@@ -32,3 +32,5 @@ An initial global buildx inventory attempted to probe pre-existing remote builde
 ## Remaining gates
 
 Resolve pinned virtual-MCU startup and repeat the unchanged smoke and full checks from fresh isolated volumes. Full acceptance must then verify both ready printers, four-tool objects and macros, webcam metadata, camera data and repeatable seeding together. RTSP, network faults, authenticated pairing, durable server persistence, WebRTC and physical hardware acceptance remain incomplete. Passing packaging and partial simulator checks does not complete Phase 0.
+
+The [follow-up readiness diagnosis](SIMULATOR-READINESS-DIAGNOSIS.md) reproduces failure with only upstream defaults and records additional fail-closed regression coverage.

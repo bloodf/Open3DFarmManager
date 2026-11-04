@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 84 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 154 Bun + 84 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Failed Klipper readiness; partial pass  |
@@ -77,3 +77,5 @@ The [HTTP transport review](HTTP-TRANSPORT-REVIEW.md) records configuration/erro
 Destination-selection integration tests now cover injected fields, URL-shaped data, malicious response fields and all standard redirect statuses. Latest verification reran lint, typecheck and 82 Node tests; 148 Bun tests, builds and nine Chromium tests retain their previously recorded checkpoints.
 
 E3.1.3 now exposes explicit, idempotent local identity initialization through the built Connector CLI. Source and distribution tests verify restart stability and possession using a synthetic challenge; this does not implement pairing or a running Connector. See the [Connector usage guide](../packages/connector/README.md).
+
+The [simulator readiness diagnosis](SIMULATOR-READINESS-DIAGNOSIS.md) reproduces the MCU identification failure with upstream defaults alone. The initial cause is unresolved; the simulator acceptance gate remains failed.

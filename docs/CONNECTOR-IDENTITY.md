@@ -1,6 +1,6 @@
 # Connector identity prototype
 
-This local component covers Ed25519 identity generation and fingerprint persistence from E3.1.3. It is not connected to the CLI, pairing endpoints or running services. Tests generate disposable identities only in temporary directories.
+This local component covers Ed25519 identity generation and fingerprint persistence from E3.1.3. The CLI can inspect an existing identity with `identity --data-dir <directory>` and prints only public JSON metadata. This read-only command never initializes or modifies files. Creation is not exposed through the CLI; pairing endpoints and running services remain unimplemented. Tests generate disposable identities only in temporary directories.
 
 `loadOrCreateIdentity(directory)` reads an existing versioned identity or initializes one when no identity exists. The SHA-256 fingerprint covers the DER-encoded public SPKI key. Repeated loads preserve the private key and fingerprint. JSON serialization and ordinary inspection of the returned object expose public metadata only; the private key remains in a JavaScript private field.
 

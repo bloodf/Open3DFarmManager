@@ -121,6 +121,14 @@ function readIdentity(path: string): ConnectorIdentity {
   }
 }
 
+/** Read-only lookup: never creates a directory, lock or identity. */
+export function loadExistingIdentity(directory: string): ConnectorIdentity {
+  if (process.platform === 'win32')
+    throw new Error('Windows identity permissions need an ACL implementation')
+  privateEntry(lstatSync(directory), true)
+  return readIdentity(join(directory, KEY_FILE))
+}
+
 /** Initializes only when explicitly called. Never replaces an existing or corrupt identity. */
 export function loadOrCreateIdentity(directory: string): ConnectorIdentity {
   if (process.platform === 'win32')

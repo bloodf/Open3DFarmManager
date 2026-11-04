@@ -83,3 +83,5 @@ The [simulator readiness diagnosis](SIMULATOR-READINESS-DIAGNOSIS.md) reproduces
 Simulator JSON responses now reject malformed UTF-8 rather than replacing bytes before parsing. Three malformed-byte regressions and a valid split-multibyte response pass; the complete lint, typecheck, 158 Bun tests, 84 Node tests and builds passed. This does not resolve MCU startup.
 
 Simulator JSON clients now reuse the existing local bounded parser to reject duplicate keys and excessive nesting/value counts. The added workspace dependency resolves offline with no external package changes. Complete checks passed with 164 Bun tests, 84 Node tests, lint, typecheck and builds; MCU startup remains separately unresolved.
+
+An opt-in [bounded PTY launch experiment](SIMULATOR-BOUNDED-PTY-VALIDATION.md) passed ten separate Python tests and rejected missing/silent MCU faults under the unchanged readiness criterion. It is not enabled in Compose or CI and does not complete simulator acceptance.

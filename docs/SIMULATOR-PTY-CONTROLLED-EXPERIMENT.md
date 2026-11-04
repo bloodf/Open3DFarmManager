@@ -36,3 +36,5 @@ The guard remains test-only. Compose, image selection, CI workflows and producti
 Project label: `o3dfm-pty-controlled-20261104`. Ten simulator containers and volumes plus one temporary read-only configuration-inspection container were created. All owned containers and volumes were removed; no dedicated networks were created. The pulled image reference was verified absent. The temporary Supervisor file/directory was removed. Exact resource IDs, samples, logs, configuration hashes and the original diagnostic script remain in local evidence.
 
 Every baseline resource remained. Two unrelated containers, two images and one network appeared concurrently and were left untouched. Label queries found zero owned containers, volumes or networks. No broad prune was used.
+
+The [bounded launcher follow-up](SIMULATOR-BOUNDED-PTY-VALIDATION.md) adds an original opt-in helper, repeated isolated controls, and missing/silent-MCU fault tests without changing default startup.

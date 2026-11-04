@@ -1,3 +1,5 @@
+import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
+
 export async function readBytes(
   response: Response,
   limit: number,
@@ -29,9 +31,15 @@ export async function readBytes(
   return bytes
 }
 export async function readJson(response: Response): Promise<unknown> {
-  return JSON.parse(
+  return parseBoundedJson(
     new TextDecoder('utf-8', { fatal: true }).decode(
       await readBytes(response, 256 * 1024),
     ),
+    {
+      maxBytes: 256 * 1024,
+      maxDepth: 32,
+      maxValues: 32_768,
+      maxStringChars: 65_536,
+    },
   )
 }

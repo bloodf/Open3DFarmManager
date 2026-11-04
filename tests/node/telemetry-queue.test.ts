@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -187,6 +188,97 @@ test('complete invalid UTF-8 and duplicate IDs are preserved and rejected', () =
     writeFileSync(path, invalid)
     assert.throws(() => new TelemetryQueue(dir, 1001))
     assert.deepEqual(readFileSync(path), invalid)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('sparse acknowledgements cannot silently discard records', () => {
+  const dir = scratch()
+  try {
+    const queue = new TelemetryQueue(dir, 1000)
+    queue.enqueue(state, 1000)
+    assert.throws(() => queue.acknowledge(new Array(1), 1000), /FIFO/)
+    assert.equal(queue.depth, 1)
+    queue.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+test('recover one orphan compaction file but reject a symlink without touching its target', () => {
+  const dir = scratch()
+  try {
+    let queue = new TelemetryQueue(dir, 1000)
+    const id = queue.enqueue(state, 1000).eventId
+    queue.close()
+    const temporary = join(dir, 'telemetry.compact')
+    writeFileSync(temporary, 'interrupted replacement', { mode: 0o600 })
+    queue = new TelemetryQueue(dir, 1001)
+    assert.equal(existsSync(temporary), false)
+    assert.equal(queue.batch(1001).records[0]!.eventId, id)
+    queue.close()
+    const target = join(dir, 'untouched')
+    writeFileSync(target, 'unchanged', { mode: 0o600 })
+    symlinkSync(target, temporary)
+    assert.throws(() => new TelemetryQueue(dir, 1002), /private files/)
+    assert.equal(readFileSync(target, 'utf8'), 'unchanged')
+    assert.equal(lstatSync(temporary).isSymbolicLink(), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+test('oversized incomplete tail is preserved rather than silently truncated', () => {
+  const dir = scratch()
+  try {
+    const queue = new TelemetryQueue(dir, 1000)
+    queue.close()
+    const path = join(dir, 'telemetry.jsonl')
+    appendFileSync(path, 'x'.repeat(65537))
+    assert.throws(() => new TelemetryQueue(dir, 1000), /Oversized partial/)
+    assert.equal(lstatSync(path).size, 65537)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('another OS process cannot acquire an active queue', () => {
+  const dir = scratch()
+  try {
+    const queue = new TelemetryQueue(dir, 1000)
+    const module = new URL(
+      '../../packages/connector/src/cloud/queue.ts',
+      import.meta.url,
+    ).href
+    const child = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { TelemetryQueue } from ${JSON.stringify(module)}; try { new TelemetryQueue(process.argv[1], 1000); process.exitCode = 2 } catch (error) { if (error.code !== 'EEXIST') throw error }`,
+        dir,
+      ],
+      { encoding: 'utf8', timeout: 5000 },
+    )
+    assert.equal(child.status, 0, child.stderr)
+    queue.enqueue(state, 1000)
+    queue.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+test('append rejects a substituted symlink and invalidates the instance', () => {
+  const dir = scratch()
+  try {
+    const queue = new TelemetryQueue(dir, 1000)
+    const path = join(dir, 'telemetry.jsonl')
+    const target = join(dir, 'untouched')
+    writeFileSync(target, 'unchanged', { mode: 0o600 })
+    rmSync(path)
+    symlinkSync(target, path)
+    assert.throws(() => queue.enqueue(state, 1000))
+    assert.throws(() => queue.batch(1000), /requires recovery/)
+    assert.equal(readFileSync(target, 'utf8'), 'unchanged')
+    queue.close()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

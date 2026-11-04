@@ -1,5 +1,6 @@
 import {
   closeSync,
+  constants,
   existsSync,
   fsyncSync,
   ftruncateSync,
@@ -89,6 +90,7 @@ export class TelemetryQueue {
   private records: TelemetryRecord[] = []
   private readonly path: string
   private readonly lock: string
+  private readonly temporary: string
   private readonly maxBytes: number
   private readonly maxAgeMs: number
   private closed = false
@@ -116,6 +118,7 @@ export class TelemetryQueue {
     privateEntry(directory, true)
     this.path = join(directory, 'telemetry.jsonl')
     this.lock = join(directory, 'telemetry.lock')
+    this.temporary = join(directory, 'telemetry.compact')
     const lockFd = openSync(this.lock, 'wx', 0o600)
     try {
       writeFileSync(lockFd, JSON.stringify({ pid: process.pid }))
@@ -140,8 +143,13 @@ export class TelemetryQueue {
         throw new Error('Queue file exceeds recovery limit')
       const data = readFileSync(this.path)
       const end = data.lastIndexOf(10) + 1
+      if (data.length - end > MAX_RECORD)
+        throw new Error('Oversized partial queue record')
       const complete = data.subarray(0, end)
-      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(complete)
+      const decoded = new TextDecoder('utf-8', {
+        fatal: true,
+        ignoreBOM: true,
+      }).decode(complete)
       const seen = new Set<string>()
       for (const raw of decoded.split('\n').slice(0, -1)) {
         if (!raw || Buffer.byteLength(raw) > MAX_RECORD)
@@ -155,9 +163,17 @@ export class TelemetryQueue {
         if (record.queuedAt > now) throw new Error('Queue clock regressed')
         this.records.push(record)
       }
+      // Validate the committed log before cleaning a leftover compaction file.
+      if (existsSync(this.temporary)) {
+        privateEntry(this.temporary)
+        if (lstatSync(this.temporary).size > MAX_BYTES)
+          throw new Error('Oversized queue compaction file')
+        unlinkSync(this.temporary)
+        this.syncDirectory()
+      }
       // Only an unterminated tail may be torn. Complete corrupt lines are never discarded.
       if (end !== data.length) {
-        const fd = openSync(this.path, 'r+')
+        const fd = openSync(this.path, constants.O_RDWR | constants.O_NOFOLLOW)
         try {
           ftruncateSync(fd, end)
           fsyncSync(fd)
@@ -208,9 +224,11 @@ export class TelemetryQueue {
     return { records: retained, loss }
   }
   private replace(records: TelemetryRecord[]) {
-    const temporary = join(this.directory, `telemetry-${randomUUID()}.tmp`)
+    const temporary = this.temporary
+    let created = false
     try {
       const fd = openSync(temporary, 'wx', 0o600)
+      created = true
       try {
         writeFileSync(fd, records.map(line).join(''))
         fsyncSync(fd)
@@ -224,7 +242,7 @@ export class TelemetryQueue {
       this.failed = true
       throw error
     } finally {
-      if (existsSync(temporary)) unlinkSync(temporary)
+      if (created && existsSync(temporary)) unlinkSync(temporary)
     }
   }
   enqueue(
@@ -246,7 +264,10 @@ export class TelemetryQueue {
       this.replace(bounded.records)
     else {
       try {
-        const fd = openSync(this.path, 'a')
+        const fd = openSync(
+          this.path,
+          constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW,
+        )
         try {
           const data = Buffer.from(serialized)
           let written = 0
@@ -298,11 +319,15 @@ export class TelemetryQueue {
   }
   acknowledge(eventIds: readonly string[], now: number): void {
     this.ready(now)
-    if (
-      eventIds.length > this.records.length ||
-      eventIds.some((id, index) => id !== this.records[index]!.eventId)
-    )
+    if (!Array.isArray(eventIds) || eventIds.length > this.records.length)
       throw new Error('Acknowledgement must match the current FIFO prefix')
+    for (let index = 0; index < eventIds.length; index++) {
+      if (
+        !Object.hasOwn(eventIds, index) ||
+        eventIds[index] !== this.records[index]!.eventId
+      )
+        throw new Error('Acknowledgement must match the current FIFO prefix')
+    }
     if (eventIds.length) this.replace(this.records.slice(eventIds.length))
   }
   get depth(): number {

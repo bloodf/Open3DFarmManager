@@ -27,3 +27,11 @@ Revocation applies to authorizations serialized after its commit. Already author
 Seven unit tests cover active snapshots, missing records, revocation/version/disabled state, exact expiry boundaries, identity mismatch, invalid/regressing clocks and malformed runtime input. They use synthetic IDs and timestamps, with no real account or secret.
 
 A future database adapter needs additional tests for concurrent logout/touch, reset/login races, unique insertion, transaction rollback, storage failure, crash/restart durability and backup restoration. Endpoint tests must verify the cookie library, per-request state checks, logout ordering, CSRF and response redaction. Farm authorization is separate. No offline Connector revocation policy is decided here.
+
+## Test-only in-memory adapter
+
+`tests/helpers/memory-session-repository.ts` implements the interface as a deterministic test double. It belongs to server-login tests, not Connector storage. The application does not import it. Each method performs its state transition without yielding, so same-turn calls model a chosen serial order. Fixtures and inspection results are copied to prevent outside mutation. There is no creation API, credential/token handling, disk access or production fallback.
+
+Ten additional tests exercise activity updates, immutable absolute expiry, idempotent logout, account-wide invalidation, unrelated-account isolation, both logout/authorization orderings, account-revocation ordering, injected unavailability, clock rollback, fixture isolation, version overflow and invalid fixtures. The in-memory clock high-water mark rejects backward time even after denied authorization; it does not survive process restart. A failed version increment reports failure rather than wrapping. Simulated storage unavailability happens before an operation and does not test partial database commit failures.
+
+The double intentionally provides no durability, database transaction isolation or cross-process concurrency guarantee. Its successful revocation models a committed operation only for the lifetime of the test instance. Production adapters still need real race, rollback, restart and restore tests. Server policy durations, session-library integration and offline Connector authorization remain undecided or unimplemented as previously recorded.

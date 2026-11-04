@@ -18,10 +18,11 @@
     "typecheck": "tsc --noEmit && bun run --cwd apps/farm typecheck",
     "test": "bun test tests/unit",
     "test:e2e": "playwright test",
-    "check:all": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "check:all": "bun run lint && bun run typecheck && bun run test && bun run test:node && bun run build",
     "sim:smoke": "bun packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:node": "node --test tests/node/*.test.ts"
   },
   "devDependencies": {
     "typescript": "5.9.3",

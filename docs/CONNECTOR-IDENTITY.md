@@ -1,0 +1,15 @@
+# Connector identity prototype
+
+This local component covers Ed25519 identity generation and fingerprint persistence from E3.1.3. It is not connected to the CLI, pairing endpoints or running services. Tests generate disposable identities only in temporary directories.
+
+`loadOrCreateIdentity(directory)` reads an existing versioned identity or initializes one when no identity exists. The SHA-256 fingerprint covers the DER-encoded public SPKI key. Repeated loads preserve the private key and fingerprint. JSON serialization and ordinary inspection of the returned object expose public metadata only; the private key remains in a JavaScript private field.
+
+The state directory and files must belong to the current OS user, with directory mode 0700 and files mode 0600. Reads use `O_NOFOLLOW` and validate the opened file descriptor. Linked, shared, oversized, malformed and noncanonical files fail closed. Windows is explicitly unsupported until an ACL implementation is available. Protection assumes trusted ancestors and no hostile process under the same OS account; filesystem permissions are not encryption or a hardware keystore.
+
+Initialization uses an exclusive lock and a reserved pending file. The pending key is synced before hard-link publication, which refuses to overwrite any existing identity path; the pending name is then removed and the directory synced. Concurrent initializers may receive an explicit lock or transient linked-file error and should retry reading after the initializer finishes. They never replace the winning key.
+
+A crash may leave a lock, pending key or two hard links to the same key. Recovery must establish that no initializer is running and reconcile those files before retrying. This component deliberately does not discard a pending key, silently regenerate a corrupt identity or remove a stale lock based on its PID. Recovery tooling, rotation, backup and encryption of separate stored credentials remain future work.
+
+`signProof()` signs exactly a 32-byte challenge prefixed with the domain `Open3DFarmManager/connector-proof/v1` and a zero separator. It does not sign printer commands or grant access. A future authenticated server must generate unpredictable challenges, bind them to the intended identity and pairing/session scope, enforce expiry and consume each challenge once. This method alone supplies none of those server guarantees. Pairing protocol and server integration must be reviewed before exposing it to a transport. The pending offline authorization and revocation policy is unchanged.
+
+Tests cover persistence, signature verification, domain separation, public-only serialization, file modes, invalid keys and formats, symlinks, hard links, interrupted initialization and simultaneous initialization by separate OS processes. No existing account credentials or production identities are read or changed.

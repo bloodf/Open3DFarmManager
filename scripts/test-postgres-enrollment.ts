@@ -1,5 +1,6 @@
 // Opt-in destructive integration fixture: dedicated disposable PostgreSQL only.
 import assert from 'node:assert/strict'
+import { testTelemetryPersistence } from '../tests/helpers/postgres-telemetry-integration.ts'
 import { SQL } from 'bun'
 import { readFile } from 'node:fs/promises'
 import { generateKeyPairSync } from 'node:crypto'
@@ -46,6 +47,7 @@ const down = await readFile(
 )
 try {
   if (process.argv.includes('--after-restart')) {
+    checks.push(...(await testTelemetryPersistence(sql, true)))
     let status: string | undefined
     await source.withEnrollment(scope, (record) => {
       status = record?.status
@@ -136,6 +138,69 @@ try {
     )
     assert.ok(await proof.issue(scope, connection, () => 1001, 5000))
     checks.push('rolled-back-revocation-does-not-change-committed-state')
+    await assert.rejects(
+      source.withEnrollment(scope, () => {
+        throw new Error('synthetic callback failure')
+      }),
+      /^Error: Enrollment storage unavailable$/,
+    )
+    assert.ok(await proof.issue(scope, connection, () => 1001, 5000))
+    checks.push('callback-failure-rolls-back-and-pool-recovers')
+    const timedChallenge = await proof.issue(
+      scope,
+      connection,
+      () => 1001,
+      5000,
+    )
+    assert.ok(timedChallenge)
+    let unlock!: () => void
+    let notifyLocked!: () => void
+    const lockReady = new Promise<void>((resolve) => {
+      notifyLocked = resolve
+    })
+    const unlockGate = new Promise<void>((resolve) => {
+      unlock = resolve
+    })
+    const blocker = sql.begin(async (tx) => {
+      await tx`UPDATE farm.connector_enrollments SET status = 'approved' WHERE agent_id = ${scope.agentId}::uuid`
+      notifyLocked()
+      await unlockGate
+    })
+    await lockReady
+    const timedSignature = identity.signProof(
+      Buffer.from(timedChallenge.nonce, 'base64url'),
+    )
+    try {
+      const start = performance.now()
+      assert.equal(
+        await proof.complete(
+          scope,
+          connection,
+          timedChallenge.nonce,
+          timedSignature,
+          () => 1001,
+        ),
+        false,
+      )
+      assert.ok(
+        performance.now() - start < 4000,
+        'Lock wait must remain bounded',
+      )
+    } finally {
+      unlock()
+      await blocker
+    }
+    assert.equal(
+      await proof.complete(
+        scope,
+        connection,
+        timedChallenge.nonce,
+        timedSignature,
+        () => 1001,
+      ),
+      false,
+    )
+    checks.push('database-lock-timeout-discards-proof-after-recovery')
     // Hold a real row writer, prove the reader waits on its lock, then commit revocation.
     const pending = await proof.issue(scope, connection, () => 1001, 5000)
     assert.ok(pending)
@@ -201,6 +266,7 @@ try {
     checks.push(
       'terminal-revocation-tombstone-immutable-binding-and-pending-insert',
     )
+    checks.push(...(await testTelemetryPersistence(sql, false)))
   }
 } finally {
   await sql.close()

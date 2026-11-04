@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 173 Bun + 92 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 173 Bun + 95 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Failed Klipper readiness; partial pass  |
@@ -95,3 +95,5 @@ The [local Spoolman HTTP reader](SPOOLMAN-HTTP-CHECKPOINT.md) connects bounded G
 The [disposable actual Spoolman API test](SPOOLMAN-ACTUAL-API-VALIDATION.md) passed locally with the pinned image: empty inventory, repeatable seed, pagination and archived inclusion. This validates the reader against that API version; production mirroring and full Klipper acceptance remain incomplete.
 
 The [PostgreSQL enrollment lookup checkpoint](POSTGRES-ENROLLMENT-CHECKPOINT.md) connects proof verification to a real transaction and validates concurrent revocation plus restart persistence in a disposable PostgreSQL 17 database. It remains unwired; account authentication, approval permissions, runtime DB roles and full pairing acceptance are incomplete.
+
+The [PostgreSQL telemetry and proof-boundary checkpoint](POSTGRES-TELEMETRY-CHECKPOINT.md) records fixed connection-close races, additional database lock/error regressions, and a durable queue-to-ingestion storage slice. These internal components do not yet establish authenticated ingestion endpoints.

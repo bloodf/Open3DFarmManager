@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 131 Bun + 37 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 138 Bun + 37 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 2 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -53,3 +53,5 @@ E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scen
 The subsequent [focused security review](SECURITY-REVIEW-INTEGRATION.md) records reproduced findings, fixes and remaining storage/authentication risks.
 
 The [independent authentication threat model](INDEPENDENT-AUTH-THREAT-MODEL.md) records remaining login work and the tested host-only cookie configuration and strict mutation-origin predicate. These helpers are not wired to endpoints and do not issue or validate sessions.
+
+The [session persistence contract](SESSION-PERSISTENCE-CONTRACT.md) adds a pure server-state decision and adapter requirements for atomic touch/revocation. It is not a database adapter or working authentication system.

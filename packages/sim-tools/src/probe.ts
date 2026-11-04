@@ -1,3 +1,4 @@
+import { readJson } from './body.ts'
 import { Effect } from 'effect'
 import { z } from 'zod'
 
@@ -32,7 +33,7 @@ export function probePrinter(origin: string) {
       })
       if (!response.ok)
         throw new Error(`Simulator returned HTTP ${response.status}`)
-      return ServerInfo.parse(await response.json()).result
+      return ServerInfo.parse(await readJson(response)).result
     },
     catch: (error) =>
       error instanceof Error ? error : new Error('Simulator probe failed'),

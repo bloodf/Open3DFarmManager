@@ -1,23 +1,68 @@
 name: open3dfarmmanager-sim
+x-printer: &printer
+  image: ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47
+  platform: linux/amd64
+  profiles: [klipper]
+  tmpfs:
+    - /tmp:noexec
+    - /home/printer/printer_data/comms:noexec
+  networks: [sim]
+  cpus: 1.0
+  mem_limit: 1g
+  pids_limit: 256
 services:
   sv06:
-    # External GPL service; no upstream source is vendored into this MIT repository.
-    image: ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47
-    platform: linux/amd64
-    profiles: [klipper]
+    <<: *printer
     ports:
       - '127.0.0.1:7125:7125'
       - '127.0.0.1:8110:8080'
     volumes:
       - sv06-data:/home/printer/printer_data
-    tmpfs:
-      - /tmp:noexec
-      - /home/printer/printer_data/comms:noexec
+      - ./sv06/moonraker.conf:/home/printer/example-configs/moonraker.conf:ro
+  u1:
+    <<: *printer
+    ports:
+      - '127.0.0.1:7126:7125'
+      - '127.0.0.1:8111:8080'
+    volumes:
+      - u1-data:/home/printer/printer_data
+      - ./u1/printer.cfg:/home/printer/example-configs/printer.cfg:ro
+      - ./u1/tools.cfg:/home/printer/example-configs/addons/open3d-tools.cfg:ro
+      - ./u1/moonraker.conf:/home/printer/example-configs/moonraker.conf:ro
+  spoolman:
+    image: ghcr.io/donkie/spoolman@sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa
+    platform: linux/amd64
+    profiles: [spoolman]
+    ports:
+      - '127.0.0.1:7912:8000'
+    environment:
+      SPOOLMAN_LOGGING_LEVEL: WARNING
+    volumes:
+      - spoolman-data:/home/app/.local/share/spoolman
     networks: [sim]
-    cpus: 1.0
-    mem_limit: 1g
-    pids_limit: 256
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  camera:
+    profiles: [cams]
+    build:
+      context: ../..
+      dockerfile: packages/sim-cams/Dockerfile
+    ports:
+      - '127.0.0.1:8112:8112'
+    networks: [sim]
+    cpus: 0.25
+    mem_limit: 64m
+    pids_limit: 32
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
 networks:
   sim:
 volumes:
   sv06-data:
+  u1-data:
+  spoolman-data:

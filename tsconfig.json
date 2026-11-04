@@ -9,7 +9,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun", "node"]
+    "types": ["bun", "node"],
+    "resolveJsonModule": true
   },
   "include": [
     "packages/**/*.ts",

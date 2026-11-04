@@ -55,6 +55,10 @@
       "name": "@open3dfarmmanager/shared",
       "version": "0.0.1",
     },
+    "packages/sim-cams": {
+      "name": "@open3dfarmmanager/sim-cams",
+      "version": "0.0.1",
+    },
     "packages/sim-tools": {
       "name": "@open3dfarmmanager/sim-tools",
       "version": "0.0.1",
@@ -236,6 +240,8 @@
     "@open3dfarmmanager/farm-protocol": ["@open3dfarmmanager/farm-protocol@workspace:packages/farm-protocol"],
 
     "@open3dfarmmanager/shared": ["@open3dfarmmanager/shared@workspace:packages/shared"],
+
+    "@open3dfarmmanager/sim-cams": ["@open3dfarmmanager/sim-cams@workspace:packages/sim-cams"],
 
     "@open3dfarmmanager/sim-tools": ["@open3dfarmmanager/sim-tools@workspace:packages/sim-tools"],
 

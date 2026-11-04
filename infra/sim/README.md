@@ -1,17 +1,33 @@
-# Local simulator
+# Isolated development simulators
 
-Requires a running Docker daemon and Compose. This project has its own network and volume; ports bind only to loopback. It never receives host devices, Docker sockets or production configuration.
+The Compose project owns its network and three independent data volumes. Published ports bind to loopback only. It mounts no hardware devices, host sockets or production files. Image digests pin the reviewed amd64 builds; ARM hosts require emulation.
+
+Execution of containers is an explicit approval gate. The commands below are prepared for use after that approval; configuration validation itself does not start services.
 
 ```sh
-docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
-bun run sim:smoke
-docker compose -f infra/sim/docker-compose.yml --profile klipper down
+docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams config --quiet
 ```
 
-The smoke check requires Moonraker to report both an active Klippy connection and `ready` state. An HTTP 200 alone is insufficient. It times out after 90 seconds and rejects non-loopback destinations and redirects.
+After approval, on a machine with a running Docker daemon:
 
-The upstream image is pinned to its reviewed amd64 manifest. ARM hosts need Docker emulation. The simulator runs upstream GPL software as a separate process. See [upstream documentation](https://github.com/mainsail-crew/virtual-klipper-printer); this repository does not vendor or relicense its code.
+```sh
+docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams up -d --build
+bun run sim:verify
+docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams down
+```
 
-The first slice covers E0.1.1 only. Four-tool U1, Spoolman, cameras and network fault profiles are subsequent gates. Do not treat this single-printer smoke as full E0.1 acceptance.
+| Service                  | Loopback port | Purpose                                       |
+| ------------------------ | ------------- | --------------------------------------------- |
+| sv06                     | 7125          | Single-tool Klipper/Moonraker                 |
+| u1                       | 7126          | Synthetic four-tool Klipper/Moonraker         |
+| Spoolman                 | 7912          | 2 vendors, 4 filaments, 6 spools              |
+| Built-in webcam patterns | 8110, 8111    | Moonraker webcam entries                      |
+| JPEG/MJPEG test source   | 8112          | Original synthetic fixture, two frames/second |
 
-`down` preserves simulator data. Only remove its named volume when you intend to reset test data.
+`sim:verify` requires both Klippy instances connected and ready, all four extruder objects and T0–T3 macros, webcam entries, a valid bounded JPEG and repeatable Spoolman seeding. It does not send printer commands. `sim:seed` can be run separately; it creates missing marked fixtures and never updates or deletes unrelated rows. Run one seeder at a time. Do not point these scripts at a real farm; the scripts enforce loopback HTTP origins and reject redirects.
+
+The U1 fixture exercises generic four-tool API behavior only. It shares emulator pins and must never be installed on a physical printer. Actual firmware object names and independent heater behavior remain hardware acceptance items. Each simulator has its own volume. Upstream startup populates configuration inside that volume on first boot; changes to the mounted defaults require a fresh test volume. Preserve any volume you want to retain.
+
+The Klipper simulator is an external GPL-3.0 service. Its defaults remain in its image and data volumes; this MIT repository contains only our added configuration and clients. See [upstream](https://github.com/mainsail-crew/virtual-klipper-printer). Spoolman is an external MIT service. No containers have been started locally.
+
+Remaining E0 gates: real container acceptance, RTSP/MediaMTX test stream, NAT/loss/latency/UDP fault rig and CI execution. Passing unit tests or Compose parsing does not complete those gates.

@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 54 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 61 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -65,3 +65,5 @@ The [telemetry delivery checkpoint](TELEMETRY-DRAIN-CHECKPOINT.md) verifies synt
 The [internal ingestion checkpoint](TELEMETRY-INGESTION-CHECKPOINT.md) connects strict server-side validation and scoped deduplication in a test store to the real Connector queue. There is no exposed ingestion route or production persistence adapter.
 
 The [command rejection checkpoint](COMMAND-BOUNDARIES-CHECKPOINT.md) tests real Chromium signatures against Node scope, revocation, role, time, tamper and persistent-replay boundaries. It does not authenticate the supplied context or dispatch commands.
+
+The [Connector proof checkpoint](CONNECTOR-PROOF-CHECKPOINT.md) verifies the existing persisted Ed25519 identity against a bounded, single-use server challenge bound to expected scope. It proves key possession only; enrollment and authenticated agent context remain unimplemented.

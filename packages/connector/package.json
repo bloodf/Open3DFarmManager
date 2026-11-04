@@ -1,0 +1,18 @@
+{
+  "name": "@open3dfarmmanager/connector",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "open3dfarmmanager-connector": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "bun build src/cli.ts --target=node --outdir=dist"
+  },
+  "dependencies": {
+    "effect": "4.1.2",
+    "@open3dfarmmanager/farm-protocol": "workspace:*",
+    "@open3dfarmmanager/shared": "workspace:*"
+  }
+}

@@ -1,0 +1,38 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.20.0'
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run lint
+      - run: bun run check:all
+      - run: node packages/connector/dist/cli.js --version
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: docker build -f apps/farm/Dockerfile -t open3dfarmmanager-test .
+      - run: |
+          docker run -d --name farm-test --read-only --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:3100:3000 open3dfarmmanager-test
+          for attempt in $(seq 1 30); do
+            if curl --fail http://127.0.0.1:3100/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs farm-test
+          exit 1
+      - if: always()
+        run: docker rm -f farm-test || true

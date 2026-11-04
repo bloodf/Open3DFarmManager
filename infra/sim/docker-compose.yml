@@ -1,0 +1,23 @@
+name: open3dfarmmanager-sim
+services:
+  sv06:
+    # External GPL service; no upstream source is vendored into this MIT repository.
+    image: ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47
+    platform: linux/amd64
+    profiles: [klipper]
+    ports:
+      - '127.0.0.1:7125:7125'
+      - '127.0.0.1:8110:8080'
+    volumes:
+      - sv06-data:/home/printer/printer_data
+    tmpfs:
+      - /tmp:noexec
+      - /home/printer/printer_data/comms:noexec
+    networks: [sim]
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
+networks:
+  sim:
+volumes:
+  sv06-data:

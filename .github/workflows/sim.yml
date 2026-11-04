@@ -1,0 +1,21 @@
+name: Simulator
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  klipper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: docker compose -f infra/sim/docker-compose.yml --profile klipper config --quiet
+      - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
+      - run: bun run sim:smoke
+      - if: failure()
+        run: docker compose -f infra/sim/docker-compose.yml logs --tail 150
+      - if: always()
+        run: docker compose -f infra/sim/docker-compose.yml --profile klipper down

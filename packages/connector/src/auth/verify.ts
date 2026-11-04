@@ -44,9 +44,48 @@ export interface CommandContext {
     publicJwk: unknown
   }
 }
+const ContextShape = z.strictObject({
+  farmId: z.string().uuid(),
+  agentId: z.string().uuid(),
+  userId: z.string().uuid(),
+  keyId: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  printerIds: z.set(z.string().uuid()),
+  now: z.number(),
+  authorization: z.strictObject({
+    issuedAt: z.number(),
+    expiresAt: z.number(),
+  }),
+  key: z.strictObject({
+    id: z.string().uuid(),
+    farmId: z.string().uuid(),
+    userId: z.string().uuid(),
+    role: z.string(),
+    revokedAt: z.number().int().nonnegative().nullable(),
+    publicJwk: z.unknown(),
+  }),
+})
+
+export type CommandRejectionReason =
+  | Exclude<ClaimResult, 'accepted'>
+  | 'invalid-command'
+  | 'invalid-context'
+  | 'invalid-clock'
+  | 'scope-mismatch'
+  | 'unknown-printer'
+  | 'revoked-key'
+  | 'role-denied'
+  | 'invalid-authorization'
+  | 'authorization-expired'
+  | 'command-expired'
+  | 'clock-window'
+  | 'invalid-key-or-signature'
+  | 'invalid-signature'
+  | 'storage-unavailable'
+
 export type CommandDecision =
   | { ok: true; command: SignedCommand }
-  | { ok: false; reason: string }
+  | { ok: false; reason: CommandRejectionReason }
 
 // Returns authorization only. No driver, transport, retries or physical side effects.
 export function authorizeCommand(
@@ -60,21 +99,24 @@ export function authorizeCommand(
   } catch {
     return { ok: false, reason: 'invalid-command' }
   }
-  const { key, now, authorization } = context
+  // Runtime shape checks are not authentication; the caller must supply trusted context.
+  const parsedContext = ContextShape.safeParse(context)
+  if (!parsedContext.success) return { ok: false, reason: 'invalid-context' }
+  const { key, now, authorization } = parsedContext.data
   if (!Number.isSafeInteger(now) || now < 0)
     return { ok: false, reason: 'invalid-clock' }
   if (
-    command.farm_id !== context.farmId ||
-    command.agent_id !== context.agentId ||
-    command.user_id !== context.userId ||
-    command.key_id !== context.keyId ||
-    command.session_id !== context.sessionId ||
-    key.id !== context.keyId ||
-    key.farmId !== context.farmId ||
-    key.userId !== context.userId
+    command.farm_id !== parsedContext.data.farmId ||
+    command.agent_id !== parsedContext.data.agentId ||
+    command.user_id !== parsedContext.data.userId ||
+    command.key_id !== parsedContext.data.keyId ||
+    command.session_id !== parsedContext.data.sessionId ||
+    key.id !== parsedContext.data.keyId ||
+    key.farmId !== parsedContext.data.farmId ||
+    key.userId !== parsedContext.data.userId
   )
     return { ok: false, reason: 'scope-mismatch' }
-  if (!context.printerIds.has(command.printer_id))
+  if (!parsedContext.data.printerIds.has(command.printer_id))
     return { ok: false, reason: 'unknown-printer' }
   if (key.revokedAt !== null) return { ok: false, reason: 'revoked-key' }
   if (!['operator', 'admin', 'owner'].includes(key.role))
@@ -112,9 +154,17 @@ export function authorizeCommand(
   if (!valid) return { ok: false, reason: 'invalid-signature' }
   try {
     const result = replay.claim(command, now)
-    return result === 'accepted'
-      ? { ok: true, command }
-      : { ok: false, reason: result }
+    switch (result) {
+      case 'accepted':
+        return { ok: true, command }
+      case 'replay':
+      case 'capacity':
+      case 'clock-regressed':
+      case 'rate-limited':
+        return { ok: false, reason: result }
+      default:
+        return { ok: false, reason: 'storage-unavailable' }
+    }
   } catch {
     return { ok: false, reason: 'storage-unavailable' }
   }

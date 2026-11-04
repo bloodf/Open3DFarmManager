@@ -13,3 +13,9 @@ The state directory must be owned by the current OS user and inaccessible to oth
 Nonextractability prevents exporting the private key through WebCrypto; it does not stop compromised same-origin JavaScript from asking the browser to sign. Browser origin isolation, CSP, authenticated Connector identity, session binding and key revocation integration remain necessary. Read-only HTTP fallback must never carry printer commands. Bed-clear interlocks, driver state checks and audit persistence are not supplied by this library.
 
 Validation includes canonicalization edge cases, signature tampering, scope substitution, expired authorization, revoked keys, storage failures, persistent replay across connections/restarts, capacity and rate checks, and a real Chromium-to-Node signature test. No test contacts a physical printer or starts a container.
+
+## Runtime rejection boundary
+
+The integrated verifier validates the runtime structure of the supplied authorization context before accessing its fields. Missing or malformed context returns `invalid-context` without invoking replay storage. This shape check does not authenticate the context or change its provenance requirements. Existing scope, role, signature, freshness and replay decisions remain required.
+
+Storage results are restricted to the declared result set. An unexpected adapter result is mapped to `storage-unavailable`, never returned as an arbitrary protocol reason. Each valid request makes at most one claim attempt; no retry is introduced. Rejection reasons now have a closed TypeScript union. Tests reproduce missing-context exceptions and leaked adapter result strings before these fixes, then assert fixed denials and zero replay calls for malformed input.

@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 47 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 54 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 6 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -61,3 +61,5 @@ A test-only in-memory session repository now exercises serialized authorization/
 The [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md) connects persistent nonextractable IndexedDB keys across reload to the existing Chromium-to-Node signing/replay test. Server enrollment and device management remain unimplemented.
 
 The [telemetry delivery checkpoint](TELEMETRY-DRAIN-CHECKPOINT.md) verifies synthetic observation → disk queue → lost response → reopen → idempotent delivery/acknowledgement. A real authenticated transport and server ingestion remain unimplemented.
+
+The [internal ingestion checkpoint](TELEMETRY-INGESTION-CHECKPOINT.md) connects strict server-side validation and scoped deduplication in a test store to the real Connector queue. There is no exposed ingestion route or production persistence adapter.

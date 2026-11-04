@@ -26,7 +26,10 @@ export async function signCommand(
   privateKey: CryptoKey,
   now = Date.now(),
 ): Promise<SignedCommand> {
-  const algorithm = privateKey.algorithm as EcKeyAlgorithm
+  const algorithm = privateKey.algorithm as {
+    name: string
+    namedCurve?: string
+  }
   if (
     privateKey.type !== 'private' ||
     privateKey.extractable ||

@@ -2,7 +2,7 @@
 
 The original MIT [experimental launcher](../infra/sim/experiments/README.md) is available for opt-in simulator tests. It has a 30-second monotonic admission deadline, verifies a TTY without consuming data, and replaces itself with the original command without a shell. Failure is nonzero; it emits no readiness result. It is not wired into Compose, CI, production or a Connector.
 
-The pinned ARM64 simulator already provides Python. Its GPL image, Supervisor configuration and Klipper executable remain external; only our original helper and tests are committed. The temporary upstream-derived configuration was extracted from the reviewed image, mounted read-only and removed after testing. No image digest, architecture default, firmware timing or privileges changed in the repository. Native amd64 validation remains pending.
+The pinned ARM64 simulator already provides Python. Its GPL image, Supervisor configuration and Klipper executable remain external; only our original helper and tests are committed. The temporary upstream-derived configuration was extracted from the reviewed image, mounted read-only and removed after testing. No image digest, architecture default, firmware timing or privileges changed in the repository. The subsequent [native amd64 full-harness attempt](SIMULATOR-AMD64-HARNESS-RESULT.md) failed MCU readiness; the candidate remains experimental.
 
 ## Repeated controls and faults
 

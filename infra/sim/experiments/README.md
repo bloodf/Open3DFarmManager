@@ -27,3 +27,5 @@ python3 /opt/o3dfm/wait_for_pty.py --
 Keep the original executable and arguments after the separator. Set `autorestart=false` and `startretries=0` for Klippy in both control and intervention configurations, so failure cannot be hidden by Supervisor retries. Do not change the emulator, firmware, privileges or readiness deadline. The original image and all upstream programs remain separately licensed GPL software; this helper does not relicense them.
 
 The temporary configuration is intentionally not a production/default override. The recorded experiment uses fresh labeled volumes, no external network or published ports, and cleans only owned resources. Missing-emulator and silent-PTY fault cases must remain unready even when the launcher behaves correctly. The diagnostic script, exact image/configuration hashes, state samples and failure logs are retained with local task evidence.
+
+The [native amd64 full-harness attempt](../../../docs/SIMULATOR-AMD64-HARNESS-RESULT.md) failed MCU readiness despite this launcher. Do not promote it to the default harness on the strength of the earlier isolated ARM64 passes.

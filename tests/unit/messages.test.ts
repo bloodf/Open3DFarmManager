@@ -16,12 +16,13 @@ const command = {
   printer_id: id,
   user_id: id,
   key_id: id,
+  session_id: id,
   action: 'pause' as const,
   args: {},
   issued_at: 1000,
   expires_at: 61000,
-  nonce: 'a'.repeat(22),
-  sig: 'a'.repeat(86),
+  nonce: 'A'.repeat(22),
+  sig: 'A'.repeat(86),
 }
 test('command JSON round-trip only checks shape, not cryptographic validity', () => {
   expect(SignedCommand.parse(JSON.parse(JSON.stringify(command)))).toEqual(

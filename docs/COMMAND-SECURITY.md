@@ -1,0 +1,15 @@
+# Command authorization prototype
+
+This branch implements a library boundary, not a printer-control feature. No driver or WebRTC transport invokes it yet. The authenticated Connector context and key distribution remain unimplemented.
+
+The browser generates a nonextractable ECDSA P-256 key with WebCrypto. Each signature covers canonical JSON, including farm, Connector, printer, user, key and session IDs, action, timestamps, random command ID and a 128-bit nonce. The Connector verifies the P1363 signature with Node crypto. Wire JSON must be canonical: duplicate fields, padding and alternate representations are rejected. Frames are limited to 8 KiB. Only pause, resume, cancel and emergency stop are represented; arbitrary G-code is excluded.
+
+The authorization context must come from an authenticated local session and authenticated authorization data, never from fields supplied by the command sender. Membership and key roles are checked independently from the signature. The prototype requires an authorization lease of at most 60 seconds and fails closed when it expires. This provisional choice bounds stale authorization, but prevents commands during a longer control-plane outage. The product's offline policy and authenticated lease distribution still need a decision and integration tests. Offline remote revocation cannot be instantaneous.
+
+Replay claims use a local SQLite transaction before authorization is returned. Command ID and key/nonce uniqueness survive restart. A ten-minute retention window exceeds the one-minute command validity; capacity exhaustion and backwards clock movement fail closed. Accepted commands are limited to ten per minute per printer; emergency stop bypasses that rate cap but still requires identity, signature, freshness and a successful replay claim. Storage exhaustion can therefore reject an emergency stop too: software remote control does not replace a physical emergency stop.
+
+The state directory must be owned by the current OS user and inaccessible to other users. Symlink database paths and shared files are rejected. This protects against accidental unsafe placement, not a hostile process running as the same OS user. No automatic replay or retry may follow an uncertain physical result. Future dispatch must consume the claim once, record its result and expose uncertainty explicitly.
+
+Nonextractability prevents exporting the private key through WebCrypto; it does not stop compromised same-origin JavaScript from asking the browser to sign. Browser origin isolation, CSP, authenticated Connector identity, session binding and key revocation integration remain necessary. Read-only HTTP fallback must never carry printer commands. Bed-clear interlocks, driver state checks and audit persistence are not supplied by this library.
+
+Validation includes canonicalization edge cases, signature tampering, scope substitution, expired authorization, revoked keys, storage failures, persistent replay across connections/restarts, capacity and rate checks, and a real Chromium-to-Node signature test. No test contacts a physical printer or starts a container.

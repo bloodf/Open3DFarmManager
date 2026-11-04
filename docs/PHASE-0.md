@@ -28,7 +28,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
 | Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 37 Node tests |
-| Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 2 Chromium tests        |
+| Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 6 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
 | Docker packaging                                | Image build and health probe          | Pending execution                       |
@@ -57,3 +57,5 @@ The [independent authentication threat model](INDEPENDENT-AUTH-THREAT-MODEL.md) 
 The [session persistence contract](SESSION-PERSISTENCE-CONTRACT.md) adds a pure server-state decision and adapter requirements for atomic touch/revocation. It is not a database adapter or working authentication system.
 
 A test-only in-memory session repository now exercises serialized authorization/revocation, outage rejection and fixture isolation. It has no durability or application integration and is not Connector storage.
+
+The [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md) connects persistent nonextractable IndexedDB keys across reload to the existing Chromium-to-Node signing/replay test. Server enrollment and device management remain unimplemented.

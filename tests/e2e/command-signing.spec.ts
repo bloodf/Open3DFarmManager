@@ -7,7 +7,7 @@ import { authorizeCommand } from '../../packages/connector/src/auth/verify.ts'
 import { PersistentReplayStore } from '../../packages/connector/src/auth/replay.ts'
 
 // Bundle the actual protocol implementation for Chromium, with no remote imports.
-test('Chromium nonextractable key produces a command accepted once by Node', async ({
+test('Chromium persisted nonextractable key survives reload and signs a command accepted once by Node', async ({
   page,
 }) => {
   const directory = mkdtempSync(join(tmpdir(), 'open3d-browser-sign-'))
@@ -16,13 +16,33 @@ test('Chromium nonextractable key produces a command accepted once by Node', asy
   try {
     execFileSync('bun', [
       'build',
-      './packages/farm-protocol/src/index.ts',
+      './tests/helpers/browser-device-entry.ts',
       '--target=browser',
       '--outfile',
       outfile,
     ])
     await page.goto('/')
     const id = '00000000-0000-4000-8000-000000000001'
+    const source = readFileSync(outfile, 'utf8')
+    const initialPublicKey = await page.evaluate(
+      async ({ source, id }) => {
+        const url = URL.createObjectURL(
+          new Blob([source], { type: 'text/javascript' }),
+        )
+        try {
+          const api = await import(url)
+          const pair = await api.loadOrCreateDeviceKey({
+            farmId: id,
+            userId: id,
+          })
+          return await crypto.subtle.exportKey('jwk', pair.publicKey)
+        } finally {
+          URL.revokeObjectURL(url)
+        }
+      },
+      { source, id },
+    )
+    await page.reload()
     const now = Date.now()
     const signed = await page.evaluate(
       async ({ source, id, now }) => {
@@ -31,7 +51,10 @@ test('Chromium nonextractable key produces a command accepted once by Node', asy
         )
         try {
           const protocol = await import(url)
-          const pair = await protocol.createBrowserKey()
+          const pair = await protocol.loadOrCreateDeviceKey({
+            farmId: id,
+            userId: id,
+          })
           let exportDenied = false
           try {
             await crypto.subtle.exportKey('jwk', pair.privateKey)
@@ -60,8 +83,9 @@ test('Chromium nonextractable key produces a command accepted once by Node', asy
           URL.revokeObjectURL(url)
         }
       },
-      { source: readFileSync(outfile, 'utf8'), id, now },
+      { source, id, now },
     )
+    expect(signed.publicJwk).toEqual(initialPublicKey)
     expect(signed.exportDenied).toBe(true)
     const context = {
       farmId: id,

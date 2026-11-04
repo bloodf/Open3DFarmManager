@@ -32,7 +32,8 @@ export class PersistentReplayStore implements ReplayStore {
     const path = join(directory, 'replay.sqlite')
     if (!existsSync(path)) closeSync(openSync(path, 'wx', 0o600))
     for (const suffix of ['', '-wal', '-shm', '-journal'])
-      if (existsSync(path + suffix)) privateEntry(path + suffix, false)
+      if (lstatSync(path + suffix, { throwIfNoEntry: false }))
+        privateEntry(path + suffix, false)
     this.database = new DatabaseSync(path, {
       timeout: 1000,
       allowExtension: false,

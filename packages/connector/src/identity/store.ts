@@ -84,7 +84,10 @@ export class ConnectorIdentity {
 }
 
 function readIdentity(path: string): ConnectorIdentity {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const fd = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  )
   try {
     const stat = fstatSync(fd)
     privateEntry(stat)
@@ -94,7 +97,12 @@ function readIdentity(path: string): ConnectorIdentity {
       fatal: true,
       ignoreBOM: true,
     }).decode(data)
-    const value: unknown = JSON.parse(text)
+    let value: unknown
+    try {
+      value = JSON.parse(text)
+    } catch {
+      throw new Error('Invalid identity JSON')
+    }
     if (!value || typeof value !== 'object' || Array.isArray(value))
       throw new Error('Invalid identity format')
     const stored = value as Record<string, unknown>

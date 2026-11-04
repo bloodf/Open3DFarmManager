@@ -1,5 +1,7 @@
 import {
   closeSync,
+  fstatSync,
+  type Stats,
   constants,
   existsSync,
   fsyncSync,
@@ -41,7 +43,9 @@ const emptyLoss = (): QueueLoss => ({
   partialTail: false,
 })
 function privateEntry(path: string, directory = false) {
-  const stat = lstatSync(path)
+  privateStat(lstatSync(path), directory)
+}
+function privateStat(stat: Stats, directory = false) {
   if (
     stat.isSymbolicLink() ||
     (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
@@ -129,6 +133,10 @@ export class TelemetryQueue {
     try {
       this.recovery = emptyLoss()
       if (!existsSync(this.path)) {
+        if (lstatSync(this.temporary, { throwIfNoEntry: false }))
+          throw new Error(
+            'Missing queue log requires explicit recovery of compaction candidate',
+          )
         const fd = openSync(this.path, 'wx', 0o600)
         try {
           fsyncSync(fd)
@@ -137,11 +145,20 @@ export class TelemetryQueue {
         }
         this.syncDirectory()
       }
-      privateEntry(this.path)
-      const size = lstatSync(this.path).size
-      if (size > MAX_BYTES + MAX_RECORD)
-        throw new Error('Queue file exceeds recovery limit')
-      const data = readFileSync(this.path)
+      const readFd = openSync(
+        this.path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      )
+      let data: Buffer
+      try {
+        const stat = fstatSync(readFd)
+        privateStat(stat)
+        if (stat.size > MAX_BYTES + MAX_RECORD)
+          throw new Error('Queue file exceeds recovery limit')
+        data = readFileSync(readFd)
+      } finally {
+        closeSync(readFd)
+      }
       const end = data.lastIndexOf(10) + 1
       if (data.length - end > MAX_RECORD)
         throw new Error('Oversized partial queue record')
@@ -154,7 +171,13 @@ export class TelemetryQueue {
       for (const raw of decoded.split('\n').slice(0, -1)) {
         if (!raw || Buffer.byteLength(raw) > MAX_RECORD)
           throw new Error('Invalid queue line')
-        const record = parseRecord(JSON.parse(raw))
+        let decodedRecord: unknown
+        try {
+          decodedRecord = JSON.parse(raw)
+        } catch {
+          throw new Error('Invalid queue JSON')
+        }
+        const record = parseRecord(decodedRecord)
         if (JSON.stringify(record) !== raw)
           throw new Error('Noncanonical queue record')
         if (seen.has(record.eventId))
@@ -173,8 +196,12 @@ export class TelemetryQueue {
       }
       // Only an unterminated tail may be torn. Complete corrupt lines are never discarded.
       if (end !== data.length) {
-        const fd = openSync(this.path, constants.O_RDWR | constants.O_NOFOLLOW)
+        const fd = openSync(
+          this.path,
+          constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        )
         try {
+          privateStat(fstatSync(fd))
           ftruncateSync(fd, end)
           fsyncSync(fd)
         } finally {
@@ -266,9 +293,13 @@ export class TelemetryQueue {
       try {
         const fd = openSync(
           this.path,
-          constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW,
+          constants.O_WRONLY |
+            constants.O_APPEND |
+            constants.O_NOFOLLOW |
+            constants.O_NONBLOCK,
         )
         try {
+          privateStat(fstatSync(fd))
           const data = Buffer.from(serialized)
           let written = 0
           while (written < data.length) {

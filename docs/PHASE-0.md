@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 122 Bun + 29 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 122 Bun + 37 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 2 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -49,3 +49,5 @@ Local validation: 46 Bun tests and one Node runtime test passed. Typecheck and C
 Container execution remains unverified. Local Docker is unavailable. Container integration and image checks require an authorized execution environment; static configuration and unit tests alone do not establish readiness.
 
 E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scenarios and CI evidence. The initial foundation PR does not complete Phase 0. Database, independent login, authenticated pairing and WebRTC remain subsequent work. Signed-command verification is now a locally tested library prototype; authenticated context and physical dispatch are not implemented.
+
+The subsequent [focused security review](SECURITY-REVIEW-INTEGRATION.md) records reproduced findings, fixes and remaining storage/authentication risks.

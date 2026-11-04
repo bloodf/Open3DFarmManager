@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 173 Bun + 84 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 173 Bun + 92 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Failed Klipper readiness; partial pass  |
@@ -89,3 +89,5 @@ An opt-in [bounded PTY launch experiment](SIMULATOR-BOUNDED-PTY-VALIDATION.md) p
 The [complete native amd64 harness attempt with the PTY candidate](SIMULATOR-AMD64-HARNESS-RESULT.md) failed Klipper readiness. Independent camera and repeatable Spoolman checks passed, but default mitigation integration is not approved by these results. CI and Compose remain unchanged.
 
 The [offline Spoolman inventory traversal](SPOOLMAN-INVENTORY-CHECKPOINT.md) now validates full supplied page sequences with cross-page uniqueness, completeness, observation ordering and aggregate budgets. Full local checks passed with 173 Bun tests and 84 Node tests plus lint, typecheck and builds. It does not fetch or persist an atomic upstream snapshot.
+
+The [local Spoolman HTTP reader](SPOOLMAN-HTTP-CHECKPOINT.md) connects bounded GET pagination to inventory validation with a cumulative deadline and synthetic loopback coverage. It remains a local prototype without persistence or production authentication.

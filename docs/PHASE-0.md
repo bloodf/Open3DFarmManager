@@ -97,3 +97,5 @@ The [disposable actual Spoolman API test](SPOOLMAN-ACTUAL-API-VALIDATION.md) pas
 The [PostgreSQL enrollment lookup checkpoint](POSTGRES-ENROLLMENT-CHECKPOINT.md) connects proof verification to a real transaction and validates concurrent revocation plus restart persistence in a disposable PostgreSQL 17 database. It remains unwired; account authentication, approval permissions, runtime DB roles and full pairing acceptance are incomplete.
 
 The [PostgreSQL telemetry and proof-boundary checkpoint](POSTGRES-TELEMETRY-CHECKPOINT.md) records fixed connection-close races, additional database lock/error regressions, and a durable queue-to-ingestion storage slice. These internal components do not yet establish authenticated ingestion endpoints.
+
+The [restricted PostgreSQL capabilities checkpoint](POSTGRES-CAPABILITIES-CHECKPOINT.md) verifies proof lookup and telemetry using separate non-admin database roles, with denied mutation/DDL/escalation attempts and restart persistence. These capabilities do not implement per-farm authorization or production account configuration.

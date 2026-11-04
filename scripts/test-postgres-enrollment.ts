@@ -1,5 +1,6 @@
 // Opt-in destructive integration fixture: dedicated disposable PostgreSQL only.
 import assert from 'node:assert/strict'
+import { testDatabaseCapabilities } from '../tests/helpers/postgres-capabilities-integration.ts'
 import { testTelemetryPersistence } from '../tests/helpers/postgres-telemetry-integration.ts'
 import { SQL } from 'bun'
 import { readFile } from 'node:fs/promises'
@@ -47,6 +48,7 @@ const down = await readFile(
 )
 try {
   if (process.argv.includes('--after-restart')) {
+    checks.push(...(await testDatabaseCapabilities(sql, port, true)))
     checks.push(...(await testTelemetryPersistence(sql, true)))
     let status: string | undefined
     await source.withEnrollment(scope, (record) => {
@@ -267,6 +269,7 @@ try {
       'terminal-revocation-tombstone-immutable-binding-and-pending-insert',
     )
     checks.push(...(await testTelemetryPersistence(sql, false)))
+    checks.push(...(await testDatabaseCapabilities(sql, port, false)))
   }
 } finally {
   await sql.close()

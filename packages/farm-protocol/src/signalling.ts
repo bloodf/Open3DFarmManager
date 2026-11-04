@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseBoundedJson } from './json.ts'
 
 const base = { id: z.string().uuid(), ts: z.number().int().nonnegative() }
 const peer = { agent_id: z.string().uuid(), viewer_id: z.string().uuid() }
@@ -26,3 +27,15 @@ export const Signalling = z.discriminatedUnion('t', [
   z.strictObject({ ...base, t: z.literal('ping'), p: z.strictObject({}) }),
 ])
 export type Signalling = z.infer<typeof Signalling>
+
+/** Decode one frame; peer authentication and request correlation are transport responsibilities. */
+export function decodeSignallingFrame(wire: string): Signalling {
+  return Signalling.parse(
+    parseBoundedJson(wire, {
+      maxBytes: 8192,
+      maxDepth: 6,
+      maxValues: 32,
+      maxStringChars: 7000,
+    }),
+  )
+}

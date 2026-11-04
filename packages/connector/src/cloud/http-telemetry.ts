@@ -10,25 +10,39 @@ export function createTelemetryHttpSender(options: {
   timeoutMs: number
   allowLoopbackHttpForTests?: boolean
 }): TelemetrySender {
-  const url = new URL(options.endpoint)
-  if (
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    (url.protocol !== 'https:' &&
-      !(
-        options.allowLoopbackHttpForTests === true &&
-        url.protocol === 'http:' &&
-        ['127.0.0.1', '[::1]'].includes(url.hostname)
-      )) ||
-    !Number.isSafeInteger(options.timeoutMs) ||
-    options.timeoutMs < 1 ||
-    options.timeoutMs > 60_000
-  )
+  let endpoint: string
+  let timeoutMs: number
+  try {
+    const input = options.endpoint
+    timeoutMs = options.timeoutMs
+    if (
+      typeof input !== 'string' ||
+      input.length > 2048 ||
+      /[\u0000-\u0020\u007f\\]/.test(input)
+    )
+      throw new Error()
+    const url = new URL(input)
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== 'https:' &&
+        !(
+          options.allowLoopbackHttpForTests === true &&
+          url.protocol === 'http:' &&
+          ['127.0.0.1', '[::1]'].includes(url.hostname)
+        )) ||
+      !Number.isSafeInteger(timeoutMs) ||
+      timeoutMs < 1 ||
+      timeoutMs > 60_000
+    )
+      throw new Error()
+    endpoint = url.href
+  } catch {
+    // URL errors may carry the complete configured input. Never propagate them.
     throw new Error('Invalid telemetry transport configuration')
-  const endpoint = url.href
-  const timeoutMs = options.timeoutMs
+  }
   return async (body, callerSignal) => {
     const deadline = new AbortController()
     const signal = AbortSignal.any([callerSignal, deadline.signal])

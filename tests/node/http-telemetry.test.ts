@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type RequestListener } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import type { AddressInfo } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -280,6 +281,139 @@ test(
       )
     } finally {
       await http.close()
+    }
+  },
+)
+
+test('invalid endpoint configuration never exposes URL parser input or underlying errors', () => {
+  const marker = 'SYNTHETIC_PRIVATE_CONFIG_MARKER'
+  for (const options of [
+    { endpoint: `https://${marker}@[invalid`, timeoutMs: 1000 },
+    {
+      get endpoint(): string {
+        throw new Error(marker)
+      },
+      timeoutMs: 1000,
+    },
+  ]) {
+    assert.throws(
+      () => createTelemetryHttpSender(options),
+      (error) => {
+        assert.ok(error instanceof Error)
+        assert.equal(error.message, 'Invalid telemetry transport configuration')
+        assert.equal('input' in error, false)
+        assert.equal('cause' in error, false)
+        assert.equal(JSON.stringify(error).includes(marker), false)
+        return true
+      },
+    )
+  }
+})
+
+test('ambiguous endpoint syntax and oversized configuration reject before URL normalization', () => {
+  for (const endpoint of [
+    'https://safe\n.example/telemetry',
+    ' https://safe.example/telemetry',
+    'https://safe.example\\telemetry',
+    'https://safe.example/' + 'a'.repeat(2048),
+  ])
+    assert.throws(
+      () => createTelemetryHttpSender({ endpoint, timeoutMs: 1000 }),
+      /configuration/,
+    )
+})
+
+test(
+  'endpoint is snapshotted and cross-origin redirects never contact the second loopback server',
+  { timeout: 5000 },
+  async () => {
+    let targetCalls = 0,
+      originCalls = 0,
+      redirect = false
+    const target = await server((request, response) => {
+      request.resume()
+      targetCalls++
+      response.end()
+    })
+    const origin = await server((request, response) => {
+      request.resume()
+      originCalls++
+      if (redirect) {
+        response.writeHead(307, { location: target.endpoint })
+        response.end()
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ ok: true, acceptedEventIds: [id] }))
+    })
+    try {
+      const config = {
+        endpoint: origin.endpoint,
+        timeoutMs: 1000,
+        allowLoopbackHttpForTests: true,
+      }
+      const send = createTelemetryHttpSender(config)
+      config.endpoint = target.endpoint
+      assert.deepEqual(await send(body, new AbortController().signal), [id])
+      redirect = true
+      await assert.rejects(
+        send(body, new AbortController().signal),
+        (error) => {
+          assert.ok(error instanceof Error)
+          assert.equal(error.message, 'Telemetry transport failed')
+          assert.equal('cause' in error, false)
+          return true
+        },
+      )
+      assert.equal(originCalls, 2)
+      assert.equal(targetCalls, 0)
+    } finally {
+      await origin.close()
+      await target.close()
+    }
+  },
+)
+
+test(
+  'response limit rejects open-ended chunking and gzip expansion, with redacted errors',
+  { timeout: 5000 },
+  async () => {
+    for (const kind of ['chunked', 'gzip']) {
+      let closed!: () => void
+      const observedClose = new Promise<void>((resolve) => {
+        closed = resolve
+      })
+      const http = await server((request, response) => {
+        request.resume()
+        response.on('close', closed)
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          ...(kind === 'gzip' ? { 'content-encoding': 'gzip' } : {}),
+        })
+        if (kind === 'gzip')
+          response.end(
+            gzipSync('SYNTHETIC_PRIVATE_RESPONSE_MARKER'.repeat(1000)),
+          )
+        else response.write('x'.repeat(8193))
+      })
+      try {
+        await assert.rejects(
+          sender(http.endpoint)(body, new AbortController().signal),
+          (error) => {
+            assert.ok(error instanceof Error)
+            assert.equal(error.message, 'Telemetry transport failed')
+            assert.equal('cause' in error, false)
+            assert.equal(
+              JSON.stringify(error).includes('PRIVATE_RESPONSE'),
+              false,
+            )
+            return true
+          },
+        )
+        await observedClose
+      } finally {
+        await http.close()
+      }
     }
   },
 )

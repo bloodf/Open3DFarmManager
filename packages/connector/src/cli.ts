@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { projectVersion } from '@open3dfarmmanager/shared'
 import { parseArgs } from 'node:util'
-import { loadExistingIdentity } from './identity/store.ts'
+import { loadExistingIdentity, loadOrCreateIdentity } from './identity/store.ts'
 
 const help = `Open3DFarmManager Connector
 
@@ -9,6 +9,7 @@ Uso:
   --version                         Exibir versão
   --help                            Exibir ajuda
   identity --data-dir <diretório>    Consultar identidade existente (JSON público)
+  init-identity --data-dir <dir>     Criar ou reutilizar identidade local (JSON público)
 
 A consulta não cria uma identidade. Pareamento e conexão com impressoras ainda não estão disponíveis.`
 
@@ -48,7 +49,7 @@ export function main(args: string[]): number {
   }
   if (
     positionals.length !== 1 ||
-    positionals[0] !== 'identity' ||
+    !['identity', 'init-identity'].includes(positionals[0]!) ||
     !values['data-dir'] ||
     values.version
   ) {
@@ -56,12 +57,18 @@ export function main(args: string[]): number {
     return 1
   }
   try {
-    console.log(JSON.stringify(loadExistingIdentity(values['data-dir'])))
+    const identity =
+      positionals[0] === 'init-identity'
+        ? loadOrCreateIdentity(values['data-dir'])
+        : loadExistingIdentity(values['data-dir'])
+    console.log(JSON.stringify(identity))
     return 0
   } catch {
     // No paths, key contents or underlying crypto/parser errors in terminal output.
     console.error(
-      'Não foi possível consultar a identidade. Verifique o diretório, as permissões e os arquivos de recuperação; nenhum arquivo foi alterado.',
+      positionals[0] === 'init-identity'
+        ? 'Não foi possível inicializar a identidade. Verifique o diretório e as permissões; arquivos de recuperação exigem revisão antes de uma nova tentativa.'
+        : 'Não foi possível consultar a identidade. Verifique o diretório, as permissões e os arquivos de recuperação; nenhum arquivo foi alterado.',
     )
     return 1
   }

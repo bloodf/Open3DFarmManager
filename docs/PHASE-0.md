@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 69 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 75 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -69,3 +69,5 @@ The [command rejection checkpoint](COMMAND-BOUNDARIES-CHECKPOINT.md) tests real 
 The [Connector proof checkpoint](CONNECTOR-PROOF-CHECKPOINT.md) verifies the existing persisted Ed25519 identity against a bounded, single-use server challenge bound to expected scope. It proves key possession only; enrollment and authenticated agent context remain unimplemented.
 
 The [enrollment-gated proof checkpoint](ENROLLMENT-PROOF-CHECKPOINT.md) rejects unpaired/pending/revoked identities before completing possession checks against the key in a current enrollment record. Approval permissions and durable enrollment storage remain unimplemented.
+
+The [bounded HTTP telemetry checkpoint](HTTP-TELEMETRY-CHECKPOINT.md) verifies real loopback POST, response limits and cancellation through the queue/ingestion flow. Production credentials, authenticated endpoints and scheduling remain unimplemented.

@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 61 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 68 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -67,3 +67,5 @@ The [internal ingestion checkpoint](TELEMETRY-INGESTION-CHECKPOINT.md) connects 
 The [command rejection checkpoint](COMMAND-BOUNDARIES-CHECKPOINT.md) tests real Chromium signatures against Node scope, revocation, role, time, tamper and persistent-replay boundaries. It does not authenticate the supplied context or dispatch commands.
 
 The [Connector proof checkpoint](CONNECTOR-PROOF-CHECKPOINT.md) verifies the existing persisted Ed25519 identity against a bounded, single-use server challenge bound to expected scope. It proves key possession only; enrollment and authenticated agent context remain unimplemented.
+
+The [enrollment-gated proof checkpoint](ENROLLMENT-PROOF-CHECKPOINT.md) rejects unpaired/pending/revoked identities before completing possession checks against the key in a current enrollment record. Approval permissions and durable enrollment storage remain unimplemented.

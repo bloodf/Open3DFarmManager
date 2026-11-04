@@ -6,6 +6,7 @@ COPY packages/connector/package.json packages/connector/package.json
 COPY packages/farm-protocol/package.json packages/farm-protocol/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/sim-tools/package.json packages/sim-tools/package.json
+COPY packages/sim-cams/package.json packages/sim-cams/package.json
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY . .
 RUN bun run --cwd apps/farm build

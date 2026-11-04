@@ -25,8 +25,9 @@ export interface EnrollmentSource {
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** Internal integration only; enrollment approval permissions and a durable source are not implemented. */
+/** Internal integration only; production approval permissions and transport integration are not implemented. */
 export class EnrolledConnectorProof {
+  #inflight = new Set<{ connectionId: string; cancelled: boolean }>()
   #source: EnrollmentSource
   #challenges = new ConnectorProofChallenges()
   constructor(source: EnrollmentSource) {
@@ -38,6 +39,7 @@ export class EnrolledConnectorProof {
     connectionId: string,
     operation: (binding: ConnectorProofBinding) => T,
   ): Promise<T | null> {
+    const attempt = { connectionId, cancelled: false }
     let checking = true
     let calls = 0
     let result: T | null = null
@@ -49,9 +51,11 @@ export class EnrolledConnectorProof {
         )
       )
         return null
+      if (this.#inflight.size >= 1000) return null
+      this.#inflight.add(attempt)
       const expected = { farmId: scope.farmId, agentId: scope.agentId }
       await this.#source.withEnrollment({ ...expected }, (record) => {
-        if (!checking) return
+        if (!checking || attempt.cancelled) return
         calls++
         if (
           calls !== 1 ||
@@ -75,7 +79,13 @@ export class EnrolledConnectorProof {
           failed = true
         }
       })
-      if (calls !== 1 || failed || result === null || result === false) {
+      if (
+        attempt.cancelled ||
+        calls !== 1 ||
+        failed ||
+        result === null ||
+        result === false
+      ) {
         this.#challenges.discardConnection(connectionId)
         return null
       }
@@ -85,6 +95,7 @@ export class EnrolledConnectorProof {
       return null
     } finally {
       checking = false
+      this.#inflight.delete(attempt)
     }
   }
   /** Connection ID must be generated and owned by the server transport. Caller cannot supply a key. */
@@ -112,6 +123,8 @@ export class EnrolledConnectorProof {
     )
   }
   discardConnection(connectionId: string): void {
+    for (const attempt of this.#inflight)
+      if (attempt.connectionId === connectionId) attempt.cancelled = true
     this.#challenges.discardConnection(connectionId)
   }
 }

@@ -182,3 +182,91 @@ test('source callback after transaction completion cannot create or evaluate a c
   late(source.record)
   assert.equal(clockCalls, 0)
 })
+
+test('closing connection while enrollment lookup waits prevents late challenge issuance', async () => {
+  const { source } = fixture()
+  source.approveForTest()
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const service = new EnrolledConnectorProof({
+    withEnrollment: async (_scope, check) => {
+      await gate
+      check(source.record)
+    },
+  })
+  const pending = service.issue(scope, id, () => 1000, 5000)
+  service.discardConnection(id)
+  release()
+  assert.equal(await pending, null)
+})
+
+test('closing connection after proof evaluation but before commit prevents success', async () => {
+  const { source, identity } = fixture()
+  source.approveForTest()
+  let hold = false
+  let release!: () => void
+  let evaluated!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const reached = new Promise<void>((resolve) => {
+    evaluated = resolve
+  })
+  const service = new EnrolledConnectorProof({
+    withEnrollment: async (_scope, check) => {
+      check(source.record)
+      if (hold) {
+        evaluated()
+        await gate
+      }
+    },
+  })
+  const challenge = await service.issue(scope, id, () => 1000, 5000)
+  assert.ok(challenge)
+  hold = true
+  const completion = service.complete(
+    scope,
+    id,
+    challenge.nonce,
+    identity.signProof(Buffer.from(challenge.nonce, 'base64url')),
+    () => 1001,
+  )
+  await reached
+  service.discardConnection(id)
+  release()
+  assert.equal(await completion, false)
+})
+
+test('closing one pending connection does not cancel another connection proof', async () => {
+  const { source, identity } = fixture()
+  source.approveForTest()
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const service = new EnrolledConnectorProof({
+    withEnrollment: async (_scope, check) => {
+      await gate
+      check(source.record)
+    },
+  })
+  const closed = service.issue(scope, id, () => 1000, 5000)
+  const live = service.issue(scope, other, () => 1000, 5000)
+  service.discardConnection(id)
+  release()
+  assert.equal(await closed, null)
+  const challenge = await live
+  assert.ok(challenge)
+  assert.equal(
+    await service.complete(
+      scope,
+      other,
+      challenge.nonce,
+      identity.signProof(Buffer.from(challenge.nonce, 'base64url')),
+      () => 1001,
+    ),
+    true,
+  )
+})

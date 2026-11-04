@@ -91,3 +91,5 @@ The [complete native amd64 harness attempt with the PTY candidate](SIMULATOR-AMD
 The [offline Spoolman inventory traversal](SPOOLMAN-INVENTORY-CHECKPOINT.md) now validates full supplied page sequences with cross-page uniqueness, completeness, observation ordering and aggregate budgets. Full local checks passed with 173 Bun tests and 84 Node tests plus lint, typecheck and builds. It does not fetch or persist an atomic upstream snapshot.
 
 The [local Spoolman HTTP reader](SPOOLMAN-HTTP-CHECKPOINT.md) connects bounded GET pagination to inventory validation with a cumulative deadline and synthetic loopback coverage. It remains a local prototype without persistence or production authentication.
+
+The [disposable actual Spoolman API test](SPOOLMAN-ACTUAL-API-VALIDATION.md) passed locally with the pinned image: empty inventory, repeatable seed, pagination and archived inclusion. This validates the reader against that API version; production mirroring and full Klipper acceptance remain incomplete.

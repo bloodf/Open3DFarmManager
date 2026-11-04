@@ -30,6 +30,8 @@ export async function readBytes(
 }
 export async function readJson(response: Response): Promise<unknown> {
   return JSON.parse(
-    new TextDecoder().decode(await readBytes(response, 256 * 1024)),
+    new TextDecoder('utf-8', { fatal: true }).decode(
+      await readBytes(response, 256 * 1024),
+    ),
   )
 }

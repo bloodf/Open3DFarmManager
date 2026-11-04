@@ -1,0 +1,39 @@
+{
+  "name": "open3dfarmmanager",
+  "private": true,
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/farm dev",
+    "build": "bun run --cwd packages/connector build && bun run --cwd apps/farm build",
+    "typecheck": "tsc --noEmit && bun run --cwd apps/farm typecheck",
+    "test": "bun test tests/unit",
+    "test:e2e": "playwright test",
+    "check:all": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "sim:smoke": "bun packages/sim-tools/src/cli.ts",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "24.10.0",
+    "@types/bun": "1.4.4",
+    "@playwright/test": "1.64.1",
+    "prettier": "3.6.2",
+    "effect": "4.1.2"
+  },
+  "dependencies": {
+    "@open3dfarmmanager/farm-protocol": "workspace:*",
+    "@open3dfarmmanager/shared": "workspace:*",
+    "@open3dfarmmanager/sim-tools": "workspace:*"
+  }
+}

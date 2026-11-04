@@ -27,3 +27,5 @@ The diagnostic used project label `o3dfm-diag-20261104-2240`, container suffix `
 Next work is to isolate the upstream firmware/emulator identification behavior under measured host conditions, or evaluate a separately licensed, reproducibly pinned alternative simulator. The root cause of the initial identification timeout remains unresolved. Do not mark E0 complete or publish changes that trigger unapproved remote container execution.
 
 The [image provenance and architecture follow-up](SIMULATOR-IMAGE-PROVENANCE.md) verifies the pinned sources, separates experimental Linux-MCU fixes from this AVR image, and records one native ARM64 stock success followed by a failed project-fixture pair. No replacement was adopted.
+
+The [startup-order measurement](SIMULATOR-STARTUP-MEASUREMENTS.md) records successful controls before and after a failed pair, with a repeatable ordering correlation that still requires a controlled intervention before claiming causality.

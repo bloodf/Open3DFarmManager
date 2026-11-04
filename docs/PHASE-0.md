@@ -24,15 +24,17 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 
 ## Current acceptance checks
 
-| Gate                                            | Check                                            | Status          |
-| ----------------------------------------------- | ------------------------------------------------ | --------------- |
-| Workspace dependencies                          | `bun install --frozen-lockfile --ignore-scripts` | Pending         |
-| Type safety, unit tests, production build       | `bun run check:all`                              | Pending         |
-| Browser smoke and hidden view                   | `bun run test:e2e`                               | Pending         |
-| Connector distribution                          | `node packages/connector/dist/cli.js --version`  | Pending         |
-| Simulator lifecycle and protocol responses      | `bun run sim:smoke`                              | Pending         |
-| Docker packaging                                | local image build and health probe               | Pending         |
-| Auth, database, pairing, WebRTC, offline safety | subsequent milestones                            | Not implemented |
+| Gate                                            | Check                                 | Status                                  |
+| ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
+| Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 122 Bun + 29 Node tests |
+| Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 2 Chromium tests        |
+| Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
+| Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
+| Docker packaging                                | Image build and health probe          | Pending execution                       |
+| Auth, database, pairing, WebRTC, offline safety | Full Phase 0 acceptance               | Incomplete                              |
+
+See [the integration checkpoint](INTEGRATION-CHECKPOINT.md) for merged source branches, conflict resolutions, verification and limitations.
 
 `/healthz` initially reports process liveness only. Database readiness will be added with E1.2; it must not be interpreted as a complete deployment health check.
 
@@ -46,4 +48,4 @@ Local validation: 46 Bun tests and one Node runtime test passed. Typecheck and C
 
 Container execution remains unverified. Local Docker is unavailable. Container integration and image checks require an authorized execution environment; static configuration and unit tests alone do not establish readiness.
 
-E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scenarios and CI evidence. The initial foundation PR does not complete Phase 0. Database, independent login, pairing, signed-command verification and WebRTC remain subsequent work.
+E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scenarios and CI evidence. The initial foundation PR does not complete Phase 0. Database, independent login, authenticated pairing and WebRTC remain subsequent work. Signed-command verification is now a locally tested library prototype; authenticated context and physical dispatch are not implemented.

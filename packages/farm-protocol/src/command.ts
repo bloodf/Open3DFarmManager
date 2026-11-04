@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
+import { parseBoundedJson } from './json.ts'
 
 const id = z
   .string()
@@ -48,7 +49,14 @@ export function encodeCommand(command: SignedCommand): string {
 export function decodeCommand(wire: string): SignedCommand {
   if (new TextEncoder().encode(wire).length > 8192)
     throw new Error('Command frame exceeds 8192 bytes')
-  const command = SignedCommand.parse(JSON.parse(wire))
+  const command = SignedCommand.parse(
+    parseBoundedJson(wire, {
+      maxBytes: 8192,
+      maxDepth: 6,
+      maxValues: 64,
+      maxStringChars: 1024,
+    }),
+  )
   if (encodeCommand(command) !== wire)
     throw new Error('Command frame is not canonical JSON')
   return command

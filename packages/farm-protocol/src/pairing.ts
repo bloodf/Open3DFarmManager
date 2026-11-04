@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseBoundedJson } from './json.ts'
 
 export const PAIRING_TTL_MS = 15 * 60 * 1000
 const timestamp = z.number().int().nonnegative()
@@ -108,7 +109,14 @@ export function formatPairingCode(value: string): string {
 export function parsePairingResponse(wire: string): PairingPollResponse {
   if (new TextEncoder().encode(wire).byteLength > 12_288)
     throw new Error('Pairing response exceeds size limit')
-  return PairingPollResponse.parse(JSON.parse(wire))
+  return PairingPollResponse.parse(
+    parseBoundedJson(wire, {
+      maxBytes: 12288,
+      maxDepth: 6,
+      maxValues: 64,
+      maxStringChars: 8192,
+    }),
+  )
 }
 
 /** Bind a start response to the Connector's locally derived fingerprint. */

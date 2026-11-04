@@ -1,5 +1,8 @@
 import { z } from 'zod'
-import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  PrinterState,
+  parseBoundedJson,
+} from '@open3dfarmmanager/farm-protocol'
 
 const MAX_FRAME_BYTES = 256 * 1024
 const nonnegative = z.number().finite().nonnegative()
@@ -57,7 +60,12 @@ function result(wire: string): unknown {
     throw new MoonrakerReadError('frame-too-large')
   let value: unknown
   try {
-    value = JSON.parse(wire)
+    value = parseBoundedJson(wire, {
+      maxBytes: MAX_FRAME_BYTES,
+      maxDepth: 16,
+      maxValues: 8192,
+      maxStringChars: 16384,
+    })
   } catch {
     throw new MoonrakerReadError('invalid-frame')
   }

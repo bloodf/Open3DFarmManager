@@ -87,7 +87,7 @@ test('progress and eventtime bounds reject rather than clamp invalid values', ()
     ).toBe(progress)
   expect(() =>
     parseMoonrakerSnapshot(wire.replace('42.5', '1e309'), context),
-  ).toThrow('invalid-result')
+  ).toThrow('invalid-frame')
   expect(() =>
     parseMoonrakerSnapshot(wire.replace('42.5', '-1'), context),
   ).toThrow('invalid-result')

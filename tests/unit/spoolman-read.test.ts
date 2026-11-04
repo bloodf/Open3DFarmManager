@@ -93,7 +93,7 @@ test('malformed numbers, references and absent archival state reject the whole p
     ).toThrow('invalid-page')
   expect(() =>
     parseSpoolmanSpools(wire.replace('750', '1e309'), context),
-  ).toThrow('invalid-page')
+  ).toThrow('invalid-frame')
   expect(() =>
     parseSpoolmanSpools(
       JSON.stringify([
@@ -106,7 +106,6 @@ test('malformed numbers, references and absent archival state reject the whole p
 test('extra values are bounded opaque strings, not arbitrary executable or nested data', () => {
   for (const extra of [
     { value: { nested: true } },
-    { value: 'x'.repeat(4097) },
     Object.fromEntries(
       Array.from({ length: 33 }, (_, i) => ['field' + i, 'x']),
     ),
@@ -115,6 +114,12 @@ test('extra values are bounded opaque strings, not arbitrary executable or neste
     expect(() =>
       parseSpoolmanSpools(JSON.stringify([{ ...fixture[0], extra }]), context),
     ).toThrow('invalid-page')
+  expect(() =>
+    parseSpoolmanSpools(
+      JSON.stringify([{ ...fixture[0], extra: { value: 'x'.repeat(4097) } }]),
+      context,
+    ),
+  ).toThrow('invalid-frame')
   expect(({} as Record<string, unknown>).polluted).toBeUndefined()
 })
 test('invalid envelopes and oversized Unicode produce redacted local errors', () => {

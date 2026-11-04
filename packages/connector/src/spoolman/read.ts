@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 
 const MAX_PAGE_BYTES = 256 * 1024
 const MAX_OFFSET = 10_000
@@ -128,7 +129,12 @@ function parsePage<T extends Entity>(
     throw new SpoolmanReadError('frame-too-large')
   let decoded: unknown
   try {
-    decoded = JSON.parse(wire)
+    decoded = parseBoundedJson(wire, {
+      maxBytes: MAX_PAGE_BYTES,
+      maxDepth: 12,
+      maxValues: 20000,
+      maxStringChars: 4096,
+    })
   } catch {
     throw new SpoolmanReadError('invalid-frame')
   }

@@ -8,6 +8,6 @@ Defaults allow 64 KiB, 32 levels, 4096 values and 16384 UTF-16 units per decoded
 
 The scanner bounds structure before native object construction, uses no evaluation and accepts already buffered strings. Network callers must enforce a streaming byte limit before buffering and decode UTF-8 with a fatal decoder. No streaming reader, authentication, replay protection or authorization is supplied here.
 
-`decodeSignallingFrame()` uses this reader with an 8 KiB frame cap, then applies the existing strict signalling schema. Other branch-specific decoders are not changed by this branch; integrating the helper into pairing, Moonraker and Spoolman remains follow-up work. Existing transport code must adopt the decoder before it protects network inputs.
+`decodeSignallingFrame()` uses this reader with an 8 KiB frame cap, then applies the existing strict signalling schema. The local integration branch also uses this reader for signed commands, pairing poll responses, Moonraker HTTP data and Spoolman pages, with per-message budgets. Existing transport code must adopt the decoder before it protects network inputs.
 
 Tests include exact limit boundaries, escaped duplicate keys, malformed tokens, nonfinite numbers, Unicode, prototype-like keys, 500 reproducibly generated valid documents and 2000 deterministic mutations compared with native JSON. These checks are focused regression and differential tests, not a full conformance suite or independent security audit.

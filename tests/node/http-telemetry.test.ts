@@ -417,3 +417,181 @@ test(
     }
   },
 )
+
+test(
+  'destination and header fields injected into telemetry are rejected before network access',
+  { timeout: 5000 },
+  async () => {
+    let originCalls = 0,
+      targetCalls = 0
+    const target = await server((request, response) => {
+      request.resume()
+      targetCalls++
+      response.end()
+    })
+    const origin = await server((request, response) => {
+      request.resume()
+      originCalls++
+      response.end()
+    })
+    try {
+      const send = sender(origin.endpoint)
+      const event = JSON.parse(body)[0]
+      for (const field of [
+        'endpoint',
+        'url',
+        'destination',
+        'redirect',
+        'headers',
+        '__proto__',
+      ]) {
+        for (const injected of [
+          { ...event, [field]: target.endpoint },
+          { ...event, state: { ...event.state, [field]: target.endpoint } },
+        ])
+          await assert.rejects(
+            send(JSON.stringify([injected]), new AbortController().signal),
+            /Telemetry transport failed/,
+          )
+      }
+      assert.equal(originCalls, 0)
+      assert.equal(targetCalls, 0)
+    } finally {
+      await origin.close()
+      await target.close()
+    }
+  },
+)
+
+test(
+  'URL-shaped printer data remains data and malicious ingestion response cannot reconfigure subsequent delivery',
+  { timeout: 5000 },
+  async () => {
+    let targetCalls = 0,
+      maliciousResponse = true
+    const target = await server((request, response) => {
+      request.resume()
+      targetCalls++
+      response.end()
+    })
+    const directory = mkdtempSync(join(tmpdir(), 'open3d-destination-data-'))
+    const queue = new TelemetryQueue(directory, 1000)
+    const store = new MemoryTelemetryStore()
+    const requestedPaths: string[] = []
+    const origin = await server((request, response) => {
+      requestedPaths.push(request.url ?? '')
+      const chunks: Buffer[] = []
+      request.on('data', (chunk) => chunks.push(chunk))
+      request.on('end', () => {
+        void ingestTelemetry(
+          Buffer.concat(chunks).toString(),
+          { farmId: id, agentId: id, printerKeys: new Set([target.endpoint]) },
+          store,
+        ).then((result) => {
+          response.writeHead(200, {
+            'content-type': 'application/json',
+            location: target.endpoint,
+          })
+          response.end(
+            JSON.stringify(
+              maliciousResponse
+                ? { ...result, endpoint: target.endpoint }
+                : result,
+            ),
+          )
+        })
+      })
+    })
+    try {
+      queue.enqueue({ ...state, printerKey: target.endpoint }, 1000)
+      const config = {
+        endpoint: origin.endpoint,
+        timeoutMs: 1000,
+        allowLoopbackHttpForTests: true,
+      }
+      const send = createTelemetryHttpSender(config)
+      const first = await drainTelemetryOnce(
+        queue,
+        send,
+        () => 1000,
+        new AbortController().signal,
+      )
+      assert.equal(first.status, 'retained')
+      assert.equal(queue.depth, 1)
+      assert.equal(store.size, 1)
+      // Neither response data nor later mutation of caller-owned configuration changes the captured endpoint.
+      config.endpoint = target.endpoint
+      maliciousResponse = false
+      assert.equal(
+        (
+          await drainTelemetryOnce(
+            queue,
+            send,
+            () => 1000,
+            new AbortController().signal,
+          )
+        ).status,
+        'delivered',
+      )
+      assert.equal(queue.depth, 0)
+      assert.equal(store.size, 1)
+      assert.deepEqual(requestedPaths, [
+        '/synthetic-ingestion',
+        '/synthetic-ingestion',
+      ])
+      assert.equal(targetCalls, 0)
+    } finally {
+      queue.close()
+      rmSync(directory, { recursive: true, force: true })
+      await origin.close()
+      await target.close()
+    }
+  },
+)
+
+test(
+  'all redirect statuses retain the queued batch and never contact another origin',
+  { timeout: 5000 },
+  async () => {
+    let status = 301,
+      targetCalls = 0,
+      originCalls = 0
+    const target = await server((request, response) => {
+      request.resume()
+      targetCalls++
+      response.end()
+    })
+    const origin = await server((request, response) => {
+      request.resume()
+      originCalls++
+      response.writeHead(status, { location: target.endpoint })
+      response.end()
+    })
+    const directory = mkdtempSync(join(tmpdir(), 'open3d-redirect-queue-'))
+    const queue = new TelemetryQueue(directory, 1000)
+    try {
+      const eventId = queue.enqueue(state, 1000).eventId
+      const send = sender(origin.endpoint)
+      for (status of [301, 302, 303, 307, 308]) {
+        const result = await drainTelemetryOnce(
+          queue,
+          send,
+          () => 1000,
+          new AbortController().signal,
+        )
+        assert.equal(result.status, 'retained')
+        assert.deepEqual(
+          queue.batch(1000).records.map((record) => record.eventId),
+          [eventId],
+        )
+      }
+      assert.equal(originCalls, 5)
+      assert.equal(targetCalls, 0)
+    } finally {
+      queue.close()
+      rmSync(directory, { recursive: true, force: true })
+      await origin.close()
+      await target.close()
+    }
+  },
+)

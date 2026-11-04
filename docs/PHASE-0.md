@@ -27,7 +27,7 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Gate                                            | Check                                 | Status                                  |
 | ----------------------------------------------- | ------------------------------------- | --------------------------------------- |
 | Workspace dependencies                          | Offline frozen-lockfile installation  | Passed locally                          |
-| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 79 Node tests |
+| Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 82 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
 | Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
@@ -73,3 +73,5 @@ The [enrollment-gated proof checkpoint](ENROLLMENT-PROOF-CHECKPOINT.md) rejects 
 The [bounded HTTP telemetry checkpoint](HTTP-TELEMETRY-CHECKPOINT.md) verifies real loopback POST, response limits and cancellation through the queue/ingestion flow. Production credentials, authenticated endpoints and scheduling remain unimplemented.
 
 The [HTTP transport review](HTTP-TRANSPORT-REVIEW.md) records configuration/error hardening and local redirect/streaming/decompression tests. DNS rebinding protection and an untrusted-URL policy are not implemented.
+
+Destination-selection integration tests now cover injected fields, URL-shaped data, malicious response fields and all standard redirect statuses. Latest verification reran lint, typecheck and 82 Node tests; 148 Bun tests, builds and nine Chromium tests retain their previously recorded checkpoints.

@@ -27,3 +27,15 @@ The 8 KiB limit bounds accumulated application payload, not every allocation ins
 No credentials are sent, no authenticated endpoint exists, and no production route or scheduler uses this adapter. TLS identity behavior and resolver/network policies outside loopback remain unverified. Future credential support must preserve destination trust, prevent forwarding on redirects and redact errors/logs. Server-side rate limiting, persistent deduplication and real enrollment authorization remain separate prerequisites.
 
 Validation: `check:all` passed with 148 Bun and 79 Node tests, lint, typecheck and builds. The nine existing Chromium tests were unchanged and not rerun for this review.
+
+## Untrusted data integration checkpoint
+
+Three further Node tests connect the existing queue, real loopback HTTP sender and ingestion service with a synthetic trusted printer scope/test store:
+
+- Extra endpoint, URL, destination, redirect, headers and `__proto__` fields at either event or printer-state level are rejected before any request. Neither the configured server nor the second destination receives traffic.
+- A URL-shaped printer identifier is treated only as data. The destination returns a deliberately invalid acknowledgement with an extra endpoint field, so the queue retains the event even though the synthetic store has accepted it. A second explicit delivery uses the original captured destination, despite mutation of the original configuration object, and deduplicates successfully. A Location header on the successful 200 response is not followed.
+- Redirect responses 301, 302, 303, 307 and 308 all preserve the same queued event and never contact the second origin.
+
+These tests prove the destination-selection properties of this component flow. There is still no public request handler, production credential flow or durable server database. They do not establish safe acceptance of arbitrary configuration URLs, DNS rebinding protection, or production SSRF resistance. No new application abstraction or destination configuration input was added for this checkpoint.
+
+Latest destination-boundary validation: lint, typecheck and all 82 Node tests passed. This test/documentation-only change did not rerun the previously passing 148 Bun tests, builds or nine Chromium tests.

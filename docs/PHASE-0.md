@@ -37,3 +37,13 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 `/healthz` initially reports process liveness only. Database readiness will be added with E1.2; it must not be interpreted as a complete deployment health check.
 
 Local Docker integration is blocked: the configured Docker socket is absent. Compose validation passes, but no simulator/container execution is claimed. CI is prepared to run both image and simulator gates.
+
+## Simulator extension checkpoint
+
+Prepared on `farm/simulator-harness`: separate SV06/U1 volumes; original synthetic four-tool configuration; Moonraker webcam entries; digest-pinned Spoolman and repeatable seed (2 vendors, 4 filaments, 6 spools); original JPEG/MJPEG source with connection and response-size limits; full integration acceptance script.
+
+Local validation: 46 Bun tests and one Node runtime test passed. Typecheck and Compose parsing passed. The camera tests exercise only a generated test pattern on loopback. No physical devices are used.
+
+Container execution remains unverified. Local Docker is unavailable. Container integration and image checks require an authorized execution environment; static configuration and unit tests alone do not establish readiness.
+
+E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scenarios and CI evidence. The initial foundation PR does not complete Phase 0. Database, independent login, pairing, signed-command verification and WebRTC remain subsequent work.

@@ -109,6 +109,9 @@ export type SpoolmanReadErrorCode =
   | 'invalid-page'
   | 'duplicate-id'
   | 'pagination-limit'
+  | 'invalid-sequence'
+  | 'incomplete-inventory'
+  | 'inventory-limit'
 export class SpoolmanReadError extends Error {
   readonly code: SpoolmanReadErrorCode
   constructor(code: SpoolmanReadErrorCode) {
@@ -171,3 +174,72 @@ export const parseSpoolmanSpools = (
   wire: string,
   context: SpoolmanPageContext,
 ) => parsePage(wire, context, SpoolmanSpool)
+
+const inventoryContextSchema = contextSchema.omit({
+  offset: true,
+  observedAt: true,
+})
+const inventoryPageSchema = z.strictObject({
+  offset: z.number().int().min(0).max(MAX_OFFSET),
+  observedAt: z.number().int().nonnegative(),
+  wire: z.string(),
+})
+export type SpoolmanInventoryContext = z.infer<typeof inventoryContextSchema>
+export type SpoolmanInventoryPage = z.infer<typeof inventoryPageSchema>
+
+/** Validates an entire observed traversal. It is not an atomic upstream snapshot. */
+export function parseSpoolmanSpoolInventory(
+  pages: readonly SpoolmanInventoryPage[],
+  input: SpoolmanInventoryContext,
+) {
+  const context = inventoryContextSchema.safeParse(input)
+  if (!context.success) throw new SpoolmanReadError('invalid-context')
+  if (!Array.isArray(pages)) throw new SpoolmanReadError('invalid-sequence')
+  if (pages.length === 0) throw new SpoolmanReadError('incomplete-inventory')
+  if (pages.length > 256) throw new SpoolmanReadError('inventory-limit')
+  const items: z.infer<typeof SpoolmanSpool>[] = []
+  const ids = new Set<number>()
+  let expectedOffset: number | null = 0
+  let observedFrom = 0
+  let observedThrough = 0
+  let bytes = 0
+  for (const [index, raw] of pages.entries()) {
+    const parsed = inventoryPageSchema.safeParse(raw)
+    if (!parsed.success) throw new SpoolmanReadError('invalid-sequence')
+    const page = parsed.data
+    if (
+      expectedOffset === null ||
+      page.offset !== expectedOffset ||
+      (index > 0 && page.observedAt < observedThrough)
+    )
+      throw new SpoolmanReadError('invalid-sequence')
+    if (page.wire.length > MAX_PAGE_BYTES)
+      throw new SpoolmanReadError('frame-too-large')
+    bytes += Buffer.byteLength(page.wire, 'utf8')
+    if (bytes > 4 * 1024 * 1024) throw new SpoolmanReadError('inventory-limit')
+    const result = parseSpoolmanSpools(page.wire, {
+      ...context.data,
+      offset: page.offset,
+      observedAt: page.observedAt,
+    })
+    if (items.length + result.items.length > 10_000)
+      throw new SpoolmanReadError('inventory-limit')
+    for (const item of result.items) {
+      if (ids.has(item.id)) throw new SpoolmanReadError('duplicate-id')
+      ids.add(item.id)
+      items.push(item)
+    }
+    if (index === 0) observedFrom = page.observedAt
+    observedThrough = page.observedAt
+    expectedOffset = result.nextOffset
+  }
+  if (expectedOffset !== null)
+    throw new SpoolmanReadError('incomplete-inventory')
+  return {
+    farmId: context.data.farmId,
+    serviceId: context.data.serviceId,
+    observedFrom,
+    observedThrough,
+    items,
+  }
+}

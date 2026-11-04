@@ -7,7 +7,7 @@
 - Live status, camera and signed commands travel over browser-to-Connector WebRTC. No TURN or HTTP/server command fallback. Degraded mode is read-only.
 - Keep safety enforcement in the Connector, including during server outages. Never send commands to physical printers during automated tests.
 - Work on feature branches and draft PRs. Do not merge, deploy, change DNS/credentials or start production services without authorization.
-- Do not use external chats or delegate development to agents.
+- Internal Codex agents managed by this session or T3 Code are authorized, subject to available subscription quota and runtime concurrency limits. Do not use external chats or external AI agents for development without separate explicit approval.
 - Use Bun workspaces, Nuxt 4 and TypeScript. Run `bun run check:all` before publishing changes; report pending integration checks explicitly.
 - Commit one coherent subtask at a time using English conventional commit messages. User-facing copy is pt-BR and accessible.
 
@@ -23,5 +23,5 @@
 ## Capacity planning
 
 - For any explicitly authorized parallel work, use the concurrency limit actually exposed by the current runtime. Ten workers is an upper preference, not permission to exceed that limit or a reason to keep idle workers running.
-- Use only subscription/account capacity and remaining quota that the environment exposes or the owner supplies. Do not invent quota estimates, switch accounts or claim to pool subscriptions. If quota is unavailable, report that limitation and avoid unnecessary parallel work.
-- Any authorized worker must receive the resource-ownership and cleanup rules with its task, record its own resources, and return a cleanup report. The coordinating agent checks those reports before declaring the work finished. These rules do not override the delegation restriction above.
+- Consult T3 Code's available account and quota information before distributing work across the owner's configured Codex subscriptions. Select only authorized configured instances with sufficient reported capacity; preserve the current coordinator's configuration. Do not invent quota estimates or claim that separate subscriptions form a shared quota pool. If remaining quota is not exposed to the agent, report that limitation and avoid unnecessary parallel work.
+- Every worker must receive the resource-ownership and cleanup rules with its task, record its own resources, and return a cleanup report. Assign distinct file ownership or isolated checkouts, and tell workers to preserve other agents' edits. The coordinating agent checks those reports before declaring the work finished. External agents still require separate approval.

@@ -30,15 +30,15 @@ This independent MIT repository supersedes the former monorepo destination. Acco
 | Type safety, unit tests, build                  | `bun run check:all`                   | Passed locally: 148 Bun + 84 Node tests |
 | Browser smoke and hidden view                   | `bun run test:e2e`                    | Passed locally: 9 Chromium tests        |
 | Connector distribution                          | Built CLI identity/help/version tests | Passed locally                          |
-| Simulator lifecycle and protocol responses      | Container acceptance                  | Pending execution                       |
-| Docker packaging                                | Image build and health probe          | Pending execution                       |
+| Simulator lifecycle and protocol responses      | Container acceptance                  | Failed Klipper readiness; partial pass  |
+| Docker packaging                                | Image build and health probe          | Passed locally: image and liveness      |
 | Auth, database, pairing, WebRTC, offline safety | Full Phase 0 acceptance               | Incomplete                              |
 
 See [the integration checkpoint](INTEGRATION-CHECKPOINT.md) for merged source branches, conflict resolutions, verification and limitations.
 
 `/healthz` initially reports process liveness only. Database readiness will be added with E1.2; it must not be interpreted as a complete deployment health check.
 
-Local Docker integration is blocked: the configured Docker socket is absent. Compose validation passes, but no simulator/container execution is claimed. CI is prepared to run both image and simulator gates.
+Authorized local Docker execution now passed the application image build and liveness probe. Camera and Spoolman checks passed locally and on an isolated native x86_64 test host. Klipper readiness failed in both environments; the simulator gate remains incomplete. See the [container validation checkpoint](CONTAINER-VALIDATION-CHECKPOINT.md). GitHub Actions execution remains separately pending; workflows are unchanged.
 
 ## Simulator extension checkpoint
 
@@ -46,7 +46,7 @@ Prepared on `farm/simulator-harness`: separate SV06/U1 volumes; original synthet
 
 Local validation: 46 Bun tests and one Node runtime test passed. Typecheck and Compose parsing passed. The camera tests exercise only a generated test pattern on loopback. No physical devices are used.
 
-Container execution remains unverified. Local Docker is unavailable. Container integration and image checks require an authorized execution environment; static configuration and unit tests alone do not establish readiness.
+Container execution was subsequently exercised with explicit authorization. The checkpoint above supersedes the earlier Docker-unavailable status; it records partial successes and actual failures rather than full simulator acceptance.
 
 E0 still requires actual container acceptance, RTSP/MediaMTX, network fault scenarios and CI evidence. The initial foundation PR does not complete Phase 0. Database, independent login, authenticated pairing and WebRTC remain subsequent work. Signed-command verification is now a locally tested library prototype; authenticated context and physical dispatch are not implemented.
 

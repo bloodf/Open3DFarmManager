@@ -38,6 +38,9 @@ export async function drainTelemetryOnce(
   active.add(queue)
   let loss: QueueLoss | undefined
   let abort: (() => void) | undefined
+  let delivery: Promise<unknown> | undefined
+  let deliverySettled = false
+  let finished = false
   try {
     let batch
     try {
@@ -60,13 +63,18 @@ export async function drainTelemetryOnce(
         signal.addEventListener('abort', abort, { once: true })
         if (signal.aborted) abort()
       })
-      accepted = await Promise.race([
-        Promise.resolve().then(() => {
-          if (signal.aborted) throw new Error('Telemetry delivery cancelled')
-          return send(body, signal)
-        }),
-        cancelled,
-      ])
+      delivery = Promise.resolve().then(() => {
+        if (signal.aborted) throw new Error('Telemetry delivery cancelled')
+        return send(body, signal)
+      })
+      const settled = () => {
+        deliverySettled = true
+        if (finished) active.delete(queue)
+      }
+      // A cancelled caller can return immediately, but the sender still owns its slot
+      // until it actually settles. Handle late rejection without acknowledging data.
+      void delivery.then(settled, settled)
+      accepted = await Promise.race([delivery, cancelled])
     } catch {
       return {
         status: 'retained',
@@ -96,6 +104,7 @@ export async function drainTelemetryOnce(
     return { status: 'delivered', count: ids.length, loss }
   } finally {
     if (abort) signal.removeEventListener('abort', abort)
-    active.delete(queue)
+    finished = true
+    if (!delivery || deliverySettled) active.delete(queue)
   }
 }

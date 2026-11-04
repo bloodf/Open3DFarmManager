@@ -160,7 +160,8 @@ test('cancellation retains records and a late success cannot acknowledge them', 
     controller.abort()
     assert.equal((await attempt).status, 'retained')
     resolve([id])
-    await Promise.resolve()
+    // Let the async sender and its adopted promise finish before starting a retry.
+    await new Promise((resolve) => setImmediate(resolve))
     assert.equal(f.queue.depth, 1)
     assert.equal(
       (
@@ -344,6 +345,62 @@ test('local acknowledgement failure reports uncertainty rather than successful d
     )
   } finally {
     recovered?.close()
+    f.cleanup()
+  }
+})
+
+test('cancelled delivery retains the concurrency slot until an abort-ignoring sender settles', async () => {
+  const f = fixture()
+  try {
+    f.queue.enqueue(state, 1000)
+    const controller = new AbortController()
+    let started!: () => void
+    let rejectDelivery!: (error: Error) => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const attempt = drainTelemetryOnce(
+      f.queue,
+      async () => {
+        started()
+        return new Promise<never>((_resolve, reject) => {
+          rejectDelivery = reject
+        })
+      },
+      () => 1000,
+      controller.signal,
+    )
+    await ready
+    controller.abort()
+    assert.equal((await attempt).status, 'retained')
+    let secondCalls = 0
+    const blocked = await drainTelemetryOnce(
+      f.queue,
+      async (body) => {
+        secondCalls++
+        return ids(body)
+      },
+      () => 1000,
+      signal(),
+    )
+    // Always settle the synthetic sender, even when this regression assertion fails.
+    rejectDelivery(new Error('Synthetic late transport failure'))
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(blocked, { status: 'retained', reason: 'busy' })
+    assert.equal(secondCalls, 0)
+    assert.equal(f.queue.depth, 1)
+    assert.equal(
+      (
+        await drainTelemetryOnce(
+          f.queue,
+          async (body) => ids(body),
+          () => 1000,
+          signal(),
+        )
+      ).status,
+      'delivered',
+    )
+  } finally {
     f.cleanup()
   }
 })

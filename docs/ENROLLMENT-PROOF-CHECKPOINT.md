@@ -21,3 +21,5 @@ The fixture's approval and revocation methods only arrange test data. They do no
 - Agent credentials, authenticated transport, connection ownership, token verification and live revocation lookup still require implementation. Farm/agent request IDs are lookup references, not credentials.
 - Production adapter race/restart tests must validate the source contract. A malicious adapter can fabricate an approved record; this integration does not make an untrusted source trustworthy.
 - No JWT, authenticated telemetry context or permission grant is returned. Success establishes possession relative to the approved record supplied by the trusted source. Existing channel-binding, relay-defense and distributed-registry gaps remain as documented in the Connector proof checkpoint.
+
+A subsequent [PostgreSQL source prototype](POSTGRES-ENROLLMENT-CHECKPOINT.md) now tests real row-lock serialization and revocation persistence after database restart. It is not wired to routes and does not supply approval permissions or a production storage deployment.

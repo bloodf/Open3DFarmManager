@@ -93,3 +93,5 @@ The [offline Spoolman inventory traversal](SPOOLMAN-INVENTORY-CHECKPOINT.md) now
 The [local Spoolman HTTP reader](SPOOLMAN-HTTP-CHECKPOINT.md) connects bounded GET pagination to inventory validation with a cumulative deadline and synthetic loopback coverage. It remains a local prototype without persistence or production authentication.
 
 The [disposable actual Spoolman API test](SPOOLMAN-ACTUAL-API-VALIDATION.md) passed locally with the pinned image: empty inventory, repeatable seed, pagination and archived inclusion. This validates the reader against that API version; production mirroring and full Klipper acceptance remain incomplete.
+
+The [PostgreSQL enrollment lookup checkpoint](POSTGRES-ENROLLMENT-CHECKPOINT.md) connects proof verification to a real transaction and validates concurrent revocation plus restart persistence in a disposable PostgreSQL 17 database. It remains unwired; account authentication, approval permissions, runtime DB roles and full pairing acceptance are incomplete.

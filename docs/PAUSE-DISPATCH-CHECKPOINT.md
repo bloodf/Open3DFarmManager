@@ -69,3 +69,28 @@ Thirty-six focused Node tests passed: eleven authority/protocol tests, seventeen
 The new send and result regressions inject changes from the last monotonic clock callback, including explicit revocation, peer closure or generation advance, disconnect, connection-generation change, and disconnect/restore or attempted generation rollback. Send cases require zero writes and a durable not-sent row. Result cases require one prior synthetic write, outcome-unknown and a durable unresolved row, never applied. Additional cases exercise abort-listener invalidation before the result decision, write-start journal-clock reentry, and an armed malicious final journal-clock callback that must never be invoked on the applied path. Existing cross-process SQLite, eight wedged slots, short deadlines, offline expiry, late completions and readonly audit-after-expiry tests remain green.
 
 Repository-wide TypeScript was attempted but this existing worktree lacks unrelated Nuxt, hashing, workspace and browser-test dependency resolution; that attempt did not pass. No dependency install or broad build was performed. Full `check:all`, production transport/driver integration, simulator pause and physical acceptance remain pending separate gates. Focused tests created and removed their own temporary SQLite directories; bounded local logs are retained outside the repository. Pre-existing shared dependency links remain for active workers.
+
+## Dispatcher and fixed-driver composition
+
+The subsequent `tests/node/pause-dispatch-driver-integration.test.ts` exercises
+the actual dispatcher, cryptographic verifier, SQLite journal and maintained
+fixed WebSocket pause driver together. The only printer endpoint is the
+existing original loopback Moonraker protocol fixture. Issuer keys, control
+transcript and local assignment provisioning are synthetic; no actual control
+RTC or current PostgreSQL authority is supplied.
+
+Four Node 24.20 tests passed in about 770 ms. They verify one fixed pause RPC,
+a later complete paused query and durable `applied` after journal reopen;
+authority or observation invalidation before dispatch with no pause; and
+lost acknowledgement or socket disconnection after the request with durable
+`outcome-unknown`. Reopening the journal still blocks a new claim for both the
+same assignment and a replacement assignment for the same farm/printer key.
+There is no automatic resend or reconnection.
+
+Focused strict TypeScript, formatting and whitespace checks passed. All five
+fixture listeners and temporary SQLite directories were closed or removed.
+Initial test-authoring failures remain in the private evidence. No production
+source changed for this test. This closes the isolated driver/dispatcher
+composition gap, while issuer HTTP/runtime wiring, browser control transport,
+real printing-simulator state, outage cases and the complete source gate remain
+separate requirements.

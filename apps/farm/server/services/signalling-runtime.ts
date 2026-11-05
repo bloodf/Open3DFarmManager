@@ -4,9 +4,24 @@ import type { SessionConfig } from 'nuxt/server'
 import {
   decodeSignallingClientFrame,
   encodeSignallingServerFrame,
-  type SignallingClientControl,
-  type SignallingServerFrame,
+  SignallingServerFrame,
 } from '../../../../packages/farm-protocol/src/signalling-socket.ts'
+import {
+  decodePauseSignallingClientFrame,
+  encodePauseSignallingServerFrame,
+  type PauseSignallingServerFrame,
+} from '../../../../packages/farm-protocol/src/pause-signalling.ts'
+import { PauseSignallingCoordinator } from './pause-signalling-coordinator.ts'
+import type { PauseNegotiationRuntime } from '../utils/pause-authority/runtime.ts'
+import {
+  openPauseNegotiation,
+  openReadOnlyNegotiation,
+  type NegotiationContext,
+  type NegotiationPeer,
+  type NegotiationDescription,
+  type SignallingMetadataPort,
+  type SignallingMode,
+} from './signalling-negotiation-adapter.ts'
 import { canonicalize } from '../../../../packages/farm-protocol/src/canonical.ts'
 import type {
   CredentialProofChallenge,
@@ -18,11 +33,7 @@ import type {
   ConnectorCurrentSnapshot,
 } from '../storage/postgres-signalling-authorization.ts'
 import { acceptSignallingProof } from './signalling-proof-acceptance.ts'
-import {
-  SignallingCoordinator,
-  type SignallingEndpoint,
-  type SignallingHandle,
-} from './signalling-coordinator.ts'
+import { SignallingCoordinator } from './signalling-coordinator.ts'
 import {
   signallingClockSample,
   signallingRemaining,
@@ -58,13 +69,13 @@ type Identity = ConnectorCurrentSnapshot
 type Link = {
   browser: Connection
   connector: Connection
-  browserHandle: SignallingHandle
-  connectorHandle: SignallingHandle | null
+  browserHandle: NegotiationContext
+  connectorHandle: NegotiationPeer | null
   lifetime: { expiresAt: number; monotonicDeadline: number }
 }
 type State =
   | { kind: 'browser.begin'; sessionId: string }
-  | { kind: 'browser.proof'; handle: SignallingHandle }
+  | { kind: 'browser.proof'; handle: NegotiationContext }
   | { kind: 'browser.wait'; link: Link }
   | { kind: 'browser.active'; link: Link }
   | { kind: 'connector.begin' }
@@ -93,16 +104,18 @@ type State =
       kind: 'connector.context-proof'
       identity: Identity
       link: Link
-      handle: SignallingHandle
+      handle: NegotiationPeer
     }
   | {
       kind: 'connector.active'
       identity: Identity
       link: Link
-      handle: SignallingHandle
+      handle: NegotiationPeer
     }
 interface Connection {
   readonly request: IncomingMessage
+  readonly mode: SignallingMode
+  readonly pause: PauseOwner | undefined
   readonly resource: SignallingResourceHandle
   readonly start: SignallingClockSample
   lastSample: SignallingClockSample
@@ -117,6 +130,29 @@ interface Connection {
   authorityCancel: (() => void) | null
   revalidationCancel: (() => void) | null
   removeSocketClose: () => void
+}
+type PauseOwner = Readonly<{
+  facade: PauseNegotiationRuntime
+  coordinator: PauseSignallingCoordinator
+  detach(): void
+}>
+type PauseConfiguration = Readonly<{
+  current(): PauseNegotiationRuntime | undefined
+  databaseIdentity: PauseNegotiationRuntime['databaseIdentity']
+  credentialIssuer: string
+  credentialAudience: string
+}>
+function inboxKey(connection: Connection, agentId: string): string {
+  return connection.mode + ':' + agentId
+}
+function pauseScope(description: NegotiationDescription) {
+  if (description.mode !== 'pause') throw Error('Pause context required')
+  return {
+    transport_id: description.transportId,
+    farm_id: description.farmId,
+    agent_id: description.agentId,
+    assignment_id: description.assignmentId,
+  }
 }
 const defaultClock: SignallingClock = {
   wall: Date.now,
@@ -145,13 +181,22 @@ export class SignallingRuntime {
   readonly #connections = new Map<IncomingMessage, Connection>()
   readonly #inboxes = new Map<string, Connection>()
   #closed = false
+  readonly #pauseConfig: PauseConfiguration | undefined
+  #pauseOwner: PauseOwner | undefined
   constructor(input: {
     reader: Reader
     credentials: Credentials
     origin: string
     cookie: SessionConfig
     clock?: SignallingClock
+    pause?: PauseConfiguration
   }) {
+    this.#pauseConfig = input.pause
+      ? Object.freeze({
+          ...input.pause,
+          databaseIdentity: Object.freeze({ ...input.pause.databaseIdentity }),
+        })
+      : undefined
     this.#reader = input.reader
     this.#credentials = input.credentials
     this.#origin = input.origin
@@ -171,11 +216,18 @@ export class SignallingRuntime {
   async upgrade(
     input: unknown,
     role: SignallingSocketRole,
+    mode: SignallingMode = 'read-only',
   ): Promise<Response | void> {
     let connection: Connection | undefined
     try {
       if (this.#closed) throw new Error('Closed')
-      const inspected = inspectSignallingUpgrade(input, role, this.#origin)
+      const pause = mode === 'pause' ? this.#pauseAdmission() : undefined
+      const inspected = inspectSignallingUpgrade(
+        input,
+        role,
+        this.#origin,
+        mode,
+      )
       const request = inspected.request
       const start = signallingClockSample(this.#clock)
       const resource = this.#resources.reserve({
@@ -197,6 +249,8 @@ export class SignallingRuntime {
       if (!resource || request.socket.destroyed) throw new Error('Capacity')
       connection = {
         request,
+        mode,
+        pause,
         resource,
         start,
         lastSample: start,
@@ -223,9 +277,10 @@ export class SignallingRuntime {
         request.socket.removeListener('close', close)
       if (role === 'browser') {
         const result = await this.#resources.work(resource, () =>
-          signallingBrowserSession(input, this.#origin, this.#cookie),
+          signallingBrowserSession(input, this.#origin, this.#cookie, mode),
         )
-        if (!result.ok || owned.closed) throw new Error('Session denied')
+        if (!result.ok || owned.closed || !this.#owned(owned))
+          throw new Error('Session denied')
         owned.state = {
           kind: 'browser.begin',
           sessionId: result.value.sessionRecordId,
@@ -249,7 +304,8 @@ export class SignallingRuntime {
         !connection ||
         connection.closed ||
         native.request.socket.destroyed ||
-        this.#closed
+        this.#closed ||
+        !this.#owned(connection)
       ) {
         native.port.terminate()
         return
@@ -289,6 +345,9 @@ export class SignallingRuntime {
   close(): void {
     this.#closed = true
     this.#coordinator.dispose()
+    this.#pauseOwner?.detach()
+    this.#pauseOwner?.coordinator.dispose()
+    this.#pauseOwner = undefined
     for (const connection of this.#connections.values()) this.#close(connection)
     this.#resources.dispose()
     this.#inboxes.clear()
@@ -302,38 +361,103 @@ export class SignallingRuntime {
       return undefined
     }
   }
-  #send(connection: Connection, frame: SignallingServerFrame): void {
+  #pauseAdmission(): PauseOwner {
+    const config = this.#pauseConfig,
+      facade = config?.current()
     if (
-      connection.closed ||
-      !this.#resources.send(
-        connection.resource,
-        encodeSignallingServerFrame(frame),
-      )
+      !config ||
+      !facade ||
+      facade.signal.aborted ||
+      facade.origin !== this.#origin ||
+      facade.credentialIssuer !== config.credentialIssuer ||
+      facade.credentialAudience !== config.credentialAudience ||
+      facade.databaseIdentity.database !== config.databaseIdentity.database ||
+      facade.databaseIdentity.address !== config.databaseIdentity.address ||
+      facade.databaseIdentity.port !== config.databaseIdentity.port
     )
-      throw new Error('Closed signalling send')
+      throw Error('Pause runtime unavailable')
+    if (this.#pauseOwner?.facade === facade) return this.#pauseOwner
+    if (this.#pauseOwner) this.#retirePause(this.#pauseOwner)
+    const coordinator = new PauseSignallingCoordinator({
+      authority: facade.reader,
+      credentials: this.#credentials,
+      credentialAudience: config.credentialAudience,
+      clock: this.#clock,
+      timers: { after },
+    })
+    const abort = () => this.#retirePause(owner)
+    const owner: PauseOwner = Object.freeze({
+      facade,
+      coordinator,
+      detach: () => facade.signal.removeEventListener('abort', abort),
+    })
+    this.#pauseOwner = owner
+    facade.signal.addEventListener('abort', abort, { once: true })
+    if (facade.signal.aborted || config.current() !== facade) {
+      this.#retirePause(owner)
+      throw Error('Pause runtime changed')
+    }
+    return owner
   }
-  #endpoint(connection: Connection): SignallingEndpoint {
+  #retirePause(owner: PauseOwner): void {
+    owner.detach()
+    if (this.#pauseOwner === owner) this.#pauseOwner = undefined
+    owner.coordinator.dispose()
+    for (const connection of this.#connections.values())
+      if (connection.pause === owner) this.#close(connection)
+  }
+  #owned(connection: Connection): boolean {
+    if (this.#closed || connection.closed) return false
+    if (connection.mode === 'read-only') return true
+    const owner = connection.pause
+    if (
+      !owner ||
+      owner.facade.signal.aborted ||
+      this.#pauseConfig?.current() !== owner.facade ||
+      this.#pauseOwner !== owner
+    ) {
+      this.#close(connection)
+      return false
+    }
+    return true
+  }
+  #wire(connection: Connection, wire: string): void {
+    if (
+      !this.#owned(connection) ||
+      !this.#resources.send(connection.resource, wire)
+    )
+      throw Error('Closed signalling send')
+  }
+  #send(
+    connection: Connection,
+    frame: SignallingServerFrame | PauseSignallingServerFrame,
+  ): void {
+    this.#wire(
+      connection,
+      connection.mode === 'pause'
+        ? encodePauseSignallingServerFrame(frame)
+        : encodeSignallingServerFrame(SignallingServerFrame.parse(frame)),
+    )
+  }
+  #endpoint(connection: Connection): SignallingMetadataPort {
     return {
       armDeadline: (remaining, expired) => {
-        if (connection.closed) throw new Error('Closed endpoint')
+        if (!this.#owned(connection)) throw Error('Closed endpoint')
         return after(remaining, () => {
           expired()
           this.#close(connection)
         })
       },
-      send: (wire) => {
-        // Coordinator accepts only strict RTC metadata; no other network frame is forwarded.
-        if (!this.#resources.send(connection.resource, wire))
-          throw new Error('Relay unavailable')
-      },
-      bindReadOnly: (binding) =>
-        this.#send(connection, { v: 1, t: 'rtc.binding', binding }),
+      send: (wire) => this.#wire(connection, wire),
       close: () => this.#close(connection),
     }
   }
   async #process(connection: Connection, wire: string): Promise<void> {
-    if (connection.closed || this.#closed) return
-    const frame = decodeSignallingClientFrame(wire)
+    if (!this.#owned(connection)) return
+    const frame =
+      connection.mode === 'pause'
+        ? decodePauseSignallingClientFrame(wire)
+        : decodeSignallingClientFrame(wire)
     if (frame.t.startsWith('rtc.')) {
       const state = connection.state
       const handle =
@@ -342,53 +466,64 @@ export class SignallingRuntime {
           : state.kind === 'connector.active'
             ? state.handle
             : null
-      if (!handle || !(await this.#coordinator.receiveAndWait(handle, wire)))
+      if (!handle || !(await handle.relay(wire)))
         throw new Error('Relay denied')
       return
     }
     // The switch is explicit: an authenticated machine cannot act as a browser.
-    const control = signallingControl(frame)
+    const control = frame
     switch (control.t) {
+      case 'pause.begin':
       case 'browser.begin': {
         if (connection.state.kind !== 'browser.begin')
           throw new Error('Admission order')
-        const opened = await this.#coordinator.open(
-          {
-            sessionRecordId: connection.state.sessionId,
-            farmId: control.farm_id,
-            agentId: control.agent_id,
-            keyId: control.key_id,
-          },
-          this.#endpoint(connection),
-        )
-        if (!opened || connection.closed) throw new Error('Browser denied')
-        connection.state = { kind: 'browser.proof', handle: opened.handle }
-        this.#send(connection, {
-          v: 1,
-          t: 'browser.challenge',
-          challenge: opened.challenge,
-        })
+        const scope = {
+          sessionRecordId: connection.state.sessionId,
+          farmId: control.farm_id,
+          agentId: control.agent_id,
+          keyId: control.key_id,
+        }
+        const opened =
+          control.t === 'pause.begin'
+            ? await openPauseNegotiation(
+                connection.pause!.coordinator,
+                { ...scope, assignmentId: control.assignment_id },
+                this.#endpoint(connection),
+              )
+            : await openReadOnlyNegotiation(
+                this.#coordinator,
+                scope,
+                this.#endpoint(connection),
+              )
+        if (!opened || !this.#owned(connection)) {
+          opened?.context.close()
+          throw Error('Browser denied')
+        }
+        connection.state = { kind: 'browser.proof', handle: opened.context }
+        this.#wire(connection, opened.challengeWire)
         break
       }
+      case 'pause.browser-proof':
       case 'browser.proof': {
         if (connection.state.kind !== 'browser.proof')
           throw new Error('Proof order')
         const handle = connection.state.handle
-        if (
-          !(await this.#coordinator.prove(handle, control.signature)) ||
-          connection.closed
-        )
+        if (!(await handle.prove(control.signature)) || connection.closed)
           throw new Error('Browser proof denied')
-        const description = this.#coordinator.describe(handle)
-        if (!description) throw new Error('Expired')
-        const inbox = this.#inboxes.get(description.agentId)
+        const description = handle.describe()
+        if (!description || description.mode !== connection.mode)
+          throw new Error('Expired')
+        const inbox = this.#inboxes.get(
+          inboxKey(connection, description.agentId),
+        )
         if (!inbox || inbox.closed || inbox.state.kind !== 'connector.ready')
           throw new Error('Connector unavailable')
         const current = await this.#current(inbox, inbox.state.identity)
         if (
           !current ||
-          connection.closed ||
-          inbox.closed ||
+          !this.#owned(connection) ||
+          !this.#owned(inbox) ||
+          inbox.pause !== connection.pause ||
           inbox.state.kind !== 'connector.ready' ||
           current.identity.credential_jti !== description.jti ||
           current.identity.farm_id !== description.farmId
@@ -408,8 +543,15 @@ export class SignallingRuntime {
         inbox.state = { kind: 'connector.request', identity: current, link }
         this.#send(inbox, {
           v: 1,
-          t: 'connector.context-request',
-          transport_id: description.transportId,
+          ...(description.mode === 'pause'
+            ? {
+                t: 'pause.context-request' as const,
+                ...pauseScope(description),
+              }
+            : {
+                t: 'connector.context-request' as const,
+                transport_id: description.transportId,
+              }),
           issued_at: description.issuedAt,
           expires_at: Math.min(
             description.admissionExpiresAt,
@@ -419,6 +561,7 @@ export class SignallingRuntime {
         })
         break
       }
+      case 'pause.connector-begin':
       case 'connector.begin': {
         if (
           connection.state.kind !== 'connector.begin' ||
@@ -447,6 +590,7 @@ export class SignallingRuntime {
         await this.#issueInbox(connection)
         break
       }
+      case 'pause.connector-inbox-proof':
       case 'connector.inbox-proof': {
         const state = connection.state
         if (state.kind !== 'connector.proof')
@@ -483,16 +627,22 @@ export class SignallingRuntime {
           current.budget.observedAt >= result.expiresAt ||
           connection.closed ||
           this.#inboxes.size >= 16 ||
-          this.#inboxes.has(current.identity.agent_id)
+          this.#inboxes.has(inboxKey(connection, current.identity.agent_id))
         )
           throw new Error('Inbox proof expired')
         connection.state = { kind: 'connector.ready', identity: current }
-        this.#inboxes.set(current.identity.agent_id, connection)
+        this.#inboxes.set(
+          inboxKey(connection, current.identity.agent_id),
+          connection,
+        )
         if (!this.#resources.finishPreauth(connection.resource))
           throw new Error('Expired inbox admission')
         this.#send(connection, {
           v: 1,
-          t: 'connector.inbox-ready',
+          t:
+            connection.mode === 'pause'
+              ? 'pause.connector-inbox-ready'
+              : 'connector.inbox-ready',
           inbox_id: connection.inboxId,
           issued_at: current.budget.observedAt,
           expires_at: connection.inboxExpiresAt,
@@ -501,9 +651,22 @@ export class SignallingRuntime {
         this.#revalidation(connection)
         break
       }
+      case 'pause.connector-attach':
       case 'connector.attach': {
         const state = connection.state
         if (state.kind !== 'connector.request') throw new Error('Context order')
+        if (control.t === 'pause.connector-attach') {
+          const description = state.link.browserHandle.describe()
+          if (
+            !description ||
+            description.mode !== 'pause' ||
+            control.transport_id !== description.transportId ||
+            control.farm_id !== description.farmId ||
+            control.agent_id !== description.agentId ||
+            control.assignment_id !== description.assignmentId
+          )
+            throw Error('Pause attach scope')
+        }
         connection.state = {
           kind: 'connector.attach',
           identity: state.identity,
@@ -514,17 +677,18 @@ export class SignallingRuntime {
         await this.#attach(connection)
         break
       }
+      case 'pause.connector-context-proof':
       case 'connector.context-proof': {
         const state = connection.state
         if (state.kind !== 'connector.context-proof')
           throw new Error('Context proof order')
         if (
-          !(await this.#coordinator.prove(state.handle, control.signature)) ||
+          !(await state.handle.prove(control.signature)) ||
           connection.closed ||
           state.link.browser.closed
         )
           throw new Error('Context denied')
-        const description = this.#coordinator.describe(state.handle)
+        const description = state.handle.describe()
         if (
           !description ||
           !this.#resources.finishPreauth(state.link.browser.resource)
@@ -539,16 +703,21 @@ export class SignallingRuntime {
         state.link.browser.state = { kind: 'browser.active', link: state.link }
         const ready = {
           v: 1,
-          t: 'rtc.ready',
-          transport_id: description.transportId,
+          ...(description.mode === 'pause'
+            ? { t: 'pause.ready' as const, ...pauseScope(description) }
+            : {
+                t: 'rtc.ready' as const,
+                transport_id: description.transportId,
+              }),
           issued_at: description.issuedAt,
           expires_at: description.expiresAt,
           commands_enabled: false,
-        } satisfies SignallingServerFrame
+        } satisfies SignallingServerFrame | PauseSignallingServerFrame
         this.#send(state.link.browser, ready)
         this.#send(connection, ready)
         break
       }
+      case 'pause.connector-retry':
       case 'connector.retry': {
         if (connection.state.kind === 'connector.issue') {
           if (this.#clock.monotonic() < connection.state.retryAt)
@@ -572,7 +741,7 @@ export class SignallingRuntime {
       state.retryAt = this.#clock.monotonic() + result.retryAfterMs
       this.#send(connection, {
         v: 1,
-        t: 'retry',
+        t: connection.mode === 'pause' ? 'pause.retry' : 'retry',
         phase: 'inbox',
         retry_after_ms: result.retryAfterMs,
       })
@@ -604,13 +773,19 @@ export class SignallingRuntime {
       identity: current,
       challenge,
     }
-    this.#send(connection, { v: 1, t: 'connector.inbox-challenge', challenge })
+    this.#send(connection, {
+      v: 1,
+      t:
+        connection.mode === 'pause'
+          ? 'pause.connector-inbox-challenge'
+          : 'connector.inbox-challenge',
+      challenge,
+    })
   }
   async #attach(connection: Connection): Promise<void> {
     const state = connection.state
     if (state.kind !== 'connector.attach') throw new Error('Attach order')
-    const attached = await this.#coordinator.attachConnector(
-      state.link.browserHandle,
+    const attached = await state.link.browserHandle.attach(
       this.#endpoint(connection),
       state.token,
       state.link.lifetime,
@@ -620,7 +795,7 @@ export class SignallingRuntime {
       state.retryAt = this.#clock.monotonic() + attached.retryAfterMs
       this.#send(connection, {
         v: 1,
-        t: 'retry',
+        t: connection.mode === 'pause' ? 'pause.retry' : 'retry',
         phase: 'context',
         retry_after_ms: attached.retryAfterMs,
       })
@@ -632,20 +807,26 @@ export class SignallingRuntime {
       attached.challenge.generation <= connection.inboxGeneration
     )
       throw new Error('Context attach denied')
-    state.link.connectorHandle = attached.handle
+    state.link.connectorHandle = attached.peer
     connection.state = {
       kind: 'connector.context-proof',
       identity: state.identity,
       link: state.link,
-      handle: attached.handle,
+      handle: attached.peer,
     }
+    const description = attached.peer.describe()
+    if (!description || description.mode !== connection.mode)
+      throw Error('Context expired')
     this.#send(connection, {
       v: 1,
-      t: 'connector.context-challenge',
+      ...(description.mode === 'pause'
+        ? { t: 'pause.context-challenge' as const, ...pauseScope(description) }
+        : { t: 'connector.context-challenge' as const }),
       challenge: attached.challenge,
     })
   }
   #observeClock(connection: Connection): SignallingClockSample {
+    if (!this.#owned(connection)) throw Error('Runtime owner changed')
     const now = signallingClockSample(this.#clock),
       previous = connection.lastSample
     if (
@@ -723,13 +904,16 @@ export class SignallingRuntime {
     const state = connection.state
     if (
       'identity' in state &&
-      this.#inboxes.get(state.identity.identity.agent_id) === connection
+      this.#inboxes.get(
+        inboxKey(connection, state.identity.identity.agent_id),
+      ) === connection
     )
-      this.#inboxes.delete(state.identity.identity.agent_id)
-    if (state.kind === 'browser.proof')
-      this.#coordinator.disconnect(state.handle)
+      this.#inboxes.delete(
+        inboxKey(connection, state.identity.identity.agent_id),
+      )
+    if (state.kind === 'browser.proof') state.handle.close()
     if ('link' in state) {
-      this.#coordinator.disconnect(state.link.browserHandle)
+      state.link.browserHandle.close()
       this.#close(state.link.browser)
       this.#close(state.link.connector)
     }
@@ -739,16 +923,4 @@ export class SignallingRuntime {
     connection.native?.terminate()
     connection.request.socket.destroy()
   }
-}
-function signallingControl(
-  input: ReturnType<typeof decodeSignallingClientFrame>,
-): SignallingClientControl {
-  if (
-    input.t === 'rtc.offer' ||
-    input.t === 'rtc.answer' ||
-    input.t === 'rtc.ice' ||
-    input.t === 'rtc.close'
-  )
-    throw new Error('Unexpected RTC metadata')
-  return input
 }

@@ -1,3 +1,4 @@
+import { currentPauseNegotiationRuntime } from '../utils/pause-authority/runtime.ts'
 import postgres, { type Sql } from 'postgres'
 import type { SessionConfig } from 'nuxt/server'
 import {
@@ -117,6 +118,12 @@ export function createSignallingRuntimeLifecycle() {
             credentials,
             origin: config.origin,
             cookie,
+            pause: {
+              current: currentPauseNegotiationRuntime,
+              databaseIdentity: readerIdentity,
+              credentialIssuer: config.issuer,
+              credentialAudience: config.audience,
+            },
           })
           active = Object.freeze({ runtime, metadata })
         } catch {

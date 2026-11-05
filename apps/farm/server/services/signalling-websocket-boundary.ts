@@ -1,3 +1,4 @@
+import type { SignallingMode } from './signalling-negotiation-adapter.ts'
 import { IncomingMessage } from 'node:http'
 import type { SessionConfig } from 'nuxt/server'
 import { sealedSessionRecordId } from './authenticated-session.ts'
@@ -7,14 +8,21 @@ import {
 } from '../utils/auth/boundary.ts'
 
 export const SIGNALLING_SUBPROTOCOL = 'open3dfarm.signalling.v1'
+export const PAUSE_SIGNALLING_SUBPROTOCOL = 'open3dfarm.pause-signalling.v1'
 export const SIGNALLING_NATIVE_MAX_PAYLOAD = 12 * 1024
 export const SIGNALLING_PENDING_BYTE_LIMIT = 32 * 1024
 export const SIGNALLING_PREAUTH_LIMIT = 16
 export const SIGNALLING_ADMISSION_TIMEOUT_MS = 8000
 export type SignallingSocketRole = 'browser' | 'connector'
 const paths = {
-  browser: '/api/signalling/browser',
-  connector: '/api/signalling/connector',
+  'read-only': {
+    browser: '/api/signalling/browser',
+    connector: '/api/signalling/connector',
+  },
+  pause: {
+    browser: '/api/signalling/pause-browser',
+    connector: '/api/signalling/pause-connector',
+  },
 }
 function object(value: unknown): value is object {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -55,7 +63,10 @@ export function installSignallingWebSocketBounds(app: unknown): void {
           const request = signallingNodeUpgrade(input)
           if (
             request.method === 'GET' &&
-            (request.url === paths.browser || request.url === paths.connector)
+            Object.values(paths).some(
+              (mode) =>
+                request.url === mode.browser || request.url === mode.connector,
+            )
           )
             return
         } catch {}
@@ -140,14 +151,18 @@ export function inspectSignallingUpgrade(
   input: unknown,
   role: SignallingSocketRole,
   configuredOrigin: string,
+  mode: SignallingMode = 'read-only',
 ): { request: IncomingMessage; headers: Headers; origin: string } {
-  if (role !== 'browser' && role !== 'connector')
+  if (
+    (role !== 'browser' && role !== 'connector') ||
+    (mode !== 'read-only' && mode !== 'pause')
+  )
     throw new Error('Invalid signalling role')
   const origin = configuredAuthOrigin(configuredOrigin)
   const request = signallingNodeUpgrade(input)
   if (
     request.method !== 'GET' ||
-    request.url !== paths[role] ||
+    request.url !== paths[mode][role] ||
     ('originalUrl' in request && request.originalUrl !== request.url) ||
     request.rawHeaders.length > 64
   )
@@ -172,7 +187,10 @@ export function inspectSignallingUpgrade(
     values.get('host') !== new URL(origin).host ||
     values.get('upgrade')?.toLowerCase() !== 'websocket' ||
     values.get('sec-websocket-version') !== '13' ||
-    values.get('sec-websocket-protocol') !== SIGNALLING_SUBPROTOCOL ||
+    values.get('sec-websocket-protocol') !==
+      (mode === 'pause'
+        ? PAUSE_SIGNALLING_SUBPROTOCOL
+        : SIGNALLING_SUBPROTOCOL) ||
     !/^[A-Za-z0-9+/]{21}[AQgw]==$/.test(values.get('sec-websocket-key') ?? '')
   )
     throw new Error('Invalid signalling handshake')
@@ -226,10 +244,16 @@ export async function signallingBrowserSession(
   input: unknown,
   configuredOrigin: string,
   cookie: SessionConfig,
+  mode: SignallingMode = 'read-only',
 ): Promise<{ request: IncomingMessage; sessionRecordId: string }> {
-  const inspected = inspectSignallingUpgrade(input, 'browser', configuredOrigin)
+  const inspected = inspectSignallingUpgrade(
+    input,
+    'browser',
+    configuredOrigin,
+    mode,
+  )
   const event = {
-    req: new Request(inspected.origin + paths.browser, {
+    req: new Request(inspected.origin + paths[mode].browser, {
       method: 'GET',
       headers: inspected.headers,
     }),

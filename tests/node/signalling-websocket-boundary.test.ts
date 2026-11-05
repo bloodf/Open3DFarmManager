@@ -18,6 +18,7 @@ import {
   signallingBrowserSession,
   SIGNALLING_NATIVE_MAX_PAYLOAD,
   SIGNALLING_SUBPROTOCOL,
+  PAUSE_SIGNALLING_SUBPROTOCOL,
 } from '../../apps/farm/server/services/signalling-websocket-boundary.ts'
 
 // Resolve the dependencies ACTUALLY selected by the installed Nuxt Nitro builder.
@@ -61,6 +62,23 @@ const cookie = {
   maxAge: 3600,
   cookie: { ...SESSION_COOKIE_ATTRIBUTES },
 }
+test('pause upgrade requires its exact path and subprotocol and preserves browser cookie checks', async () => {
+  for (const role of ['browser', 'connector'] as const) {
+    const value = input(role)
+    value._req.url = '/api/signalling/pause-' + role
+    const at = value._req.rawHeaders.indexOf(SIGNALLING_SUBPROTOCOL)
+    assert.ok(at >= 0)
+    assert.throws(() => inspectSignallingUpgrade(value, role, origin, 'pause'))
+    value._req.rawHeaders[at] = PAUSE_SIGNALLING_SUBPROTOCOL
+    assert.doesNotThrow(() =>
+      inspectSignallingUpgrade(value, role, origin, 'pause'),
+    )
+    assert.throws(() => inspectSignallingUpgrade(value, role, origin))
+    value._req.url += '?mode=read-only'
+    assert.throws(() => inspectSignallingUpgrade(value, role, origin, 'pause'))
+    value._req.socket.destroy()
+  }
+})
 function input(role = 'browser', extra: string[] = []) {
   const raw = new IncomingMessage(new Socket())
   raw.method = 'GET'

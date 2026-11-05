@@ -1,3 +1,17 @@
+import {
+  decodePauseSignallingServerFrame,
+  encodePauseSignallingClientFrame,
+  signPauseTransportProof,
+  type PauseSignallingClientFrame,
+  type PauseSignallingServerFrame,
+} from '../../packages/farm-protocol/src/pause-signalling.ts'
+import type { PauseNegotiationRuntime } from '../../apps/farm/server/utils/pause-authority/runtime.ts'
+import {
+  PauseNegotiationAuthority,
+  PauseNegotiationScope,
+} from '../../apps/farm/server/storage/postgres-pause-negotiation.ts'
+import type { SignallingMode } from '../../apps/farm/server/services/signalling-negotiation-adapter.ts'
+import { PAUSE_SIGNALLING_SUBPROTOCOL } from '../../apps/farm/server/services/signalling-websocket-boundary.ts'
 import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -7,6 +21,7 @@ import { EventEmitter } from 'node:events'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
 import { SignallingRuntime } from '../../apps/farm/server/services/signalling-runtime.ts'
+import { signallingSocketHooks } from '../../apps/farm/server/services/signalling-routes.ts'
 import {
   SESSION_COOKIE_NAME,
   SESSION_COOKIE_ATTRIBUTES,
@@ -15,6 +30,7 @@ import { SIGNALLING_SUBPROTOCOL } from '../../apps/farm/server/services/signalli
 import {
   decodeSignallingServerFrame,
   encodeSignallingClientFrame,
+  SignallingClientFrame as SignallingClientFrameSchema,
   type SignallingClientFrame,
   type SignallingServerFrame,
 } from '../../packages/farm-protocol/src/signalling-socket.ts'
@@ -55,7 +71,8 @@ class Native extends EventEmitter {
 interface TestPeer {
   raw: IncomingMessage
   native: Native
-  wires: SignallingServerFrame[]
+  mode: SignallingMode
+  wires: (SignallingServerFrame | PauseSignallingServerFrame)[]
   request: { _req: IncomingMessage }
   _internal: { ws: Native }
   send(wire: string): void
@@ -284,12 +301,61 @@ async function fixture(
       }
     },
   }
+  const assignmentId = randomUUID()
+  const pauseAbort = new AbortController()
+  const databaseIdentity = Object.freeze({
+    database: 'fixture',
+    address: '127.0.0.1',
+    port: 5432,
+  })
+  const pauseAuthority = () => {
+    const {
+      assignment_count: _count,
+      assignment_digest: _digest,
+      ...shared
+    } = authority
+    return PauseNegotiationAuthority.parse({
+      ...shared,
+      assignment_id: assignmentId,
+      role: 'owner',
+      audience: 'pause-fixture',
+    })
+  }
+  let pauseDenied = false
+  let facade: PauseNegotiationRuntime | undefined = Object.freeze({
+    owner: Object.freeze({}),
+    signal: pauseAbort.signal,
+    origin,
+    audience: 'pause-fixture',
+    credentialIssuer: 'independent-signalling-fixture',
+    credentialAudience: authority.audience,
+    databaseIdentity,
+    reader: {
+      async read(input) {
+        const scope = PauseNegotiationScope.parse(input)
+        const current = await reader.read(scope)
+        return current && !pauseDenied && scope.assignmentId === assignmentId
+          ? {
+              authority: pauseAuthority(),
+              printerKey: 'fixture-printer',
+              budget: budget(),
+            }
+          : null
+      },
+    },
+  })
   const runtime = makeRuntime({
     reader,
     credentials,
     origin,
     cookie,
     clock,
+    pause: {
+      current: () => facade,
+      databaseIdentity,
+      credentialIssuer: 'independent-signalling-fixture',
+      credentialAudience: authority.audience,
+    },
   })
   const changes = new EventEmitter()
   const peers: TestPeer[] = []
@@ -305,10 +371,11 @@ async function fixture(
   function peer(
     role: 'browser' | 'connector',
     headers: string[] = [],
+    mode: SignallingMode = 'read-only',
   ): TestPeer {
     const raw = new IncomingMessage(new Socket())
     raw.method = 'GET'
-    raw.url = '/api/signalling/' + role
+    raw.url = '/api/signalling/' + (mode === 'pause' ? 'pause-' : '') + role
     raw.rawHeaders = [
       'Host',
       'farm.example',
@@ -321,20 +388,25 @@ async function fixture(
       'Sec-WebSocket-Key',
       randomBytes(16).toString('base64'),
       'Sec-WebSocket-Protocol',
-      SIGNALLING_SUBPROTOCOL,
+      mode === 'pause' ? PAUSE_SIGNALLING_SUBPROTOCOL : SIGNALLING_SUBPROTOCOL,
       ...(role === 'browser' ? ['Origin', origin, 'Cookie', sealed!] : []),
       ...headers,
     ]
     const native = new Native(),
-      wires: SignallingServerFrame[] = []
+      wires: (SignallingServerFrame | PauseSignallingServerFrame)[] = []
     const value = {
+      mode,
       raw,
       native,
       wires,
       request: { _req: raw },
       _internal: { ws: native },
       send(wire: string) {
-        wires.push(decodeSignallingServerFrame(wire))
+        wires.push(
+          mode === 'pause'
+            ? decodePauseSignallingServerFrame(wire)
+            : decodeSignallingServerFrame(wire),
+        )
         changes.emit('changed')
       },
       terminate() {
@@ -346,16 +418,19 @@ async function fixture(
     peers.push(value)
     return value
   }
-  async function connect(role: 'browser' | 'connector') {
-    const p = peer(role)
-    assert.equal(await runtime.upgrade(p.request, role), undefined)
+  async function connect(
+    role: 'browser' | 'connector',
+    mode: SignallingMode = 'read-only',
+  ) {
+    const p = peer(role, [], mode)
+    assert.equal(await runtime.upgrade(p.request, role, mode), undefined)
     runtime.open(p)
     assert.equal(p.raw.socket.destroyed, false)
     return p
   }
   async function send(
     p: ReturnType<typeof peer>,
-    frame: SignallingClientFrame,
+    frame: SignallingClientFrame | PauseSignallingClientFrame,
   ) {
     const done = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -368,7 +443,11 @@ async function fixture(
       }
       changes.once('changed', changed)
     })
-    const raw = Buffer.from(encodeSignallingClientFrame(frame))
+    const raw = Buffer.from(
+      p.mode === 'pause'
+        ? encodePauseSignallingClientFrame(frame)
+        : encodeSignallingClientFrame(SignallingClientFrameSchema.parse(frame)),
+    )
     p.native.emit('message', raw, false)
     runtime.message(p, { rawData: raw })
     await done
@@ -376,8 +455,8 @@ async function fixture(
   }
   async function waitFor(
     p: TestPeer,
-    type: SignallingServerFrame['t'],
-  ): Promise<SignallingServerFrame> {
+    type: (SignallingServerFrame | PauseSignallingServerFrame)['t'],
+  ): Promise<SignallingServerFrame | PauseSignallingServerFrame> {
     const existing = p.wires.find((wire) => wire.t === type)
     if (existing) return existing
     return new Promise((resolve, reject) => {
@@ -408,64 +487,115 @@ async function fixture(
       ),
     )
   }
-  async function inbox() {
-    const p = await connect('connector')
+  async function inbox(mode: SignallingMode = 'read-only') {
+    const p = await connect('connector', mode)
     await send(p, {
       v: 1,
-      t: 'connector.begin',
+      t: mode === 'pause' ? 'pause.connector-begin' : 'connector.begin',
       agent_id: agent,
       farm_id: farm,
       jti,
       token: token,
     })
     const challenge = p.wires.at(-1)
-    assert.ok(challenge?.t === 'connector.inbox-challenge')
+    assert.ok(
+      challenge?.t === 'connector.inbox-challenge' ||
+        challenge?.t === 'pause.connector-inbox-challenge',
+    )
     await send(p, {
       v: 1,
-      t: 'connector.inbox-proof',
+      t:
+        mode === 'pause'
+          ? 'pause.connector-inbox-proof'
+          : 'connector.inbox-proof',
       signature: await sign(challenge.challenge),
     })
-    assert.equal(p.wires.at(-1)?.t, 'connector.inbox-ready')
+    assert.equal(
+      p.wires.at(-1)?.t,
+      mode === 'pause'
+        ? 'pause.connector-inbox-ready'
+        : 'connector.inbox-ready',
+    )
     return p
   }
-  async function browserContext() {
-    const p = await connect('browser')
+  async function browserContext(mode: SignallingMode = 'read-only') {
+    const p = await connect('browser', mode)
     await send(p, {
       v: 1,
-      t: 'browser.begin',
+      ...(mode === 'pause'
+        ? { t: 'pause.begin' as const, assignment_id: assignmentId }
+        : { t: 'browser.begin' as const }),
       agent_id: agent,
       farm_id: farm,
       key_id: keyId,
     })
     const challenge = p.wires.at(-1)
-    assert.ok(challenge?.t === 'browser.challenge')
-    await send(p, {
-      v: 1,
-      t: 'browser.proof',
-      signature: await signBrowserTransportProof(
-        challenge.challenge,
-        browserKey.privateKey,
-      ),
-    })
+    assert.ok(
+      challenge?.t === 'browser.challenge' ||
+        challenge?.t === 'pause.challenge',
+    )
+    await send(
+      p,
+      challenge.t === 'pause.challenge'
+        ? {
+            v: 1,
+            t: 'pause.browser-proof',
+            signature: await signPauseTransportProof(
+              challenge.challenge,
+              browserKey.privateKey,
+            ),
+          }
+        : {
+            v: 1,
+            t: 'browser.proof',
+            signature: await signBrowserTransportProof(
+              challenge.challenge,
+              browserKey.privateKey,
+            ),
+          },
+    )
     return p
   }
   async function attach(p: ReturnType<typeof peer>) {
-    await send(p, {
-      v: 1,
-      t: 'connector.attach',
-      token: token,
-    })
+    const request = p.wires.at(-1)
+    if (p.mode === 'pause') {
+      assert.ok(request?.t === 'pause.context-request')
+      await send(p, {
+        v: 1,
+        t: 'pause.connector-attach',
+        token,
+        transport_id: request.transport_id,
+        farm_id: request.farm_id,
+        agent_id: request.agent_id,
+        assignment_id: request.assignment_id,
+      })
+    } else await send(p, { v: 1, t: 'connector.attach', token })
     const challenge = p.wires.at(-1)
-    assert.ok(challenge?.t === 'connector.context-challenge')
+    assert.ok(
+      challenge?.t === 'connector.context-challenge' ||
+        challenge?.t === 'pause.context-challenge',
+    )
     await send(p, {
       v: 1,
-      t: 'connector.context-proof',
+      t:
+        p.mode === 'pause'
+          ? 'pause.connector-context-proof'
+          : 'connector.context-proof',
       signature: await sign(challenge.challenge),
     })
     return challenge.challenge
   }
   return {
     runtime,
+    assignmentId,
+    pauseAbort,
+    setFacade(value: PauseNegotiationRuntime | undefined) {
+      facade = value
+    },
+    facade: () => facade,
+    denyPause() {
+      pauseDenied = true
+    },
     peer,
     connect,
     send,
@@ -507,7 +637,341 @@ async function fixture(
 }
 const sdp = (hex: string) =>
   `v=0\r\na=fingerprint:sha-256 ${Array(32).fill(hex).join(':')}\r\n`
-test('two verified admissions competing for the last inbox slot cannot exceed sixteen', async () => {
+test('route callbacks retain their admitting runtime and never bind an old socket to a replacement', async () => {
+  const first = await fixture(),
+    second = await fixture()
+  let active = first.runtime
+  const hooks = signallingSocketHooks('connector', 'read-only', () => active)
+  try {
+    const peer = first.peer('connector')
+    assert.equal(await hooks.upgrade(peer.request), undefined)
+    active = second.runtime
+    hooks.open(peer)
+    const raw = Buffer.from(
+      encodeSignallingClientFrame({
+        v: 1,
+        t: 'connector.begin',
+        farm_id: first.farm,
+        agent_id: first.agent,
+        jti: first.jti,
+        token: first.token,
+      }),
+    )
+    hooks.message(peer, { rawData: raw })
+    const challenge = await first.waitFor(peer, 'connector.inbox-challenge')
+    assert.equal(challenge.t, 'connector.inbox-challenge')
+    assert.equal(peer.raw.socket.destroyed, false)
+    hooks.close(peer)
+    assert.equal(peer.raw.socket.destroyed, true)
+    assert.equal(second.peers.length, 0)
+    const unknown = first.peer('connector')
+    hooks.open(unknown)
+    assert.equal(unknown.raw.socket.destroyed, true)
+  } finally {
+    first.close()
+    second.close()
+  }
+})
+test('runtime replacement while upgrade awaits cannot admit the socket', async () => {
+  const first = await fixture(),
+    second = await fixture()
+  let active = first.runtime
+  const hooks = signallingSocketHooks('browser', 'read-only', () => active)
+  try {
+    const peer = first.peer('browser')
+    const pending = hooks.upgrade(peer.request)
+    active = second.runtime
+    assert.equal((await pending)?.status, 403)
+    assert.equal(peer.raw.socket.destroyed, true)
+    hooks.open(peer)
+    assert.equal(peer.wires.length, 0)
+  } finally {
+    first.close()
+    second.close()
+  }
+})
+test('pause retry retains the original inbox expiry and distinct control transport', async () => {
+  const f = await fixture()
+  try {
+    const machine = await f.inbox('pause')
+    f.advance(20000)
+    const browser = await f.browserContext('pause'),
+      request = machine.wires.at(-1)
+    assert.ok(request?.t === 'pause.context-request')
+    f.setBusy(true)
+    await f.send(machine, {
+      v: 1,
+      t: 'pause.connector-attach',
+      token: f.token,
+      transport_id: request.transport_id,
+      farm_id: request.farm_id,
+      agent_id: request.agent_id,
+      assignment_id: request.assignment_id,
+    })
+    assert.equal(machine.wires.at(-1)?.t, 'pause.retry')
+    f.advance(1)
+    f.setBusy(false)
+    await f.send(machine, { v: 1, t: 'pause.connector-retry' })
+    const challenge = machine.wires.at(-1)
+    assert.ok(challenge?.t === 'pause.context-challenge')
+    assert.equal(challenge.transport_id, request.transport_id)
+    assert.equal(challenge.assignment_id, request.assignment_id)
+    await f.send(machine, {
+      v: 1,
+      t: 'pause.connector-context-proof',
+      signature: await f.sign(challenge.challenge),
+    })
+    const ready = browser.wires.at(-1)
+    assert.ok(ready?.t === 'pause.ready')
+    assert.equal(ready.expires_at, 130000)
+    f.advance(10000)
+    await f.send(machine, {
+      v: 1,
+      t: 'rtc.offer',
+      transport_id: ready.transport_id,
+      seq: 0,
+      p: { sdp: sdp('AB') },
+    })
+    assert.equal(machine.raw.socket.destroyed, true)
+    assert.equal(browser.raw.socket.destroyed, true)
+    assert.equal(
+      browser.wires.some((w) => w.t === 'rtc.offer'),
+      false,
+    )
+  } finally {
+    f.close()
+  }
+})
+test('separate pause and readonly contexts share one runtime without upgrading either peer', async () => {
+  const f = await fixture()
+  try {
+    const readonlyMachine = await f.inbox()
+    const readonlyBrowser = await f.browserContext()
+    await f.attach(readonlyMachine)
+    const machine = await f.inbox('pause')
+    const browser = await f.browserContext('pause')
+    await f.attach(machine)
+    const ready = browser.wires.at(-1)
+    assert.ok(ready?.t === 'pause.ready')
+    assert.equal(ready.assignment_id, f.assignmentId)
+    assert.equal(ready.commands_enabled, false)
+    await f.send(machine, {
+      v: 1,
+      t: 'rtc.offer',
+      transport_id: ready.transport_id,
+      seq: 0,
+      p: { sdp: sdp('AB') },
+    })
+    await f.send(browser, {
+      v: 1,
+      t: 'rtc.answer',
+      transport_id: ready.transport_id,
+      seq: 0,
+      p: { sdp: sdp('CD') },
+    })
+    const binding = await f.waitFor(browser, 'pause.binding')
+    assert.ok(binding.t === 'pause.binding')
+    assert.equal(binding.binding.assignment_id, f.assignmentId)
+    assert.equal(binding.binding.purpose, 'pause-rtc')
+    assert.equal(binding.binding.audience, 'pause-fixture')
+    assert.deepEqual(await f.waitFor(machine, 'pause.binding'), binding)
+    assert.equal(readonlyBrowser.wires.at(-1)?.t, 'rtc.ready')
+    f.denyPause()
+    await f.send(machine, {
+      v: 1,
+      t: 'rtc.ice',
+      transport_id: ready.transport_id,
+      seq: 1,
+      p: { candidate: '', sdpMid: null, sdpMLineIndex: null },
+    })
+    assert.equal(browser.raw.socket.destroyed, true)
+    assert.equal(machine.raw.socket.destroyed, true)
+    assert.equal(readonlyMachine.raw.socket.destroyed, false)
+    assert.equal(readonlyBrowser.raw.socket.destroyed, false)
+  } finally {
+    f.close()
+  }
+})
+test('one inbox per mode permits two for an agent but rejects either duplicate mode', async () => {
+  const f = await fixture()
+  try {
+    const first = await f.inbox(),
+      second = await f.inbox('pause')
+    for (const mode of ['read-only', 'pause'] as const) {
+      const p = await f.connect('connector', mode)
+      await f.send(p, {
+        v: 1,
+        t: mode === 'pause' ? 'pause.connector-begin' : 'connector.begin',
+        agent_id: f.agent,
+        farm_id: f.farm,
+        jti: f.jti,
+        token: f.token,
+      })
+      const challenge = p.wires.at(-1)
+      assert.ok(
+        challenge?.t === 'connector.inbox-challenge' ||
+          challenge?.t === 'pause.connector-inbox-challenge',
+      )
+      await f.send(p, {
+        v: 1,
+        t:
+          mode === 'pause'
+            ? 'pause.connector-inbox-proof'
+            : 'connector.inbox-proof',
+        signature: await f.sign(challenge.challenge),
+      })
+      assert.equal(p.raw.socket.destroyed, true)
+    }
+    assert.equal(first.raw.socket.destroyed, false)
+    assert.equal(second.raw.socket.destroyed, false)
+  } finally {
+    f.close()
+  }
+})
+test('pause facade pins config and database identity; absence cannot disable readonly', async () => {
+  for (const field of [
+    'missing',
+    'origin',
+    'credentialIssuer',
+    'credentialAudience',
+    'database',
+    'address',
+    'port',
+  ] as const) {
+    const f = await fixture()
+    try {
+      const original = f.facade()!
+      f.setFacade(
+        field === 'missing'
+          ? undefined
+          : field === 'database' || field === 'address' || field === 'port'
+            ? {
+                ...original,
+                databaseIdentity: {
+                  ...original.databaseIdentity,
+                  [field]: field === 'port' ? 5433 : 'different',
+                },
+              }
+            : { ...original, [field]: 'different' },
+      )
+      const p = f.peer('connector', [], 'pause')
+      assert.equal(
+        (await f.runtime.upgrade(p.request, 'connector', 'pause'))?.status,
+        403,
+      )
+      assert.equal(p.raw.socket.destroyed, true)
+      const readonly = await f.inbox()
+      assert.equal(readonly.raw.socket.destroyed, false)
+    } finally {
+      f.close()
+    }
+  }
+})
+test('pause facade abort closes both admitted endpoints and never closes the readonly inbox', async () => {
+  const f = await fixture()
+  try {
+    const readonly = await f.inbox(),
+      machine = await f.inbox('pause'),
+      browser = await f.browserContext('pause')
+    await f.attach(machine)
+    f.pauseAbort.abort()
+    assert.equal(machine.raw.socket.destroyed, true)
+    assert.equal(browser.raw.socket.destroyed, true)
+    assert.equal(readonly.raw.socket.destroyed, false)
+  } finally {
+    f.close()
+  }
+})
+test('pause attach checks all four scope fields before issuing a context challenge', async () => {
+  for (const field of [
+    'transport_id',
+    'farm_id',
+    'agent_id',
+    'assignment_id',
+  ] as const) {
+    const f = await fixture()
+    try {
+      const machine = await f.inbox('pause'),
+        browser = await f.browserContext('pause')
+      const request = machine.wires.at(-1)
+      assert.ok(request?.t === 'pause.context-request')
+      await f.send(machine, {
+        v: 1,
+        t: 'pause.connector-attach',
+        token: f.token,
+        transport_id: request.transport_id,
+        farm_id: request.farm_id,
+        agent_id: request.agent_id,
+        assignment_id: request.assignment_id,
+        [field]: randomUUID(),
+      })
+      assert.equal(machine.raw.socket.destroyed, true)
+      assert.equal(browser.raw.socket.destroyed, true)
+      assert.equal(
+        machine.wires.some((w) => w.t === 'pause.context-challenge'),
+        false,
+      )
+    } finally {
+      f.close()
+    }
+  }
+})
+test('mode-specific decoding rejects cross-mode begins and command payloads', async () => {
+  for (const mode of ['read-only', 'pause'] as const) {
+    const f = await fixture()
+    try {
+      for (const t of [
+        mode === 'pause' ? 'browser.begin' : 'pause.begin',
+        'control.command',
+      ]) {
+        const p = await f.connect('browser', mode)
+        f.runtime.message(p, {
+          rawData: Buffer.from(
+            JSON.stringify({
+              v: 1,
+              t,
+              farm_id: f.farm,
+              agent_id: f.agent,
+              key_id: f.keyId,
+            }),
+          ),
+        })
+        await flush()
+        assert.equal(p.raw.socket.destroyed, true)
+        assert.equal(p.wires.length, 0)
+      }
+    } finally {
+      f.close()
+    }
+  }
+})
+test('pause owner loss during an authority await cannot publish a late challenge', async () => {
+  const f = await fixture(),
+    gate = Promise.withResolvers<void>()
+  try {
+    await f.inbox('pause')
+    const browser = await f.connect('browser', 'pause')
+    f.setAuthorityGate(gate.promise)
+    const pending = f.send(browser, {
+      v: 1,
+      t: 'pause.begin',
+      farm_id: f.farm,
+      agent_id: f.agent,
+      key_id: f.keyId,
+      assignment_id: f.assignmentId,
+    })
+    await flush()
+    f.pauseAbort.abort()
+    gate.resolve()
+    await pending
+    assert.equal(browser.raw.socket.destroyed, true)
+    assert.equal(browser.wires.length, 0)
+  } finally {
+    gate.resolve()
+    f.close()
+  }
+})
+test('two mixed-mode admissions competing for the last shared inbox slot cannot exceed sixteen', async () => {
   const configs: RuntimeConfig[] = []
   let shared: SignallingRuntime | undefined
   let hold = false
@@ -560,23 +1024,30 @@ test('two verified admissions competing for the last inbox slot cannot exceed si
     for (const f of fixtures.slice(0, 15)) await f.inbox()
     const contenders: TestPeer[] = []
     hold = true
-    for (const f of fixtures.slice(15)) {
-      const p = await f.connect('connector')
+    for (const [index, f] of fixtures.slice(15).entries()) {
+      const mode = index === 0 ? 'pause' : 'read-only'
+      const p = await f.connect('connector', mode)
       contenders.push(p)
       await f.send(p, {
         v: 1,
-        t: 'connector.begin',
+        t: mode === 'pause' ? 'pause.connector-begin' : 'connector.begin',
         agent_id: f.agent,
         farm_id: f.farm,
         jti: f.jti,
         token: f.token,
       })
       const challenge = p.wires.at(-1)
-      assert.ok(challenge?.t === 'connector.inbox-challenge')
+      assert.ok(
+        challenge?.t === 'connector.inbox-challenge' ||
+          challenge?.t === 'pause.connector-inbox-challenge',
+      )
       pending.push(
         f.send(p, {
           v: 1,
-          t: 'connector.inbox-proof',
+          t:
+            mode === 'pause'
+              ? 'pause.connector-inbox-proof'
+              : 'connector.inbox-proof',
           signature: await f.sign(challenge.challenge),
         }),
       )
@@ -594,7 +1065,11 @@ test('two verified admissions competing for the last inbox slot cannot exceed si
     await Promise.all(pending)
     assert.equal(
       contenders.filter((p) =>
-        p.wires.some((w) => w.t === 'connector.inbox-ready'),
+        p.wires.some(
+          (w) =>
+            w.t === 'connector.inbox-ready' ||
+            w.t === 'pause.connector-inbox-ready',
+        ),
       ).length,
       1,
     )
@@ -605,7 +1080,11 @@ test('two verified admissions competing for the last inbox slot cannot exceed si
         .filter(
           (p) =>
             !p.raw.socket.destroyed &&
-            p.wires.some((w) => w.t === 'connector.inbox-ready'),
+            p.wires.some(
+              (w) =>
+                w.t === 'connector.inbox-ready' ||
+                w.t === 'pause.connector-inbox-ready',
+            ),
         ).length,
       16,
     )

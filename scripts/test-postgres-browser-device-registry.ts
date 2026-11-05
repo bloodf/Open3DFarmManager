@@ -1,6 +1,10 @@
 // Only for an explicitly disposable, isolated synthetic database.
 import assert from 'node:assert/strict'
 import postgres from 'postgres'
+import {
+  loadMigrationCatalog,
+  validateMigrationHistory,
+} from './db/migrations.ts'
 import { testPostgresBrowserDeviceRegistry } from '../tests/helpers/postgres-browser-device-registry-integration.ts'
 
 const portText = process.env.BROWSER_REGISTRY_SYNTHETIC_TEST_PORT
@@ -31,12 +35,18 @@ try {
     await admin`SELECT current_database() AS database, current_user AS username`
   )[0]
   assert.deepEqual(identity, { database: 'fixture', username: 'fixture' })
+  const catalog = await loadMigrationCatalog()
+  const history =
+    await admin`SELECT position, id, checksum FROM public.open3dfarm_migrations ORDER BY position`
+  assert.equal(validateMigrationHistory(catalog, [...history]), catalog.length)
+  assert.ok(
+    catalog.some((entry) => entry.id === '0013_browser_device_registry'),
+  )
   console.log(
     JSON.stringify({
       result: 'passed',
       checks: await testPostgresBrowserDeviceRegistry(admin, port),
-      migrations:
-        'partial synthetic schema only; official migration history not verified',
+      migrations: 'full catalog and exact journal verified',
     }),
   )
 } finally {

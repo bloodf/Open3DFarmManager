@@ -4,7 +4,7 @@ import postgres, { type Sql } from 'postgres'
 import { PostgresBrowserDeviceRegistry } from '../../apps/farm/server/storage/postgres-browser-device-registry.ts'
 import { signBrowserDeviceProof } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 
-/** Caller owns the disposable synthetic database and applies its reviewed partial schema. */
+/** Caller owns the disposable synthetic database and applies the maintained migration catalog. */
 export async function testPostgresBrowserDeviceRegistry(
   admin: Sql,
   port: number,
@@ -27,12 +27,12 @@ export async function testPostgresBrowserDeviceRegistry(
   }
   const registry = new PostgresBrowserDeviceRegistry(sql, config, () => now)
   const checks: string[] = []
-  async function seed(memberRole = 'owner') {
+  async function seed(memberRole = 'owner', expiry = 1000000000) {
     const account = 'acct_' + randomUUID(),
       session = 'session_' + randomUUID(),
       farm = randomUUID()
     await admin`INSERT INTO farm.session_accounts(id) VALUES (${account})`
-    await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES (${session},${account},0,1000,1000,1000000000)`
+    await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES (${session},${account},0,1000,1000,${expiry})`
     await admin`INSERT INTO farm.farms(id) VALUES (${farm}::uuid)`
     await admin`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES (${farm}::uuid,${account},${memberRole})`
     return { account, session, farm }
@@ -384,7 +384,197 @@ export async function testPostgresBrowserDeviceRegistry(
       }),
       { ok: false, reason: 'denied' },
     )
+    assert.ok(
+      (
+        await registry.revoke({
+          ...decision(member, challenge.challenge),
+          sessionRecordId: adminActor.session,
+        })
+      ).ok,
+    )
+    checks.push('admin-revokes-after-owning-membership-removal')
+    for (const kind of [
+      'session',
+      'account',
+      'membership',
+      'downgrade',
+      'owner-expiry',
+    ]) {
+      const target = await seed(
+          'owner',
+          kind === 'owner-expiry' ? now + 1000 : 1000000000,
+        ),
+        targetKey = await key(),
+        proof = await issue(target, targetKey)
+      assert.ok(proof.ok)
+      assert.ok((await complete(target, targetKey, proof.challenge)).ok)
+      const actor = await seed('admin')
+      await admin`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES (${target.farm}::uuid,${actor.account},'admin')`
+      const blocker = await admin.reserve()
+      await blocker`BEGIN`
+      if (kind === 'membership' || kind === 'downgrade') {
+        if (kind === 'membership')
+          await blocker`UPDATE farm.memberships SET revoked_at=${now} WHERE farm_id=${target.farm}::uuid AND account_id=${actor.account}`
+        else
+          await blocker`UPDATE farm.memberships SET role='viewer' WHERE farm_id=${target.farm}::uuid AND account_id=${actor.account}`
+      } else {
+        await blocker`SELECT id FROM farm.session_accounts WHERE id=${kind === 'owner-expiry' ? target.account : actor.account} FOR UPDATE`
+        if (kind === 'session')
+          await blocker`UPDATE farm.account_sessions SET revoked_at=${now} WHERE id=${actor.session}`
+        if (kind === 'account')
+          await blocker`UPDATE farm.session_accounts SET disabled=true WHERE id=${actor.account}`
+      }
+      const pending = registry.approve({
+        ...decision(target, proof.challenge),
+        sessionRecordId: actor.session,
+      })
+      const beforeWait = now
+      try {
+        const deadline = performance.now() + 1500
+        while (true) {
+          const waits =
+            await admin`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename=${role} AND wait_event_type='Lock'`
+          if (waits[0]?.n > 0) break
+          assert.ok(
+            performance.now() < deadline,
+            'Expected approval authorization lock wait',
+          )
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        if (kind === 'owner-expiry') now = beforeWait + 1000
+      } finally {
+        await blocker`COMMIT`
+        blocker.release()
+      }
+      assert.deepEqual(await pending, { ok: false, reason: 'denied' })
+      now = beforeWait
+    }
+    checks.push(
+      'approval-observes-approver-revocation-downgrade-and-owner-expiry-after-lock-wait',
+    )
     checks.push('owning-membership-must-remain-active-for-approval')
+    for (const first of ['complete', 'revoke']) {
+      const subject = await seed(),
+        subjectKey = await key(),
+        proof = await issue(subject, subjectKey)
+      assert.ok(proof.ok)
+      const blocker = await admin.reserve()
+      await blocker`BEGIN`
+      await blocker`SELECT pg_advisory_xact_lock(1870033,13)`
+      const start = (operation: string) =>
+        operation === 'complete'
+          ? complete(subject, subjectKey, proof.challenge)
+          : registry.revoke(decision(subject, proof.challenge))
+      const pending: ReturnType<typeof start>[] = []
+      try {
+        const deadline = performance.now() + 1500
+        for (const count of [1, 2]) {
+          pending.push(
+            start(
+              count === 1
+                ? first
+                : first === 'complete'
+                  ? 'revoke'
+                  : 'complete',
+            ),
+          )
+          while (true) {
+            const waits =
+              await admin`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename=${role} AND wait_event_type='Lock'`
+            if (waits[0]?.n >= count) break
+            assert.ok(
+              performance.now() < deadline,
+              'Expected ordered registry lock wait',
+            )
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          }
+        }
+      } finally {
+        await blocker`COMMIT`
+        blocker.release()
+      }
+      const [firstResult, secondResult] = await Promise.all(pending)
+      assert.ok(firstResult && secondResult)
+      assert.ok(firstResult.ok)
+      if (first === 'complete') assert.ok(secondResult.ok)
+      else assert.deepEqual(secondResult, { ok: false, reason: 'denied' })
+      assert.deepEqual(
+        await registry.approve(decision(subject, proof.challenge)),
+        { ok: false, reason: 'denied' },
+      )
+      assert.equal(
+        (
+          await admin`SELECT status FROM farm.browser_device_keys WHERE key_id=${proof.challenge.key_id}::uuid`
+        )[0]?.status,
+        'revoked',
+      )
+    }
+    checks.push('completion-and-key-revocation-both-lock-orders')
+    for (const first of ['snapshot', 'revoke']) {
+      const subject = await seed(),
+        subjectKey = await key(),
+        proof = await issue(subject, subjectKey)
+      assert.ok(proof.ok)
+      assert.ok((await complete(subject, subjectKey, proof.challenge)).ok)
+      assert.ok((await registry.approve(decision(subject, proof.challenge))).ok)
+      const snapshot = {
+        sessionRecordId: subject.session,
+        policy,
+        request: {
+          farm_id: subject.farm,
+          key_id: proof.challenge.key_id,
+          proof_session_id: proof.challenge.session_id,
+        },
+      }
+      const blocker = await admin.reserve()
+      await blocker`BEGIN`
+      await blocker`SELECT pg_advisory_xact_lock(1870033,13)`
+      const start = (operation: string) =>
+        operation === 'snapshot'
+          ? registry.authorizeDevice(snapshot)
+          : registry.revoke(decision(subject, proof.challenge))
+      const pending: ReturnType<typeof start>[] = []
+      try {
+        const deadline = performance.now() + 1500
+        for (const count of [1, 2]) {
+          pending.push(
+            start(
+              count === 1
+                ? first
+                : first === 'snapshot'
+                  ? 'revoke'
+                  : 'snapshot',
+            ),
+          )
+          while (true) {
+            const waits =
+              await admin`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename=${role} AND wait_event_type='Lock'`
+            if (waits[0]?.n >= count) break
+            assert.ok(
+              performance.now() < deadline,
+              'Expected ordered registry lock wait',
+            )
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          }
+        }
+      } finally {
+        await blocker`COMMIT`
+        blocker.release()
+      }
+      const [a, b] = await Promise.all(pending)
+      assert.ok(a && b)
+      assert.ok(a.ok)
+      if (first === 'snapshot') assert.ok(b.ok)
+      else assert.deepEqual(b, { ok: false, reason: 'denied' })
+      assert.equal(
+        (
+          await admin`SELECT status FROM farm.browser_device_keys WHERE key_id=${proof.challenge.key_id}::uuid`
+        )[0]?.status,
+        'revoked',
+      )
+    }
+    checks.push('snapshot-and-key-revocation-both-lock-orders')
+
     const expOwner = await seed(),
       expKey = await key(),
       exp = await issue(expOwner, expKey)

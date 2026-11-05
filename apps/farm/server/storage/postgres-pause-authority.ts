@@ -161,34 +161,50 @@ export class PostgresPauseAuthority {
   private async transaction<
     T extends PauseChallengeDecision | PauseCapabilityDecision,
   >(
-    run: (tx: TransactionSql) => Promise<T>,
+    run: (
+      tx: TransactionSql,
+      setDeliveryDeadline: (deadline: number) => void,
+    ) => Promise<T>,
   ): Promise<T | PauseAuthorityFailure> {
     try {
       let result: T | undefined
+      let deliveryDeadline: number | undefined
       await this.sql.begin(async (tx) => {
         await tx`SET LOCAL statement_timeout='2000ms'`
         await tx`SET LOCAL lock_timeout='1000ms'`
         await tx`SET LOCAL transaction_timeout='10000ms'`
-        result = await run(tx)
+        result = await run(tx, (deadline) => {
+          deliveryDeadline = time.parse(deadline)
+        })
       })
       if (result?.ok) {
         const authority =
           'challenge' in result ? result.challenge : result.capability
-        let fresh = false
-        // A deferred COMMIT wait may consume the deadline. Never redeliver a stored result.
+        // Deduct the entire bounded freshness transaction, including its COMMIT wait.
+        const started = performance.now()
+        let observedNow: number | undefined
+        let observedWatermark: number | undefined
         await this.sql.begin(async (check) => {
           await check`SET LOCAL statement_timeout='2000ms'`
           await check`SET LOCAL lock_timeout='1000ms'`
           await check`SET LOCAL transaction_timeout='10000ms'`
           const rows =
             await check`SELECT floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS now,observed_at::float8 AS watermark FROM farm.pause_authority_watermark WHERE id=1`
-          const now = time.parse(rows[0]?.now),
-            watermark = time.parse(rows[0]?.watermark)
-          fresh =
-            now >= watermark &&
-            now >= authority.issued_at &&
-            now < authority.expires_at
+          observedNow = time.parse(rows[0]?.now)
+          observedWatermark = time.parse(rows[0]?.watermark)
         })
+        const elapsed = Math.ceil(performance.now() - started)
+        const fresh =
+          deliveryDeadline !== undefined &&
+          Number.isSafeInteger(elapsed) &&
+          elapsed >= 0 &&
+          elapsed < 2000 &&
+          observedNow !== undefined &&
+          observedWatermark !== undefined &&
+          observedNow >= observedWatermark &&
+          observedNow >= authority.issued_at &&
+          observedNow + elapsed <
+            Math.min(deliveryDeadline, authority.expires_at)
         if (!fresh) return denied()
       }
       return result ?? { ok: false, reason: 'storage-unavailable' }
@@ -425,143 +441,146 @@ export class PostgresPauseAuthority {
     if (!(await this.validConfiguration()))
       return { ok: false, reason: 'invalid-input' }
     const { sessionRecordId, request } = parsed.data
-    return this.transaction(async (tx): Promise<PauseChallengeDecision> => {
-      const current = await this.current(tx, sessionRecordId, binding)
-      if (!current) {
-        await this.observe(tx, sessionRecordId)
-        return denied()
-      }
-      const before = await this.now(tx)
-      const browserValid = await verifyControlSessionProof(
-        binding,
-        'browser',
-        browserSignature,
-      )
-      const connectorValid = await verifyControlSessionProof(
-        binding,
-        'connector',
-        connectorSignature,
-      )
-      const afterCrypto = await this.validAt(
-        tx,
-        sessionRecordId,
-        current,
-        binding,
-        before,
-      )
-      if (!browserValid || !connectorValid || afterCrypto === null)
-        return denied()
-      const observed = await this.watermark(tx)
-      if (observed === null) return denied()
-      await tx`SELECT farm.prune_pause_authority()`
-      const budgets =
-        await tx`SELECT window_started_at::float8 AS window_started_at,attempts FROM farm.pause_authority_sessions WHERE session_id=${sessionRecordId} FOR UPDATE`
-      const prior = budgets[0]
-      if (prior && observed < prior.window_started_at) return denied()
-      if (
-        prior &&
-        observed - prior.window_started_at < 900000 &&
-        prior.attempts >= 60
-      )
-        return { ok: false, reason: 'rate-limited' }
-      const existing =
-        await tx`SELECT challenge_id FROM farm.pause_authority_challenges WHERE transport_id=${binding.transport_id}::uuid OR (agent_id=${binding.agent_id}::uuid AND credential_jti=${binding.credential_jti}::uuid AND admission_nonce=${request.admissionNonce}) FOR UPDATE`
-      if (existing.length) return denied()
-      const counts =
-        await tx`SELECT count(*)::int AS total,count(*) FILTER(WHERE account_id=${current.account.id})::int AS account FROM farm.pause_authority_challenges`
-      if (counts[0]?.total >= 4096 || counts[0]?.account >= 64)
-        return { ok: false, reason: 'capacity' }
-      const now = await this.validAt(
-        tx,
-        sessionRecordId,
-        current,
-        binding,
-        observed,
-      )
-      if (now === null) return denied()
-      const expires = Math.min(
-        now + this.policy.admissionMs,
-        current.validUntil,
-      )
-      if (expires <= now) return denied()
-      const challenge = PauseAdmissionChallenge.parse({
-        v: 1,
-        purpose: 'pause-admission',
-        challenge_id: randomUUID(),
-        farm_id: binding.farm_id,
-        agent_id: binding.agent_id,
-        key_id: binding.key_id,
-        assignment_id: binding.assignment_id,
-        transport_id: binding.transport_id,
-        account_id: current.account.id,
-        browser_thumbprint: binding.browser_thumbprint,
-        origin: this.config.origin,
-        audience: this.config.audience,
-        control_binding_sha256: await controlBindingHash(binding),
-        admission_nonce: request.admissionNonce,
-        issued_at: now,
-        expires_at: expires,
-      })
-      await tx`INSERT INTO farm.pause_authority_challenges(challenge_id,session_id,account_id,farm_id,agent_id,key_id,credential_jti,assignment_id,transport_id,admission_nonce,binding,challenge,issued_at,expires_at,binding_expires_at,credential_expires_at) VALUES(${challenge.challenge_id}::uuid,${sessionRecordId},${current.account.id},${binding.farm_id}::uuid,${binding.agent_id}::uuid,${binding.key_id}::uuid,${binding.credential_jti}::uuid,${binding.assignment_id}::uuid,${binding.transport_id}::uuid,${request.admissionNonce},${tx.json(binding)},${tx.json(challenge)},${now},${expires},${binding.expires_at},${current.credentialExpiresAt})`
-      if (!prior)
-        await tx`INSERT INTO farm.pause_authority_sessions(session_id,window_started_at,attempts) VALUES(${sessionRecordId},${now},1)`
-      else if (now - prior.window_started_at >= 900000)
-        await tx`UPDATE farm.pause_authority_sessions SET window_started_at=${now},attempts=1 WHERE session_id=${sessionRecordId}`
-      else
-        await tx`UPDATE farm.pause_authority_sessions SET attempts=attempts+1 WHERE session_id=${sessionRecordId}`
-      const final = await this.validAt(
-        tx,
-        sessionRecordId,
-        current,
-        binding,
-        now,
-      )
-      if (final === null || final >= expires) {
-        await this.terminal(
-          tx,
-          {
-            challenge_id: challenge.challenge_id,
-            session_id: sessionRecordId,
-            account_id: current.account.id,
-            binding,
-            challenge,
-            status: 'pending',
-            issued_at: now,
-            expires_at: expires,
-          },
-          'expired',
-          await this.now(tx),
+    return this.transaction(
+      async (tx, setDeliveryDeadline): Promise<PauseChallengeDecision> => {
+        const current = await this.current(tx, sessionRecordId, binding)
+        if (!current) {
+          await this.observe(tx, sessionRecordId)
+          return denied()
+        }
+        const before = await this.now(tx)
+        const browserValid = await verifyControlSessionProof(
+          binding,
+          'browser',
+          browserSignature,
         )
-        return denied()
-      }
-      await tx`UPDATE farm.pause_authority_watermark SET observed_at=${final} WHERE id=1`
-      const preCommit = await this.validAt(
-        tx,
-        sessionRecordId,
-        current,
-        binding,
-        final,
-      )
-      if (preCommit === null || preCommit >= expires) {
-        await this.terminal(
-          tx,
-          {
-            challenge_id: challenge.challenge_id,
-            session_id: sessionRecordId,
-            account_id: current.account.id,
-            binding,
-            challenge,
-            status: 'pending',
-            issued_at: now,
-            expires_at: expires,
-          },
-          'expired',
-          await this.now(tx),
+        const connectorValid = await verifyControlSessionProof(
+          binding,
+          'connector',
+          connectorSignature,
         )
-        return denied()
-      }
-      return { ok: true, challenge }
-    })
+        const afterCrypto = await this.validAt(
+          tx,
+          sessionRecordId,
+          current,
+          binding,
+          before,
+        )
+        if (!browserValid || !connectorValid || afterCrypto === null)
+          return denied()
+        const observed = await this.watermark(tx)
+        if (observed === null) return denied()
+        await tx`SELECT farm.prune_pause_authority()`
+        const budgets =
+          await tx`SELECT window_started_at::float8 AS window_started_at,attempts FROM farm.pause_authority_sessions WHERE session_id=${sessionRecordId} FOR UPDATE`
+        const prior = budgets[0]
+        if (prior && observed < prior.window_started_at) return denied()
+        if (
+          prior &&
+          observed - prior.window_started_at < 900000 &&
+          prior.attempts >= 60
+        )
+          return { ok: false, reason: 'rate-limited' }
+        const existing =
+          await tx`SELECT challenge_id FROM farm.pause_authority_challenges WHERE transport_id=${binding.transport_id}::uuid OR (agent_id=${binding.agent_id}::uuid AND credential_jti=${binding.credential_jti}::uuid AND admission_nonce=${request.admissionNonce}) FOR UPDATE`
+        if (existing.length) return denied()
+        const counts =
+          await tx`SELECT count(*)::int AS total,count(*) FILTER(WHERE account_id=${current.account.id})::int AS account FROM farm.pause_authority_challenges`
+        if (counts[0]?.total >= 4096 || counts[0]?.account >= 64)
+          return { ok: false, reason: 'capacity' }
+        const now = await this.validAt(
+          tx,
+          sessionRecordId,
+          current,
+          binding,
+          observed,
+        )
+        if (now === null) return denied()
+        const expires = Math.min(
+          now + this.policy.admissionMs,
+          current.validUntil,
+        )
+        if (expires <= now) return denied()
+        const challenge = PauseAdmissionChallenge.parse({
+          v: 1,
+          purpose: 'pause-admission',
+          challenge_id: randomUUID(),
+          farm_id: binding.farm_id,
+          agent_id: binding.agent_id,
+          key_id: binding.key_id,
+          assignment_id: binding.assignment_id,
+          transport_id: binding.transport_id,
+          account_id: current.account.id,
+          browser_thumbprint: binding.browser_thumbprint,
+          origin: this.config.origin,
+          audience: this.config.audience,
+          control_binding_sha256: await controlBindingHash(binding),
+          admission_nonce: request.admissionNonce,
+          issued_at: now,
+          expires_at: expires,
+        })
+        await tx`INSERT INTO farm.pause_authority_challenges(challenge_id,session_id,account_id,farm_id,agent_id,key_id,credential_jti,assignment_id,transport_id,admission_nonce,binding,challenge,issued_at,expires_at,binding_expires_at,credential_expires_at) VALUES(${challenge.challenge_id}::uuid,${sessionRecordId},${current.account.id},${binding.farm_id}::uuid,${binding.agent_id}::uuid,${binding.key_id}::uuid,${binding.credential_jti}::uuid,${binding.assignment_id}::uuid,${binding.transport_id}::uuid,${request.admissionNonce},${tx.json(binding)},${tx.json(challenge)},${now},${expires},${binding.expires_at},${current.credentialExpiresAt})`
+        if (!prior)
+          await tx`INSERT INTO farm.pause_authority_sessions(session_id,window_started_at,attempts) VALUES(${sessionRecordId},${now},1)`
+        else if (now - prior.window_started_at >= 900000)
+          await tx`UPDATE farm.pause_authority_sessions SET window_started_at=${now},attempts=1 WHERE session_id=${sessionRecordId}`
+        else
+          await tx`UPDATE farm.pause_authority_sessions SET attempts=attempts+1 WHERE session_id=${sessionRecordId}`
+        const final = await this.validAt(
+          tx,
+          sessionRecordId,
+          current,
+          binding,
+          now,
+        )
+        if (final === null || final >= expires) {
+          await this.terminal(
+            tx,
+            {
+              challenge_id: challenge.challenge_id,
+              session_id: sessionRecordId,
+              account_id: current.account.id,
+              binding,
+              challenge,
+              status: 'pending',
+              issued_at: now,
+              expires_at: expires,
+            },
+            'expired',
+            await this.now(tx),
+          )
+          return denied()
+        }
+        await tx`UPDATE farm.pause_authority_watermark SET observed_at=${final} WHERE id=1`
+        const preCommit = await this.validAt(
+          tx,
+          sessionRecordId,
+          current,
+          binding,
+          final,
+        )
+        if (preCommit === null || preCommit >= expires) {
+          await this.terminal(
+            tx,
+            {
+              challenge_id: challenge.challenge_id,
+              session_id: sessionRecordId,
+              account_id: current.account.id,
+              binding,
+              challenge,
+              status: 'pending',
+              issued_at: now,
+              expires_at: expires,
+            },
+            'expired',
+            await this.now(tx),
+          )
+          return denied()
+        }
+        setDeliveryDeadline(challenge.expires_at)
+        return { ok: true, challenge }
+      },
+    )
   }
   async issueCapability(input: unknown): Promise<PauseCapabilityDecision> {
     const parsed = CapabilityInput.safeParse(input)
@@ -575,173 +594,177 @@ export class PostgresPauseAuthority {
     if (!(await this.validConfiguration()))
       return { ok: false, reason: 'invalid-input' }
     const { sessionRecordId } = parsed.data
-    return this.transaction(async (tx): Promise<PauseCapabilityDecision> => {
-      // Immutable scope is a hint only until the row is locked below.
-      const scopes = await tx<
-        ChallengeRow[]
-      >`SELECT challenge_id,session_id,account_id,binding,challenge,status,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.pause_authority_challenges WHERE challenge_id=${proof.challenge.challenge_id}::uuid`
-      const scope = scopes[0]
-      if (!scope || scope.session_id !== sessionRecordId) return denied()
-      const binding = ControlSessionBinding.parse(scope.binding)
-      const current = await this.current(tx, sessionRecordId, binding)
-      const watermark = await this.watermark(tx)
-      if (watermark === null) return denied()
-      const rows = await tx<
-        ChallengeRow[]
-      >`SELECT challenge_id,session_id,account_id,binding,challenge,status,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.pause_authority_challenges WHERE challenge_id=${scope.challenge_id}::uuid FOR UPDATE`
-      const row = rows[0]
-      if (
-        !row ||
-        row.status !== 'pending' ||
-        row.session_id !== sessionRecordId ||
-        row.account_id !== scope.account_id ||
-        canonicalize(row.binding) !== canonicalize(binding)
-      )
-        return denied()
-      const stored = PauseAdmissionChallenge.parse(row.challenge)
-      const now = await this.now(tx)
-      if (now < watermark || now < row.issued_at) return denied()
-      if (!current || now >= row.expires_at) {
-        await this.observe(tx, sessionRecordId)
-        await this.terminal(
-          tx,
-          row,
-          now >= row.expires_at ? 'expired' : 'rejected',
-          await this.now(tx),
+    return this.transaction(
+      async (tx, setDeliveryDeadline): Promise<PauseCapabilityDecision> => {
+        // Immutable scope is a hint only until the row is locked below.
+        const scopes = await tx<
+          ChallengeRow[]
+        >`SELECT challenge_id,session_id,account_id,binding,challenge,status,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.pause_authority_challenges WHERE challenge_id=${proof.challenge.challenge_id}::uuid`
+        const scope = scopes[0]
+        if (!scope || scope.session_id !== sessionRecordId) return denied()
+        const binding = ControlSessionBinding.parse(scope.binding)
+        const current = await this.current(tx, sessionRecordId, binding)
+        const watermark = await this.watermark(tx)
+        if (watermark === null) return denied()
+        const rows = await tx<
+          ChallengeRow[]
+        >`SELECT challenge_id,session_id,account_id,binding,challenge,status,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.pause_authority_challenges WHERE challenge_id=${scope.challenge_id}::uuid FOR UPDATE`
+        const row = rows[0]
+        if (
+          !row ||
+          row.status !== 'pending' ||
+          row.session_id !== sessionRecordId ||
+          row.account_id !== scope.account_id ||
+          canonicalize(row.binding) !== canonicalize(binding)
         )
-        return denied()
-      }
-      if (canonicalize(stored) !== canonicalize(proof.challenge)) {
-        await this.terminal(tx, row, 'rejected', now)
-        return denied()
-      }
-      const validProof = await verifyPauseAdmissionProof(
-        proof,
-        binding.browser_public_key,
-      )
-      const checked = await this.validAt(
-        tx,
-        sessionRecordId,
-        current,
-        binding,
-        now,
-      )
-      if (!validProof || checked === null || checked >= row.expires_at) {
-        await this.terminal(
-          tx,
-          row,
-          checked === null || checked >= row.expires_at
-            ? 'expired'
-            : 'rejected',
-          await this.now(tx),
+          return denied()
+        const stored = PauseAdmissionChallenge.parse(row.challenge)
+        const now = await this.now(tx)
+        if (now < watermark || now < row.issued_at) return denied()
+        if (!current || now >= row.expires_at) {
+          await this.observe(tx, sessionRecordId)
+          await this.terminal(
+            tx,
+            row,
+            now >= row.expires_at ? 'expired' : 'rejected',
+            await this.now(tx),
+          )
+          return denied()
+        }
+        if (canonicalize(stored) !== canonicalize(proof.challenge)) {
+          await this.terminal(tx, row, 'rejected', now)
+          return denied()
+        }
+        const validProof = await verifyPauseAdmissionProof(
+          proof,
+          binding.browser_public_key,
         )
-        return denied()
-      }
-      let capability: SignedPauseCapabilityV1 | undefined
-      try {
-        await tx.savepoint(async (save) => {
-          const preSign = await this.validAt(
-            save,
-            sessionRecordId,
-            current,
-            binding,
-            checked,
+        const checked = await this.validAt(
+          tx,
+          sessionRecordId,
+          current,
+          binding,
+          now,
+        )
+        if (!validProof || checked === null || checked >= row.expires_at) {
+          await this.terminal(
+            tx,
+            row,
+            checked === null || checked >= row.expires_at
+              ? 'expired'
+              : 'rejected',
+            await this.now(tx),
           )
-          if (preSign === null || preSign >= row.expires_at)
-            throw new ExpiredIssuance()
-          const expires = Math.min(
-            preSign + this.policy.capabilityMs,
-            current.validUntil,
-          )
-          if (expires <= preSign) throw new ExpiredIssuance()
-          const claims = PauseCapabilityV1.parse({
-            v: 1,
-            purpose: 'pause-authority',
-            capability_id: randomUUID(),
-            kid: this.config.kid,
-            issuer: this.config.issuer,
-            audience: this.config.audience,
-            origin: this.config.origin,
-            issued_at: preSign,
-            expires_at: expires,
-            account_id: current.account.id,
-            role: current.role,
-            farm_id: binding.farm_id,
-            agent_id: binding.agent_id,
-            key_id: binding.key_id,
-            assignment_id: binding.assignment_id,
-            transport_id: binding.transport_id,
-            browser_public_key: binding.browser_public_key,
-            browser_thumbprint: binding.browser_thumbprint,
-            connector_fingerprint: binding.connector_fingerprint,
-            credential_jti: binding.credential_jti,
-            printer_key: current.printerKey,
-            control_binding_sha256: stored.control_binding_sha256,
-            admission_nonce: stored.admission_nonce,
-            actions: ['pause'],
-          })
-          const signed = await signPauseCapability(claims, this.signingKey)
-          const postSign = await this.validAt(
-            save,
-            sessionRecordId,
-            current,
-            binding,
-            preSign,
-          )
-          if (
-            postSign === null ||
-            postSign >= row.expires_at ||
-            postSign >= expires
-          )
-            throw new ExpiredIssuance()
-          const wire = encodePauseCapability(signed)
-          const hash = base64url(
-            new Uint8Array(
-              await crypto.subtle.digest(
-                'SHA-256',
-                new TextEncoder().encode(wire),
+          return denied()
+        }
+        let capability: SignedPauseCapabilityV1 | undefined
+        try {
+          await tx.savepoint(async (save) => {
+            const preSign = await this.validAt(
+              save,
+              sessionRecordId,
+              current,
+              binding,
+              checked,
+            )
+            if (preSign === null || preSign >= row.expires_at)
+              throw new ExpiredIssuance()
+            const expires = Math.min(
+              preSign + this.policy.capabilityMs,
+              current.validUntil,
+            )
+            if (expires <= preSign) throw new ExpiredIssuance()
+            const claims = PauseCapabilityV1.parse({
+              v: 1,
+              purpose: 'pause-authority',
+              capability_id: randomUUID(),
+              kid: this.config.kid,
+              issuer: this.config.issuer,
+              audience: this.config.audience,
+              origin: this.config.origin,
+              issued_at: preSign,
+              expires_at: expires,
+              account_id: current.account.id,
+              role: current.role,
+              farm_id: binding.farm_id,
+              agent_id: binding.agent_id,
+              key_id: binding.key_id,
+              assignment_id: binding.assignment_id,
+              transport_id: binding.transport_id,
+              browser_public_key: binding.browser_public_key,
+              browser_thumbprint: binding.browser_thumbprint,
+              connector_fingerprint: binding.connector_fingerprint,
+              credential_jti: binding.credential_jti,
+              printer_key: current.printerKey,
+              control_binding_sha256: stored.control_binding_sha256,
+              admission_nonce: stored.admission_nonce,
+              actions: ['pause'],
+            })
+            const signed = await signPauseCapability(claims, this.signingKey)
+            const postSign = await this.validAt(
+              save,
+              sessionRecordId,
+              current,
+              binding,
+              preSign,
+            )
+            if (
+              postSign === null ||
+              postSign >= row.expires_at ||
+              postSign >= expires
+            )
+              throw new ExpiredIssuance()
+            const wire = encodePauseCapability(signed)
+            const hash = base64url(
+              new Uint8Array(
+                await crypto.subtle.digest(
+                  'SHA-256',
+                  new TextEncoder().encode(wire),
+                ),
               ),
-            ),
+            )
+            await save`UPDATE farm.pause_authority_challenges SET status='issued',consumed_at=${postSign},capability_id=${signed.capability_id}::uuid,capability=${save.json(signed)},capability_hash=${hash},capability_expires_at=${expires},retain_until=greatest(${postSign},expires_at,binding_expires_at,credential_expires_at,${expires})+3600000 WHERE challenge_id=${row.challenge_id}::uuid`
+            const final = await this.validAt(
+              save,
+              sessionRecordId,
+              current,
+              binding,
+              postSign,
+            )
+            if (final === null || final >= row.expires_at || final >= expires)
+              throw new ExpiredIssuance()
+            await save`UPDATE farm.pause_authority_watermark SET observed_at=${final} WHERE id=1`
+            const preCommit = await this.validAt(
+              save,
+              sessionRecordId,
+              current,
+              binding,
+              final,
+            )
+            if (
+              preCommit === null ||
+              preCommit >= row.expires_at ||
+              preCommit >= expires
+            )
+              throw new ExpiredIssuance()
+            capability = signed
+          })
+        } catch (error) {
+          await this.observe(tx, sessionRecordId)
+          await this.terminal(
+            tx,
+            row,
+            error instanceof ExpiredIssuance ? 'expired' : 'rejected',
+            await this.now(tx),
           )
-          await save`UPDATE farm.pause_authority_challenges SET status='issued',consumed_at=${postSign},capability_id=${signed.capability_id}::uuid,capability=${save.json(signed)},capability_hash=${hash},capability_expires_at=${expires},retain_until=greatest(${postSign},expires_at,binding_expires_at,credential_expires_at,${expires})+3600000 WHERE challenge_id=${row.challenge_id}::uuid`
-          const final = await this.validAt(
-            save,
-            sessionRecordId,
-            current,
-            binding,
-            postSign,
-          )
-          if (final === null || final >= row.expires_at || final >= expires)
-            throw new ExpiredIssuance()
-          await save`UPDATE farm.pause_authority_watermark SET observed_at=${final} WHERE id=1`
-          const preCommit = await this.validAt(
-            save,
-            sessionRecordId,
-            current,
-            binding,
-            final,
-          )
-          if (
-            preCommit === null ||
-            preCommit >= row.expires_at ||
-            preCommit >= expires
-          )
-            throw new ExpiredIssuance()
-          capability = signed
-        })
-      } catch (error) {
-        await this.observe(tx, sessionRecordId)
-        await this.terminal(
-          tx,
-          row,
-          error instanceof ExpiredIssuance ? 'expired' : 'rejected',
-          await this.now(tx),
-        )
-        return error instanceof ExpiredIssuance
-          ? denied()
-          : { ok: false, reason: 'storage-unavailable' }
-      }
-      return capability ? { ok: true, capability } : denied()
-    })
+          return error instanceof ExpiredIssuance
+            ? denied()
+            : { ok: false, reason: 'storage-unavailable' }
+        }
+        if (capability)
+          setDeliveryDeadline(Math.min(row.expires_at, capability.expires_at))
+        return capability ? { ok: true, capability } : denied()
+      },
+    )
   }
 }

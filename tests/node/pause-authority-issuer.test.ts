@@ -527,3 +527,83 @@ test('issuer key mismatch, extractability and policy bounds fail before any data
     await sql.end({ timeout: 1 })
   }
 })
+
+test('postcommit delayed clock response cannot extend an earlier admission deadline', async () => {
+  const f = await inputs()
+  const caps = await import(
+    '../../packages/farm-protocol/src/pause-capability.ts'
+  )
+  const { PostgresPauseAuthority } = await import(
+    '../../apps/farm/server/storage/postgres-pause-authority.ts'
+  )
+  const postgres = (await import('postgres')).default
+  const backing = postgres({
+    host: '127.0.0.1',
+    port: 1,
+    database: 'fixture',
+    username: 'fixture',
+    connect_timeout: 1,
+  })
+  const signed = await caps.signPauseCapability(
+    f.f.capability,
+    f.f.issuer.privateKey,
+  )
+  // Synthetic SQL adapter isolates postcommit time accounting; it is not DB acceptance.
+  let transactions = 0,
+    delayPoint: 'response' | 'commit' = 'commit'
+  const sql = new Proxy(backing, {
+    get(target, property, receiver) {
+      if (property === 'begin')
+        return async (
+          callback: (
+            tx: (strings: TemplateStringsArray) => Promise<unknown>,
+          ) => Promise<void>,
+        ) => {
+          transactions++
+          await callback(async (strings) => {
+            if (!strings.join('').includes('SELECT floor(')) return []
+            if (delayPoint === 'response')
+              await new Promise((resolve) => setTimeout(resolve, 20))
+            return [{ now: 1000, watermark: 1000 }]
+          })
+          if (transactions === 2 && delayPoint === 'commit')
+            await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+      return Reflect.get(target, property, receiver)
+    },
+  })
+  try {
+    const authority = new PostgresPauseAuthority(sql, f.config)
+    const transaction = Reflect.get(authority, 'transaction')
+    assert.equal(typeof transaction, 'function')
+    const control = await Reflect.apply(transaction, authority, [
+      async (_tx: unknown, setDeadline: (n: number) => void) => {
+        setDeadline(f.f.challenge.expires_at)
+        return { ok: true, capability: signed }
+      },
+    ])
+    assert.deepEqual(control, { ok: true, capability: signed })
+    assert.equal(transactions, 2)
+    transactions = 0
+    const result = await Reflect.apply(transaction, authority, [
+      async (_tx: unknown, setDeadline: (n: number) => void) => {
+        setDeadline(1005)
+        return { ok: true, capability: signed }
+      },
+    ])
+    assert.deepEqual(result, { ok: false, reason: 'denied' })
+    assert.equal(transactions, 2)
+    transactions = 0
+    delayPoint = 'response'
+    const responseDelay = await Reflect.apply(transaction, authority, [
+      async (_tx: unknown, setDeadline: (n: number) => void) => {
+        setDeadline(1005)
+        return { ok: true, capability: signed }
+      },
+    ])
+    assert.deepEqual(responseDelay, { ok: false, reason: 'denied' })
+    assert.equal(transactions, 2)
+  } finally {
+    await backing.end({ timeout: 1 })
+  }
+})

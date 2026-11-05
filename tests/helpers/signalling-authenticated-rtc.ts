@@ -559,6 +559,7 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               fixture: input,
               closure: session.closure,
               startedAt: runtimeStartedAt,
+              note: session.note,
               advance: async () => {
                 await session.connector.request({ kind: 'advance-runtime' })
               },

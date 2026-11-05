@@ -2,7 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
-import { AuthenticatedBrowserSignallingClient } from '../../apps/farm/app/utils/webrtc/authenticated-signalling-client.ts'
+import {
+  AuthenticatedBrowserSignallingClient,
+  browserSocket,
+} from '../../apps/farm/app/utils/webrtc/authenticated-signalling-client.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { verifyBrowserTransportProof } from '../../packages/farm-protocol/src/browser-transport-proof.ts'
 import type { SocketPort } from '../../packages/connector/src/webrtc/signalling-client-channel.ts'
@@ -277,5 +280,57 @@ test('closed client ignores late frames and does not affect another account', as
   } finally {
     a.client.close()
     b.client.close()
+  }
+})
+
+test('relative browser signalling URLs use the page WebSocket scheme and stay same-origin', () => {
+  const oldLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
+  const oldSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket')
+  const destinations: string[] = []
+  class TestSocket extends EventTarget {
+    static OPEN = 1
+    readyState = 0
+    bufferedAmount = 0
+    protocol = 'open3dfarm.signalling.v1'
+    constructor(url: URL, protocol: string) {
+      super()
+      assert.equal(protocol, this.protocol)
+      destinations.push(url.href)
+    }
+    send() {}
+    close() {}
+  }
+  try {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: TestSocket,
+    })
+    for (const scheme of ['https:', 'http:']) {
+      Object.defineProperty(globalThis, 'location', {
+        configurable: true,
+        value: new URL(scheme + '//farm.example:4443/farm'),
+      })
+      browserSocket('/api/signalling/browser').close()
+      const ws = scheme === 'https:' ? 'wss:' : 'ws:'
+      assert.equal(
+        destinations.at(-1),
+        ws + '//farm.example:4443/api/signalling/browser',
+      )
+      for (const target of [
+        ws + '//foreign.example:4443/api/signalling/browser',
+        '/api/signalling/connector',
+        '/api/signalling/browser?token=forbidden',
+        '/api/signalling/browser#fragment',
+        (ws === 'wss:' ? 'ws:' : 'wss:') +
+          '//farm.example:4443/api/signalling/browser',
+      ])
+        assert.throws(() => browserSocket(target))
+    }
+    assert.equal(destinations.length, 2)
+  } finally {
+    if (oldLocation) Object.defineProperty(globalThis, 'location', oldLocation)
+    else Reflect.deleteProperty(globalThis, 'location')
+    if (oldSocket) Object.defineProperty(globalThis, 'WebSocket', oldSocket)
+    else Reflect.deleteProperty(globalThis, 'WebSocket')
   }
 })

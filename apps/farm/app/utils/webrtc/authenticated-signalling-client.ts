@@ -25,8 +25,10 @@ import { ReadonlyBrowserPeer } from './readonly-peer.ts'
 
 const protocol = 'open3dfarm.signalling.v1'
 export function browserSocket(url: string): SocketPort {
-  const target = new URL(url, location.href)
   const expected = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const base = new URL(location.href)
+  base.protocol = expected
+  const target = new URL(url, base)
   if (
     target.protocol !== expected ||
     target.host !== location.host ||

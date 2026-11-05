@@ -35,7 +35,12 @@ Object.defineProperty(globalThis, symbol, {
       connectionOptions.push(options)
       onCreate?.()
       const sql = (parts: TemplateStringsArray) => {
-        statements.push(parts.join('?'))
+        const statement = parts.join('?')
+        statements.push(statement)
+        if (statement.includes('inet_server_addr()'))
+          return Promise.resolve([
+            { database: 'fixture', address: '127.0.0.1', port: 5432 },
+          ])
         return query()
       }
       sql.end = async () => {

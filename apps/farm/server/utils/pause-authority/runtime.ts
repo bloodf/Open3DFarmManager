@@ -1,4 +1,6 @@
 import postgres, { type Sql } from 'postgres'
+import { z } from 'zod'
+import { PostgresPauseNegotiation } from '../../storage/postgres-pause-negotiation.ts'
 import { createError, useRuntimeConfig } from 'nuxt/server'
 import { PairingProofOrigin } from '../../../../../packages/farm-protocol/src/pairing-proof.ts'
 import { createPauseAuthorityService } from '../../services/pause-authority.ts'
@@ -11,10 +13,39 @@ import {
 import { loadPauseIssuerKey } from './issuer-key.ts'
 import { validatePauseAuthorityRole } from './role-policy.ts'
 
+export type PauseNegotiationRuntime = Readonly<{
+  owner: object
+  signal: AbortSignal
+  origin: string
+  audience: string
+  credentialIssuer: string
+  credentialAudience: string
+  databaseIdentity: Readonly<{
+    database: string
+    address: string | null
+    port: number | null
+  }>
+  reader: Readonly<Pick<PostgresPauseNegotiation, 'read'>>
+}>
+const DatabaseIdentity = z.strictObject({
+  database: z.string().min(1).max(63),
+  address: z.string().min(1).max(64).nullable(),
+  port: z.number().int().min(1).max(65535).nullable(),
+})
 let owner: object | undefined
 let active:
-  | Readonly<{ owner: object; runtime: PauseAuthorityHttpRuntime }>
+  | Readonly<{
+      owner: object
+      runtime: PauseAuthorityHttpRuntime
+      negotiation: PauseNegotiationRuntime
+    }>
   | undefined
+/** Internal publication only: configuration flags alone never provide a reader. */
+export function currentPauseNegotiationRuntime():
+  | PauseNegotiationRuntime
+  | undefined {
+  return active?.negotiation
+}
 export function pauseAuthorityRuntime(): PauseAuthorityHttpRuntime {
   const raw: unknown = Reflect.get(useRuntimeConfig(), 'pauseAuthority')
   if (
@@ -38,6 +69,7 @@ export function pauseAuthorityRuntime(): PauseAuthorityHttpRuntime {
 /** Reserve one startup, publish only after validation, retain ownership until pending cleanup settles. */
 export function createPauseAuthorityRuntimeLifecycle() {
   const identity = Object.freeze({})
+  const terminal = new AbortController()
   let pending: Promise<void> | undefined
   let closing: Promise<void> | undefined
   let pool: Sql | undefined
@@ -93,6 +125,37 @@ export function createPauseAuthorityRuntimeLifecycle() {
           await validatePauseAuthorityRole(sql)
           if (closed || owner !== identity)
             throw new Error('Pause authority startup cancelled')
+          const rows = await sql`
+            SELECT current_database()::text AS database,
+              inet_server_addr()::text AS address, inet_server_port() AS port`
+          if (closed || owner !== identity || rows.length !== 1)
+            throw new Error('Pause authority startup cancelled')
+          const databaseIdentity = Object.freeze(
+            DatabaseIdentity.parse(rows[0]),
+          )
+          const reader = new PostgresPauseNegotiation(sql, {
+            origin,
+            audience: config.audience,
+            credentialIssuer: config.credentialIssuer,
+            credentialAudience: config.credentialAudience,
+            idleTimeoutMs: 1800000,
+          })
+          const negotiation: PauseNegotiationRuntime = Object.freeze({
+            owner: identity,
+            signal: terminal.signal,
+            origin,
+            audience: config.audience,
+            credentialIssuer: config.credentialIssuer,
+            credentialAudience: config.credentialAudience,
+            databaseIdentity,
+            reader: Object.freeze({
+              read: async (scope: unknown) => {
+                if (closed || active?.owner !== identity) return null
+                const result = await reader.read(scope)
+                return closed || active?.owner !== identity ? null : result
+              },
+            }),
+          })
           service = createPauseAuthorityService(sql, {
             origin,
             audience: config.audience,
@@ -106,11 +169,13 @@ export function createPauseAuthorityRuntimeLifecycle() {
           if (closed) throw new Error('Pause authority startup cancelled')
           active = Object.freeze({
             owner: identity,
+            negotiation,
             runtime: Object.freeze({ auth, authority: service }),
           })
         } catch {
           closed = true
           if (active?.owner === identity) active = undefined
+          terminal.abort()
           service?.close()
           try {
             await releasePool()
@@ -124,10 +189,17 @@ export function createPauseAuthorityRuntimeLifecycle() {
     },
     close(): Promise<void> {
       if (closing) return closing
+      let resolve!: () => void
+      let reject!: (reason: unknown) => void
+      closing = new Promise<void>((done, failed) => {
+        resolve = done
+        reject = failed
+      })
       closed = true
       if (active?.owner === identity) active = undefined
+      terminal.abort()
       service?.close()
-      closing = (async () => {
+      void (async () => {
         try {
           await pending?.catch(() => {})
           service?.close()
@@ -136,7 +208,7 @@ export function createPauseAuthorityRuntimeLifecycle() {
         } finally {
           if (!cleanupFailure && owner === identity) owner = undefined
         }
-      })()
+      })().then(resolve, reject)
       return closing
     },
   })

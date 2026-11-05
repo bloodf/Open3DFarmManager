@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "nuxt dev --host 127.0.0.1",
-    "build": "nuxt build",
+    "build": "nuxt build && cp ../../LICENSE ../../THIRD_PARTY.md .output/",
     "typecheck": "nuxt typecheck",
     "prepare": "nuxt prepare"
   },

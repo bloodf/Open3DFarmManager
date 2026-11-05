@@ -528,3 +528,34 @@ test('verification and consumer reentry preserve queued status order', async () 
     session.close()
   }
 })
+
+test('verified callback queue overflow closes without exposing retained frames', async () => {
+  const f = await fixture()
+  const received: unknown[] = []
+  const frame = (seq: number) =>
+    JSON.stringify({ t: 'snapshot', seq, printers: [] })
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: [],
+      onStatus: (value) => {
+        received.push(value)
+      },
+    },
+    onVerified: () => {
+      session.receiveApplication(frame(1))
+      session.receiveApplication(frame(2))
+    },
+  })
+  try {
+    await session.start()
+    session.receiveApplication(frame(0))
+    await session.inspectProof(f.decode(f.connectorProof()))
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.deepEqual(received, [])
+    assert.equal(session.snapshot().acceptedTotal, 0)
+  } finally {
+    session.close()
+  }
+})

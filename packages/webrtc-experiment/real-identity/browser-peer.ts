@@ -17,7 +17,15 @@ import {
   boundRtcApplicationFrame,
 } from '../../connector/src/webrtc/rtc-proof-inbox.ts'
 
+export type FixtureOnlyVideoHooks = Readonly<{
+  onTrack: (event: RTCTrackEvent) => void
+  activate: (
+    context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
+  ) => void
+  stop: () => void
+}>
 type Options = {
+  fixtureOnlyVideo?: FixtureOnlyVideoHooks
   privateKey: CryptoKey
   expectedAgentId: string
   /** Supplied by trusted signalling/test context, never a peer proof frame. */
@@ -52,8 +60,37 @@ export class ReadonlyBrowserPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
-    this.#options = Object.freeze({ ...options })
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.fixtureOnlyVideo
+        ? {
+            fixtureOnlyVideo: Object.freeze({
+              onTrack: options.fixtureOnlyVideo.onTrack.bind(
+                options.fixtureOnlyVideo,
+              ),
+              activate: options.fixtureOnlyVideo.activate.bind(
+                options.fixtureOnlyVideo,
+              ),
+              stop: options.fixtureOnlyVideo.stop.bind(
+                options.fixtureOnlyVideo,
+              ),
+            }),
+          }
+        : {}),
+    })
     this.#peer = new RTCPeerConnection({ iceServers: [] })
+    if (this.#options.fixtureOnlyVideo)
+      this.#peer.ontrack = (event) => {
+        if (this.#terminal) {
+          event.track.stop()
+          return
+        }
+        try {
+          this.#options.fixtureOnlyVideo?.onTrack(event)
+        } catch {
+          this.close('fixture-video-track')
+        }
+      }
     this.#inbox = new RtcProofInbox({
       paused: true,
       inspect: async (proof) => {
@@ -297,7 +334,16 @@ export class ReadonlyBrowserPeer {
           throw Error('Application closed')
         this.#application.send(wire)
       },
-      onVerified: () => clearTimeout(this.#authTimer),
+      onVerified: () => {
+        clearTimeout(this.#authTimer)
+        if (this.#options.fixtureOnlyVideo && this.current())
+          this.#options.fixtureOnlyVideo.activate(
+            Object.freeze({
+              binding: validated,
+              lifetimeDeadline: this.#lifetimeDeadline,
+            }),
+          )
+      },
       onReadonly: () => this.close('session-readonly'),
     })
     if (!this.current()) {
@@ -317,6 +363,12 @@ export class ReadonlyBrowserPeer {
     if (this.#terminal) return
     this.#terminal = reason.slice(0, 64) || 'closed'
     this.#resolveClosed()
+    try {
+      this.#options.fixtureOnlyVideo?.stop()
+    } catch {
+      this.#stage = 'fixture-video-stop-failed'
+    }
+    this.#peer.ontrack = null
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
     this.#inbox.close(reason)

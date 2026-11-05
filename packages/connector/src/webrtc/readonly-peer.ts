@@ -3,7 +3,12 @@ import {
   checkEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
 } from './rtc-descriptions.ts'
-import { PeerConnection, type DataChannel } from 'node-datachannel'
+import {
+  PeerConnection,
+  type DataChannel,
+  type Video,
+  type Track,
+} from 'node-datachannel'
 import { ConnectorIdentity } from '../identity/store.ts'
 import {
   RtcSessionBinding,
@@ -15,7 +20,19 @@ import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-pro
 import { RtcProofInbox, boundRtcApplicationFrame } from './rtc-proof-inbox.ts'
 import { ReadonlyRtcSession } from './readonly-session.ts'
 
+/** Explicit local fixture hook only; not a production camera permission API. */
+export type FixtureOnlyMediaHooks = Readonly<{
+  prepare: (
+    capability: Readonly<{ addVideoTrack: (description: Video) => Track }>,
+  ) => void
+  activate: (
+    context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
+  ) => void
+  stop: () => void
+}>
+
 type Options = {
+  fixtureOnlyMedia?: FixtureOnlyMediaHooks
   identity: ConnectorIdentity
   /** Trusted enrollment/runtime configuration, never the RTC binding's agent_id. */
   expectedAgentId: string
@@ -40,6 +57,7 @@ export class ReadonlyConnectorPeer {
   #offerStarted = false
   #offer: string | undefined
   #answer: string | undefined
+  #mediaTrackAdded = false
   #opened = false
   #starting = false
   #stage = 'constructed'
@@ -55,7 +73,24 @@ export class ReadonlyConnectorPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
-    this.#options = Object.freeze({ ...options })
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.fixtureOnlyMedia
+        ? {
+            fixtureOnlyMedia: Object.freeze({
+              prepare: options.fixtureOnlyMedia.prepare.bind(
+                options.fixtureOnlyMedia,
+              ),
+              activate: options.fixtureOnlyMedia.activate.bind(
+                options.fixtureOnlyMedia,
+              ),
+              stop: options.fixtureOnlyMedia.stop.bind(
+                options.fixtureOnlyMedia,
+              ),
+            }),
+          }
+        : {}),
+    })
     this.#peer = new PeerConnection('readonly-connector', {
       iceServers: [],
       bindAddress: '127.0.0.1',
@@ -139,6 +174,29 @@ export class ReadonlyConnectorPeer {
     })
     this.#application.onClosed(() => this.close('application-closed'))
     this.#application.onError(() => this.close('application-error'))
+    let preparingFixture = true
+    try {
+      this.#options.fixtureOnlyMedia?.prepare(
+        Object.freeze({
+          addVideoTrack: (description: Video) => {
+            if (
+              !preparingFixture ||
+              this.#terminal ||
+              this.#offerStarted ||
+              this.#mediaTrackAdded
+            )
+              throw Error('Fixture track reservation closed')
+            this.#mediaTrackAdded = true
+            return this.#peer.addTrack(description)
+          },
+        }),
+      )
+    } catch (error) {
+      this.close('fixture-media-prepare')
+      throw error
+    } finally {
+      preparingFixture = false
+    }
   }
   private current() {
     if (this.#terminal) return false
@@ -274,7 +332,16 @@ export class ReadonlyConnectorPeer {
         if (!this.current() || !this.#application.sendMessage(wire))
           throw Error('Status send failed')
       },
-      onVerified: () => clearTimeout(this.#authTimer),
+      onVerified: () => {
+        clearTimeout(this.#authTimer)
+        if (this.#options.fixtureOnlyMedia && this.current())
+          this.#options.fixtureOnlyMedia.activate(
+            Object.freeze({
+              binding: validated,
+              lifetimeDeadline: this.#lifetimeDeadline,
+            }),
+          )
+      },
       onReadonly: () => this.close('session-readonly'),
     })
     if (!this.current()) {
@@ -293,6 +360,11 @@ export class ReadonlyConnectorPeer {
     if (this.#terminal) return
     this.#terminal = reason.slice(0, 64) || 'closed'
     this.#resolveClosed()
+    try {
+      this.#options.fixtureOnlyMedia?.stop()
+    } catch {
+      this.#stage = 'fixture-media-stop-failed'
+    }
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
     this.#inbox.close(reason)

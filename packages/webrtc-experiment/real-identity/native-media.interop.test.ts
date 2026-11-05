@@ -23,3 +23,17 @@ test('original moving fixture has deterministic distinct pixels and a bounded in
 // Actual WebCodecs capability and native/Chromium decode runs are intentionally
 // absent from this static checkpoint. They require separately scheduled resources
 // and must assert decoded frames and moving pixels, not merely an ontrack event.
+
+// Explicit manual phase selection. The default test path never imports or
+// starts a native peer. Both phases require the coordinator's resource gate.
+const phase = process.env.RTC_FINITE_MEDIA_PHASE
+if (phase === 'encode' || phase === 'native') {
+  test(
+    'finite moving H264 manual phase ' + phase,
+    { timeout: 60000 },
+    async () => {
+      const { runFiniteMediaPhase } = await import('./native-media-harness.ts')
+      await runFiniteMediaPhase(phase)
+    },
+  )
+}

@@ -231,3 +231,331 @@ test('owner closing reentrantly on verification leaves no session deadline armed
     globalThis.clearTimeout = cancel
   }
 })
+
+test('genuine status mode requires real mutual proofs, complete assignment keys and increasing sequence', async () => {
+  const f = await fixture()
+  const refs = [
+    {
+      assignmentId: randomUUID(),
+      agentId: f.binding.agent_id,
+      printerKey: 'printer-a',
+    },
+  ]
+  const session = f.make({ genuineStatus: { assignmentRefs: refs } })
+  refs[0]!.printerKey = 'mutated-caller-ref'
+  const message = {
+    t: 'snapshot',
+    seq: 0,
+    printers: [
+      {
+        printerKey: 'printer-a',
+        state: 'idle',
+        progress: 0,
+        observedAt: Date.now(),
+      },
+    ],
+  }
+  try {
+    assert.equal(session.sendGenuineStatus(message), false)
+    await session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    assert.equal(session.sendStatus(), false)
+    assert.equal(session.sendGenuineStatus(message), true)
+    assert.deepEqual(JSON.parse(f.sent.at(-1)!), message)
+    assert.equal(session.sendGenuineStatus(message), false)
+    assert.equal(session.snapshot().state, 'readonly')
+  } finally {
+    session.close()
+  }
+})
+
+test('browser genuine status is immutable, bounded and never translates the fixture literal', async () => {
+  const f = await fixture()
+  const refs = [
+    {
+      assignmentId: randomUUID(),
+      agentId: f.binding.agent_id,
+      printerKey: 'printer-a',
+    },
+  ]
+  let received: unknown
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: refs,
+      onStatus: (message) => {
+        received = message
+      },
+    },
+  })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(f.connectorProof()))
+    const message = {
+      t: 'snapshot',
+      seq: 2,
+      printers: [
+        {
+          printerKey: 'printer-a',
+          state: 'printing',
+          progress: 0.5,
+          observedAt: Date.now(),
+        },
+      ],
+    }
+    session.receiveApplication(JSON.stringify(message))
+    assert.deepEqual(received, message)
+    assert.equal(Object.isFrozen(received), true)
+    assert.equal(
+      Object.isFrozen((received as typeof message).printers[0]),
+      true,
+    )
+    session.receiveApplication(READONLY_FIXTURE_STATUS)
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.equal(session.snapshot().acceptedTotal, 1)
+  } finally {
+    session.close()
+  }
+})
+
+test('genuine status rejects incomplete, foreign or oversized complete snapshots without sending', async () => {
+  for (const fault of ['missing', 'foreign', 'oversize'] as const) {
+    const f = await fixture()
+    const refs = Array.from(
+      { length: fault === 'oversize' ? 30 : 1 },
+      (_, index) => ({
+        assignmentId: randomUUID(),
+        agentId: f.binding.agent_id,
+        printerKey: 'printer-' + index,
+      }),
+    )
+    const session = f.make({ genuineStatus: { assignmentRefs: refs } })
+    try {
+      await session.start()
+      await session.inspectProof(f.decode(await f.browserProof()))
+      const before = f.sent.length
+      const printers =
+        fault === 'missing'
+          ? []
+          : refs.map((ref) => ({
+              printerKey: fault === 'foreign' ? 'other' : ref.printerKey,
+              state: 'idle',
+              progress: 0,
+              observedAt: Date.now(),
+            }))
+      assert.equal(
+        session.sendGenuineStatus({ t: 'snapshot', seq: 0, printers }),
+        false,
+      )
+      assert.equal(session.snapshot().state, 'readonly')
+      assert.equal(f.sent.length, before)
+    } finally {
+      session.close()
+    }
+  }
+})
+
+test('an async genuine-status consumer is terminal and its rejection is handled', async () => {
+  const f = await fixture()
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: [
+        {
+          assignmentId: randomUUID(),
+          agentId: f.binding.agent_id,
+          printerKey: 'printer-a',
+        },
+      ],
+      onStatus: async () => {
+        throw Error('async consumer forbidden')
+      },
+    },
+  })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(f.connectorProof()))
+    session.receiveApplication(
+      JSON.stringify({
+        t: 'snapshot',
+        seq: 0,
+        printers: [
+          {
+            printerKey: 'printer-a',
+            state: 'idle',
+            progress: 0,
+            observedAt: Date.now(),
+          },
+        ],
+      }),
+    )
+    assert.equal(session.snapshot().state, 'readonly')
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(session.snapshot().acceptedTotal, 1)
+  } finally {
+    session.close()
+  }
+})
+
+test('genuine send lifetime count stays bounded without retaining a status history', async () => {
+  const f = await fixture()
+  const session = f.make({ genuineStatus: { assignmentRefs: [] } })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    for (let seq = 0; seq < 1024; seq++)
+      assert.equal(
+        session.sendGenuineStatus({ t: 'snapshot', seq, printers: [] }),
+        true,
+      )
+    assert.equal(
+      session.sendGenuineStatus({ t: 'snapshot', seq: 1024, printers: [] }),
+      false,
+    )
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.deepEqual(session.snapshot().accepted, [])
+  } finally {
+    session.close()
+  }
+})
+
+test('genuine status reserves sequence before a reentrant transport send', async () => {
+  const f = await fixture()
+  const emitted: string[] = []
+  let nested: boolean | undefined
+  const session = f.make({
+    genuineStatus: { assignmentRefs: [] },
+    sendApplication: (wire) => {
+      emitted.push(wire)
+      nested = session.sendGenuineStatus({
+        t: 'snapshot',
+        seq: 0,
+        printers: [],
+      })
+    },
+  })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    assert.equal(
+      session.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+      true,
+    )
+    assert.equal(nested, false)
+    assert.equal(emitted.length, 1)
+    assert.equal(
+      session.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+      false,
+    )
+    assert.equal(emitted.length, 1)
+  } finally {
+    session.close()
+  }
+})
+
+test('one early complete status waits for browser proof verification; overflow and closure discard it', async () => {
+  for (const mode of ['verify', 'overflow', 'close'] as const) {
+    const f = await fixture()
+    const received: unknown[] = []
+    const browser = f.make({
+      role: 'browser',
+      signProof: f.browserProof,
+      genuineStatus: {
+        assignmentRefs: [],
+        onStatus: (message) => {
+          received.push(message)
+        },
+      },
+    })
+    const connector = f.make({
+      genuineStatus: { assignmentRefs: [] },
+      sendApplication: (wire) => browser.receiveApplication(wire),
+    })
+    try {
+      await browser.start()
+      await connector.start()
+      await connector.inspectProof(f.decode(await f.browserProof()))
+      assert.equal(
+        connector.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+        true,
+      )
+      assert.equal(browser.snapshot().state, 'pending')
+      assert.equal(received.length, 0)
+      if (mode === 'overflow')
+        connector.sendGenuineStatus({ t: 'snapshot', seq: 1, printers: [] })
+      if (mode === 'close') browser.close()
+      await browser.inspectProof(f.decode(f.connectorProof()))
+      assert.equal(received.length, mode === 'verify' ? 1 : 0)
+      assert.equal(
+        browser.snapshot().state,
+        mode === 'verify' ? 'verified' : 'readonly',
+      )
+    } finally {
+      browser.close()
+      connector.close()
+    }
+  }
+})
+
+test('verification and consumer reentry preserve queued status order', async () => {
+  const f = await fixture()
+  const received: number[] = []
+  const frame = (seq: number) =>
+    JSON.stringify({ t: 'snapshot', seq, printers: [] })
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: [],
+      onStatus: (message) => {
+        received.push(message.seq)
+        if (message.seq === 1) session.receiveApplication(frame(2))
+      },
+    },
+    onVerified: () => {
+      session.receiveApplication(frame(1))
+    },
+  })
+  try {
+    await session.start()
+    session.receiveApplication(frame(0))
+    await session.inspectProof(f.decode(f.connectorProof()))
+    assert.deepEqual(received, [0, 1, 2])
+    assert.equal(session.snapshot().state, 'verified')
+  } finally {
+    session.close()
+  }
+})
+
+test('verified callback queue overflow closes without exposing retained frames', async () => {
+  const f = await fixture()
+  const received: unknown[] = []
+  const frame = (seq: number) =>
+    JSON.stringify({ t: 'snapshot', seq, printers: [] })
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: [],
+      onStatus: (value) => {
+        received.push(value)
+      },
+    },
+    onVerified: () => {
+      session.receiveApplication(frame(1))
+      session.receiveApplication(frame(2))
+    },
+  })
+  try {
+    await session.start()
+    session.receiveApplication(frame(0))
+    await session.inspectProof(f.decode(f.connectorProof()))
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.deepEqual(received, [])
+    assert.equal(session.snapshot().acceptedTotal, 0)
+  } finally {
+    session.close()
+  }
+})

@@ -1,4 +1,12 @@
 import {
+  immutableAdmission,
+  runSynchronous,
+  snapshotAssignmentRefs,
+  validatedStatusMessage,
+  type VerifiedRtcAdmission,
+  type GenuineStatusOptions,
+} from '../../../../../packages/connector/src/webrtc/readonly-session.ts'
+import {
   BrowserTransportProofChallenge,
   signBrowserTransportProof,
 } from '../../../../../packages/farm-protocol/src/browser-transport-proof.ts'
@@ -74,6 +82,8 @@ type PeerOptions = {
   admittedBinding: Promise<unknown>
   authDeadline?: number | undefined
   lifetimeDeadline?: number
+  genuineStatus?: GenuineStatusOptions
+  onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
 }
@@ -85,6 +95,12 @@ export class AuthenticatedBrowserSignallingClient {
   #transport: string | undefined
   #nonce: string | undefined
   #thumbprint: string | undefined
+  #admission: VerifiedRtcAdmission | undefined
+  #options: Readonly<{
+    genuineStatus?: GenuineStatusOptions
+    onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
+    onTerminal?: (reason: string) => void
+  }>
   #peer: Peer | undefined
   #resolveBinding: (value: unknown) => void = () => {}
   #binding = new Promise<unknown>((resolve) => {
@@ -100,7 +116,12 @@ export class AuthenticatedBrowserSignallingClient {
   })
   constructor(
     scope: Scope,
-    options: { peerFactory?: (options: PeerOptions) => Peer } = {},
+    options: {
+      peerFactory?: (options: PeerOptions) => Peer
+      genuineStatus?: GenuineStatusOptions
+      onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
+      onTerminal?: (reason: string) => void
+    } = {},
   ) {
     if (
       scope.privateKey.type !== 'private' ||
@@ -117,6 +138,20 @@ export class AuthenticatedBrowserSignallingClient {
     this.#scope = Object.freeze({
       ...scope,
       publicKey: structuredClone(scope.publicKey),
+    })
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.genuineStatus
+        ? {
+            genuineStatus: Object.freeze({
+              ...options.genuineStatus,
+              assignmentRefs: snapshotAssignmentRefs(
+                options.genuineStatus.assignmentRefs,
+                scope.agentId,
+              ),
+            }),
+          }
+        : {}),
     })
     this.#peerFactory =
       options.peerFactory ?? ((input) => new ReadonlyBrowserPeer(input))
@@ -135,7 +170,11 @@ export class AuthenticatedBrowserSignallingClient {
       onFrame: (frame) => this.frame(frame),
       onTerminal: (reason) => {
         this.#rejectStart(Error(reason))
-        this.#peer?.close(reason)
+        try {
+          this.#peer?.close(reason)
+        } finally {
+          runSynchronous(() => this.#options.onTerminal?.(reason))
+        }
       },
     })
   }
@@ -191,6 +230,48 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
+        ...(this.#options.genuineStatus
+          ? {
+              genuineStatus: {
+                assignmentRefs: this.#options.genuineStatus.assignmentRefs,
+                onStatus: (message) => {
+                  if (this.#channel.current() && this.#admission) {
+                    try {
+                      const status = validatedStatusMessage(
+                        message,
+                        this.#options.genuineStatus!.assignmentRefs,
+                      )
+                      runSynchronous(() =>
+                        this.#options.genuineStatus?.onStatus?.(status),
+                      )
+                    } catch {
+                      this.#channel.close('status-callback')
+                    }
+                  }
+                },
+              },
+            }
+          : {}),
+        onVerifiedAdmission: (admission) => {
+          if (!this.#channel.current()) return
+          if (this.#phase !== 'active' || this.#admission) {
+            this.#channel.close('unexpected-admission')
+            return
+          }
+          const copy = immutableAdmission(
+            admission.binding,
+            Math.min(
+              admission.deadlineMonoMs,
+              this.#channel.deadlines().lifetimeDeadline,
+            ),
+          )
+          this.#admission = copy
+          try {
+            runSynchronous(() => this.#options.onVerifiedAdmission?.(copy))
+          } catch {
+            this.#channel.close('admission-callback')
+          }
+        },
         onVerified: () => {
           if (this.#phase !== 'active' || !this.#channel.current()) {
             this.#channel.close('unexpected-verification')

@@ -44,12 +44,16 @@ function validDestination(destination: LocalDestination): boolean {
   const family = isIP(address);
   if (family === 0) return false;
   const denied = new BlockList();
-  denied.addAddress("0.0.0.0", "ipv4");
-  denied.addAddress("255.255.255.255", "ipv4");
-  denied.addSubnet("224.0.0.0", 4, "ipv4");
-  denied.addAddress("::", "ipv6");
-  denied.addSubnet("ff00::", 8, "ipv6");
-  denied.addSubnet("::ffff:0:0", 96, "ipv6");
+  if (family === 4) {
+    denied.addAddress("0.0.0.0", "ipv4");
+    denied.addAddress("255.255.255.255", "ipv4");
+    denied.addSubnet("224.0.0.0", 4, "ipv4");
+  } else {
+    denied.addAddress("::", "ipv6");
+    denied.addSubnet("ff00::", 8, "ipv6");
+    // BlockList maps IPv4 inputs into this range, so apply it only to IPv6 input.
+    denied.addSubnet("::ffff:0:0", 96, "ipv6");
+  }
   return !denied.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 

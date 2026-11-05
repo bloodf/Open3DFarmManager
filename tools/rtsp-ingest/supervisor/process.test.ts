@@ -218,9 +218,24 @@ test("symlink executable is rejected even with the correct hash", async (t) => {
   await assert.rejects(f.open(), code("HELPER_EXECUTABLE"));
 });
 
+for (const address of ["127.0.0.1", "192.168.1.1", "::1"]) {
+  test(`valid literal ${address} reaches executable validation without spawning`, async () => {
+    await assert.rejects(openHelperSource({
+      executable: { path: "/unread/missing-helper", sha256: "0".repeat(64) }, sourceHandle: "local",
+      signal: new AbortController().signal, expiresAtMonoMs: performance.now() + 1000,
+      generation: 1, isAdmitted: () => true,
+      resolveLocal: () => ({ address, port: 554, path: "/one" }),
+    }), code("HELPER_EXECUTABLE"));
+  });
+}
+
 for (const destination of [
   { address: "camera.example", port: 554, path: "/one" },
   { address: "0.0.0.0", port: 554, path: "/one" },
+  { address: "224.0.0.1", port: 554, path: "/one" },
+  { address: "255.255.255.255", port: 554, path: "/one" },
+  { address: "::", port: 554, path: "/one" },
+  { address: "ff02::1", port: 554, path: "/one" },
   { address: "::ffff:127.0.0.1", port: 554, path: "/one" },
   { address: "127.0.0.1", port: 0, path: "/one" },
   { address: "127.0.0.1", port: 554, path: "//foreign" },

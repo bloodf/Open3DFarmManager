@@ -95,7 +95,12 @@ function collectWithLogs(logs: {
 }) {
   const dir = mkdtempSync(join(tmpdir(), 'open3d-diag-test-'))
   try {
-    for (const name of ['klippy', 'moonraker', 'supervisord', 'stdout'])
+    for (const name of [
+      'klippy',
+      'moonraker',
+      'supervisord',
+      'stdout',
+    ] as const)
       writeFileSync(join(dir, `${name}.log`), logs[name] ?? '')
     writeFileSync(
       join(dir, 'docker'),
@@ -199,7 +204,9 @@ ${Array.from(
   assert.equal(summary.counts['mcu-no-communication'], 25)
   assert.equal(summary.events.length, 20)
   assert.equal(summary.stats.length, 5)
-  assert.ok(summary.events.every((event) => event === 'mcu-no-communication'))
+  assert.ok(
+    summary.events.every((event: unknown) => event === 'mcu-no-communication'),
+  )
   assert.equal(summary.stats[0].at, 3)
   assert.equal(summary.stats[4].at, 7)
 })

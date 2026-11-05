@@ -180,7 +180,11 @@ export class SignallingClientChannel {
           loading,
           this.#closed.then(() => undefined),
         ])
-        if (!port || !this.current()) return
+        if (!port) return
+        if (!this.current()) {
+          port.close()
+          return
+        }
         this.#port = port
         this.#unbind = port.bind({
           open: () => {

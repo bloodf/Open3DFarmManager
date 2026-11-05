@@ -35,6 +35,7 @@ type NativeSocket = {
   terminate(): void
 }
 type WsOptions = {
+  rejectUnauthorized: true
   maxPayload: number
   perMessageDeflate: false
   followRedirects: false
@@ -73,6 +74,7 @@ export async function connectorSocket(
     throw Error('Invalid signalling destination')
   const module = await load()
   const options: Readonly<WsOptions> = Object.freeze({
+    rejectUnauthorized: true,
     maxPayload: MAX_SIGNALLING_SOCKET_BYTES,
     perMessageDeflate: false,
     followRedirects: false,

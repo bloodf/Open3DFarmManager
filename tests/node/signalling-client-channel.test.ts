@@ -237,6 +237,38 @@ test('deadline starts before a delayed factory and closes late port', async () =
   }
 })
 
+test('close between factory resolution and adoption closes the unbound socket', async () => {
+  let closed = 0,
+    bound = 0
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 0,
+    bind: () => {
+      bound++
+      return () => {}
+    },
+    send: () => {},
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  try {
+    channel.connect(() => port)
+    queueMicrotask(() => queueMicrotask(() => channel.close()))
+    await tick()
+    assert.equal(closed, 1)
+    assert.equal(bound, 0)
+    assert.equal(channel.current(), false)
+  } finally {
+    channel.close()
+  }
+})
+
 test('notification and unbind failures cannot prevent socket cleanup', async () => {
   let handlers: Parameters<SocketPort['bind']>[0] | undefined,
     closed = 0

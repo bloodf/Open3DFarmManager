@@ -444,6 +444,7 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
       },
     )
     assert.deepEqual(options, {
+      rejectUnauthorized: true,
       maxPayload: 12288,
       perMessageDeflate: false,
       followRedirects: false,

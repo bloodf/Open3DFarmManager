@@ -24,6 +24,7 @@ import {
 } from 'node:crypto'
 
 import { signPairingProof } from './pairing-proof.ts'
+import { signCredentialProof } from './credential-proof.ts'
 
 const KEY_FILE = 'identity.json'
 const LIMIT = 1024
@@ -77,6 +78,11 @@ export class ConnectorIdentity {
     return sign(null, message, this.#key).toString('base64url')
   }
   /** Signs only the validated pairing domain, retaining the existing private key internally. */
+  signCredentialProof(
+    input: Omit<Parameters<typeof signCredentialProof>[0], 'privateKey'>,
+  ): string {
+    return signCredentialProof({ ...input, privateKey: this.#key })
+  }
   signPairingProof(
     input: Omit<Parameters<typeof signPairingProof>[0], 'privateKey'>,
   ): string {

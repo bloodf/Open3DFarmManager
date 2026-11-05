@@ -2,18 +2,26 @@
 
 This queue describes the independent MIT product. It does not adopt private deployment configuration, shared authentication, another product's implementation or its commercial plans. Existing checkpoints remain evidence of their specific tests, not complete feature acceptance.
 
+## Verified component work
+
+- PostgreSQL adapters run under Node. Isolated real-database checks passed for session persistence, expiry/revocation, concurrency and restricted permissions, and for migration ordering/checksums, concurrent runners and transactional rollback.
+- Independent login/logout passed against the built Node application, a temporary HTTPS endpoint and Chromium. The flow uses its own host-only secure cookie and current database session state. Authentication dependencies and their notices were reviewed. Login remains opt-in; production account provisioning and recovery are incomplete.
+- Real PostgreSQL credential checks passed for stale password/version rejection, disabled accounts, session-version changes, transaction/COMMIT failures, restricted permissions and shared rate limits.
+- Farm approval helpers passed real PostgreSQL checks for allowed roles, farm scope, session/membership revocation ordering, rollback/COMMIT failures and restricted permissions. These are internal service checks, not a completed authenticated pairing API.
+
+These results cover their tested components. The farm isolation check includes two existing farms. Migration reversals passed in an isolated PostgreSQL cluster. `bun run check:all` passed with 190 Bun tests, 95 Node tests and builds. Full enrollment, WebRTC and simulator acceptance remain incomplete.
+
 ## Current work
 
 1. Diagnose the pinned simulator's MCU identification failure. Capture progress before serial disconnect, distinguish observed traffic from inferred causes, and keep the existing readiness deadline and resource restrictions. A diagnostic result does not count as simulator acceptance.
-2. Persist independent account session state in PostgreSQL. Prove expiry, logout, account-wide revocation, concurrency, restart persistence and restricted database permissions using synthetic data.
-3. Make disposable database migrations repeatable. Record checksums and applied order, serialize concurrent migration attempts, reject changed history and demonstrate transactional rollback with a real isolated database.
+2. Connect the verified authentication, authorization and persistence components to enrollment without weakening their transaction boundaries.
 
-These tasks can proceed independently. The coordinator owns container execution to avoid duplicate databases and simulators. Workers own distinct source files and report resources retained or removed.
+The coordinator owns container execution to avoid duplicate databases and simulators. Workers own distinct source files and report resources retained or removed.
 
 ## Authentication and enrollment
 
-1. Review an established authentication library at an exact version, including its license and transitive dependencies. Implement original login/logout integration with a host-only secure cookie, current server-side session state, mutation-origin protection, bounded input and rate limits. Verify the built Node application; Bun-only storage tests are insufficient.
-2. Add farm membership and explicit roles. Reject cross-farm reads and mutations. Serialize enrollment approval against session, membership and enrollment revocation instead of trusting a prior permission check.
+1. Extend the verified independent login with account provisioning/recovery and operational audit requirements. Keep authentication opt-in until deployment configuration and remaining acceptance gates are addressed; do not treat isolated login success as complete Phase 0.
+2. Wire the verified farm-membership and approval service into authenticated request boundaries. Enforce farm scope on every exposed read and mutation; retain atomic approval checks against session, membership and enrollment revocation.
 3. Connect the pairing contracts to single-use expiring codes, bounded polling and fingerprint confirmation. Approve only from an authenticated authorized browser. Authenticate Connector transport with the approved identity and proof of possession.
 4. Register browser signing keys through authenticated sessions. Bind keys to current farm permissions and distribute authenticated authorization context to the Connector.
 
@@ -25,7 +33,7 @@ The offline policy must state how long cached authorization can remain usable. A
 2. Authenticate telemetry ingestion and signalling. Exercise queue recovery after lost responses and server/database restart with durable idempotency. The server must never accept or return executable printer commands.
 3. Select a WebRTC implementation through an isolated experiment. Authenticate the browser-to-Connector peer and carry live status, camera and signed commands over that connection. No TURN or command fallback.
 4. Connect verified commands to the simulator driver behind Connector-local safety checks. Test tampering, replay, expired authorization, known revocation, wrong roles and wrong scope. Hardware is excluded from automated acceptance.
-5. Build accessible pt-BR login, pairing, device management and farm views. Show data age and disable controls when P2P fails. Verify login-to-pairing-to-simulator behavior in a real browser and the built application.
+5. Extend the tested accessible pt-BR login/logout pages with pairing, device management and farm views. Show data age and disable controls when P2P fails. Verify login-to-pairing-to-simulator behavior in a real browser and the built application.
 
 ## After the integrated core
 

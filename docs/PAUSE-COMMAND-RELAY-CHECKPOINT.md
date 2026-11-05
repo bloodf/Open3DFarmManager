@@ -79,8 +79,10 @@ is sent.
 **Local mapping agreement.** The relay refuses a peer whose local mapping
 disagrees with the control binding on farm, agent or assignment.
 
-**An existing transport cannot be replaced.** Opening the same transport id
+**A live transport cannot be replaced.** Opening the same live transport id
 is refused without closing its current peer or changing its admission nonce.
+Sealing removes the peer; a later opening can reuse the id. An opening whose
+send callback seals its peer returns false and does not close a replacement.
 The caller supplies the binding and proofs after mutual transport authentication.
 The relay parses the proof envelopes and matches their scope when opening;
 its capability verifier checks the signatures during admission. Parsing alone
@@ -128,7 +130,8 @@ nothing. Constructing a relay never enables a command anywhere.
 
 **Strict transport contract.** A transport callback must return a boolean. A
 throwing callback, a non boolean result or a thenable result is a transport
-fault: the peer is closed and the outcome stays local. The caller of
+fault. A nonce-send fault closes that peer. A result-send fault records an
+unconfirmed handoff and preserves the local outcome. The caller of
 `commandPeer` always receives an outcome and never a rejected promise.
 
 ## Rules the browser client enforces
@@ -216,7 +219,7 @@ advance them, so the expiry path is proven, not assumed.
 
 ```text
 node --test --test-timeout=20000 tests/node/pause-command-relay.test.ts tests/node/pause-command-client.test.ts
-tests 48, pass 48, fail 0
+tests 51, pass 51, fail 0
 
 tsc --noEmit (strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess)
 on the repository: no diagnostics
@@ -240,8 +243,11 @@ and the bounded state.
 
 ## Not proven here
 
-- `bun run check:all` was not run. The heavy slot belongs to the coordinator
-  and the release gate is not open for this slice.
+- `bun run check:all` passed at `fa7514b` in 188 seconds: 334 Bun tests,
+  562 Node passes and 3 explicit skips, 66 supervisor tests, 7 framing tests,
+  formatting, both type checks and both builds. The subsequent callback
+  reentry and correlated-busy-result fixes have the focused evidence above;
+  their integrated gate remains pending.
 - The relay and the client are not wired to the runtime, to the signalling
   clients or to the UI. Nothing in the running product changed.
 - The runtime still loses the printer binding handle, so the connector cannot

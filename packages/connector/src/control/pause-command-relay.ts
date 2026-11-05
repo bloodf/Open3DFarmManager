@@ -550,7 +550,9 @@ export function createPauseCommandRelay(
       // No wait list. A command beyond the bound is refused, never queued.
       lastReason = 'busy'
       rejected++
-      return Promise.resolve('rejected')
+      peer.command = Promise.resolve('rejected')
+      deliverResult(peer, commandId, 'rejected')
+      return peer.command
     }
     // Reserved before any await: a reentrant command replays this promise.
     let settleCommand!: (outcome: PauseRelayOutcome) => void
@@ -704,7 +706,12 @@ export function createPauseCommandRelay(
     )
     if (sent !== 'sent') {
       // Delivery is unconfirmed. Close the peer and revoke its admission.
-      closePeer(peer.transportId)
+      seal(peer)
+      return false
+    }
+    // The send callback can close this peer and even reopen its transport id.
+    if (peer.sealed || closed || peers.get(peer.transportId) !== peer) {
+      seal(peer)
       return false
     }
     return true

@@ -783,6 +783,11 @@ test('the concurrent command bound refuses a command beyond the cap', async (t) 
     'rejected',
   )
   assert.equal(f.relay.diagnostics().lastReason, 'busy')
+  assert.deepEqual(f.results.at(-1), {
+    t: 'control.result',
+    command_id: signed.cmd_id,
+    outcome: 'rejected',
+  })
   f.relay.close()
   await f.relay.settled
 })
@@ -1138,3 +1143,28 @@ test('scope-rejected admissions release every peer slot', async (t) => {
   }
   assert.equal(f.open(), true)
 })
+
+for (const action of ['close-peer', 'close-relay', 'replace-peer'] as const) {
+  test(`opening refuses synchronous transport ${action}`, async (t) => {
+    const f = await relayFixture(t)
+    const peer = await f.makePeer()
+    assert.equal(
+      f.relay.openPeer({
+        binding: peer.binding,
+        browserProofWire: peer.browserProofWire,
+        connectorProofWire: peer.connectorProofWire,
+        sendPhase: () => {
+          if (action === 'close-relay') f.relay.close()
+          else f.relay.closePeer(peer.transportId)
+          if (action === 'replace-peer') assert.equal(peer.open(), true)
+          return true
+        },
+        sendResult: () => true,
+      }),
+      false,
+    )
+    assert.equal(f.relay.diagnostics().peers, action === 'replace-peer' ? 1 : 0)
+    f.relay.close()
+    await f.relay.settled
+  })
+}

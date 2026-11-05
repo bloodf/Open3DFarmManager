@@ -22,6 +22,7 @@ export type CompleteFarmSnapshot = Readonly<{
 export type FarmSnapshotProvider = (
   input: Readonly<{
     binding: VerifiedRtcAdmission['binding']
+    deadlineMonoMs: number
     assignmentRefs: readonly AssignmentRef[]
     signal: AbortSignal
     onComplete: (snapshot: CompleteFarmSnapshot) => void
@@ -130,6 +131,7 @@ export class FarmStatusSender {
       const provider = this.#open(
         Object.freeze({
           binding: admission.binding,
+          deadlineMonoMs: admission.deadlineMonoMs,
           assignmentRefs: this.#refs,
           signal: this.#controller.signal,
           onComplete: (value) => this.complete(value),

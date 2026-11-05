@@ -151,6 +151,7 @@ test('sender opens only after admitted context and sends copied complete genuine
     assert.equal(f.sent.length, 0)
     f.admit()
     assert.ok(f.provider())
+    assert.equal(f.provider()?.deadlineMonoMs, f.admission.deadlineMonoMs)
     assert.equal(
       Object.isFrozen(f.provider()?.binding.browser_public_key),
       true,

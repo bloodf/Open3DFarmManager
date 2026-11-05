@@ -48,13 +48,26 @@ export function startCameraSession({
   const controller = new AbortController()
   let stopped = false
   let iterator: AsyncIterator<CameraAccessUnit> | undefined
+  let iteratorReturned = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let release: () => void = () => {}
   const stoppedPromise = new Promise<void>((resolve) => {
     release = resolve
   })
+  const disposeIterator = () => {
+    if (!iterator || iteratorReturned) return
+    iteratorReturned = true
+    try {
+      Promise.resolve(iterator.return?.()).catch(() => {})
+    } catch {
+      /* Cleanup is best effort. */
+    }
+  }
   const stop = () => {
-    if (stopped) return
+    if (stopped) {
+      disposeIterator()
+      return
+    }
     stopped = true
     controller.abort()
     if (timer !== undefined) clearTimeout(timer)
@@ -64,13 +77,7 @@ export function startCameraSession({
     } catch {
       /* Cleanup must continue. */
     }
-    if (iterator?.return) {
-      try {
-        Promise.resolve(iterator.return()).catch(() => {})
-      } catch {
-        /* Cleanup is best effort. */
-      }
-    }
+    disposeIterator()
     release()
   }
   const active = () =>

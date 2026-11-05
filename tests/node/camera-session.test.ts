@@ -62,7 +62,7 @@ test('streams ordered units and closes once', async () => {
 
 test('rejects invalid units and closes on backpressure', async () => {
   for (const invalid of [
-    { ...unit(), data: new Uint8Array(262_145) },
+    { ...unit(1), data: new Uint8Array(262_145) },
     unit(NaN),
     unit(Infinity),
     unit(-1),
@@ -102,6 +102,45 @@ test('abort interrupts pending next and ignores its late result', async () => {
   assert.equal(s.sent.length, 0)
   assert.equal(returned, 1)
   assert.equal(s.closed(), 1)
+})
+
+test('returns an iterator acquired during cancellation exactly once', async () => {
+  for (const abortDuringAcquisition of [false, true]) {
+    let resolveOpen: (
+      source: AsyncIterable<CameraAccessUnit>,
+    ) => void = () => {}
+    let returned = 0
+    let read = 0
+    const s = setup(
+      () =>
+        new Promise((resolve) => {
+          resolveOpen = resolve
+        }),
+    )
+    resolveOpen({
+      [Symbol.asyncIterator]() {
+        if (abortDuringAcquisition) s.controller.abort()
+        return {
+          next: async () => {
+            read++
+            return { done: false, value: unit() }
+          },
+          return: async () => {
+            returned++
+            return { done: true, value: undefined }
+          },
+        }
+      },
+    })
+    if (!abortDuringAcquisition) s.controller.abort()
+    await s.done
+    s.stop()
+    s.stop()
+    assert.equal(returned, 1)
+    assert.equal(read, 0)
+    assert.equal(s.sent.length, 0)
+    assert.equal(s.closed(), 1)
+  }
 })
 
 test('expiry interrupts pending open and cleans up a late source', async () => {

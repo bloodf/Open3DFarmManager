@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Diagnostic output deliberately excludes raw logs, configuration and container environment.
 import { spawnSync } from 'node:child_process'
+import { availableParallelism, loadavg } from 'node:os'
 
 const project = process.argv[2]
 if (
@@ -93,6 +94,47 @@ function cpu(input) {
     ? result
     : 'unavailable'
 }
+function cpuQuota(input) {
+  const match = /^(max|[1-9][0-9]*) ([1-9][0-9]*)\n?$/.exec(input)
+  if (!match) return 'unavailable'
+  const periodUsec = Number(match[2])
+  const quotaUsec = match[1] === 'max' ? null : Number(match[1])
+  if (
+    !Number.isSafeInteger(periodUsec) ||
+    (quotaUsec !== null && !Number.isSafeInteger(quotaUsec))
+  )
+    return 'unavailable'
+  return { quotaUsec, periodUsec }
+}
+function cpuPressure(input) {
+  const result = {}
+  for (const line of input.trim().split('\n')) {
+    const match =
+      /^(some|full) avg10=([0-9]+\.[0-9]+) avg60=([0-9]+\.[0-9]+) avg300=([0-9]+\.[0-9]+) total=([0-9]+)$/.exec(
+        line,
+      )
+    if (!match || Object.hasOwn(result, match[1])) return 'unavailable'
+    const averages = match.slice(2, 5).map(Number)
+    const totalUsec = Number(match[5])
+    if (
+      averages.some((value) => !Number.isFinite(value) || value > 100) ||
+      !Number.isSafeInteger(totalUsec)
+    )
+      return 'unavailable'
+    result[match[1]] = {
+      avg10: averages[0],
+      avg60: averages[1],
+      avg300: averages[2],
+      totalUsec,
+    }
+  }
+  return Object.hasOwn(result, 'some') ? result : 'unavailable'
+}
+// Sampled only after failure; host load includes unrelated runner activity.
+const host = {
+  availableParallelism: availableParallelism(),
+  loadavg: loadavg(),
+}
 for (const service of ['sv06', 'u1']) {
   const ids = docker([...compose, 'ps', '-aq', service])
   const id = ids?.trim()
@@ -141,6 +183,8 @@ for (const service of ['sv06', 'u1']) {
   }
   const stdout = docker(['logs', '--tail', '150', id], true)
   const cgroup = docker(['exec', id, 'cat', '/sys/fs/cgroup/cpu.stat'])
+  const quota = docker(['exec', id, 'cat', '/sys/fs/cgroup/cpu.max'])
+  const pressure = docker(['exec', id, 'cat', '/sys/fs/cgroup/cpu.pressure'])
   console.log(
     JSON.stringify({
       service,
@@ -149,6 +193,9 @@ for (const service of ['sv06', 'u1']) {
       logs,
       stdout: stdout === null ? 'unavailable' : summarize(stdout),
       cpu: cgroup === null ? 'unavailable' : cpu(cgroup),
+      host,
+      cpuQuota: quota === null ? 'unavailable' : cpuQuota(quota),
+      cpuPressure: pressure === null ? 'unavailable' : cpuPressure(pressure),
     }),
   )
 }

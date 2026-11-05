@@ -13,7 +13,6 @@ import {
   chmod,
   mkdir,
   lstat,
-  readdir,
   readlink,
   mkdtemp,
   open,
@@ -29,6 +28,11 @@ import postgres from 'postgres'
 import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
+import {
+  Receipt,
+  outputSnapshot,
+  createFixtureReceipt,
+} from '../tests/helpers/signalling-https-manifest.ts'
 import {
   observeFixtureClose,
   waitFixtureClose,
@@ -53,13 +57,6 @@ async function absoluteOutside(path: string) {
     throw new Error('Fixture path must be outside the checkout')
   return resolved
 }
-const Receipt = z.strictObject({
-  head: z.string().regex(/^[a-f0-9]{40}$/),
-  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  configSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  outputSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  outputFiles: z.number().int().min(1).max(10000),
-})
 const Prebuild = Receipt.omit({ outputSha256: true, outputFiles: true })
 function git(args: string[]) {
   return execFileSync('git', args, {
@@ -101,49 +98,6 @@ async function sourceSnapshot() {
   )
     throw new Error('Source changed during snapshot')
   return { head, sourceSha256: hash.digest('hex') }
-}
-async function outputSnapshot(root: string) {
-  const entries: { path: string; size: number; sha256: string }[] = []
-  let total = 0
-  async function walk(directory: string) {
-    for (const entry of (
-      await readdir(directory, { withFileTypes: true })
-    ).sort((a, b) => a.name.localeCompare(b.name))) {
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) await walk(path)
-      else if (entry.isFile()) {
-        const stat = await lstat(path)
-        total += stat.size
-        if (
-          !stat.isFile() ||
-          stat.size > 64 * 1024 * 1024 ||
-          total > 512 * 1024 * 1024 ||
-          entries.length >= 10000
-        )
-          throw new Error('Output exceeds fixture bounds')
-        entries.push({
-          path: relative(root, path),
-          size: stat.size,
-          sha256: createHash('sha256')
-            .update(await readFile(path))
-            .digest('hex'),
-        })
-      } else
-        throw new Error(
-          'Output must contain regular files and directories only',
-        )
-    }
-  }
-  await walk(root)
-  if (!entries.some((entry) => entry.path === 'server/index.mjs'))
-    throw new Error('Generated Nitro entry missing')
-  return {
-    outputSha256: createHash('sha256')
-      .update(JSON.stringify(entries))
-      .digest('hex'),
-    outputFiles: entries.length,
-    entries,
-  }
 }
 async function shaFile(path: string) {
   return createHash('sha256')
@@ -215,13 +169,16 @@ if (mode === '--prepare-layer') {
     configSha256 = await shaFile(join(layer, 'nuxt.config.ts'))
   if (JSON.stringify({ ...source, configSha256 }) !== JSON.stringify(initial))
     throw new Error('Build input changed since preparation')
-  const output = await outputSnapshot(join(layer, 'output'))
+  const { entries, receipt } = await createFixtureReceipt(
+    join(layer, 'output'),
+    source,
+    configSha256,
+  )
   await writeFile(
     join(layer, 'fixture-output-files.json'),
-    JSON.stringify(output.entries),
+    JSON.stringify(entries),
     { mode: 0o600, flag: 'wx' },
   )
-  const receipt = Receipt.parse({ ...source, configSha256, ...output })
   await writeFile(
     join(layer, 'fixture-build-receipt.json'),
     JSON.stringify(receipt),

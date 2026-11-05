@@ -149,6 +149,8 @@ test(
   async (context) => {
     const restore = installFake(),
       key = await privateKey()
+    // Keep deadline subtraction exact when only the timeout scheduler advances.
+    context.mock.method(performance, 'now', () => 1000)
     context.mock.timers.enable({ apis: ['setTimeout'] })
     let terminal = 0
     const peer = new PauseBrowserPeer({
@@ -162,7 +164,10 @@ test(
       },
     })
     try {
-      context.mock.timers.tick(8000)
+      context.mock.timers.tick(7999)
+      assert.equal(terminal, 0)
+      assert.equal(peer.diagnostics().closeCount, 0)
+      context.mock.timers.tick(1)
       await peer.closed
       assert.equal(terminal, 1)
       assert.equal(peer.diagnostics().closeCount, 1)

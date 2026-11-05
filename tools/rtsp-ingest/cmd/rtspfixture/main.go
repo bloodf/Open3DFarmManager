@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// rtspfixture is a finite maintained-library test server, never a video fixture.
+// rtspfixture is a finite maintained-library synthetic test server.
 package main
 
 import (
@@ -41,7 +41,7 @@ func writeFixed(output io.Writer, data []byte) error {
 	return nil
 }
 
-func run(ctx context.Context, input io.Reader, output io.Writer) error {
+func runV1(ctx context.Context, input io.Reader, output io.Writer) error {
 	address, err := readConfig(input)
 	if err != nil || ctx.Err() != nil {
 		return errFixtureCommand

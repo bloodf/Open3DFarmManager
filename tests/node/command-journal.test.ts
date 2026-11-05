@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   openCommandJournal,
@@ -13,9 +14,9 @@ import {
   closeCommandJournal,
 } from '../../packages/connector/src/control/command-journal.ts'
 
-const base = '/tmp/open3dfarm-pause-dispatch'
+const base = tmpdir()
 function fixture() {
-  const directory = mkdtempSync(join(base, 'journal-'))
+  const directory = mkdtempSync(join(base, 'open3dfarm-pause-journal-'))
   let now = 1000
   const journal = openCommandJournal({ directory, clock: () => now })
   const scope = {
@@ -188,7 +189,7 @@ test('capacity, rate and backwards clock fail closed without evicting active row
   } finally {
     f.cleanup()
   }
-  const directory = mkdtempSync(join(base, 'capacity-'))
+  const directory = mkdtempSync(join(base, 'open3dfarm-pause-capacity-'))
   const j = openCommandJournal({ directory, clock: () => 1000, capacity: 1 })
   const other = fixture()
   try {
@@ -334,7 +335,7 @@ test('independent processes race the same assignment without a queue', async () 
 test('unknown database application ID is rejected before journal mode changes', async () => {
   const { DatabaseSync } = await import('node:sqlite')
   const { chmodSync } = await import('node:fs')
-  const directory = mkdtempSync(join(base, 'foreign-')),
+  const directory = mkdtempSync(join(base, 'open3dfarm-pause-foreign-')),
     path = join(directory, 'pause-commands.sqlite')
   const db = new DatabaseSync(path)
   try {

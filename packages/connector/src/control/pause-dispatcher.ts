@@ -464,6 +464,9 @@ export function createPauseDispatcher(config: {
         if (live()) return false
         const current = eligible()
         if (!current || live()) return false
+        // External callbacks may synchronously abort, close or advance the clock.
+        if (!capability || revoked(capability, authorityHandle)) return false
+        if (!verifier.inspect(authorityHandle).ok) return false
         const now = sample()
         if (
           !now ||
@@ -481,8 +484,8 @@ export function createPauseDispatcher(config: {
           closed ||
           controller.signal.aborted ||
           signal?.aborted ||
-          readPrinterBinding(printerBinding) !== mapping ||
-          revoked(capability, authorityHandle)
+          terminal !== undefined ||
+          readPrinterBinding(printerBinding) !== mapping
         )
           return false
         cursor = Object.freeze({

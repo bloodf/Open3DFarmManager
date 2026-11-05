@@ -17,30 +17,8 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
-      - id: smoke
-        run: bun run sim:smoke
+      - run: bun run sim:smoke
       - if: failure()
         run: node scripts/klipper-diagnostics.mjs
-      - id: baseline_cleanup
-        if: always()
+      - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down
-      - name: Compare simulator CPU limits
-        if: failure() && steps.smoke.outcome == 'failure' && steps.baseline_cleanup.outcome == 'success'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          project=open3dfarmmanager-cpu-diagnostic
-          compose=(docker compose -p "$project" -f infra/sim/docker-compose.yml -f infra/sim/docker-compose.cpu-diagnostic.yml --profile klipper)
-          cleanup() {
-            status=$?
-            trap - EXIT
-            timeout --kill-after=5s 45s "${compose[@]}" down --volumes --remove-orphans || status=1
-            exit "$status"
-          }
-          trap cleanup EXIT
-          timeout --kill-after=5s 45s "${compose[@]}" up -d
-          status=0
-          timeout --kill-after=5s 110s bun run sim:smoke || status=$?
-          timeout --kill-after=5s 60s node scripts/klipper-diagnostics.mjs "$project" || status=1
-          exit "$status"

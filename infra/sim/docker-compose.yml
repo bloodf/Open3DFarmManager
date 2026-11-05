@@ -7,7 +7,7 @@ x-printer: &printer
     - /tmp:noexec
     - /home/printer/printer_data/comms:noexec
   networks: [sim]
-  cpus: 1.0
+  cpus: 2.0
   mem_limit: 1g
   pids_limit: 256
 services:

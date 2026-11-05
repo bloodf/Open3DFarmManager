@@ -150,7 +150,12 @@ try {
     ok: false,
     reason: 'denied',
   })
-  assert.deepEqual(await again.commitTelemetryWithProof(pending, body), {
+  const later = new PostgresConnectorCredentialAcceptance(
+    runtime,
+    config,
+    () => fixtureNow + 2000,
+  )
+  assert.deepEqual(await later.commitTelemetryWithProof(pending, body), {
     ok: false,
     reason: 'denied',
   })

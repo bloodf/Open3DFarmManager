@@ -158,6 +158,7 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
 test('RTC child reply boundary excludes credentials, SDP, private keys and unbounded diagnostics', () => {
   const reply = {
     kind: 'observation',
+    terminalReason: null,
     inboxReady: false,
     verifiedAdmission: true,
     diagnosticsImmutable: true,

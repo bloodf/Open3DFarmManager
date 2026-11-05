@@ -61,6 +61,10 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('observation'),
     inboxReady: z.boolean(),
+    terminalReason: z
+      .string()
+      .regex(/^[a-zA-Z0-9:_-]{1,80}$/)
+      .nullable(),
     verifiedAdmission: z.boolean(),
     diagnosticsImmutable: z.boolean(),
     provider: z.literal('finite-synthetic-assigned-status'),
@@ -275,9 +279,15 @@ async function run() {
       case 'observe': {
         if (!client) throw Error('Client unavailable')
         const diagnostics = client.diagnostics()
+        const snapshot = client.snapshot()
         output({
           kind: 'observation',
-          inboxReady: client.snapshot().phase === 'context-request',
+          inboxReady: snapshot.phase === 'context-request',
+          terminalReason: snapshot.reason
+            ? /^[a-zA-Z0-9:_-]{1,80}$/.test(snapshot.reason)
+              ? snapshot.reason
+              : 'unclassified'
+            : null,
           verifiedAdmission,
           diagnosticsImmutable: Object.isFrozen(diagnostics),
           provider: 'finite-synthetic-assigned-status',

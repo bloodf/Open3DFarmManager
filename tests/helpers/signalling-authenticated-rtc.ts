@@ -463,6 +463,8 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
         input.claim.farm_id !== input.farmId
       )
         throw Error('Provisioned fixture scope mismatch')
+      let lastNative: unknown = null
+      let lastBrowser: unknown = null
       try {
         const refs = snapshotAssignmentRefs(
           input.assignmentRefs,
@@ -482,16 +484,26 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           const reply = await session.connector.request({ kind: 'observe' })
           if (reply.kind !== 'observation')
             throw Error('Connector observation missing')
+          lastNative = reply
           return reply
         }
-        const observeBrowser = () =>
-          session.actor.evaluate((actor) => {
+        const observeBrowser = async () => {
+          const value = await session.actor.evaluate((actor) => {
             const observation = actor.observe()
             return {
               ...observation,
               diagnosticsImmutable: Object.isFrozen(observation.diagnostics),
             }
           })
+          lastBrowser = {
+            verifiedAdmission: value.verifiedAdmission,
+            acceptedStatusCount: value.acceptedStatusCount,
+            terminal: value.terminal,
+            terminalReason: value.terminalReason,
+            diagnostics: value.diagnostics,
+          }
+          return value
+        }
         const started = await session.connector.request({
           kind: 'start',
           origin: input.origin,
@@ -612,6 +624,15 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
         await session.note(
           `authenticated-rtc-${session.closure}-verified-status-and-remote-close`,
         )
+      } catch (error) {
+        await session.note(
+          'rtc-failure-observations:' +
+            JSON.stringify({
+              connector: lastNative,
+              browser: lastBrowser,
+            }),
+        )
+        throw error
       } finally {
         await input.identities.dispose()
       }

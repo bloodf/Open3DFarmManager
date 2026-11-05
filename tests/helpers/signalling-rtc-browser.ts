@@ -140,7 +140,13 @@ export async function createSignallingRtcBrowserActor(input: Input) {
       })
     },
     observe() {
+      const reason = client?.snapshot().reason
       return {
+        terminalReason: reason
+          ? /^[a-zA-Z0-9:_-]{1,80}$/.test(reason)
+            ? reason
+            : 'unclassified'
+          : null,
         verifiedAdmission,
         acceptedStatusCount,
         latestStatus: latestStatus ? structuredClone(latestStatus) : undefined,

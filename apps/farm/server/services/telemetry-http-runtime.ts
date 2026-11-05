@@ -59,3 +59,8 @@ export async function activateTelemetryHttpRuntime(
 export function telemetryHttpRuntime(): Handler | undefined {
   return activeHandler
 }
+
+/** The lifecycle owner calls this before closing its dedicated pool. */
+export function deactivateTelemetryHttpRuntime(): void {
+  activeHandler = undefined
+}

@@ -247,6 +247,29 @@ test('both endpoints compare exact descriptions; unchanged certificate cannot hi
     ),
   )
 })
+test('every session and media fingerprint declaration must use the same valid SHA-256 pin', async () => {
+  const valid = sdp('AB')
+  const media = 'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n'
+  const pin = Array(32).fill('AB').join(':')
+  assert.equal(
+    rtcDtlsFingerprint(valid + media + `a=fingerprint:sha-256 ${pin}\r\n`),
+    pin,
+  )
+  for (const declaration of [
+    `a=fingerprint:sha-384 ${Array(48).fill('AB').join(':')}`,
+    `a=fingerprint:sha-1 ${Array(20).fill('AB').join(':')}`,
+    'a=fingerprint:sha-256 invalid',
+    'a=fingerprint:sha-256 AB:CD',
+    'a=fingerprint',
+    `a=fingerprint:sha-256 ${pin} trailing`,
+    ` a=fingerprint:sha-256 ${pin}`,
+    `A=FINGERPRINT:sha-256 ${pin}`,
+  ]) {
+    const ambiguous = valid + media + declaration + '\r\n'
+    assert.throws(() => rtcDtlsFingerprint(ambiguous), declaration)
+    await assert.rejects(rtcSdpHash(ambiguous), declaration)
+  }
+})
 test('signalling boundary only admits bounded direct SDP/ICE and control metadata', () => {
   const base = { v: 1, transport_id: randomUUID(), seq: 0 }
   const frame = { ...base, t: 'rtc.offer', p: { sdp: sdp('AB') } }

@@ -195,3 +195,39 @@ test('remote proof cannot admit application while local signing is pending', asy
     session.close()
   }
 })
+
+test('owner closing reentrantly on verification leaves no session deadline armed', async () => {
+  const f = await fixture()
+  const schedule = globalThis.setTimeout
+  const cancel = globalThis.clearTimeout
+  const active = new Set<unknown>()
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    const handle = schedule(...args)
+    active.add(handle)
+    return handle
+  }) as typeof setTimeout
+  globalThis.clearTimeout = (handle) => {
+    active.delete(handle)
+    Reflect.apply(cancel, globalThis, [handle])
+  }
+  let notifications = 0
+  const session = f.make({
+    onVerified: () => session.close('owner-deadline'),
+    onReadonly: () => {
+      notifications++
+    },
+  })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.equal(session.sendStatus(), false)
+    assert.equal(notifications, 1)
+    assert.equal(active.size, 0)
+  } finally {
+    session.close()
+    for (const handle of active) Reflect.apply(cancel, globalThis, [handle])
+    globalThis.setTimeout = schedule
+    globalThis.clearTimeout = cancel
+  }
+})

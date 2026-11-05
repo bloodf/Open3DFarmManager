@@ -1,4 +1,4 @@
-import { ReadonlyBrowserPeer } from './browser-peer.ts'
+import { ReadonlyBrowserPeer } from '../../../apps/farm/app/utils/webrtc/readonly-peer.ts'
 import { validateBrowserDevicePublicKey } from '../../farm-protocol/src/browser-device-proof.ts'
 const key = await crypto.subtle.generateKey(
   { name: 'ECDSA', namedCurve: 'P-256' },

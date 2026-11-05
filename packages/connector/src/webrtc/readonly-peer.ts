@@ -3,7 +3,12 @@ import {
   checkEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
 } from './rtc-descriptions.ts'
-import { PeerConnection, type DataChannel } from 'node-datachannel'
+import {
+  PeerConnection,
+  type DataChannel,
+  type Video,
+  type Track,
+} from 'node-datachannel'
 import { ConnectorIdentity } from '../identity/store.ts'
 import {
   RtcSessionBinding,
@@ -15,7 +20,24 @@ import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-pro
 import { RtcProofInbox, boundRtcApplicationFrame } from './rtc-proof-inbox.ts'
 import { ReadonlyRtcSession } from './readonly-session.ts'
 
+/** Explicit local fixture hook only; not a production camera permission API. */
+export type FixtureOnlyMediaHooks = Readonly<{
+  prepare: (
+    capability: Readonly<{ addVideoTrack: (description: Video) => Track }>,
+  ) => void
+  activate: (
+    context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
+  ) => void
+  stop: () => void
+}>
+
 type Options = {
+  /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
+  authDeadline?: number | undefined
+  lifetimeDeadline?: number
+  onVerified?: () => void
+  onTerminal?: (reason: string) => void
+  fixtureOnlyMedia?: FixtureOnlyMediaHooks
   identity: ConnectorIdentity
   /** Trusted enrollment/runtime configuration, never the RTC binding's agent_id. */
   expectedAgentId: string
@@ -40,6 +62,7 @@ export class ReadonlyConnectorPeer {
   #offerStarted = false
   #offer: string | undefined
   #answer: string | undefined
+  #mediaTrackAdded = false
   #opened = false
   #starting = false
   #stage = 'constructed'
@@ -55,7 +78,37 @@ export class ReadonlyConnectorPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
-    this.#options = Object.freeze({ ...options })
+    const now = performance.now()
+    for (const cap of [options.authDeadline, options.lifetimeDeadline])
+      if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
+        throw Error('Expired owner deadline')
+    this.#authDeadline = Math.min(
+      this.#authDeadline,
+      options.authDeadline ?? Infinity,
+    )
+    this.#lifetimeDeadline = Math.min(
+      this.#lifetimeDeadline,
+      options.lifetimeDeadline ?? Infinity,
+    )
+
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.fixtureOnlyMedia
+        ? {
+            fixtureOnlyMedia: Object.freeze({
+              prepare: options.fixtureOnlyMedia.prepare.bind(
+                options.fixtureOnlyMedia,
+              ),
+              activate: options.fixtureOnlyMedia.activate.bind(
+                options.fixtureOnlyMedia,
+              ),
+              stop: options.fixtureOnlyMedia.stop.bind(
+                options.fixtureOnlyMedia,
+              ),
+            }),
+          }
+        : {}),
+    })
     this.#peer = new PeerConnection('readonly-connector', {
       iceServers: [],
       bindAddress: '127.0.0.1',
@@ -101,10 +154,13 @@ export class ReadonlyConnectorPeer {
     this.#gathered = new Promise((resolve) => {
       this.#resolveGathered = resolve
     })
-    this.#authTimer = setTimeout(() => this.close('auth-deadline'), 8000)
+    this.#authTimer = setTimeout(
+      () => this.close('auth-deadline'),
+      Math.max(0, this.#authDeadline - performance.now()),
+    )
     this.#lifetimeTimer = setTimeout(
       () => this.close('prototype-lifetime'),
-      30000,
+      Math.max(0, this.#lifetimeDeadline - performance.now()),
     )
     this.#peer.onGatheringStateChange((state) => {
       if (state === 'complete') this.#resolveGathered()
@@ -139,6 +195,29 @@ export class ReadonlyConnectorPeer {
     })
     this.#application.onClosed(() => this.close('application-closed'))
     this.#application.onError(() => this.close('application-error'))
+    let preparingFixture = true
+    try {
+      this.#options.fixtureOnlyMedia?.prepare(
+        Object.freeze({
+          addVideoTrack: (description: Video) => {
+            if (
+              !preparingFixture ||
+              this.#terminal ||
+              this.#offerStarted ||
+              this.#mediaTrackAdded
+            )
+              throw Error('Fixture track reservation closed')
+            this.#mediaTrackAdded = true
+            return this.#peer.addTrack(description)
+          },
+        }),
+      )
+    } catch (error) {
+      this.close('fixture-media-prepare')
+      throw error
+    } finally {
+      preparingFixture = false
+    }
   }
   private current() {
     if (this.#terminal) return false
@@ -274,7 +353,17 @@ export class ReadonlyConnectorPeer {
         if (!this.current() || !this.#application.sendMessage(wire))
           throw Error('Status send failed')
       },
-      onVerified: () => clearTimeout(this.#authTimer),
+      onVerified: () => {
+        clearTimeout(this.#authTimer)
+        if (this.current()) this.#options.onVerified?.()
+        if (this.#options.fixtureOnlyMedia && this.current())
+          this.#options.fixtureOnlyMedia.activate(
+            Object.freeze({
+              binding: validated,
+              lifetimeDeadline: this.#lifetimeDeadline,
+            }),
+          )
+      },
       onReadonly: () => this.close('session-readonly'),
     })
     if (!this.current()) {
@@ -293,6 +382,11 @@ export class ReadonlyConnectorPeer {
     if (this.#terminal) return
     this.#terminal = reason.slice(0, 64) || 'closed'
     this.#resolveClosed()
+    try {
+      this.#options.fixtureOnlyMedia?.stop()
+    } catch {
+      this.#stage = 'fixture-media-stop-failed'
+    }
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
     this.#inbox.close(reason)
@@ -305,7 +399,18 @@ export class ReadonlyConnectorPeer {
       this.#proof.close()
       this.#application.close()
     } finally {
-      this.#peer.close()
+      try {
+        this.#peer.close()
+      } finally {
+        this.notifyTerminal()
+      }
+    }
+  }
+  private notifyTerminal() {
+    try {
+      this.#options.onTerminal?.(this.#terminal ?? 'closed')
+    } catch {
+      this.#stage = 'terminal-notification-failed'
     }
   }
   snapshot() {

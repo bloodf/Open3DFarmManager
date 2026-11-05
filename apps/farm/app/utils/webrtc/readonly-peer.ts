@@ -2,22 +2,37 @@ import {
   captureEffectiveRtcDescriptions,
   checkEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
-} from '../../connector/src/webrtc/rtc-descriptions.ts'
+} from '../../../../../packages/connector/src/webrtc/rtc-descriptions.ts'
 import {
   RtcSessionBinding,
   BrowserRtcProof,
   signRtcSessionProof,
   rtcBindingFromDescriptions,
   rtcDtlsFingerprint,
-} from '../../farm-protocol/src/rtc-session-binding.ts'
-import { BrowserDeviceUuid } from '../../farm-protocol/src/browser-device-proof.ts'
-import { ReadonlyRtcSession } from '../../connector/src/webrtc/readonly-session.ts'
+} from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
+import { BrowserDeviceUuid } from '../../../../../packages/farm-protocol/src/browser-device-proof.ts'
+import { ReadonlyRtcSession } from '../../../../../packages/connector/src/webrtc/readonly-session.ts'
 import {
   RtcProofInbox,
   boundRtcApplicationFrame,
-} from '../../connector/src/webrtc/rtc-proof-inbox.ts'
+} from '../../../../../packages/connector/src/webrtc/rtc-proof-inbox.ts'
 
+export type FixtureOnlyVideoHooks = Readonly<{
+  onTrack: (
+    event: Readonly<{ track: MediaStreamTrack; receiver: RTCRtpReceiver }>,
+  ) => void
+  activate: (
+    context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
+  ) => void
+  stop: () => void
+}>
 type Options = {
+  /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
+  authDeadline?: number | undefined
+  lifetimeDeadline?: number
+  onVerified?: () => void
+  onTerminal?: (reason: string) => void
+  fixtureOnlyVideo?: FixtureOnlyVideoHooks
   privateKey: CryptoKey
   expectedAgentId: string
   /** Supplied by trusted signalling/test context, never a peer proof frame. */
@@ -52,8 +67,52 @@ export class ReadonlyBrowserPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
-    this.#options = Object.freeze({ ...options })
+    const now = performance.now()
+    for (const cap of [options.authDeadline, options.lifetimeDeadline])
+      if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
+        throw Error('Expired owner deadline')
+    this.#authDeadline = Math.min(
+      this.#authDeadline,
+      options.authDeadline ?? Infinity,
+    )
+    this.#lifetimeDeadline = Math.min(
+      this.#lifetimeDeadline,
+      options.lifetimeDeadline ?? Infinity,
+    )
+
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.fixtureOnlyVideo
+        ? {
+            fixtureOnlyVideo: Object.freeze({
+              onTrack: options.fixtureOnlyVideo.onTrack.bind(
+                options.fixtureOnlyVideo,
+              ),
+              activate: options.fixtureOnlyVideo.activate.bind(
+                options.fixtureOnlyVideo,
+              ),
+              stop: options.fixtureOnlyVideo.stop.bind(
+                options.fixtureOnlyVideo,
+              ),
+            }),
+          }
+        : {}),
+    })
     this.#peer = new RTCPeerConnection({ iceServers: [] })
+    if (this.#options.fixtureOnlyVideo)
+      this.#peer.ontrack = (event) => {
+        if (this.#terminal) {
+          event.track.stop()
+          return
+        }
+        try {
+          this.#options.fixtureOnlyVideo?.onTrack(
+            Object.freeze({ track: event.track, receiver: event.receiver }),
+          )
+        } catch {
+          this.close('fixture-video-track')
+        }
+      }
     this.#inbox = new RtcProofInbox({
       paused: true,
       inspect: async (proof) => {
@@ -81,10 +140,13 @@ export class ReadonlyBrowserPeer {
       return binding
     })
     void this.#binding.catch(() => weak.deref()?.close('admission-rejected'))
-    this.#authTimer = setTimeout(() => this.close('auth-deadline'), 8000)
+    this.#authTimer = setTimeout(
+      () => this.close('auth-deadline'),
+      Math.max(0, this.#authDeadline - performance.now()),
+    )
     this.#lifetimeTimer = setTimeout(
       () => this.close('prototype-lifetime'),
-      30000,
+      Math.max(0, this.#lifetimeDeadline - performance.now()),
     )
     this.#peer.onconnectionstatechange = () => {
       if (
@@ -297,7 +359,17 @@ export class ReadonlyBrowserPeer {
           throw Error('Application closed')
         this.#application.send(wire)
       },
-      onVerified: () => clearTimeout(this.#authTimer),
+      onVerified: () => {
+        clearTimeout(this.#authTimer)
+        if (this.current()) this.#options.onVerified?.()
+        if (this.#options.fixtureOnlyVideo && this.current())
+          this.#options.fixtureOnlyVideo.activate(
+            Object.freeze({
+              binding: validated,
+              lifetimeDeadline: this.#lifetimeDeadline,
+            }),
+          )
+      },
       onReadonly: () => this.close('session-readonly'),
     })
     if (!this.current()) {
@@ -317,6 +389,12 @@ export class ReadonlyBrowserPeer {
     if (this.#terminal) return
     this.#terminal = reason.slice(0, 64) || 'closed'
     this.#resolveClosed()
+    try {
+      this.#options.fixtureOnlyVideo?.stop()
+    } catch {
+      this.#stage = 'fixture-video-stop-failed'
+    }
+    this.#peer.ontrack = null
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
     this.#inbox.close(reason)
@@ -325,18 +403,28 @@ export class ReadonlyBrowserPeer {
     if (this.#application) this.#application.onmessage = null
     this.#peer.onsignalingstatechange = null
     this.#peer.ondatachannel = null
-    this.#peer.onsignalingstatechange = () => {
-      if (this.#answer && this.#peer.signalingState !== 'stable')
-        this.close('signalling-replacement')
-    }
     this.#peer.onnegotiationneeded = null
     this.#peer.onconnectionstatechange = null
     this.#peer.onicegatheringstatechange = null
     this.#resolveGathered()
     this.#closeCount++
-    this.#proof?.close()
-    this.#application?.close()
-    this.#peer.close()
+    try {
+      this.#proof?.close()
+    } finally {
+      try {
+        this.#application?.close()
+      } finally {
+        try {
+          this.#peer.close()
+        } finally {
+          try {
+            this.#options.onTerminal?.(this.#terminal)
+          } catch {
+            this.#stage = 'terminal-notification-failed'
+          }
+        }
+      }
+    }
   }
   snapshot() {
     return {

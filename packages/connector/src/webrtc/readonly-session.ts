@@ -129,7 +129,7 @@ export class ReadonlyRtcSession {
       return
     this.#state = 'verified'
     this.#options.onVerified()
-    this.schedule()
+    if (this.current()) this.schedule()
   }
   receiveApplication(raw: unknown) {
     if (!this.current()) return

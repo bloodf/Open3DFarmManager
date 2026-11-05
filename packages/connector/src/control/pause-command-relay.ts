@@ -270,6 +270,7 @@ export function createPauseCommandRelay(
   function seal(peer: Peer): void {
     if (peer.sealed) return
     peer.sealed = true
+    if (peers.get(peer.transportId) === peer) peers.delete(peer.transportId)
     peer.removeAbort()
     if (peer.expiry !== undefined) {
       clearTimeout(peer.expiry)
@@ -290,7 +291,6 @@ export function createPauseCommandRelay(
     const peer = peers.get(transportId)
     if (!peer) return
     seal(peer)
-    peers.delete(transportId)
   }
   function armExpiry(peer: Peer, deadlineMono: number): void {
     if (peer.expiry !== undefined) {
@@ -451,6 +451,10 @@ export function createPauseCommandRelay(
     }
     // The attempt is single use. A repeat returns the first outcome.
     if (!peer.attempt) {
+      if (pending.size >= PAUSE_RELAY_MAX_PENDING_WORK) {
+        seal(peer)
+        return Promise.resolve({ ok: false, reason: 'expired-or-inactive' })
+      }
       let resolveAttempt!: (value: PauseRelayAdmit) => void
       const attempt = new Promise<PauseRelayAdmit>((resolve) => {
         resolveAttempt = resolve

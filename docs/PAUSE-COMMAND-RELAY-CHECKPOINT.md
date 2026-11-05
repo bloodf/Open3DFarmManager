@@ -2,9 +2,9 @@
 
 Status: `em revisão`
 Slice: library only, no runtime wiring, no UI.
-Base source: `084ffef380a9fb12b85d1e3c3ad591951a821c5d`
-Composed slice: `4fd6a7f6aa1d663a4141864455237f9a28bc4c36`
-Branch: `t3/harden-pause-command-relay`
+Integration base: `e9ba7c14e94678e51810bea58606af653c19f4d3`
+Original composition: `4fd6a7f6aa1d663a4141864455237f9a28bc4c36`, based on `084ffef`.
+Current branch: `feat/pause-command-composition`
 
 ## What this slice is
 
@@ -182,7 +182,7 @@ actual source.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `admit` callback and standalone verifier handles | rejected. `createPauseDispatcher` owns the verifier, so the relay owns the dispatcher and injects only the keyring  |
 | capability handle treated as the printer binding | rejected. `dispatcher.admit` returns an opaque capability handle, `observe` and `dispatch` take the printer binding |
-| `advancePeer` and a standalone `revoke`          | rejected. A peer is replaced by opening a new one, and closing a peer already revokes its capability                |
+| `advancePeer` and a standalone `revoke`          | rejected. Close the existing peer before opening another; closing already revokes its capability                    |
 | result timeout knob                              | rejected. The dispatcher default is the hard maximum of five seconds and the relay does not widen it                |
 | `revoke` after a failed admission                | changed. The peer stays open so a command already on the wire still receives an honest `rejected`                   |
 | abort resolves a pending command as `rejected`   | changed. A command already sent settles as `outcome-unknown`                                                        |
@@ -206,7 +206,7 @@ verified against the source and the disposition is recorded here.
 | D10     | fixed. A throwing observer never breaks the settlement of the command.                                                                                                    |
 | D11     | fixed. `settled` has an exact meaning on both sides and never resolves while work can still arrive.                                                                       |
 | D12     | fixed. A duplicate transport is refused without replacing its live peer.                                                                                                  |
-| D13     | fixed. The declared base source is the reviewed parent.                                                                                                                   |
+| D13     | fixed. The header distinguishes the integration base from the original composition.                                                                                       |
 
 The review also warned against copying its own claim that a timer can never
 fire. The timers are armed with a real `setTimeout` and the focused tests
@@ -216,7 +216,7 @@ advance them, so the expiry path is proven, not assumed.
 
 ```text
 node --test --test-timeout=20000 tests/node/pause-command-relay.test.ts tests/node/pause-command-client.test.ts
-tests 36, pass 36, fail 0
+tests 48, pass 48, fail 0
 
 tsc --noEmit (strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess)
 on the repository: no diagnostics
@@ -226,7 +226,7 @@ no diagnostics
 ```
 
 The relay tests use real P-256 and Ed25519 keys, a real SQLite command journal
-and a local driver double. The last relay test runs both sides of the real
+and a local driver double. The transport integration test runs both sides of the real
 `PauseControlSession` in memory, with genuine keys and the real journal, and
 carries the two admission frames, the command and the result. The browser
 tests use a real nonextractable P-256 key, a real issuer signature and a local
@@ -271,3 +271,9 @@ counts unconfirmed transport handoffs, not evidence that a frame was unsent.
 
 These changes have focused local regression coverage. Full repository checks
 and actual RTC, Moonraker and simulator composition remain separate gates.
+
+Sealing a peer removes its own map entry before lifecycle callbacks run, so
+rejected admissions do not consume the peer budget. A stale peer cannot remove
+a different peer with the same ID. Client monotonic-clock failures become
+terminal without an issuer request. Retained admission work is checked against
+the cap before a new attempt promise is allocated.

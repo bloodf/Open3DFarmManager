@@ -216,11 +216,19 @@ export function createPauseCommandClient(
     }
     maybeSettled()
   }
+  function sampleMonotonic(): number | undefined {
+    try {
+      const value = monotonicNow()
+      return Number.isFinite(value) && value >= 0 ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
   function armSession(deadlineMonoMs?: number): void {
-    const current = monotonicNow()
+    const current = sampleMonotonic()
     clearTimer(sessionTimer)
     sessionTimer = undefined
-    if (!Number.isFinite(current)) {
+    if (current === undefined) {
       abort()
       return
     }
@@ -241,10 +249,10 @@ export function createPauseCommandClient(
     }, sessionDeadline - current)
   }
   function armAdmission(): void {
-    const current = monotonicNow()
+    const current = sampleMonotonic()
     clearTimer(admissionTimer)
     admissionTimer = undefined
-    if (!Number.isFinite(current)) {
+    if (current === undefined) {
       abort()
       return
     }
@@ -475,6 +483,7 @@ export function createPauseCommandClient(
       if (aborted || admission) return
       if (frame.t !== 'control.admission-nonce') return
       armAdmission()
+      if (aborted) return
       admissionIssued = undefined
       admissionGate = new Promise<void>((resolve) => {
         resolveAdmissionGate = resolve

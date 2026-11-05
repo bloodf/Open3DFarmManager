@@ -1118,3 +1118,23 @@ for (const wallNow of [
     assert.equal(f.relay.diagnostics().peers, 0)
   })
 }
+
+test('scope-rejected admissions release every peer slot', async (t) => {
+  const f = await relayFixture(t)
+  for (let index = 0; index < 17; index++) {
+    const peer = await f.makePeer()
+    assert.equal(peer.open(), true)
+    const foreign = await peer.issueCapability(digest())
+    assert.deepEqual(
+      await f.relay.admitPeer({
+        transportId: peer.transportId,
+        capabilityWire: foreign.capabilityWire,
+        admissionProofWire: foreign.admissionProofWire,
+      }),
+      { ok: false, reason: 'expired-or-inactive' },
+    )
+    assert.equal(f.relay.diagnostics().lastReason, 'scope-mismatch')
+    assert.equal(f.relay.diagnostics().peers, 0)
+  }
+  assert.equal(f.open(), true)
+})

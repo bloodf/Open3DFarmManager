@@ -45,6 +45,7 @@ async function clientFixture(
     holdIssuer?: boolean
     challengeGate?: Promise<void>
     onChallenge?: () => void
+    monotonicNow?: () => number
   } = {},
 ) {
   const browser = await crypto.subtle.generateKey(
@@ -132,7 +133,7 @@ async function clientFixture(
   const client = createPauseCommandClient({
     privateKey: browser.privateKey,
     now: () => Date.now(),
-    monotonicNow: () => performance.now(),
+    monotonicNow: options.monotonicNow ?? (() => performance.now()),
     onOutcome: (outcome) => {
       outcomes.push(outcome)
       if (throwObserver) throw new Error('Observer fault')
@@ -650,4 +651,37 @@ test('failed admission cannot restart on a later nonce', async (t) => {
   f.client.phase(f.nonceFrame())
   assert.equal(await f.client.pause(), 'rejected')
   assert.equal(f.phases.length, count)
+})
+
+test('a throwing monotonic clock terminates construction without sending', async (t) => {
+  const f = await clientFixture(t, {
+    monotonicNow() {
+      throw new Error('Clock unavailable')
+    },
+  })
+  assert.equal(f.client.state.aborted, true)
+  assert.equal(await f.client.pause(), 'rejected')
+  assert.equal(f.phases.length, 0)
+  await f.client.settled
+})
+
+test('a monotonic clock failure at admission ends without calling the issuer', async (t) => {
+  let failed = false
+  let calls = 0
+  const f = await clientFixture(t, {
+    monotonicNow() {
+      if (failed) throw new Error('Clock unavailable')
+      return performance.now()
+    },
+    onChallenge() {
+      calls++
+    },
+  })
+  f.proofsReady()
+  failed = true
+  f.client.phase(f.nonceFrame())
+  assert.equal(f.client.state.aborted, true)
+  await f.client.settled
+  assert.equal(calls, 0)
+  assert.equal(f.phases.length, 0)
 })

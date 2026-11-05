@@ -39,10 +39,20 @@ identify timeouts. Throttling was only 0.015/0.171 seconds for SV06/U1 over the
 roughly 90-second window. That failure cannot be attributed to heavy quota
 throttling from these counters alone.
 
-The collector also records scheduling observations. The new quota and pressure
-fields have only been exercised with synthetic Docker output. The simulator job
-passed at `1a8b885`, so its failure-only collector did not run; real remote
-collection of these fields remains pending.
+The collector also records scheduling observations. The simulator job passed at
+`1a8b885`, so its failure-only collector did not run. Subsequently,
+[run 42071575582](https://github.com/bloodf/Open3DFarmManager/actions/runs/42071575582/job/127401307214)
+at `8156420` failed readiness and exercised the new collector against real
+container cgroups. Both visible quotas were 200000/100000 microseconds (2 CPU
+units). Host available parallelism was 4, with load averages 3.05/1.24/0.47.
+SV06/U1 reported CPU `some.avg10` of 0.94/1.54 percent and `full.avg10` of
+0.41/0.44 percent. Quota throttling was 0.017/0.181 seconds. Both MCU identify
+counts remained zero, with 15/14 identify timeouts in the captured tails.
+
+This establishes one real collection of the fields, not simulator acceptance or
+a scheduling root cause. Low sampled pressure and throttling do not justify
+increasing CPU allocation or extending the deadline. Checks passed; the
+simulator readiness check remains failed.
 
 On the supported Linux CI host, `loadavg` contains the 1-, 5- and 15-minute
 averages of runnable or uninterruptible tasks, as absolute counts, not percentages

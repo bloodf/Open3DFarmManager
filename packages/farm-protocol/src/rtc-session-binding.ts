@@ -80,11 +80,13 @@ export function rtcDtlsFingerprint(sdp: string): string {
     /^a=candidate:.*\styp\s+relay(?:\s|$)/im.test(sdp)
   )
     throw new Error('Invalid direct SDP')
-  const values = new Set(
-    [...sdp.matchAll(/^a=fingerprint:sha-256 ([A-Fa-f0-9:]+)\r?$/gm)].map(
-      (match) => match[1]?.toUpperCase(),
-    ),
-  )
+  const values = new Set<string>()
+  for (const line of sdp.split('\n')) {
+    if (!/^\s*a\s*=\s*fingerprint\b/i.test(line)) continue
+    const match = /^a=fingerprint:sha-256 ([A-Fa-f0-9:]+)\r?$/.exec(line)
+    if (!match?.[1]) throw new Error('Unsupported DTLS fingerprint declaration')
+    values.add(fingerprint.parse(match[1].toUpperCase()))
+  }
   if (values.size !== 1) throw new Error('Unique DTLS fingerprint required')
   return fingerprint.parse(values.values().next().value)
 }

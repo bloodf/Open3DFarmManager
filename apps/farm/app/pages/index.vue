@@ -9,6 +9,7 @@ onMounted(() => heading.value?.focus())
     <small>Open3DFarmManager · Desenvolvimento</small>
     <h1 ref="heading" tabindex="-1">Sua farm de impressão, em um só lugar.</h1>
     <nav aria-label="Conta">
+      <NuxtLink to="/connectors">Consultar Connectors</NuxtLink>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>

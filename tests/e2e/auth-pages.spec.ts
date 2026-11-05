@@ -17,6 +17,10 @@ test('login rejects credentials without retaining the password or following retu
     })
   })
   await page.goto('/entrar?return=https://example.invalid')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
   await page.getByLabel('Usuário', { exact: true }).fill('fixture_user')
   await page.getByLabel('Senha', { exact: true }).fill('synthetic-password')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
@@ -48,6 +52,10 @@ test('pending login disables duplicate submissions and shows unavailable safely'
     })
   })
   await page.goto('/entrar')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
   await page.getByLabel('Usuário', { exact: true }).fill('fixture_user')
   await page.getByLabel('Senha', { exact: true }).fill('synthetic-password')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
@@ -80,6 +88,10 @@ test('logout requires an explicit action and does not claim success on failure',
     await route.fulfill({ status: 503, json: {} })
   })
   await page.goto('/sair')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
   await expect(
     page.getByRole('heading', { name: 'Sair da conta' }),
   ).toBeVisible()

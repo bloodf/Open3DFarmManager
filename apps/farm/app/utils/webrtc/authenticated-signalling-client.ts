@@ -72,7 +72,7 @@ type PeerOptions = {
   privateKey: CryptoKey
   expectedAgentId: string
   admittedBinding: Promise<unknown>
-  authDeadline?: number
+  authDeadline?: number | undefined
   lifetimeDeadline?: number
   onVerified?: () => void
   onTerminal?: (reason: string) => void

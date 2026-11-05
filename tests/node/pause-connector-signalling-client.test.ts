@@ -106,6 +106,7 @@ async function fixture(
     },
     ...(options.onProofsReady ? { onProofsReady: options.onProofsReady } : {}),
     peerFactory: async (value) => {
+      assert.equal(value.onData, undefined)
       input = value
       void value.expectedBinding.then((b) => {
         binding = b

@@ -343,3 +343,87 @@ func TestRunCanceledBeforeDialAndLeaseClosesBlockedRead(t *testing.T) {
 		}
 	}
 }
+
+func TestRunPlayRequiresInitialCredit(t *testing.T) {
+	for _, mode := range []string{"abort", "terminal", "credit and abort", "credit"} {
+		t.Run(mode, func(t *testing.T) {
+			outputR, outputW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer outputR.Close()
+			defer outputW.Close()
+			controlR, controlW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer controlR.Close()
+			defer controlW.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			setup := make(chan struct{})
+			played := make(chan struct{}, 1)
+			raw := newMemoryConn()
+			raw.respond = func(req *base.Request) *base.Response {
+				switch req.Method {
+				case base.Describe:
+					return &base.Response{StatusCode: 200, Header: base.Header{"Content-Type": {"application/sdp"}}, Body: []byte(fixtureSDP)}
+				case base.Setup:
+					if mode == "credit and abort" {
+						_, _ = controlW.Write([]byte{1})
+						cancel()
+					}
+					close(setup)
+					return &base.Response{StatusCode: 200, Header: base.Header{"Session": {"fixture"}, "Transport": {"RTP/AVP/TCP;unicast;interleaved=0-1"}}}
+				case base.Play:
+					played <- struct{}{}
+					cancel()
+				}
+				return &base.Response{StatusCode: 200}
+			}
+			done := make(chan error, 1)
+			go func() {
+				done <- run(ctx, Config{Destination: fixtureDestination(), Lease: 2 * time.Second}, outputW, controlR, func(context.Context, string, string) (net.Conn, error) { return raw, nil })
+			}()
+			select {
+			case <-setup:
+			case err := <-done:
+				t.Fatalf("run ended before SETUP: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("SETUP not reached")
+			}
+			switch mode {
+			case "abort":
+				cancel()
+			case "terminal":
+				_ = controlW.Close()
+			case "credit":
+				if _, err := controlW.Write([]byte{1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case err := <-done:
+				want := ErrCanceled
+				if mode == "terminal" {
+					want = ErrOutput
+				}
+				if err != want {
+					t.Fatalf("run error: %v, want %v", err, want)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("run did not finish")
+			}
+			select {
+			case <-played:
+				if mode != "credit" {
+					t.Fatal("PLAY sent after abort")
+				}
+			default:
+				if mode == "credit" {
+					t.Fatal("PLAY not sent after credit")
+				}
+			}
+		})
+	}
+}

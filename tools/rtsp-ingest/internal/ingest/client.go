@@ -143,6 +143,38 @@ func run(parent context.Context, cfg Config, output *os.File, control *os.File, 
 		}
 		return ErrSource
 	}
+	playReady := func() bool {
+		if ctx.Err() == context.DeadlineExceeded {
+			state.stop(ErrLease)
+			return false
+		}
+		if ctx.Err() != nil {
+			state.stop(ErrCanceled)
+			return false
+		}
+		if pipe.Err() != nil {
+			state.stop(ErrOutput)
+			return false
+		}
+		select {
+		case <-pipe.Done():
+			if pipe.Err() != nil {
+				state.stop(ErrOutput)
+			} else {
+				state.stop(ErrCanceled)
+			}
+			return false
+		default:
+		}
+		return state.failure() == nil
+	}
+	onRequest := client.OnRequest
+	client.OnRequest = func(req *base.Request) {
+		if req.Method == base.Play && !playReady() {
+			return
+		}
+		onRequest(req)
+	}
 	if ctx.Err() != nil {
 		return fail()
 	}
@@ -189,6 +221,13 @@ func run(parent context.Context, cfg Config, output *os.File, control *os.File, 
 			state.stop(err)
 		}
 	})
+	if pipe.WaitInitialCredit(ctx) != nil {
+		playReady()
+		return fail()
+	}
+	if !playReady() {
+		return fail()
+	}
 	if _, err := client.Play(nil); err != nil {
 		return fail()
 	}

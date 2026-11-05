@@ -165,3 +165,68 @@ func TestOutputFailureCancels(t *testing.T) {
 		t.Fatal("missing output error")
 	}
 }
+
+func TestWaitInitialCreditAdmissionAndLatch(t *testing.T) {
+	p, _, control := newTestPipe(t)
+	p.mu.Lock()
+	if _, err := control.Write([]byte{1}); err != nil {
+		p.mu.Unlock()
+		t.Fatal(err)
+	}
+	select {
+	case <-p.firstCredit:
+		p.mu.Unlock()
+		t.Fatal("write alone signaled acceptance")
+	default:
+	}
+	p.mu.Unlock()
+	if err := p.WaitInitialCredit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Offer(0, false, [][]byte{{1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.WaitInitialCredit(context.Background()); err != nil {
+		t.Fatal("consumed credit lost latch:", err)
+	}
+}
+
+func TestWaitInitialCreditCancellationAndTerminal(t *testing.T) {
+	t.Run("canceled before credit", func(t *testing.T) {
+		p, _, _ := newTestPipe(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if p.WaitInitialCredit(ctx) != context.Canceled {
+			t.Fatal("cancellation lost")
+		}
+	})
+	t.Run("canceled with credit", func(t *testing.T) {
+		p, _, control := newTestPipe(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		p.mu.Lock()
+		if _, err := control.Write([]byte{1}); err != nil {
+			p.mu.Unlock()
+			t.Fatal(err)
+		}
+		cancel()
+		p.mu.Unlock()
+		<-p.firstCredit
+		if p.WaitInitialCredit(ctx) != context.Canceled {
+			t.Fatal("simultaneous cancellation lost")
+		}
+	})
+	for _, afterCredit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "terminal before credit", true: "terminal after credit"}[afterCredit], func(t *testing.T) {
+			p, _, control := newTestPipe(t)
+			if afterCredit {
+				grant(t, p, control)
+			}
+			if err := p.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if p.WaitInitialCredit(context.Background()) != ErrInvalid {
+				t.Fatal("terminal pipe accepted")
+			}
+		})
+	}
+}

@@ -14,6 +14,7 @@ type Pipe struct {
 	control       *os.File
 	mu            sync.Mutex
 	credit        bool
+	initialCredit bool
 	occupied      bool
 	failed        bool
 	haveTimestamp bool
@@ -23,13 +24,14 @@ type Pipe struct {
 	windowBytes   int
 	leaseBytes    int
 	stop          chan struct{}
+	firstCredit   chan struct{}
 	slot          chan []byte
 	once          sync.Once
 	wg            sync.WaitGroup
 }
 
 func New(ctx context.Context, output *os.File, control *os.File) *Pipe {
-	p := &Pipe{output: output, control: control, stop: make(chan struct{}), slot: make(chan []byte, 1)}
+	p := &Pipe{output: output, control: control, stop: make(chan struct{}), firstCredit: make(chan struct{}), slot: make(chan []byte, 1)}
 	p.wg.Add(3)
 	go p.readControl()
 	go p.writeOutput()
@@ -68,6 +70,10 @@ func (p *Pipe) readControl() {
 		invalid := b[0] != 1 || p.credit
 		if !invalid {
 			p.credit = true
+			if !p.initialCredit {
+				p.initialCredit = true
+				close(p.firstCredit)
+			}
 		} else {
 			p.failed = true
 		}
@@ -161,6 +167,32 @@ func (p *Pipe) Offer(timestampUs uint64, keyframe bool, nalus [][]byte) error {
 	}
 	p.slot <- data
 	p.mu.Unlock()
+	return nil
+}
+
+// WaitInitialCredit waits until the control reader accepts its first credit.
+func (p *Pipe) WaitInitialCredit(ctx context.Context) error {
+	select {
+	case <-p.firstCredit:
+	case <-p.stop:
+	case <-ctx.Done():
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-p.stop:
+		return ErrInvalid
+	default:
+	}
+	if p.failed || !p.initialCredit {
+		return ErrInvalid
+	}
 	return nil
 }
 

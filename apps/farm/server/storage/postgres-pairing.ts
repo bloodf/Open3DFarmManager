@@ -1,0 +1,395 @@
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto'
+import type { Sql } from 'postgres'
+import {
+  PAIRING_TTL_MS,
+  PairingStartRequest,
+  PairingStartResponse,
+  PairingApprovalRequest,
+  PairingPollRequest,
+  PairingPollResponse,
+} from '@open3dfarmmanager/farm-protocol'
+import {
+  PairingProofOrigin,
+  PairingProofAudience,
+} from '../../../../packages/farm-protocol/src/pairing-proof.ts'
+import {
+  issueConnectorCredential,
+  connectorKeyBinding,
+  type ConnectorCredentialIssuerConfig,
+} from '../utils/connector-credentials.ts'
+import {
+  evaluateSession,
+  type SessionPolicy,
+  type SessionRecord,
+  type AccountSessionState,
+} from '../utils/auth/session-contract.ts'
+
+const alphabet = 'BCDFGHJKLMNPQRSTVWXZ23456789'
+const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+type Failure = {
+  ok: false
+  reason: 'invalid-input' | 'denied' | 'storage-unavailable' | 'capacity'
+}
+type Decision = { ok: true; status: 'approved' | 'denied' } | Failure
+/** Credential delivery is internal-only until lost-response recovery and revocation have reviewed HTTP flows. */
+export type PairingClaim =
+  | { ok: true; status: 'pending' | 'slow_down'; retry_after_s: 5 }
+  | { ok: true; status: 'expired' | 'denied' }
+  | ({ ok: true } & Extract<PairingPollResponse, { status: 'approved' }>)
+  | Failure
+interface PairingRow {
+  agent_id: string
+  public_key_spki: string
+  fingerprint: string
+  issued_at: number
+  expires_at: number
+  next_poll_at: number
+  proof_expired_at: number | null
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
+  farm_id: string | null
+}
+
+class CredentialWindowExpired extends Error {
+  constructor(readonly observedAt: number) {
+    super('Credential issuance window expired')
+  }
+}
+
+interface VerifiedProof {
+  origin: string
+  audience: string
+  issued_at: number
+  expires_at: number
+  consumed_at: number
+}
+
+/** Unwired internal persistence. Clock is sampled after lock acquisition, not before waiting. */
+export class PostgresPairing {
+  private readonly origin: string
+  private readonly audience: string
+  constructor(
+    private readonly sql: Sql,
+    config: { origin: string; audience: string },
+    private readonly clock: () => number = Date.now,
+  ) {
+    this.origin = PairingProofOrigin.parse(config.origin)
+    this.audience = PairingProofAudience.parse(config.audience)
+  }
+  private proofIsCurrent(
+    proof: VerifiedProof | undefined,
+    row: PairingRow,
+    now: number,
+  ): boolean {
+    return (
+      row.proof_expired_at === null &&
+      !!proof &&
+      proof.origin === this.origin &&
+      proof.audience === this.audience &&
+      proof.issued_at >= row.issued_at &&
+      proof.expires_at <= row.expires_at &&
+      proof.consumed_at >= proof.issued_at &&
+      proof.consumed_at < proof.expires_at &&
+      now >= proof.consumed_at &&
+      now < proof.expires_at
+    )
+  }
+  private now(): number {
+    const now = this.clock()
+    if (
+      !Number.isSafeInteger(now) ||
+      now < 0 ||
+      now > Number.MAX_SAFE_INTEGER - PAIRING_TTL_MS
+    )
+      throw new Error('Invalid pairing clock')
+    return now
+  }
+  async start(
+    input: unknown,
+  ): Promise<{ ok: true; response: PairingStartResponse } | Failure> {
+    const parsed = PairingStartRequest.safeParse(input)
+    if (!parsed.success) return { ok: false, reason: 'invalid-input' }
+    const request = parsed.data
+    const deviceCode = randomBytes(32).toString('base64url')
+    const userCode = Array.from({ length: 8 }, () =>
+      alphabet.charAt(randomInt(alphabet.length)),
+    ).join('')
+    const fingerprint =
+      'SHA256:' +
+      createHash('sha256')
+        .update(Buffer.from(request.public_key_spki, 'base64url'))
+        .digest('base64url')
+    try {
+      return await this.sql.begin(async (tx) => {
+        await tx`SET LOCAL statement_timeout = '2000ms'`
+        await tx`SET LOCAL lock_timeout = '1000ms'`
+        // Bound active requests across all application instances.
+        await tx`SELECT pg_advisory_xact_lock(1870033, 7)`
+        const now = this.now()
+        const count =
+          await tx`SELECT count(*)::int AS n FROM farm.pairing_requests WHERE status IN ('pending', 'approved') AND expires_at > ${now}`
+        if (count[0]?.n >= 1000)
+          return { ok: false, reason: 'capacity' } satisfies Failure
+        const response = PairingStartResponse.parse({
+          device_code: deviceCode,
+          user_code: userCode,
+          fingerprint,
+          issued_at: now,
+          expires_at: now + PAIRING_TTL_MS,
+          poll_interval_s: 5,
+        })
+        await tx`INSERT INTO farm.pairing_requests (agent_id, device_code_hash, user_code_hash, public_key_spki, fingerprint, platform, version, issued_at, expires_at, next_poll_at) VALUES (${randomUUID()}::uuid, ${hash(deviceCode)}, ${hash(userCode)}, ${request.public_key_spki}, ${fingerprint}, ${request.platform}, ${request.version}, ${now}, ${response.expires_at}, ${now})`
+        return { ok: true, response } as const
+      })
+    } catch {
+      return { ok: false, reason: 'storage-unavailable' }
+    }
+  }
+  async decide(input: {
+    request: unknown
+    sessionRecordId: string
+    policy: SessionPolicy
+    decision: 'approve' | 'deny'
+  }): Promise<Decision> {
+    const parsed = PairingApprovalRequest.safeParse(input.request)
+    if (
+      !parsed.success ||
+      !['approve', 'deny'].includes(input.decision) ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.sessionRecordId)
+    )
+      return { ok: false, reason: 'invalid-input' }
+    const request = parsed.data
+    try {
+      return await this.sql.begin(async (tx): Promise<Decision> => {
+        await tx`SET LOCAL statement_timeout = '2000ms'`
+        await tx`SET LOCAL lock_timeout = '1000ms'`
+        // Same account -> session -> membership lock order as enrollment authorization.
+        const accounts = await tx<
+          AccountSessionState[]
+        >`SELECT id, session_version::float8 AS "sessionVersion", disabled FROM farm.session_accounts WHERE id = (SELECT account_id FROM farm.account_sessions WHERE id = ${input.sessionRecordId}) FOR UPDATE`
+        const sessions = await tx<
+          SessionRecord[]
+        >`SELECT id, account_id AS "accountId", account_version::float8 AS "accountVersion", created_at::float8 AS "createdAt", last_seen_at::float8 AS "lastSeenAt", absolute_expires_at::float8 AS "absoluteExpiresAt", revoked_at::float8 AS "revokedAt" FROM farm.account_sessions WHERE id = ${input.sessionRecordId} FOR UPDATE`
+        const account = accounts[0] ?? null
+        const record = sessions[0] ?? null
+        const initialNow = this.now()
+        const initial = evaluateSession(
+          input.sessionRecordId,
+          record,
+          account,
+          initialNow,
+          input.policy,
+        )
+        if (!initial.ok) {
+          if (initial.reason === 'expired')
+            await tx`UPDATE farm.account_sessions SET revoked_at = ${initialNow} WHERE id = ${input.sessionRecordId}`
+          return { ok: false, reason: 'denied' }
+        }
+        const members =
+          await tx`SELECT role, revoked_at FROM farm.memberships WHERE farm_id = ${request.farm_id}::uuid AND account_id = ${initial.accountId} FOR SHARE`
+        if (
+          !members[0] ||
+          members[0].revoked_at !== null ||
+          !['owner', 'admin'].includes(members[0].role)
+        )
+          return { ok: false, reason: 'denied' }
+        const rows = await tx<
+          PairingRow[]
+        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, proof_expired_at::float8, status, farm_id FROM farm.pairing_requests WHERE user_code_hash = ${hash(request.user_code)} FOR UPDATE`
+        const now = this.now()
+        if (now < initialNow) return { ok: false, reason: 'denied' }
+        const session = evaluateSession(
+          input.sessionRecordId,
+          record,
+          account,
+          now,
+          input.policy,
+        )
+        if (!session.ok) {
+          if (session.reason === 'expired')
+            await tx`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE id = ${input.sessionRecordId}`
+          return { ok: false, reason: 'denied' }
+        }
+        const row = rows[0]
+        if (
+          !row ||
+          row.status !== 'pending' ||
+          (input.decision === 'approve' && row.proof_expired_at !== null) ||
+          row.fingerprint !== request.expected_fingerprint ||
+          now < row.issued_at
+        )
+          return { ok: false, reason: 'denied' }
+        if (now >= row.expires_at) {
+          await tx`UPDATE farm.pairing_requests SET status = 'expired' WHERE agent_id = ${row.agent_id}::uuid`
+          return { ok: false, reason: 'denied' }
+        }
+        let touchAt = session.touchAt
+        if (input.decision === 'deny') {
+          await tx`UPDATE farm.pairing_requests SET status = 'denied' WHERE agent_id = ${row.agent_id}::uuid`
+        } else {
+          const proofs = await tx<
+            VerifiedProof[]
+          >`SELECT origin, audience, issued_at::float8, expires_at::float8, consumed_at::float8 FROM farm.pairing_proofs WHERE agent_id = ${row.agent_id}::uuid AND status = 'verified' FOR SHARE`
+          const approvalNow = this.now()
+          if (approvalNow < now) return { ok: false, reason: 'denied' }
+          if (proofs[0] && approvalNow >= proofs[0].expires_at)
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${approvalNow} WHERE agent_id = ${row.agent_id}::uuid`
+          const currentSession = evaluateSession(
+            input.sessionRecordId,
+            record,
+            account,
+            approvalNow,
+            input.policy,
+          )
+          if (!currentSession.ok) {
+            if (currentSession.reason === 'expired')
+              await tx`UPDATE farm.account_sessions SET revoked_at = ${approvalNow} WHERE id = ${input.sessionRecordId}`
+            return { ok: false, reason: 'denied' }
+          }
+          if (!this.proofIsCurrent(proofs[0], row, approvalNow))
+            return { ok: false, reason: 'denied' }
+          await tx`INSERT INTO farm.connector_enrollments (agent_id, farm_id, public_key_spki, fingerprint) VALUES (${row.agent_id}::uuid, ${request.farm_id}::uuid, ${row.public_key_spki}, ${row.fingerprint})`
+          await tx`UPDATE farm.connector_enrollments SET status = 'approved' WHERE agent_id = ${row.agent_id}::uuid`
+          await tx`UPDATE farm.pairing_requests SET status = 'approved', farm_id = ${request.farm_id}::uuid, decided_by = ${session.accountId} WHERE agent_id = ${row.agent_id}::uuid`
+          touchAt = currentSession.touchAt
+        }
+        await tx`UPDATE farm.account_sessions SET last_seen_at = ${touchAt} WHERE id = ${input.sessionRecordId}`
+        return {
+          ok: true,
+          status: input.decision === 'approve' ? 'approved' : 'denied',
+        }
+      })
+    } catch {
+      return { ok: false, reason: 'storage-unavailable' }
+    }
+  }
+  /** Signs and records one credential inside the locked claim transaction; returns only after COMMIT. */
+  async claim(
+    input: unknown,
+    issuer: ConnectorCredentialIssuerConfig,
+  ): Promise<PairingClaim> {
+    const signing = { ...issuer }
+    const parsed = PairingPollRequest.safeParse(input)
+    if (!parsed.success) return { ok: false, reason: 'invalid-input' }
+    try {
+      return await this.sql.begin(async (tx): Promise<PairingClaim> => {
+        await tx`SET LOCAL statement_timeout = '2000ms'`
+        await tx`SET LOCAL lock_timeout = '1000ms'`
+        const rows = await tx<
+          PairingRow[]
+        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, proof_expired_at::float8, status, farm_id FROM farm.pairing_requests WHERE device_code_hash = ${hash(parsed.data.device_code)} FOR UPDATE`
+        const row = rows[0]
+        const now = this.now()
+        if (!row || now < row.issued_at || row.status === 'consumed')
+          return { ok: false, reason: 'denied' }
+        if (row.status === 'denied' || row.status === 'expired')
+          return { ok: true, status: row.status }
+        if (now >= row.expires_at) {
+          // Approved remains an immutable authorization decision; expiry prevents delivery.
+          if (row.status === 'pending')
+            await tx`UPDATE farm.pairing_requests SET status = 'expired' WHERE agent_id = ${row.agent_id}::uuid`
+          else if (row.proof_expired_at === null)
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${now} WHERE agent_id = ${row.agent_id}::uuid`
+          return { ok: true, status: 'expired' }
+        }
+        if (now < row.next_poll_at)
+          return { ok: true, status: 'slow_down', retry_after_s: 5 }
+        if (row.status === 'pending') {
+          await tx`UPDATE farm.pairing_requests SET next_poll_at = ${Math.min(now + 5000, row.expires_at)} WHERE agent_id = ${row.agent_id}::uuid`
+          return { ok: true, status: 'pending', retry_after_s: 5 }
+        }
+        if (row.proof_expired_at !== null)
+          return { ok: false, reason: 'denied' }
+        const proofs = await tx<
+          VerifiedProof[]
+        >`SELECT origin, audience, issued_at::float8, expires_at::float8, consumed_at::float8 FROM farm.pairing_proofs WHERE agent_id = ${row.agent_id}::uuid AND status = 'verified' FOR SHARE`
+        const proofNow = this.now()
+        if (proofNow >= now && proofs[0] && proofNow >= proofs[0].expires_at)
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${proofNow} WHERE agent_id = ${row.agent_id}::uuid`
+        if (proofNow < now || !this.proofIsCurrent(proofs[0], row, proofNow))
+          return { ok: false, reason: 'denied' }
+        const enrolled =
+          await tx`SELECT status, farm_id FROM farm.connector_enrollments WHERE agent_id = ${row.agent_id}::uuid FOR SHARE`
+        if (
+          !row.farm_id ||
+          enrolled[0]?.status !== 'approved' ||
+          enrolled[0]?.farm_id !== row.farm_id
+        )
+          return { ok: false, reason: 'denied' }
+        const deliveryNow = this.now()
+        if (
+          deliveryNow >= proofNow &&
+          proofs[0] &&
+          deliveryNow >= proofs[0].expires_at
+        )
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${deliveryNow} WHERE agent_id = ${row.agent_id}::uuid`
+        if (deliveryNow < proofNow || deliveryNow >= row.expires_at)
+          return { ok: true, status: 'expired' }
+        if (!this.proofIsCurrent(proofs[0], row, deliveryNow))
+          return { ok: false, reason: 'denied' }
+        const jti = randomUUID()
+        const issuedAt = Math.floor(deliveryNow / 1000)
+        const expiresAt = issuedAt + signing.ttlSeconds
+        const binding = await connectorKeyBinding(row.public_key_spki)
+        if (binding.fingerprint !== row.fingerprint)
+          throw new Error('Credential identity mismatch')
+        const token = await issueConnectorCredential({
+          ...signing,
+          nowSeconds: issuedAt,
+          agentId: row.agent_id,
+          farmId: row.farm_id,
+          publicKeySpki: row.public_key_spki,
+          jti,
+        })
+        const signedAt = this.now()
+        if (
+          signedAt >= deliveryNow &&
+          proofs[0] &&
+          signedAt >= proofs[0].expires_at
+        )
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${signedAt} WHERE agent_id = ${row.agent_id}::uuid`
+        if (
+          signedAt < deliveryNow ||
+          signedAt >= row.expires_at ||
+          !this.proofIsCurrent(proofs[0], row, signedAt) ||
+          Math.floor(signedAt / 1000) >= expiresAt
+        )
+          return { ok: false, reason: 'denied' }
+        const response = PairingPollResponse.parse({
+          status: 'approved',
+          agent_id: row.agent_id,
+          farm_id: row.farm_id,
+          device_token: token,
+          expires_at: expiresAt * 1000,
+        })
+        if (response.status !== 'approved')
+          throw new Error('Invalid credential response')
+        try {
+          await tx.savepoint(async (save) => {
+            await save`INSERT INTO farm.connector_credentials (jti, agent_id, farm_id, fingerprint, thumbprint, kid, issuer, audience, issued_at, expires_at) VALUES (${jti}::uuid, ${row.agent_id}::uuid, ${row.farm_id}::uuid, ${binding.fingerprint}, ${binding.thumbprint}, ${signing.kid}, ${signing.issuer}, ${signing.audience}, ${issuedAt}, ${expiresAt})`
+            await save`UPDATE farm.pairing_requests SET status = 'consumed' WHERE agent_id = ${row.agent_id}::uuid`
+            const recordedAt = this.now()
+            if (
+              recordedAt < signedAt ||
+              recordedAt >= row.expires_at ||
+              !this.proofIsCurrent(proofs[0], row, recordedAt) ||
+              Math.floor(recordedAt / 1000) >= expiresAt
+            )
+              throw new CredentialWindowExpired(recordedAt)
+          })
+        } catch (error) {
+          if (!(error instanceof CredentialWindowExpired)) throw error
+          if (
+            error.observedAt >= signedAt &&
+            proofs[0] &&
+            error.observedAt >= proofs[0].expires_at
+          )
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${error.observedAt} WHERE agent_id = ${row.agent_id}::uuid`
+          return { ok: false, reason: 'denied' }
+        }
+        return { ok: true, ...response }
+      })
+    } catch {
+      return { ok: false, reason: 'storage-unavailable' }
+    }
+  }
+}

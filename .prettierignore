@@ -4,3 +4,5 @@ reference-review/
 .output/
 dist/
 node_modules/
+# Audited upstream bytes and notices are verified by their retained manifest.
+third_party/rtsp-ingest/

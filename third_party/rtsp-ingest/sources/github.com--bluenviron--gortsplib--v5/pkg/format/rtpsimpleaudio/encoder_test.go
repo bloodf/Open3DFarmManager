@@ -1,0 +1,60 @@
+package rtpsimpleaudio_test
+
+import (
+	"testing"
+
+	"github.com/pion/rtp"
+	"github.com/stretchr/testify/require"
+
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtpsimpleaudio"
+)
+
+var cases = []struct {
+	name  string
+	frame []byte
+	pkt   *rtp.Packet
+}{
+	{
+		"single",
+		[]byte{0x01, 0x02, 0x03, 0x04},
+		&rtp.Packet{
+			Header: rtp.Header{
+				Version:        2,
+				Marker:         false,
+				PayloadType:    0,
+				SequenceNumber: 17645,
+				SSRC:           0x9dbb7812,
+			},
+			Payload: []byte{0x01, 0x02, 0x03, 0x04},
+		},
+	},
+}
+
+func TestEncode(t *testing.T) {
+	for _, ca := range cases {
+		t.Run(ca.name, func(t *testing.T) {
+			e := &rtpsimpleaudio.Encoder{
+				PayloadType:           0,
+				SSRC:                  new(uint32(0x9dbb7812)),
+				InitialSequenceNumber: new(uint16(0x44ed)),
+				PayloadMaxSize:        1000,
+			}
+			err := e.Init()
+			require.NoError(t, err)
+
+			pkt, err := e.Encode(ca.frame)
+			require.NoError(t, err)
+			require.Equal(t, ca.pkt, pkt)
+		})
+	}
+}
+
+func TestEncodeRandomInitialState(t *testing.T) {
+	e := &rtpsimpleaudio.Encoder{
+		PayloadType: 0,
+	}
+	err := e.Init()
+	require.NoError(t, err)
+	require.NotEqual(t, nil, e.SSRC)
+	require.NotEqual(t, nil, e.InitialSequenceNumber)
+}

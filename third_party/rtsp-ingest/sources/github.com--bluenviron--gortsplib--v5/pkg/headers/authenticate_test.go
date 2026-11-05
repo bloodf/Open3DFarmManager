@@ -1,0 +1,167 @@
+package headers_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/headers"
+)
+
+var casesAuthenticate = []struct {
+	name string
+	vin  base.HeaderValue
+	vout base.HeaderValue
+	h    headers.Authenticate
+}{
+	{
+		"basic",
+		base.HeaderValue{`Basic realm="4419b63f5e51"`},
+		base.HeaderValue{`Basic realm="4419b63f5e51"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodBasic,
+			Realm:  "4419b63f5e51",
+		},
+	},
+	{
+		"digest with qop",
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", qop="auth"`},
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", ` +
+			`qop="auth"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodDigest,
+			Realm:  "4419b63f5e51",
+			Nonce:  "8b84a3b789283a8bea8da7fa7d41f08b",
+			Qop:    new("auth"),
+		},
+	},
+	{
+		"digest 1",
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", stale="FALSE"`},
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", ` +
+			`stale="FALSE"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodDigest,
+			Realm:  "4419b63f5e51",
+			Nonce:  "8b84a3b789283a8bea8da7fa7d41f08b",
+			Stale:  new("FALSE"),
+		},
+	},
+	{
+		"digest 2",
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", stale=FALSE`},
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", ` +
+			`stale="FALSE"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodDigest,
+			Realm:  "4419b63f5e51",
+			Nonce:  "8b84a3b789283a8bea8da7fa7d41f08b",
+			Stale:  new("FALSE"),
+		},
+	},
+	{
+		"digest 3",
+		base.HeaderValue{`Digest realm="4419b63f5e51",nonce="133767111917411116111311118211673010032",  stale="FALSE"`},
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="133767111917411116111311118211673010032", ` +
+			`stale="FALSE"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodDigest,
+			Realm:  "4419b63f5e51",
+			Nonce:  "133767111917411116111311118211673010032",
+			Stale:  new("FALSE"),
+		},
+	},
+	{
+		"digest after failed auth",
+		base.HeaderValue{`Digest realm="Please log in with a valid username",` +
+			`nonce="752a62306daf32b401a41004555c7663",opaque="",stale=FALSE`},
+		base.HeaderValue{`Digest realm="Please log in with a valid username", ` +
+			`nonce="752a62306daf32b401a41004555c7663", opaque="", stale="FALSE"`},
+		headers.Authenticate{
+			Method: headers.AuthMethodDigest,
+			Realm:  "Please log in with a valid username",
+			Nonce:  "752a62306daf32b401a41004555c7663",
+			Opaque: new(""),
+			Stale:  new("FALSE"),
+		},
+	},
+	{
+		"digest md5 explicit",
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", ` +
+			`stale="FALSE", algorithm="MD5"`},
+		base.HeaderValue{`Digest realm="4419b63f5e51", nonce="8b84a3b789283a8bea8da7fa7d41f08b", ` +
+			`stale="FALSE", algorithm="MD5"`},
+		headers.Authenticate{
+			Method:    headers.AuthMethodDigest,
+			Realm:     "4419b63f5e51",
+			Nonce:     "8b84a3b789283a8bea8da7fa7d41f08b",
+			Stale:     new("FALSE"),
+			Algorithm: new(headers.AuthAlgorithmMD5),
+		},
+	},
+	{
+		"digest sha256",
+		base.HeaderValue{`Digest realm="IP Camera(AB705)", ` +
+			`nonce="fcc86deace979a488b2bfb89f4d0812c", algorithm="SHA-256", stale="FALSE"`},
+		base.HeaderValue{`Digest realm="IP Camera(AB705)", ` +
+			`nonce="fcc86deace979a488b2bfb89f4d0812c", stale="FALSE", algorithm="SHA-256"`},
+		headers.Authenticate{
+			Method:    headers.AuthMethodDigest,
+			Realm:     "IP Camera(AB705)",
+			Nonce:     "fcc86deace979a488b2bfb89f4d0812c",
+			Stale:     new("FALSE"),
+			Algorithm: new(headers.AuthAlgorithmSHA256),
+		},
+	},
+}
+
+func TestAuthenticateUnmarshal(t *testing.T) {
+	for _, ca := range casesAuthenticate {
+		t.Run(ca.name, func(t *testing.T) {
+			var h headers.Authenticate
+			err := h.Unmarshal(ca.vin)
+			require.NoError(t, err)
+			require.Equal(t, ca.h, h)
+		})
+	}
+}
+
+func TestAuthenticateMarshal(t *testing.T) {
+	for _, ca := range casesAuthenticate {
+		t.Run(ca.name, func(t *testing.T) {
+			vout := ca.h.Marshal()
+			require.Equal(t, ca.vout, vout)
+		})
+	}
+}
+
+func FuzzAuthenticateUnmarshal(f *testing.F) {
+	for _, ca := range casesAuthenticate {
+		f.Add(ca.vin[0])
+	}
+
+	f.Fuzz(func(_ *testing.T, b string) {
+		var h headers.Authenticate
+		err := h.Unmarshal(base.HeaderValue{b})
+		if err != nil {
+			return
+		}
+
+		h.Marshal()
+	})
+}
+
+func TestAuthenticateAdditionalErrors(t *testing.T) {
+	func() {
+		var h headers.Authenticate
+		err := h.Unmarshal(base.HeaderValue{})
+		require.Error(t, err)
+	}()
+
+	func() {
+		var h headers.Authenticate
+		err := h.Unmarshal(base.HeaderValue{"a", "b"})
+		require.Error(t, err)
+	}()
+}

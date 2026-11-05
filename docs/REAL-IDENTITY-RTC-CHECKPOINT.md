@@ -1,0 +1,49 @@
+# Real-identity read-only RTC checkpoint
+
+Status: the controlled real-identity Chromium-to-Node/Bun interoperability matrix passed. Production authorization and registry integration remain pending. The existing Chromium-to-Node/Bun experiment uses synthetic identity and status only. The following contracts prepare a separate read-only integration; they do not establish production authorization, registry access, camera transport or hardware behavior.
+
+## Evidence available
+
+The adapter under test is commit `faee089ae78836ddad1ebffcc7ff149961fad8d6`. Its shared receive engine is `044c64c`, framing is `b4e0324`, and the session is `38a6f57`.
+
+The Connector identity store can sign the fixed Connector RTC proof domain using its encapsulated key. The signer checks the trusted expected agent ID against the binding and derives the Connector public key and fingerprint from its own key. It does not expose a general signing operation or export the private key. Protocol changes bound the encoded proof separately from application data and require the complete expected binding during verification. The shared receive engine supports explicit UTF-8 accounting.
+
+Focused protocol tests passed seven cases each under Node and Bun. Signer and existing identity/credential tests passed thirteen cases each under Node and Bun. The global TypeScript gate passed after dependency installation. A controlled Node-only real-identity probe passed in 1.803 seconds. Both actual certificate fingerprints matched the signed pins; each endpoint sent and received one proof, reached mutual verification before exchanging the synthetic `fixture-idle` status over RTC, and kept commands disabled. Both closed once with empty receive queues. The child exited normally, and its standard output and error streams drained before cleanup. The subsequent full matrix passed twenty scenarios, ten each with Node 24.20.0 and Bun 1.4.2 against Chromium 156.0.8078.4 and libdatachannel 0.24.5, in 34.833 seconds. It covered valid exchange, altered farm, wrong identity, tampered offer and answer, admission timeout, abandoned offer and late admission, replay, pre-authentication status and closure. Both tampered-SDP cases had zero actual proof sends, decoded proof receives and accepted application frames on both endpoints. The altered farm was rejected. The replay used a previously valid proof on a fresh RTC session; root proof verification succeeded before expected-binding verification rejected it. Child exit and close were successful, with stdout and stderr drained before browser and server cleanup. Twelve focused cases passed under each runtime, including the three description regressions. Focused strict TypeScript, formatting and diff checks passed. These results do not establish SQL registry, WebSocket authority or production authorization integration. Current-head integrated checks remain pending.
+
+## Independent review corrections
+
+The follow-up closes the concurrent `offer()` window by consuming the one-shot
+attempt before native gathering starts. The interoperability child calls
+`offer()` twice without awaiting the first call on every scenario and requires
+that the second call reject while the first completes. Browser agent validation
+now precedes peer allocation; an actual Chromium constructor-counting probe
+requires invalid input to allocate zero peers. Successful exchanges assert one
+sent and one received proof at each endpoint.
+
+Tampered offer and answer tests now require an explicit `transport-failed` or
+`binding-or-certificate` terminal result at an endpoint, in addition to zero
+proof sends, receives and accepted application frames. An authentication timeout
+alone cannot satisfy this gate. The ten-scenario matrix passed separately with
+Node 24.20.0 and Bun 1.4.2 against Chromium 156.0.8078.4; both tampered cases
+reported transport failure in each run. Root TypeScript and focused formatting
+checks passed. Child processes exited and closed normally, browser/server cleanup
+completed, and no PostgreSQL or Docker resource was used. Full integrated CI and
+production signalling authorization remain pending.
+
+## Integration contract
+
+A trusted owner constructs the endpoint with the expected Connector agent ID and a one-shot admitted-binding promise. That owner supplies the binding after the exact final offer and answer are known. Hash the immutable remote input bytes actually passed to a successful `setRemoteDescription`, and the final local description bytes actually transmitted after successful `setLocalDescription`. A later SDP getter may reserialize the description and is not the signed byte source. The strict protocol parser must check effective role fingerprints against the signed binding, independently of the actual negotiated certificate check. Reject replacement, renegotiation, rollback and description-type mismatch; do not normalize bytes or substitute a new binding. An RTC frame, peer-provided key or server-provided identifier alone cannot create this trust. The endpoints verify the expected binding and actual negotiated certificate and enforce their deadlines before and after asynchronous work. Expiry, revocation or transport failure closes the endpoint into read-only state. `commands_enabled` remains false for every identity; no command path, TURN or server fallback is introduced.
+
+The intended receive limits are 8,192 UTF-8 bytes per proof, 2,048 bytes per application frame and 32,768 UTF-8 bytes retained across queued and active inputs, with at most four maximum-sized envelopes. For these payloads, UTF-16 string storage is at most 65,536 bytes. These are application-owned payload bounds at the JavaScript callback boundary, not a bound on the native library or whole-process memory.
+
+## Camera extension boundary
+
+A later camera source may supply complete encoded access units with `timestampUs`, a nonnegative safe integer in microseconds that strictly increases per session. The API rejects overflow or wrap; internal conversion to a 90 kHz RTP clock may wrap. Each input is copied into one owned buffer of at most 256 KiB, without `SharedArrayBuffer` or caller aliasing. A synchronous `trySend` consumes or copies the input before returning. Track configuration and codec parameters must be included before the final SDP is signed. An independently enforced `performance.now()` lease of at most 30 seconds gates source admission; lease expiry, revocation, pressure or transport closure stops the source and closes its track. Pressure is terminal until a separately reviewed bounded strategy exists.
+
+The installed low-level Track API is the candidate interface; the browser-shaped polyfill does not establish a usable native media track path. The installed TypeScript Track declaration lists buffer methods that its C++ wrapper does not export, and a Track low-buffer callback is not exposed. A bounded upstream producer alone does not prove native media buffering is bounded. RTSP ingestion, codec interoperability and camera runtime behavior have not been tested.
+
+## Runtime probe and remaining limitations
+
+The current real-identity probe stopped before proof exchange under the rejected assumption that a browser SDP getter reproduces the transmitted offer byte-for-byte. The native offer had 527 UTF-16 code units and 19 CRLF pairs; Chromium returned 504 code units and 17 CRLF pairs. This difference is not explained solely by line endings. A second pre-proof close came from copying an `RTCSessionDescription` with object spread: its getter-backed fields were not enumerable, so the copy was empty. A regression was preserved and an explicit-field copy corrected that failure. Three description tests passed under both Node and Bun. The distinct transmitted-byte contract correction remains in force; the controlled Node probe and subsequent Node/Bun matrix passed afterward.
+
+The native binary reports its library version, but exact source-to-binary provenance and its complete embedded dependency inventory remain unverified. No forged-handshake test or distribution-ready claim follows from the source review. A prior `Got a remote candidate without ICE transport` failure with legitimate SDP remains unexplained; later passing synthetic runs do not establish its cause or correction. Production identity approval, current registry and authorization wiring, remote revocation behavior, real camera or RTSP integration, cross-network connectivity and physical printers remain outside this checkpoint.

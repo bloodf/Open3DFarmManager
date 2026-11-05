@@ -4,16 +4,20 @@
   "type": "module",
   "scripts": {
     "dev": "nuxt dev --host 127.0.0.1",
-    "build": "nuxt build",
+    "build": "nuxt build && cp ../../LICENSE ../../THIRD_PARTY.md .output/",
     "typecheck": "nuxt typecheck",
     "prepare": "nuxt prepare"
   },
   "dependencies": {
+    "@adonisjs/hash": "9.1.1",
+    "@open3dfarmmanager/farm-protocol": "workspace:*",
+    "@open3dfarmmanager/shared": "workspace:*",
+    "jose": "6.2.15",
     "nuxt": "4.6.4",
+    "postgres": "3.4.9",
     "vue": "3.5.44",
     "vue-router": "5.4.0",
-    "@open3dfarmmanager/farm-protocol": "workspace:*",
-    "@open3dfarmmanager/shared": "workspace:*"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "vue-tsc": "3.3.14"

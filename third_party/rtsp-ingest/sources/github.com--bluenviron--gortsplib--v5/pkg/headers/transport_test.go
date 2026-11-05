@@ -1,0 +1,215 @@
+package headers_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/headers"
+)
+
+var casesTransport = []struct {
+	name string
+	vin  base.HeaderValue
+	vout base.HeaderValue
+	h    headers.Transport
+}{
+	{
+		"udp unicast play request",
+		base.HeaderValue{`RTP/AVP;unicast;client_port=3456-3457;mode="PLAY"`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=3456-3457;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			ClientPorts: &[2]int{3456, 3457},
+			Mode:        new(headers.TransportModePlay),
+		},
+	},
+	{
+		"udp unicast play response",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;client_port=3056-3057;server_port=5000-5001`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=3056-3057;server_port=5000-5001`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			ClientPorts: &[2]int{3056, 3057},
+			ServerPorts: &[2]int{5000, 5001},
+		},
+	},
+	{
+		"udp multicast play request / response",
+		base.HeaderValue{`RTP/AVP;multicast;destination=225.219.201.15;port=7000-7001;ttl=127`},
+		base.HeaderValue{`RTP/AVP;multicast;destination=225.219.201.15;port=7000-7001;ttl=127`},
+		headers.Transport{
+			Protocol:     headers.TransportProtocolUDP,
+			Delivery:     new(headers.TransportDeliveryMulticast),
+			Destination2: new("225.219.201.15"),
+			TTL:          new(uint(127)),
+			Ports:        &[2]int{7000, 7001},
+		},
+	},
+	{
+		"tcp play request / response",
+		base.HeaderValue{`RTP/AVP/TCP;interleaved=0-1`},
+		base.HeaderValue{`RTP/AVP/TCP;interleaved=0-1`},
+		headers.Transport{
+			Protocol:       headers.TransportProtocolTCP,
+			InterleavedIDs: &[2]int{0, 1},
+		},
+	},
+	{
+		"udp unicast play response with a single port and ssrc",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;server_port=8052;client_port=14186;ssrc=0B6020AD;mode=PLAY`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=14186-14187;server_port=8052-8053;ssrc=0B6020AD;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			Mode:        new(headers.TransportModePlay),
+			ClientPorts: &[2]int{14186, 14187},
+			ServerPorts: &[2]int{8052, 8053},
+			SSRC:        new(uint32(0x0B6020AD)),
+		},
+	},
+	{
+		"udp record response with receive",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;mode=receive;source=127.0.0.1;client_port=14186-14187;server_port=5000-5001`},
+		base.HeaderValue{`RTP/AVP;unicast;source=127.0.0.1;client_port=14186-14187;server_port=5000-5001;mode=record`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			Mode:        new(headers.TransportModeRecord),
+			ClientPorts: &[2]int{14186, 14187},
+			ServerPorts: &[2]int{5000, 5001},
+			Source2:     new("127.0.0.1"),
+		},
+	},
+	{
+		"unsorted udp unicast play request headers",
+		base.HeaderValue{`client_port=3456-3457;RTP/AVP;mode="PLAY";unicast`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=3456-3457;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			ClientPorts: &[2]int{3456, 3457},
+			Mode:        new(headers.TransportModePlay),
+		},
+	},
+	{
+		"ssrc odd",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;client_port=14186;server_port=8052;ssrc=4317f;mode=play`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=14186-14187;server_port=8052-8053;ssrc=0004317F;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			Mode:        new(headers.TransportModePlay),
+			ClientPorts: &[2]int{14186, 14187},
+			ServerPorts: &[2]int{8052, 8053},
+			SSRC:        new(uint32(0x04317f)),
+		},
+	},
+	{
+		"hikvision ssrc with initial spaces",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;client_port=14186;server_port=8052;ssrc= 4317f;mode=play`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=14186-14187;server_port=8052-8053;ssrc=0004317F;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			Mode:        new(headers.TransportModePlay),
+			ClientPorts: &[2]int{14186, 14187},
+			ServerPorts: &[2]int{8052, 8053},
+			SSRC:        new(uint32(0x04317f)),
+		},
+	},
+	{
+		"dahua rtsp server ssrc with initial spaces",
+		base.HeaderValue{`RTP/AVP/TCP;unicast;interleaved=0-1;ssrc=     D93FF`},
+		base.HeaderValue{`RTP/AVP/TCP;unicast;interleaved=0-1;ssrc=000D93FF`},
+		headers.Transport{
+			Protocol:       headers.TransportProtocolTCP,
+			Delivery:       new(headers.TransportDeliveryUnicast),
+			InterleavedIDs: &[2]int{0, 1},
+			SSRC:           new(uint32(0xD93FF)),
+		},
+	},
+	{
+		"empty source",
+		base.HeaderValue{`RTP/AVP/UDP;unicast;source=;client_port=32560-32561;server_port=3046-3047;ssrc=45dcb578`},
+		base.HeaderValue{`RTP/AVP;unicast;client_port=32560-32561;server_port=3046-3047;ssrc=45DCB578`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			SSRC:        new(uint32(0x45dcb578)),
+			ClientPorts: &[2]int{32560, 32561},
+			ServerPorts: &[2]int{3046, 3047},
+		},
+	},
+	{
+		"invalid ssrc",
+		base.HeaderValue{`RTP/AVP;unicast;client_port=14236;source=172.16.8.2;server_port=56002;ssrc=1449463210`},
+		base.HeaderValue{`RTP/AVP;unicast;source=172.16.8.2;client_port=14236-14237;server_port=56002-56003`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			Source2:     new("172.16.8.2"),
+			ClientPorts: &[2]int{14236, 14237},
+			ServerPorts: &[2]int{56002, 56003},
+		},
+	},
+	{
+		"secure udp unicast play request",
+		base.HeaderValue{`RTP/SAVP;unicast;client_port=3456-3457;mode="PLAY"`},
+		base.HeaderValue{`RTP/SAVP;unicast;client_port=3456-3457;mode=play`},
+		headers.Transport{
+			Protocol:    headers.TransportProtocolUDP,
+			Profile:     headers.TransportProfileSAVP,
+			Delivery:    new(headers.TransportDeliveryUnicast),
+			ClientPorts: &[2]int{3456, 3457},
+			Mode:        new(headers.TransportModePlay),
+		},
+	},
+	{
+		"secure tcp play request / response",
+		base.HeaderValue{`RTP/SAVP/TCP;interleaved=0-1`},
+		base.HeaderValue{`RTP/SAVP/TCP;interleaved=0-1`},
+		headers.Transport{
+			Protocol:       headers.TransportProtocolTCP,
+			Profile:        headers.TransportProfileSAVP,
+			InterleavedIDs: &[2]int{0, 1},
+		},
+	},
+}
+
+func TestTransportUnmarshal(t *testing.T) {
+	for _, ca := range casesTransport {
+		t.Run(ca.name, func(t *testing.T) {
+			var h headers.Transport
+			err := h.Unmarshal(ca.vin)
+			require.NoError(t, err)
+			require.Equal(t, ca.h, h)
+		})
+	}
+}
+
+func TestTransportMarshal(t *testing.T) {
+	for _, ca := range casesTransport {
+		t.Run(ca.name, func(t *testing.T) {
+			req := ca.h.Marshal()
+			require.Equal(t, ca.vout, req)
+		})
+	}
+}
+
+func TestTransportAdditionalErrors(t *testing.T) {
+	func() {
+		var h headers.Transport
+		err := h.Unmarshal(base.HeaderValue{})
+		require.Error(t, err)
+	}()
+
+	func() {
+		var h headers.Transport
+		err := h.Unmarshal(base.HeaderValue{"a", "b"})
+		require.Error(t, err)
+	}()
+}

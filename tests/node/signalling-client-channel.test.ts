@@ -1,0 +1,541 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  SignallingClientChannel,
+  type SocketPort,
+} from '../../packages/connector/src/webrtc/signalling-client-channel.ts'
+
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+for (const phase of ['open', 'frame'] as const) {
+  test(`disposal waits for pending ${phase} work after observed socket close`, async () => {
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let handlers: Parameters<SocketPort['bind']>[0] | undefined
+    const channel = new SignallingClientChannel({
+      onOpen: () => (phase === 'open' ? held : undefined),
+      onFrame: async () => {
+        if (phase === 'frame') await held
+      },
+      onTerminal: () => {},
+    })
+    channel.connect(() => ({
+      isOpen: () => true,
+      bufferedBytes: () => 0,
+      send: () => {},
+      bind: (value) => {
+        handlers = value
+        return () => {}
+      },
+      close: () => {},
+      waitClosed: async () => {},
+    }))
+    try {
+      await tick()
+      assert.ok(handlers)
+      handlers.open()
+      if (phase === 'frame') {
+        handlers.message(
+          JSON.stringify({
+            v: 1,
+            t: 'retry',
+            phase: 'inbox',
+            retry_after_ms: 1,
+          }),
+        )
+        // Overload must not erase the still-running callback's settlement.
+        for (let i = 0; i < 5; i++) handlers.message('x')
+      }
+      await tick()
+      let disposed = false
+      const result = channel.dispose(1000).then(() => {
+        disposed = true
+      })
+      await tick()
+      assert.equal(disposed, false)
+      release()
+      await result
+      assert.equal(disposed, true)
+    } finally {
+      release()
+      channel.close()
+    }
+  })
+}
+
+async function fixture(
+  onFrame: ConstructorParameters<
+    typeof SignallingClientChannel
+  >[0]['onFrame'] = async () => {},
+) {
+  let now = 100,
+    wall = 100000,
+    closed = 0,
+    opened = 0
+  let handlers: Parameters<SocketPort['bind']>[0] | undefined
+  const writes: Array<(error?: Error) => void> = []
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 0,
+    bind: (value) => {
+      handlers = value
+      return () => {}
+    },
+    send: (_wire, done) => {
+      writes.push(done)
+    },
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame,
+    onOpen: () => {
+      opened++
+    },
+    onTerminal: () => {},
+    clock: { now: () => now, wallNow: () => wall },
+  })
+  channel.connect(() => port)
+  await tick()
+  assert.ok(handlers)
+  return {
+    channel,
+    handlers,
+    writes,
+    closed: () => closed,
+    opened: () => opened,
+    advance: (ms: number) => {
+      now += ms
+      wall += ms
+    },
+  }
+}
+
+test('original admission and lifetime only shorten; terminal late callbacks cannot restart', async () => {
+  const f = await fixture()
+  try {
+    f.advance(1000)
+    f.channel.beginContext(120000)
+    assert.equal(f.channel.deadlines().authDeadline, 8100)
+    f.channel.capLease({ issued_at: 100000, expires_at: 110000 })
+    assert.equal(f.channel.deadlines().lifetimeDeadline, 10100)
+    f.channel.close()
+    f.handlers.open()
+    f.handlers.message('x'.repeat(100000))
+    await tick()
+    assert.equal(f.opened(), 0)
+    assert.equal(f.channel.snapshot().work.admitted, 0)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.channel.close()
+  }
+})
+
+test('active receive is charged before await and overload stops subsequent callbacks', async () => {
+  let release = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const f = await fixture(async () => {
+    await held
+  })
+  try {
+    const frame = JSON.stringify({
+      v: 1,
+      t: 'retry',
+      phase: 'inbox',
+      retry_after_ms: 1,
+    })
+    for (let i = 0; i < 100000; i++) f.handlers.message(frame)
+    const snapshot = f.channel.snapshot()
+    assert.equal(snapshot.state, 'readonly')
+    assert.equal(snapshot.reason, 'receive-capacity')
+    assert.equal(snapshot.work.maxPending, 4)
+    assert.ok(snapshot.work.maxRetainedBytes <= 32768)
+    assert.equal(snapshot.work.admitted, 4)
+    assert.equal(f.closed(), 1)
+    release()
+    await tick()
+    assert.equal(f.channel.snapshot().work.pending, 0)
+    assert.equal(f.channel.snapshot().work.retainedBytes, 0)
+  } finally {
+    release()
+    f.channel.close()
+  }
+})
+
+test('four outstanding writes cap submission and late completions do not revive counters', async () => {
+  const f = await fixture()
+  try {
+    for (let i = 0; i < 4; i++) f.channel.send({ v: 1, t: 'connector.retry' })
+    assert.equal(f.channel.snapshot().pendingWrites, 4)
+    assert.throws(() => f.channel.send({ v: 1, t: 'connector.retry' }))
+    for (const done of f.writes) done()
+    assert.equal(f.channel.snapshot().state, 'readonly')
+    assert.equal(f.channel.snapshot().pendingWrites, 0)
+    assert.equal(f.channel.snapshot().writeBytes, 0)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.channel.close()
+  }
+})
+
+test('UTF-8 byte budget includes the active frame before asynchronous work settles', async () => {
+  let release = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const f = await fixture(async () => held)
+  try {
+    const base = JSON.stringify({
+      v: 1,
+      t: 'retry',
+      phase: 'inbox',
+      retry_after_ms: 1,
+    })
+    const padded = (bytes: number) => ' '.repeat(bytes - base.length) + base
+    for (const n of [8192, 8192, 8192]) f.handlers.message(padded(n))
+    assert.equal(f.channel.snapshot().work.retainedBytes, 24576)
+    f.handlers.message(padded(8193))
+    const stopped = f.channel.snapshot()
+    assert.equal(stopped.reason, 'receive-capacity')
+    assert.equal(stopped.work.admitted, 3)
+    assert.equal(stopped.work.retainedBytes, 8192)
+    release()
+    await tick()
+    assert.equal(f.channel.snapshot().work.retainedBytes, 0)
+  } finally {
+    release()
+    f.channel.close()
+  }
+})
+
+test('oversized UTF-8 and binary frames fail before admission', async () => {
+  for (const input of ['é'.repeat(6145), new Uint8Array([1])]) {
+    const f = await fixture()
+    try {
+      f.handlers.message(input)
+      assert.equal(f.channel.snapshot().reason, 'receive-capacity')
+      assert.equal(f.channel.snapshot().work.admitted, 0)
+    } finally {
+      f.channel.close()
+    }
+  }
+})
+
+test('socket buffered bytes count against outbound cap', async () => {
+  let closed = 0,
+    sent = 0
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 32768,
+    bind: () => () => {},
+    send: () => {
+      sent++
+    },
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  try {
+    channel.connect(() => port)
+    await tick()
+    assert.throws(() => channel.send({ v: 1, t: 'connector.retry' }))
+    assert.equal(sent, 0)
+    assert.equal(closed, 1)
+  } finally {
+    channel.close()
+  }
+})
+
+test('deadline starts before a delayed factory and closes late port', async () => {
+  let now = 0,
+    closed = 0,
+    bind = 0
+  let release: (port: SocketPort) => void = () => {}
+  const delayed = new Promise<SocketPort>((resolve) => {
+    release = resolve
+  })
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 0,
+    bind: () => {
+      bind++
+      return () => {}
+    },
+    send: () => {},
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+    clock: { now: () => now, wallNow: () => 100000 },
+  })
+  try {
+    channel.connect(() => delayed)
+    await tick()
+    now = 8000
+    assert.equal(channel.current(), false)
+    release(port)
+    await tick()
+    assert.equal(closed, 1)
+    assert.equal(bind, 0)
+  } finally {
+    channel.close()
+  }
+})
+
+test('close between factory resolution and adoption closes the unbound socket', async () => {
+  let closed = 0,
+    bound = 0
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 0,
+    bind: () => {
+      bound++
+      return () => {}
+    },
+    send: () => {},
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  try {
+    channel.connect(() => port)
+    queueMicrotask(() => queueMicrotask(() => channel.close()))
+    await tick()
+    assert.equal(closed, 1)
+    assert.equal(bound, 0)
+    assert.equal(channel.current(), false)
+  } finally {
+    channel.close()
+  }
+})
+
+test('notification and unbind failures cannot prevent socket cleanup', async () => {
+  let handlers: Parameters<SocketPort['bind']>[0] | undefined,
+    closed = 0
+  const port: SocketPort = {
+    isOpen: () => true,
+    bufferedBytes: () => 0,
+    bind: (h) => {
+      handlers = h
+      return () => {
+        throw Error('unbind')
+      }
+    },
+    send: () => {},
+    close: () => {
+      closed++
+    },
+  }
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {
+      throw Error('owner')
+    },
+  })
+  channel.connect(() => port)
+  await tick()
+  handlers?.error()
+  assert.equal(channel.snapshot().state, 'readonly')
+  assert.equal(closed, 1)
+  channel.close()
+  assert.equal(closed, 1)
+})
+
+test('completed admission keeps lifetime and later cap only shortens it', async () => {
+  const f = await fixture()
+  try {
+    f.channel.completeAdmission()
+    assert.equal(f.channel.deadlines().authDeadline, undefined)
+    f.advance(1000)
+    f.channel.capLease({ issued_at: 100000, expires_at: 110000 })
+    assert.equal(f.channel.deadlines().lifetimeDeadline, 10100)
+    f.channel.capLease({ issued_at: 100000, expires_at: 120000 })
+    assert.equal(f.channel.deadlines().lifetimeDeadline, 10100)
+    f.advance(9000)
+    assert.equal(f.channel.current(), false)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.channel.close()
+  }
+})
+
+test('outstanding write bytes cannot exceed 32 KiB even below four slots', async () => {
+  const f = await fixture()
+  try {
+    const frame = {
+      v: 1 as const,
+      t: 'connector.attach' as const,
+      token: 'a'.repeat(8192),
+    }
+    for (let i = 0; i < 3; i++) f.channel.send(frame)
+    assert.equal(f.channel.snapshot().pendingWrites, 3)
+    assert.ok(f.channel.snapshot().writeBytes < 32768)
+    assert.throws(() => f.channel.send(frame))
+    assert.equal(f.channel.snapshot().reason, 'send-failed')
+    assert.equal(f.writes.length, 3)
+  } finally {
+    f.channel.close()
+  }
+})
+
+test('disposal joins late factory and observed socket closure without extending deadline', async () => {
+  let release: (port: SocketPort) => void = () => {}
+  let observed: () => void = () => {}
+  let closes = 0
+  const factory = new Promise<SocketPort>((resolve) => {
+    release = resolve
+  })
+  const closed = new Promise<void>((resolve) => {
+    observed = resolve
+  })
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  channel.connect(() => factory)
+  const disposal = channel.dispose(1000)
+  assert.equal(channel.dispose(10000), disposal)
+  let done = false
+  void disposal.then(() => {
+    done = true
+  })
+  const port: SocketPort = {
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: () => closed,
+  }
+  release(port)
+  await tick()
+  assert.equal(closes, 1)
+  assert.equal(done, false)
+  observed()
+  await disposal
+  assert.equal(closes, 1)
+})
+
+test('disposal fails closed on absent observation or unsettled work', async () => {
+  const make = () =>
+    new SignallingClientChannel({
+      onFrame: async () => {},
+      onOpen: () => {},
+      onTerminal: () => {},
+    })
+  const empty = make()
+  await empty.dispose(100)
+  const failed = make()
+  failed.connect(() => Promise.reject(new Error('factory failed')))
+  await failed.dispose(1000)
+  const missing = make()
+  missing.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {},
+  }))
+  await tick()
+  await assert.rejects(missing.dispose(1000), /observation unavailable/)
+  const hung = make()
+  hung.connect(() => new Promise<SocketPort>(() => {}))
+  const pending = hung.dispose(100)
+  assert.equal(hung.dispose(10000), pending)
+  await assert.rejects(pending, /timed out/)
+  assert.equal(hung.dispose(10000), pending)
+  const stuckClose = make()
+  stuckClose.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {},
+    waitClosed: () => new Promise<void>(() => {}),
+  }))
+  await tick()
+  await assert.rejects(stuckClose.dispose(100), /timed out/)
+})
+
+test('terminal callback can reenter disposal without a second close request', async () => {
+  let closes = 0,
+    reentered: Promise<void> | undefined
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {
+      reentered = channel.dispose(1000)
+    },
+  })
+  channel.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: async () => {},
+  }))
+  await tick()
+  const outer = channel.dispose(1000)
+  assert.equal(reentered, outer)
+  await outer
+  assert.equal(closes, 1)
+})
+
+test('a factory still settling after timeout remains charged and closes its late port once', async () => {
+  let release: (port: SocketPort) => void = () => {},
+    closes = 0
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  channel.connect(
+    () =>
+      new Promise<SocketPort>((resolve) => {
+        release = resolve
+      }),
+  )
+  await tick()
+  const disposal = channel.dispose(100)
+  await assert.rejects(disposal, /timed out/)
+  release({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: async () => {},
+  })
+  await tick()
+  assert.equal(closes, 1)
+  assert.equal(channel.dispose(10000), disposal)
+  await assert.rejects(disposal, /timed out/)
+})

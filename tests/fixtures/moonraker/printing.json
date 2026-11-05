@@ -1,0 +1,19 @@
+{
+  "result": {
+    "eventtime": 42.5,
+    "status": {
+      "webhooks": { "state": "ready", "state_message": "synthetic fixture" },
+      "print_stats": {
+        "state": "printing",
+        "filename": "synthetic-test.gcode",
+        "print_duration": 120
+      },
+      "virtual_sdcard": {
+        "progress": 0.25,
+        "is_active": true,
+        "file_position": 100
+      },
+      "extruder": { "temperature": 200, "target": 210 }
+    }
+  }
+}

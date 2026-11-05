@@ -1,0 +1,222 @@
+package h264_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+)
+
+var casesAnnexB = []struct {
+	name   string
+	encin  []byte
+	encout []byte
+	dec    h264.AnnexB
+}{
+	{
+		"2 zeros",
+		[]byte{
+			0x00, 0x00, 0x01, 0xaa, 0xbb, 0x00, 0x00, 0x01,
+			0xcc, 0xdd, 0x00, 0x00, 0x01, 0xee, 0xff,
+		},
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb,
+			0x00, 0x00, 0x00, 0x01, 0xcc, 0xdd,
+			0x00, 0x00, 0x00, 0x01, 0xee, 0xff,
+		},
+		h264.AnnexB{
+			{0xaa, 0xbb},
+			{0xcc, 0xdd},
+			{0xee, 0xff},
+		},
+	},
+	{
+		"3 zeros",
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb,
+			0x00, 0x00, 0x00, 0x01, 0xcc, 0xdd,
+			0x00, 0x00, 0x00, 0x01, 0xee, 0xff,
+		},
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb,
+			0x00, 0x00, 0x00, 0x01, 0xcc, 0xdd,
+			0x00, 0x00, 0x00, 0x01, 0xee, 0xff,
+		},
+		h264.AnnexB{
+			{0xaa, 0xbb},
+			{0xcc, 0xdd},
+			{0xee, 0xff},
+		},
+	},
+	{
+		// used by Apple inside HLS test streams
+		"2 or 3 zeros",
+		[]byte{
+			0, 0, 0, 1, 9, 240,
+			0, 0, 0, 1, 39, 66, 224, 21, 169, 24, 60, 23, 252, 184, 3, 80, 96, 16, 107, 108, 43, 94, 247, 192, 64,
+			0, 0, 0, 1, 40, 222, 9, 200,
+			0, 0, 1, 6, 0, 7, 131, 236, 119,
+			0, 0, 0, 0, 1, 3, 0, 64, 128,
+			0, 0, 1, 6, 5, 17, 3, 135, 244, 78, 205, 10, 75, 220, 161, 148, 58, 195, 212, 155, 23, 31, 0, 128,
+		},
+		[]byte{
+			0, 0, 0, 1, 9, 240,
+			0, 0, 0, 1, 39, 66, 224, 21, 169, 24, 60, 23, 252, 184, 3, 80, 96, 16, 107, 108, 43, 94, 247, 192, 64,
+			0, 0, 0, 1, 40, 222, 9, 200,
+			0, 0, 0, 1, 6, 0, 7, 131, 236, 119, 0,
+			0, 0, 0, 1, 3, 0, 64, 128,
+			0, 0, 0, 1, 6, 5, 17, 3, 135, 244, 78, 205, 10, 75, 220, 161, 148, 58, 195, 212, 155, 23, 31, 0, 128,
+		},
+		h264.AnnexB{
+			{9, 240},
+			{39, 66, 224, 21, 169, 24, 60, 23, 252, 184, 3, 80, 96, 16, 107, 108, 43, 94, 247, 192, 64},
+			{40, 222, 9, 200},
+			{6, 0, 7, 131, 236, 119, 0},
+			{3, 0, 64, 128},
+			{6, 5, 17, 3, 135, 244, 78, 205, 10, 75, 220, 161, 148, 58, 195, 212, 155, 23, 31, 0, 128},
+		},
+	},
+	{
+		"AUs end with zeros",
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb, 0x00,
+			0x00, 0x00, 0x00, 0x01, 0xcc, 0xdd, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x01, 0xee, 0xff, 0x00, 0x00,
+			0x00, 0x00, 0x01, 0x1a, 0x1b, 0x1c,
+		},
+		[]byte{
+			0x00, 0x00, 0x00, 0x01, 0xaa, 0xbb, 0x00,
+			0x00, 0x00, 0x00, 0x01, 0xcc, 0xdd, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x01, 0xee, 0xff, 0x00,
+			0x00, 0x00, 0x00, 0x01, 0x1a, 0x1b, 0x1c,
+		},
+		h264.AnnexB{
+			{0xaa, 0xbb, 0},
+			{0xcc, 0xdd, 0, 0, 0},
+			{0xee, 0xff, 0},
+			{0x1a, 0x1b, 0x1c},
+		},
+	},
+}
+
+func TestAnnexBUnmarshal(t *testing.T) {
+	for _, ca := range casesAnnexB {
+		t.Run(ca.name, func(t *testing.T) {
+			var dec h264.AnnexB
+			err := dec.Unmarshal(ca.encin)
+			require.NoError(t, err)
+			require.Equal(t, ca.dec, dec)
+		})
+	}
+}
+
+func TestAnnexBUnmarshalEmpty(t *testing.T) {
+	buf := []byte{0, 0, 0, 1, 0, 0, 0, 1}
+	var dec h264.AnnexB
+	err := dec.Unmarshal(buf)
+	require.Equal(t, h264.ErrAnnexBNoNALUs, err)
+
+	buf = []byte{0, 0, 0, 1, 0, 0, 0, 1, 1}
+	err = dec.Unmarshal(buf)
+	require.NoError(t, err)
+	require.Equal(t, h264.AnnexB{{1}}, dec)
+}
+
+func TestAnnexBUnmarshalExceedsMaxNALUs(t *testing.T) {
+	buf := make([]byte, 0, 5*51)
+	for range 51 {
+		buf = append(buf, 0x00, 0x00, 0x00, 0x01, 0xAA)
+	}
+
+	var dec h264.AnnexB
+	err := dec.Unmarshal(buf)
+	require.EqualError(t, err, "NALU count (51) exceeds maximum allowed (50)")
+}
+
+func TestAnnexBMarshal(t *testing.T) {
+	for _, ca := range casesAnnexB {
+		t.Run(ca.name, func(t *testing.T) {
+			enc, err := ca.dec.Marshal()
+			require.NoError(t, err)
+			require.Equal(t, ca.encout, enc)
+		})
+	}
+}
+
+func BenchmarkAnnexBUnmarshal(b *testing.B) {
+	for b.Loop() {
+		var dec h264.AnnexB
+		dec.Unmarshal([]byte{ //nolint:errcheck
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+			0x00, 0x00, 0x00, 0x01,
+			0x01, 0x02, 0x03, 0x04,
+		})
+	}
+}
+
+func FuzzAnnexBUnmarshal(f *testing.F) {
+	for _, ca := range casesAnnexB {
+		f.Add(ca.encin)
+	}
+
+	f.Fuzz(func(t *testing.T, b []byte) {
+		var au h264.AnnexB
+		err := au.Unmarshal(b)
+		if err != nil {
+			return
+		}
+
+		require.NotEmpty(t, au)
+
+		for _, nalu := range au {
+			require.NotEmpty(t, nalu)
+		}
+
+		_, err = au.Marshal()
+		require.NoError(t, err)
+	})
+}
+
+// Source-only bounded scanner regressions, intentionally unrun.
+func TestAnnexBStrictLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		buf    []byte
+		limits h264.AnnexBLimits
+		valid  bool
+	}{
+		{"exact", []byte{0, 0, 0, 1, 0x65}, h264.AnnexBLimits{5, 1}, true},
+		{"three-byte-canonical-over", []byte{0, 0, 1, 0x65}, h264.AnnexBLimits{4, 1}, false},
+		{"dense", []byte{0, 0, 1, 0x65, 0, 0, 1, 0x61}, h264.AnnexBLimits{10, 1}, false},
+		{"input-over", []byte{0, 0, 0, 1, 0x65}, h264.AnnexBLimits{4, 1}, false},
+		{"zero", nil, h264.AnnexBLimits{0, 1}, false},
+		{"negative", nil, h264.AnnexBLimits{5, -1}, false},
+		{"overflow", nil, h264.AnnexBLimits{int(^uint(0) >> 1), 1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var a h264.AnnexB
+			err := a.UnmarshalWithLimits(tc.buf, tc.limits)
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, h264.AnnexB{{0x65}}, a)
+			} else {
+				require.Error(t, err)
+				require.Nil(t, a)
+			}
+		})
+	}
+}

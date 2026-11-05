@@ -1,39 +1,85 @@
 # Phase 0 acceptance ledger
 
-This independent MIT repository supersedes the former monorepo destination. Accounts, session cookies and database belong to this product. Hosting-specific details remain private. No code from the former application has been copied.
+This is an independent MIT project. Accounts, sessions, credentials and databases belong to this product. Private hosting details and the original private planning documents stay outside this repository. The checkpoints linked below prove only the behavior and revision they name; Phase 0 is not complete.
 
 ## Sequence
 
-1. E0.1: isolated Klipper simulators (single and four tools), Spoolman seed, cameras, network faults and integration CI.
-2. E1.1: Bun workspaces, Nuxt 4, protocol contracts, Connector CLI, checks, Docker packaging and feature flags.
-3. E1.2: dedicated Postgres 17, reversible migrations, validated environment, readiness, structured logs and portable Compose.
-4. E2.1/E2.4: independent login and session, authorization, rate limits and secure Connector pairing.
-5. E3.1/E3.2: Connector identity, configuration, durable offline queue and batched persistence.
-6. E5.1a/E5.4a: Moonraker identify/subscriptions/webcam and read-only Spoolman mirror.
-7. E2.3/E4.1–E4.5: approved browser keys, WebRTC spike, authenticated signalling, signed commands, local verification and read-only degradation.
-8. E6.1: hidden farm view with age indicators and direct links to existing printer UIs.
-9. Hardware acceptance is an owner-run gate after simulator acceptance. Deployment and physical printer control require separate authorization.
+1. E0.1: accept isolated Klipper simulators, including SV06 and a four-tool printer, Spoolman, cameras through RTSP/MediaMTX, network faults and integration CI.
+2. E1.1/E1.2: complete Bun workspaces, Nuxt 4, Connector packaging, Docker, Postgres migrations, configuration validation, readiness and structured logs.
+3. E2.1/E2.4: complete independent login and sessions, farm authorization, limits, secure pairing, credential recovery and revocation.
+4. E3.1/E3.2: connect Connector identity, configuration, durable offline telemetry and authenticated ingestion.
+5. E5.1a/E5.4a: connect Moonraker discovery/subscriptions/webcam and a read-only Spoolman inventory mirror.
+6. E2.3/E4.1–E4.5: register approved browser keys, authenticate signalling, carry live status, camera and signed pause over WebRTC, and verify local safety with read-only degradation.
+7. E6.1: deliver the farm view with age indicators and links to existing printer interfaces.
+8. Hardware acceptance follows simulator acceptance and is owner-run. Deployment and physical-printer control require separate authorization.
 
 ## Invariants
 
-- No TURN, cloud slicing, server-enqueued commands or command fallback outside WebRTC.
-- Connector enforces signatures, roles, expiry, replay protection and safety when the server is unavailable.
-- Camera/video and bulk files stay on P2P transport. Server receives bounded snapshots and batched metadata only.
-- Simulators never connect to physical printers. Four-tool fixtures approximate capabilities, not unverified vendor internals.
-- Do not mark Phase 0 complete until login, pairing, signed pause, tamper/replay/revocation rejection, outage recovery and degraded mode pass integration and browser tests.
+- No TURN, cloud slicing, server-enqueued commands or HTTP/server command fallback. Status, camera and signed commands use browser-to-Connector WebRTC.
+- The Connector enforces identity, signature, farm/role scope, expiry, revocation, replay protection and safety while the server is unavailable. Offline expiry fails closed; loss of connectivity alone does not stop an ongoing print.
+- Camera/video and bulk files stay on P2P transport. The server receives bounded snapshots and metadata only.
+- Simulators never connect to physical printers. Automated tests never send commands to hardware.
+- Do not mark Phase 0 complete until the full scope below passes in the built application, browser and simulators.
 
-## Current acceptance checks
+## Current status snapshot
 
-| Gate                                            | Check                                            | Status          |
-| ----------------------------------------------- | ------------------------------------------------ | --------------- |
-| Workspace dependencies                          | `bun install --frozen-lockfile --ignore-scripts` | Pending         |
-| Type safety, unit tests, production build       | `bun run check:all`                              | Pending         |
-| Browser smoke and hidden view                   | `bun run test:e2e`                               | Pending         |
-| Connector distribution                          | `node packages/connector/dist/cli.js --version`  | Pending         |
-| Simulator lifecycle and protocol responses      | `bun run sim:smoke`                              | Pending         |
-| Docker packaging                                | local image build and health probe               | Pending         |
-| Auth, database, pairing, WebRTC, offline safety | subsequent milestones                            | Not implemented |
+The table below retains the rendered farm-page checkpoint from 2026-11-05.
+Later source is published in [PR #14](https://github.com/bloodf/Open3DFarmManager/pull/14).
+The complete local gate passed before `7a749d8`; that commit adds a CPU-only
+comparison after the unchanged Klipper smoke test fails. Its remote result and
+merge remain pending. The prior `f5f2088` passed remote code and image checks but
+failed Klipper startup. Publication does not establish deployment or complete
+Phase 0 acceptance. Source, packaged artifacts, database fixtures and native
+diagnostics retain their distinct scopes.
 
-`/healthz` initially reports process liveness only. Database readiness will be added with E1.2; it must not be interpreted as a complete deployment health check.
+| Gate                         | Verified evidence                                                                                                                                                                                                                                                                                                                                                       | Remaining scope                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local application gate       | The source through `422e83f` passed 326 Bun tests, 383 Node tests and two runtime skips, lint, TypeScript and both builds. `10a3f92` subsequently recorded the rendered-page results in documentation.                                                                                                                                                                  | Repeat the complete gate after later implementation changes. Remote CI and publication of the local payload are not established.                                                                                                         |
+| Login, pairing and inventory | Historical real-handler HTTPS flows cover enrollment, pairing, recovery and revocation. The newer rendered-page fixture uses real independent login, approved IndexedDB key, issued Connector credential, current assignment readback and official journal through 0019. Three actual restricted-role session tests cover lock-wait touch, expiry and clock regression. | Full current-head negative coverage, production TLS and all concurrent session/inventory transitions remain distinct gates.                                                                                                              |
+| Assignment-bound RTC         | The generated HTTPS fixture at `40e1a63` passed actual browser/Connector peers, v2 assignment commitments, DTLS checks, mutual proofs and status, with separate disconnect and revocation cases. The official 0019 authorization and privilege/down-up suite passed at `ea741f5`.                                                                                       | Migration 0019 restart, cross-network behavior, native provenance/buffering and control/media authorization are not established by read-only transport.                                                                                  |
+| Packaged Connector runtime   | The fixed package at `17b4ac4` passed actual CLI collection, authenticated signalling and RTC status against the maintained application and a loopback Moonraker protocol fixture. Native loading remains lazy and the package notice/output manifest is recorded.                                                                                                      | Genuine pinned Moonraker/Klipper, standalone distribution and current native binary provenance remain pending.                                                                                                                           |
+| Rendered farm view           | At `422e83f`, separate actual `/farm` disconnect and revocation runs passed. The page uses its production composable, existing IndexedDB key and genuine feed. It displays progress changes, then unavailable with the previous observation; pause stays disabled. No application API or RTC interception is used.                                                      | This uses synthetic Moonraker protocol data, not a simulator process. Camera and signed pause remain unavailable. Browser fixture TLS ignores certificate errors and does not prove production deployment.                               |
+| Pause authority and safety   | The maintained 0018 issuer preparation passed twenty named PostgreSQL checks at `b21df2b`, followed by actual database restart and three fresh-process checks. The journal, dispatcher and fixed pause driver also have scoped tests.                                                                                                                                   | Actual browser control peer, issuer HTTP/runtime composition, driver integration and printing-simulator pause are not accepted. Restart replay used a new synthetic issuer key.                                                          |
+| Simulators and camera        | Historical pinned Spoolman service runs passed the read-only adapter. The latest ARM64 pacing diagnostic observed 542 consecutive ready samples over about 71 s, but rejected its pacing summary. RTSP parser/helper and finite native moving-video results remain separate checkpoints.                                                                                | SV06 and four-tool scenarios, genuine Connector data, restart/network faults, actual bounded RTSP helper execution, MediaMTX and authenticated camera must be connected and validated. A ready sample or finite fixture is insufficient. |
+| Full Phase 0                 | No exact candidate combines all required real services, browser flows, status, camera, signed pause and outage recovery.                                                                                                                                                                                                                                                | Incomplete.                                                                                                                                                                                                                              |
 
-Local Docker integration is blocked: the configured Docker socket is absent. Compose validation passes, but no simulator/container execution is claimed. CI is prepared to run both image and simulator gates.
+Detailed artifacts, limitations and historical failures remain in the
+[rendered farm checkpoint](FARM-VIEW-CHECKPOINT.md),
+[Connector runtime checkpoint](CONNECTOR-RTC-RUNTIME-CHECKPOINT.md),
+[assignment binding checkpoint](RTC-ASSIGNMENT-BINDING-CHECKPOINT.md),
+[pause issuer checkpoint](PAUSE-ISSUER-CHECKPOINT.md),
+[native session result](SIMULATOR-ARM64-NATIVE-SESSION-RESULT.md) and
+[Spoolman service validation](SPOOLMAN-ACTUAL-API-VALIDATION.md).
+
+The [implementation queue](IMPLEMENTATION-QUEUE.md) retains an older snapshot;
+its migration labels do not describe the current official catalog through 0019. Use this ledger and the exact checkpoint receipts when selecting remaining
+work. Historical counts and prepared-but-unrun tests are not current acceptance.
+
+The separate pause transport subsequently passed five actual native cases at
+`579f377`, recorded in [the control RTC checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
+Those cases use synthetic authority and execute no printer commands. They do
+not close the integrated issuer, signalling, driver and simulator gate below.
+
+## Acceptance scope still required
+
+- **Runtime and database:** built application with PostgreSQL readiness, reversible journal-verified migrations, validated configuration and structured diagnostics. Run the final integrated CI on the exact candidate head.
+- **Simulator and integrations:** SV06 plus the existing four-tool fixture; Moonraker identify, status/subscriptions and cameras through RTSP/MediaMTX; read-only Spoolman against its pinned service; startup/restart and network-fault cases. Repeat on required architectures with bounded logs and no hardware.
+- **Login, pairing and inventory:** independent login/logout, authenticated farm approval, rate limits, current membership/session checks, least-privilege discovery and Connector inventory reads. Verify wrong-farm, wrong-role, expired/revoked session and missing-resource behavior.
+- **Browser identity and transport:** register approved browser keys through the authenticated flow; demonstrate actual Node/Bun Connector interoperability over browser-to-Connector WebRTC for status and camera. Verify signed pause without TURN or server/HTTP fallback.
+- **Safety and recovery:** reject tampered, replayed, expired, wrong-scope and revoked commands; verify credential delivery/recovery after known and ambiguous failures, server/database outage recovery and read-only degradation. Define and enforce the offline authorization lifetime in the Connector.
+- **Farm interface:** verify the built pt-BR interface from login through pairing and farm/device views, including data age and disabled controls when P2P is unavailable.
+
+No single component helper, browser mock or synthetic service store satisfies these end-to-end gates. The seven-scenario experiment is not Node/Bun interoperability. The latest native amd64 control with no valid Moonraker sample is not an architecture comparison.
+
+## Historical checkpoint index
+
+These documents retain earlier scoped evidence and limitations. Their historical test counts and statements must not be read as current repository status:
+
+- [Local integration checkpoint](INTEGRATION-CHECKPOINT.md) — initial local integration and its then-current limits.
+- [Container validation](CONTAINER-VALIDATION-CHECKPOINT.md), [simulator readiness diagnosis](SIMULATOR-READINESS-DIAGNOSIS.md), [simulator follow-up](SIMULATOR-ACCEPTANCE-FOLLOWUP.md) and [bounded Klipper diagnostics](KLIPPER-CI-DIAGNOSTICS.md) — separate experiments; startup remains blocked.
+- [PostgreSQL sessions](POSTGRES-SESSIONS-CHECKPOINT.md), [pairing persistence](PAIRING-PERSISTENCE-CHECKPOINT.md), [pairing proof](PAIRING-PROOF-CHECKPOINT.md) and [credential issuance](CONNECTOR-CREDENTIAL-ISSUANCE-CHECKPOINT.md) — isolated database behaviors, not authenticated end-to-end acceptance.
+- [Browser keys](BROWSER-KEY-CHECKPOINT.md), [frontend accessibility](FRONTEND-ACCESSIBILITY-CHECKPOINT.md), [HTTP telemetry](HTTP-TELEMETRY-CHECKPOINT.md) and [integration queue](IMPLEMENTATION-QUEUE.md) — component and mock/loopback evidence, not a complete product flow.
+
+## Publication and hardware gates
+
+Track work as local, tested, validated, published or merged, with the exact commit/PR head. Review the immutable publication diff for private material and license obligations. The owner has authorized publication and merging ready PRs. Required current-head checks, review resolution and repository protections still apply. Deployment, DNS/credential changes and physical-printer tests remain separately authorized actions.

@@ -1,0 +1,27 @@
+[
+  {
+    "id": 7,
+    "filament": {
+      "id": 3,
+      "name": "PLA de teste",
+      "material": "PLA",
+      "vendor": { "id": 2, "name": "Fornecedor sintético" },
+      "diameter": 1.75,
+      "density": 1.24,
+      "weight": 1000,
+      "color_hex": "3388FF"
+    },
+    "initial_weight": 1000,
+    "used_weight": 250,
+    "remaining_weight": 750,
+    "archived": false,
+    "location": "Prateleira de teste",
+    "extra": { "fixture": "\"synthetic\"" }
+  },
+  {
+    "id": 8,
+    "filament": { "id": 4, "name": null, "material": null, "vendor": null },
+    "remaining_weight": -5,
+    "archived": true
+  }
+]

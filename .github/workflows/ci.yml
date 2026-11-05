@@ -1,5 +1,8 @@
 name: Checks
 on: [push, pull_request]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -15,7 +18,6 @@ jobs:
         with:
           node-version: '24.20.0'
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run lint
       - run: bun run check:all
       - run: node packages/connector/dist/cli.js --version
       - run: bunx playwright install --with-deps chromium

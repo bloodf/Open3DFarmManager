@@ -1,0 +1,13 @@
+# Printer assignment HTTP acceptance
+
+The opt-in disposable fixture uses the built application, a local HTTPS forwarder, PostgreSQL and Chromium. It requires Node 24, a caller-owned disposable loopback database with the complete official migrations through 0017, and the printer assignment runtime configured. Before seeding, the runner verifies every migration ID and journal checksum. It creates dedicated runtime logins and records their names and cleanup in the caller's private ledger.
+
+The integrated acceptance run passed with fixture source at `30e06597f4104806ba4fee88458724187ae01618` and the application built at `2bc09d516586fb639c405fa84e758d934b456c7e`. Node 24.20.0, real HTTPS and Chromium were used against the official 17-entry migration journal. All 445 application artifact hashes and the fixture source manifest were unchanged before and after the run.
+
+The browser scenario verified real login, explicit local-configuration attestation, owner and admin registration, viewer and operator restrictions, farm and Connector scope, exact opaque Unicode keys, pagination, and stale revocation against a replacement. It exercised membership downgrade and revocation, session revocation, and a short real-clock session expiry after an observed enrollment lock wait. The other lock-wait cases also observed the relevant PostgreSQL runtime connection blocked before the holding transaction committed. The database role helper called the production policy with a valid dedicated login and rejected extra inherited and non-inherited membership, direct table privilege, and schema ownership.
+
+The first run failed in the fixture's expiry setup because it tried to update the immutable expiry of an existing session. The corrected fixture issued a separate short-lived synthetic session through the maintained credentials API and used the real session cookie mechanism; no production behavior changed. The failure receipt and successful retry evidence remain in the private task ledger.
+
+The fixture cleaned up its browser, app, TLS files and database roles. Its isolated cluster and proxy were removed, and the original shared PostgreSQL identity, start time, database, user and complete journal matched the pre-task baseline. The database and CPU windows were released. No simulator or physical printer was involved.
+
+Earlier root checks passed 257 Bun tests and 195 Node tests at `d3b6b54`. After the subsequent Vue template correction, root and Nuxt typechecks and the fresh application build passed at `2bc09d5`. These separate results do not constitute a single exact-head `check:all` pass at the fixture revision.

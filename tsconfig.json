@@ -9,12 +9,14 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun", "node"]
+    "types": ["bun", "node"],
+    "resolveJsonModule": true
   },
   "include": [
     "packages/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
+    "tools/rtsp-ingest/**/*.ts",
     "playwright.config.ts"
   ]
 }

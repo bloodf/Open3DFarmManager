@@ -104,7 +104,7 @@ export interface AuditOptions {
 }
 
 export interface AuditSectionStatus {
-  status: 'ok' | 'unavailable'
+  status: 'ok' | 'partial' | 'unavailable'
   reason: string | null
 }
 
@@ -612,6 +612,7 @@ async function collectDocker(
     network: [],
   }
 
+  const incomplete: string[] = []
   for (const kind of ['container', 'volume', 'network'] as ResourceKind[]) {
     const listed = await environment.run(
       'docker',
@@ -641,12 +642,20 @@ async function collectDocker(
       }
     }
     const entries: ResourceEntry[] = []
+    let listedLines = 0
+    let invalidLines = 0
     for (const line of listed.stdout.split('\n')) {
       if (line.length === 0) continue
-      if (entries.length >= MAX_LISTED_LINES) break
+      if (++listedLines > MAX_LISTED_LINES) {
+        incomplete.push(`${kind} listing exceeded ${MAX_LISTED_LINES} rows`)
+        break
+      }
       const entry = parseResourceLine(kind, line)
       if (entry) entries.push(entry)
+      else invalidLines++
     }
+    if (invalidLines > 0)
+      incomplete.push(`${kind} listing contained ${invalidLines} invalid rows`)
     const partition = partitionByOwnership(entries, options.taskLabel)
     owned[kind] = partition.owned
     otherTask[kind] = partition.otherTask
@@ -654,8 +663,8 @@ async function collectDocker(
   }
 
   return {
-    status: 'ok',
-    reason: null,
+    status: incomplete.length > 0 ? 'partial' : 'ok',
+    reason: incomplete.length > 0 ? incomplete.join('; ') : null,
     serverVersion,
     owned: {
       container: ownedBucketOf(owned.container),
@@ -743,19 +752,30 @@ export async function buildReport(
   ])
 
   const capacity: FilesystemUsage[] = []
+  const failedCapacityPaths: string[] = []
   const capacityPaths = new Set<string>()
   for (const worktree of git.worktrees) capacityPaths.add(worktree.path)
   capacityPaths.add(options.repository)
   for (const path of capacityPaths) {
     const usage = await environment.capacity(path)
-    if (!usage) continue
+    if (!usage) {
+      failedCapacityPaths.push(path)
+      continue
+    }
     const duplicate = capacity.some((entry) => entry.path === usage.path)
     if (!duplicate) capacity.push(usage)
   }
   const filesystem: AuditReport['filesystem'] = {
-    status: capacity.length > 0 ? 'ok' : 'unavailable',
+    status:
+      capacity.length === 0
+        ? 'unavailable'
+        : failedCapacityPaths.length > 0
+          ? 'partial'
+          : 'ok',
     reason:
-      capacity.length > 0 ? null : 'Filesystem capacity could not be read',
+      failedCapacityPaths.length > 0
+        ? `Filesystem capacity could not be read for: ${JSON.stringify(failedCapacityPaths)}`
+        : null,
     capacity,
   }
 
@@ -784,7 +804,7 @@ export async function buildReport(
   ]
   if (status === 'partial')
     notes.push(
-      'Partial report: at least one section was unavailable, so the result is incomplete.',
+      'Partial report: at least one section was unavailable or incomplete.',
     )
 
   return {

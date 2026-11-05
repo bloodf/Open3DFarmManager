@@ -19,6 +19,11 @@ import {
   PairingProofAudience,
 } from '../../../../packages/farm-protocol/src/pairing-proof.ts'
 import {
+  BrowserDeviceHttpListRequest,
+  BrowserDeviceHttpListResponse,
+  BROWSER_DEVICE_HTTP_LIMITS,
+} from '../../../../packages/farm-protocol/src/browser-device-http.ts'
+import {
   evaluateSession,
   type SessionPolicy,
   type SessionRecord,
@@ -146,6 +151,37 @@ export class PostgresBrowserDeviceRegistry {
     )
       throw new Error('Authorization expired during registry transaction')
     await tx`UPDATE farm.account_sessions SET last_seen_at=${now} WHERE id=${input.sessionRecordId}`
+  }
+  /** Bounded metadata only; callers must not interpret a listing as a command lease. */
+  async list(input: Input): Promise<Result<BrowserDeviceHttpListResponse>> {
+    const parsed = BrowserDeviceHttpListRequest.safeParse(input.request)
+    if (!parsed.success || !this.valid(input))
+      return { ok: false, reason: 'invalid-input' }
+    return this.transaction(async (tx) => {
+      const request = parsed.data
+      const auth = await this.authorize(
+        tx,
+        input.sessionRecordId,
+        request.farm_id,
+        input.policy,
+      )
+      if (!auth) return denied()
+      const now = this.now()
+      const all = auth.role === 'owner' || auth.role === 'admin'
+      const rows =
+        await tx`SELECT key_id AS "keyId",account_id AS "accountId",thumbprint,status,proof_at::float8 AS "proofAt",created_at::float8 AS "createdAt",CASE WHEN status='pending' THEN (created_at+86400000)::float8 ELSE NULL END AS "pendingExpiresAt" FROM farm.browser_device_keys WHERE farm_id=${request.farm_id}::uuid AND (${all} OR account_id=${auth.account.id}) AND (${request.after ?? null}::uuid IS NULL OR key_id>${request.after ?? null}::uuid) ORDER BY key_id LIMIT ${request.limit + 1}`
+      const devices = rows.slice(0, request.limit)
+      const last = devices.at(-1)
+      const response = BrowserDeviceHttpListResponse.parse({
+        currentAccountId: auth.account.id,
+        currentRole: auth.role,
+        devices,
+        nextAfter: rows.length > request.limit && last ? last.keyId : null,
+        limits: BROWSER_DEVICE_HTTP_LIMITS,
+      })
+      await this.finish(tx, input, auth, now)
+      return { ok: true, ...response }
+    })
   }
   async issueChallenge(
     input: Input,

@@ -7,6 +7,9 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpsServer } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { PostgresCredentials } from '../apps/farm/server/storage/postgres-credentials.ts'
 import { isAbsolute, join } from 'node:path'
 import postgres from 'postgres'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
@@ -56,6 +59,10 @@ const account = randomUUID(),
   otherFarm = randomUUID()
 const username = 'u' + randomBytes(12).toString('hex'),
   password = randomBytes(24).toString('hex')
+const adminAccount = randomUUID(),
+  operatorAccount = randomUUID()
+const adminUsername = 'a' + randomBytes(12).toString('hex'),
+  operatorUsername = 'o' + randomBytes(12).toString('hex')
 const directory = await mkdtemp(join(tmpdir(), 'open3dfarm-pairing-http-'))
 const created: string[] = []
 let app: ReturnType<typeof spawn> | undefined
@@ -86,8 +93,16 @@ try {
   }
   await sql`INSERT INTO farm.session_accounts(id) VALUES(${account})`
   await sql`INSERT INTO farm.password_credentials(account_id,username,password_hash) VALUES(${account},${username},${await hashPassword(password)})`
+  for (const [id, name] of [
+    [adminAccount, adminUsername],
+    [operatorAccount, operatorUsername],
+  ] as const) {
+    await sql`INSERT INTO farm.session_accounts(id) VALUES(${id})`
+    await sql`INSERT INTO farm.password_credentials(account_id,username,password_hash) VALUES(${id},${name},${await hashPassword(password)})`
+  }
   await sql`INSERT INTO farm.farms(id) VALUES(${farm}::uuid),(${otherFarm}::uuid)`
   await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farm}::uuid,${account},'owner')`
+  await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farm}::uuid,${adminAccount},'admin'),(${farm}::uuid,${operatorAccount},'operator')`
   const cert = join(directory, 'cert.pem'),
     tlsKey = join(directory, 'tls-key.pem')
   execFileSync(
@@ -125,18 +140,32 @@ try {
   )
   // Reserve an OS-assigned port for the local HTTPS proxy and keep it bound throughout the run.
   let appPort = 0
+  const dropControl = randomBytes(24).toString('hex')
+  let dropped = false
   proxy = createHttpsServer(
     { key: await readFile(tlsKey), cert: await readFile(cert) },
     (req, res) => {
+      const drop =
+        !dropped &&
+        req.url === '/api/connector-pairing/claim' &&
+        req.headers['x-fixture-drop'] === dropControl
+      const headers = { ...req.headers }
+      delete headers['x-fixture-drop']
       const upstream = httpRequest(
         {
           host: '127.0.0.1',
           port: appPort,
           path: req.url,
           method: req.method,
-          headers: req.headers,
+          headers,
         },
         (reply) => {
+          if (drop && reply.statusCode === 200) {
+            dropped = true
+            reply.resume()
+            reply.once('end', () => res.destroy())
+            return
+          }
           res.writeHead(reply.statusCode ?? 502, reply.headers)
           reply.pipe(res)
         },
@@ -168,6 +197,35 @@ try {
   )
   const dbUrl = (index: number) =>
     `postgres://${roles[index]}:${secrets[index]}@127.0.0.1:${port}/fixture`
+  const authFixture = postgres(dbUrl(0), { max: 1, connect_timeout: 3 })
+  let expiredSessionId: string | null
+  try {
+    const credentials = new PostgresCredentials(authFixture)
+    const snapshot = await credentials.find(username)
+    if (!snapshot) throw new Error('Synthetic credentials unavailable')
+    expiredSessionId = await credentials.issue(
+      snapshot,
+      Date.now() - 2000,
+      1000,
+    )
+  } finally {
+    await authFixture.end({ timeout: 3 })
+  }
+  if (!expiredSessionId)
+    throw new Error('Synthetic expired session unavailable')
+  const appRequire = createRequire(
+    new URL('../apps/farm/package.json', import.meta.url),
+  )
+  const nuxtRequire = createRequire(appRequire.resolve('nuxt'))
+  const iron = await import(
+    pathToFileURL(nuxtRequire.resolve('iron-webcrypto')).href
+  )
+  const sessionSecret = randomBytes(32).toString('hex')
+  const expiredCookie: string = await iron.seal(
+    { nuxt: 1, id: randomUUID(), data: { sessionRecordId: expiredSessionId } },
+    sessionSecret,
+    { ...iron.defaults, ttl: 8 * 60 * 60 * 1000 },
+  )
   app = spawn('node', ['apps/farm/.output/server/index.mjs'], {
     stdio: 'ignore',
     env: {
@@ -176,7 +234,7 @@ try {
       NITRO_PORT: String(appPort),
       NUXT_AUTH_ENABLED: 'true',
       NUXT_AUTH_ORIGIN: origin,
-      NUXT_AUTH_SESSION_SECRET: randomBytes(32).toString('hex'),
+      NUXT_AUTH_SESSION_SECRET: sessionSecret,
       NUXT_AUTH_DATABASE_URL: dbUrl(0),
       NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
       NUXT_CONNECTOR_INVENTORY_DATABASE_URL: dbUrl(4),
@@ -222,11 +280,17 @@ try {
         PAIRING_HTTP_TEST_OUTPUT_DIR: join(directory, 'playwright-output'),
         PAIRING_HTTP_TEST_ORIGIN: origin,
         PAIRING_HTTP_TEST_USERNAME: username,
+        PAIRING_HTTP_TEST_ADMIN_USERNAME: adminUsername,
+        PAIRING_HTTP_TEST_OPERATOR_USERNAME: operatorUsername,
+        PAIRING_HTTP_TEST_OWNER_ACCOUNT: account,
+        PAIRING_HTTP_TEST_ADMIN_ACCOUNT: adminAccount,
         PAIRING_HTTP_TEST_PASSWORD: password,
         PAIRING_HTTP_TEST_FARM_ID: farm,
         PAIRING_HTTP_TEST_OTHER_FARM_ID: otherFarm,
         PAIRING_HTTP_TEST_PUBLIC_KEY_FILE: publicPath,
         PAIRING_HTTP_TEST_KEY_ID: 'fixture',
+        PAIRING_HTTP_TEST_DROP_CONTROL: dropControl,
+        PAIRING_HTTP_TEST_EXPIRED_COOKIE: expiredCookie,
       },
     },
   )

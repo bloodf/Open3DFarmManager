@@ -20,13 +20,20 @@ const farmId = process.env.PAIRING_HTTP_TEST_FARM_ID
 const otherFarmId = process.env.PAIRING_HTTP_TEST_OTHER_FARM_ID
 const publicKeyFile = process.env.PAIRING_HTTP_TEST_PUBLIC_KEY_FILE
 const keyId = process.env.PAIRING_HTTP_TEST_KEY_ID
+const adminUsername = process.env.PAIRING_HTTP_TEST_ADMIN_USERNAME
+const operatorUsername = process.env.PAIRING_HTTP_TEST_OPERATOR_USERNAME
+const adminAccount = process.env.PAIRING_HTTP_TEST_ADMIN_ACCOUNT
+const ownerAccount = process.env.PAIRING_HTTP_TEST_OWNER_ACCOUNT
 const databasePort = process.env.PAIRING_HTTP_SYNTHETIC_TEST_PORT
+const dropControl = process.env.PAIRING_HTTP_TEST_DROP_CONTROL
+const expiredCookie = process.env.PAIRING_HTTP_TEST_EXPIRED_COOKIE
 const enabled = process.env.PAIRING_HTTP_TEST_DISPOSABLE === 'yes'
 
 test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   page,
 }) => {
   test.skip(!enabled, 'Requires explicit disposable pairing HTTP fixture')
+  test.setTimeout(150_000)
   if (
     !origin ||
     !username ||
@@ -35,7 +42,13 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
     !otherFarmId ||
     !publicKeyFile ||
     !keyId ||
-    !databasePort
+    !databasePort ||
+    !dropControl ||
+    !expiredCookie ||
+    !adminUsername ||
+    !operatorUsername ||
+    !adminAccount ||
+    !ownerAccount
   )
     throw new Error('Missing disposable pairing HTTP fixture configuration')
   const url = new URL(origin)
@@ -61,7 +74,13 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
         },
         (response) => {
           const chunks: Buffer[] = []
-          response.on('data', (chunk: Buffer) => chunks.push(chunk))
+          let size = 0
+          response.on('data', (chunk: Buffer) => {
+            size += chunk.length
+            if (size > 16384)
+              response.destroy(new Error('Fixture response exceeded bound'))
+            else chunks.push(chunk)
+          })
           response.on('end', () =>
             resolve(
               new Response(Buffer.concat(chunks), {
@@ -72,12 +91,66 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
           response.on('error', reject)
         },
       )
+      request.setTimeout(10_000, () =>
+        request.destroy(new Error('Fixture request timed out')),
+      )
       request.on('error', reject)
       request.end(payload)
     })
-  const identity = new ConnectorIdentity(
-    generateKeyPairSync('ed25519').privateKey,
-  )
+  const pair = generateKeyPairSync('ed25519')
+  const privatePem = pair.privateKey
+    .export({ type: 'pkcs8', format: 'pem' })
+    .toString()
+  const identity = new ConnectorIdentity(pair.privateKey)
+  const browserBytes: string[] = []
+  const responseReads: Promise<void>[] = []
+  const trackPage = (tracked: typeof page) => {
+    tracked.on('request', (request) => {
+      browserBytes.push(request.url(), request.postData() ?? '')
+      responseReads.push(
+        request
+          .allHeaders()
+          .then((headers) => {
+            browserBytes.push(JSON.stringify(headers))
+          })
+          .catch(() => {}),
+      )
+    })
+    tracked.on('response', (response) => {
+      if (
+        new URL(response.url()).origin === url.origin &&
+        new URL(response.url()).pathname.startsWith('/api/')
+      )
+        responseReads.push(
+          response
+            .allHeaders()
+            .then((headers) => {
+              browserBytes.push(JSON.stringify(headers))
+            })
+            .catch(() => {}),
+        )
+      if (
+        new URL(response.url()).origin === url.origin &&
+        new URL(response.url()).pathname.startsWith('/api/')
+      )
+        responseReads.push(
+          response
+            .text()
+            .then((body) => {
+              browserBytes.push(body)
+            })
+            .catch(() => {}),
+        )
+    })
+  }
+  trackPage(page)
+  const connectorSecrets = [
+    privatePem,
+    pair.privateKey
+      .export({ type: 'pkcs8', format: 'der' })
+      .toString('base64url'),
+  ]
+
   const request = {
     public_key_spki: identity.publicKeySpki,
     platform: 'linux',
@@ -107,10 +180,12 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
     (await machine('start', { ...request, padding: 'x'.repeat(4097) })).status,
   ).toBe(413)
 
+  let replayChecked = false
   async function begin() {
     const response = await machine('start', request)
     expect(response.ok).toBe(true)
     const started = PairingStartResponse.parse(await response.json())
+    connectorSecrets.push(started.device_code)
     expect(started.fingerprint).toBe(identity.fingerprint)
     const challengeResponse = await machine('challenge', {
       device_code: started.device_code,
@@ -130,9 +205,22 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
       }),
     }
     expect((await machine('proof', proof)).ok).toBe(true)
-    expect((await machine('proof', proof)).ok).toBe(false)
+    if (!replayChecked) {
+      expect((await machine('proof', proof)).ok).toBe(false)
+      replayChecked = true
+    }
     return { started, challenge }
   }
+  expect((await machine('start?unexpected=1', request)).status).toBe(400)
+  expect((await machine('challenge', {})).status).toBeGreaterThanOrEqual(400)
+  expect((await machine('claim', {})).status).toBeGreaterThanOrEqual(400)
+  expect(
+    (await machine('approve', {}, { origin: 'https://invalid.example' }))
+      .status,
+  ).toBe(403)
+  expect((await machine('approve', {}, { origin: url.origin })).status).toBe(
+    401,
+  )
   const first = await begin()
   await page.goto(origin + '/entrar')
   await page.getByLabel('Usuário').fill(username)
@@ -207,6 +295,7 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   const claimed = PairingPollResponse.parse(await successful[0]!.json())
   if (claimed.status !== 'approved')
     throw new Error('Expected one approved claim')
+  connectorSecrets.push(claimed.device_token)
   expect(claimed.agent_id).toBe(first.challenge.agent_id)
   expect(claimed.farm_id).toBe(farmId)
   const publicKey = createPublicKey(await readFile(publicKeyFile))
@@ -338,4 +427,231 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   } finally {
     await admin.end({ timeout: 3 })
   }
+  const openActor = async (name: string) => {
+    const actor = await page
+      .context()
+      .browser()!
+      .newContext({ ignoreHTTPSErrors: true })
+    const actorPage = await actor.newPage()
+    trackPage(actorPage)
+    await actorPage.goto(origin + '/entrar')
+    await actorPage.getByLabel('Usuário').fill(name)
+    await actorPage.getByLabel('Senha').fill(password)
+    await actorPage.getByRole('button', { name: 'Entrar', exact: true }).click()
+    await expect(actorPage).not.toHaveURL(/\/entrar$/)
+    return { actor, actorPage }
+  }
+  const postAs = (actorPage: typeof page, body: unknown) =>
+    actorPage.evaluate(async (input) => {
+      const response = await fetch('/api/connector-pairing/approve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      return response.status
+    }, body)
+  const roleCase = await begin()
+  const expiredContext = await page
+    .context()
+    .browser()!
+    .newContext({ ignoreHTTPSErrors: true })
+  await expiredContext.addCookies([
+    {
+      name: '__Host-open3dfarmmanager-session',
+      value: expiredCookie,
+      url: url.origin,
+      secure: true,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ])
+  const expiredPage = await expiredContext.newPage()
+  trackPage(expiredPage)
+  await expiredPage.goto(origin + '/entrar')
+  const expiredSessionCase = roleCase
+  expect(
+    await postAs(expiredPage, {
+      ...approval,
+      user_code: expiredSessionCase.started.user_code,
+    }),
+  ).toBeGreaterThanOrEqual(400)
+  await expiredContext.close()
+  const operator = await openActor(operatorUsername)
+  const administrator = await openActor(adminUsername)
+  const roleApproval = { ...approval, user_code: roleCase.started.user_code }
+  expect(await postAs(operator.actorPage, roleApproval)).toBeGreaterThanOrEqual(
+    400,
+  )
+  expect(await postAs(administrator.actorPage, roleApproval)).toBe(200)
+  const roleClaim = PairingPollResponse.parse(
+    await (
+      await machine('claim', { device_code: roleCase.started.device_code })
+    ).json(),
+  )
+  expect(roleClaim.status).toBe('approved')
+  if (roleClaim.status === 'approved')
+    connectorSecrets.push(roleClaim.device_token)
+  browserBytes.push(
+    await operator.actorPage.evaluate(
+      () =>
+        document.documentElement.outerHTML +
+        JSON.stringify(localStorage) +
+        JSON.stringify(sessionStorage),
+    ),
+  )
+  await operator.actor.close()
+
+  const lost = await begin()
+  expect(
+    (
+      await browserPost('/api/connector-pairing/approve', {
+        ...approval,
+        user_code: lost.started.user_code,
+      })
+    ).status,
+  ).toBe(200)
+  let disconnected = false
+  try {
+    await machine(
+      'claim',
+      { device_code: lost.started.device_code },
+      { 'x-fixture-drop': dropControl },
+    )
+  } catch {
+    disconnected = true
+  }
+  expect(disconnected).toBe(true)
+  const lostInventory = await page.evaluate(
+    async (id) => (await fetch(`/api/farms/${id}/connectors`)).text(),
+    farmId,
+  )
+  expect(lostInventory.includes(lost.challenge.agent_id)).toBe(true)
+  expect(lostInventory.includes(identity.fingerprint)).toBe(true)
+  expect(
+    (
+      await browserPost(
+        `/api/farms/${farmId}/connectors/${lost.challenge.agent_id}/revoke`,
+        { expected_fingerprint: identity.fingerprint },
+      )
+    ).status,
+  ).toBe(200)
+  const recovered = await begin()
+  expect(
+    (
+      await browserPost('/api/connector-pairing/approve', {
+        ...approval,
+        user_code: recovered.started.user_code,
+      })
+    ).status,
+  ).toBe(200)
+  const recoveredClaim = PairingPollResponse.parse(
+    await (
+      await machine('claim', { device_code: recovered.started.device_code })
+    ).json(),
+  )
+  expect(recoveredClaim.status).toBe('approved')
+  if (recoveredClaim.status === 'approved')
+    connectorSecrets.push(recoveredClaim.device_token)
+
+  const lockCase = await begin()
+  const lockSql = postgres({
+    host: '127.0.0.1',
+    port: Number(databasePort),
+    database: 'fixture',
+    username: 'fixture',
+    max: 3,
+    connect_timeout: 3,
+  })
+  const held = await lockSql.reserve()
+  try {
+    await held`BEGIN`
+    await held`UPDATE farm.memberships SET revoked_at=${Date.now()} WHERE farm_id=${farmId}::uuid AND account_id=${adminAccount}`
+    const pending = postAs(administrator.actorPage, {
+      ...approval,
+      user_code: lockCase.started.user_code,
+    })
+    const deadline = Date.now() + 700
+    while (true) {
+      const waiting =
+        await lockSql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%FROM farm.memberships%'`
+      if (waiting[0]?.n > 0) break
+      if (Date.now() >= deadline)
+        throw new Error('Approval did not wait on membership lock')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    await held`COMMIT`
+    expect(await pending).toBeGreaterThanOrEqual(400)
+  } finally {
+    await held`ROLLBACK`.catch(() => {})
+    held.release()
+    await lockSql.end({ timeout: 3 })
+    browserBytes.push(
+      await administrator.actorPage.evaluate(
+        () =>
+          document.documentElement.outerHTML +
+          JSON.stringify(localStorage) +
+          JSON.stringify(sessionStorage),
+      ),
+    )
+    await administrator.actor.close()
+  }
+
+  const expiry = await begin()
+  await new Promise((resolve) =>
+    setTimeout(
+      resolve,
+      Math.max(0, expiry.challenge.expires_at - Date.now() + 50),
+    ),
+  )
+  expect(
+    (
+      await browserPost('/api/connector-pairing/approve', {
+        ...approval,
+        user_code: expiry.started.user_code,
+      })
+    ).status,
+  ).toBeGreaterThanOrEqual(400)
+  const expiredClaim = await machine('claim', {
+    device_code: expiry.started.device_code,
+  })
+  expect(expiredClaim.ok).toBe(false)
+  expect(
+    /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(
+      await expiredClaim.text(),
+    ),
+  ).toBe(false)
+
+  const revokedSessionCase = await begin()
+  const revokeSessions = postgres({
+    host: '127.0.0.1',
+    port: Number(databasePort),
+    database: 'fixture',
+    username: 'fixture',
+    max: 1,
+    connect_timeout: 3,
+  })
+  try {
+    await revokeSessions`UPDATE farm.account_sessions SET revoked_at=${Date.now()} WHERE account_id=${ownerAccount} AND revoked_at IS NULL`
+    expect(
+      (
+        await browserPost('/api/connector-pairing/approve', {
+          ...approval,
+          user_code: revokedSessionCase.started.user_code,
+        })
+      ).status,
+    ).toBeGreaterThanOrEqual(400)
+  } finally {
+    await revokeSessions.end({ timeout: 3 })
+  }
+  await Promise.all(responseReads)
+  const browserState = await page.evaluate(
+    () =>
+      document.documentElement.outerHTML +
+      JSON.stringify(localStorage) +
+      JSON.stringify(sessionStorage),
+  )
+  const visible = browserBytes.join('\n') + browserState
+  for (const secret of connectorSecrets)
+    expect(visible.includes(secret)).toBe(false)
+  expect(/\"device_token\"\s*:/.test(browserBytes.join('\n'))).toBe(false)
 })

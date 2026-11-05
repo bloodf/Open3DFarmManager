@@ -144,3 +144,11 @@ export function encodeSignallingServerFrame(
     throw new Error('Signalling socket frame too large')
   return wire
 }
+export function encodeSignallingClientFrame(
+  input: SignallingClientFrame,
+): string {
+  const wire = JSON.stringify(SignallingClientFrame.parse(input))
+  if (utf8Bytes(wire) > MAX_SIGNALLING_SOCKET_BYTES)
+    throw new Error('Signalling socket frame too large')
+  return wire
+}

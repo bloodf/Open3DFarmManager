@@ -4,6 +4,10 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   page,
 }) => {
   await page.goto('/')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
   await page.keyboard.press('Tab')
   await expect(
     page.getByRole('link', { name: 'Entrar', exact: true }),
@@ -25,7 +29,7 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   await expect(page.getByRole('button')).toHaveCount(0)
 })
 
-test('login is keyboard operable, labels help, and failed submission focuses an associated error', async ({
+test('login is keyboard operable, labels help, and failed submission focuses an announced error', async ({
   page,
 }) => {
   await page.route('**/api/auth/login', async (route) => {
@@ -35,6 +39,10 @@ test('login is keyboard operable, labels help, and failed submission focuses an 
     })
   })
   await page.goto('/entrar')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
 
   const username = page.getByRole('textbox', { name: 'Usuário' })
   const password = page.getByLabel('Senha', { exact: true })
@@ -64,6 +72,39 @@ test('login is keyboard operable, labels help, and failed submission focuses an 
   )
 })
 
+test('successful login by keyboard returns home and focuses its heading', async ({
+  page,
+}) => {
+  let requests = 0
+  await page.route('**/api/auth/login', async (route) => {
+    requests++
+    expect(route.request().method()).toBe('POST')
+    expect(route.request().postDataJSON()).toEqual({
+      username: 'fixture_user',
+      password: 'synthetic-password',
+    })
+    await route.fulfill({ status: 204, body: '' })
+  })
+  await page.goto('/entrar')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('fixture_user')
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('synthetic-password')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/')
+  await expect(
+    page.getByRole('heading', {
+      name: 'Sua farm de impressão, em um só lugar.',
+    }),
+  ).toBeFocused()
+  expect(requests).toBe(1)
+})
+
 test('logout failure focuses an announced error and success returns home', async ({
   page,
 }) => {
@@ -83,6 +124,10 @@ test('logout failure focuses an announced error and success returns home', async
     await route.fulfill({ status: 204, body: '' })
   })
   await page.goto('/sair')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
 
   const submit = page.getByRole('button', {
     name: 'Sair da conta',
@@ -121,11 +166,15 @@ test('pending logout disables duplicate submits until the request settles', asyn
     await route.fulfill({ status: 503, json: {} })
   })
   await page.goto('/sair')
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#__nuxt')
+    return root !== null && '__vue_app__' in root
+  })
   await page.getByRole('button', { name: 'Sair da conta', exact: true }).click()
   try {
     const pendingButton = page.getByRole('button', { name: 'Saindo…' })
     await expect(pendingButton).toBeDisabled()
-    await expect(page.getByRole('status')).toContainText(
+    await expect(page.locator('form').getByRole('status')).toContainText(
       'Encerrando sua sessão.',
     )
     await expect.poll(() => requests).toBe(1)

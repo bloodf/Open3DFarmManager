@@ -358,3 +358,92 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
     ),
   )
 })
+
+test('adapter compares the complete trusted expected binding and role before any key import', async (t) => {
+  const { encodeRtcProof, verifyExpectedRtcProof } = await import(
+    '../../packages/farm-protocol/src/rtc-session-binding.ts'
+  )
+  const f = await fixture(),
+    other = await fixture()
+  const signature = await signRtcSessionProof(
+    f.binding,
+    'connector',
+    f.connector.privateKey,
+  )
+  const wire = encodeRtcProof({
+    v: 1,
+    role: 'connector',
+    binding: f.binding,
+    signature,
+  })
+  const altered = { ...f.binding, farm_id: randomUUID() }
+  const alteredSignature = await signRtcSessionProof(
+    altered,
+    'connector',
+    f.connector.privateKey,
+  )
+  assert.equal(
+    await verifyRtcSessionProof(altered, 'connector', alteredSignature),
+    true,
+  )
+  const alteredWire = encodeRtcProof({
+    v: 1,
+    role: 'connector',
+    binding: altered,
+    signature: alteredSignature,
+  })
+  const imports = t.mock.method(crypto.subtle, 'importKey')
+  try {
+    const mutations = [
+      { transport_id: randomUUID() },
+      { farm_id: randomUUID() },
+      { agent_id: randomUUID() },
+      { account_id: 'other_text' },
+      { key_id: randomUUID() },
+      { browser_public_key: other.binding.browser_public_key },
+      { browser_thumbprint: nonce() },
+      { connector_public_key_spki: other.binding.connector_public_key_spki },
+      { connector_fingerprint: other.binding.connector_fingerprint },
+      { credential_jti: randomUUID() },
+      { origin: 'https://other.example' },
+      { audience: 'other-audience' },
+      { browser_nonce: nonce() },
+      { connector_nonce: nonce() },
+      { issued_at: 1001 },
+      { expires_at: 30999 },
+      { browser_dtls: other.binding.connector_dtls },
+      { connector_dtls: other.binding.browser_dtls },
+      { offer_sha256: nonce() },
+      { answer_sha256: nonce() },
+    ]
+    for (const mutation of mutations)
+      assert.equal(
+        await verifyExpectedRtcProof(
+          { ...f.binding, ...mutation },
+          'connector',
+          wire,
+        ),
+        false,
+      )
+    assert.equal(
+      await verifyExpectedRtcProof(f.binding, 'connector', alteredWire),
+      false,
+    )
+    assert.equal(
+      await verifyExpectedRtcProof(f.binding, 'browser', wire),
+      false,
+    )
+    assert.equal(
+      await verifyExpectedRtcProof(f.binding, 'connector', wire + ' '),
+      false,
+    )
+    assert.equal(imports.mock.callCount(), 0)
+    assert.equal(
+      await verifyExpectedRtcProof(f.binding, 'connector', wire),
+      true,
+    )
+    assert.ok(imports.mock.callCount() > 0)
+  } finally {
+    imports.mock.restore()
+  }
+})

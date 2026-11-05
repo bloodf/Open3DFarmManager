@@ -247,3 +247,31 @@ export async function verifyRtcSessionProof(
     return false
   }
 }
+
+/** Adapter admission helper: expected binding comes from the trusted server API,
+ * never from a received frame. Equality and role checks happen before key import
+ * or signature verification. Caller must independently enforce its local deadline
+ * before/after this await and compare the actual negotiated DTLS certificate. */
+export async function verifyExpectedRtcProof(
+  expectedBinding: unknown,
+  expectedRole: RtcPeerRole,
+  wire: unknown,
+): Promise<boolean> {
+  try {
+    if (expectedRole !== 'browser' && expectedRole !== 'connector') return false
+    const expected = RtcSessionBinding.parse(expectedBinding)
+    const incoming = decodeRtcProof(wire)
+    if (
+      incoming.role !== expectedRole ||
+      canonicalize(incoming.binding) !== canonicalize(expected)
+    )
+      return false
+    return await verifyRtcSessionProof(
+      expected,
+      expectedRole,
+      incoming.signature,
+    )
+  } catch {
+    return false
+  }
+}

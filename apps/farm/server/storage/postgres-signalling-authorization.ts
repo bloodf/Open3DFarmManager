@@ -74,6 +74,11 @@ export class PostgresSignallingAuthorization
         await tx`SET LOCAL statement_timeout = '2000ms'`
         await tx`SET LOCAL lock_timeout = '1000ms'`
         const first = await this.observe(tx, scope.sessionRecordId)
+        if (first === null)
+          return {
+            ok: false,
+            reason: 'denied',
+          } satisfies SignallingReadDecision
         // observe locks account SHARE before session UPDATE and checks immutable account binding.
         const accounts = await tx<
           AccountSessionState[]
@@ -95,6 +100,11 @@ export class PostgresSignallingAuthorization
           : null
         // Even a denied snapshot may have waited for a row. Expiry observed after that wait commits.
         const final = await this.observe(tx, scope.sessionRecordId)
+        if (final === null)
+          return {
+            ok: false,
+            reason: 'denied',
+          } satisfies SignallingReadDecision
         const current = evaluateSession(
           scope.sessionRecordId,
           session,
@@ -130,10 +140,10 @@ export class PostgresSignallingAuthorization
   private async observe(
     tx: TransactionSql,
     sessionId: string,
-  ): Promise<number> {
+  ): Promise<number | null> {
     const rows =
       await tx`SELECT farm.observe_signalling_session_expiry(${sessionId})::float8 AS observed_at`
-    return time.parse(rows[0]?.observed_at)
+    return time.nullable().parse(rows[0]?.observed_at)
   }
   private async snapshot(
     tx: TransactionSql,

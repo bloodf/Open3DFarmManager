@@ -29,7 +29,7 @@ BEGIN
   observed_now := greatest(first_now, floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint);
   IF observed_now NOT BETWEEN 0 AND 9007199254740991 THEN RAISE EXCEPTION 'Invalid signalling authorization clock'; END IF;
   IF locked_account IS NULL OR session_row.account_id IS DISTINCT FROM expected_account
-     OR session_row.account_id IS DISTINCT FROM locked_account THEN RETURN observed_now; END IF;
+     OR session_row.account_id IS DISTINCT FROM locked_account THEN RETURN NULL; END IF;
   IF session_row.revoked_at IS NULL AND observed_now >= session_row.last_seen_at
      AND (observed_now >= session_row.absolute_expires_at
           OR observed_now - session_row.last_seen_at >= 1800000) THEN

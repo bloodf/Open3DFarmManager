@@ -243,6 +243,16 @@ export async function testPostgresSignallingAuthorization(
     }).authorize(valid.scope),
     { ok: false, reason: 'denied' },
   )
+  assert.deepEqual(
+    await reader().authorize({ ...valid.scope, sessionRecordId: randomUUID() }),
+    { ok: false, reason: 'denied' },
+  )
+  assert.equal(
+    (
+      await runtime`SELECT farm.observe_signalling_session_expiry(${randomUUID()}) AS observed_at`
+    )[0]?.observed_at,
+    null,
+  )
   const missing = await actor()
   assert.deepEqual(
     await reader().authorize({

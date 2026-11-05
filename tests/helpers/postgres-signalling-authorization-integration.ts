@@ -500,6 +500,11 @@ export async function testPostgresSignallingAuthorization(
   )
 
   const waiting = await actor(600)
+  const waitingExpiry = Number(
+    (
+      await admin`SELECT absolute_expires_at::float8 AS at FROM farm.account_sessions WHERE id=${waiting.sessionRecordId}`
+    )[0]?.at,
+  )
   let release: (() => void) | undefined
   let locked: (() => void) | undefined
   const ready = new Promise<void>((resolve) => {
@@ -514,11 +519,6 @@ export async function testPostgresSignallingAuthorization(
     await gate
   })
   await ready
-  const waitingExpiry = Number(
-    (
-      await admin`SELECT absolute_expires_at::float8 AS at FROM farm.account_sessions WHERE id=${waiting.sessionRecordId}`
-    )[0]?.at,
-  )
   const pending = reader().authorize({
     ...valid.scope,
     sessionRecordId: waiting.sessionRecordId,
@@ -546,9 +546,9 @@ export async function testPostgresSignallingAuthorization(
     )
   } finally {
     release?.()
-    await holding
-    await Promise.allSettled([pending])
+    await Promise.allSettled([holding, pending])
   }
+  await holding
   assert.deepEqual(await pending, { ok: false, reason: 'denied' })
   assert.ok(
     (
@@ -608,9 +608,9 @@ export async function testPostgresSignallingAuthorization(
     )
   } finally {
     releaseMember?.()
-    await memberHolding
-    await Promise.allSettled([lateRead])
+    await Promise.allSettled([memberHolding, lateRead])
   }
+  await memberHolding
   assert.deepEqual(await lateRead, { ok: false, reason: 'denied' })
   assert.ok(
     (
@@ -679,9 +679,13 @@ export async function testPostgresSignallingAuthorization(
     assert.equal(revokerWaiting, true)
   } finally {
     releaseCredential?.()
-    await credentialHolding
-    await Promise.allSettled([firstRead, revokePromise ?? Promise.resolve()])
+    await Promise.allSettled([
+      credentialHolding,
+      firstRead,
+      revokePromise ?? Promise.resolve(),
+    ])
   }
+  await credentialHolding
   try {
     assert.equal((await firstRead).ok, true)
   } finally {

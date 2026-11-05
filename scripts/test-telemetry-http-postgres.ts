@@ -1,11 +1,11 @@
-// Opt-in disposable fixture: actual PostgreSQL and Node HTTP, no built-Nuxt claim.
+// Opt-in disposable fixture: actual PostgreSQL and synthetic-only HTTP clients.
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import postgres from 'postgres'
 import { generateKeyPairSync } from 'node:crypto'
 import {
@@ -21,7 +21,16 @@ import { ConnectorIdentity } from '../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../packages/connector/src/cloud/queue.ts'
 import { drainTelemetryOnce } from '../packages/connector/src/cloud/drain.ts'
 import { createAuthenticatedTelemetrySender } from '../packages/connector/src/cloud/authenticated-http-telemetry.ts'
+import { startBuiltTelemetryFixture } from '../tests/helpers/telemetry-built-harness.ts'
 
+const builtMode = process.env.TELEMETRY_HTTP_TEST_BUILT === 'yes'
+const ledgerPath = process.env.TELEMETRY_HTTP_SYNTHETIC_LEDGER
+if (
+  !ledgerPath ||
+  !isAbsolute(ledgerPath) ||
+  !relative(process.cwd(), ledgerPath).startsWith('..')
+)
+  throw new Error('External synthetic resource ledger required')
 const portText = process.env.TELEMETRY_HTTP_SYNTHETIC_TEST_PORT
 const port = Number(portText)
 if (
@@ -55,6 +64,7 @@ const created: string[] = []
 let directory: string | undefined
 let queue: TelemetryQueue | undefined
 let server: ReturnType<typeof createServer> | undefined
+let built: Awaited<ReturnType<typeof startBuiltTelemetryFixture>> | undefined
 try {
   const identity = (
     await admin`SELECT current_database() AS db,current_user AS actor`
@@ -64,11 +74,16 @@ try {
   const catalog = (await loadMigrationCatalog()).slice(0, 16)
   assert.equal(catalog.length, 16)
   const history =
-    await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations WHERE position<=16 ORDER BY position`
+    await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...history]), 16)
   for (const role of roles) {
     await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
     created.push(role.name)
+    await appendFile(
+      ledgerPath,
+      JSON.stringify({ resource: 'database-role', name: role.name }) + '\n',
+      { mode: 0o600 },
+    )
   }
   function connect(username: string) {
     const sql = postgres({
@@ -87,6 +102,11 @@ try {
     revokeSql = connect(prefix + '_revoke'),
     badSql = connect(prefix + '_bad')
   directory = await mkdtemp(join(tmpdir(), 'o3dfm-telemetry-http-real-'))
+  await appendFile(
+    ledgerPath,
+    JSON.stringify({ resource: 'fixture-directory', path: directory }) + '\n',
+    { mode: 0o600 },
+  )
   const keyFile = join(directory, 'keys.json')
   const keys = await crypto.subtle.generateKey('Ed25519', true, [
     'sign',
@@ -98,40 +118,61 @@ try {
   ).toString('base64')
   const pem = `-----BEGIN PUBLIC KEY-----\n${spki.match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----\n`
   await writeFile(keyFile, JSON.stringify({ fixture: pem }), { mode: 0o600 })
-  const agent = new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
+  const agentKey = generateKeyPairSync('ed25519').privateKey
+  const agent = new ConnectorIdentity(agentKey)
   let handler:
     | Awaited<ReturnType<typeof createTelemetryHttpRuntime>>
     | undefined
-  let dropAcknowledgement = true
-  server = createServer(async (req, res) => {
-    if (!handler) {
-      res.writeHead(503)
-      res.end()
-      return
-    }
-    const result = await handler({ '~app': { node: { req } } })
-    if (
-      req.url === '/api/connector/telemetry' &&
-      result.status === 200 &&
-      dropAcknowledgement
-    ) {
-      dropAcknowledgement = false
-      res.destroy()
-      return
-    }
-    res.writeHead(result.status, {
-      'content-type': 'application/json',
-      'cache-control': 'no-store',
+  let origin: string
+  const audience = 'open3dfarmmanager:connector'
+  if (builtMode) {
+    built = await startBuiltTelemetryFixture({
+      directory,
+      keyFile,
+      sqlPort: port,
+      sqlUser: prefix,
+      issuer: 'https://farm.example',
+      audience,
+      ledgerPath,
     })
-    res.end(JSON.stringify(result.body))
-  })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Missing HTTP listener')
-  const origin = `http://127.0.0.1:${address.port}`,
-    audience = 'open3dfarmmanager:connector'
+    origin = built.origin
+  } else {
+    let dropAcknowledgement = true
+    server = createServer(async (req, res) => {
+      if (!handler) {
+        res.writeHead(503)
+        res.end()
+        return
+      }
+      const result = await handler({ '~app': { node: { req } } })
+      if (
+        req.url === '/api/connector/telemetry' &&
+        result.status === 200 &&
+        dropAcknowledgement
+      ) {
+        dropAcknowledgement = false
+        res.destroy()
+        return
+      }
+      res.writeHead(result.status, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+      })
+      res.end(JSON.stringify(result.body))
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string')
+      throw new Error('Missing HTTP listener')
+    origin = `http://127.0.0.1:${address.port}`
+    await appendFile(
+      ledgerPath,
+      JSON.stringify({ resource: 'loopback-server', port: address.port }) +
+        '\n',
+      { mode: 0o600 },
+    )
+  }
   const config = {
     origin,
     issuer: 'https://farm.example',
@@ -161,12 +202,22 @@ try {
     elevated = prefix + '_elevated'
   await admin`CREATE ROLE ${admin(bridge)} NOLOGIN NOINHERIT`
   created.push(bridge)
+  await appendFile(
+    ledgerPath,
+    JSON.stringify({ resource: 'database-role', name: bridge }) + '\n',
+    { mode: 0o600 },
+  )
   await admin`GRANT farm_printer_ownership TO ${admin(bridge)}`
   await admin`GRANT ${admin(bridge)} TO ${admin(prefix + '_bad')}`
   await denyBad()
   await admin`REVOKE ${admin(bridge)} FROM ${admin(prefix + '_bad')}`
   await admin`CREATE ROLE ${admin(elevated)} NOLOGIN CREATEDB`
   created.push(elevated)
+  await appendFile(
+    ledgerPath,
+    JSON.stringify({ resource: 'database-role', name: elevated }) + '\n',
+    { mode: 0o600 },
+  )
   await admin`GRANT ${admin(elevated)} TO ${admin(prefix + '_bad')}`
   await denyBad()
   await admin`REVOKE ${admin(elevated)} FROM ${admin(prefix + '_bad')}`
@@ -257,51 +308,63 @@ try {
     ).ok,
     true,
   )
-  queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
-  const eventId = queue.enqueue(
-    {
-      printerKey: 'simulator',
-      state: 'idle',
-      progress: 0,
-      observedAt: Date.now(),
-    },
-    Date.now(),
-  ).eventId
-  const sender = createAuthenticatedTelemetrySender({
-    endpoint: origin + '/api/connector/telemetry',
+  let eventId: string
+  let sender: ReturnType<typeof createAuthenticatedTelemetrySender> | undefined
+  const clientFixture = {
     token: claimed.device_token,
     agentId: claimed.agent_id,
     farmId,
-    audience,
-    timeoutMs: 5000,
-    allowLoopbackHttpForTests: true,
-    identity: agent,
-  })
-  assert.equal(
-    (
-      await drainTelemetryOnce(
-        queue,
-        sender,
-        Date.now,
-        new AbortController().signal,
-      )
-    ).status,
-    'retained',
-  )
-  assert.equal(queue.depth, 1)
-  await new Promise((resolve) => setTimeout(resolve, 1100))
-  assert.equal(
-    (
-      await drainTelemetryOnce(
-        queue,
-        sender,
-        Date.now,
-        new AbortController().signal,
-      )
-    ).status,
-    'delivered',
-  )
-  assert.equal(queue.depth, 0)
+    privateKey: agentKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+  }
+  if (built) {
+    eventId = await built.runClient(clientFixture, 'deliver')
+  } else {
+    queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
+    eventId = queue.enqueue(
+      {
+        printerKey: 'simulator',
+        state: 'idle',
+        progress: 0,
+        observedAt: Date.now(),
+      },
+      Date.now(),
+    ).eventId
+    sender = createAuthenticatedTelemetrySender({
+      endpoint: origin + '/api/connector/telemetry',
+      token: claimed.device_token,
+      agentId: claimed.agent_id,
+      farmId,
+      audience,
+      timeoutMs: 5000,
+      allowLoopbackHttpForTests: true,
+      identity: agent,
+    })
+    assert.equal(
+      (
+        await drainTelemetryOnce(
+          queue,
+          sender,
+          Date.now,
+          new AbortController().signal,
+        )
+      ).status,
+      'retained',
+    )
+    assert.equal(queue.depth, 1)
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    assert.equal(
+      (
+        await drainTelemetryOnce(
+          queue,
+          sender,
+          Date.now,
+          new AbortController().signal,
+        )
+      ).status,
+      'delivered',
+    )
+    assert.equal(queue.depth, 0)
+  }
   assert.equal(
     Number(
       (
@@ -321,28 +384,42 @@ try {
     ).ok,
     true,
   )
-  queue.enqueue(
-    {
-      printerKey: 'simulator',
-      state: 'idle',
-      progress: 0,
-      observedAt: Date.now(),
-    },
-    Date.now(),
-  )
-  await new Promise((resolve) => setTimeout(resolve, 1100))
+  let deniedEventId: string
+  if (built) {
+    deniedEventId = await built.runClient(clientFixture, 'revoked')
+  } else {
+    if (!queue || !sender) throw new Error('Missing local fixture')
+    deniedEventId = queue.enqueue(
+      {
+        printerKey: 'simulator',
+        state: 'idle',
+        progress: 0,
+        observedAt: Date.now(),
+      },
+      Date.now(),
+    ).eventId
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    assert.equal(
+      (
+        await drainTelemetryOnce(
+          queue,
+          sender,
+          Date.now,
+          new AbortController().signal,
+        )
+      ).status,
+      'retained',
+    )
+    assert.equal(queue.depth, 1)
+  }
   assert.equal(
-    (
-      await drainTelemetryOnce(
-        queue,
-        sender,
-        Date.now,
-        new AbortController().signal,
-      )
-    ).status,
-    'retained',
+    Number(
+      (
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${claimed.agent_id}::uuid AND event_id=${deniedEventId}::uuid`
+      )[0]?.n,
+    ),
+    0,
   )
-  assert.equal(queue.depth, 1)
   console.log(
     JSON.stringify({
       result: 'passed',
@@ -352,17 +429,50 @@ try {
         'lost acknowledgement and durable deduplication',
         'enrollment revocation denies retry',
       ],
-      builtNuxt: false,
+      builtNuxt: builtMode,
     }),
   )
 } finally {
-  queue?.close()
-  if (server) {
-    server.closeAllConnections()
-    await new Promise<void>((resolve) => server?.close(() => resolve()))
+  const failures: string[] = []
+  async function cleanup(label: string, action: () => Promise<void> | void) {
+    try {
+      await action()
+    } catch {
+      failures.push(label)
+    }
   }
-  for (const pool of pools) await pool.end({ timeout: 3 })
-  for (const role of created.reverse()) await admin`DROP ROLE ${admin(role)}`
-  await admin.end({ timeout: 3 })
-  if (directory) await rm(directory, { recursive: true, force: true })
+  await cleanup('queue', () => queue?.close())
+  await cleanup('built application and proxy', async () => {
+    await built?.close()
+  })
+  await cleanup('local HTTP server', async () => {
+    if (!server?.listening) return
+    server.closeAllConnections()
+    await new Promise<void>((resolveClose, reject) =>
+      server?.close((error) => (error ? reject(error) : resolveClose())),
+    )
+  })
+  for (const pool of pools)
+    await cleanup('SQL pool', () => pool.end({ timeout: 3 }))
+  for (const role of created.reverse())
+    await cleanup('synthetic database role', async () => {
+      await admin`DROP ROLE ${admin(role)}`
+    })
+  await cleanup('administrative pool', () => admin.end({ timeout: 3 }))
+  const ownedDirectory = directory
+  if (ownedDirectory)
+    await cleanup('fixture directory', () =>
+      rm(ownedDirectory, { recursive: true, force: true }),
+    )
+  await appendFile(
+    ledgerPath,
+    JSON.stringify({
+      cleanup: failures.length
+        ? 'incomplete'
+        : 'fixture-owned roles, pools, servers and directory removed',
+      failures,
+    }) + '\n',
+    { mode: 0o600 },
+  )
+  if (failures.length) throw new Error('Synthetic fixture cleanup incomplete')
 }

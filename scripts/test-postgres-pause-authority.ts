@@ -1,5 +1,6 @@
 // Caller owns a disposable loopback PostgreSQL database with the maintained full migration journal.
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFile, realpath, lstat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative } from 'node:path'
 import postgres from 'postgres'
@@ -36,11 +37,30 @@ const base = process.env.PAUSE_AUTHORITY_SYNTHETIC_RESTART_BASE
 if (phase !== 'run' && (!base || !isAbsolute(base)))
   throw new Error('Absolute private restart handoff path required')
 if (base) {
-  const checkout = await realpath(new URL('..', import.meta.url)),
-    parent = await realpath(dirname(base)),
-    outside = relative(checkout, parent)
-  if (!outside.startsWith('../') && outside !== '..')
-    throw new Error('Restart handoff must be outside checkout')
+  const checkout = await realpath(new URL('..', import.meta.url))
+  const parent = await realpath(dirname(base))
+  const worktrees = execFileSync(
+    'git',
+    ['worktree', 'list', '--porcelain', '-z'],
+    {
+      cwd: checkout,
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 1048576,
+    },
+  )
+    .split('\0')
+    .filter((entry) => entry.startsWith('worktree '))
+  if (worktrees.length === 0)
+    throw new Error('Cannot verify private handoff location')
+  for (const entry of worktrees) {
+    const root = await realpath(entry.slice('worktree '.length))
+    const outside = relative(root, parent)
+    if (!outside.startsWith('../') && outside !== '..')
+      throw new Error(
+        'Restart handoff must be outside every repository worktree',
+      )
+  }
 }
 if (
   phase === 'prepare-restart' &&

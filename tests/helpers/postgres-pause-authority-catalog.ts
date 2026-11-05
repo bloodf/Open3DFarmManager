@@ -93,7 +93,7 @@ export async function testPauseAuthorityCatalog(
   })
   try {
     const allowed =
-      await sql`SELECT has_function_privilege(current_user,'farm.prune_pause_authority()','EXECUTE') AS prune,has_function_privilege(current_user,'farm.observe_signalling_session_expiry(text)','EXECUTE') AS observer,has_schema_privilege(current_user,'farm','CREATE') AS create_schema,has_table_privilege(current_user,'farm.account_sessions','UPDATE') AS session_update,has_column_privilege(current_user,'farm.connector_credentials','jti','UPDATE') AS credential_lock,has_column_privilege(current_user,'farm.connector_credentials','expires_at','UPDATE') AS revoke,has_table_privilege(current_user,'farm.connector_revocations','INSERT') AS revocation_insert`
+      await sql`SELECT has_function_privilege(current_user,'farm.prune_pause_authority()','EXECUTE') AS prune,has_function_privilege(current_user,'farm.observe_signalling_session_expiry(text)','EXECUTE') AS observer,has_schema_privilege(current_user,'farm','CREATE') AS create_schema,has_table_privilege(current_user,'farm.account_sessions','UPDATE') AS session_update,has_column_privilege(current_user,'farm.connector_credentials','jti','UPDATE') AS credential_lock,has_column_privilege(current_user,'farm.connector_credentials','expires_at','UPDATE') AS revoke,has_table_privilege(current_user,'farm.connector_revocations','INSERT') AS revocation_insert,has_table_privilege(current_user,'farm.pause_authority_challenges','TRUNCATE') AS truncate_challenges`
     assert.deepEqual(
       { ...allowed[0] },
       {
@@ -104,6 +104,7 @@ export async function testPauseAuthorityCatalog(
         credential_lock: true,
         revoke: false,
         revocation_insert: false,
+        truncate_challenges: false,
       },
     )
     for (const query of [
@@ -114,7 +115,14 @@ export async function testPauseAuthorityCatalog(
       () => sql`TRUNCATE farm.pause_authority_challenges`,
       () => sql`CREATE TABLE farm.pause_catalog_forbidden(id integer)`,
     ])
-      await assert.rejects(query)
+      await assert.rejects(
+        query,
+        (error: unknown) =>
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === '42501',
+      )
     // A caller-controlled temporary schema must not redirect qualified SECURITY DEFINER work.
     await sql`CREATE TEMP TABLE pause_authority_watermark(id integer,observed_at bigint)`
     await sql`INSERT INTO pg_temp.pause_authority_watermark VALUES(1,9007199251140991)`

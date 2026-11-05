@@ -27,102 +27,109 @@ export async function testPostgresPauseAuthority(
   port: number,
   restartFile?: string,
 ): Promise<string[]> {
-  const role = 'pause_issuer_fixture_' + randomUUID().replaceAll('-', '')
-  await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_pause_authority`
-  const acceptorRole =
-    'pause_acceptor_fixture_' + randomUUID().replaceAll('-', '')
-  await admin`CREATE ROLE ${admin(acceptorRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_connector_credential_acceptor`
-  const acceptorSql = postgres({
-    host: '127.0.0.1',
-    port,
-    database: 'fixture',
-    username: acceptorRole,
-    max: 2,
-    connect_timeout: 3,
-    connection: {
-      application_name: acceptorRole,
-      options: '-c role=farm_connector_credential_acceptor',
-      statement_timeout: 2000,
-      lock_timeout: 1000,
-    },
-  })
-  const sql = postgres({
-    host: '127.0.0.1',
-    port,
-    database: 'fixture',
-    username: role,
-    max: 4,
-    connect_timeout: 3,
-    connection: {
-      application_name: role,
-      options: '-c role=farm_pause_authority',
-      statement_timeout: 2000,
-      lock_timeout: 1000,
-      transaction_timeout: 10000,
-    },
-  })
-  const origin = 'https://farm.example',
-    audience = 'open3dfarmmanager:pause',
-    credentialAudience = 'open3dfarmmanager:connector'
-  const identityKeys = generateKeyPairSync('ed25519'),
-    identity = new ConnectorIdentity(identityKeys.privateKey)
-  const connectorPrivate = await crypto.subtle.importKey(
-    'pkcs8',
-    identityKeys.privateKey.export({ type: 'pkcs8', format: 'der' }),
-    { name: 'Ed25519' },
-    false,
-    ['sign'],
-  )
-  const issuer = await crypto.subtle.generateKey('Ed25519', false, [
-    'sign',
-    'verify',
-  ])
-  const credentialIssuer = await crypto.subtle.generateKey('Ed25519', false, [
-    'sign',
-    'verify',
-  ])
-  const browser = await crypto.subtle.generateKey(
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign', 'verify'],
-  )
-  const { kty, crv, x, y } = await crypto.subtle.exportKey(
-    'jwk',
-    browser.publicKey,
-  )
-  const publicKey = { kty, crv, x, y },
-    account = 'account_' + randomUUID(),
-    farm = randomUUID()
-  let session = 'session_' + randomUUID()
-  const policy = { idleTimeoutMs: 1800000 },
-    pairingConfig = { origin, audience: 'open3dfarmmanager:pairing' }
-  const pairing = new PostgresPairing(admin, pairingConfig),
-    pairingProof = new PostgresPairingProof(admin, pairingConfig)
-  const devices = new PostgresBrowserDeviceRegistry(admin, {
-    origin,
-    audience: 'open3dfarmmanager:browser-device',
-  })
-  const authority = new PostgresPauseAuthority(sql, {
-    origin,
-    audience,
-    issuer: 'pause:issuer',
-    kid: 'pause-key',
-    credentialIssuer: origin,
-    credentialAudience,
-    idleTimeoutMs: 1800000,
-    signingKey: issuer.privateKey,
-    verificationKey: issuer.publicKey,
-  })
-  async function databaseNow(): Promise<number> {
-    const now = Number(
-      (
-        await admin`SELECT floor(extract(epoch FROM clock_timestamp())*1000)::float8 AS now`
-      )[0]?.now,
-    )
-    if (!Number.isSafeInteger(now)) throw new Error('Invalid database clock')
-    return now
-  }
+  const cleanup: (() => Promise<unknown>)[] = []
+  let primaryError: unknown
+  let failed = false
   try {
+    const role = 'pause_issuer_fixture_' + randomUUID().replaceAll('-', '')
+    await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_pause_authority`
+    cleanup.push(() => admin`DROP ROLE ${admin(role)}`)
+    const acceptorRole =
+      'pause_acceptor_fixture_' + randomUUID().replaceAll('-', '')
+    await admin`CREATE ROLE ${admin(acceptorRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_connector_credential_acceptor`
+    cleanup.push(() => admin`DROP ROLE ${admin(acceptorRole)}`)
+    const acceptorSql = postgres({
+      host: '127.0.0.1',
+      port,
+      database: 'fixture',
+      username: acceptorRole,
+      max: 2,
+      connect_timeout: 3,
+      connection: {
+        application_name: acceptorRole,
+        options: '-c role=farm_connector_credential_acceptor',
+        statement_timeout: 2000,
+        lock_timeout: 1000,
+      },
+    })
+    cleanup.push(() => acceptorSql.end({ timeout: 3 }))
+    const sql = postgres({
+      host: '127.0.0.1',
+      port,
+      database: 'fixture',
+      username: role,
+      max: 4,
+      connect_timeout: 3,
+      connection: {
+        application_name: role,
+        options: '-c role=farm_pause_authority',
+        statement_timeout: 2000,
+        lock_timeout: 1000,
+        transaction_timeout: 10000,
+      },
+    })
+    cleanup.push(() => sql.end({ timeout: 3 }))
+    const origin = 'https://farm.example',
+      audience = 'open3dfarmmanager:pause',
+      credentialAudience = 'open3dfarmmanager:connector'
+    const identityKeys = generateKeyPairSync('ed25519'),
+      identity = new ConnectorIdentity(identityKeys.privateKey)
+    const connectorPrivate = await crypto.subtle.importKey(
+      'pkcs8',
+      identityKeys.privateKey.export({ type: 'pkcs8', format: 'der' }),
+      { name: 'Ed25519' },
+      false,
+      ['sign'],
+    )
+    const issuer = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
+    const credentialIssuer = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
+    const browser = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify'],
+    )
+    const { kty, crv, x, y } = await crypto.subtle.exportKey(
+      'jwk',
+      browser.publicKey,
+    )
+    const publicKey = { kty, crv, x, y },
+      account = 'account_' + randomUUID(),
+      farm = randomUUID()
+    let session = 'session_' + randomUUID()
+    const policy = { idleTimeoutMs: 1800000 },
+      pairingConfig = { origin, audience: 'open3dfarmmanager:pairing' }
+    const pairing = new PostgresPairing(admin, pairingConfig),
+      pairingProof = new PostgresPairingProof(admin, pairingConfig)
+    const devices = new PostgresBrowserDeviceRegistry(admin, {
+      origin,
+      audience: 'open3dfarmmanager:browser-device',
+    })
+    const authority = new PostgresPauseAuthority(sql, {
+      origin,
+      audience,
+      issuer: 'pause:issuer',
+      kid: 'pause-key',
+      credentialIssuer: origin,
+      credentialAudience,
+      idleTimeoutMs: 1800000,
+      signingKey: issuer.privateKey,
+      verificationKey: issuer.publicKey,
+    })
+    async function databaseNow(): Promise<number> {
+      const now = Number(
+        (
+          await admin`SELECT floor(extract(epoch FROM clock_timestamp())*1000)::float8 AS now`
+        )[0]?.now,
+      )
+      if (!Number.isSafeInteger(now)) throw new Error('Invalid database clock')
+      return now
+    }
     const settings = (
       await sql`SELECT current_user, current_setting('statement_timeout') AS statement, current_setting('lock_timeout') AS lock, current_setting('transaction_timeout') AS transaction`
     )[0]
@@ -1346,7 +1353,7 @@ export async function testPostgresPauseAuthority(
       'UPDATE farm.printer_assignments SET printer_key=printer_key',
       'SET ROLE fixture',
     ])
-      await assert.rejects(sql.unsafe(query))
+      await assert.rejects(sql.unsafe(query), sqlstate('42501'))
     const injectedFutureWatermark =
       process.env.PAUSE_AUTHORITY_SYNTHETIC_FUTURE_WATERMARK === 'yes'
     if (injectedFutureWatermark) {
@@ -1386,11 +1393,24 @@ export async function testPostgresPauseAuthority(
       'idle-and-absolute-expiry-after-session-lock-and-account-version-after-account-lock',
       'native-sign-failure-deferred-commit-rollback-committed-lost-response-deferred-commit-expiry-live-retention-expiry-after-lock-disabled-account-and-session-revocation',
     ]
+  } catch (error) {
+    failed = true
+    primaryError = error
+    throw error
   } finally {
-    await sql.end({ timeout: 3 })
-    await acceptorSql.end({ timeout: 3 })
-    await admin`DROP ROLE ${admin(role)}`
-    await admin`DROP ROLE ${admin(acceptorRole)}`
+    const errors: unknown[] = []
+    for (const release of cleanup.reverse()) {
+      try {
+        await release()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(
+        failed ? [primaryError, ...errors] : errors,
+        'Pause issuer fixture cleanup incomplete',
+      )
   }
 }
 

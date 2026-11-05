@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -956,7 +957,7 @@ function readBoundedText(path, limit) {
 
 function writeLedgerFile(ledgerDir, name, content) {
   const path = join(ledgerDir, name)
-  writeFileSync(path, content, { mode: 0o600 })
+  writeFileSync(path, content, { mode: 0o600, flag: 'wx' })
   return path
 }
 
@@ -1101,9 +1102,9 @@ async function discoverSupervisorConfig(docker, options, state) {
       'discover',
     )
   const configPath = supervisorConfigPathFromScript(script)
-  if (!configPath)
+  if (!configPath || !isAbsoluteContainerPath(configPath))
     throw diagnostic(
-      'supervisor configuration path could not be derived from the image entrypoint',
+      'absolute supervisor configuration path could not be derived from the image entrypoint',
       'discover',
     )
   const configDestination = join(state.workDir, 'supervisord.conf')
@@ -1270,12 +1271,18 @@ export function splitObserverRecords(text) {
 // while reserving one of its 4097 slots for that marker when needed.
 export function prepareAnalyzerInput(text, truncated = false) {
   const split = splitObserverRecords(text)
-  const lines = split.text.split('\n').filter((line) => line.startsWith(OBSERVER_PREFIX))
+  const lines = split.text
+    .split('\n')
+    .filter((line) => line.startsWith(OBSERVER_PREFIX))
   const starts = new Set()
   let reusedSession = false
   for (const line of lines) {
     const event = JSON.parse(line.slice(OBSERVER_PREFIX.length))
-    if (event.event === 'start' && Number.isInteger(event.session) && event.session > 0) {
+    if (
+      event.event === 'start' &&
+      Number.isInteger(event.session) &&
+      event.session > 0
+    ) {
       if (starts.has(event.session)) reusedSession = true
       starts.add(event.session)
     }
@@ -1285,10 +1292,25 @@ export function prepareAnalyzerInput(text, truncated = false) {
   const marker = `${OBSERVER_PREFIX}{"event":"truncated"}`
   let selected = lines
   if (loss) {
-    selected = lines.filter((line) => JSON.parse(line.slice(OBSERVER_PREFIX.length)).event !== 'truncated').slice(0, 4096)
+    selected = lines
+      .filter(
+        (line) =>
+          JSON.parse(line.slice(OBSERVER_PREFIX.length)).event !== 'truncated',
+      )
+      .slice(0, 4096)
     selected.push(marker)
   }
-  return { text: selected.join('\n') + (selected.length ? '\n' : ''), accepted: lines.length, dropped: split.dropped, reusedSession, overflow, notified: loss }
+  return {
+    text: selected.join('\n') + (selected.length ? '\n' : ''),
+    accepted: lines.length,
+    analyzedRecords: selected.length,
+    omittedRecords:
+      lines.length - (loss ? selected.length - 1 : selected.length),
+    dropped: split.dropped,
+    reusedSession,
+    overflow,
+    notified: loss,
+  }
 }
 
 function containerJoin(directory, name) {
@@ -1302,19 +1324,21 @@ async function resolveChildLogDirectory(docker, container, candidate) {
   const environment = await docker.run([
     'exec',
     container,
-    'printenv',
-    'TMPDIR',
+    'python3',
+    '-c',
+    'import tempfile; print(tempfile.gettempdir())',
   ])
   if (environment.status === 0) {
     const value = environment.stdout.trim()
     if (isAbsoluteContainerPath(value)) return value
   }
-  // Supervisor falls back to the temporary directory when TMPDIR is unset.
-  return '/tmp'
+  // Do not guess when the container cannot resolve Python's temporary directory.
+  return null
 }
 
 async function readChildLog(docker, container, candidate, limit) {
   const directory = await resolveChildLogDirectory(docker, container, candidate)
+  if (!directory) return { available: false, text: '', truncated: false }
   const listing = await docker.run(
     ['exec', container, 'ls', '-1t', directory],
     { maxBuffer: 64 * 1024 },
@@ -1346,7 +1370,7 @@ async function readChildLog(docker, container, candidate, limit) {
       return {
         available: true,
         text: bounded.text,
-        truncated: bounded.truncated,
+        truncated: bounded.truncated || names.length > 1,
       }
     if (!fallback)
       fallback = {
@@ -1355,7 +1379,7 @@ async function readChildLog(docker, container, candidate, limit) {
         truncated: bounded.truncated,
       }
   }
-  return fallback ?? { available: false, text: '', truncated: false }
+  return { available: false, text: '', truncated: fallback?.truncated ?? false }
 }
 
 async function readRoutingSource(docker, container, candidate, limit) {
@@ -1366,8 +1390,19 @@ async function readRoutingSource(docker, container, candidate, limit) {
     )
     if (result.status !== 0)
       return { available: false, text: '', truncated: false }
-    const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit || result.stdout.split('\n').length - (result.stdout.endsWith('\n') ? 1 : 0) >= CONTAINER_LOG_LINE_LIMIT
-    const bounded = boundCapture(result.stdout, limit, truncated)
+    const truncated =
+      Boolean(result.stderr) ||
+      Buffer.byteLength(result.stdout, 'utf8') +
+        Buffer.byteLength(result.stderr, 'utf8') >
+        limit ||
+      (result.stdout + result.stderr).split('\n').length -
+        ((result.stdout + result.stderr).endsWith('\n') ? 1 : 0) >=
+        CONTAINER_LOG_LINE_LIMIT
+    const bounded = boundCapture(
+      result.stdout + result.stderr,
+      limit,
+      truncated,
+    )
     return { available: true, text: bounded.text, truncated: bounded.truncated }
   }
   if (candidate.kind === 'child-log')
@@ -1414,6 +1449,7 @@ async function captureChildStderr(docker, container, routing, limit) {
         available: true,
         text: attempt.text,
         source: candidate.kind,
+        path: candidate.path ?? null,
         truncated: attempt.truncated,
         observerRecords: records,
         reason: 'observer-records-captured',
@@ -1423,6 +1459,7 @@ async function captureChildStderr(docker, container, routing, limit) {
         available: true,
         text: attempt.text,
         source: candidate.kind,
+        path: candidate.path ?? null,
         truncated: attempt.truncated,
         observerRecords: 0,
         reason: 'no-observer-records',
@@ -1441,7 +1478,11 @@ async function captureChildStderr(docker, container, routing, limit) {
 
 async function analyzeCapture(docker, container, capture) {
   const split = prepareAnalyzerInput(capture.text, capture.truncated)
-  if (split.reusedSession) throw diagnostic('observer session ID reuse: merged capture refused', 'analyze')
+  if (split.reusedSession)
+    throw diagnostic(
+      'observer session ID reuse: merged capture refused',
+      'analyze',
+    )
   const result = await docker.run(
     ['exec', '-i', container, 'python3', OBSERVER_MOUNT_PATH, 'analyze'],
     { input: split.text },
@@ -1486,29 +1527,31 @@ async function removeOwned(docker, state) {
   ]
   for (const resource of ordered) {
     try {
-      if (resource.kind === 'container') {
-        const labels = await dockerJson(
-          docker,
-          ['inspect', '--format', '{{json .Config.Labels}}', resource.name],
-          {},
-          'cleanup',
-        )
-        const parsed = typeof labels === 'string' ? JSON.parse(labels) : labels
-        if (!parsed || parsed[state.labelKey] !== state.runId)
-          throw new Error('label verification failed')
-        await dockerRun(docker, ['rm', '-f', resource.name], {}, 'cleanup')
-      } else if (resource.kind === 'volume') {
-        const labels = await dockerJson(
-          docker,
-          ['volume', 'inspect', '--format', '{{json .Labels}}', resource.name],
-          {},
-          'cleanup',
-        )
-        const parsed = typeof labels === 'string' ? JSON.parse(labels) : labels
-        if (!parsed || parsed[state.labelKey] !== state.runId)
-          throw new Error('label verification failed')
-        await dockerRun(docker, ['volume', 'rm', resource.name], {}, 'cleanup')
+      const inspectArgs =
+        resource.kind === 'container'
+          ? ['inspect', '--format', '{{json .Config.Labels}}', resource.name]
+          : ['volume', 'inspect', '--format', '{{json .Labels}}', resource.name]
+      const inspected = await docker.run(inspectArgs)
+      if (inspected.timedOut) throw new Error('docker inspect timed out')
+      if (inspected.status !== 0) {
+        const absent =
+          resource.kind === 'container'
+            ? /no such container/i
+            : /no such volume/i
+        if (inspected.status === 1 && absent.test(inspected.stderr)) {
+          state.removedResources.add(resource.name)
+          continue
+        }
+        throw new Error(`docker inspect failed with status ${inspected.status}`)
       }
+      const parsed = JSON.parse(inspected.stdout)
+      if (!parsed || parsed[state.labelKey] !== state.runId)
+        throw new Error('label verification failed')
+      const args =
+        resource.kind === 'container'
+          ? ['rm', '-f', resource.name]
+          : ['volume', 'rm', resource.name]
+      await dockerRun(docker, args, {}, 'cleanup')
       state.removedResources.add(resource.name)
     } catch (error) {
       failures.push({
@@ -1664,10 +1707,27 @@ export async function runDiagnostic(options) {
     assertLedgerOutsideRepository(base)
     ledgerDir = mkdtempSync(join(base, 'open3dfm-identify-diagnostic-'))
   }
-  ledgerDir = assertLedgerOutsideRepository(ledgerDir)
-  mkdirSync(ledgerDir, { recursive: true })
+  const requestedLedger = ledgerDir
+  if (
+    existsSync(requestedLedger) &&
+    lstatSync(requestedLedger).isSymbolicLink()
+  )
+    throw diagnostic('ledger directory must not be a symlink', 'preflight')
+  ledgerDir = assertLedgerOutsideRepository(requestedLedger)
+  mkdirSync(ledgerDir, { recursive: true, mode: 0o700 })
+  const ledgerStat = lstatSync(ledgerDir)
+  if (
+    !ledgerStat.isDirectory() ||
+    (ledgerStat.mode & 0o077) !== 0 ||
+    (typeof process.getuid === 'function' &&
+      ledgerStat.uid !== process.getuid())
+  )
+    throw diagnostic(
+      'ledger directory must be private and owned by the current user',
+      'preflight',
+    )
   state.workDir = join(ledgerDir, 'work')
-  mkdirSync(state.workDir, { recursive: true })
+  mkdirSync(state.workDir, { mode: 0o700 })
 
   let result = null
   let pendingFailure = null
@@ -1733,11 +1793,7 @@ export async function runDiagnostic(options) {
 
     // Phase: source gate -------------------------------------------------
     enterStage('sources')
-    // The pins come from the pinned observer bytes. The resolver is a test
-    // seam only; the command line never overrides it.
-    const sourcePins = options.resolveSourcePins
-      ? options.resolveSourcePins()
-      : observer.pins
+    const sourcePins = observer.pins
     const verifiedSources = await verifyKlipperSources(
       docker,
       state,
@@ -1934,8 +1990,9 @@ export async function runDiagnostic(options) {
         exceededBudget: observedFor > READINESS_BUDGET_MS,
       },
       routing: {
-        kind: routing.kind,
-        pathDigest: routing.path ? sha256(routing.path) : null,
+        kind: capture.source ?? 'unresolved',
+        candidates: routing.candidates.map((candidate) => candidate.kind),
+        pathDigest: capture.path ? sha256(capture.path) : null,
         evidence: capture.observerRecords > 0 ? 'observer-records' : 'none',
         ambiguous: routing.ambiguous,
       },
@@ -1945,10 +2002,15 @@ export async function runDiagnostic(options) {
         bytes: Buffer.byteLength(capture.text, 'utf8'),
         limitBytes: CAPTURE_BYTE_LIMIT,
         observerRecords: prepared.accepted,
+        prefixRecords: prepared.accepted + prepared.dropped,
+        analyzedRecords: prepared.analyzedRecords,
+        omittedRecords: prepared.omittedRecords,
         invalidRecords,
         sessionIdReused: prepared.reusedSession,
         eventOverflow: prepared.overflow,
-        overflowReason: prepared.overflow ? 'observer-event-limit-exceeded' : null,
+        overflowReason: prepared.overflow
+          ? 'observer-event-limit-exceeded'
+          : null,
         truncationNotifiedToAnalyzer: Boolean(analysis && prepared.notified),
         truncated: capture.truncated,
         source: capture.source,
@@ -1974,12 +2036,23 @@ export async function runDiagnostic(options) {
   // resources that are still there, so it is the final state of the cleanup.
   const retried =
     cleanupErrors.length > 0 ? await removeOwned(docker, state) : null
-  const finalCleanupErrors = retried ?? cleanupErrors
+  const finalCleanupErrors = (retried ?? []).map((retry) => {
+    const first = cleanupErrors.find(
+      (entry) => entry.kind === retry.kind && entry.name === retry.name,
+    )
+    return {
+      ...retry,
+      message: first
+        ? `${first.message}; retry: ${retry.message}`
+        : retry.message,
+    }
+  })
   removeWorkDirectory(state)
   state.stages.cleanup = clock.now() - stageStart
   if (result) {
     result.cleanup = {
       errors: finalCleanupErrors,
+      firstAttemptErrors: cleanupErrors,
       completed: finalCleanupErrors.length === 0,
     }
     result.stages = state.stages
@@ -1995,14 +2068,17 @@ export async function runDiagnostic(options) {
   if (failure) {
     if (failure instanceof DiagnosticError) {
       failure.cleanupErrors = finalCleanupErrors
+      failure.firstCleanupErrors = cleanupErrors
       if (result) failure.result = result
       throw failure
     }
-    throw new DiagnosticError(failure.message, {
+    const wrapped = new DiagnosticError(failure.message, {
       phase: state.phase,
       cause: failure,
       cleanupErrors: finalCleanupErrors,
     })
+    wrapped.firstCleanupErrors = cleanupErrors
+    throw wrapped
   }
   return result
 }
@@ -2043,6 +2119,7 @@ async function main(argv) {
         error: error.message,
         phase: error.phase ?? 'unknown',
         cleanupErrors: error.cleanupErrors ?? [],
+        firstCleanupErrors: error.firstCleanupErrors ?? [],
       })}\n`,
     )
     return 1

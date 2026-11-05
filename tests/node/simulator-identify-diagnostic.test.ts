@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { gunzipSync } from 'node:zlib'
 
 interface DiagnosticErrorShape {
   message: string
@@ -120,7 +121,17 @@ interface DiagnosticModule {
     truncated: boolean
   }
   splitObserverRecords(text: string): { text: string; dropped: number }
-  prepareAnalyzerInput(text: string, truncated?: boolean): { text: string; accepted: number; dropped: number; reusedSession: boolean; overflow: boolean; notified: boolean }
+  prepareAnalyzerInput(
+    text: string,
+    truncated?: boolean,
+  ): {
+    text: string
+    accepted: number
+    dropped: number
+    reusedSession: boolean
+    overflow: boolean
+    notified: boolean
+  }
   validateObserverAnalysis(value: unknown): {
     truncated: boolean
     sessions: Record<string, unknown>[]
@@ -178,7 +189,6 @@ interface RunOptions {
   platform?: string
   composeFile?: string
   observerPath?: string
-  resolveSourcePins?: () => Record<string, string>
   runId: string
   runName: string
 }
@@ -233,8 +243,21 @@ const CHILD_LOG_CONFIG = [
   '',
 ].join('\n')
 
-const SERIALHDL = '# klippy serialhdl source fixture\n'
-const SERIALQUEUE = '/* klippy serialqueue source fixture */\n'
+// Exact Klipper source fixtures, compressed to keep them separate from test code.
+// Copyright (C) 2016-2025 Kevin O'Connor; GPL-3.0. The decompressed
+// fixtures retain the original notices. Source: https://github.com/Klipper3d/klipper
+const SERIALHDL = gunzipSync(
+  Buffer.from(
+    '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',
+    'base64',
+  ),
+).toString('utf8')
+const SERIALQUEUE = gunzipSync(
+  Buffer.from(
+    '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',
+    'base64',
+  ),
+).toString('utf8')
 
 const OBSERVER_EVENT = (session: number, bytes: number) =>
   `${OBSERVER_PREFIX}${JSON.stringify({
@@ -442,6 +465,7 @@ interface FakeOptions {
   fail?: (args: string[]) => FakeResult | null
   failOnce?: (args: string[]) => FakeResult | null
   missingFiles?: string[]
+  badSource?: boolean
   timedOutCommands?: string[]
 }
 
@@ -449,7 +473,10 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
   const files = new Map<string, string>([
     ['/usr/local/bin/start.sh', options.entrypoint ?? ENTRYPOINT_SCRIPT],
     ['/usr/local/etc/supervisord.conf', options.config ?? SUPERVISOR_CONFIG],
-    ['/home/printer/klipper/klippy/serialhdl.py', SERIALHDL],
+    [
+      '/home/printer/klipper/klippy/serialhdl.py',
+      options.badSource ? 'wrong source' : SERIALHDL,
+    ],
     ['/home/printer/klipper/klippy/chelper/serialqueue.c', SERIALQUEUE],
   ])
   for (const missing of options.missingFiles ?? []) files.delete(missing)
@@ -591,8 +618,19 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
         containers.delete(rest[1] ?? '')
         return { status: 0, stdout: '', stderr: '' }
       }
-      if (command === 'logs')
-        return { status: 0, stdout: options.capture ?? '', stderr: '' }
+      if (command === 'logs') {
+        const lines = (options.capture ?? '').split('\n')
+        if (lines.at(-1) === '') lines.pop()
+        const limit = Number(rest[rest.indexOf('--tail') + 1])
+        return {
+          status: 0,
+          stdout: lines
+            .slice(-limit)
+            .map((line) => line + '\n')
+            .join(''),
+          stderr: '',
+        }
+      }
       if (command === 'exec') {
         const execArgv = rest[0] === '-i' ? rest.slice(1) : rest
         const target = execArgv[1] ?? ''
@@ -628,7 +666,7 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
             stderr: '',
           }
         }
-        if (target === 'printenv') {
+        if (target === 'python3' && execArgv[2] === '-c') {
           return { status: 0, stdout: '/tmp\n', stderr: '' }
         }
         if (target === 'ls') {
@@ -707,10 +745,6 @@ function runOptions(
     runId: 'run-1',
     runName: 'open3dfm-identify-run-1',
     observationMs: 5_000,
-    resolveSourcePins: () => ({
-      'klippy/serialhdl.py': sha256(SERIALHDL),
-      'klippy/chelper/serialqueue.c': sha256(SERIALQUEUE),
-    }),
     ...overrides,
   }
 }
@@ -1474,13 +1508,8 @@ test('stops before the observation when the configuration does not match', async
 })
 
 test('stops before the observation when a klipper source hash does not match', async () => {
-  const docker = createFakeDocker()
-  const options = runOptions(docker, {
-    resolveSourcePins: () => ({
-      'klippy/serialhdl.py': sha256('different content'),
-      'klippy/chelper/serialqueue.c': sha256(SERIALQUEUE),
-    }),
-  })
+  const docker = createFakeDocker({ badSource: true })
+  const options = runOptions(docker)
   const ledger = options.ledgerDir as string
   try {
     await assert.rejects(
@@ -1759,6 +1788,7 @@ test('retries a removal that failed once without touching the removed resources'
       'a removal that succeeds on the retry leaves no cleanup error',
     )
     assert.deepEqual(result.cleanup.errors, [])
+    assert.ok(result.cleanup.firstAttemptErrors.length > 0)
     const containerRemovals = docker.calls.filter(
       (call) =>
         call.args[0] === 'rm' && call.args.includes('open3dfm-identify-run-1'),
@@ -1943,25 +1973,240 @@ test('resolves a canonical ledger path outside the repository', () => {
   }
 })
 
-
 test('real observer treats capture loss and overflow as incomplete', () => {
-  const event = (value: object) => OBSERVER_PREFIX + JSON.stringify(value) + '\n'
-  const records = event({ event: 'start', session: 1 }) +
-    event({ event: 'identify', session: 1, requested: 0, offset: 0, length: 0 }) +
+  const event = (value: object) =>
+    OBSERVER_PREFIX + JSON.stringify(value) + '\n'
+  const records =
+    event({ event: 'start', session: 1 }) +
+    event({
+      event: 'identify',
+      session: 1,
+      requested: 0,
+      offset: 0,
+      length: 0,
+    }) +
     event({ event: 'result', session: 1, success: true })
   for (const [input, truncated] of [
     [records, true],
     [records + OBSERVER_PREFIX + '{\n', false],
-    [records + event({ event: 'disconnect', session: 1, counters: {} }).repeat(4100), false],
+    [
+      records +
+        event({ event: 'disconnect', session: 1, counters: {} }).repeat(4100),
+      false,
+    ],
   ] as const) {
     const prepared = diagnostic.prepareAnalyzerInput(input, truncated)
     assert.equal(prepared.notified, true)
     assert.ok(prepared.text.trimEnd().split('\n').length <= 4097)
-    const python = spawnSync('python3', [join(diagnostic.REPOSITORY_ROOT, 'infra/sim/experiments/serial_diagnostic.py'), 'analyze'], { input: prepared.text, encoding: 'utf8' })
+    const python = spawnSync(
+      'python3',
+      [
+        join(
+          diagnostic.REPOSITORY_ROOT,
+          'infra/sim/experiments/serial_diagnostic.py',
+        ),
+        'analyze',
+      ],
+      { input: prepared.text, encoding: 'utf8' },
+    )
     assert.equal(python.status, 0, python.stderr)
     const analysis = JSON.parse(python.stdout)
     assert.equal(analysis.truncated, true)
-    assert.ok(analysis.sessions.every((session: { classification: string }) => session.classification === 'inconclusive-incomplete-capture'))
+    assert.ok(
+      analysis.sessions.every(
+        (session: { classification: string }) =>
+          session.classification === 'inconclusive-incomplete-capture',
+      ),
+    )
   }
-  assert.equal(diagnostic.prepareAnalyzerInput(records + event({ event: 'start', session: 1 })).reusedSession, true)
+  assert.equal(
+    diagnostic.prepareAnalyzerInput(
+      records + event({ event: 'start', session: 1 }),
+    ).reusedSession,
+    true,
+  )
+})
+
+test('container log line cap forces incomplete analysis', async () => {
+  const config = SUPERVISOR_CONFIG.replace(
+    'stdout_logfile=/home/printer/printer_data/logs/klippy.log',
+    'redirect_stderr=false',
+  ).replace('stderr_logfile=/home/printer/printer_data/logs/klippy.log\n', '')
+  const records =
+    OBSERVER_START(1) + OBSERVER_EVENT(1, 0) + OBSERVER_RESULT(1, true)
+  const docker = createFakeDocker({
+    config,
+    capture: 'other\n'.repeat(3) + records + 'other\n'.repeat(4997),
+  })
+  const options = runOptions(docker)
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.capture.source, 'container-output')
+    assert.equal(result.capture.truncated, true)
+    assert.equal(result.capture.truncationNotifiedToAnalyzer, true)
+    assert.equal(
+      result.observerAnalysis.sessions[0].classification,
+      'inconclusive-incomplete-capture',
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('reused session IDs suppress merged classifications', async () => {
+  const records =
+    OBSERVER_START(1) +
+    OBSERVER_EVENT(1, 0) +
+    OBSERVER_RESULT(1, false) +
+    OBSERVER_START(1) +
+    OBSERVER_RESULT(1, true)
+  const docker = createFakeDocker({ capture: records })
+  const options = runOptions(docker)
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.capture.sessionIdReused, true)
+    assert.equal(result.observerAnalysis, null)
+    assert.match(result.observerAnalysisError, /session ID reuse/)
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('rejects relative Supervisor configuration paths before copying', async () => {
+  const docker = createFakeDocker({
+    entrypoint: 'exec supervisord -c relative.conf\n',
+  })
+  const options = runOptions(docker)
+  try {
+    await assert.rejects(
+      () => diagnostic.runDiagnostic(options),
+      /absolute supervisor configuration path/,
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('ledger file collision does not overwrite or follow a symlink', async () => {
+  const docker = createFakeDocker()
+  const options = runOptions(docker)
+  const ledger = options.ledgerDir as string
+  const target = join(ledger, 'untouched')
+  writeFileSync(target, 'keep', { mode: 0o600 })
+  symlinkSync(target, join(ledger, 'baseline.txt'))
+  try {
+    await assert.rejects(() => diagnostic.runDiagnostic(options))
+    assert.equal(readFileSync(target, 'utf8'), 'keep')
+  } finally {
+    cleanupLedger(ledger)
+  }
+})
+
+test('reports cleanup retries including the original failure', async () => {
+  let count = 0
+  const docker = createFakeDocker({
+    fail: (args) => {
+      if (
+        args[0] === 'inspect' &&
+        args.includes('open3dfm-identify-run-1-inspect') &&
+        args.includes('--format')
+      ) {
+        count++
+        return {
+          status: 1,
+          stdout: '',
+          stderr: count === 1 ? 'connection refused' : 'different error',
+        }
+      }
+      return null
+    },
+  })
+  const options = runOptions(docker)
+  try {
+    await assert.rejects(
+      () => diagnostic.runDiagnostic(options),
+      (error: DiagnosticErrorShape) => {
+        assert.match(
+          error.cleanupErrors[0]?.message ?? '',
+          /docker inspect failed.*retry: docker inspect failed/,
+        )
+        return true
+      },
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('an already absent resource is distinct from an inspect failure', async () => {
+  const docker = createFakeDocker({
+    fail: (args) =>
+      args[0] === 'inspect' &&
+      args.includes('open3dfm-identify-run-1-inspect') &&
+      args.includes('--format')
+        ? {
+            status: 1,
+            stdout: '',
+            stderr: 'Error: No such container: open3dfm-identify-run-1-inspect',
+          }
+        : null,
+  })
+  const options = runOptions(docker)
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.cleanup.completed, true)
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('byte-bounded capture is incomplete in the real observer', () => {
+  const records =
+    OBSERVER_START(1) + OBSERVER_EVENT(1, 0) + OBSERVER_RESULT(1, true)
+  const bounded = diagnostic.boundCapture(
+    'noise\n'.repeat(50) + records,
+    Buffer.byteLength(records) + 1,
+  )
+  assert.equal(bounded.truncated, true)
+  const prepared = diagnostic.prepareAnalyzerInput(
+    bounded.text,
+    bounded.truncated,
+  )
+  const python = spawnSync(
+    'python3',
+    [
+      join(
+        diagnostic.REPOSITORY_ROOT,
+        'infra/sim/experiments/serial_diagnostic.py',
+      ),
+      'analyze',
+    ],
+    { input: prepared.text, encoding: 'utf8' },
+  )
+  assert.equal(python.status, 0, python.stderr)
+  const analysis = JSON.parse(python.stdout)
+  assert.equal(analysis.truncated, true)
+  assert.equal(
+    analysis.sessions[0].classification,
+    'inconclusive-incomplete-capture',
+  )
+})
+
+test('caller cannot replace reviewed source pins', async () => {
+  const docker = createFakeDocker({ badSource: true })
+  const options = {
+    ...runOptions(docker),
+    resolveSourcePins: () => ({
+      'klippy/serialhdl.py': sha256('wrong source'),
+      'klippy/chelper/serialqueue.c': sha256(SERIALQUEUE),
+    }),
+  }
+  try {
+    await assert.rejects(
+      () => diagnostic.runDiagnostic(options),
+      /reviewed hash/,
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
 })

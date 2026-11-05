@@ -119,11 +119,17 @@ for (let index = 0; index < worktrees.length; index += WORKTREES_PER_CASE) {
           /ECONNREFUSED|PostgresError/,
           `child reached PostgreSQL: ${diagnostic}`,
         )
-        assert.equal(
-          existsSync(base),
-          false,
-          `child wrote the private handoff path: ${diagnostic}`,
-        )
+        for (const path of [
+          base,
+          base + '.private.json',
+          base + '.catalog.json',
+        ]) {
+          assert.equal(
+            existsSync(path),
+            false,
+            `child wrote a handoff file: ${diagnostic}`,
+          )
+        }
       }
     },
   )

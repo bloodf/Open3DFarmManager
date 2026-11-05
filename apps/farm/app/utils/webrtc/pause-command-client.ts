@@ -245,13 +245,13 @@ export function createPauseCommandClient(
     clearTimer(admissionTimer)
     admissionTimer = undefined
     if (!Number.isFinite(current)) {
-      controller.abort()
+      abort()
       return
     }
     // The original admission window. It is armed once and never reset.
     admissionTimer = setTimeout(() => {
       admissionTimer = undefined
-      controller.abort()
+      abort()
       // The admission operation ends here. The issuer call itself is not
       // cancelled, it stays retained until it actually settles.
       resolveAdmissionGate?.()
@@ -316,7 +316,9 @@ export function createPauseCommandClient(
       !scopeMatches(challenge, expected, bindingHash)
     )
       throw new Error('Pause admission challenge outside the control scope')
+    if (aborted) throw new Error('Pause command client aborted')
     const proof = await signPauseAdmissionProof(challenge, options.privateKey)
+    if (aborted) throw new Error('Pause command client aborted')
     const admissionProofWire = encodePauseAdmissionProof(proof)
     const issued = SignedPauseCapabilityV1.parse(
       await options.issuer.capability({
@@ -345,12 +347,14 @@ export function createPauseCommandClient(
       ) !== 'sent'
     )
       throw new Error('Pause capability phase refused')
+    if (aborted) throw new Error('Pause command client aborted')
     if (
       attemptSend(() =>
         sendPhase({ t: 'control.admission-proof', wire: admissionProofWire }),
       ) !== 'sent'
     )
       throw new Error('Pause admission proof phase refused')
+    if (aborted) throw new Error('Pause command client aborted')
     admitted = true
     return issued
   }
@@ -416,6 +420,10 @@ export function createPauseCommandClient(
       return await reservedCommand
     } catch {
       return 'rejected'
+    } finally {
+      // The single reserved operation has finished, including pre-send rejection.
+      // Outstanding issuer work remains tracked until its real settlement.
+      abort()
     }
   }
   function abort(): void {

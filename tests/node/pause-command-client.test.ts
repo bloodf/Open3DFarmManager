@@ -41,7 +41,11 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000) {
  */
 async function clientFixture(
   t: test.TestContext,
-  options: { holdIssuer?: boolean } = {},
+  options: {
+    holdIssuer?: boolean
+    challengeGate?: Promise<void>
+    onChallenge?: () => void
+  } = {},
 ) {
   const browser = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
@@ -157,6 +161,8 @@ async function clientFixture(
     },
     issuer: {
       async challenge({ admissionNonce, signal }) {
+        options.onChallenge?.()
+        if (options.challengeGate) await options.challengeGate
         if (options.holdIssuer) {
           await new Promise<void>((_resolve, reject) => {
             signal.addEventListener(
@@ -574,3 +580,50 @@ test('an issuer that answers outside the control scope never reaches the transpo
   assert.equal(foreign.state.admitted, false)
   assert.equal(await foreign.pause(), 'rejected')
 })
+
+test(
+  'a rejection before command reservation settles without a later session abort',
+  { timeout: 2000 },
+  async (t) => {
+    const f = await clientFixture(t)
+    assert.equal(await f.client.pause(), 'rejected')
+    let settled = false
+    void f.client.settled.then(() => {
+      settled = true
+    })
+    await waitFor(() => settled, 100)
+    assert.equal(f.commands.length, 0)
+  },
+)
+
+test(
+  'an issuer ignoring admission abort cannot publish late phases',
+  { timeout: 3000 },
+  async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let entered = false
+    const f = await clientFixture(t, {
+      challengeGate: gate,
+      onChallenge: () => {
+        entered = true
+      },
+    })
+    try {
+      f.proofsReady()
+      f.client.phase(f.nonceFrame())
+      await waitFor(() => entered)
+      t.mock.timers.tick(8001)
+      release()
+      await waitFor(() => !f.client.state.pending)
+      assert.equal(f.phases.length, 0)
+      assert.equal(f.client.state.admitted, false)
+      await f.client.settled
+    } finally {
+      release()
+    }
+  },
+)

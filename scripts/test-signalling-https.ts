@@ -728,7 +728,9 @@ if (mode === '--prepare-layer') {
     )
     if (!failed && !failures.length)
       await note(
-        'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
+        rtcFixture
+          ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
+          : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
       )
     await ledger.close()
     globalThis.process.removeListener('SIGINT', interrupt)

@@ -261,7 +261,7 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
     ).status,
   ).toBeGreaterThanOrEqual(400)
   await page.goto(origin + '/parear')
-  await page.getByLabel('Farm de destino').selectOption(farmId)
+  await page.getByLabel('Farm de destino', { exact: true }).selectOption(farmId)
   await page
     .getByLabel('Código exibido no Connector')
     .fill(first.started.user_code)

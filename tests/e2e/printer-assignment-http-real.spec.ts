@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import postgres from 'postgres'
+import postgres, { type TransactionSql } from 'postgres'
 
 // This suite requires the explicit disposable HTTPS and PostgreSQL fixture.
 const enabled = process.env.PRINTER_HTTP_TEST_DISPOSABLE === 'yes'
@@ -11,6 +11,9 @@ const agent = process.env.PRINTER_HTTP_TEST_AGENT
 const foreignAgent = process.env.PRINTER_HTTP_TEST_FOREIGN_AGENT
 const revokedAgent = process.env.PRINTER_HTTP_TEST_REVOKED_AGENT
 const ownerAccount = process.env.PRINTER_HTTP_TEST_OWNER_ACCOUNT
+const adminAccount = process.env.PRINTER_HTTP_TEST_ADMIN_ACCOUNT
+const printerRole = process.env.PRINTER_HTTP_TEST_PRINTER_ROLE
+const authRole = process.env.PRINTER_HTTP_TEST_AUTH_ROLE
 const port = process.env.PRINTER_HTTP_SYNTHETIC_TEST_PORT
 const usernames = {
   owner: process.env.PRINTER_HTTP_TEST_OWNER,
@@ -33,6 +36,9 @@ test('real login scopes registration and preserves opaque printer keys', async (
     !foreignAgent ||
     !revokedAgent ||
     !ownerAccount ||
+    !adminAccount ||
+    !printerRole ||
+    !authRole ||
     !port ||
     Object.values(usernames).some((value) => !value)
   )
@@ -183,27 +189,139 @@ test('real login scopes registration and preserves opaque printer keys', async (
       port: Number(port),
       database: 'fixture',
       username: 'fixture',
-      max: 1,
+      max: 3,
       connect_timeout: 3,
     })
     try {
-      await db`UPDATE farm.memberships SET role='viewer' WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
+      async function blocked<T>(
+        hold: (tx: TransactionSql) => Promise<void>,
+        role: string,
+        fragment: string,
+        start: () => Promise<T>,
+        beforeRelease?: () => Promise<void>,
+      ): Promise<T> {
+        let ready: () => void = () => {
+          throw new Error('Lock signal unavailable')
+        }
+        let release: () => void = () => {
+          throw new Error('Lock release unavailable')
+        }
+        const held = new Promise<void>((resolve) => {
+          ready = resolve
+        })
+        const gate = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const transaction = db.begin(async (tx) => {
+          await hold(tx)
+          ready()
+          await gate
+        })
+        let operation: Promise<T> | undefined
+        try {
+          await Promise.race([
+            held,
+            transaction.then(() => {
+              throw new Error('Lock released early')
+            }),
+          ])
+          operation = start()
+          void operation.catch(() => {})
+          const deadline = performance.now() + 750
+          while (true) {
+            const rows =
+              await db`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND usename=${role} AND wait_event_type='Lock' AND query LIKE ${'%' + fragment + '%'}`
+            if (Number(rows[0]?.n) > 0) break
+            expect(
+              performance.now(),
+              'Expected an observed PostgreSQL row-lock wait',
+            ).toBeLessThan(deadline)
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          }
+          await beforeRelease?.()
+        } finally {
+          release()
+          await transaction
+        }
+        if (!operation) throw new Error('Blocked request did not start')
+        return await operation
+      }
+      const registration = (page: Page, printerKey: string) =>
+        post(page, path, {
+          agentId: agent,
+          printerKey,
+          confirmedLocalConfiguration: true,
+        })
+      for (const kind of ['downgrade', 'revoke'] as const) {
+        const key = `wait-membership-${kind}`
+        const response = await blocked(
+          async (tx) => {
+            if (kind === 'downgrade')
+              await tx`UPDATE farm.memberships SET role='viewer' WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
+            else
+              await tx`UPDATE farm.memberships SET revoked_at=${Date.now()} WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
+          },
+          printerRole,
+          'farm.memberships',
+          () => registration(owner, key),
+        )
+        expect(response.status).toBe(403)
+        const rows =
+          await db`SELECT count(*)::int AS n FROM farm.printer_assignments WHERE farm_id=${farm}::uuid AND printer_key=${key}`
+        expect(rows[0]?.n).toBe(0)
+        if (kind === 'downgrade')
+          await db`UPDATE farm.memberships SET role='owner' WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
+      }
+      expect((await get(owner, path)).status).toBe(403)
+      const session =
+        await db`SELECT id FROM farm.account_sessions WHERE account_id=${ownerAccount} AND revoked_at IS NULL`
+      expect(session).toHaveLength(1)
+      const ownerSession = String(session[0]?.id)
+      const revoked = await blocked(
+        async (tx) => {
+          await tx`UPDATE farm.account_sessions SET revoked_at=${Date.now()} WHERE id=${ownerSession}`
+        },
+        authRole,
+        'farm.account_sessions',
+        () => get(owner, path),
+      )
+      expect(revoked.status).toBe(401)
       expect(
         (
-          await post(owner, path, {
-            agentId: agent,
-            printerKey: 'after-downgrade',
-            confirmedLocalConfiguration: true,
-          })
-        ).status,
-      ).toBe(403)
-      await db`UPDATE farm.memberships SET revoked_at=${Date.now()} WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
-      expect((await get(owner, path)).status).toBe(403)
-      await db`UPDATE farm.account_sessions SET revoked_at=${Date.now()} WHERE account_id=${ownerAccount} AND revoked_at IS NULL`
-      expect((await get(owner, path)).status).toBe(401)
-      const rows =
-        await db`SELECT count(*)::int AS n FROM farm.printer_assignments WHERE farm_id=${farm}::uuid AND printer_key='after-downgrade'`
-      expect(rows[0]?.n).toBe(0)
+          await db`SELECT revoked_at FROM farm.account_sessions WHERE id=${ownerSession}`
+        )[0]?.revoked_at,
+      ).not.toBeNull()
+
+      const adminSessions =
+        await db`SELECT id FROM farm.account_sessions WHERE account_id=${adminAccount} AND revoked_at IS NULL`
+      expect(adminSessions).toHaveLength(1)
+      const adminSession = String(adminSessions[0]?.id)
+      const expiresAt = Date.now() + 750
+      await db`UPDATE farm.account_sessions SET absolute_expires_at=${expiresAt} WHERE id=${adminSession}`
+      const expired = await blocked(
+        async (tx) => {
+          await tx`SELECT agent_id FROM farm.connector_enrollments WHERE agent_id=${agent}::uuid FOR UPDATE`
+        },
+        printerRole,
+        'farm.connector_enrollments',
+        () => registration(admin, 'wait-expiry'),
+        async () => {
+          const remaining = expiresAt - Date.now()
+          if (remaining > 0)
+            await new Promise((resolve) => setTimeout(resolve, remaining + 5))
+        },
+      )
+      expect(expired.status).toBe(403)
+      expect(
+        (
+          await db`SELECT revoked_at FROM farm.account_sessions WHERE id=${adminSession}`
+        )[0]?.revoked_at,
+      ).not.toBeNull()
+      expect(
+        (
+          await db`SELECT count(*)::int AS n FROM farm.printer_assignments WHERE farm_id=${farm}::uuid AND printer_key='wait-expiry'`
+        )[0]?.n,
+      ).toBe(0)
     } finally {
       await db.end({ timeout: 3 })
     }

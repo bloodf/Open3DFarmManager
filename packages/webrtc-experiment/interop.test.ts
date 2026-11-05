@@ -628,6 +628,10 @@ test(
                 sawDtlsFailure: true,
                 accepted: [],
               })
+            if (scenario === 'tampered-answer')
+              expect(connectorResult).toMatchObject({
+                transportStates: expect.arrayContaining(['failed']),
+              })
             if (scenario.startsWith('tampered-')) {
               for (const result of [connectorResult, browserResult])
                 expect(result).toMatchObject({

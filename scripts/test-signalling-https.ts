@@ -563,6 +563,10 @@ if (mode === '--prepare-layer') {
           ? {
               NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
               NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
+              NUXT_PUBLIC_FLAGS_FARM_VIEW:
+                process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes'
+                  ? 'true'
+                  : 'false',
             }
           : {}),
         NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',

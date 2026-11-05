@@ -13,11 +13,12 @@ import {
 } from '../../packages/farm-protocol/src/pairing-proof.ts'
 import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
 import { AuthenticatedBrowserSignallingClient } from '../../apps/farm/app/utils/webrtc/authenticated-signalling-client.ts'
+import { createDeviceKey } from '../../apps/farm/app/utils/device-key.ts'
 
 type Input = Pick<
   SignallingIdentityInput,
   'accountId' | 'farmId' | 'origin' | 'audience'
->
+> & { persistKey?: boolean }
 type Assignment = Readonly<{
   assignmentId: string
   agentId: string
@@ -37,11 +38,18 @@ export async function createSignallingRtcBrowserActor(input: Input) {
   PairingProofOrigin.parse(scope.origin)
   PairingProofAudience.parse(scope.audience)
   if (location.origin !== scope.origin) throw Error('Fixture origin mismatch')
-  const keys = await crypto.subtle.generateKey(
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign', 'verify'],
-  )
+  const keys = input.persistKey
+    ? (
+        await createDeviceKey({
+          accountId: scope.accountId,
+          farmId: scope.farmId,
+        })
+      ).keyPair
+    : await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['sign', 'verify'],
+      )
   const exported = await crypto.subtle.exportKey('jwk', keys.publicKey)
   const identity = await validateBrowserDevicePublicKey({
     kty: exported.kty,

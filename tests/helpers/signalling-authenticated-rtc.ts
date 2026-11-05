@@ -22,6 +22,7 @@ import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
 import { snapshotAssignmentRefs } from '../../packages/connector/src/webrtc/readonly-session.ts'
+import { testAuthenticatedFarmPage } from './signalling-farm-page.ts'
 
 type BrowserActor = Awaited<ReturnType<typeof createSignallingRtcBrowserActor>>
 type Closure = 'disconnect' | 'revocation'
@@ -303,6 +304,11 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
   let used = false
   return Object.freeze({
     async identityHandles(input: SignallingIdentityInput) {
+      if (
+        process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes' &&
+        process.env.SIGNALLING_HTTPS_RTC_RUNTIME !== 'yes'
+      )
+        throw Error('Farm page fixture requires composed runtime')
       if (current || used) throw Error('RTC fixture already used')
       used = true
       input.signal.throwIfAborted()
@@ -387,6 +393,7 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               farmId: input.farmId,
               origin: input.origin,
               audience: input.audience,
+              persistKey: process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes',
             },
           },
         )
@@ -547,6 +554,21 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 packagedFiles: runtime.packagedFiles,
               }),
           )
+          if (process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes') {
+            await testAuthenticatedFarmPage({
+              fixture: input,
+              closure: session.closure,
+              startedAt: runtimeStartedAt,
+              advance: async () => {
+                await session.connector.request({ kind: 'advance-runtime' })
+              },
+            })
+            assert.ok((await observeRuntime()).queued >= 2)
+            await session.note(
+              `authenticated-farm-page-${session.closure}-status-transition-and-readonly-degradation`,
+            )
+            return
+          }
           await session.actor.evaluate((actor, scope) => actor.start(scope), {
             browserKeyId: input.browserKeyId,
             agentId: input.claim.agent_id,

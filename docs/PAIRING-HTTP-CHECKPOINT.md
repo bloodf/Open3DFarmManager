@@ -21,7 +21,7 @@ A separately authorized `PAIRING_HTTP_TEST_PHASE=remaining` run selects only the
 
 ## Local acceptance status
 
-**HOLD:** no uninterrupted end-to-end run has passed. A local HTTPS/Chromium run of the built app at source `8352a1e` with test head `04dbae8` reached the proof-expiry check after exercising login, approval, credential claim, deliberately dropped claim response, inventory recovery, revocation, fresh pairing, role checks, the membership lock race, and deferred commit failure. That run failed an incorrect expectation that the claim response for an unapproved request with an expired proof must be non-2xx. The assertion was corrected to require the existing `pending` response and zero credential rows.
+**Previous hold:** the following earlier runs did not complete an uninterrupted end-to-end pass. A local HTTPS/Chromium run of the built app at source `8352a1e` with test head `04dbae8` reached the proof-expiry check after exercising login, approval, credential claim, deliberately dropped claim response, inventory recovery, revocation, fresh pairing, role checks, the membership lock race, and deferred commit failure. That run failed an incorrect expectation that the claim response for an unapproved request with an expired proof must be non-2xx. The assertion was corrected to require the existing `pending` response and zero credential rows.
 
 An explicitly authorized remaining-phase run at test head `e069199` timed out. Read-only database observations after that timeout included a pending request with an expired-proof marker and no credential, and an approved enrollment recorded as revoked after the anonymous machine limit had been reached. Those individual observations are not a passing continuation or evidence that every final browser assertion completed. The timeout cause remains unknown. First failure receipts and a bounded sanitized database snapshot were retained outside the repository.
 
@@ -32,3 +32,9 @@ The local task-owned PostgreSQL cluster and HTTPS test resources were removed af
 A future policy proposal could retain the verified identity during a bounded human approval and require a separate fresh claim-specific proof before issuance. That would require coordinated protocol and storage work and is not implemented.
 
 The bounded stage and response-capture diagnostics currently apply to the optional remaining-phase test only; the default full matrix does not yet use them. A stalled or failed capture must fail the diagnostic run.
+
+## Full synthetic acceptance
+
+The default complete HTTPS/Chromium pairing matrix passed in one uninterrupted run against the isolated official 0001–0016 journal. It used the built app from source snapshot `599fd8d` and fixture runner `eb5dd56`; the app server entry SHA-256 was `b883745f3ae072867d555907c7e0f4415390722465230bfa8e7f27af483d6774` and Nitro chunk SHA-256 was `26bde7818589a4e4561120dab0681cd45293b1447581f52992fc24ce14a2265e`. The build input manifests matched before and after the build. Playwright reported one full test passed in 1.1 minutes. The fixture used fresh synthetic accounts and roles without resetting rate-limit state. Its own roles, processes and temporary browser artifacts were removed; its synthetic rows belonged to the caller-owned disposable database.
+
+This result supersedes the earlier hold for this exact synthetic matrix and artifact. It does not establish full repository checks, a later build, publication, deployment or physical-printer acceptance.

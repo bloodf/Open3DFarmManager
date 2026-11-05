@@ -46,6 +46,7 @@ const prefix = `printer_http_${randomUUID().replaceAll('-', '')}`
 const roles = [`${prefix}_auth`, `${prefix}_printer`]
 const passwords = roles.map(() => randomBytes(24).toString('hex'))
 const password = randomBytes(24).toString('hex')
+const sessionSecret = randomBytes(32).toString('hex')
 const users = ['owner', 'admin', 'viewer', 'operator'].map((role) => ({
   role,
   id: randomUUID(),
@@ -187,7 +188,7 @@ try {
       NITRO_PORT: String(appPort),
       NUXT_AUTH_ENABLED: 'true',
       NUXT_AUTH_ORIGIN: origin,
-      NUXT_AUTH_SESSION_SECRET: randomBytes(32).toString('hex'),
+      NUXT_AUTH_SESSION_SECRET: sessionSecret,
       NUXT_AUTH_DATABASE_URL: dbUrl(0),
       NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
       NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(1),
@@ -230,6 +231,7 @@ try {
         PRINTER_HTTP_TEST_DISPOSABLE: 'yes',
         PRINTER_HTTP_TEST_ORIGIN: origin,
         PRINTER_HTTP_TEST_PASSWORD: password,
+        PRINTER_HTTP_TEST_SESSION_SECRET: sessionSecret,
         PRINTER_HTTP_TEST_FARM: farm,
         PRINTER_HTTP_TEST_OTHER_FARM: otherFarm,
         PRINTER_HTTP_TEST_AGENT: agent,

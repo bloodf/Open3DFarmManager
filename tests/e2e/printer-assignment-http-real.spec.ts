@@ -1,10 +1,17 @@
 import { expect, test, type Page } from '@playwright/test'
 import postgres, { type TransactionSql } from 'postgres'
+import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { PostgresCredentials } from '../../apps/farm/server/storage/postgres-credentials.ts'
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_COOKIE_ATTRIBUTES,
+} from '../../apps/farm/server/utils/auth/boundary.ts'
 
 // This suite requires the explicit disposable HTTPS and PostgreSQL fixture.
 const enabled = process.env.PRINTER_HTTP_TEST_DISPOSABLE === 'yes'
 const origin = process.env.PRINTER_HTTP_TEST_ORIGIN
 const password = process.env.PRINTER_HTTP_TEST_PASSWORD
+const sessionSecret = process.env.PRINTER_HTTP_TEST_SESSION_SECRET
 const farm = process.env.PRINTER_HTTP_TEST_FARM
 const otherFarm = process.env.PRINTER_HTTP_TEST_OTHER_FARM
 const agent = process.env.PRINTER_HTTP_TEST_AGENT
@@ -30,6 +37,7 @@ test('real login scopes registration and preserves opaque printer keys', async (
   if (
     !origin ||
     !password ||
+    !sessionSecret ||
     !farm ||
     !otherFarm ||
     !agent ||
@@ -292,19 +300,51 @@ test('real login scopes registration and preserves opaque printer keys', async (
         )[0]?.revoked_at,
       ).not.toBeNull()
 
-      const adminSessions =
-        await db`SELECT id FROM farm.account_sessions WHERE account_id=${adminAccount} AND revoked_at IS NULL`
-      expect(adminSessions).toHaveLength(1)
-      const adminSession = String(adminSessions[0]?.id)
-      const expiresAt = Date.now() + 750
-      await db`UPDATE farm.account_sessions SET absolute_expires_at=${expiresAt} WHERE id=${adminSession}`
+      const expiryContext = await browser.newContext({
+        ignoreHTTPSErrors: true,
+      })
+      contexts.push(expiryContext)
+      const expiryPage = await expiryContext.newPage()
+      await expiryPage.goto(origin + '/entrar')
+      const credentials = new PostgresCredentials(db)
+      const credential = await credentials.find(usernames.admin!)
+      if (!credential || credential.accountId !== adminAccount)
+        throw new Error('Missing synthetic admin credential')
+      const issuedAt = Date.now()
+      const expiresAt = issuedAt + 750
+      const adminSession = await credentials.issue(credential, issuedAt, 750)
+      if (!adminSession) throw new Error('Synthetic short session not issued')
+      const event = {
+        req: new Request(origin),
+        res: { headers: new Headers() },
+      }
+      const sealed = await useSession(event, {
+        name: SESSION_COOKIE_NAME,
+        password: sessionSecret,
+        maxAge: 8 * 60 * 60,
+        cookie: { ...SESSION_COOKIE_ATTRIBUTES },
+      })
+      await sealed.update({ sessionRecordId: adminSession })
+      const setCookie = event.res.headers.getSetCookie().at(-1)?.split(';')[0]
+      if (!setCookie?.startsWith(SESSION_COOKIE_NAME + '='))
+        throw new Error('Missing sealed fixture cookie')
+      await expiryContext.addCookies([
+        {
+          name: SESSION_COOKIE_NAME,
+          value: setCookie.slice(SESSION_COOKIE_NAME.length + 1),
+          url: origin,
+          secure: true,
+          httpOnly: true,
+          sameSite: 'Lax',
+        },
+      ])
       const expired = await blocked(
         async (tx) => {
           await tx`SELECT agent_id FROM farm.connector_enrollments WHERE agent_id=${agent}::uuid FOR UPDATE`
         },
         printerRole,
         'farm.connector_enrollments',
-        () => registration(admin, 'wait-expiry'),
+        () => registration(expiryPage, 'wait-expiry'),
         async () => {
           const remaining = expiresAt - Date.now()
           if (remaining > 0)

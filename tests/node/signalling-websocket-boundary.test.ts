@@ -138,6 +138,95 @@ test('native limits are installed in the actual H3 cached options before adapter
   )
   assert.throws(() => installSignallingWebSocketBounds({}), /Unsupported/)
 })
+test('global upgrade boundary rejects unmanaged paths and missing or failed route admission without a listener catcher', async () => {
+  const app = createApp()
+  let opened = 0
+  app.use('/ordinary', () => 'ordinary HTTP')
+  app.use(
+    '/api/signalling/browser',
+    defineWebSocketHandler({
+      upgrade() {
+        throw new Error('Runtime unavailable')
+      },
+      open() {
+        opened++
+      },
+    }),
+  )
+  // A route without its admission hook must never become a permissive socket.
+  app.use(
+    '/api/signalling/connector',
+    defineWebSocketHandler({
+      open() {
+        opened++
+      },
+    }),
+  )
+  installSignallingWebSocketBounds(app)
+  const adapter = nodeAdapter(app.websocket)
+  const server = createServer(toNodeListener(app))
+  const sockets = new Set<Socket>()
+  server.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  })
+  // Same uncaught upgrade binding as Nitro's generated Node listener.
+  server.on('upgrade', adapter.handleUpgrade)
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  try {
+    for (const [path, expected] of [
+      ['/unknown', 404],
+      ['/ordinary', 404],
+      ['/api/signalling/browser?token=synthetic', 404],
+      ['/api/signalling/browser/', 404],
+      ['/api/signalling/browser', 403],
+      ['/api/signalling/connector', 503],
+    ] as const) {
+      const req = request({
+        host: '127.0.0.1',
+        port: address.port,
+        path,
+        headers: {
+          Upgrade: 'websocket',
+          Connection: 'Upgrade',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+        },
+      })
+      try {
+        const response = deadline(
+          new Promise<number | undefined>((resolve, reject) => {
+            req.once('response', (res) => {
+              res.resume()
+              res.once('end', () => resolve(res.statusCode))
+            })
+            req.once('upgrade', (_res, socket) => {
+              socket.destroy()
+              reject(new Error('Unexpected upgrade'))
+            })
+            req.once('error', reject)
+          }),
+        )
+        req.end()
+        assert.equal(await response, expected)
+      } finally {
+        req.destroy()
+      }
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(opened, 0)
+    assert.equal(adapter.peers.size, 0)
+    assert.equal(sockets.size, 0)
+  } finally {
+    adapter.closeAll(1000, undefined, true)
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    )
+  }
+})
 test('strict original upgrade boundary separates sealed browser credentials from machines', async () => {
   assert.equal(
     inspectSignallingUpgrade(input(), 'browser', origin).origin,
@@ -365,8 +454,9 @@ test('native masked ping burst terminates without automatic pong buffering', asy
   const app = createApp()
   let delivered = 0
   app.use(
-    '/ping-test',
+    '/api/signalling/connector',
     defineWebSocketHandler({
+      upgrade() {},
       open(peer: unknown) {
         installSignallingControlBounds(peer)
       },
@@ -392,7 +482,7 @@ test('native masked ping burst terminates without automatic pong buffering', asy
   const req = request({
     host: '127.0.0.1',
     port: address.port,
-    path: '/ping-test',
+    path: '/api/signalling/connector',
     headers: {
       Upgrade: 'websocket',
       Connection: 'Upgrade',

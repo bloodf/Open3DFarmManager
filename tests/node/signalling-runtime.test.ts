@@ -60,7 +60,10 @@ interface TestPeer {
   send(wire: string): void
   terminate(): void
 }
-async function fixture() {
+type RuntimeConfig = ConstructorParameters<typeof SignallingRuntime>[0]
+async function fixture(
+  makeRuntime = (config: RuntimeConfig) => new SignallingRuntime(config),
+) {
   let wall = 100_000,
     mono = 1000,
     revoked = false,
@@ -268,7 +271,7 @@ async function fixture() {
       }
     },
   }
-  const runtime = new SignallingRuntime({
+  const runtime = makeRuntime({
     reader,
     credentials,
     origin,
@@ -491,6 +494,114 @@ async function fixture() {
 }
 const sdp = (hex: string) =>
   `v=0\r\na=fingerprint:sha-256 ${Array(32).fill(hex).join(':')}\r\n`
+test('two verified admissions competing for the last inbox slot cannot exceed sixteen', async () => {
+  const configs: RuntimeConfig[] = []
+  let shared: SignallingRuntime | undefined
+  let hold = false
+  let arrivals = 0
+  const both = Promise.withResolvers<void>()
+  const gate = Promise.withResolvers<void>()
+  const makeRuntime = (config: RuntimeConfig) => {
+    configs.push(config)
+    shared ??= new SignallingRuntime({
+      ...config,
+      reader: {
+        read: config.reader.read,
+        async readConnectorCurrent(input) {
+          for (const candidate of configs) {
+            const value = await candidate.reader.readConnectorCurrent(input)
+            if (value) return value
+          }
+          return null
+        },
+      },
+      credentials: {
+        async issue(input) {
+          for (const candidate of configs) {
+            const value = await candidate.credentials.issue(input)
+            if (value.ok) return value
+          }
+          return { ok: false, reason: 'denied' }
+        },
+        async accept(input) {
+          for (const candidate of configs) {
+            const value = await candidate.credentials.accept(input)
+            if (value.ok) {
+              if (hold) {
+                if (++arrivals === 2) both.resolve()
+                await gate.promise
+              }
+              return value
+            }
+          }
+          return { ok: false, reason: 'denied' }
+        },
+      },
+    })
+    return shared
+  }
+  const fixtures: Awaited<ReturnType<typeof fixture>>[] = []
+  const pending: Promise<void>[] = []
+  try {
+    for (let i = 0; i < 17; i++) fixtures.push(await fixture(makeRuntime))
+    for (const f of fixtures.slice(0, 15)) await f.inbox()
+    const contenders: TestPeer[] = []
+    hold = true
+    for (const f of fixtures.slice(15)) {
+      const p = await f.connect('connector')
+      contenders.push(p)
+      await f.send(p, {
+        v: 1,
+        t: 'connector.begin',
+        agent_id: f.agent,
+        farm_id: f.farm,
+        jti: f.jti,
+        token: f.token,
+      })
+      const challenge = p.wires.at(-1)
+      assert.ok(challenge?.t === 'connector.inbox-challenge')
+      pending.push(
+        f.send(p, {
+          v: 1,
+          t: 'connector.inbox-proof',
+          signature: await f.sign(challenge.challenge),
+        }),
+      )
+    }
+    await Promise.race([
+      both.promise,
+      ...pending.map((p) =>
+        p.then(() => {
+          throw new Error('Admission completed before the contention barrier')
+        }),
+      ),
+    ])
+    assert.equal(arrivals, 2)
+    gate.resolve()
+    await Promise.all(pending)
+    assert.equal(
+      contenders.filter((p) =>
+        p.wires.some((w) => w.t === 'connector.inbox-ready'),
+      ).length,
+      1,
+    )
+    assert.equal(contenders.filter((p) => p.raw.socket.destroyed).length, 1)
+    assert.equal(
+      fixtures
+        .flatMap((f) => f.peers)
+        .filter(
+          (p) =>
+            !p.raw.socket.destroyed &&
+            p.wires.some((w) => w.t === 'connector.inbox-ready'),
+        ).length,
+      16,
+    )
+  } finally {
+    gate.resolve()
+    await Promise.allSettled(pending)
+    for (const f of fixtures) f.close()
+  }
+})
 test('runtime gates both role proofs then relays exact SDP and emits a scoped read-only binding', async () => {
   const f = await fixture()
   try {

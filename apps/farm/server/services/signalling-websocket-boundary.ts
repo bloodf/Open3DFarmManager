@@ -36,23 +36,68 @@ export function installSignallingWebSocketBounds(app: unknown): void {
     throw new Error('Unsupported WebSocket options')
   if (previous && 'wss' in previous)
     throw new Error('Preconstructed WebSocket server is unsupported')
+  if (previous && 'hooks' in previous)
+    throw new Error('Preconfigured WebSocket hooks are unsupported')
   const nativeLimits = Object.freeze({
     maxPayload: SIGNALLING_NATIVE_MAX_PAYLOAD,
     perMessageDeflate: false,
     autoPong: false,
   })
-  const options = Object.freeze({ ...previous, serverOptions: nativeLimits })
+  const options = Object.freeze({
+    ...previous,
+    serverOptions: nativeLimits,
+    hooks: Object.freeze({
+      upgrade(input: unknown) {
+        // CrossWS calls this synchronously before resolving any route hooks.
+        // Throw a Response so its Node adapter ends the socket without an
+        // outer listener catch (Nitro does not install one).
+        try {
+          const request = signallingNodeUpgrade(input)
+          if (
+            request.method === 'GET' &&
+            (request.url === paths.browser || request.url === paths.connector)
+          )
+            return
+        } catch {}
+        throw new Response(null, { status: 404 })
+      },
+    }),
+  })
   Object.assign(app.options, { websocket: options })
   const resolved = app.websocket
   if (
     !object(resolved) ||
     !('serverOptions' in resolved) ||
     resolved.serverOptions !== nativeLimits ||
-    'wss' in resolved
+    'wss' in resolved ||
+    !('resolve' in resolved) ||
+    typeof resolved.resolve !== 'function'
   )
     throw new Error(
       'WebSocket bounds were not installed before adapter initialization',
     )
+  const resolve = resolved.resolve.bind(resolved)
+  Object.assign(resolved, {
+    async resolve(input: unknown) {
+      const hooks: unknown = await resolve(input)
+      return {
+        ...(object(hooks) ? hooks : {}),
+        async upgrade(request: unknown) {
+          if (
+            !object(hooks) ||
+            !('upgrade' in hooks) ||
+            typeof hooks.upgrade !== 'function'
+          )
+            throw new Response(null, { status: 503 })
+          try {
+            return await hooks.upgrade(request)
+          } catch {
+            throw new Response(null, { status: 403 })
+          }
+        },
+      }
+    },
+  })
   Object.freeze(resolved)
 }
 /** Install synchronously in the open hook before any asynchronous admission.

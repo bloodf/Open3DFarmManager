@@ -478,6 +478,7 @@ export class SignallingRuntime {
           current.budget.observedAt >= state.challenge.expires_at ||
           current.budget.observedAt >= result.expiresAt ||
           connection.closed ||
+          this.#inboxes.size >= 16 ||
           this.#inboxes.has(current.identity.agent_id)
         )
           throw new Error('Inbox proof expired')

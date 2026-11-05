@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { z } from 'zod'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
-import { validateMoonrakerInput } from '../moonraker/client.ts'
+import { validateMoonrakerInput } from './moonraker.ts'
 
 const MAX_CONFIG_BYTES = 64 * 1024
 // Timing is local configuration only; these bounds are not command safety policy.
@@ -36,7 +36,7 @@ const Limits = z
     reconnectMinMs: 1000,
     reconnectMaxMs: 30_000,
   })
-const Config = z.strictObject({
+export const LocalCollectorConfigSchema = z.strictObject({
   version: z.literal(1),
   allowedOrigins: z.array(z.string().min(1).max(2048)).min(1).max(16),
   printers: z
@@ -50,7 +50,7 @@ const Config = z.strictObject({
     .max(16),
   limits: Limits,
 })
-export type LocalCollectorConfig = z.infer<typeof Config>
+export type LocalCollectorConfig = z.infer<typeof LocalCollectorConfigSchema>
 
 function privateFile(stat: Stats) {
   if (
@@ -64,11 +64,19 @@ function privateFile(stat: Stats) {
 }
 
 /** No final symlink, FIFO/device reads or unbounded growing-file reads. */
-export function readLocalCollectorConfig(path: string): LocalCollectorConfig {
+export function readPrivateJsonFile(
+  path: string,
+  options: {
+    maxBytes: number
+    maxStringChars?: number
+  },
+): unknown {
+  const limit = options.maxBytes
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CONFIG_BYTES)
+    throw new Error('Invalid private JSON limit')
   const before = lstatSync(path)
   privateFile(before)
-  if (before.size > MAX_CONFIG_BYTES)
-    throw new Error('Collector configuration too large')
+  if (before.size > limit) throw new Error('Collector configuration too large')
   const fd = openSync(
     path,
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
@@ -76,47 +84,52 @@ export function readLocalCollectorConfig(path: string): LocalCollectorConfig {
   try {
     const stat = fstatSync(fd)
     privateFile(stat)
-    if (
-      stat.dev !== before.dev ||
-      stat.ino !== before.ino ||
-      stat.size > MAX_CONFIG_BYTES
-    )
+    if (stat.dev !== before.dev || stat.ino !== before.ino || stat.size > limit)
       throw new Error('Collector configuration changed')
-    const bytes = Buffer.alloc(MAX_CONFIG_BYTES + 1)
+    const bytes = Buffer.alloc(limit + 1)
     let size = 0
     while (size < bytes.length) {
       const count = readSync(fd, bytes, size, bytes.length - size, null)
       if (!count) break
       size += count
     }
-    if (size > MAX_CONFIG_BYTES)
-      throw new Error('Collector configuration too large')
+    if (size > limit) throw new Error('Collector configuration too large')
     const text = new TextDecoder('utf-8', {
       fatal: true,
       ignoreBOM: true,
     }).decode(bytes.subarray(0, size))
-    const config = Config.parse(
-      parseBoundedJson(text, {
-        maxBytes: MAX_CONFIG_BYTES,
-        maxDepth: 8,
-        maxValues: 512,
-        maxStringChars: 2048,
-      }),
-    )
-    const keys = new Set<string>()
-    for (const assignment of config.printers) {
-      // Validate every printer and every allowlist entry before any queue/network.
-      validateMoonrakerInput({
-        assignment,
-        allowedOrigins: config.allowedOrigins,
-        limits: config.limits,
-      })
-      if (keys.has(assignment.printerKey))
-        throw new Error('Duplicate collector printer key')
-      keys.add(assignment.printerKey)
-    }
-    return config
+    return parseBoundedJson(text, {
+      maxBytes: limit,
+      maxDepth: 8,
+      maxValues: 512,
+      maxStringChars: options.maxStringChars ?? 2048,
+    })
   } finally {
     closeSync(fd)
   }
+}
+
+export function parseLocalCollectorConfig(
+  input: unknown,
+): LocalCollectorConfig {
+  const config = LocalCollectorConfigSchema.parse(input)
+  const keys = new Set<string>()
+  for (const assignment of config.printers) {
+    // Validate every printer and every allowlist entry before any queue/network.
+    validateMoonrakerInput({
+      assignment,
+      allowedOrigins: config.allowedOrigins,
+      limits: config.limits,
+    })
+    if (keys.has(assignment.printerKey))
+      throw new Error('Duplicate collector printer key')
+    keys.add(assignment.printerKey)
+  }
+  return config
+}
+
+export function readLocalCollectorConfig(path: string): LocalCollectorConfig {
+  return parseLocalCollectorConfig(
+    readPrivateJsonFile(path, { maxBytes: MAX_CONFIG_BYTES }),
+  )
 }

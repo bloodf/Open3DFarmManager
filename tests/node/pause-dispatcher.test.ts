@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import {
   openCommandJournal,
@@ -160,11 +161,12 @@ async function authorityFixture() {
 
 async function fixture(shortCapability = false) {
   const f = await authorityFixture(),
-    directory = mkdtempSync(join('/tmp/open3dfarm-pause-dispatch', 'dispatch-'))
+    directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
     mono = 1000,
     writes = 0,
     allowed = true
+  let onRevocationCheck: (() => void) | undefined
   const journal = openCommandJournal({ directory, clock: () => wall })
   const bindings = createPrinterBindingRegistry({
     allowedOrigins: ['http://127.0.0.1:7125'],
@@ -289,7 +291,12 @@ async function fixture(shortCapability = false) {
     clock: { wallNow: () => wall, monotonicNow: () => mono },
     journal,
     driver,
-    localRevocations: { check: () => allowed },
+    localRevocations: {
+      check: () => {
+        onRevocationCheck?.()
+        return allowed
+      },
+    },
     resultTimeoutMs: 50,
   })
   const controls = await import(
@@ -442,6 +449,9 @@ async function fixture(shortCapability = false) {
     handle: result.handle,
     journal,
     directory,
+    setRevocationCheck: (action: () => void) => {
+      onRevocationCheck = action
+    },
     setPostCommit: (action: () => void) => {
       postCommit = action
     },
@@ -802,5 +812,46 @@ test('failed durable write-start commit prevents driver send', async () => {
   } finally {
     db.close()
     f.cleanup()
+  }
+})
+
+test('final revocation callback cannot permit a send after abort, close or expiry', async () => {
+  for (const change of ['abort', 'close', 'expiry'] as const) {
+    const f = await fixture(),
+      abort = new AbortController()
+    const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+    let checks = 0,
+      triggered = false
+    try {
+      f.setRevocationCheck(() => {
+        const row = db
+          .prepare(
+            "SELECT status FROM pause_commands WHERE status = 'write-started'",
+          )
+          .get()
+        if (!row || ++checks !== 3) return
+        triggered = true
+        if (change === 'abort') abort.abort()
+        if (change === 'close') f.dispatcher.close()
+        if (change === 'expiry') f.advance(5000)
+      })
+      const result = await f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+        signal: abort.signal,
+      })
+      assert.equal(triggered, true, change)
+      assert.equal(result.kind, 'not-sent', change)
+      assert.equal(f.getWrites(), 0, change)
+      assert.equal(
+        db.prepare('SELECT status FROM pause_commands').get()?.status,
+        'not-sent',
+        change,
+      )
+    } finally {
+      db.close()
+      f.cleanup()
+    }
   }
 })

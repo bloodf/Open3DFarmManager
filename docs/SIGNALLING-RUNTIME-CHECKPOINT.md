@@ -1,0 +1,17 @@
+# Signalling runtime boundary checkpoint
+
+This staged implementation prepares a bounded Node WebSocket boundary. It does not expose signalling routes or authenticate a socket. Commands remain disabled for every identity.
+
+The local Nuxt module leaves Nitro WebSockets disabled by default. Only the literal private build configuration `connectorSignalling.enabled: true` opts in. A runtime environment flag cannot replace that build decision. An opted-in build uses the `node-server` preset; disabling its runtime flag still retains the native limits. Removing the compiled adapter requires rebuilding without the opt-in.
+
+The synchronous lifecycle plugin checks the build decision before runtime enablement. It installs the pinned h3/CrossWS native `maxPayload` of 12 KiB and disables compression before adapter construction. An unsupported or already cached incompatible adapter fails startup. No shared Nuxt configuration or environment file is changed by this slice.
+
+The upgrade helper reads the original Node `IncomingMessage`, rejects duplicate headers and query authentication carriers, requires a fixed subprotocol, and separates strict browser Origin plus the maintained sealed cookie from machine upgrades without Origin or cookies. Unsealing a cookie is not authorization. Current session, farm, key, enrollment, credential, and fresh possession checks remain required before admission.
+
+Resource controls bound preauthentication to 16 peers and eight seconds, live sockets to 64, outstanding async operations to 32, and queued plus in-flight plus outbound bytes to 32 KiB per peer. A maximum of eight frames includes the active processor. Disconnecting does not release async capacity until the operation settles. The original 30-second hard lifetime cannot renew; closed or expired contexts discard late results.
+
+Focused tests run against installed Nitro 2.13.6, h3, and CrossWS 0.3.5, including a real Node upgrade with sealed-cookie unsealing and a real oversized frame rejected with code 1009 before the application message callback. Eighteen focused cases pass in both Node and Bun across boundary, resource, build-policy, lifecycle, and clock tests. Root TypeScript and focused module/plugin TypeScript checks pass. These checks are not built HTTPS, Chromium, database, native RTC interoperability, or complete runtime acceptance.
+
+The clock utility is prepared separately from the existing coordinator and reader. It subtracts the entire SQL transaction duration including COMMIT from a final DB observation, uses monotonic deadlines, and preserves the original context deadline when revalidating. Wire issuance must use the actual final DB observation. Endpoint validation uses a single request wall interval with a 250 ms skew guard, without an additional RTT allowance or expiry grace. This prototype synchronization requirement can deny legitimately skewed hosts. Reader snapshots, coordinator integration, endpoint timers, and actual stalled SQL/crypto acceptance remain pending.
+
+Next dependencies are the narrow current Connector reader and DB-time snapshots, coordinator clock integration, authenticated browser and Connector inbox/context proof processing, bounded SDP/ICE routes, then built HTTPS and actual browser-to-Connector RTC acceptance. Existing possession proof throttling and the single pending context per credential remain authoritative; retrying a busy pending proof does not authorize automatic renewal. No migration, SQL grant, authenticated transport, command relay, TURN, or HTTP fallback is added here.

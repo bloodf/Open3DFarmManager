@@ -183,6 +183,8 @@ export async function testPostgresConnectorInventory(
     'DELETE FROM farm.connector_enrollments',
     'CREATE TABLE farm.inventory_forbidden (id int)',
     'SET ROLE fixture',
+    'GRANT farm_connector_revoker TO CURRENT_USER',
+    'GRANT UPDATE ON farm.connector_enrollments TO CURRENT_USER',
   ])
     await assert.rejects(runtime.unsafe(query))
   assert.equal(
@@ -334,6 +336,7 @@ export async function testPostgresConnectorInventory(
       headers: { cookie: pair },
     })
     assert.equal(sessionRevoked.status, 401)
+    auth.lifetimeMs = 1
     const secondLogin = await fetch(base + '/api/auth/login', {
       method: 'POST',
       headers: { origin: auth.origin, 'content-type': 'application/json' },
@@ -342,15 +345,62 @@ export async function testPostgresConnectorInventory(
     assert.equal(secondLogin.status, 200)
     const secondCookie = secondLogin.headers.getSetCookie()[0]?.split(';')[0]
     assert.ok(secondCookie)
+    await sleep(5)
+    auth.lifetimeMs = 60000
+    const expired = await fetch(base + '/api/farms', {
+      headers: { cookie: secondCookie },
+    })
+    assert.equal(expired.status, 401)
+    assert.equal(expired.headers.get('cache-control'), 'no-store')
+    const thirdLogin = await fetch(base + '/api/auth/login', {
+      method: 'POST',
+      headers: { origin: auth.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    assert.equal(thirdLogin.status, 200)
+    const thirdCookie = thirdLogin.headers.getSetCookie()[0]?.split(';')[0]
+    assert.ok(thirdCookie)
+    await admin`INSERT INTO farm.memberships (farm_id, account_id, role) VALUES (${farms[1]!}::uuid, ${httpAccount}, 'viewer')`
+    const runtimeRole = (await runtime`SELECT current_user AS name`)[0]?.name
+    assert.equal(typeof runtimeRole, 'string')
+    // A real PostgreSQL connection outage for this fixture's runtime identity.
+    // Authentication/admin connections remain healthy; no fake HTTP/proxy response.
+    await admin`ALTER ROLE ${admin(runtimeRole)} NOLOGIN`
+    try {
+      await admin`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = ${runtimeRole} AND pid <> pg_backend_pid()`
+      for (const path of [
+        '/api/farms',
+        '/api/farms/' + farms[1] + '/connectors',
+      ]) {
+        const unavailable = await fetch(base + path, {
+          headers: { cookie: thirdCookie },
+        })
+        assert.equal(unavailable.status, 503)
+        assert.equal(unavailable.headers.get('cache-control'), 'no-store')
+        assert.deepEqual(await unavailable.json(), { error: true })
+      }
+      assert.equal((await admin`SELECT 1 AS healthy`)[0]?.healthy, 1)
+    } finally {
+      await admin`ALTER ROLE ${admin(runtimeRole)} LOGIN`
+    }
+    const recovered = await fetch(base + '/api/farms', {
+      headers: { cookie: thirdCookie },
+    })
+    assert.equal(recovered.status, 200)
+    assert.deepEqual(await recovered.json(), {
+      farms: [{ farmId: farms[1] }],
+      nextAfter: null,
+    })
     await admin`UPDATE farm.session_accounts SET disabled = true WHERE id = ${httpAccount}`
     const revoked = await fetch(base + '/api/farms', {
-      headers: { cookie: secondCookie },
+      headers: { cookie: thirdCookie },
     })
     assert.equal(revoked.status, 401)
   } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    )
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+      server.closeAllConnections()
+    })
   }
   return [
     'bounded-keyset-discovery-and-exact-public-fields',
@@ -358,5 +408,7 @@ export async function testPostgresConnectorInventory(
     'revocation-disable-and-expiry-after-lock',
     'least-privilege-and-no-enrollment-mutation',
     'loopback-http-real-login-sealed-cookie-and-postgres',
+    'http-expired-revoked-session-and-cross-farm-denied',
+    'http-runtime-postgres-outage-503-and-recovery',
   ]
 }

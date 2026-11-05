@@ -19,14 +19,18 @@ import (
 )
 
 func validateRequest(req *base.Request, destination Destination) error {
-	if req == nil || validateURL(req.URL, destination) != nil || len(req.Body) != 0 { return ErrPolicy }
+	if req == nil || validateURL(req.URL, destination) != nil || len(req.Body) != 0 {
+		return ErrPolicy
+	}
 	switch req.Method {
 	case base.Options, base.Describe, base.Setup, base.Play, base.GetParameter, base.Teardown:
 	default:
 		return ErrPolicy
 	}
 	for key := range req.Header {
-		if strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "Proxy-Authorization") { return ErrPolicy }
+		if strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "Proxy-Authorization") {
+			return ErrPolicy
+		}
 	}
 	return nil
 }
@@ -43,24 +47,30 @@ func newClient(destination Destination, gate *dialGate, state *terminalState) *g
 		ReadLimits: &base.ReadLimits{MaxBodyBytes: 16384}, SDPLimits: sdpLimits(),
 		ValidateSDP: func(desc *sdp.SessionDescription) error {
 			err := ValidateSDP(desc, destination)
-			if err != nil { state.stop(ErrPolicy) }
+			if err != nil {
+				state.stop(ErrPolicy)
+			}
 			return err
 		},
-		DialContext: gate.DialContext,
-		ListenPacket: func(string, string) (net.PacketConn, error) { state.stop(ErrPolicy); return nil, ErrPolicy },
-		ResolveIPAddr: func(string, string) (*net.IPAddr, error) { state.stop(ErrPolicy); return nil, ErrPolicy },
+		DialContext:    gate.DialContext,
+		ListenPacket:   func(string, string) (net.PacketConn, error) { state.stop(ErrPolicy); return nil, ErrPolicy },
+		ResolveIPAddr:  func(string, string) (*net.IPAddr, error) { state.stop(ErrPolicy); return nil, ErrPolicy },
 		DialTLSContext: func(context.Context, string, string) (net.Conn, error) { state.stop(ErrPolicy); return nil, ErrPolicy },
 		OnRequest: func(req *base.Request) {
-			if validateRequest(req, destination) != nil { state.stop(ErrPolicy) }
+			if validateRequest(req, destination) != nil {
+				state.stop(ErrPolicy)
+			}
 		},
 		OnResponse: func(res *base.Response) {
-			if validateResponse(res, destination) != nil { state.stop(ErrPolicy) }
+			if validateResponse(res, destination) != nil {
+				state.stop(ErrPolicy)
+			}
 		},
-		OnServerRequest: func(*base.Request) { state.stop(ErrPolicy) },
-		OnServerResponse: func(*base.Response) { state.stop(ErrPolicy) },
+		OnServerRequest:   func(*base.Request) { state.stop(ErrPolicy) },
+		OnServerResponse:  func(*base.Response) { state.stop(ErrPolicy) },
 		OnTransportSwitch: func(error) { state.stop(ErrPolicy) },
-		OnPacketsLost: func(uint64) { state.stop(ErrRTP) },
-		OnDecodeError: func(error) { state.stop(ErrRTP) },
+		OnPacketsLost:     func(uint64) { state.stop(ErrRTP) },
+		OnDecodeError:     func(error) { state.stop(ErrRTP) },
 	}
 }
 
@@ -72,8 +82,12 @@ func Run(parent context.Context, cfg Config, output *os.File, control *os.File) 
 
 func run(parent context.Context, cfg Config, output *os.File, control *os.File, dial func(context.Context, string, string) (net.Conn, error)) error {
 	entered := time.Now()
-	if !validConfig(cfg) { return ErrConfig }
-	if output == nil || control == nil { return ErrOutput }
+	if !validConfig(cfg) {
+		return ErrConfig
+	}
+	if output == nil || control == nil {
+		return ErrOutput
+	}
 	ctx, cancel := context.WithDeadline(parent, entered.Add(cfg.Lease))
 	defer cancel()
 	deadline, _ := ctx.Deadline()
@@ -87,7 +101,11 @@ func run(parent context.Context, cfg Config, output *os.File, control *os.File, 
 		defer close(watchDone)
 		select {
 		case <-ctx.Done():
-			if ctx.Err() == context.DeadlineExceeded { state.stop(ErrLease) } else { state.stop(ErrCanceled) }
+			if ctx.Err() == context.DeadlineExceeded {
+				state.stop(ErrLease)
+			} else {
+				state.stop(ErrCanceled)
+			}
 		case <-pipe.Done():
 			// Err is observed here even if Offer has not been called yet.
 			pipeErr := pipe.Err()
@@ -107,39 +125,73 @@ func run(parent context.Context, cfg Config, output *os.File, control *os.File, 
 		state.stop(ErrCanceled)
 		cancel()
 		// Close the socket before the library waits, including on hook failure.
-		if started { client.Close() }
+		if started {
+			client.Close()
+		}
 		_ = pipe.Close()
 		<-watchDone
 	}()
 	fail := func() error {
-		if err := state.failure(); err != nil { return err }
-		if ctx.Err() == context.DeadlineExceeded { return ErrLease }
-		if ctx.Err() != nil { return ErrCanceled }
+		if err := state.failure(); err != nil {
+			return err
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return ErrLease
+		}
+		if ctx.Err() != nil {
+			return ErrCanceled
+		}
 		return ErrSource
 	}
-	if ctx.Err() != nil { return fail() }
-	if client.Start() != nil { return fail() }
+	if ctx.Err() != nil {
+		return fail()
+	}
+	if client.Start() != nil {
+		return fail()
+	}
 	started = true
 	u := &base.URL{Scheme: "rtsp", Host: cfg.Destination.Addr.String(), Path: cfg.Destination.Path}
 	desc, _, err := client.Describe(u)
-	if err != nil { return fail() }
-	if state.failure() != nil { return fail() }
-	if desc == nil || validateURL(desc.BaseURL, cfg.Destination) != nil || len(desc.Medias) != 1 || len(desc.Medias[0].Formats) != 1 { return ErrPolicy }
+	if err != nil {
+		return fail()
+	}
+	if state.failure() != nil {
+		return fail()
+	}
+	if desc == nil || validateURL(desc.BaseURL, cfg.Destination) != nil || len(desc.Medias) != 1 || len(desc.Medias[0].Formats) != 1 {
+		return ErrPolicy
+	}
 	media := desc.Medias[0]
 	codec, ok := media.Formats[0].(*format.H264)
-	if !ok || codec.PacketizationMode != 1 || len(codec.SPS) != 0 || len(codec.PPS) != 0 { return ErrPolicy }
+	if !ok || codec.PacketizationMode != 1 || len(codec.SPS) != 0 || len(codec.PPS) != 0 {
+		return ErrPolicy
+	}
 	trackURL, err := media.URL(desc.BaseURL)
-	if err != nil || validateURL(trackURL, cfg.Destination) != nil { return ErrPolicy }
+	if err != nil || validateURL(trackURL, cfg.Destination) != nil {
+		return ErrPolicy
+	}
 	decoder, err := strictDecoder()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	stream := &streamAdmission{guard: RTPGuard{PayloadType: codec.PayloadTyp}, decoder: decoder}
-	if _, err := client.Setup(desc.BaseURL, media, 0, 0); err != nil { return fail() }
-	if state.failure() != nil { return fail() }
+	if _, err := client.Setup(desc.BaseURL, media, 0, 0); err != nil {
+		return fail()
+	}
+	if state.failure() != nil {
+		return fail()
+	}
 	client.OnPacketRTP(media, codec, func(pkt *rtp.Packet) {
-		if state.failure() != nil { return }
-		if err := stream.accept(pkt, pipe.Offer); err != nil { state.stop(err) }
+		if state.failure() != nil {
+			return
+		}
+		if err := stream.accept(pkt, pipe.Offer); err != nil {
+			state.stop(err)
+		}
 	})
-	if _, err := client.Play(nil); err != nil { return fail() }
+	if _, err := client.Play(nil); err != nil {
+		return fail()
+	}
 	_ = client.Wait()
 	return fail()
 }

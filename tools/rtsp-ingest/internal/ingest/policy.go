@@ -26,50 +26,70 @@ func validateURL(u *base.URL, destination Destination) error {
 		return ErrPolicy
 	}
 	addr, err := netip.ParseAddrPort(u.Host)
-	if err != nil || addr != destination.Addr { return ErrPolicy }
+	if err != nil || addr != destination.Addr {
+		return ErrPolicy
+	}
 	return nil
 }
 
 // Validate raw controls too: Media.URL rewrites absolute control hosts.
 func validateControl(value string, destination Destination, session bool) error {
-	if session && value == "*" { return nil }
+	if session && value == "*" {
+		return nil
+	}
 	if value == "" || !validText(value, 1024) || strings.ContainsAny(value, "?#@\\") || strings.HasPrefix(value, "//") {
 		return ErrPolicy
 	}
 	if session || strings.Contains(value, ":") {
 		u, err := base.ParseURL(value)
-		if err != nil { return ErrPolicy }
+		if err != nil {
+			return ErrPolicy
+		}
 		return validateURL(u, destination)
 	}
 	// Resolve using the same upstream utility as SETUP, then gate the result.
 	u := &base.URL{Scheme: "rtsp", Host: destination.Addr.String(), Path: destination.Path}
 	resolved, err := (description.Media{Control: value}).URL(u)
-	if err != nil { return ErrPolicy }
+	if err != nil {
+		return ErrPolicy
+	}
 	return validateURL(resolved, destination)
 }
 
 func validateResponse(res *base.Response, destination Destination) error {
-	if res == nil || res.StatusCode != base.StatusOK || len(res.Body) > 16384 { return ErrPolicy }
+	if res == nil || res.StatusCode != base.StatusOK || len(res.Body) > 16384 {
+		return ErrPolicy
+	}
 	for _, key := range []string{"Content-Base", "Content-Location"} {
 		values, ok := res.Header[key]
-		if !ok { continue }
-		if len(values) != 1 { return ErrPolicy }
+		if !ok {
+			continue
+		}
+		if len(values) != 1 {
+			return ErrPolicy
+		}
 		value := values[0]
 		if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
 			value = "rtsp://" + destination.Addr.String() + value
 		}
 		u, err := base.ParseURL(value)
-		if err != nil || validateURL(u, destination) != nil { return ErrPolicy }
+		if err != nil || validateURL(u, destination) != nil {
+			return ErrPolicy
+		}
 	}
 	if len(res.Body) != 0 {
 		ct := res.Header["Content-Type"]
-		if len(ct) != 1 || ct[0] != "application/sdp" { return ErrPolicy }
+		if len(ct) != 1 || ct[0] != "application/sdp" {
+			return ErrPolicy
+		}
 	}
 	return nil
 }
 
 func validSDPAddress(network, family, address string) bool {
-	if network != "IN" { return false }
+	if network != "IN" {
+		return false
+	}
 	ip, err := netip.ParseAddr(address)
 	return err == nil && ip.Zone() == "" && !ip.Is4In6() && !ip.IsMulticast() &&
 		(ip.IsUnspecified() || validAddress(ip)) &&
@@ -89,9 +109,13 @@ func ValidateSDP(desc *sdp.SessionDescription, destination Destination) error {
 		return ErrPolicy
 	}
 	timing := desc.TimeDescriptions[0]
-	if timing.Timing.StartTime != 0 || timing.Timing.StopTime != 0 || len(timing.RepeatTimes) != 0 { return ErrPolicy }
+	if timing.Timing.StartTime != 0 || timing.Timing.StopTime != 0 || len(timing.RepeatTimes) != 0 {
+		return ErrPolicy
+	}
 	for _, a := range desc.Attributes {
-		if a.Key != "control" || validateControl(a.Value, destination, true) != nil { return ErrPolicy }
+		if a.Key != "control" || validateControl(a.Value, destination, true) != nil {
+			return ErrPolicy
+		}
 	}
 	m := desc.MediaDescriptions[0]
 	if m == nil || m.MediaName.Media != "video" || m.MediaName.Port.Value < 0 || m.MediaName.Port.Value > 65535 || m.MediaName.Port.Range != nil ||
@@ -102,24 +126,36 @@ func ValidateSDP(desc *sdp.SessionDescription, destination Destination) error {
 	}
 	pt := m.MediaName.Formats[0]
 	n, err := strconv.Atoi(pt)
-	if err != nil || n < 96 || n > 127 || strconv.Itoa(n) != pt { return ErrPolicy }
+	if err != nil || n < 96 || n > 127 || strconv.Itoa(n) != pt {
+		return ErrPolicy
+	}
 	seen := make(map[string]bool, 3)
 	for _, a := range m.Attributes {
-		if seen[a.Key] || !validText(a.Value, 2048) { return ErrPolicy }
+		if seen[a.Key] || !validText(a.Value, 2048) {
+			return ErrPolicy
+		}
 		seen[a.Key] = true
 		switch a.Key {
 		case "control":
-			if validateControl(a.Value, destination, false) != nil { return ErrPolicy }
+			if validateControl(a.Value, destination, false) != nil {
+				return ErrPolicy
+			}
 		case "rtpmap":
-			if a.Value != pt+" H264/90000" { return ErrPolicy }
+			if a.Value != pt+" H264/90000" {
+				return ErrPolicy
+			}
 		case "fmtp":
 			params, ok := strings.CutPrefix(a.Value, pt+" ")
-			if !ok || !validFMTP(params) { return ErrPolicy }
+			if !ok || !validFMTP(params) {
+				return ErrPolicy
+			}
 		default:
 			return ErrPolicy
 		}
 	}
-	if !seen["control"] || !seen["rtpmap"] || !seen["fmtp"] { return ErrPolicy }
+	if !seen["control"] || !seen["rtpmap"] || !seen["fmtp"] {
+		return ErrPolicy
+	}
 	return nil
 }
 
@@ -127,14 +163,22 @@ func validFMTP(value string) bool {
 	seen := make(map[string]bool, 2)
 	for _, parameter := range strings.Split(value, ";") {
 		key, val, ok := strings.Cut(strings.TrimSpace(parameter), "=")
-		if !ok || seen[key] { return false }
+		if !ok || seen[key] {
+			return false
+		}
 		seen[key] = true
 		switch key {
 		case "packetization-mode":
-			if val != "1" { return false }
+			if val != "1" {
+				return false
+			}
 		case "profile-level-id":
-			if len(val) != 6 { return false }
-			if _, err := hex.DecodeString(val); err != nil { return false }
+			if len(val) != 6 {
+				return false
+			}
+			if _, err := hex.DecodeString(val); err != nil {
+				return false
+			}
 		default:
 			return false
 		}

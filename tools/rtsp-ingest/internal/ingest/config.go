@@ -20,15 +20,15 @@ type Code string
 func (c Code) Error() string { return string(c) }
 
 const (
-	ErrConfig Code = "INGEST_CONFIG"
-	ErrPolicy Code = "INGEST_POLICY"
-	ErrWire Code = "INGEST_WIRE"
-	ErrRTP Code = "INGEST_RTP"
-	ErrClock Code = "INGEST_CLOCK"
-	ErrSource Code = "INGEST_SOURCE"
-	ErrOutput Code = "INGEST_OUTPUT"
+	ErrConfig   Code = "INGEST_CONFIG"
+	ErrPolicy   Code = "INGEST_POLICY"
+	ErrWire     Code = "INGEST_WIRE"
+	ErrRTP      Code = "INGEST_RTP"
+	ErrClock    Code = "INGEST_CLOCK"
+	ErrSource   Code = "INGEST_SOURCE"
+	ErrOutput   Code = "INGEST_OUTPUT"
 	ErrCanceled Code = "INGEST_CANCELED"
-	ErrLease Code = "INGEST_LEASE"
+	ErrLease    Code = "INGEST_LEASE"
 )
 
 type Destination struct {
@@ -38,7 +38,7 @@ type Destination struct {
 
 type Config struct {
 	Destination Destination
-	Lease time.Duration
+	Lease       time.Duration
 }
 
 // ValidateConfig consumes a complete private JSON object, including its EOF.
@@ -56,18 +56,28 @@ func ValidateConfig(raw []byte) (Config, error) {
 	seen := make(map[string]bool, 5)
 	for d.More() {
 		token, err = d.Token()
-		if err != nil { return Config{}, ErrConfig }
+		if err != nil {
+			return Config{}, ErrConfig
+		}
 		key, ok := token.(string)
-		if !ok || seen[key] { return Config{}, ErrConfig }
+		if !ok || seen[key] {
+			return Config{}, ErrConfig
+		}
 		seen[key] = true
 		var target any
 		switch key {
-		case "version": target = &version
-		case "address": target = &address
-		case "port": target = &port
-		case "path": target = &path
-		case "leaseMs": target = &lease
-		default: return Config{}, ErrConfig
+		case "version":
+			target = &version
+		case "address":
+			target = &address
+		case "port":
+			target = &port
+		case "path":
+			target = &path
+		case "leaseMs":
+			target = &lease
+		default:
+			return Config{}, ErrConfig
 		}
 		var value json.RawMessage
 		if d.Decode(&value) != nil || bytes.Equal(bytes.TrimSpace(value), []byte("null")) || json.Unmarshal(value, target) != nil {
@@ -75,13 +85,17 @@ func ValidateConfig(raw []byte) (Config, error) {
 		}
 	}
 	token, err = d.Token()
-	if err != nil || token != json.Delim('}') || len(seen) != 5 { return Config{}, ErrConfig }
-	if _, err = d.Token(); err != io.EOF { return Config{}, ErrConfig }
+	if err != nil || token != json.Delim('}') || len(seen) != 5 {
+		return Config{}, ErrConfig
+	}
+	if _, err = d.Token(); err != io.EOF {
+		return Config{}, ErrConfig
+	}
 	addr, err := netip.ParseAddr(address)
 	if err != nil || !validAddress(addr) || version != 1 || port < 1 || port > 65535 || lease < 1 || lease > 30000 || !validPath(path) {
 		return Config{}, ErrConfig
 	}
-	return Config{Destination: Destination{Addr: netip.AddrPortFrom(addr, uint16(port)), Path: path}, Lease: time.Duration(lease)*time.Millisecond}, nil
+	return Config{Destination: Destination{Addr: netip.AddrPortFrom(addr, uint16(port)), Path: path}, Lease: time.Duration(lease) * time.Millisecond}, nil
 }
 
 func validAddress(addr netip.Addr) bool {
@@ -90,8 +104,14 @@ func validAddress(addr netip.Addr) bool {
 }
 
 func validText(s string, max int) bool {
-	if len(s) > max || !utf8.ValidString(s) { return false }
-	for _, r := range s { if unicode.IsControl(r) { return false } }
+	if len(s) > max || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
 	return true
 }
 

@@ -17,7 +17,9 @@ func fixturePacket(seq uint16, timestamp uint32, marker bool, payload ...byte) *
 func TestRTPSequenceWrapAndIdentity(t *testing.T) {
 	g := RTPGuard{PayloadType: 96}
 	for _, seq := range []uint16{65535, 0, 1} {
-		if err := g.Admit(fixturePacket(seq, 100, true, 0x65)); err != nil { t.Fatal(err) }
+		if err := g.Admit(fixturePacket(seq, 100, true, 0x65)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mutations := []func(*rtp.Packet){
 		func(p *rtp.Packet) { p.SequenceNumber = 4 }, func(p *rtp.Packet) { p.SequenceNumber = 2 },
@@ -30,7 +32,9 @@ func TestRTPSequenceWrapAndIdentity(t *testing.T) {
 		_ = guard.Admit(fixturePacket(2, 100, true, 0x65))
 		packet := fixturePacket(3, 200, true, 0x65)
 		mutate(packet)
-		if guard.Admit(packet) != ErrRTP || guard.Admit(fixturePacket(3, 200, true, 0x65)) != ErrRTP { t.Fatal("accepted invalid RTP or revived guard") }
+		if guard.Admit(packet) != ErrRTP || guard.Admit(fixturePacket(3, 200, true, 0x65)) != ErrRTP {
+			t.Fatal("accepted invalid RTP or revived guard")
+		}
 	}
 }
 
@@ -39,7 +43,9 @@ func TestDecodedAUAndSuppressedSEIDoNotLeaveOuterState(t *testing.T) {
 		decoder := &rtph264.Decoder{PacketizationMode: 1, Limits: &rtph264.DecoderLimits{
 			MaxAccessUnitBytes: 262144, MaxPacketsPerAccessUnit: packetCap, MaxFragmentsPerNAL: 512, MaxNALUsPerAccessUnit: 50,
 		}}
-		if err := decoder.Init(); err != nil { t.Fatal(err) }
+		if err := decoder.Init(); err != nil {
+			t.Fatal(err)
+		}
 		stream := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: decoder}
 		var timestamps []uint64
 		var keys []bool
@@ -56,9 +62,13 @@ func TestDecodedAUAndSuppressedSEIDoNotLeaveOuterState(t *testing.T) {
 			fixturePacket(0, 100, true, 0x06),
 			fixturePacket(1, 9100, true, 0x61),
 		} {
-			if err := stream.accept(packet, offer); err != nil { t.Fatalf("packet cap %d: %v", packetCap, err) }
+			if err := stream.accept(packet, offer); err != nil {
+				t.Fatalf("packet cap %d: %v", packetCap, err)
+			}
 		}
-		if !reflect.DeepEqual(timestamps, []uint64{0, 100000}) || !reflect.DeepEqual(keys, []bool{true, false}) || !reflect.DeepEqual(aus, [][][]byte{{{0x67}, {0x68}, {0x65}}, {{0x61}}}) { t.Fatal("wrong completed output or suppressed SEI offered") }
+		if !reflect.DeepEqual(timestamps, []uint64{0, 100000}) || !reflect.DeepEqual(keys, []bool{true, false}) || !reflect.DeepEqual(aus, [][][]byte{{{0x67}, {0x68}, {0x65}}, {{0x61}}}) {
+			t.Fatal("wrong completed output or suppressed SEI offered")
+		}
 	}
 }
 
@@ -70,49 +80,81 @@ func TestDecoderOwnsIncompleteAUAndLimits(t *testing.T) {
 		{fixturePacket(1, 1, true, 0x78, 0, 3, 0x65)},
 	} {
 		d, err := strictDecoder()
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		var last error
-		for _, packet := range packets { _, last = d.Decode(packet) }
-		if last == nil || last == rtph264.ErrMorePacketsNeeded { t.Fatal("decoder accepted malformed AU") }
+		for _, packet := range packets {
+			_, last = d.Decode(packet)
+		}
+		if last == nil || last == rtph264.ErrMorePacketsNeeded {
+			t.Fatal("decoder accepted malformed AU")
+		}
 	}
 	d, err := strictDecoder()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 513; i++ {
 		header := byte(0x05)
-		if i == 0 { header = 0x85 }
+		if i == 0 {
+			header = 0x85
+		}
 		_, err = d.Decode(fixturePacket(uint16(i), 1, true, 0x7c, header))
-		if i < 512 && err != rtph264.ErrMorePacketsNeeded { t.Fatal("early packet limit") }
+		if i < 512 && err != rtph264.ErrMorePacketsNeeded {
+			t.Fatal("early packet limit")
+		}
 	}
-	if err == nil || err == rtph264.ErrMorePacketsNeeded { t.Fatal("packet cap bypass") }
+	if err == nil || err == rtph264.ErrMorePacketsNeeded {
+		t.Fatal("packet cap bypass")
+	}
 	d, _ = strictDecoder()
 	oversized := make([]byte, 262141)
 	oversized[0] = 0x65
-	if _, err := d.Decode(fixturePacket(1, 1, true, oversized...)); err == nil { t.Fatal("AnnexB delimiter bytes excluded from cap") }
+	if _, err := d.Decode(fixturePacket(1, 1, true, oversized...)); err == nil {
+		t.Fatal("AnnexB delimiter bytes excluded from cap")
+	}
 	d, _ = strictDecoder()
 	exact := make([]byte, 262140)
 	exact[0] = 0x65
-	if au, err := d.Decode(fixturePacket(1, 1, true, exact...)); err != nil || len(au) != 1 || len(au[0]) != len(exact) { t.Fatal("rejected exact AU bound") }
+	if au, err := d.Decode(fixturePacket(1, 1, true, exact...)); err != nil || len(au) != 1 || len(au[0]) != len(exact) {
+		t.Fatal("rejected exact AU bound")
+	}
 	d, _ = strictDecoder()
 	stap := []byte{0x78}
-	for i := 0; i < 51; i++ { stap = append(stap, 0, 1, 0x67) }
-	if _, err := d.Decode(fixturePacket(1, 1, true, stap...)); err == nil { t.Fatal("NAL count cap bypass") }
+	for i := 0; i < 51; i++ {
+		stap = append(stap, 0, 1, 0x67)
+	}
+	if _, err := d.Decode(fixturePacket(1, 1, true, stap...)); err == nil {
+		t.Fatal("NAL count cap bypass")
+	}
 }
 
 func TestDecoderFUCompletion(t *testing.T) {
 	d, err := strictDecoder()
-	if err != nil { t.Fatal(err) }
-	if _, err := d.Decode(fixturePacket(1, 10, false, 0x7c, 0x85, 0x11)); err != rtph264.ErrMorePacketsNeeded { t.Fatal("FU start") }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Decode(fixturePacket(1, 10, false, 0x7c, 0x85, 0x11)); err != rtph264.ErrMorePacketsNeeded {
+		t.Fatal("FU start")
+	}
 	au, err := d.Decode(fixturePacket(2, 10, true, 0x7c, 0x45, 0x22))
-	if err != nil || !reflect.DeepEqual(au, [][]byte{{0x65, 0x11, 0x22}}) { t.Fatal("FU completion") }
+	if err != nil || !reflect.DeepEqual(au, [][]byte{{0x65, 0x11, 0x22}}) {
+		t.Fatal("FU completion")
+	}
 }
 
 func TestStreamRequiresInBandBootstrapAndPropagatesOfferFailure(t *testing.T) {
 	for _, nal := range []byte{0x65, 0x61, 0x80} {
 		d, _ := strictDecoder()
 		s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
-		if s.accept(fixturePacket(1, 1, true, nal), func(uint64, bool, [][]byte) error { t.Fatal("offered unbootstrapped video"); return nil }) != ErrRTP { t.Fatal("accepted unbootstrapped video") }
+		if s.accept(fixturePacket(1, 1, true, nal), func(uint64, bool, [][]byte) error { t.Fatal("offered unbootstrapped video"); return nil }) != ErrRTP {
+			t.Fatal("accepted unbootstrapped video")
+		}
 	}
 	d, _ := strictDecoder()
 	s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
-	if s.accept(fixturePacket(1, 1, true, 0x67), func(uint64, bool, [][]byte) error { return ErrOutput }) != ErrOutput { t.Fatal("lost output failure") }
+	if s.accept(fixturePacket(1, 1, true, 0x67), func(uint64, bool, [][]byte) error { return ErrOutput }) != ErrOutput {
+		t.Fatal("lost output failure")
+	}
 }

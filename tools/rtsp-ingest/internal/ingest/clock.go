@@ -5,15 +5,17 @@ package ingest
 // StreamClock maps completed 90 kHz AUs to a relative, increasing media clock.
 // It has no wall-clock or RTCP/NTP dependency.
 type StreamClock struct {
-	started bool
-	last uint32
-	ticks uint64
-	lastUs uint64
+	started  bool
+	last     uint32
+	ticks    uint64
+	lastUs   uint64
 	terminal bool
 }
 
 func (c *StreamClock) Complete(timestamp uint32) (uint64, error) {
-	if c.terminal { return 0, ErrClock }
+	if c.terminal {
+		return 0, ErrClock
+	}
 	if !c.started {
 		c.started, c.last = true, timestamp
 		return 0, nil
@@ -29,7 +31,7 @@ func (c *StreamClock) Complete(timestamp uint32) (uint64, error) {
 		c.terminal = true
 		return 0, ErrClock
 	}
-	us := ticks*1000000/90000
+	us := ticks * 1000000 / 90000
 	if us <= c.lastUs || us > 9007199254740991 {
 		c.terminal = true
 		return 0, ErrClock

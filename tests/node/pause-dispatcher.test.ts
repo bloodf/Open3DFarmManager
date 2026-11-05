@@ -164,12 +164,18 @@ async function fixture(shortCapability = false) {
     directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
     mono = 1000,
-    writes = 0,
-    allowed = true
-  let onRevocationCheck: (() => void) | undefined
-  let onPeerCheck: (() => void) | undefined
+    writes = 0
   let onClockSample: (() => void) | undefined
-  const journal = openCommandJournal({ directory, clock: () => wall })
+  let onMonotonicSample: (() => void) | undefined
+  let onJournalClock: (() => void) | undefined
+  let onDriverAbort: (() => void) | undefined
+  const journal = openCommandJournal({
+    directory,
+    clock: () => {
+      onJournalClock?.()
+      return wall
+    },
+  })
   const bindings = createPrinterBindingRegistry({
     allowedOrigins: ['http://127.0.0.1:7125'],
   })
@@ -210,8 +216,17 @@ async function fixture(shortCapability = false) {
   const unblocks: Array<() => void> = []
   let lateGuard: (() => boolean) | undefined
   let postCommit: (() => void) | undefined
+  let postCommitPhase: 'wall' | 'mono' = 'wall'
+  let resultClock: (() => void) | undefined
   const driver = {
-    pauseOnce: async ({ beforeSend }: { beforeSend: () => boolean }) => {
+    pauseOnce: async ({
+      beforeSend,
+      signal,
+    }: {
+      beforeSend: () => boolean
+      signal: AbortSignal
+    }) => {
+      signal.addEventListener('abort', () => onDriverAbort?.(), { once: true })
       if (mode === 'hang-before-send') {
         lateGuard = beforeSend
         await new Promise<void>((resolve) => {
@@ -220,7 +235,8 @@ async function fixture(shortCapability = false) {
         if (beforeSend()) writes++
         return { acknowledged: true }
       }
-      if (mode === 'revoke-before-send') allowed = false
+      if (mode === 'revoke-before-send' && result.ok)
+        dispatcher.revoke(result.handle)
       if (mode === 'expire-before-send') {
         wall += 5000
         mono += 5000
@@ -241,6 +257,11 @@ async function fixture(shortCapability = false) {
         )
         db.close()
       }
+      onMonotonicSample = () => {
+        const action = resultClock
+        resultClock = undefined
+        action?.()
+      }
       const sent = mono
       const delta = 1
       wall += delta
@@ -256,6 +277,23 @@ async function fixture(shortCapability = false) {
       }
     },
   }
+  function runPostCommit(phase: 'wall' | 'mono') {
+    if (postCommitPhase !== phase) return
+    if (postCommit) {
+      const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
+      const row = db
+        .prepare(
+          "SELECT count(*) AS n FROM pause_commands WHERE status='write-started'",
+        )
+        .get()
+      db.close()
+      if (row?.n) {
+        const action = postCommit
+        postCommit = undefined
+        action()
+      }
+    }
+  }
   const dispatcher = createPauseDispatcher({
     authority: {
       issuers: [
@@ -269,32 +307,17 @@ async function fixture(shortCapability = false) {
     clock: {
       wallNow: () => {
         onClockSample?.()
+        runPostCommit('wall')
         return wall
       },
-      monotonicNow: () => mono,
+      monotonicNow: () => {
+        onMonotonicSample?.()
+        runPostCommit('mono')
+        return mono
+      },
     },
     journal,
     driver,
-    localRevocations: {
-      check: () => {
-        if (postCommit) {
-          const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
-          const row = db
-            .prepare(
-              "SELECT count(*) AS n FROM pause_commands WHERE status='write-started'",
-            )
-            .get()
-          db.close()
-          if (row?.n) {
-            const action = postCommit
-            postCommit = undefined
-            action()
-          }
-        }
-        onRevocationCheck?.()
-        return allowed
-      },
-    },
     resultTimeoutMs: 50,
   })
   dispatcher.observe(printerBinding, state)
@@ -304,14 +327,11 @@ async function fixture(shortCapability = false) {
   const caps = await import(
     '../../packages/farm-protocol/src/pause-capability.ts'
   )
+  const peer = dispatcher.createPeer(1)
   const admission = dispatcher.beginAdmission({
     binding: f.binding,
     printerBinding,
-    peerGeneration: 1,
-    currentPeerGeneration: () => {
-      onPeerCheck?.()
-      return 1
-    },
+    peer: peer.peer,
   })
   const nonce = admission.challenge.admissionNonce
   const capability = await caps.signPauseCapability(
@@ -372,11 +392,7 @@ async function fixture(shortCapability = false) {
     const a = dispatcher.beginAdmission({
       binding,
       printerBinding: local,
-      peerGeneration: 1,
-      currentPeerGeneration: () => {
-        onPeerCheck?.()
-        return 1
-      },
+      peer: dispatcher.createPeer(1).peer,
     })
     const hash = await controls.controlBindingHash(binding),
       nonce = a.challenge.admissionNonce
@@ -457,19 +473,25 @@ async function fixture(shortCapability = false) {
     additional,
     wire: encodeCommandV2(signed),
     handle: result.handle,
+    peer,
     journal,
     directory,
-    setPeerCheck: (action: () => void) => {
-      onPeerCheck = action
+    setJournalClock: (action: () => void) => {
+      onJournalClock = action
+    },
+    setDriverAbort: (action: () => void) => {
+      onDriverAbort = action
+    },
+    retire: () => bindings.retire(printerBinding),
+    setResultClock: (action: () => void) => {
+      resultClock = action
     },
     setClockSample: (action: () => void) => {
       onClockSample = action
     },
-    setRevocationCheck: (action: () => void) => {
-      onRevocationCheck = action
-    },
-    setPostCommit: (action: () => void) => {
+    setPostCommit: (action: () => void, phase: 'wall' | 'mono' = 'wall') => {
       postCommit = action
+      postCommitPhase = phase
     },
     setMode: (value: typeof mode) => {
       mode = value
@@ -490,7 +512,7 @@ async function fixture(shortCapability = false) {
       mono += n
     },
     revoke: () => {
-      allowed = false
+      dispatcher.revoke(result.handle)
     },
     cleanup: () => {
       dispatcher.close()
@@ -832,44 +854,49 @@ test('failed durable write-start commit prevents driver send', async () => {
   }
 })
 
-test('final revocation callback cannot permit a send after local state or lifecycle invalidation', async () => {
+test('final send clock cannot hide revocation, peer closure, generation change or observation invalidation', async () => {
   for (const change of [
-    'connection',
+    'revoke',
+    'peer-close',
+    'peer-generation',
+    'disconnect',
+    'disconnect-restore',
+    'generation',
+    'generation-restore',
     'idle',
     'not-ready',
-    'abort',
-    'close',
-    'expiry',
   ] as const) {
-    const f = await fixture(),
-      abort = new AbortController()
+    const f = await fixture()
     const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
-    let checks = 0,
-      triggered = false
+    let triggered = false
     try {
-      f.setRevocationCheck(() => {
-        const row = db
-          .prepare(
-            "SELECT status FROM pause_commands WHERE status = 'write-started'",
-          )
-          .get()
-        if (!row || ++checks !== 3) return
+      f.setPostCommit(() => {
         triggered = true
-        if (change === 'connection')
+        if (change === 'revoke') f.revoke()
+        if (change === 'peer-close') f.peer.close()
+        if (change === 'peer-generation') f.peer.advance(2)
+        if (change === 'disconnect')
+          f.dispatcher.observe(f.printerBinding, null)
+        if (change === 'disconnect-restore') {
+          f.dispatcher.observe(f.printerBinding, null)
+          f.setState({ ...f.getState() })
+        }
+        if (change === 'generation-restore') {
+          const original = { ...f.getState() }
+          f.setState({ ...original, connectionGeneration: 2 })
+          f.setState(original)
+        }
+        if (change === 'generation')
           f.setState({ ...f.getState(), connectionGeneration: 2 })
         if (change === 'idle')
           f.setState({ ...f.getState(), printState: 'idle' })
         if (change === 'not-ready')
           f.setState({ ...f.getState(), ready: false })
-        if (change === 'abort') abort.abort()
-        if (change === 'close') f.dispatcher.close()
-        if (change === 'expiry') f.advance(5000)
-      })
+      }, 'mono')
       const result = await f.dispatcher.dispatch({
         wire: f.wire,
         capability: f.handle,
         printerBinding: f.printerBinding,
-        signal: abort.signal,
       })
       assert.equal(triggered, true, change)
       assert.equal(result.kind, 'not-sent', change)
@@ -886,38 +913,52 @@ test('final revocation callback cannot permit a send after local state or lifecy
   }
 })
 
-test('final peer and clock callbacks cannot invalidate the latched printer state unnoticed', async () => {
-  for (const phase of ['peer', 'clock'] as const) {
+test('result clock cannot persist applied after revocation, peer change or disconnected observation', async () => {
+  for (const change of [
+    'revoke',
+    'peer-close',
+    'peer-generation',
+    'disconnect',
+    'disconnect-restore',
+    'generation',
+    'generation-restore',
+  ] as const) {
     const f = await fixture()
     const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
-    let checks = 0,
-      triggered = false
+    let triggered = false
+    // The dispatcher snapshots driver methods, so the fixture schedules its result-clock hook explicitly.
+    f.setResultClock(() => {
+      triggered = true
+      if (change === 'revoke') f.revoke()
+      if (change === 'peer-close') f.peer.close()
+      if (change === 'peer-generation') f.peer.advance(2)
+      if (change === 'disconnect') f.dispatcher.observe(f.printerBinding, null)
+      if (change === 'disconnect-restore') {
+        f.dispatcher.observe(f.printerBinding, null)
+        f.setState({ ...f.getState() })
+      }
+      if (change === 'generation-restore') {
+        const original = { ...f.getState() }
+        f.setState({ ...original, connectionGeneration: 2 })
+        f.setState(original)
+      }
+      if (change === 'generation')
+        f.setState({ ...f.getState(), connectionGeneration: 2 })
+    })
     try {
-      f.setRevocationCheck(() => {
-        if (
-          !db
-            .prepare(
-              "SELECT status FROM pause_commands WHERE status = 'write-started'",
-            )
-            .get() ||
-          ++checks !== 3
-        )
-          return
-        const change = () => {
-          triggered = true
-          f.setState({ ...f.getState(), ready: false })
-        }
-        if (phase === 'peer') f.setPeerCheck(change)
-        else f.setClockSample(change)
-      })
       const result = await f.dispatcher.dispatch({
         wire: f.wire,
         capability: f.handle,
         printerBinding: f.printerBinding,
       })
-      assert.equal(triggered, true, phase)
-      assert.equal(result.kind, 'not-sent', phase)
-      assert.equal(f.getWrites(), 0, phase)
+      assert.equal(triggered, true, change)
+      assert.equal(f.getWrites(), 1, change)
+      assert.equal(result.kind, 'outcome-unknown', change)
+      assert.equal(
+        db.prepare('SELECT status FROM pause_commands').get()?.status,
+        'outcome-unknown',
+        change,
+      )
     } finally {
       db.close()
       f.cleanup()
@@ -954,5 +995,108 @@ test('observations are copied, scoped and invalidated on malformed or disconnect
     } finally {
       f.cleanup()
     }
+  }
+})
+
+test('abort listeners run before the final result decision and cannot leave applied', async () => {
+  for (const change of [
+    'revoke',
+    'peer-close',
+    'disconnect',
+    'retire',
+  ] as const) {
+    const f = await fixture()
+    const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+    let called = false
+    f.setDriverAbort(() => {
+      called = true
+      if (change === 'revoke') f.revoke()
+      if (change === 'peer-close') f.peer.close()
+      if (change === 'disconnect') f.dispatcher.observe(f.printerBinding, null)
+      if (change === 'retire') f.retire()
+    })
+    try {
+      const result = await f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+      })
+      assert.equal(called, true, change)
+      assert.equal(f.getWrites(), 1, change)
+      assert.equal(result.kind, 'outcome-unknown', change)
+      assert.equal(
+        db.prepare('SELECT status FROM pause_commands').get()?.status,
+        'outcome-unknown',
+        change,
+      )
+    } finally {
+      db.close()
+      f.cleanup()
+    }
+  }
+})
+
+test('applied finalization invokes no journal clock after the final result sample', async () => {
+  const f = await fixture()
+  const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+  let finalSample = false,
+    lateClockCalls = 0
+  f.setResultClock(() => {
+    finalSample = true
+    f.setJournalClock(() => {
+      lateClockCalls++
+      f.revoke()
+    })
+  })
+  try {
+    const result = await f.dispatcher.dispatch({
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+    })
+    assert.equal(finalSample, true)
+    assert.equal(lateClockCalls, 0)
+    assert.equal(f.getWrites(), 1)
+    assert.equal(result.kind, 'applied')
+    assert.equal(
+      db.prepare('SELECT status FROM pause_commands').get()?.status,
+      'applied',
+    )
+  } finally {
+    db.close()
+    f.cleanup()
+  }
+})
+
+test('journal write-start clock reentry is followed by pure authority checks', async () => {
+  const f = await fixture()
+  const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+  let called = false
+  f.setJournalClock(() => {
+    if (
+      db
+        .prepare("SELECT status FROM pause_commands WHERE status='claimed'")
+        .get()
+    ) {
+      called = true
+      f.revoke()
+    }
+  })
+  try {
+    const result = await f.dispatcher.dispatch({
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+    })
+    assert.equal(called, true)
+    assert.equal(f.getWrites(), 0)
+    assert.equal(result.kind, 'not-sent')
+    assert.equal(
+      db.prepare('SELECT status FROM pause_commands').get()?.status,
+      'not-sent',
+    )
+  } finally {
+    db.close()
+    f.cleanup()
   }
 })

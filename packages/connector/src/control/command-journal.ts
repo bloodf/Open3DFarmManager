@@ -167,8 +167,7 @@ function stateOf(handle: unknown): State | null {
   const state = journals.get(handle)
   return state && !state.closed ? state : null
 }
-function sample(state: State): number {
-  const now = state.clock()
+function validateWall(now: number): number {
   if (
     !Number.isSafeInteger(now) ||
     now < 0 ||
@@ -177,8 +176,11 @@ function sample(state: State): number {
     throw new Error('Invalid command journal clock')
   return now
 }
-function clockStep(state: State): number | null {
-  const now = sample(state)
+function sample(state: State): number {
+  return validateWall(state.clock())
+}
+function clockStep(state: State, observedWall = sample(state)): number | null {
+  const now = validateWall(observedWall)
   const row = state.database
     .prepare('SELECT high_water FROM pause_meta WHERE id=1')
     .get()
@@ -463,6 +465,33 @@ export function finishCommand(
   outcome: CommandJournalOutcome,
   reason: CommandJournalReason,
 ): boolean {
+  return finishCommandInternal(handle, claim, outcome, reason, false, 0)
+}
+/** Trusted local measurement only. No injected clock is invoked after a dispatcher's final pure decision. */
+export function finishCommandAt(
+  handle: CommandJournalHandle,
+  claim: CommandClaimHandle,
+  outcome: CommandJournalOutcome,
+  reason: CommandJournalReason,
+  observedWall: number,
+): boolean {
+  return finishCommandInternal(
+    handle,
+    claim,
+    outcome,
+    reason,
+    true,
+    observedWall,
+  )
+}
+function finishCommandInternal(
+  handle: CommandJournalHandle,
+  claim: CommandClaimHandle,
+  outcome: CommandJournalOutcome,
+  reason: CommandJournalReason,
+  preSampled: boolean,
+  observedWall: number,
+): boolean {
   const state = stateOf(handle),
     receipt = state && receiptOf(state, claim)
   if (
@@ -476,7 +505,10 @@ export function finishCommand(
   receipt.finishAttempted = true
   try {
     return transaction(state, () => {
-      const now = clockStep(state)
+      const now = clockStep(
+        state,
+        preSampled ? validateWall(observedWall) : sample(state),
+      )
       if (now === null) return false
       return (
         state.database

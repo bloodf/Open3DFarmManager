@@ -429,7 +429,6 @@ async function verifierFixture(expireOnRead = 0) {
   })
   let wall = 1000,
     mono = 1000,
-    generation = 1,
     reads = 0
   const issuers = [
     {
@@ -451,12 +450,12 @@ async function verifierFixture(expireOnRead = 0) {
       monotonicNow: () => mono,
     },
   })
+  let peer = verifier.createPeer(1)
   function begin() {
     return verifier.beginAdmission({
       binding: f.binding,
       printerBinding,
-      peerGeneration: 1,
-      currentPeerGeneration: () => generation,
+      peer: peer.peer,
     })
   }
   async function wires(nonce: string, capPatch: Record<string, unknown> = {}) {
@@ -499,6 +498,7 @@ async function verifierFixture(expireOnRead = 0) {
   return {
     f,
     verifier,
+    clockReads: () => reads,
     issuers,
     begin,
     wires,
@@ -515,7 +515,11 @@ async function verifierFixture(expireOnRead = 0) {
       mono = n
     },
     setGeneration: (n: number) => {
-      generation = n
+      peer.advance(n)
+    },
+    replacePeer: () => {
+      peer.close()
+      peer = verifier.createPeer(1)
     },
   }
 }
@@ -547,6 +551,7 @@ test('verifier accepts once, rejects forged handles and invalidates peer or loca
     ok: false,
     reason: 'expired-or-inactive',
   })
+  f.replacePeer()
   const again = f.begin(),
     accepted = await f.verifier.admit(
       again.token,
@@ -647,4 +652,41 @@ test('monotonic regression and exact capability deadline deny permanently', asyn
     ok: false,
     reason: 'expired-or-inactive',
   })
+})
+
+test('opaque peer provenance, terminal lifecycle and explicit revocation require no polling callbacks', async () => {
+  const f = await verifierFixture()
+  const foreign = await verifierFixture()
+  assert.throws(() =>
+    f.verifier.beginAdmission({
+      binding: f.f.binding,
+      printerBinding: f.printerBinding,
+      peer: foreign.verifier.createPeer(1).peer,
+    }),
+  )
+  const attempt = f.begin()
+  const decision = await f.verifier.admit(
+    attempt.token,
+    await f.wires(attempt.challenge.admissionNonce),
+  )
+  assert.ok(decision.ok)
+  const reads = f.clockReads()
+  assert.equal(f.verifier.inspectAt(decision.handle, 1000, 1000).ok, true)
+  assert.equal(f.verifier.revoke(decision.handle), true)
+  assert.equal(f.verifier.inspectAt(decision.handle, 1000, 1000).ok, false)
+  assert.equal(f.verifier.inspectLifecycle(decision.handle), false)
+  assert.equal(f.clockReads(), reads)
+  assert.equal(f.verifier.revoke({}), false)
+  const peer = f.verifier.createPeer(1)
+  assert.equal(peer.advance(2), true)
+  assert.equal(peer.advance(1), false)
+  assert.equal(peer.advance(3), false)
+  assert.throws(() =>
+    f.verifier.beginAdmission({
+      binding: f.f.binding,
+      printerBinding: f.printerBinding,
+      peer: peer.peer,
+    }),
+  )
+  assert.throws(() => JSON.stringify(peer.peer))
 })

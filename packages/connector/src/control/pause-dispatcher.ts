@@ -16,6 +16,7 @@ import {
   claimCommand,
   markWriteStarted,
   finishCommand,
+  finishCommandAt,
   type CommandJournalHandle,
   type CommandClaimHandle,
   type CommandJournalReason,
@@ -62,18 +63,6 @@ export interface PauseDriver {
     signal: AbortSignal
   }): Promise<ControlObservation | null>
 }
-export type LocalRevocationScope = Readonly<{
-  capabilityId: string
-  accountId: string
-  keyId: string
-  farmId: string
-  agentId: string
-  assignmentId: string
-  transportId: string
-}>
-export interface LocalRevocationSource {
-  check(scope: LocalRevocationScope): boolean
-}
 export type PauseDispatchReason =
   | 'invalid-command'
   | 'invalid-authority'
@@ -108,7 +97,6 @@ export function createPauseDispatcher(config: {
   clock: PauseAuthorityClock
   journal: CommandJournalHandle
   driver: PauseDriver
-  localRevocations: LocalRevocationSource
   resultTimeoutMs?: number
 }) {
   const verifier = createPauseCapabilityVerifier({
@@ -129,19 +117,14 @@ export function createPauseDispatcher(config: {
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
     waitForPaused: config.driver.waitForPaused.bind(config.driver),
   })
-  const checkRevocation = config.localRevocations.check.bind(
-    config.localRevocations,
-  )
   let closed = false,
     clockBroken = false
   let previous: Sample | undefined, baseline: Sample | undefined
   const observations = new WeakMap<PrinterBinding, ControlObservation>()
+  const observationVersions = new WeakMap<PrinterBinding, object>()
+  const observationGenerations = new WeakMap<PrinterBinding, number>()
   const slots = new Set<string>()
-  const deniedHandles = new WeakSet<object>()
   const stopAttempts = new Set<() => void>()
-  type PeerMetadata = { generation: number; currentGeneration(): number }
-  const admissionPeers = new WeakMap<object, PeerMetadata>()
-  const handlePeers = new WeakMap<object, PeerMetadata>()
   function sample(): Sample | null {
     if (clockBroken) return null
     try {
@@ -191,42 +174,15 @@ export function createPauseDispatcher(config: {
       return null
     }
   }
-  function revoked(
-    capability: PauseCapabilitySnapshot,
-    handle: unknown,
-  ): boolean {
-    if (
-      handle === null ||
-      typeof handle !== 'object' ||
-      deniedHandles.has(handle)
-    )
-      return true
-    try {
-      if (
-        checkRevocation(
-          Object.freeze({
-            capabilityId: capability.capability_id,
-            accountId: capability.account_id,
-            keyId: capability.key_id,
-            farmId: capability.farm_id,
-            agentId: capability.agent_id,
-            assignmentId: capability.assignment_id,
-            transportId: capability.transport_id,
-          }),
-        ) === true
-      )
-        return false
-    } catch {
-      /* Local revocation storage failure denies authority. */
-    }
-    deniedHandles.add(handle) // An observed denial is terminal for this genuine handle.
-    return true
-  }
   return Object.freeze({
     /** Trusted local observation publisher only; never accept this input from a command or server. */
     observe(binding: PrinterBinding, input: unknown): boolean {
       observations.delete(binding)
-      if (closed || input === null) return false
+      function invalidate() {
+        observationVersions.set(binding, Object.freeze({}))
+        return false
+      }
+      if (closed || input === null) return invalidate()
       const mapping = readPrinterBinding(binding)
       const parsed = Observation.safeParse(input)
       if (
@@ -235,33 +191,34 @@ export function createPauseDispatcher(config: {
         parsed.data.assignmentId !== mapping.assignment_id ||
         parsed.data.printerKey !== mapping.printer_key
       )
-        return false
+        return invalidate()
+      const generation = observationGenerations.get(binding)
+      if (
+        generation !== undefined &&
+        parsed.data.connectionGeneration < generation
+      )
+        return invalidate()
+      if (
+        generation !== undefined &&
+        parsed.data.connectionGeneration !== generation
+      )
+        invalidate()
+      observationGenerations.set(binding, parsed.data.connectionGeneration)
       observations.set(binding, Object.freeze(parsed.data))
       return true
     },
     beginAdmission(input: Parameters<typeof verifier.beginAdmission>[0]) {
       if (closed) throw new Error('Pause dispatcher is closed')
-      const admitted = verifier.beginAdmission(input)
-      admissionPeers.set(admitted.token, {
-        generation: input.peerGeneration,
-        currentGeneration: input.currentPeerGeneration.bind(input),
-      })
-      return admitted
+      return verifier.beginAdmission(input)
     },
+    createPeer: verifier.createPeer,
+    revoke: verifier.revoke,
     async admit(
       ...args: Parameters<typeof verifier.admit>
     ): ReturnType<typeof verifier.admit> {
       if (closed) return { ok: false, reason: 'expired-or-inactive' }
-      const [token] = args
-      const peer =
-        token !== null && typeof token === 'object'
-          ? admissionPeers.get(token)
-          : undefined
-      if (token !== null && typeof token === 'object')
-        admissionPeers.delete(token)
       const result = await verifier.admit(...args)
       if (closed) return { ok: false, reason: 'expired-or-inactive' }
-      if (result.ok && peer) handlePeers.set(result.handle, peer)
       return result
     },
     dispatch(input: {
@@ -284,6 +241,7 @@ export function createPauseDispatcher(config: {
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
       const mapping = candidateMapping
+      const observationVersion = observationVersions.get(printerBinding)
       if (slots.size >= 8 || slots.has(mapping.assignment_id))
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
       slots.add(mapping.assignment_id) // No wait list. Retained until underlying asynchronous work actually settles.
@@ -312,12 +270,27 @@ export function createPauseDispatcher(config: {
       const result = new Promise<PauseDispatchResult>((resolve) => {
         resolveResult = resolve
       })
+      let cleaned = false
+      function cleanup() {
+        if (cleaned) return
+        cleaned = true
+        controller.abort()
+        clearTimeout(timer)
+        stopAttempts.delete(onClose)
+        signal?.removeEventListener('abort', onAbort)
+      }
       function finalize(
         kind: PauseDispatchResult['kind'],
         reason: PauseDispatchReason,
         journalReason: CommandJournalReason,
+        observedWall?: number,
       ): PauseDispatchResult {
         if (terminal) return terminal
+        if (kind === 'applied' && (!cleaned || observedWall === undefined)) {
+          kind = 'outcome-unknown'
+          reason = 'state-unconfirmed'
+          journalReason = 'state-unconfirmed'
+        }
         boundaryClosed = true
         // Latch before abort listeners can synchronously reenter close/finalization.
         terminal = receipt
@@ -327,10 +300,7 @@ export function createPauseDispatcher(config: {
               reason,
             }
           : { kind: 'rejected', reason }
-        controller.abort()
-        clearTimeout(timer)
-        stopAttempts.delete(onClose)
-        signal?.removeEventListener('abort', onAbort)
+        cleanup()
         if (receipt) {
           const outcome =
             kind === 'applied'
@@ -340,7 +310,16 @@ export function createPauseDispatcher(config: {
                 : 'not-sent'
           let persisted = false
           try {
-            persisted = finishCommand(journal, receipt, outcome, journalReason)
+            persisted =
+              observedWall === undefined
+                ? finishCommand(journal, receipt, outcome, journalReason)
+                : finishCommandAt(
+                    journal,
+                    receipt,
+                    outcome,
+                    journalReason,
+                    observedWall,
+                  )
           } catch {
             /* conservative unknown */
           }
@@ -374,10 +353,11 @@ export function createPauseDispatcher(config: {
       function onAbort() {
         interrupted('aborted')
       }
-      function live(): PauseDispatchReason | null {
+      function liveAt(now: Sample | null): PauseDispatchReason | null {
         if (boundaryClosed || closed) return 'closed'
+        if (observationVersions.get(printerBinding) !== observationVersion)
+          return 'state'
         if (controller.signal.aborted || signal?.aborted) return 'aborted'
-        const now = sample()
         if (
           !now ||
           now.mono >= commandDeadline ||
@@ -385,7 +365,7 @@ export function createPauseDispatcher(config: {
           command.issued_at > now.wall
         )
           return 'expired'
-        const decision = verifier.inspect(authorityHandle)
+        const decision = verifier.inspectAt(authorityHandle, now.wall, now.mono)
         if (!decision.ok) return 'invalid-authority'
         const cap = decision.capability
         if (
@@ -409,39 +389,31 @@ export function createPauseDispatcher(config: {
           command.expires_at - command.issued_at > decision.policy.commandMs
         )
           return 'expired'
-        if (revoked(cap, authorityHandle)) return 'revoked'
         capability = cap
         return null
       }
+      function live(): PauseDispatchReason | null {
+        return liveAt(sample())
+      }
+      // Pure local state only. Time-only authority expiry does not prevent a readonly result audit.
       function postSendCurrent(): boolean {
-        if (
-          boundaryClosed ||
-          closed ||
-          controller.signal.aborted ||
-          signal?.aborted ||
-          !capability ||
-          readPrinterBinding(printerBinding) !== mapping ||
-          revoked(capability, authorityHandle)
+        const observation = observations.get(printerBinding)
+        return (
+          !boundaryClosed &&
+          !closed &&
+          !signal?.aborted &&
+          !terminal &&
+          !contractBroken &&
+          !clockBroken &&
+          observationVersions.get(printerBinding) === observationVersion &&
+          !!capability &&
+          readPrinterBinding(printerBinding) === mapping &&
+          verifier.inspectLifecycle(authorityHandle) &&
+          !!observation &&
+          observation.assignmentId === mapping.assignment_id &&
+          observation.printerKey === mapping.printer_key &&
+          observation.connectionGeneration === connectionGeneration
         )
-          return false
-        if (authorityHandle === null || typeof authorityHandle !== 'object')
-          return false
-        const peer = handlePeers.get(authorityHandle)
-        try {
-          if (!peer || peer.currentGeneration() !== peer.generation) {
-            deniedHandles.add(authorityHandle)
-            return false
-          }
-          const observation = observations.get(printerBinding)
-          return (
-            !!observation &&
-            observation.assignmentId === mapping.assignment_id &&
-            observation.printerKey === mapping.printer_key &&
-            observation.connectionGeneration === connectionGeneration
-          )
-        } catch {
-          return false
-        }
       }
       function eligible(): ControlObservation | null {
         if (!capability) return null
@@ -472,42 +444,21 @@ export function createPauseDispatcher(config: {
           /* zero writes */
         }
         if (!marked) return false
-        // Last durable commit precedes ALL final synchronous authority/state checks.
-        if (live()) return false
-        const current = eligible()
-        if (!current || live()) return false
-        // External callbacks may synchronously abort, close or advance the clock.
-        if (!capability || revoked(capability, authorityHandle)) return false
-        if (!verifier.inspect(authorityHandle).ok) return false
+        // Clock callbacks are the final external calls. Every mutable authority/state check follows them.
         const now = sample()
-        // No external callback occurs after this final local snapshot read.
-        const finalObservation =
-          now && capability
-            ? readObservation(printerBinding, capability, now)
-            : null
+        if (liveAt(now) || !now || !capability || now.mono >= resultDeadline)
+          return false
+        const finalObservation = readObservation(
+          printerBinding,
+          capability,
+          now,
+        )
         if (
-          !now ||
-          !capability ||
           !finalObservation ||
           !finalObservation.ready ||
           finalObservation.printState !== 'printing' ||
           finalObservation.connectionGeneration !== connectionGeneration ||
-          now.mono >= resultDeadline ||
-          now.mono >= commandDeadline ||
-          now.mono - finalObservation.readyObservedMono >
-            verifier.policy.freshStateMs ||
-          now.mono - finalObservation.printStateObservedMono >
-            verifier.policy.freshStateMs ||
-          now.wall >= command.expires_at ||
-          now.wall >= capability.expires_at ||
-          now.wall < capability.issued_at ||
-          now.wall < command.issued_at ||
-          boundaryClosed ||
-          closed ||
-          controller.signal.aborted ||
-          signal?.aborted ||
-          terminal !== undefined ||
-          readPrinterBinding(printerBinding) !== mapping
+          terminal
         )
           return false
         cursor = Object.freeze({
@@ -636,19 +587,13 @@ export function createPauseDispatcher(config: {
             signal: controller.signal,
           })
           if (terminal) return
-          // Observation can finish after authorization expires; it never permits another write.
-          if (!postSendCurrent()) {
-            finalize(
-              'outcome-unknown',
-              'state-unconfirmed',
-              'state-unconfirmed',
-            )
-            return
-          }
-          const observedAt = sample()
+          // Copy untrusted driver properties and run abort listeners before the final clock sample.
           const parsed = Observation.safeParse(paused)
+          cleanup()
+          const observedAt = sample()
           if (
             !observedAt ||
+            !postSendCurrent() ||
             observedAt.mono >= resultDeadline ||
             !parsed.success ||
             !capability
@@ -685,7 +630,7 @@ export function createPauseDispatcher(config: {
             )
             return
           }
-          finalize('applied', 'applied', 'applied')
+          finalize('applied', 'applied', 'applied', observedAt.wall)
         } catch {
           if (!terminal)
             finalize(

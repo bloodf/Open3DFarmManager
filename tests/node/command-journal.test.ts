@@ -10,6 +10,7 @@ import {
   claimCommand,
   markWriteStarted,
   finishCommand,
+  finishCommandAt,
   readCommandOutcome,
   closeCommandJournal,
 } from '../../packages/connector/src/control/command-journal.ts'
@@ -351,5 +352,38 @@ test('unknown database application ID is rejected before journal mode changes', 
   } finally {
     db.close()
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('pre-sampled finalization retains durable watermark, provenance and single-use guards without clock callbacks', () => {
+  const f = fixture()
+  try {
+    const first = f.claim()
+    assert.ok(first.ok)
+    assert.equal(markWriteStarted(f.journal, first.receipt), true)
+    // An independently regressed injected clock must not be consulted by the pre-sampled path.
+    f.setNow(0)
+    assert.equal(
+      finishCommandAt(f.journal, first.receipt, 'applied', 'applied', 1001),
+      true,
+    )
+    assert.equal(
+      finishCommandAt(f.journal, first.receipt, 'applied', 'applied', 1002),
+      false,
+    )
+    f.setNow(1001)
+    const second = f.claim(f.command(), 'printer-2')
+    assert.ok(second.ok)
+    assert.equal(markWriteStarted(f.journal, second.receipt), true)
+    assert.equal(
+      finishCommandAt(f.journal, second.receipt, 'applied', 'applied', 1000),
+      false,
+    )
+    assert.equal(
+      finishCommandAt(f.journal, second.receipt, 'applied', 'applied', 1002),
+      false,
+    )
+  } finally {
+    f.cleanup()
   }
 })

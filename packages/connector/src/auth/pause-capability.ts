@@ -53,12 +53,24 @@ export type PauseCapabilitySnapshot = Readonly<
   >
   readonly actions: readonly ['pause']
 }
-type ClockSample = { wall: number; mono: number }
+type ClockSample = Readonly<{ wall: number; mono: number }>
+class PeerHandle {
+  #opaque = true
+  constructor() {
+    Object.freeze(this)
+  }
+  toJSON(): never {
+    throw new Error('Pause peers cannot be serialized')
+  }
+}
+Object.freeze(PeerHandle.prototype)
+export type PausePeerHandle = PeerHandle
+type PeerState = { generation: number; closed: boolean }
 type Peer = {
   binding: ControlSessionBinding
   printerBinding: PrinterBinding
   peerGeneration: number
-  currentPeerGeneration(): number
+  peer: PausePeerHandle
 }
 type Admission = Peer & {
   start: ClockSample
@@ -69,6 +81,8 @@ type Admission = Peer & {
 type Authority = Peer & {
   capability: PauseCapabilitySnapshot
   deadline: number
+  revoked: boolean
+  expired: boolean
 }
 export type PauseCapabilityRejection =
   | 'invalid-admission'
@@ -124,10 +138,10 @@ export function createPauseCapabilityVerifier(config: {
   let clockBroken = false
   const admissions = new WeakMap<AdmissionToken, Admission>()
   const handles = new WeakMap<CapabilityHandle, Authority>()
-  function sample(): ClockSample | null {
+  const peers = new WeakMap<PeerHandle, PeerState>()
+  function acceptSample(next: ClockSample): ClockSample | null {
     if (clockBroken) return null
     try {
-      const next = { wall: wallNow(), mono: monotonicNow() }
       if (
         !Number.isSafeInteger(next.wall) ||
         next.wall < 0 ||
@@ -149,21 +163,73 @@ export function createPauseCapabilityVerifier(config: {
       return null
     }
   }
-  function peerCurrent(peer: Peer, now: ClockSample): boolean {
+  function sample(): ClockSample | null {
     try {
-      const assignment = readPrinterBinding(peer.printerBinding)
-      return Boolean(
-        assignment &&
-          assignment.assignment_id === peer.binding.assignment_id &&
-          assignment.farm_id === peer.binding.farm_id &&
-          assignment.agent_id === peer.binding.agent_id &&
-          peer.currentPeerGeneration() === peer.peerGeneration &&
-          now.wall >= peer.binding.issued_at &&
-          now.wall < peer.binding.expires_at,
-      )
+      return acceptSample({ wall: wallNow(), mono: monotonicNow() })
     } catch {
+      clockBroken = true
+      return null
+    }
+  }
+  function lifecycleCurrent(peer: Peer): boolean {
+    const state = peers.get(peer.peer)
+    const assignment = readPrinterBinding(peer.printerBinding)
+    return (
+      !!state &&
+      !state.closed &&
+      state.generation === peer.peerGeneration &&
+      !!assignment &&
+      assignment.assignment_id === peer.binding.assignment_id &&
+      assignment.farm_id === peer.binding.farm_id &&
+      assignment.agent_id === peer.binding.agent_id
+    )
+  }
+  // Readonly result auditing only: time-only expiry never grants a further command write.
+  function inspectLifecycle(handle: unknown) {
+    if (!(handle instanceof CapabilityHandle)) return false
+    const authority = handles.get(handle)
+    if (!authority || authority.revoked || clockBroken) return false
+    if (!lifecycleCurrent(authority)) {
+      authority.revoked = true
       return false
     }
+    return true
+  }
+  function inspectAt(
+    handle: unknown,
+    wall: number,
+    mono: number,
+  ):
+    | {
+        ok: true
+        capability: PauseCapabilitySnapshot
+        policy: Readonly<PausePolicy>
+      }
+    | { ok: false; reason: 'expired-or-inactive' } {
+    const now = acceptSample({ wall, mono })
+    const authority =
+      handle instanceof CapabilityHandle ? handles.get(handle) : undefined
+    if (!authority || !now || !inspectLifecycle(handle))
+      return { ok: false, reason: 'expired-or-inactive' }
+    if (
+      authority.expired ||
+      now.mono >= authority.deadline ||
+      now.wall < authority.capability.issued_at ||
+      now.wall >= authority.capability.expires_at ||
+      now.wall < authority.binding.issued_at ||
+      now.wall >= authority.binding.expires_at
+    ) {
+      authority.expired = true
+      return { ok: false, reason: 'expired-or-inactive' }
+    }
+    return { ok: true, capability: authority.capability, policy }
+  }
+  function peerCurrent(peer: Peer, now: ClockSample): boolean {
+    return (
+      lifecycleCurrent(peer) &&
+      now.wall >= peer.binding.issued_at &&
+      now.wall < peer.binding.expires_at
+    )
   }
   function admissionCurrent(admission: Admission): ClockSample | null {
     const now = sample()
@@ -176,11 +242,44 @@ export function createPauseCapabilityVerifier(config: {
   }
   return Object.freeze({
     policy,
+    createPeer(initialGeneration: number) {
+      if (!Number.isSafeInteger(initialGeneration) || initialGeneration < 0)
+        throw new Error('Invalid peer generation')
+      const peer = new PeerHandle()
+      const state: PeerState = { generation: initialGeneration, closed: false }
+      peers.set(peer, state)
+      return Object.freeze({
+        peer,
+        advance(nextGeneration: number): boolean {
+          if (state.closed) return false
+          if (
+            !Number.isSafeInteger(nextGeneration) ||
+            nextGeneration <= state.generation
+          ) {
+            state.closed = true
+            return false
+          }
+          state.generation = nextGeneration
+          return true
+        },
+        close(): void {
+          state.closed = true
+        },
+      })
+    },
+    revoke(handle: unknown): boolean {
+      const authority =
+        handle instanceof CapabilityHandle ? handles.get(handle) : undefined
+      if (!authority) return false
+      authority.revoked = true
+      return true
+    },
+    inspectAt,
+    inspectLifecycle,
     beginAdmission(input: {
       binding: unknown
       printerBinding: PrinterBinding
-      peerGeneration: number
-      currentPeerGeneration(): number
+      peer: PausePeerHandle
     }) {
       // Capture both deadlines before validation or any asynchronous cryptographic work.
       const start = sample()
@@ -194,17 +293,14 @@ export function createPauseCapabilityVerifier(config: {
       const binding = ControlSessionBinding.parse(input.binding)
       Object.freeze(binding.browser_public_key)
       Object.freeze(binding)
-      if (
-        !Number.isSafeInteger(input.peerGeneration) ||
-        input.peerGeneration < 0 ||
-        typeof input.currentPeerGeneration !== 'function'
-      )
-        throw new Error('Invalid local peer generation')
+      const peer =
+        input.peer instanceof PeerHandle ? peers.get(input.peer) : undefined
+      if (!peer || peer.closed) throw new Error('Invalid local peer')
       const admission: Admission = {
         binding,
         printerBinding: input.printerBinding,
-        peerGeneration: input.peerGeneration,
-        currentPeerGeneration: input.currentPeerGeneration,
+        peerGeneration: peer.generation,
+        peer: input.peer,
         start,
         nonce: randomBytes(32).toString('base64url'),
         deadline: start.mono + policy.admissionMs,
@@ -349,7 +445,9 @@ export function createPauseCapabilityVerifier(config: {
           binding: expected,
           printerBinding: admission.printerBinding,
           peerGeneration: admission.peerGeneration,
-          currentPeerGeneration: admission.currentPeerGeneration,
+          peer: admission.peer,
+          revoked: false,
+          expired: false,
           capability,
           deadline:
             admission.start.mono +
@@ -364,29 +462,11 @@ export function createPauseCapabilityVerifier(config: {
         return { ok: false, reason: 'invalid-proof' }
       }
     },
-    inspect(handle: unknown):
-      | {
-          ok: true
-          capability: PauseCapabilitySnapshot
-          policy: Readonly<PausePolicy>
-        }
-      | { ok: false; reason: 'expired-or-inactive' } {
-      if (!(handle instanceof CapabilityHandle))
-        return { ok: false, reason: 'expired-or-inactive' }
-      const authority = handles.get(handle)
+    inspect(handle: unknown) {
       const now = sample()
-      if (
-        !authority ||
-        !now ||
-        now.mono >= authority.deadline ||
-        now.wall < authority.capability.issued_at ||
-        now.wall >= authority.capability.expires_at ||
-        !peerCurrent(authority, now)
-      ) {
-        handles.delete(handle) // An observed closure or deadline is terminal, even if callbacks later change back.
-        return { ok: false, reason: 'expired-or-inactive' }
-      }
-      return { ok: true, capability: authority.capability, policy }
+      return now
+        ? inspectAt(handle, now.wall, now.mono)
+        : { ok: false as const, reason: 'expired-or-inactive' as const }
     },
   })
 }

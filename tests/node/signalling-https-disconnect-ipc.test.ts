@@ -76,7 +76,7 @@ test('IPC requester rejects a malformed reply', async () => {
 
 test('IPC requester rejects when the parent disconnects', async () => {
   const child = childFor(
-    `import {requestProxyDisconnect} from ${JSON.stringify(helper)}; try {await requestProxyDisconnect(); process.exit(2)} catch {process.exit(0)}`,
+    `import {requestProxyDisconnect} from ${JSON.stringify(helper)}; try {await requestProxyDisconnect(); process.exit(2)} catch (error) {process.exit(error?.message === 'Fixture IPC disconnected' ? 0 : 3)}`,
   )
   child.once('message', () => child.disconnect())
   try {

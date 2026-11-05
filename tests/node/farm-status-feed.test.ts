@@ -6,7 +6,7 @@ import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 
 type Options = Parameters<typeof createAuthenticatedFarmStatusFeed>[0]
-async function fixture() {
+async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
   const keyPair = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
@@ -95,9 +95,12 @@ async function fixture() {
     signal: controller.signal,
     onHealth: (value: { kind: string }) => {
       health.push(value.kind)
+      if (asyncAt === 'authenticated' && value.kind === 'authenticated')
+        return Promise.reject(Error('late failure'))
     },
     onSnapshot: (value: unknown) => {
       snapshots.push(value)
+      if (asyncAt === 'snapshot') return Promise.reject(Error('late failure'))
     },
   }
   const handle = feed.open(input)
@@ -407,4 +410,37 @@ test('an asynchronous view callback fails closed before key lookup', async () =>
   assert.equal(lookups, 0)
   assert.equal(closes, 1)
   handle.close()
+})
+
+test('asynchronous authenticated health and snapshot callbacks fail closed', async () => {
+  for (const mode of ['authenticated', 'snapshot'] as const) {
+    const f = await fixture(mode)
+    try {
+      f.callbacks.onVerifiedAdmission({
+        binding: f.binding,
+        deadlineMonoMs: performance.now() + 5000,
+      })
+      if (mode === 'snapshot')
+        f.callbacks.onStatus({
+          t: 'snapshot',
+          seq: 0,
+          printers: [
+            {
+              printerKey: 'printer-a',
+              state: 'idle',
+              progress: 0,
+              observedAt: Date.now(),
+            },
+          ],
+        })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      assert.equal(f.health.at(-1), 'closed')
+      assert.equal(f.closes(), 1)
+      const count = f.snapshots.length
+      f.callbacks.onStatus({ t: 'snapshot', seq: 1, printers: [] })
+      assert.equal(f.snapshots.length, count)
+    } finally {
+      f.handle.close()
+    }
+  }
 })

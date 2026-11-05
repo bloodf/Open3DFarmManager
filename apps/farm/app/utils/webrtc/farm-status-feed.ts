@@ -52,7 +52,7 @@ type Options = {
 function requireSync(callback: () => void) {
   const result: unknown = callback()
   if (result !== undefined) {
-    if (result instanceof Promise) void result.catch(() => {})
+    void Promise.resolve(result).catch(() => {})
     throw Error('Callback must return synchronously')
   }
 }
@@ -298,10 +298,10 @@ export function createAuthenticatedFarmStatusFeed(
                   Math.max(0, session.deadlineMonoMs - performance.now()),
                 )
                 try {
-                  onHealth({
-                    kind: 'authenticated',
-                    session: Object.freeze({ ...session }),
-                  })
+                  const snapshot = Object.freeze({ ...session })
+                  requireSync(() =>
+                    onHealth({ kind: 'authenticated', session: snapshot }),
+                  )
                 } catch {
                   close('rejected')
                 }
@@ -335,19 +335,22 @@ export function createAuthenticatedFarmStatusFeed(
                   return close('expired')
                 seq = parsed.data.seq
                 try {
+                  const admitted = session
                   const message = parsed.data
                   for (const printer of message.printers) Object.freeze(printer)
                   Object.freeze(message.printers)
                   Object.freeze(message)
-                  onSnapshot(
-                    Object.freeze({
-                      session: Object.freeze({ ...session }),
-                      message,
-                      receivedAtWallMs: wall,
-                      receivedAtMonoMs: now,
-                      sourceClockComparable: false,
-                      complete: true,
-                    }),
+                  requireSync(() =>
+                    onSnapshot(
+                      Object.freeze({
+                        session: Object.freeze({ ...admitted }),
+                        message,
+                        receivedAtWallMs: wall,
+                        receivedAtMonoMs: now,
+                        sourceClockComparable: false,
+                        complete: true,
+                      }),
+                    ),
                   )
                 } catch {
                   close('rejected')

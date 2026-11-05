@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/bluenviron/gortsplib/v5 v5.6.7
-	github.com/bluenviron/mediacommon/v2 v2.9.6
+	github.com/bluenviron/mediacommon/v2 v2.9.7
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/pion/rtcp v1.2.19

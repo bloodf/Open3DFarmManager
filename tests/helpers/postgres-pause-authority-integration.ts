@@ -162,14 +162,8 @@ export async function testPostgresPauseAuthority(
       timeoutBlocker.release()
     }
     assert.equal((await sql`SELECT 1 AS n`)[0]?.n, 1)
-    // Every individual statement remains below 2s; the server's unmodified 10s
-    // transaction_timeout must terminate the transaction itself.
-    await assert.rejects(
-      sql.begin(async (tx) => {
-        for (let i = 0; i < 16; i++) await tx`SELECT pg_sleep(0.75)`
-      }),
-      sqlstate('25P04'),
-    )
+    // The runner has already closed its isolated timeout pool using server evidence.
+    // This newly opened issuer pool must remain independently usable.
     assert.equal((await sql`SELECT 1 AS n`)[0]?.n, 1)
     const now = await databaseNow()
     await admin`INSERT INTO farm.session_accounts(id) VALUES (${account})`
@@ -1383,7 +1377,7 @@ export async function testPostgresPauseAuthority(
       ...(injectedFutureWatermark
         ? ['injected-future-watermark-prune-denies-before-delete']
         : []),
-      'real-2s-statement-1s-lock-10s-transaction-timeouts-and-pool-recovery',
+      'real-2s-statement-1s-lock-timeouts-and-subsequent-issuer-pool-recovery',
       'real-enrollment-pairing-credential-assignment-dual-proof-and-single-issuance',
       'maintained-acceptor-first-slot-waits-for-parent-lock',
       'key-and-assignment-revocation-row-wait-terminal-denial',

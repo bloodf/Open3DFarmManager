@@ -18,6 +18,11 @@ import {
   verifyPauseAuthorityRestart,
 } from '../tests/helpers/postgres-pause-authority-catalog.ts'
 import { testPauseConnectorRevocations } from '../tests/helpers/postgres-pause-authority-revocations.ts'
+import {
+  requirePauseTimeoutLogPath,
+  testPauseAuthorityTransactionTimeout,
+  type PauseTimeoutReceipt,
+} from '../tests/helpers/postgres-pause-authority-timeout.ts'
 const portText = process.env.PAUSE_AUTHORITY_SYNTHETIC_TEST_PORT,
   port = Number(portText)
 const phase = process.argv[2] ?? 'run'
@@ -67,6 +72,13 @@ if (
   process.env.PAUSE_AUTHORITY_SYNTHETIC_FUTURE_WATERMARK === 'yes'
 )
   throw new Error('Use a separate fixture for injected future watermark')
+// This is a path inside the caller-owned disposable PostgreSQL server, not the host.
+const serverLogPath =
+  phase === 'verify-restart'
+    ? undefined
+    : requirePauseTimeoutLogPath(
+        process.env.PAUSE_AUTHORITY_SYNTHETIC_SERVER_LOG,
+      )
 const admin = postgres({
   host: '127.0.0.1',
   port,
@@ -91,6 +103,7 @@ try {
   assert.equal(catalog.at(-1)?.id, '0018_pause_authority')
   assert.equal(validateMigrationHistory(catalog, [...history]), 18)
   let checks: string[]
+  let timeout: PauseTimeoutReceipt | undefined
   if (phase === 'verify-restart') {
     if (!base) throw new Error('Missing restart base')
     for (const path of [base + '.private.json', base + '.catalog.json']) {
@@ -113,9 +126,18 @@ try {
       )),
     ]
   } else {
+    const catalogChecks = await testPauseAuthorityCatalog(admin, port)
+    const revocationChecks = await testPauseConnectorRevocations(admin, port)
+    assert.ok(serverLogPath)
+    timeout = await testPauseAuthorityTransactionTimeout(
+      admin,
+      port,
+      serverLogPath,
+    )
     checks = [
-      ...(await testPauseAuthorityCatalog(admin, port)),
-      ...(await testPauseConnectorRevocations(admin, port)),
+      ...catalogChecks,
+      ...revocationChecks,
+      'server-attributed-ten-second-transaction-timeout-before-main-pool',
       ...(await testPostgresPauseAuthority(
         admin,
         port,
@@ -133,7 +155,9 @@ try {
       )
     }
   }
-  console.log(JSON.stringify({ result: 'passed', phase, checks, journal: 18 }))
+  console.log(
+    JSON.stringify({ result: 'passed', phase, checks, journal: 18, timeout }),
+  )
 } finally {
   await admin.end({ timeout: 3 })
 }

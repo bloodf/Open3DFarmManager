@@ -282,6 +282,10 @@ export class SignallingRuntime {
     const connection = this.#connection(peer)
     if (connection) this.#close(connection)
   }
+  /** Local terminal state only; exposes neither authority nor connection details. */
+  get isClosed(): boolean {
+    return this.#closed
+  }
   close(): void {
     this.#closed = true
     this.#coordinator.dispose()

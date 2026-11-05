@@ -7,9 +7,25 @@ import {
 import { loadTelemetryVerificationKeys } from './telemetry-key-registry.ts'
 import { SignallingRuntime } from './signalling-runtime.ts'
 import type { SignallingRuntimeConfig } from './signalling-runtime-config.ts'
-let active: SignallingRuntime | undefined
+import {
+  DISABLED_SIGNALLING_METADATA,
+  validatedSignallingMetadata,
+  type SignallingMetadata,
+  type EnabledSignallingMetadata,
+} from './signalling-metadata.ts'
+let active:
+  | Readonly<{
+      runtime: SignallingRuntime
+      metadata: EnabledSignallingMetadata
+    }>
+  | undefined
 export function signallingRuntime(): SignallingRuntime | undefined {
-  return active
+  return active?.runtime.isClosed === false ? active.runtime : undefined
+}
+export function signallingMetadata(): SignallingMetadata {
+  return active?.runtime.isClosed === false
+    ? active.metadata
+    : DISABLED_SIGNALLING_METADATA
 }
 async function role(
   sql: Sql,
@@ -41,11 +57,14 @@ export function createSignallingRuntimeLifecycle() {
   let closed = false
   return {
     start(
-      config: SignallingRuntimeConfig,
+      input: SignallingRuntimeConfig,
       cookie: SessionConfig,
     ): Promise<void> {
       if (pending || runtime || closed || active)
         throw new Error('Signalling lifecycle unavailable')
+      // Capture once before the first await; metadata and runtime use the same validated fields.
+      const config = Object.freeze({ ...input })
+      const metadata = validatedSignallingMetadata(config)
       const options = {
         max: 3,
         connect_timeout: 3,
@@ -99,7 +118,7 @@ export function createSignallingRuntimeLifecycle() {
             origin: config.origin,
             cookie,
           })
-          active = runtime
+          active = Object.freeze({ runtime, metadata })
         } catch {
           closed = true
           await Promise.allSettled(
@@ -113,7 +132,7 @@ export function createSignallingRuntimeLifecycle() {
     },
     async close(): Promise<void> {
       closed = true
-      if (active === runtime) active = undefined
+      if (active?.runtime === runtime) active = undefined
       runtime?.close()
       runtime = undefined
       await pending?.catch(() => {})

@@ -8,6 +8,7 @@ import { parseSignallingRuntimeConfig } from '../../apps/farm/server/services/si
 import {
   createSignallingRuntimeLifecycle,
   signallingRuntime,
+  signallingMetadata,
 } from '../../apps/farm/server/services/signalling-runtime-bootstrap.ts'
 import {
   SESSION_COOKIE_ATTRIBUTES,
@@ -30,6 +31,11 @@ const cookie = {
   cookie: { ...SESSION_COOKIE_ATTRIBUTES },
 }
 test('disabled needs no secrets; invalid enabled configuration fails synchronously', () => {
+  assert.deepEqual(signallingMetadata(), {
+    enabled: false,
+    origin: null,
+    audience: null,
+  })
   assert.equal(parseSignallingRuntimeConfig(undefined), null)
   assert.equal(parseSignallingRuntimeConfig({ enabled: false }), null)
   assert.ok(parseSignallingRuntimeConfig(config))
@@ -66,6 +72,11 @@ test('shutdown during public-key validation never publishes a runtime', async ()
     assert.ok(parsed)
     const pending = lifecycle.start(parsed, cookie)
     assert.equal(signallingRuntime(), undefined)
+    assert.deepEqual(signallingMetadata(), {
+      enabled: false,
+      origin: null,
+      audience: null,
+    })
     const rejected = assert.rejects(
       pending,
       /^Error: Signalling startup unavailable$/,
@@ -73,6 +84,11 @@ test('shutdown during public-key validation never publishes a runtime', async ()
     await lifecycle.close()
     await rejected
     assert.equal(signallingRuntime(), undefined)
+    assert.deepEqual(signallingMetadata(), {
+      enabled: false,
+      origin: null,
+      audience: null,
+    })
     await lifecycle.close()
   } finally {
     await lifecycle.close()
@@ -93,6 +109,11 @@ test('failed key validation stays unavailable and shutdown drains its rejected p
       /^Error: Signalling startup unavailable$/,
     )
     assert.equal(signallingRuntime(), undefined)
+    assert.deepEqual(signallingMetadata(), {
+      enabled: false,
+      origin: null,
+      audience: null,
+    })
     await lifecycle.close()
     assert.throws(() => lifecycle.start(parsed, cookie))
   } finally {

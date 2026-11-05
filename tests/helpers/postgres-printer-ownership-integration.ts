@@ -173,7 +173,41 @@ export async function testPostgresPrinterOwnership(
     agentId: foreignAgent,
   })
   assert.equal(foreign.ok, true)
-  assert.equal((await service.revoke(request)).ok, true)
+  if (!first.ok) throw new Error('Missing first assignment')
+  assert.equal(
+    (
+      await service.revoke({
+        ...request,
+        expectedAssignmentId: first.assignmentId,
+      })
+    ).ok,
+    true,
+  )
+  const sameAgentReplacement = await service.register(request)
+  assert.equal(sameAgentReplacement.ok, true)
+  assert.deepEqual(
+    await service.revoke({
+      ...request,
+      expectedAssignmentId: first.assignmentId,
+    }),
+    { ok: true, assignmentId: first.assignmentId, status: 'revoked' },
+  )
+  if (!sameAgentReplacement.ok) throw new Error('Missing replacement')
+  assert.equal(
+    (
+      await admin`SELECT revoked_at FROM farm.printer_assignments WHERE id=${sameAgentReplacement.assignmentId}::uuid`
+    )[0]?.revoked_at,
+    null,
+  )
+  assert.equal(
+    (
+      await service.revoke({
+        ...request,
+        expectedAssignmentId: sameAgentReplacement.assignmentId,
+      })
+    ).ok,
+    true,
+  )
   const replacement = await service.register({ ...request, agentId: agent2 })
   assert.equal(replacement.ok, true)
   if (!first.ok || !replacement.ok) throw new Error('Missing assignment')
@@ -203,7 +237,18 @@ export async function testPostgresPrinterOwnership(
     null,
   )
   await admin`UPDATE farm.connector_enrollments SET status='revoked' WHERE agent_id=${agentId}::uuid`
-  assert.equal((await service.revoke({ ...request, printerKey: 'é' })).ok, true)
+  const accentRows =
+    await admin`SELECT id FROM farm.printer_assignments WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='é' AND revoked_at IS NULL`
+  assert.equal(
+    (
+      await service.revoke({
+        ...request,
+        printerKey: 'é',
+        expectedAssignmentId: String(accentRows[0]?.id),
+      })
+    ).ok,
+    true,
+  )
   assert.equal(
     Number(
       (

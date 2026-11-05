@@ -218,12 +218,18 @@ export async function testPrinterOwnershipRaces(
   assert.equal(await count('after-revoke'), 0)
   const readable = await agent(),
     readRequest = request(user, readable, 'read-lock')
-  assert.equal((await service.register(readRequest)).ok, true)
+  const readAssignment = await service.register(readRequest)
+  assert.equal(readAssignment.ok, true)
+  if (!readAssignment.ok) throw new Error('Missing assignment')
   const revoked = await blocked(
     async (tx) => {
       await tx`SELECT id FROM farm.printer_assignments WHERE farm_id=${farmId}::uuid AND printer_key='read-lock' AND revoked_at IS NULL FOR SHARE`
     },
-    () => service.revoke(readRequest),
+    () =>
+      service.revoke({
+        ...readRequest,
+        expectedAssignmentId: readAssignment.assignmentId,
+      }),
     'printer_assignments',
   )
   assert.equal(revoked.ok, true)

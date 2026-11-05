@@ -185,11 +185,10 @@ export async function testPostgresAtomicTelemetry(
   ) => ({ ...item.subject, agentId: item.agentId, printerKey })
   async function assigned(printerKey = 'printer-a') {
     const item = await issued()
-    assert.equal(
-      (await ownership.register(ownRequest(item, printerKey))).ok,
-      true,
-    )
-    return { ...item, printerKey }
+    const assignment = await ownership.register(ownRequest(item, printerKey))
+    assert.equal(assignment.ok, true)
+    if (!assignment.ok) throw new Error('Missing assignment')
+    return { ...item, printerKey, assignmentId: assignment.assignmentId }
   }
   async function challenge(
     item: Awaited<ReturnType<typeof issued>>,
@@ -505,7 +504,10 @@ export async function testPostgresAtomicTelemetry(
                 agentId: race.agentId,
                 expectedFingerprint: race.expectedFingerprint,
               })
-            : ownership.revoke(ownRequest(race, race.printerKey))
+            : ownership.revoke({
+                ...ownRequest(race, race.printerKey),
+                expectedAssignmentId: race.assignmentId,
+              })
         const table =
           order === 'ingest-first'
             ? 'telemetry_events'

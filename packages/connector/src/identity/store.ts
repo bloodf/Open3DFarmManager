@@ -27,6 +27,19 @@ import { signPairingProof } from './pairing-proof.ts'
 import { signCredentialProof } from './credential-proof.ts'
 import { signTelemetryProof } from './telemetry-proof.ts'
 
+import { z } from 'zod'
+import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
+import {
+  RtcSessionBinding,
+  ConnectorRtcProof,
+  rtcSessionProofPayload,
+} from '../../../farm-protocol/src/rtc-session-binding.ts'
+
+const RtcProofInput = z.strictObject({
+  binding: RtcSessionBinding,
+  expectedAgentId: BrowserDeviceUuid,
+})
+
 const KEY_FILE = 'identity.json'
 const LIMIT = 1024
 function privateEntry(stat: Stats, directory = false) {
@@ -93,6 +106,39 @@ export class ConnectorIdentity {
     input: Omit<Parameters<typeof signPairingProof>[0], 'privateKey'>,
   ): string {
     return signPairingProof({ ...input, privateKey: this.#key })
+  }
+  /**
+   * Signs only the Connector RTC domain. expectedAgentId must come from trusted
+   * enrollment/runtime configuration, never from the received binding or frame.
+   * This proves key possession, not enrollment, current authorization, DTLS
+   * agreement or permission to send media or commands. The caller checks those.
+   */
+  signRtcSessionProof(input: {
+    binding: unknown
+    expectedAgentId: string
+  }): ConnectorRtcProof {
+    const { binding, expectedAgentId } = RtcProofInput.parse(input)
+    const publicDer = createPublicKey(this.#key).export({
+      format: 'der',
+      type: 'spki',
+    })
+    if (
+      binding.agent_id !== expectedAgentId ||
+      binding.connector_public_key_spki !== publicDer.toString('base64url') ||
+      binding.connector_fingerprint !==
+        'SHA256:' + createHash('sha256').update(publicDer).digest('base64url')
+    )
+      throw new Error('RTC binding does not match trusted Connector identity')
+    return ConnectorRtcProof.parse({
+      v: 1,
+      role: 'connector',
+      binding,
+      signature: sign(
+        null,
+        rtcSessionProofPayload(binding, 'connector'),
+        this.#key,
+      ).toString('base64url'),
+    })
   }
   toJSON() {
     return {

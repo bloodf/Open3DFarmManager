@@ -11,7 +11,14 @@ import {
   rtcDtlsFingerprint,
 } from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
 import { BrowserDeviceUuid } from '../../../../../packages/farm-protocol/src/browser-device-proof.ts'
-import { ReadonlyRtcSession } from '../../../../../packages/connector/src/webrtc/readonly-session.ts'
+import {
+  ReadonlyRtcSession,
+  immutableAdmission,
+  runSynchronous,
+  snapshotAssignmentRefs,
+  type VerifiedRtcAdmission,
+  type GenuineStatusOptions,
+} from '../../../../../packages/connector/src/webrtc/readonly-session.ts'
 import {
   RtcProofInbox,
   boundRtcApplicationFrame,
@@ -30,6 +37,8 @@ type Options = {
   /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
   authDeadline?: number | undefined
   lifetimeDeadline?: number
+  genuineStatus?: GenuineStatusOptions
+  onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
   fixtureOnlyVideo?: FixtureOnlyVideoHooks
@@ -82,6 +91,17 @@ export class ReadonlyBrowserPeer {
 
     this.#options = Object.freeze({
       ...options,
+      ...(options.genuineStatus
+        ? {
+            genuineStatus: Object.freeze({
+              ...options.genuineStatus,
+              assignmentRefs: snapshotAssignmentRefs(
+                options.genuineStatus.assignmentRefs,
+                options.expectedAgentId,
+              ),
+            }),
+          }
+        : {}),
       ...(options.fixtureOnlyVideo
         ? {
             fixtureOnlyVideo: Object.freeze({
@@ -335,6 +355,9 @@ export class ReadonlyBrowserPeer {
     this.#session = new ReadonlyRtcSession({
       binding: validated,
       role: 'browser',
+      ...(this.#options.genuineStatus
+        ? { genuineStatus: this.#options.genuineStatus }
+        : {}),
       authDeadline: this.#authDeadline,
       lifetimeDeadline: this.#lifetimeDeadline,
       signProof: async (context) =>
@@ -361,6 +384,18 @@ export class ReadonlyBrowserPeer {
       },
       onVerified: () => {
         clearTimeout(this.#authTimer)
+        if (this.current())
+          runSynchronous(() =>
+            this.#options.onVerifiedAdmission?.(
+              immutableAdmission(
+                validated,
+                Math.min(
+                  this.#lifetimeDeadline,
+                  performance.now() + validated.expires_at - Date.now(),
+                ),
+              ),
+            ),
+          )
         if (this.current()) this.#options.onVerified?.()
         if (this.#options.fixtureOnlyVideo && this.current())
           this.#options.fixtureOnlyVideo.activate(

@@ -1,3 +1,7 @@
+import {
+  immutableAdmission,
+  type VerifiedRtcAdmission,
+} from '../../packages/connector/src/webrtc/readonly-session.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
@@ -176,6 +180,14 @@ async function fixture(holdPeer = false) {
 
 test('fresh TLS-phase challenges pin scope and permit generation gaps; RTC waits for ready and mutual verification', async () => {
   const f = await fixture()
+  let terminal = 0
+  const admissions: VerifiedRtcAdmission[] = []
+  f.client.subscribeTerminal(() => {
+    terminal++
+  })
+  f.client.subscribeVerifiedAdmission((admission) => {
+    admissions.push(admission)
+  })
   try {
     assert.equal(f.sent[0]?.t, 'connector.begin')
     await f.inbox()
@@ -260,11 +272,20 @@ test('fresh TLS-phase challenges pin scope and permit generation gaps; RTC waits
     })
     await tick()
     assert.equal(complete, false)
+    f.input()?.onVerifiedAdmission?.(
+      immutableAdmission(binding, performance.now() + 1000),
+    )
+    assert.equal(admissions.length, 1)
+    assert.equal(
+      Object.isFrozen(admissions[0]?.binding.browser_public_key),
+      true,
+    )
     f.input()?.onVerified?.()
     await f.pending
     assert.equal(f.client.snapshot().authDeadline, undefined)
     f.client.close('socket-1006')
     assert.equal(f.peerClosed(), 1)
+    assert.equal(terminal, 1)
   } finally {
     f.client.close()
   }

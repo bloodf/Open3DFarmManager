@@ -1,3 +1,10 @@
+import {
+  immutableAdmission,
+  runSynchronous,
+  snapshotAssignmentRefs,
+  type VerifiedRtcAdmission,
+  type GenuineStatusOptions,
+} from '../webrtc/readonly-session.ts'
 import { createHash, createPublicKey } from 'node:crypto'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
@@ -127,7 +134,8 @@ export async function connectorSocket(
     close: () => socket.terminate(),
   }
 }
-type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'>
+type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'> &
+  Partial<Pick<ReadonlyConnectorPeer, 'sendStatus'>>
 type PeerOptions = ConstructorParameters<typeof ReadonlyConnectorPeer>[0]
 type Scope = {
   url: string
@@ -140,6 +148,9 @@ type Scope = {
   identity: ConnectorIdentity
 }
 type Options = {
+  genuineStatus?: GenuineStatusOptions
+  onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
+  onTerminal?: (reason: string) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   clock?: ChannelClock
@@ -172,6 +183,11 @@ export class AuthenticatedConnectorSignallingClient {
   #fingerprint: string
   #thumbprint: string
   #tokenHash: string
+  #admission: VerifiedRtcAdmission | undefined
+  #admissionListener: ((admission: VerifiedRtcAdmission) => void) | undefined
+  #subscribed = false
+  #terminalListener: ((reason: string) => void) | undefined
+  #terminalSubscribed = false
   #peer: Peer | undefined
   #retry: ReturnType<typeof setTimeout> | undefined
   #completion: Promise<void> | undefined
@@ -207,7 +223,20 @@ export class AuthenticatedConnectorSignallingClient {
     )
       throw Error('Signalling origin mismatch')
     this.#scope = Object.freeze({ ...scope, origin, audience })
-    this.#options = Object.freeze({ ...options })
+    this.#options = Object.freeze({
+      ...options,
+      ...(options.genuineStatus
+        ? {
+            genuineStatus: Object.freeze({
+              ...options.genuineStatus,
+              assignmentRefs: snapshotAssignmentRefs(
+                options.genuineStatus.assignmentRefs,
+                scope.agentId,
+              ),
+            }),
+          }
+        : {}),
+    })
     this.#publicKey = scope.identity.publicKeySpki
     this.#fingerprint = scope.identity.fingerprint
     const jwk = createPublicKey({
@@ -234,10 +263,19 @@ export class AuthenticatedConnectorSignallingClient {
       onFrame: (frame) => this.frame(frame),
       onTerminal: (reason) => {
         clearTimeout(this.#retry)
+        this.#admissionListener = undefined
+        this.#admission = undefined
+        const terminalListener = this.#terminalListener
+        this.#terminalListener = undefined
         try {
           this.#peer?.close(reason)
         } finally {
           this.#reject(Error('Signalling readonly: ' + reason))
+          try {
+            runSynchronous(() => terminalListener?.(reason))
+          } finally {
+            runSynchronous(() => this.#options.onTerminal?.(reason))
+          }
         }
       },
     })
@@ -409,6 +447,35 @@ export class AuthenticatedConnectorSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...caps,
+        ...(this.#options.genuineStatus
+          ? { genuineStatus: this.#options.genuineStatus }
+          : {}),
+        onVerifiedAdmission: (admission) => {
+          if (!this.#channel.current()) return
+          if (this.#phase !== 'active' || this.#admission) {
+            this.#channel.close('unexpected-admission')
+            return
+          }
+          const copy = immutableAdmission(
+            admission.binding,
+            Math.min(
+              admission.deadlineMonoMs,
+              this.#channel.deadlines().lifetimeDeadline,
+            ),
+          )
+          this.#admission = copy
+          try {
+            runSynchronous(() => this.#options.onVerifiedAdmission?.(copy))
+            if (this.#channel.current())
+              runSynchronous(() =>
+                this.#admissionListener?.(
+                  immutableAdmission(copy.binding, copy.deadlineMonoMs),
+                ),
+              )
+          } catch {
+            this.#channel.close('admission-callback')
+          }
+        },
         onVerified: () => {
           if (this.#channel.current()) {
             this.#channel.completeAdmission()
@@ -476,6 +543,54 @@ export class AuthenticatedConnectorSignallingClient {
       return
     }
     throw Error('Unexpected signalling frame')
+  }
+  /** One bounded owner listener, registered once; no socket/peer escape. */
+  subscribeVerifiedAdmission(
+    listener: (admission: VerifiedRtcAdmission) => void,
+  ) {
+    if (this.#subscribed) throw Error('Admission listener already registered')
+    this.#subscribed = true
+    if (!this.#channel.current()) return () => {}
+    this.#admissionListener = listener
+    if (this.#admission)
+      try {
+        runSynchronous(() =>
+          listener(
+            immutableAdmission(
+              this.#admission!.binding,
+              this.#admission!.deadlineMonoMs,
+            ),
+          ),
+        )
+      } catch {
+        this.#channel.close('admission-callback')
+      }
+    return () => {
+      this.#admissionListener = undefined
+    }
+  }
+  subscribeTerminal(listener: (reason: string) => void) {
+    if (this.#terminalSubscribed)
+      throw Error('Terminal listener already registered')
+    this.#terminalSubscribed = true
+    if (!this.#channel.current()) {
+      runSynchronous(() =>
+        listener(this.#channel.snapshot().reason ?? 'closed'),
+      )
+      return () => {}
+    }
+    this.#terminalListener = listener
+    return () => {
+      this.#terminalListener = undefined
+    }
+  }
+  sendStatus(input: unknown) {
+    return (
+      !!this.#options.genuineStatus &&
+      !!this.#admission &&
+      this.#channel.current() &&
+      (this.#peer?.sendStatus?.(input) ?? false)
+    )
   }
   close(reason = 'closed') {
     this.#channel.close(reason)

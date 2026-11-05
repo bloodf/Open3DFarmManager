@@ -101,6 +101,33 @@ Temporary upstream/configuration copies were removed after retaining their
 hashes. Bounded samples, logs and runtime metadata remain outside the repository.
 No other emulator, container, worktree or user data was removed.
 
+## Local ARM64 comparison
+
+A fresh native ARM64 instance used the reviewed same-version manifest
+`sha256:4fa52c3d57722ef38cfd05a31fd0237347e0e6285fc1371b133a6789798602b7`.
+The original Supervisor configuration matched the amd64 experiment's recorded
+SHA-256. The observer configuration was reconstructed with the same documented
+Klippy wrapper, disabled restart/retry and bounded output, but its hash differed
+from the prior temporary file. The exact earlier contents no longer exist, so
+configuration identity cannot be established. CPU, memory, PID, network, mount
+and 90-second controls remained the same. The exact reconstructed config and its
+transformation are retained with the local evidence for future comparison.
+
+The observer recorded 3,672 contiguous dictionary bytes and a terminal response;
+the session reported success 3.96 seconds after it began. Moonraker samples first
+reported ready at 20.53 seconds, then shutdown at 39.68 seconds and through the
+last sample at 87.63 seconds. Klippy logged `MCU shutdown: Timer too close`.
+This establishes identification and transient readiness in this run, followed by
+an observed shutdown; it does not pass stable readiness or prove a cause. The
+amd64 capture was incomplete, the images contain architecture-specific artifacts,
+configuration identity was not established and host scheduling varied. These
+observations cannot isolate architecture, emulation or observer overhead as the
+cause of either outcome. Full simulator acceptance remains pending.
+
+The owned simulator container, fresh volume and newly pulled image reference were
+removed. Bounded logs, samples, runtime metadata and the exact synthetic config
+remain outside the repository for diagnosis. No physical printer was used.
+
 ## Reading the result
 
 | Classification                                      | What it establishes                                                                                                                 |
@@ -113,7 +140,7 @@ No other emulator, container, worktree or user data was removed.
 | `inconclusive-dictionary-not-loaded`                | A terminal response was observed, but session success was not established.                                                          |
 | `inconclusive-incomplete-capture`                   | Capture ended early, was truncated or encountered an observer error.                                                                |
 
-Counters are retained alongside classification. Partial dictionary progress may
+The analyzer reports the last identification response time relative to its session start when that timestamp is available. It does not establish when the observer stopped collecting. Counters are retained alongside classification. Partial dictionary progress may
 coexist with invalid traffic; do not interpret the primary classification as
 proof that other faults were absent. The pinned
 [Python serial reader](https://github.com/Klipper3d/klipper/blob/ee2c6fb6b00b2b5d097ef70d0868df7d74943b51/klippy/serialhdl.py)

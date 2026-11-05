@@ -3,6 +3,7 @@
 """Observe pinned simulator identification without reading its serial device."""
 import hashlib
 import json
+import math
 from pathlib import Path
 import runpy
 import sys
@@ -115,6 +116,7 @@ def analyze(events):
             "session": identity, "accepted_bytes": 0, "unmatched_responses": 0,
             "terminal_response": False, "counters": {}, "finished": False,
             "success": False, "started": False, "observer_error": False,
+            "last_identify_elapsed": None,
         })
         kind = event.get("event")
         if kind == "identify":
@@ -124,6 +126,11 @@ def analyze(events):
             if any(type(value) is not int or value < 0
                    for value in (requested, offset, length)):
                 raise ValueError("invalid identification record")
+            elapsed = event.get("elapsed")
+            if elapsed is not None:
+                if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+                    raise ValueError("invalid identification elapsed time")
+                state["last_identify_elapsed"] = elapsed
             if requested == offset == state["accepted_bytes"]:
                 state["accepted_bytes"] += length
                 state["terminal_response"] = length == 0

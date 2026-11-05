@@ -59,6 +59,15 @@ class SerialDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["classification"], "valid-incomplete-identification")
         self.assertEqual(result["accepted_bytes"], 6)
 
+    def test_identification_elapsed_time_is_reported_and_validated(self):
+        result = self.observe(((0, 0, b"abcd"), (4, 4, b"ef")))
+        self.assertEqual(result["last_identify_elapsed"], 0.0)
+        for elapsed in (-1, float("nan"), True):
+            with self.subTest(elapsed=elapsed), self.assertRaises(ValueError):
+                diagnostic.analyze([{"event": "identify", "session": 1,
+                                     "requested": 0, "offset": 0, "length": 4,
+                                     "elapsed": elapsed}])
+
     def test_unmatched_response_does_not_advance_bytes(self):
         result = self.observe(((0, 4, b"abcd"),))
         self.assertEqual(result["classification"], "inconclusive-unmatched-responses")

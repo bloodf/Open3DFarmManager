@@ -222,10 +222,12 @@ export function openFixedMoonrakerPause(input: {
   })
   socket.on('error', stop)
   socket.on('ping', stop)
+  socket.on('pong', stop)
   socket.on('close', () => {
     stop()
     socket.off('error', stop)
     socket.off('ping', stop)
+    socket.off('pong', stop)
     resolveClosed()
   })
   socket.on('message', (data, binary) => {

@@ -331,6 +331,22 @@ test('native ping and excessive fragmented valid JSON terminate without freshnes
   }
 })
 
+test('unsolicited pong terminates before an otherwise valid query reply', async () => {
+  const f = await fixture({
+    query: (_index, socket) => {
+      socket.pong('unsolicited')
+      return false
+    },
+  })
+  try {
+    await assert.rejects(f.driver.prepare())
+    await f.driver.closed
+    assert.deepEqual(f.observations, [null])
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('post-send queries are bounded and never retry a pause that remains unconfirmed', async () => {
   const f = await fixture({
     query: (index, socket, id) => {

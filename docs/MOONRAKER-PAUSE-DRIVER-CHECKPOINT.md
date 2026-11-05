@@ -18,7 +18,7 @@ This source pin does **not** establish correspondence with the configured simula
 
 The connection has an original 30-second maximum lifetime and an eight-second maximum preparation window. Lower configured connection/request limits still apply. A pause attempt starts a nonrenewable five-second local operation deadline; the dispatcher’s earlier original result deadline and cancellation remain authoritative and may shorten it. Each reply timeout is capped at 500 ms and the remaining operation budget. There are no recurring background polls or reconnection timers.
 
-Receiver limits are at most 4,096 bytes per message, 32 fragments, 32 buffered chunks, 16 received messages and 32 KiB cumulative payload. UTF-8 and bounded JSON validation precede strict reply validation. Compression, redirects, optional native addons and automatic pong output are disabled; native ping terminates the connection. Unexpected IDs, notifications, duplicate properties, remote errors and malformed or excessive input terminate rather than create fresh observations.
+Receiver limits are at most 4,096 bytes per message, 32 fragments, 32 buffered chunks, 16 received messages and 32 KiB cumulative payload. UTF-8 and bounded JSON validation precede strict reply validation. Compression, redirects, optional native addons and automatic pong output are disabled; native ping or unsolicited pong terminates the connection. Unexpected IDs, notifications, duplicate properties, remote errors and malformed or excessive input terminate rather than create fresh observations.
 
 ## Complete observations and uncertainty
 

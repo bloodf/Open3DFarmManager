@@ -76,6 +76,9 @@
     "packages/webrtc-experiment": {
       "name": "@open3dfarmmanager/webrtc-experiment",
       "version": "0.0.1",
+      "devDependencies": {
+        "node-datachannel": "0.33.5",
+      },
     },
   },
   "packages": {

@@ -3,7 +3,10 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   nitro: { preset: 'node-server' },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
-  runtimeConfig: { public: { flags: { farmView: false } } },
+  runtimeConfig: {
+    auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
+    public: { flags: { farmView: false } },
+  },
   typescript: { strict: true },
   css: ['~/assets/main.css'],
 })

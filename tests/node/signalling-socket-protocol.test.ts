@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   decodeSignallingClientFrame,
+  encodeSignallingClientFrame,
   decodeSignallingServerFrame,
   encodeSignallingServerFrame,
   MAX_SIGNALLING_SOCKET_BYTES,
@@ -88,4 +89,27 @@ test('server lease metadata is strict, short-lived and always commands-disabled'
       }),
     ),
   )
+})
+
+test('client encoding checks actual UTF8 and JSON escaping before sending', () => {
+  assert.equal(
+    encodeSignallingClientFrame(
+      decodeSignallingClientFrame(JSON.stringify(begin)),
+    ),
+    JSON.stringify(begin),
+  )
+  const control = {
+    v: 1,
+    t: 'connector.begin',
+    farm_id: id,
+    agent_id: id,
+    jti: id,
+    token: 'x'.repeat(8192),
+  }
+  const parsed = decodeSignallingClientFrame(JSON.stringify(control))
+  assert.equal(encodeSignallingClientFrame(parsed), JSON.stringify(control))
+  assert.ok(parsed.t === 'connector.begin')
+  for (const token of ['é'.repeat(8192), '\u0000'.repeat(8192)]) {
+    assert.throws(() => encodeSignallingClientFrame({ ...parsed, token }))
+  }
 })

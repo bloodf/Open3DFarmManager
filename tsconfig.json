@@ -16,6 +16,7 @@
     "packages/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
+    "tools/rtsp-ingest/**/*.ts",
     "playwright.config.ts"
   ]
 }

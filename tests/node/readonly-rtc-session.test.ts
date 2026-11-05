@@ -127,6 +127,7 @@ test('application before authentication and foreign role, context or replay proo
   const replay = f.make()
   try {
     const proof = f.decode(await f.browserProof())
+    await replay.start()
     await replay.inspectProof(proof)
     assert.equal(replay.snapshot().state, 'verified')
     await replay.inspectProof(proof)
@@ -160,5 +161,37 @@ test('close or expired deadline during signing cannot revive session or emit pro
     } finally {
       session.close()
     }
+  }
+})
+
+test('remote proof cannot admit application while local signing is pending', async () => {
+  const f = await fixture()
+  let release: ((proof: unknown) => void) | undefined
+  let verified = 0
+  const session = f.make({
+    signProof: () =>
+      new Promise((resolve) => {
+        release = resolve
+      }),
+    onVerified: () => {
+      verified++
+    },
+  })
+  try {
+    const signing = session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    assert.equal(session.snapshot().state, 'pending')
+    assert.equal(verified, 0)
+    session.receiveApplication(READONLY_FIXTURE_STATUS)
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.deepEqual(session.snapshot().accepted, [])
+    release?.(f.connectorProof())
+    await signing
+    assert.equal(session.snapshot().state, 'readonly')
+    assert.equal(session.snapshot().localProof, false)
+    assert.equal(verified, 0)
+    assert.deepEqual(f.sent, [])
+  } finally {
+    session.close()
   }
 })

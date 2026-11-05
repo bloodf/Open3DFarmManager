@@ -271,3 +271,23 @@ test('closes on closed sink and on source or sink exceptions', async () => {
   assert.equal(closeCount, 1)
   assert.equal(returned, 1)
 })
+
+test('does not send when reading unit metadata aborts the lease', async () => {
+  let controller: AbortController
+  const s = setup(async () =>
+    stream([
+      {
+        data: new Uint8Array([1]),
+        keyframe: true,
+        get timestampUs() {
+          controller.abort()
+          return 1
+        },
+      },
+    ])(),
+  )
+  controller = s.controller
+  await s.done
+  assert.equal(s.sent.length, 0)
+  assert.equal(s.closed(), 1)
+})

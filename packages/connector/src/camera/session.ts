@@ -147,14 +147,12 @@ export function startCameraSession({
         )
           return
         lastTimestamp = timestampUs
-        if (
-          sink.trySend({
-            data: new Uint8Array(data),
-            keyframe,
-            timestampUs,
-          }) !== 'sent'
-        )
-          return
+        const ownedUnit: CameraAccessUnit = {
+          data: new Uint8Array(data),
+          keyframe,
+          timestampUs,
+        }
+        if (!active() || sink.trySend(ownedUnit) !== 'sent') return
       }
     } catch {
       // Source and sink errors must not expose local configuration.

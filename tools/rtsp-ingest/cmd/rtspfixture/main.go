@@ -107,7 +107,16 @@ func main() {
 		os.Stdin.Close()
 		os.Stdout.Close()
 	}()
-	if len(os.Args) != 1 || run(ctx, os.Stdin, os.Stdout) != nil {
+	var err error
+	switch {
+	case len(os.Args) == 1:
+		err = run(ctx, os.Stdin, os.Stdout)
+	case len(os.Args) == 2 && os.Args[1] == "--preflight":
+		err = runPreflight(ctx, os.Stdin, os.Stdout)
+	default:
+		err = errFixtureCommand
+	}
+	if err != nil {
 		// No source address, system error or credential is emitted.
 		os.Stderr.WriteString("RTSP_FIXTURE_COMMAND\n")
 		os.Exit(1)

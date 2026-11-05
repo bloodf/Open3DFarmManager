@@ -36,6 +36,8 @@ type MovingFrame struct {
 	NALUs           [][]byte
 	CanonicalBytes  int
 	CanonicalSHA256 [32]byte
+	RawSHA256       [32]byte
+	PacketCount     int
 }
 
 type MovingInput struct {
@@ -129,7 +131,7 @@ func (m *MovingInput) ReadNext() (frame MovingFrame, err error) {
 	if rate > 1<<20 {
 		return frame, errFixture
 	}
-	frame = MovingFrame{Timestamp90k: 9000 + uint32(m.index)*9000, NALUs: nalus, CanonicalBytes: canonical}
+	frame = MovingFrame{Timestamp90k: 9000 + uint32(m.index)*9000, NALUs: nalus, CanonicalBytes: canonical, RawSHA256: sha256.Sum256(record.AnnexB), PacketCount: packets}
 	copy(frame.CanonicalSHA256[:], hash.Sum(nil))
 	m.index++
 	m.rawTotal = rawTotal

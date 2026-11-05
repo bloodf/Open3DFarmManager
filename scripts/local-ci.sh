@@ -138,7 +138,9 @@ image_job() {
   return 1
 }
 klipper_job() {
-  command -v bun >/dev/null || { printf '%s\n' 'UNSUPPORTED: Bun is required.' >&2; return 2; }
+  if ! command -v bun >/dev/null || ! command -v node >/dev/null; then
+    printf '%s\n' 'UNSUPPORTED: Bun and Node are required.' >&2; return 2
+  fi
   [[ $(bun --version) == 1.4.2 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: Bun 1.4.2 and existing workspace dependencies are required.' >&2; return 2; }
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker volume ls -q --filter "label=com.docker.compose.project=$project_name") ||
@@ -159,13 +161,16 @@ klipper_job() {
   bun install --frozen-lockfile --ignore-scripts
   docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper config --quiet
   sim_started=1
-  if ! docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper up -d; then
-    docker compose -p "$project_name" -f infra/sim/docker-compose.yml logs --tail 150 > "$ledger/simulator-failure.log" 2>&1 || true
-    return 1
+  local failure
+  if docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper up -d; then :; else
+    failure=$?
+    node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
+    return "$failure"
   fi
-  if ! env -u SIM_SV06_URL -u SIM_U1_URL bun run sim:smoke; then
-    docker compose -p "$project_name" -f infra/sim/docker-compose.yml logs --tail 150 > "$ledger/simulator-failure.log" 2>&1 || true
-    return 1
+  if env -u SIM_SV06_URL -u SIM_U1_URL bun run sim:smoke; then :; else
+    failure=$?
+    node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
+    return "$failure"
   fi
 }
 case "$job" in

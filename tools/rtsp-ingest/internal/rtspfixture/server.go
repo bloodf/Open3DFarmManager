@@ -277,7 +277,7 @@ func (f *Fixture) OnResponse(c *gortsplib.ServerConn, r *base.Response) {
 	f.playPending = false
 }
 func (f *Fixture) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
-	if c.Conn != f.conn || c.Path != "fixture" || c.Query != "" {
+	if c.Conn != f.conn || c.Path != "/fixture" || c.Query != "" {
 		return &base.Response{StatusCode: base.StatusNotFound}, nil, nil
 	}
 	return &base.Response{StatusCode: base.StatusOK}, f.stream, nil
@@ -286,7 +286,7 @@ func (f *Fixture) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response,
 	f.mu.Lock()
 	valid := c.Conn == f.conn && c.Session == f.session
 	f.mu.Unlock()
-	if !valid || c.Path != "fixture" || c.Query != "" || c.Transport.Protocol != gortsplib.ProtocolTCP || c.Transport.Profile != headers.TransportProfileAVP {
+	if !valid || c.Path != "/fixture" || c.Query != "" || c.Transport.Protocol != gortsplib.ProtocolTCP || c.Transport.Profile != headers.TransportProfileAVP {
 		return &base.Response{StatusCode: base.StatusUnsupportedTransport}, nil, nil
 	}
 	return &base.Response{StatusCode: base.StatusOK}, f.stream, nil
@@ -294,7 +294,7 @@ func (f *Fixture) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response,
 func (f *Fixture) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if c.Conn != f.conn || c.Session != f.session || c.Path != "fixture" || c.Query != "" || f.playedOnce {
+	if c.Conn != f.conn || c.Session != f.session || c.Path != "/fixture" || c.Query != "" || f.playedOnce {
 		return &base.Response{StatusCode: base.StatusBadRequest}, nil
 	}
 	increment(&f.counts.plays)

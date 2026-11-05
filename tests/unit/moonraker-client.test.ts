@@ -1,5 +1,8 @@
 import { test, expect } from 'bun:test'
 import { appendFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
+import type { Duplex } from 'node:stream'
 
 // Opt-in resource diagnostics stay outside the checkout.
 function recordResource(value: object) {
@@ -520,3 +523,68 @@ test('HTTP not-ready, redirects, body overflow and subscription timeout fail clo
     }
   }
 }, 10000)
+
+test('coalesced subscription reply and delta preserve the baseline and update without reconnect', async () => {
+  let connections = 0
+  const sockets = new Set<Duplex>()
+  const server = createServer((_request, response) => {
+    response.setHeader('content-type', 'application/json')
+    response.end(JSON.stringify(ready))
+  })
+  server.on('upgrade', (request, socket) => {
+    sockets.add(socket)
+    socket.on('error', () => {})
+    socket.once('close', () => sockets.delete(socket))
+    const key = request.headers['sec-websocket-key']
+    if (typeof key !== 'string') {
+      socket.destroy()
+      return
+    }
+    connections++
+    const accept = createHash('sha1')
+      .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64')
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' +
+        accept +
+        '\r\n\r\n',
+    )
+    socket.once('data', () => {
+      function frame(text: string) {
+        const body = Buffer.from(text)
+        const header = Buffer.alloc(4)
+        header[0] = 0x81
+        header[1] = 126
+        header.writeUInt16BE(body.length, 2)
+        return Buffer.concat([header, body])
+      }
+      // One socket write deliberately supplies both complete frames together.
+      socket.write(Buffer.concat([frame(snapshot()), frame(delta(11, 0.5))]))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw Error('No fixture port')
+  try {
+    const events = await run(
+      `http://127.0.0.1:${address.port}`,
+      { staleAfterMs: 2000 },
+      'normal',
+      250,
+    )
+    expect(
+      events
+        .filter((event) => event.kind === 'snapshot')
+        .map((event) => event.printer?.progress),
+    ).toEqual([0.25, 0.5])
+    expect(events.some((event) => event.reason === 'invalid-response')).toBe(
+      false,
+    )
+    expect(connections).toBe(1)
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    )
+  }
+})

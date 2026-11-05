@@ -33,3 +33,15 @@ Focused tests run the actual Node 24 CLI against original synthetic Bun loopback
 The collect-focused command `bun test tests/unit/moonraker-collect.test.ts --max-concurrency 1` passed 8 test groups and 83 assertions. The changed transport regression command `bun test tests/unit/moonraker-client.test.ts --max-concurrency 1` passed 10 groups and 202 assertions. The receive-limit fixture observed the audited receiver close codes, 1009 for payload size and 1008 for fragment count, with no queued records. An owned-file TypeScript check and targeted formatting checks passed. These are source-level results on Node 24.20.0 and Bun 1.4.2, not production bundle execution or a full repository gate.
 
 Genuine pinned Moonraker simulator acceptance, production packaging execution, migration 0015 ownership integration, printer-local authentication, authenticated telemetry sending and the coordinator's full repository gate remain pending. No physical printer, Docker, emulator, PostgreSQL, SSH, production service or publication was used by this slice.
+
+## Coalesced-frame correction
+
+Independent review identified a valid subscription reply and following delta
+arriving in one receiver batch before the snapshot promise continuation installed
+its baseline. A real Node client regression sends both complete WebSocket frames
+in one socket write. Before the correction it lost the delta and repeatedly
+reconnected; with `allowSynchronousEvents: false` it observes both progress values
+in order on one connection, without an invalid-response event. No extra queue or
+buffer is introduced. The full focused client suite passed 11 tests and 209
+assertions; root TypeScript, targeted formatting and diff checks passed. This
+remains local source evidence, not packaged or genuine simulator acceptance.

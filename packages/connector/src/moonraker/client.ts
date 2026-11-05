@@ -168,6 +168,8 @@ export function openMoonrakerClient(input: {
     maxPayload: input.limits.maxMessageBytes,
     maxFragments: 128,
     maxBufferedChunks: 128,
+    // Let the snapshot promise continuation install its baseline before a delta.
+    allowSynchronousEvents: false,
     perMessageDeflate: false,
     followRedirects: false,
     handshakeTimeout: input.limits.connectTimeoutMs,

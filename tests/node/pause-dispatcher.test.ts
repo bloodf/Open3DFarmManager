@@ -829,7 +829,10 @@ test(
       // before that continuation, independent of real timer/poll phase ordering.
       f.advance(51)
       const result = await pending
-      assert.deepEqual(result, { kind: 'rejected', reason: 'deadline' })
+      // A timer before the durable claim rejects; the post-claim clock guard
+      // records not-sent. Both must stop before invoking the driver.
+      assert.equal(result.reason, 'deadline')
+      assert.ok(result.kind === 'rejected' || result.kind === 'not-sent')
       assert.equal(f.driverEntryCount(), 0)
       assert.equal(f.getWrites(), 0)
     } finally {

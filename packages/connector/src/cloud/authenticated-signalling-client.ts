@@ -43,7 +43,6 @@ type WsOptions = {
   maxFragments: number
   maxBufferedChunks: number
   autoPong: false
-  origin: string
 }
 type WsConstructor = new (
   url: URL,
@@ -82,7 +81,6 @@ export async function connectorSocket(
     maxFragments: 16,
     maxBufferedChunks: 16,
     autoPong: false,
-    origin: 'https://' + target.host,
   })
   const socket = new module.WebSocket(
     target,

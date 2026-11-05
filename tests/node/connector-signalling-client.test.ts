@@ -452,7 +452,6 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
       maxFragments: 16,
       maxBufferedChunks: 16,
       autoPong: false,
-      origin: 'https://farm.example',
     })
     let messages = 0,
       errors = 0

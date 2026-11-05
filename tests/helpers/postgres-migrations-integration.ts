@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import {
   loadMigrationCatalog,
   migrationCatalog,
@@ -7,14 +7,16 @@ import {
 } from '../../scripts/db/migrations.ts'
 
 /** Destructive fixture: caller provides a fresh isolated disposable fixture database. */
-export async function testPostgresMigrations(sql: SQL) {
+export async function testPostgresMigrations(sql: Sql) {
   const baseline =
     await sql`SELECT current_database() AS db, current_user AS actor, to_regclass('public.open3dfarm_migrations') AS journal, EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'farm') AS farm`
-  assert.equal(baseline[0].db, 'fixture')
-  assert.equal(baseline[0].actor, 'fixture')
-  assert.equal(baseline[0].journal, null)
-  assert.equal(baseline[0].farm, false)
+  assert.equal(baseline[0]?.db, 'fixture')
+  assert.equal(baseline[0]?.actor, 'fixture')
+  assert.equal(baseline[0]?.journal, null)
+  assert.equal(baseline[0]?.farm, false)
   const catalog = await loadMigrationCatalog()
+  const firstMigration = catalog[0]
+  assert.ok(firstMigration)
   const sources = catalog.flatMap((entry) => [
     { name: `${entry.id}.up.sql`, sql: entry.up },
     { name: `${entry.id}.down.sql`, sql: entry.down },
@@ -45,7 +47,7 @@ export async function testPostgresMigrations(sql: SQL) {
   checks.push('edited-applied-rollback-digest-rejected')
   await sql`UPDATE public.open3dfarm_migrations SET id = '0001_unknown' WHERE position = 1`
   await assert.rejects(runMigrations(sql, catalog, { kind: 'up' }))
-  await sql`UPDATE public.open3dfarm_migrations SET id = ${catalog[0]?.id} WHERE position = 1`
+  await sql`UPDATE public.open3dfarm_migrations SET id = ${firstMigration.id} WHERE position = 1`
   await sql`UPDATE public.open3dfarm_migrations SET position = 999 WHERE position = 1`
   await assert.rejects(runMigrations(sql, catalog, { kind: 'up' }))
   await sql`UPDATE public.open3dfarm_migrations SET position = 1 WHERE position = 999`
@@ -67,7 +69,7 @@ export async function testPostgresMigrations(sql: SQL) {
   assert.equal(
     (
       await sql`SELECT to_regclass('public.migration_failure_probe') AS relation`
-    )[0].relation,
+    )[0]?.relation,
     null,
   )
   assert.deepEqual(await snapshot(), before)
@@ -84,7 +86,7 @@ export async function testPostgresMigrations(sql: SQL) {
   assert.equal(
     (
       await sql`SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'farm') AS present`
-    )[0].present,
+    )[0]?.present,
     false,
   )
   assert.equal(

@@ -1,7 +1,7 @@
 // Opt-in destructive fixture. Run only against a fresh, disposable loopback database.
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { SQL } from 'bun'
+import postgres from 'postgres'
 import { PostgresSessionRepository } from '../apps/farm/server/storage/postgres-session.ts'
 import {
   testPostgresSessions,
@@ -21,10 +21,10 @@ const options = {
   port,
   database: 'fixture',
   max: 6,
-  connectionTimeout: 3,
+  connect_timeout: 3,
 }
-const admin = new SQL({ ...options, username: 'fixture' })
-const runtime = new SQL({ ...options, username: 'session_fixture' })
+const admin = postgres({ ...options, username: 'fixture' })
+const runtime = postgres({ ...options, username: 'session_fixture' })
 const store = new PostgresSessionRepository(runtime)
 const up = await readFile(
   new URL(
@@ -46,7 +46,7 @@ try {
     assert.equal(
       (
         await admin`SELECT last_seen_at::int AS n FROM farm.account_sessions WHERE id = 'isolated'`
-      )[0].n,
+      )[0]?.n,
       150,
     )
     assert.deepEqual(
@@ -70,7 +70,7 @@ try {
       'touch-session-and-account-revocation-survive-restart',
       ...(await testSessionPrivileges(runtime)),
     )
-    await runtime.close()
+    await runtime.end()
     await admin.begin(async (tx) => {
       await tx.unsafe(down).simple()
     })
@@ -78,7 +78,7 @@ try {
       await tx.unsafe(up).simple()
     })
     assert.equal(
-      (await admin`SELECT count(*)::int AS n FROM farm.account_sessions`)[0].n,
+      (await admin`SELECT count(*)::int AS n FROM farm.account_sessions`)[0]?.n,
       0,
     )
     await admin.begin(async (tx) => {
@@ -91,7 +91,7 @@ try {
     assert.equal(
       (
         await admin`SELECT count(*)::int AS n FROM pg_namespace WHERE nspname = 'farm'`
-      )[0].n,
+      )[0]?.n,
       0,
       'Fresh dedicated database required',
     )
@@ -103,8 +103,8 @@ try {
     checks.push(...(await testPostgresSessions(admin, runtime)))
   }
 } finally {
-  await runtime.close()
-  await admin.close()
+  await runtime.end()
+  await admin.end()
 }
 assert.deepEqual(
   await store.authorizeAndTouch('isolated', 102, { idleTimeoutMs: 100 }),

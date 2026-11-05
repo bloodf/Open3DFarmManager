@@ -1,14 +1,14 @@
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import type {
   EnrollmentRecord,
   EnrollmentScope,
   EnrollmentSource,
 } from '../services/enrolled-connector-proof.ts'
 
-/** Unwired prototype. Caller owns a dedicated Bun PostgreSQL pool and its lifecycle. */
+/** Unwired prototype. Caller owns a dedicated PostgreSQL pool and its lifecycle. */
 export class PostgresEnrollmentSource implements EnrollmentSource {
-  #sql: SQL
-  constructor(sql: SQL) {
+  #sql: Sql
+  constructor(sql: Sql) {
     this.#sql = sql
   }
   async withEnrollment(
@@ -21,7 +21,7 @@ export class PostgresEnrollmentSource implements EnrollmentSource {
       await this.#sql.begin(async (transaction) => {
         await transaction`SET LOCAL statement_timeout = '2000ms'`
         await transaction`SET LOCAL lock_timeout = '1000ms'`
-        const rows = await transaction`
+        const rows = await transaction<EnrollmentRecord[]>`
           SELECT farm_id AS "farmId", agent_id AS "agentId", status,
                  public_key_spki AS "publicKeySpki", fingerprint
           FROM farm.connector_enrollments

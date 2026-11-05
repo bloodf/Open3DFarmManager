@@ -1,6 +1,6 @@
 // Called only by the explicitly opted-in disposable PostgreSQL integration script.
 import assert from 'node:assert/strict'
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,13 +26,13 @@ const fixedEvent = {
   },
 }
 export async function testTelemetryPersistence(
-  sql: SQL,
+  sql: Sql,
   afterRestart: boolean,
 ): Promise<string[]> {
   const store = new PostgresTelemetryStore(sql)
   const count = async () =>
     (await sql`SELECT count(*)::int AS count FROM farm.telemetry_events`)[0]
-      .count
+      ?.count
   if (afterRestart) {
     assert.equal(await count(), 3)
     assert.equal(
@@ -113,8 +113,9 @@ export async function testTelemetryPersistence(
     queue.close()
     rmSync(directory, { recursive: true, force: true })
   }
-  const original = (await sql`SELECT payload FROM farm.telemetry_events`)[0]
-    .payload
+  const originalRow = (await sql`SELECT payload FROM farm.telemetry_events`)[0]
+  assert.ok(originalRow)
+  const original = originalRow.payload
   const conflict = await ingestTelemetry(
     JSON.stringify([
       fixedEvent,

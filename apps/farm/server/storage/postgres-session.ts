@@ -1,6 +1,8 @@
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import {
   evaluateSession,
+  type SessionRecord,
+  type AccountSessionState,
   type SessionDecision,
   type SessionPolicy,
   type SessionRepository,
@@ -12,7 +14,10 @@ const validTime = (now: number) => Number.isSafeInteger(now) && now >= 0
 
 /** Unwired persistence adapter. The caller owns a dedicated, bounded SQL pool. */
 export class PostgresSessionRepository implements SessionRepository {
-  constructor(private readonly sql: SQL) {}
+  private readonly sql: Sql
+  constructor(sql: Sql) {
+    this.sql = sql
+  }
 
   async authorizeAndTouch(
     id: string,
@@ -26,13 +31,13 @@ export class PostgresSessionRepository implements SessionRepository {
         await tx`SET LOCAL statement_timeout = '2000ms'`
         await tx`SET LOCAL lock_timeout = '1000ms'`
         // Account binding is immutable. Always lock account before session.
-        const accounts = await tx`
+        const accounts = await tx<AccountSessionState[]>`
           SELECT id, session_version::float8 AS "sessionVersion", disabled
           FROM farm.session_accounts
           WHERE id = (SELECT account_id FROM farm.account_sessions WHERE id = ${id})
           FOR UPDATE
         `
-        const sessions = await tx`
+        const sessions = await tx<SessionRecord[]>`
           SELECT id, account_id AS "accountId", account_version::float8 AS "accountVersion",
             created_at::float8 AS "createdAt", last_seen_at::float8 AS "lastSeenAt",
             absolute_expires_at::float8 AS "absoluteExpiresAt", revoked_at::float8 AS "revokedAt"

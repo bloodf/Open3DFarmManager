@@ -13,7 +13,9 @@
     "vue": "3.5.44",
     "vue-router": "5.4.0",
     "@open3dfarmmanager/farm-protocol": "workspace:*",
-    "@open3dfarmmanager/shared": "workspace:*"
+    "@open3dfarmmanager/shared": "workspace:*",
+    "postgres": "3.4.9",
+    "@adonisjs/hash": "9.1.1"
   },
   "devDependencies": {
     "vue-tsc": "3.3.14"

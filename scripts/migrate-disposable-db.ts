@@ -1,4 +1,4 @@
-import { SQL } from 'bun'
+import postgres from 'postgres'
 import {
   loadMigrationCatalog,
   runMigrations,
@@ -25,17 +25,17 @@ let action: MigrationAction
 if (command === 'up') action = { kind: 'up' }
 else if (expectedLastId) action = { kind: 'down', expectedLastId }
 else throw new Error('Rollback ID required')
-const sql = new SQL({
+const sql = postgres({
   hostname: '127.0.0.1',
   port,
   username: 'fixture',
   database: 'fixture',
   max: 2,
-  connectionTimeout: 3,
+  connect_timeout: 3,
 })
 try {
   const changed = await runMigrations(sql, await loadMigrationCatalog(), action)
   console.log(JSON.stringify({ action: command, changed }))
 } finally {
-  await sql.close()
+  await sql.end()
 }

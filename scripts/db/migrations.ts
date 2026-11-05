@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 
 export function migrationCatalog(
   sources: readonly { name: string; sql: string }[],
@@ -90,7 +90,7 @@ export type MigrationAction =
 
 /** Trusted, reviewed local SQL only; not a SQL sandbox or production startup hook. */
 export async function runMigrations(
-  sql: SQL,
+  sql: Sql,
   catalog: ReturnType<typeof migrationCatalog>,
   action: MigrationAction,
 ) {

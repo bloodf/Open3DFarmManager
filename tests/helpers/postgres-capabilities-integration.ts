@@ -1,6 +1,6 @@
 // Disposable DB only: login roles below are synthetic test fixtures, never deployment accounts.
 import assert from 'node:assert/strict'
-import { SQL } from 'bun'
+import postgres, { type Sql } from 'postgres'
 import { readFileSync } from 'node:fs'
 import { generateKeyPairSync } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -29,10 +29,10 @@ const denied = (query: PromiseLike<unknown>, code = '42501') =>
       await query
     },
     (error: unknown) =>
-      error instanceof Error && 'errno' in error && error.errno === code,
+      error instanceof Error && 'code' in error && error.code === code,
   )
 export async function testDatabaseCapabilities(
-  admin: SQL,
+  admin: Sql,
   port: number,
   afterRestart: boolean,
 ): Promise<string[]> {
@@ -53,26 +53,27 @@ export async function testDatabaseCapabilities(
     await admin`GRANT farm_enrollment_reader TO fixture_reader`
     await admin`GRANT farm_telemetry_writer TO fixture_writer`
   }
-  const reader = new SQL({
+  const reader = postgres({
     hostname: '127.0.0.1',
     port,
     username: 'fixture_reader',
     database: 'fixture',
     max: 2,
-    connectionTimeout: 3,
+    connect_timeout: 3,
   })
-  const writer = new SQL({
+  const writer = postgres({
     hostname: '127.0.0.1',
     port,
     username: 'fixture_writer',
     database: 'fixture',
     max: 2,
-    connectionTimeout: 3,
+    connect_timeout: 3,
   })
   try {
     for (const pool of [reader, writer]) {
       const [role] =
         await pool`SELECT rolsuper, rolcreaterole, rolcreatedb, rolbypassrls FROM pg_roles WHERE rolname = current_user`
+      assert.ok(role)
       assert.deepEqual(
         [
           role.rolsuper,
@@ -141,12 +142,13 @@ export async function testDatabaseCapabilities(
     await denied(writer`ALTER TABLE farm.telemetry_events DISABLE TRIGGER ALL`)
     const [stored] =
       await admin`SELECT payload FROM farm.telemetry_events WHERE event_id = ${connection}::uuid`
+    assert.ok(stored)
     assert.deepEqual(stored.payload, event)
     // Owner-only fixture cleanup keeps the existing telemetry fixture's row-count invariant.
     await admin`DELETE FROM farm.telemetry_events WHERE event_id = ${connection}::uuid`
   } finally {
-    await reader.close()
-    await writer.close()
+    await reader.end()
+    await writer.end()
   }
   if (afterRestart) {
     await admin.begin(async (tx) => {

@@ -1,6 +1,6 @@
 # Persistência de sessões PostgreSQL
 
-A migração `0004_account_sessions` e `PostgresSessionRepository` implementam o contrato de persistência de sessões independentes. O adaptador permanece desconectado das rotas. Usa `Bun.SQL`; a aplicação Nuxt gera um servidor Node, portanto esta implementação não comprova compatibilidade com o runtime de produção.
+A migração `0004_account_sessions` e `PostgresSessionRepository` implementam o contrato de persistência de sessões independentes. A primeira verificação usou Bun SQL. A [transição para Node](NODE-POSTGRES-CHECKPOINT.md) substituiu esse driver por Postgres.js e repetiu os testes reais sob Node; o [login independente](INDEPENDENT-LOGIN-CHECKPOINT.md) conecta o adaptador às rotas quando explicitamente habilitado.
 
 Os IDs são referências internas, nunca tokens de autenticação. Não há emissão de cookies, senha, login, recuperação de conta ou autorização por fazenda nesta etapa. A tabela `session_accounts` contém somente o estado de revogação e bloqueio de contas.
 

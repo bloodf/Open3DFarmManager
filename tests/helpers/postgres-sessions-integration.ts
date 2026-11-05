@@ -1,11 +1,12 @@
+import { setTimeout as sleep } from 'node:timers/promises'
 import assert from 'node:assert/strict'
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import { PostgresSessionRepository } from '../../apps/farm/server/storage/postgres-session.ts'
 
 const policy = { idleTimeoutMs: 100 }
 export async function testPostgresSessions(
-  admin: SQL,
-  runtime: SQL,
+  admin: Sql,
+  runtime: Sql,
 ): Promise<string[]> {
   const store = new PostgresSessionRepository(runtime)
   const checks: string[] = []
@@ -18,9 +19,9 @@ export async function testPostgresSessions(
     while (true) {
       const rows =
         await admin`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ${'%' + fragment + '%'}`
-      if (rows[0].n > 0) return
+      if ((rows[0]?.n ?? 0) > 0) return
       assert.ok(performance.now() - start < 750, 'Expected database lock wait')
-      await Bun.sleep(5)
+      await sleep(5)
     }
   }
   await seed('boundaries')
@@ -174,7 +175,7 @@ export async function testPostgresSessions(
   assert.equal(
     (
       await admin`SELECT last_seen_at::int AS n FROM farm.account_sessions WHERE id = 'rollback'`
-    )[0].n,
+    )[0]?.n,
     101,
   )
   await admin
@@ -206,14 +207,14 @@ export async function testPostgresSessions(
   assert.equal(
     (
       await admin`SELECT session_version::text AS n FROM farm.session_accounts WHERE id = 'exhausted'`
-    )[0].n,
+    )[0]?.n,
     '9007199254740991',
   )
   checks.push(...(await testSessionPrivileges(runtime)))
   return [...checks, 'version-exhaustion-fails-without-wraparound']
 }
 
-export async function testSessionPrivileges(runtime: SQL): Promise<string[]> {
+export async function testSessionPrivileges(runtime: Sql): Promise<string[]> {
   for (const query of [
     "INSERT INTO farm.session_accounts (id) VALUES ('unauthorized')",
     'UPDATE farm.session_accounts SET disabled = false',

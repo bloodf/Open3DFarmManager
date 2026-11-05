@@ -1,4 +1,4 @@
-import type { SQL } from 'bun'
+import type { Sql } from 'postgres'
 import {
   TelemetryBatch,
   type TelemetryEvent,
@@ -9,8 +9,8 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Internal persistence only. This store does not authenticate or authorize its caller. */
 export class PostgresTelemetryStore implements TelemetryEventStore {
-  #sql: SQL
-  constructor(sql: SQL) {
+  #sql: Sql
+  constructor(sql: Sql) {
     this.#sql = sql
   }
   async commitBatch(
@@ -37,13 +37,14 @@ export class PostgresTelemetryStore implements TelemetryEventStore {
         for (const event of snapshot) {
           const payload = event
           await tx`INSERT INTO farm.telemetry_events (farm_id, agent_id, event_id, payload)
-            VALUES (${farmId}::uuid, ${agentId}::uuid, ${event.eventId}::uuid, ${payload}::jsonb)
+            VALUES (${farmId}::uuid, ${agentId}::uuid, ${event.eventId}::uuid, ${tx.json(payload)}::jsonb)
             ON CONFLICT (farm_id, agent_id, event_id) DO NOTHING`
-          const rows = await tx`SELECT payload = ${payload}::jsonb AS matches
+          const rows =
+            await tx`SELECT payload = ${tx.json(payload)}::jsonb AS matches
             FROM farm.telemetry_events
             WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND event_id = ${event.eventId}::uuid
             FOR SHARE`
-          if (rows.length !== 1 || rows[0].matches !== true)
+          if (rows.length !== 1 || rows[0]?.matches !== true)
             throw new EventConflict()
         }
       })

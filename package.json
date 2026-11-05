@@ -37,6 +37,7 @@
   "dependencies": {
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
-    "@open3dfarmmanager/sim-tools": "workspace:*"
+    "@open3dfarmmanager/sim-tools": "workspace:*",
+    "postgres": "3.4.9"
   }
 }

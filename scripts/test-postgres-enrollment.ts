@@ -1,8 +1,9 @@
+import { setTimeout as sleep } from 'node:timers/promises'
 // Opt-in destructive integration fixture: dedicated disposable PostgreSQL only.
 import assert from 'node:assert/strict'
 import { testDatabaseCapabilities } from '../tests/helpers/postgres-capabilities-integration.ts'
 import { testTelemetryPersistence } from '../tests/helpers/postgres-telemetry-integration.ts'
-import { SQL } from 'bun'
+import postgres from 'postgres'
 import { readFile } from 'node:fs/promises'
 import { generateKeyPairSync } from 'node:crypto'
 import { ConnectorIdentity } from '../packages/connector/src/identity/store.ts'
@@ -16,13 +17,13 @@ if (
   port > 65535
 )
   throw new Error('Explicit disposable PostgreSQL port required')
-const sql = new SQL({
+const sql = postgres({
   hostname: '127.0.0.1',
   port,
   username: 'fixture',
   database: 'fixture',
   max: 4,
-  connectionTimeout: 3,
+  connect_timeout: 3,
 })
 const scope = {
   farmId: '00000000-0000-4000-8000-000000000001',
@@ -67,7 +68,7 @@ try {
     assert.equal(
       (
         await sql`SELECT count(*)::int AS count FROM farm.connector_enrollments`
-      )[0].count,
+      )[0]?.count,
       0,
     )
     checks.push('explicit-down-up-and-missing-table-fail-closed')
@@ -75,7 +76,7 @@ try {
     assert.equal(
       (
         await sql`SELECT count(*)::int AS count FROM pg_namespace WHERE nspname = 'farm'`
-      )[0].count,
+      )[0]?.count,
       0,
       'Requires fresh dedicated database',
     )
@@ -238,12 +239,12 @@ try {
       while (true) {
         const waiting =
           await sql`SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = 'fixture' AND wait_event_type = 'Lock' AND query LIKE '%FROM farm.connector_enrollments%'`
-        if (waiting[0].count > 0) break
+        if ((waiting[0]?.count ?? 0) > 0) break
         assert.ok(
           performance.now() - start < 800,
           'Reader must enter row lock wait',
         )
-        await Bun.sleep(5)
+        await sleep(5)
       }
       assert.equal(completed, false)
     } finally {
@@ -272,7 +273,7 @@ try {
     checks.push(...(await testDatabaseCapabilities(sql, port, false)))
   }
 } finally {
-  await sql.close()
+  await sql.end()
 }
 assert.equal(await proof.issue(scope, connection, () => 1002, 5000), null)
 checks.push('closed-storage-fails-closed')

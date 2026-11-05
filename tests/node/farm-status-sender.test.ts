@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
@@ -57,10 +58,22 @@ async function fixture(onSend?: () => void) {
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
   }
-  const admission = immutableAdmission(binding, performance.now() + 2500)
   const refs = [
     { assignmentId: randomUUID(), agentId: agent, printerKey: 'printer-a' },
   ]
+  const assignments = await assignmentSetDigest(
+    { farmId: binding.farm_id, agentId: agent },
+    refs,
+  )
+  const admission = immutableAdmission(
+    {
+      ...binding,
+      v: 2,
+      assignment_count: assignments.count,
+      assignment_digest: assignments.digest,
+    },
+    performance.now() + 2500,
+  )
   let listener: ((value: VerifiedRtcAdmission) => void) | undefined,
     provider: Parameters<FarmSnapshotProvider>[0] | undefined
   let terminal: ((reason: string) => void) | undefined
@@ -135,7 +148,12 @@ async function fixture(onSend?: () => void) {
     sent,
     controller,
     complete,
-    admit: () => listener?.(admission),
+    admit: async (input = admission) => {
+      listener?.(input)
+      const deadline = performance.now() + 500
+      while (!provider && !closed && performance.now() < deadline)
+        await new Promise<void>((resolve) => setTimeout(resolve, 1))
+    },
     provider: () => provider,
     closed: () => closed,
     providerClosed: () => providerClosed,
@@ -149,7 +167,7 @@ test('sender opens only after admitted context and sends copied complete genuine
     await f.sender.start()
     assert.equal(f.provider(), undefined)
     assert.equal(f.sent.length, 0)
-    f.admit()
+    await f.admit()
     assert.ok(f.provider())
     assert.equal(f.provider()?.deadlineMonoMs, f.admission.deadlineMonoMs)
     assert.equal(
@@ -197,7 +215,7 @@ test('incomplete, changed authority or invalid source clock evidence terminates 
   ] as const) {
     const f = await fixture()
     try {
-      f.admit()
+      await f.admit()
       const now = performance.now()
       const overrides =
         fault === 'partial'
@@ -254,7 +272,7 @@ test('source expiry and unavailable independently close session; later complete 
   for (const unavailable of [false, true]) {
     const f = await fixture()
     try {
-      f.admit()
+      await f.admit()
       f.complete({ validUntilMonoMs: performance.now() + 15 })
       if (unavailable) f.provider()?.onUnavailable()
       else await new Promise((resolve) => setTimeout(resolve, 30))
@@ -273,7 +291,7 @@ test('reentrant owner close during send never rearms publishing or provider time
   const f = await fixture(() => stop())
   stop = () => f.sender.close('owner-close')
   try {
-    f.admit()
+    await f.admit()
     f.complete()
     assert.equal(f.closed(), 1)
     f.complete()
@@ -287,7 +305,7 @@ test('reentrant owner close during send never rearms publishing or provider time
 test('client terminal notification immediately closes idle provider without another snapshot', async () => {
   const f = await fixture()
   try {
-    f.admit()
+    await f.admit()
     const provider = f.provider()
     assert.ok(provider)
     f.terminate()
@@ -304,7 +322,7 @@ test('client terminal notification immediately closes idle provider without anot
 
 test('source expiry during validation prevents the first send', async () => {
   const f = await fixture()
-  f.admit()
+  await f.admit()
   const now = performance.now()
   const original = Object.getOwnPropertyDescriptor(performance, 'now')
   let clock = now
@@ -334,5 +352,42 @@ test('source expiry during validation prevents the first send', async () => {
     if (original) Object.defineProperty(performance, 'now', original)
     else Reflect.deleteProperty(performance, 'now')
     f.sender.close()
+  }
+})
+
+test('sender never opens a provider for v1, replaced assignment or changed digest', async () => {
+  for (const mode of ['v1', 'replacement', 'digest'] as const) {
+    const f = await fixture()
+    try {
+      const binding = f.admission.binding
+      const changed =
+        mode === 'v1'
+          ? (() => {
+              const { assignment_count, assignment_digest, ...v1 } =
+                binding.v === 2
+                  ? binding
+                  : (() => {
+                      throw Error('v2 fixture required')
+                    })()
+              return { ...v1, v: 1 }
+            })()
+          : {
+              ...binding,
+              assignment_digest: randomBytes(32).toString('base64url'),
+            }
+      if (mode === 'replacement') {
+        const digest = await assignmentSetDigest(
+          { farmId: binding.farm_id, agentId: binding.agent_id },
+          f.refs.map((ref) => ({ ...ref, assignmentId: randomUUID() })),
+        )
+        Object.assign(changed, { assignment_digest: digest.digest })
+      }
+      await f.admit(immutableAdmission(changed, f.admission.deadlineMonoMs))
+      assert.equal(f.provider(), undefined)
+      assert.equal(f.closed(), 1)
+      assert.deepEqual(f.sent, [])
+    } finally {
+      f.sender.close()
+    }
   }
 })

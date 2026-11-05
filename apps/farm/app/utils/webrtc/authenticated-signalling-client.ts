@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
   runSynchronous,
@@ -321,6 +322,19 @@ export class AuthenticatedBrowserSignallingClient {
         b.browser_nonce !== this.#nonce
       )
         throw Error('Binding scope mismatch')
+      if (this.#options.genuineStatus) {
+        if (b.v !== 2) throw Error('Assignment binding v2 required')
+        const assignments = await assignmentSetDigest(
+          { farmId: s.farmId, agentId: s.agentId },
+          this.#options.genuineStatus.assignmentRefs,
+        )
+        if (!this.#channel.current()) return
+        if (
+          assignments.count !== b.assignment_count ||
+          assignments.digest !== b.assignment_digest
+        )
+          throw Error('Assignment binding mismatch')
+      }
       this.#channel.capLease(b)
       if (!this.#channel.current()) return
       this.#phase = 'active'

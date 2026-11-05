@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import type {
   FarmStatusFeed,
   FarmScope,
@@ -238,6 +239,11 @@ export function createAuthenticatedFarmStatusFeed(
           )
             throw Error('Key pair mismatch')
           if (!current()) return
+          const assignments = await assignmentSetDigest(
+            { farmId: scope.farmId, agentId },
+            refs,
+          )
+          if (!current()) return
           const create =
             options.createClient ??
             ((value: ClientInput) =>
@@ -270,6 +276,9 @@ export function createAuthenticatedFarmStatusFeed(
                   now = performance.now(),
                   wall = Date.now()
                 if (
+                  b.v !== 2 ||
+                  b.assignment_count !== assignments.count ||
+                  b.assignment_digest !== assignments.digest ||
                   b.account_id !== scope.accountId ||
                   b.farm_id !== scope.farmId ||
                   b.agent_id !== agentId ||

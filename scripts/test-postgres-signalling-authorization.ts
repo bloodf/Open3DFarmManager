@@ -1,4 +1,4 @@
-// Explicit disposable loopback fixture, official contiguous migrations through 0017.
+// Explicit disposable loopback fixture, official contiguous migrations through 0019.
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -53,12 +53,12 @@ try {
     'fixture',
   )
   assert.equal((await admin`SELECT current_user AS actor`)[0]?.actor, 'fixture')
-  const catalog = (await loadMigrationCatalog()).slice(0, 17)
-  assert.equal(catalog.length, 17)
-  assert.equal(catalog[16]?.id, '0017_signalling_authorization')
+  const catalog = (await loadMigrationCatalog()).slice(0, 19)
+  assert.equal(catalog.length, 19)
+  assert.equal(catalog[18]?.id, '0019_signalling_assignment_scope')
   const history =
     await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...history]), 17)
+  assert.equal(validateMigrationHistory(catalog, [...history]), 19)
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_signalling_reader`
   created = true
   const verifyPath = process.env.SIGNALLING_READER_VERIFY_RESTART

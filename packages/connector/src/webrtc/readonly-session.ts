@@ -1,3 +1,7 @@
+import {
+  assignmentSetDigest,
+  RtcAssignmentRef,
+} from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import { StatusMessage } from '../../../farm-protocol/src/channel.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import {
@@ -35,12 +39,15 @@ export type ReadonlyStatusMessage = Readonly<{
     ReturnType<typeof StatusMessage.parse>['printers'][number]
   >[]
 }>
+type ImmutableBinding<B = RtcSessionBinding> = B extends RtcSessionBinding
+  ? Readonly<
+      Omit<B, 'browser_public_key'> & {
+        browser_public_key: Readonly<B['browser_public_key']>
+      }
+    >
+  : never
 export type VerifiedRtcAdmission = Readonly<{
-  binding: Readonly<
-    Omit<RtcSessionBinding, 'browser_public_key'> & {
-      browser_public_key: Readonly<RtcSessionBinding['browser_public_key']>
-    }
-  >
+  binding: ImmutableBinding
   deadlineMonoMs: number
 }>
 export function immutableAdmission(
@@ -64,11 +71,13 @@ export function snapshotAssignmentRefs(
   refs: readonly AssignmentRef[],
   agentId: string,
 ): readonly AssignmentRef[] {
-  if (!Array.isArray(refs) || refs.length > 100) throw Error('Assignment limit')
+  if (!Array.isArray(refs) || refs.length < 1 || refs.length > 16)
+    throw Error('Assignment limit')
   const assignments = new Set<string>(),
     printers = new Set<string>()
   return Object.freeze(
-    refs.map((ref) => {
+    refs.map((input) => {
+      const ref = RtcAssignmentRef.parse(input)
       if (
         Object.keys(ref).sort().join(',') !==
           'agentId,assignmentId,printerKey' ||
@@ -215,6 +224,19 @@ export class ReadonlyRtcSession {
     if (this.#started || !this.current()) return
     this.#started = true
     try {
+      if (this.#genuine) {
+        if (this.#binding.v !== 2) throw Error('Assignment binding v2 required')
+        const expected = await assignmentSetDigest(
+          { farmId: this.#binding.farm_id, agentId: this.#binding.agent_id },
+          this.#genuine.assignmentRefs,
+        )
+        if (!this.current()) return
+        if (
+          expected.count !== this.#binding.assignment_count ||
+          expected.digest !== this.#binding.assignment_digest
+        )
+          throw Error('Assignment binding mismatch')
+      }
       const proof = await this.#options.signProof(this.#binding)
       if (!this.current()) return
       const wire = encodeRtcProof(proof)

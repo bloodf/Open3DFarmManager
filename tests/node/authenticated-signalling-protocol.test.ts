@@ -311,6 +311,9 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
   const origin = 'https://' + '"'.repeat(248)
   const binding = RtcSessionBinding.parse({
     ...f.binding,
+    v: 2,
+    assignment_count: 16,
+    assignment_digest: 'A'.repeat(43),
     account_id: 'a'.repeat(128),
     origin,
     audience: 'a'.repeat(128),
@@ -322,7 +325,7 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
     'connector',
     f.connector.privateKey,
   )
-  const proof = { v: 1, role: 'connector', binding, signature }
+  const proof = { v: binding.v, role: 'connector', binding, signature }
   const wire = encodeRtcProof(proof)
   assert.ok(
     Buffer.byteLength(wire) > 2048,
@@ -342,7 +345,10 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
   })
   assert.deepEqual(
     Object.keys(binding).sort(),
-    Object.keys(RtcSessionBinding.shape).sort(),
+    Object.keys(
+      (await import('../../packages/farm-protocol/src/rtc-session-binding.ts'))
+        .RtcSessionBindingV2.shape,
+    ).sort(),
   )
   assert.ok(Buffer.byteLength(conservative) < 4096)
   assert.equal(MAX_RTC_PROOF_WIRE_BYTES, 8192)

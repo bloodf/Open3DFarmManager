@@ -12,7 +12,8 @@ import {
 } from '../../../../packages/farm-protocol/src/browser-transport-proof.ts'
 import { CredentialProofChallenge } from '../../../../packages/farm-protocol/src/credential-proof.ts'
 import {
-  RtcSessionBinding,
+  RtcSessionBindingV2,
+  type RtcSessionBinding,
   rtcSdpHash,
   rtcDtlsFingerprint,
   type RtcPeerRole,
@@ -32,8 +33,10 @@ const Scope = z.strictObject({
   keyId: BrowserDeviceUuid,
 })
 export type SignallingScope = z.infer<typeof Scope>
-const shape = RtcSessionBinding.shape
+const shape = RtcSessionBindingV2.shape
 const Authority = z.strictObject({
+  assignment_count: shape.assignment_count,
+  assignment_digest: shape.assignment_digest,
   farm_id: shape.farm_id,
   agent_id: shape.agent_id,
   account_id: shape.account_id,
@@ -633,9 +636,9 @@ export class SignallingCoordinator {
             if (!(await this.revalidate(c)))
               throw new Error('Denied after SDP hashing')
             const { validUntil: _, ...pins } = c.authority
-            const binding = RtcSessionBinding.parse({
+            const binding = RtcSessionBindingV2.parse({
               ...pins,
-              v: 1,
+              v: 2,
               purpose: 'read-only-rtc',
               transport_id: c.id,
               browser_nonce: c.browserChallenge.nonce,

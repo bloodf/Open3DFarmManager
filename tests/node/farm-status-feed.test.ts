@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto'
@@ -41,8 +42,18 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     ),
     nonce = () => randomBytes(32).toString('base64url'),
     now = Date.now()
+  const assignments = await assignmentSetDigest(
+    { farmId: scope.farmId, agentId },
+    refs.map(({ assignmentId, agentId, printerKey }) => ({
+      assignmentId,
+      agentId,
+      printerKey,
+    })),
+  )
   const binding = {
-    v: 1 as const,
+    v: 2 as const,
+    assignment_count: assignments.count,
+    assignment_digest: assignments.digest,
     purpose: 'read-only-rtc' as const,
     transport_id: randomUUID(),
     farm_id: scope.farmId,

@@ -364,7 +364,7 @@ export class ReadonlyBrowserPeer {
       lifetimeDeadline: this.#lifetimeDeadline,
       signProof: async (context) =>
         BrowserRtcProof.parse({
-          v: 1,
+          v: context.v,
           role: 'browser',
           binding: context,
           signature: await signRtcSessionProof(

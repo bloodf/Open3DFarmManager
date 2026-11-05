@@ -1,12 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
+import { canonicalize } from '../../packages/farm-protocol/src/canonical.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
   RtcSessionBinding,
   ConnectorRtcProof,
   verifyRtcSessionProof,
+  rtcSessionProofPayload,
+  encodeRtcProof,
+  decodeRtcProof,
+  MAX_RTC_PROOF_WIRE_BYTES,
 } from '../../packages/farm-protocol/src/rtc-session-binding.ts'
 
 async function fixture() {
@@ -52,6 +57,60 @@ async function fixture() {
   })
   return { identity, binding, expectedAgentId }
 }
+
+test('v1 bytes remain exact; v2 envelope and domain cannot be downgraded', async () => {
+  const { identity, binding, expectedAgentId } = await fixture()
+  assert.equal(
+    new TextDecoder().decode(rtcSessionProofPayload(binding, 'connector')),
+    'Open3DFarmManager/rtc-session-proof/v1\0connector\0' +
+      canonicalize(binding),
+  )
+  const v2 = RtcSessionBinding.parse({
+    ...binding,
+    v: 2,
+    assignment_count: 16,
+    assignment_digest: randomBytes(32).toString('base64url'),
+  })
+  const proof = identity.signRtcSessionProof({ binding: v2, expectedAgentId })
+  assert.equal(proof.v, 2)
+  assert.equal(
+    new TextDecoder().decode(rtcSessionProofPayload(v2, 'connector')),
+    'Open3DFarmManager/rtc-session-proof/v2\0connector\0' + canonicalize(v2),
+  )
+  assert.equal(
+    await verifyRtcSessionProof(v2, 'connector', proof.signature),
+    true,
+  )
+  assert.equal(
+    await verifyRtcSessionProof(binding, 'connector', proof.signature),
+    false,
+  )
+  assert.equal(
+    await verifyRtcSessionProof(v2, 'browser', proof.signature),
+    false,
+  )
+  assert.throws(() => ConnectorRtcProof.parse({ ...proof, v: 1 }))
+  assert.throws(() => ConnectorRtcProof.parse({ ...proof, binding }))
+  assert.equal(
+    await verifyRtcSessionProof(
+      { ...v2, assignment_count: 15 },
+      'connector',
+      proof.signature,
+    ),
+    false,
+  )
+  assert.equal(
+    await verifyRtcSessionProof(
+      { ...v2, assignment_digest: randomBytes(32).toString('base64url') },
+      'connector',
+      proof.signature,
+    ),
+    false,
+  )
+  const wire = encodeRtcProof(proof)
+  assert.deepEqual(decodeRtcProof(wire), proof)
+  assert.ok(Buffer.byteLength(wire) <= MAX_RTC_PROOF_WIRE_BYTES)
+})
 
 test('encapsulated identity returns a strict Connector proof verified by the real protocol without private export', async () => {
   const { identity, binding, expectedAgentId } = await fixture()

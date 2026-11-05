@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
   runSynchronous,
@@ -86,8 +87,8 @@ export class FarmStatusSender {
         return
       }
       this.#unsubscribeTerminal = unsubscribeTerminal
-      const unsubscribe = this.#client.subscribeVerifiedAdmission((admission) =>
-        this.admit(admission),
+      const unsubscribe = this.#client.subscribeVerifiedAdmission(
+        (admission) => void this.admit(admission),
       )
       if (this.#terminal) unsubscribe()
       else this.#unsubscribe = unsubscribe
@@ -113,7 +114,7 @@ export class FarmStatusSender {
     }
     return true
   }
-  private admit(input: VerifiedRtcAdmission) {
+  private async admit(input: VerifiedRtcAdmission) {
     if (!this.current()) return
     if (this.#admission) {
       this.close('admission-replacement')
@@ -126,6 +127,22 @@ export class FarmStatusSender {
         admission.binding.agent_id,
       )
       this.#admission = admission
+      this.schedule(admission.deadlineMonoMs)
+      if (admission.binding.v !== 2)
+        throw Error('Assignment binding v2 required')
+      const assignments = await assignmentSetDigest(
+        {
+          farmId: admission.binding.farm_id,
+          agentId: admission.binding.agent_id,
+        },
+        this.#refs,
+      )
+      if (!this.current()) return
+      if (
+        admission.binding.assignment_count !== assignments.count ||
+        admission.binding.assignment_digest !== assignments.digest
+      )
+        throw Error('Assignment binding mismatch')
       if (!this.current()) return
       this.schedule(admission.deadlineMonoMs)
       const provider = this.#open(

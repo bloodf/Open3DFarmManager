@@ -13,54 +13,70 @@ import { PairingProofOrigin, PairingProofAudience } from './pairing-proof.ts'
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const digest = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)
 const fingerprint = z.string().regex(/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/)
-export const RtcSessionBinding = z
-  .strictObject({
-    v: z.literal(1),
-    purpose: z.literal('read-only-rtc'),
-    transport_id: BrowserDeviceUuid,
-    farm_id: BrowserDeviceUuid,
-    agent_id: BrowserDeviceUuid,
-    account_id: BrowserDeviceTextId,
-    key_id: BrowserDeviceUuid,
-    browser_public_key: BrowserDevicePublicKey,
-    browser_thumbprint: digest,
-    connector_public_key_spki: PairingPublicKey,
-    connector_fingerprint: z
-      .string()
-      .regex(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
-    credential_jti: BrowserDeviceUuid,
-    origin: PairingProofOrigin,
-    audience: PairingProofAudience,
-    browser_nonce: digest,
-    connector_nonce: digest,
-    issued_at: time,
-    expires_at: time,
-    commands_enabled: z.literal(false),
-    offer_sha256: digest,
-    answer_sha256: digest,
-    browser_dtls: fingerprint,
-    connector_dtls: fingerprint,
+const bindingFields = z.strictObject({
+  v: z.literal(1),
+  purpose: z.literal('read-only-rtc'),
+  transport_id: BrowserDeviceUuid,
+  farm_id: BrowserDeviceUuid,
+  agent_id: BrowserDeviceUuid,
+  account_id: BrowserDeviceTextId,
+  key_id: BrowserDeviceUuid,
+  browser_public_key: BrowserDevicePublicKey,
+  browser_thumbprint: digest,
+  connector_public_key_spki: PairingPublicKey,
+  connector_fingerprint: z
+    .string()
+    .regex(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+  credential_jti: BrowserDeviceUuid,
+  origin: PairingProofOrigin,
+  audience: PairingProofAudience,
+  browser_nonce: digest,
+  connector_nonce: digest,
+  issued_at: time,
+  expires_at: time,
+  commands_enabled: z.literal(false),
+  offer_sha256: digest,
+  answer_sha256: digest,
+  browser_dtls: fingerprint,
+  connector_dtls: fingerprint,
+})
+const validLifetime = (value: { issued_at: number; expires_at: number }) =>
+  value.expires_at > value.issued_at &&
+  value.expires_at - value.issued_at <= 30000
+export const RtcSessionBindingV1 = bindingFields.refine(validLifetime)
+export type RtcSessionBindingV1 = z.infer<typeof RtcSessionBindingV1>
+export const RtcSessionBindingV2 = bindingFields
+  .extend({
+    v: z.literal(2),
+    assignment_count: z.number().int().min(1).max(16),
+    assignment_digest: digest,
   })
-  .refine(
-    (value) =>
-      value.expires_at > value.issued_at &&
-      value.expires_at - value.issued_at <= 30000,
-  )
+  .refine(validLifetime)
+export type RtcSessionBindingV2 = z.infer<typeof RtcSessionBindingV2>
+export const RtcSessionBinding = z.discriminatedUnion('v', [
+  RtcSessionBindingV1,
+  RtcSessionBindingV2,
+])
 export type RtcSessionBinding = z.infer<typeof RtcSessionBinding>
 const signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/)
-export const BrowserRtcProof = z.strictObject({
-  v: z.literal(1),
-  role: z.literal('browser'),
-  binding: RtcSessionBinding,
-  signature,
-})
+const proofFor = <R extends 'browser' | 'connector'>(role: R) =>
+  z.discriminatedUnion('v', [
+    z.strictObject({
+      v: z.literal(1),
+      role: z.literal(role),
+      binding: RtcSessionBindingV1,
+      signature,
+    }),
+    z.strictObject({
+      v: z.literal(2),
+      role: z.literal(role),
+      binding: RtcSessionBindingV2,
+      signature,
+    }),
+  ])
+export const BrowserRtcProof = proofFor('browser')
 export type BrowserRtcProof = z.infer<typeof BrowserRtcProof>
-export const ConnectorRtcProof = z.strictObject({
-  v: z.literal(1),
-  role: z.literal('connector'),
-  binding: RtcSessionBinding,
-  signature,
-})
+export const ConnectorRtcProof = proofFor('connector')
 export type ConnectorRtcProof = z.infer<typeof ConnectorRtcProof>
 /** Independent of the 2 KiB RTC application-frame limit. A 32 KiB pending-byte
  * budget can hold at most four maximum-sized proof envelopes.
@@ -68,10 +84,7 @@ export type ConnectorRtcProof = z.infer<typeof ConnectorRtcProof>
  * permits 256 UTF-16 units (at most 1536 JSON-escaped bytes); every other variable
  * string is bounded ASCII. The schema-bound regression test accounts for all fields. */
 export const MAX_RTC_PROOF_WIRE_BYTES = 8192
-const RtcProof = z.discriminatedUnion('role', [
-  BrowserRtcProof,
-  ConnectorRtcProof,
-])
+const RtcProof = z.union([BrowserRtcProof, ConnectorRtcProof])
 export type RtcProof = z.infer<typeof RtcProof>
 export function encodeRtcProof(input: unknown): string {
   const wire = canonicalize(RtcProof.parse(input))
@@ -136,11 +149,14 @@ export function rtcSessionProofPayload(
 ): Uint8Array<ArrayBuffer> {
   if (role !== 'browser' && role !== 'connector')
     throw new Error('Invalid peer role')
+  const binding = RtcSessionBinding.parse(input)
   return new TextEncoder().encode(
-    'Open3DFarmManager/rtc-session-proof/v1\0' +
+    'Open3DFarmManager/rtc-session-proof/v' +
+      binding.v +
+      '\0' +
       role +
       '\0' +
-      canonicalize(RtcSessionBinding.parse(input)),
+      canonicalize(binding),
   )
 }
 export async function rtcBindingFromDescriptions(

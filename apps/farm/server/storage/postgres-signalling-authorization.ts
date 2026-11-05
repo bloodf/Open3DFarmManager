@@ -1,3 +1,7 @@
+import {
+  assignmentSetDigest,
+  RtcAssignmentRef,
+} from '../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import { z } from 'zod'
 import type { Sql, TransactionSql } from 'postgres'
 import {
@@ -52,6 +56,13 @@ const Credential = z.strictObject({
   audience: z.string(),
   issued_at: time,
   expires_at: time,
+})
+const Assignment = z.strictObject({
+  id: BrowserDeviceUuid,
+  farm_id: BrowserDeviceUuid,
+  agent_id: BrowserDeviceUuid,
+  printer_key: RtcAssignmentRef.shape.printerKey,
+  revoked_at: z.null(),
 })
 const ConnectorScope = z.strictObject({
   agentId: BrowserDeviceUuid,
@@ -280,7 +291,31 @@ export class PostgresSignallingAuthorization
       this.connector(tx, scope.agentId, scope.farmId, observedAt),
     ])
     if (!connector || browser.thumbprint !== key.thumbprint) return null
+    // connector() holds enrollment SHARE through digesting and final session/time
+    // checks. Maintained register/revoke take enrollment UPDATE before any write,
+    // including an insert into an initially empty set. Do not filter by caller refs.
+    const rows =
+      await tx`SELECT id, farm_id, agent_id, printer_key, revoked_at FROM farm.printer_assignments WHERE farm_id = ${scope.farmId}::uuid AND agent_id = ${scope.agentId}::uuid AND revoked_at IS NULL ORDER BY id LIMIT 17`
+    if (!rows.length || rows.length > 16) return null
+    const assignments = z.array(Assignment).safeParse([...rows])
+    if (
+      !assignments.success ||
+      assignments.data.some(
+        (row) => row.farm_id !== scope.farmId || row.agent_id !== scope.agentId,
+      )
+    )
+      return null
+    const assignmentSet = await assignmentSetDigest(
+      { farmId: scope.farmId, agentId: scope.agentId },
+      assignments.data.map((row) => ({
+        assignmentId: row.id,
+        agentId: row.agent_id,
+        printerKey: row.printer_key,
+      })),
+    )
     return {
+      assignment_count: assignmentSet.count,
+      assignment_digest: assignmentSet.digest,
       farm_id: scope.farmId,
       agent_id: scope.agentId,
       account_id: accountId,

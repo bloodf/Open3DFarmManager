@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IncomingMessage } from 'node:http'
@@ -101,7 +102,19 @@ async function fixture(
     farm = randomUUID(),
     keyId = randomUUID(),
     jti = randomUUID()
+  const assignments = await assignmentSetDigest(
+    { farmId: farm, agentId: agent },
+    [
+      {
+        assignmentId: randomUUID(),
+        agentId: agent,
+        printerKey: 'fixture-printer',
+      },
+    ],
+  )
   const authority: SignallingAuthority = {
+    assignment_count: assignments.count,
+    assignment_digest: assignments.digest,
     farm_id: farm,
     agent_id: agent,
     key_id: keyId,

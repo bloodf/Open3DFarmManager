@@ -1,3 +1,5 @@
+import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
+import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgres-printer-ownership.ts'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
@@ -52,7 +54,7 @@ export async function testPostgresSignallingAuthorization(
       policy: { idleTimeoutMs: SIGNALLING_IDLE_TIMEOUT_MS },
     }
   }
-  async function fixture() {
+  async function fixture(printerKeys: readonly string[] = ['fixture-printer']) {
     const subject = await actor()
     const identity = new ConnectorIdentity(
       generateKeyPairSync('ed25519').privateKey,
@@ -129,15 +131,27 @@ export async function testPostgresSignallingAuthorization(
       now = await dbNow()
     await admin`INSERT INTO farm.browser_device_keys(key_id,farm_id,account_id,public_key,thumbprint,created_at) VALUES(${keyId}::uuid,${subject.farmId}::uuid,${subject.sessionRecordId},${admin.json(key.publicKey)},${key.thumbprint},${now})`
     await admin`UPDATE farm.browser_device_keys SET proof_at=${now},proof_session_id=${subject.sessionRecordId},status='approved',approved_at=${now},approved_by=${subject.sessionRecordId} WHERE key_id=${keyId}::uuid`
-    return {
-      scope: {
-        sessionRecordId: subject.sessionRecordId,
-        farmId: subject.farmId,
-        agentId: challenge.challenge.agent_id,
-        keyId,
-      },
-      identity,
+    const scope = {
+      sessionRecordId: subject.sessionRecordId,
+      farmId: subject.farmId,
+      agentId: challenge.challenge.agent_id,
+      keyId,
     }
+    const assignmentRefs = []
+    for (const printerKey of printerKeys) {
+      const result = await new PostgresPrinterOwnership(admin).register({
+        ...scope,
+        policy: subject.policy,
+        printerKey,
+      })
+      assert.ok(result.ok && result.status === 'active')
+      assignmentRefs.push({
+        assignmentId: result.assignmentId,
+        agentId: scope.agentId,
+        printerKey,
+      })
+    }
+    return { scope, identity, assignmentRefs }
   }
   const valid = await fixture()
   const before = (
@@ -146,6 +160,12 @@ export async function testPostgresSignallingAuthorization(
   const accepted = await reader().authorize(valid.scope)
   assert.ok(accepted.ok)
   assert.equal(accepted.authority.account_id, valid.scope.sessionRecordId)
+  const expectedAssignments = await assignmentSetDigest(
+    valid.scope,
+    valid.assignmentRefs,
+  )
+  assert.equal(accepted.authority.assignment_count, expectedAssignments.count)
+  assert.equal(accepted.authority.assignment_digest, expectedAssignments.digest)
   assert.equal(
     accepted.authority.connector_fingerprint,
     valid.identity.fingerprint,
@@ -697,6 +717,265 @@ export async function testPostgresSignallingAuthorization(
   })
   checks.push(
     'reader-before-session-revoke has proven row contention and next context observes terminal revoke',
+  )
+
+  // Migration 0019 exposes only immutable identity/scope plus active tombstones.
+  for (const column of [
+    'id',
+    'farm_id',
+    'agent_id',
+    'printer_key',
+    'revoked_at',
+  ]) {
+    const granted =
+      await runtime`SELECT has_column_privilege(current_user,'farm.printer_assignments',${column},'SELECT') AS allowed`
+    assert.equal(granted[0]?.allowed, true)
+  }
+  for (const column of ['created_at', 'created_by', 'revoked_by']) {
+    const denied =
+      await runtime`SELECT has_column_privilege(current_user,'farm.printer_assignments',${column},'SELECT') AS allowed`
+    assert.equal(denied[0]?.allowed, false)
+  }
+  await runtime`SELECT id,farm_id,agent_id,printer_key,revoked_at FROM farm.printer_assignments LIMIT 1`
+  await assert.rejects(
+    runtime`SELECT created_by FROM farm.printer_assignments LIMIT 0`,
+    /permission denied/i,
+  )
+  await assert.rejects(
+    runtime`UPDATE farm.printer_assignments SET revoked_at=revoked_at WHERE false`,
+    /permission denied/i,
+  )
+  await assert.rejects(
+    runtime`DELETE FROM farm.printer_assignments WHERE false`,
+    /permission denied/i,
+  )
+  await assert.rejects(
+    runtime`TRUNCATE farm.printer_assignments`,
+    /permission denied/i,
+  )
+  await assert.rejects(
+    runtime`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) SELECT id,farm_id,agent_id,printer_key,created_at,created_by FROM farm.printer_assignments WHERE false`,
+    /permission denied/i,
+  )
+  checks.push(
+    'assignment scope has five SELECT columns only, no hidden audit columns or mutation capability',
+  )
+
+  const emptyAssignments = await fixture([])
+  assert.deepEqual(await reader().authorize(emptyAssignments.scope), {
+    ok: false,
+    reason: 'denied',
+  })
+  const tooManyAssignments = await fixture(
+    Array.from({ length: 17 }, (_, i) => `printer-${i}`),
+  )
+  assert.deepEqual(await reader().authorize(tooManyAssignments.scope), {
+    ok: false,
+    reason: 'denied',
+  })
+  const edgeKeys = [
+    'e\u0301',
+    'é',
+    ' 打印机\n ',
+    '😀'.repeat(64),
+    ...Array.from({ length: 12 }, (_, i) => `edge-${i}`),
+  ]
+  const edgeAssignments = await fixture(edgeKeys)
+  const edgeRead = await reader().authorize(edgeAssignments.scope)
+  assert.ok(edgeRead.ok)
+  const edgeDigest = await assignmentSetDigest(
+    edgeAssignments.scope,
+    edgeAssignments.assignmentRefs,
+  )
+  assert.equal(edgeRead.authority.assignment_count, 16)
+  assert.equal(edgeRead.authority.assignment_digest, edgeDigest.digest)
+  checks.push(
+    'complete assignment count denies empty and 17th rows; 16 exact Unicode identities match shared digest',
+  )
+
+  async function waitForLock(name: string, fragment: string) {
+    const until = Date.now() + 400
+    while (Date.now() < until) {
+      const found =
+        await admin`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name=${name} AND wait_event_type='Lock' AND query LIKE ${'%' + fragment + '%'}`
+      if (Number(found[0]?.n) > 0) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    assert.fail('Expected real database lock contention')
+  }
+  for (const order of ['reader-first', 'writer-first'] as const) {
+    for (const operation of ['insert-empty', 'revoke'] as const) {
+      const subject = await fixture(
+        operation === 'insert-empty' ? [] : ['race-printer'],
+      )
+      const writerActor = await actor()
+      await admin`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${subject.scope.farmId}::uuid,${writerActor.sessionRecordId},'owner')`
+      const writerName =
+        'assignment_scope_writer_' + randomUUID().replaceAll('-', '')
+      const writerSql = postgres({
+        host: '127.0.0.1',
+        port,
+        database: 'fixture',
+        username: 'fixture',
+        password: '',
+        ssl: false,
+        max: 1,
+        connect_timeout: 3,
+        connection: { application_name: writerName },
+      })
+      const writer = new PostgresPrinterOwnership(writerSql)
+      const request = {
+        sessionRecordId: writerActor.sessionRecordId,
+        policy: writerActor.policy,
+        farmId: subject.scope.farmId,
+        agentId: subject.scope.agentId,
+        printerKey: 'race-printer',
+      }
+      let release: () => void = () => {}
+      let ready: () => void = () => {},
+        rejectReady: (error: unknown) => void = () => {}
+      const gated = new Promise<void>((resolve, reject) => {
+        ready = resolve
+        rejectReady = reject
+      })
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const holding = admin
+        .begin(async (tx) => {
+          if (order === 'reader-first')
+            await tx`SELECT jti FROM farm.connector_credentials WHERE agent_id=${subject.scope.agentId}::uuid FOR UPDATE`
+          else
+            await tx`LOCK TABLE farm.printer_assignments IN ACCESS EXCLUSIVE MODE`
+          ready()
+          await gate
+        })
+        .catch((error) => {
+          rejectReady(error)
+          throw error
+        })
+      void holding.catch(() => {})
+      let reading:
+        | ReturnType<PostgresSignallingAuthorization['authorize']>
+        | undefined
+      let writing: ReturnType<PostgresPrinterOwnership['register']> | undefined
+      try {
+        await gated
+        const change = () =>
+          operation === 'insert-empty'
+            ? writer.register(request)
+            : writer.revoke({
+                ...request,
+                expectedAssignmentId: subject.assignmentRefs[0]!.assignmentId,
+              })
+        if (order === 'reader-first') {
+          reading = reader().authorize(subject.scope)
+          await waitForLock(applicationName, 'farm.connector_credentials')
+          writing = change()
+          await waitForLock(writerName, 'farm.connector_enrollments')
+        } else {
+          writing = change()
+          await waitForLock(writerName, 'farm.printer_assignments')
+          reading = reader().authorize(subject.scope)
+          await waitForLock(applicationName, 'farm.connector_enrollments')
+        }
+      } finally {
+        release()
+        await Promise.allSettled([
+          holding,
+          reading ?? Promise.resolve(),
+          writing ?? Promise.resolve(),
+        ])
+        await writerSql.end({ timeout: 2 })
+      }
+      await holding
+      if (reading === undefined || writing === undefined)
+        throw new Error('Both contention operations must have started')
+      const initial = await reading,
+        changed = await writing
+      assert.ok(changed.ok)
+      if (order === 'reader-first') {
+        assert.equal(initial.ok, operation === 'revoke')
+        if (initial.ok) assert.equal(initial.authority.assignment_count, 1)
+      } else assert.equal(initial.ok, operation === 'insert-empty')
+      const next = await reader().authorize(subject.scope)
+      assert.equal(next.ok, operation === 'insert-empty')
+      if (operation === 'revoke') {
+        // Same key with a fresh immutable assignment ID must change the pin.
+        assert.ok(initial.ok || order === 'writer-first')
+        const replacement = await new PostgresPrinterOwnership(admin).register({
+          ...request,
+          sessionRecordId: subject.scope.sessionRecordId,
+        })
+        assert.ok(replacement.ok)
+        assert.notEqual(
+          replacement.assignmentId,
+          subject.assignmentRefs[0]!.assignmentId,
+        )
+        const fresh = await reader().authorize(subject.scope)
+        assert.ok(fresh.ok)
+        const prior = await assignmentSetDigest(
+          subject.scope,
+          subject.assignmentRefs,
+        )
+        assert.notEqual(fresh.authority.assignment_digest, prior.digest)
+      }
+      checks.push(
+        `maintained ${order} ${operation} has proven enrollment contention and exact post-commit assignment pins`,
+      )
+    }
+  }
+
+  // Deliberately demonstrate the stated trust boundary, not an extra guarantee:
+  // trusted direct writer SQL can bypass the maintained enrollment UPDATE order.
+  const bypass = await fixture([])
+  let releaseBypass: () => void = () => {},
+    readyBypass: () => void = () => {},
+    rejectBypass: (error: unknown) => void = () => {}
+  const bypassGate = new Promise<void>((resolve) => {
+    releaseBypass = resolve
+  })
+  const bypassReady = new Promise<void>((resolve, reject) => {
+    readyBypass = resolve
+    rejectBypass = reject
+  })
+  const bypassHolding = admin
+    .begin(async (tx) => {
+      await tx`SELECT agent_id FROM farm.connector_enrollments WHERE agent_id=${bypass.scope.agentId}::uuid FOR SHARE`
+      readyBypass()
+      await bypassGate
+    })
+    .catch((error) => {
+      rejectBypass(error)
+      throw error
+    })
+  void bypassHolding.catch(() => {})
+  let bypassWrite: Promise<unknown> | undefined
+  let bypassTimer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await bypassReady
+    bypassWrite = admin.begin(async (tx) => {
+      await tx`SET LOCAL ROLE farm_printer_ownership`
+      await tx`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES(${randomUUID()}::uuid,${bypass.scope.farmId}::uuid,${bypass.scope.agentId}::uuid,'direct-trusted-writer',${await dbNow()},${bypass.scope.sessionRecordId})`
+    })
+    await Promise.race([
+      bypassWrite,
+      new Promise<never>((_, reject) => {
+        bypassTimer = setTimeout(
+          () => reject(Error('Direct writer unexpectedly serialized')),
+          400,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(bypassTimer)
+    releaseBypass()
+    await Promise.allSettled([bypassHolding, bypassWrite ?? Promise.resolve()])
+  }
+  await bypassHolding
+  await bypassWrite
+  checks.push(
+    'explicit trusted direct-SQL writer bypass is demonstrated; only maintained writer lock protocol is claimed',
   )
 
   await admin`UPDATE farm.memberships SET revoked_at=${await dbNow()} WHERE farm_id=${valid.scope.farmId}::uuid AND account_id=${valid.scope.sessionRecordId}`

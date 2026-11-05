@@ -130,7 +130,7 @@ export class ConnectorIdentity {
     )
       throw new Error('RTC binding does not match trusted Connector identity')
     return ConnectorRtcProof.parse({
-      v: 1,
+      v: binding.v,
       role: 'connector',
       binding,
       signature: sign(

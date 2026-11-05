@@ -1,3 +1,4 @@
+import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID, randomBytes } from 'node:crypto'
@@ -98,7 +99,16 @@ async function fixture() {
     agentId: randomUUID(),
     keyId: randomUUID(),
   }
+  const assignments = await assignmentSetDigest(scope, [
+    {
+      assignmentId: randomUUID(),
+      agentId: scope.agentId,
+      printerKey: 'fixture-printer',
+    },
+  ])
   const authority: SignallingAuthority = {
+    assignment_count: assignments.count,
+    assignment_digest: assignments.digest,
     farm_id: scope.farmId,
     agent_id: scope.agentId,
     key_id: scope.keyId,
@@ -291,7 +301,12 @@ test('opaque handles and two real proofs admit only bounded metadata and exact r
     }
     assert.equal(f.browserEndpoint.bindings.length, 1)
     assert.deepEqual(f.browserEndpoint.bindings, f.connectorEndpoint.bindings)
+    assert.equal(f.browserEndpoint.bindings[0]?.v, 2)
     assert.equal(f.browserEndpoint.bindings[0]?.commands_enabled, false)
+    const bound = f.browserEndpoint.bindings[0]
+    assert.ok(bound?.v === 2)
+    assert.equal(bound.assignment_count, f.authority.assignment_count)
+    assert.equal(bound.assignment_digest, f.authority.assignment_digest)
     assert.equal(f.browserEndpoint.bindings[0]?.expires_at, 31000)
     f.coordinator.receive(
       f.open.handle,
@@ -486,5 +501,43 @@ test('initial authority-read expiry and disposal close endpoints before late adm
     assert.equal(await opening, null)
     f.coordinator.dispose()
     assert.equal(f.clock.tasks.size, 0)
+  }
+})
+
+test('assignment count or digest changes close rather than renew scope', async () => {
+  for (const change of [
+    (a: SignallingAuthority) => ({
+      ...a,
+      assignment_count: a.assignment_count + 1,
+    }),
+    (a: SignallingAuthority) => ({ ...a, assignment_digest: nonce() }),
+  ]) {
+    const f = await fixture()
+    try {
+      await f.admit()
+      f.change(change(f.authority))
+      f.clock.advance(5000)
+      await flush()
+      assert.equal(f.browserEndpoint.closed, 1)
+      assert.equal(f.connectorEndpoint.closed, 1)
+      assert.equal(f.clock.tasks.size, 0)
+    } finally {
+      f.coordinator.dispose()
+    }
+  }
+})
+
+test('authority without complete assignment pins cannot open a production context', async () => {
+  for (const field of ['assignment_count', 'assignment_digest']) {
+    const f = await fixture()
+    try {
+      // Deliberately corrupt the storage response at runtime without a typed
+      // compatibility path: strict boundary parsing must deny legacy authority.
+      Reflect.deleteProperty(f.authority, field)
+      assert.equal(await f.coordinator.open(f.scope, f.browserEndpoint), null)
+      assert.equal(f.browserEndpoint.bindings.length, 0)
+    } finally {
+      f.coordinator.dispose()
+    }
   }
 })

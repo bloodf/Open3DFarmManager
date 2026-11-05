@@ -38,6 +38,17 @@ The runtime JSON accepts one additional optional key:
 }
 ```
 
+### Migrating an existing version 1 configuration
+
+This change is incompatible with the earlier keyring-only version 1 `pause` section.
+Keeping that old section causes strict configuration parsing to reject Connector startup,
+before telemetry starts. Before upgrading, either remove the entire optional `pause`
+section to continue read-only operation, or provision all four signalling values:
+`endpoint`, `origin`, `audience`, and `credentialAudience`. Provision the two audiences
+independently from their respective server owners; do not infer or copy one from the other.
+Adding these settings does not enable product pause or establish runtime acceptance.
+Private and external configurations have not been inspected for migration needs.
+
 An absent `pause` key means no authority. The read then performs no cryptographic work, opens no
 socket and starts no runtime task. A present `pause` key is parsed strictly by
 `packages/connector/src/config/pause.ts` and returned as a deeply immutable value. The parsed

@@ -50,7 +50,8 @@ async function fixture(
     token: 'fixture-token',
     identity,
   }
-  let now = 100,
+  const startedAt = performance.now()
+  let now = startedAt,
     wall = Date.now(),
     closed = 0,
     peerClosed = 0
@@ -171,6 +172,7 @@ async function fixture(
     })
   }
   return {
+    startedAt,
     releasePeer,
     scope,
     client,
@@ -263,7 +265,7 @@ test('fresh TLS-phase challenges pin scope and permit generation gaps; RTC waits
     })
     assert.equal(f.sent[4]?.t, 'rtc.offer')
     assert.equal(f.input()?.expectedAgentId, f.scope.agentId)
-    assert.ok((f.input()?.authDeadline ?? Infinity) <= 8100)
+    assert.ok((f.input()?.authDeadline ?? Infinity) <= f.startedAt + 8000)
     await f.push({
       v: 1,
       t: 'rtc.answer',

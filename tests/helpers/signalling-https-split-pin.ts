@@ -6,6 +6,7 @@ const allowed = new Set([
   'tests/helpers/signalling-https-acceptance.ts',
   'tests/helpers/signalling-https-process.ts',
   'tests/node/signalling-https-process.test.ts',
+  'tests/node/signalling-https-proxy.test.ts',
   'tests/helpers/signalling-https-split-pin.ts',
   'tests/node/signalling-https-split-pin.test.ts',
 ])

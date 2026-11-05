@@ -513,8 +513,17 @@ export async function runSignallingHttpsAcceptance(input: {
       ),
     )
     sockets.push(browserPeer)
+    browserPeer.socket.once('unexpected-response', (_request, response) => {
+      const status = response.statusCode
+      console.error(
+        `[fixture-browser-upgrade-status] ${Number.isInteger(status) && status! >= 100 && status! <= 599 ? status : 'invalid'}`,
+      )
+      response.resume()
+      browserPeer.socket.terminate()
+    })
     console.error('[fixture-stage] browser-proof')
     await opened(browserPeer.socket)
+    console.error('[fixture-stage] browser-opened')
     browserPeer.send({
       v: 1,
       t: 'browser.begin',
@@ -522,12 +531,14 @@ export async function runSignallingHttpsAcceptance(input: {
       agent_id: claim.agent_id,
       key_id: challenge.key_id,
     })
+    console.error('[fixture-stage] browser-begin-sent')
     const browserChallenge = await browserPeer.next()
     if (
       !('t' in browserChallenge) ||
       browserChallenge.t !== 'browser.challenge'
     )
       throw new Error('Expected browser proof challenge')
+    console.error('[fixture-stage] browser-challenge-received')
     browserPeer.send({
       v: 1,
       t: 'browser.proof',
@@ -536,6 +547,7 @@ export async function runSignallingHttpsAcceptance(input: {
         keyPair.privateKey,
       ),
     })
+    console.error('[fixture-stage] browser-proof-sent')
     const contextRequest = await machine.next()
     if (
       !('t' in contextRequest) ||

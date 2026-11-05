@@ -105,7 +105,9 @@ test('TLS proxy forwards raw upgrade bytes over the actual loopback socket', asy
           if (bytes.includes('\r\n\r\nPAYLOAD')) {
             clearTimeout(timer)
             resolve(bytes)
-            socket.end()
+            socket.end(
+              'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+            )
           }
         })
       })
@@ -118,8 +120,23 @@ test('TLS proxy forwards raw upgrade bytes over the actual loopback socket', asy
     })
     try {
       await once(client, 'secureConnect')
+      let response = ''
+      client.on('data', (chunk: Buffer) => {
+        response += chunk.toString('latin1')
+      })
+      const ended = once(client, 'end')
       client.write(expected)
       assert.equal(await received, expected)
+      await Promise.race([
+        ended,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('response timed out')), 3000),
+        ),
+      ])
+      assert.equal(
+        response,
+        'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+      )
     } finally {
       client.destroy()
     }

@@ -21,6 +21,7 @@ test('split pin rejects production changes, removed files and dirty inputs', asy
     git('config', 'user.name', 'fixture')
     await mkdir(join(root, 'scripts'), { recursive: true })
     await mkdir(join(root, 'apps'), { recursive: true })
+    await mkdir(join(root, 'tests/node'), { recursive: true })
     await writeFile(join(root, '.gitignore'), 'scripts/hidden.ts\n')
     await writeFile(join(root, 'scripts/test-signalling-https.ts'), 'old')
     await writeFile(join(root, 'apps/app.ts'), 'app')
@@ -28,6 +29,10 @@ test('split pin rejects production changes, removed files and dirty inputs', asy
     git('commit', '-m', 'base')
     const base = git('rev-parse', 'HEAD')
     await writeFile(join(root, 'scripts/test-signalling-https.ts'), 'new')
+    await writeFile(
+      join(root, 'tests/node/signalling-https-proxy.test.ts'),
+      'proxy fixture',
+    )
     git('add', '.')
     git('commit', '-m', 'fixture')
     const head = git('rev-parse', 'HEAD')

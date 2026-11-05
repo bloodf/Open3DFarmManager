@@ -503,3 +503,14 @@ any Docker call, creates no directory and exits with code 1.
 Example 12: a programmatic caller passes an unpinned image or an observation
 window above 90 000 ms. The run refuses with the phase `settings` before any
 Docker call.
+
+### Capture loss and session identity
+
+The runner supplies the unchanged observer's `truncated` event when its capture
+loses bytes, reaches the container log line limit, drops malformed observer
+records, or exceeds the analyzer's event limit. It reserves one of the 4097
+analyzer event slots for this marker. The report records the accepted and
+invalid record counts, event overflow, and whether the marker reached the
+analyzer. Repeated `start` events for a session ID refuse analysis because
+observer processes can reuse IDs after a restart. This does not establish that
+a capture contains only one observer process.

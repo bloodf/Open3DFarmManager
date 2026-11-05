@@ -1223,8 +1223,9 @@ export function boundCapture(text, limit, truncated = false) {
     slice = bytes.subarray(bytes.length - limit)
     wasTruncated = true
   }
-  slice = dropTrailingPartialLine(slice)
-  return { text: slice.toString('utf8'), truncated: wasTruncated }
+  const complete = dropTrailingPartialLine(slice)
+  if (complete.length !== slice.length) wasTruncated = true
+  return { text: complete.toString('utf8'), truncated: wasTruncated }
 }
 
 function dropTrailingPartialLine(buffer) {
@@ -1263,6 +1264,31 @@ export function splitObserverRecords(text) {
     dropped += 1
   }
   return { text: kept.join('\n'), dropped }
+}
+
+// The unchanged analyzer owns classification. Give it its own loss marker,
+// while reserving one of its 4097 slots for that marker when needed.
+export function prepareAnalyzerInput(text, truncated = false) {
+  const split = splitObserverRecords(text)
+  const lines = split.text.split('\n').filter((line) => line.startsWith(OBSERVER_PREFIX))
+  const starts = new Set()
+  let reusedSession = false
+  for (const line of lines) {
+    const event = JSON.parse(line.slice(OBSERVER_PREFIX.length))
+    if (event.event === 'start' && Number.isInteger(event.session) && event.session > 0) {
+      if (starts.has(event.session)) reusedSession = true
+      starts.add(event.session)
+    }
+  }
+  const overflow = lines.length > 4097
+  const loss = truncated || split.dropped > 0 || overflow
+  const marker = `${OBSERVER_PREFIX}{"event":"truncated"}`
+  let selected = lines
+  if (loss) {
+    selected = lines.filter((line) => JSON.parse(line.slice(OBSERVER_PREFIX.length)).event !== 'truncated').slice(0, 4096)
+    selected.push(marker)
+  }
+  return { text: selected.join('\n') + (selected.length ? '\n' : ''), accepted: lines.length, dropped: split.dropped, reusedSession, overflow, notified: loss }
 }
 
 function containerJoin(directory, name) {
@@ -1340,7 +1366,7 @@ async function readRoutingSource(docker, container, candidate, limit) {
     )
     if (result.status !== 0)
       return { available: false, text: '', truncated: false }
-    const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit
+    const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit || result.stdout.split('\n').length - (result.stdout.endsWith('\n') ? 1 : 0) >= CONTAINER_LOG_LINE_LIMIT
     const bounded = boundCapture(result.stdout, limit, truncated)
     return { available: true, text: bounded.text, truncated: bounded.truncated }
   }
@@ -1414,7 +1440,8 @@ async function captureChildStderr(docker, container, routing, limit) {
 }
 
 async function analyzeCapture(docker, container, capture) {
-  const split = splitObserverRecords(capture.text)
+  const split = prepareAnalyzerInput(capture.text, capture.truncated)
+  if (split.reusedSession) throw diagnostic('observer session ID reuse: merged capture refused', 'analyze')
   const result = await docker.run(
     ['exec', '-i', container, 'python3', OBSERVER_MOUNT_PATH, 'analyze'],
     { input: split.text },
@@ -1434,6 +1461,9 @@ async function analyzeCapture(docker, container, capture) {
   return {
     analysis: validateObserverAnalysis(parsed),
     invalidRecords: split.dropped,
+    acceptedRecords: split.accepted,
+    overflow: split.overflow,
+    truncationNotifiedToAnalyzer: split.notified,
   }
 }
 
@@ -1835,7 +1865,8 @@ export async function runDiagnostic(options) {
     enterStage('analyze')
     let analysis = null
     let analysisError = null
-    let invalidRecords = 0
+    const prepared = prepareAnalyzerInput(capture.text, capture.truncated)
+    let invalidRecords = prepared.dropped
     if (capture.available && capture.observerRecords > 0) {
       try {
         const analyzed = await analyzeCapture(docker, containerName, capture)
@@ -1913,8 +1944,12 @@ export async function runDiagnostic(options) {
         reason: capture.reason,
         bytes: Buffer.byteLength(capture.text, 'utf8'),
         limitBytes: CAPTURE_BYTE_LIMIT,
-        observerRecords: capture.observerRecords,
+        observerRecords: prepared.accepted,
         invalidRecords,
+        sessionIdReused: prepared.reusedSession,
+        eventOverflow: prepared.overflow,
+        overflowReason: prepared.overflow ? 'observer-event-limit-exceeded' : null,
+        truncationNotifiedToAnalyzer: Boolean(analysis && prepared.notified),
         truncated: capture.truncated,
         source: capture.source,
       },

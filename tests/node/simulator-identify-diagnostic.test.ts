@@ -120,6 +120,7 @@ interface DiagnosticModule {
     truncated: boolean
   }
   splitObserverRecords(text: string): { text: string; dropped: number }
+  prepareAnalyzerInput(text: string, truncated?: boolean): { text: string; accepted: number; dropped: number; reusedSession: boolean; overflow: boolean; notified: boolean }
   validateObserverAnalysis(value: unknown): {
     truncated: boolean
     sessions: Record<string, unknown>[]
@@ -1377,9 +1378,9 @@ test('keeps the analysis when the captured stream holds a record that was cut in
     assert.equal(result.observerAnalysis.sessions[0].session, 1)
     assert.equal(
       result.observerAnalysis.sessions[0].classification,
-      'valid-incomplete-identification',
+      'inconclusive-incomplete-capture',
     )
-    assert.equal(result.capture.observerRecords, 4)
+    assert.equal(result.capture.observerRecords, 3)
     assert.equal(
       result.capture.invalidRecords,
       1,
@@ -1940,4 +1941,27 @@ test('resolves a canonical ledger path outside the repository', () => {
   } finally {
     rmSync(external, { recursive: true, force: true })
   }
+})
+
+
+test('real observer treats capture loss and overflow as incomplete', () => {
+  const event = (value: object) => OBSERVER_PREFIX + JSON.stringify(value) + '\n'
+  const records = event({ event: 'start', session: 1 }) +
+    event({ event: 'identify', session: 1, requested: 0, offset: 0, length: 0 }) +
+    event({ event: 'result', session: 1, success: true })
+  for (const [input, truncated] of [
+    [records, true],
+    [records + OBSERVER_PREFIX + '{\n', false],
+    [records + event({ event: 'disconnect', session: 1, counters: {} }).repeat(4100), false],
+  ] as const) {
+    const prepared = diagnostic.prepareAnalyzerInput(input, truncated)
+    assert.equal(prepared.notified, true)
+    assert.ok(prepared.text.trimEnd().split('\n').length <= 4097)
+    const python = spawnSync('python3', [join(diagnostic.REPOSITORY_ROOT, 'infra/sim/experiments/serial_diagnostic.py'), 'analyze'], { input: prepared.text, encoding: 'utf8' })
+    assert.equal(python.status, 0, python.stderr)
+    const analysis = JSON.parse(python.stdout)
+    assert.equal(analysis.truncated, true)
+    assert.ok(analysis.sessions.every((session: { classification: string }) => session.classification === 'inconclusive-incomplete-capture'))
+  }
+  assert.equal(diagnostic.prepareAnalyzerInput(records + event({ event: 'start', session: 1 })).reusedSession, true)
 })

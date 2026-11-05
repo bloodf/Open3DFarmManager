@@ -11,8 +11,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises'
-import { createServer as createHttpsServer } from 'node:https'
-import { request as httpRequest } from 'node:http'
+import { pairingHttpProxy } from '../tests/helpers/pairing-http-proxy.ts'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -76,7 +75,7 @@ const created: string[] = []
 let app: ReturnType<typeof spawn> | undefined
 let test: ReturnType<typeof spawn> | undefined
 let stage = 'setup'
-let proxy: ReturnType<typeof createHttpsServer> | undefined
+let proxy: ReturnType<typeof pairingHttpProxy> | undefined
 try {
   await appendFile(
     ledger!,
@@ -169,42 +168,12 @@ try {
   // Reserve an OS-assigned port for the local HTTPS proxy and keep it bound throughout the run.
   let appPort = 0
   const dropControl = randomBytes(24).toString('hex')
-  let dropped = false
-  proxy = createHttpsServer(
-    { key: await readFile(tlsKey), cert: await readFile(cert) },
-    (req, res) => {
-      const drop =
-        !dropped &&
-        req.url === '/api/connector-pairing/claim' &&
-        req.headers['x-fixture-drop'] === dropControl
-      const headers = { ...req.headers }
-      delete headers['x-fixture-drop']
-      const upstream = httpRequest(
-        {
-          host: '127.0.0.1',
-          port: appPort,
-          path: req.url,
-          method: req.method,
-          headers,
-        },
-        (reply) => {
-          if (drop && reply.statusCode === 200) {
-            dropped = true
-            reply.resume()
-            reply.once('end', () => res.destroy())
-            return
-          }
-          res.writeHead(reply.statusCode ?? 502, reply.headers)
-          reply.pipe(res)
-        },
-      )
-      upstream.on('error', () => {
-        if (!res.headersSent) res.writeHead(502)
-        res.end()
-      })
-      req.pipe(upstream)
-    },
-  )
+  proxy = pairingHttpProxy({
+    key: await readFile(tlsKey),
+    cert: await readFile(cert),
+    upstreamPort: () => appPort,
+    dropControl,
+  })
   proxy.listen(0, '127.0.0.1')
   await once(proxy, 'listening')
   const address = proxy.address()

@@ -135,7 +135,7 @@ export async function connectorSocket(
   }
 }
 type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'> &
-  Partial<Pick<ReadonlyConnectorPeer, 'sendStatus'>>
+  Partial<Pick<ReadonlyConnectorPeer, 'sendStatus' | 'diagnostics'>>
 type PeerOptions = ConstructorParameters<typeof ReadonlyConnectorPeer>[0]
 type Scope = {
   url: string
@@ -595,6 +595,21 @@ export class AuthenticatedConnectorSignallingClient {
   }
   close(reason = 'closed') {
     this.#channel.close(reason)
+  }
+  /** Custom test peer factories cannot supply accepted transport evidence. */
+  diagnostics() {
+    const actual = this.#options.peerFactory
+      ? undefined
+      : this.#peer?.diagnostics?.()
+    return Object.freeze({
+      certificateMatched: actual?.certificateMatched ?? false,
+      sentProofs: actual?.sentProofs ?? 0,
+      receivedProofs: actual?.receivedProofs ?? 0,
+      terminal:
+        this.#channel.snapshot().state === 'readonly' ||
+        actual?.terminal === true,
+      readOnly: true as const,
+    })
   }
   snapshot() {
     return { phase: this.#phase, ...this.#channel.snapshot() }

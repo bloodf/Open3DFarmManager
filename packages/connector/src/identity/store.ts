@@ -34,9 +34,20 @@ import {
   ConnectorRtcProof,
   rtcSessionProofPayload,
 } from '../../../farm-protocol/src/rtc-session-binding.ts'
+import {
+  ControlSessionBinding,
+  ConnectorControlProof,
+  validateControlSessionBinding,
+  controlSessionProofPayload,
+  encodeControlProof,
+} from '../../../farm-protocol/src/control-session-binding.ts'
 
 const RtcProofInput = z.strictObject({
   binding: RtcSessionBinding,
+  expectedAgentId: BrowserDeviceUuid,
+})
+const ControlProofInput = z.strictObject({
+  binding: ControlSessionBinding,
   expectedAgentId: BrowserDeviceUuid,
 })
 
@@ -139,6 +150,40 @@ export class ConnectorIdentity {
         this.#key,
       ).toString('base64url'),
     })
+  }
+  /** Possession proof for a new control peer, never capability or command authorization. */
+  async signControlSessionProof(input: {
+    binding: unknown
+    expectedAgentId: string
+  }): Promise<ConnectorControlProof> {
+    // Snapshot before native crypto awaits. Expected agent comes from trusted enrollment.
+    const parsed = ControlProofInput.parse(input)
+    const binding = await validateControlSessionBinding(parsed.binding)
+    const publicDer = createPublicKey(this.#key).export({
+      format: 'der',
+      type: 'spki',
+    })
+    if (
+      binding.agent_id !== parsed.expectedAgentId ||
+      binding.connector_public_key_spki !== publicDer.toString('base64url') ||
+      binding.connector_fingerprint !==
+        'SHA256:' + createHash('sha256').update(publicDer).digest('base64url')
+    )
+      throw new Error(
+        'Control binding does not match trusted Connector identity',
+      )
+    const proof = ConnectorControlProof.parse({
+      v: 1,
+      role: 'connector',
+      binding,
+      signature: sign(
+        null,
+        controlSessionProofPayload(binding, 'connector'),
+        this.#key,
+      ).toString('base64url'),
+    })
+    encodeControlProof(proof)
+    return proof
   }
   toJSON() {
     return {

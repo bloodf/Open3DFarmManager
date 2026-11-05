@@ -1,5 +1,8 @@
 # Pause authority contract checkpoint
 
+The initial sections retain the original contract-slice scope. The later
+encapsulated-signing section records the subsequent Connector identity addition.
+
 This slice adds pause-only contracts and an internal Connector capability verifier. It does not create an authenticated command path or grant permission to dispatch. Current database authorization, a server issuer, a control transport adapter, and the dispatcher remain separate integration work.
 
 ## Files and contracts
@@ -41,3 +44,25 @@ Verifier tests cover complete issuer, dual-peer, and fresh-admission proof verif
 No SQL, migration, route, runtime admission, driver, durable command journal, dispatch hook, or transport connection is added. Full repository checks remain pending integration because unrelated workspace dependencies are absent. No dependencies were installed, builds run, database or container resources used, network services started, or physical printers contacted for this slice. The coordinator tracks the small local verification artifacts and final cleanup outside the repository.
 
 A future runnable pause gate must connect real login and approved browser keys to current transactional authority, authenticated direct WebRTC, durable replay-before-write, a fixed pause RPC, and fresh observed paused state on an isolated simulator. That acceptance would still leave other Phase 0 command and safety requirements incomplete. Nonextractable browser keys do not prevent hostile same-origin JavaScript from requesting signatures.
+
+## Encapsulated Connector control proof
+
+`ConnectorIdentity.signControlSessionProof({ binding, expectedAgentId })`
+signs the maintained Connector control domain using its existing private
+Ed25519 key. The method snapshots and validates the binding before asynchronous
+key checks, fixes the Connector role, compares the independently supplied
+enrolled agent and derives its own SPKI/fingerprint from the private key.
+It does not export private key material or sign arbitrary command payloads.
+
+Seventeen focused Node tests passed, including existing identity, credential and
+read-only RTC signing tests. New cases cover native signature verification,
+cross-role/domain rejection, foreign identity, malformed keys, input mutation
+across awaits, public-property tampering and a private-export trap. Scoped strict
+TypeScript and formatting passed. The first external TypeScript configuration
+could not locate installed Node/Bun types; the corrected scoped configuration
+uses the existing repository Node types without installing dependencies.
+
+This is a possession-proof method only. The trusted caller still owns current
+enrollment, transcript and actual DTLS verification, control-peer lifetime and
+capability admission. Actual control signalling, browser/issuer composition,
+printing-simulator pause and the final repository gate remain pending.

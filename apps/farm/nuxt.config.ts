@@ -5,6 +5,7 @@ export default defineNuxtConfig({
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
   runtimeConfig: {
     auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
+    connectorInventory: { enabled: false, databaseUrl: '' },
     public: { flags: { farmView: false } },
   },
   typescript: { strict: true },

@@ -38,11 +38,20 @@ function parseScope(value: unknown): Scope {
   }
 }
 const lines = createInterface({ input: process.stdin })
-let queue = Promise.resolve()
+let current = Promise.resolve()
+let busy = false
+let closing = false
 lines.on('line', (line) => {
-  queue = queue.then(async () => {
+  if (closing) return
+  if (busy || line.length > 65536) {
+    closing = true
+    output({ error: 'Fixture IPC capacity exceeded' })
+    lines.close()
+    return
+  }
+  busy = true
+  current = (async () => {
     try {
-      if (line.length > 65536) throw Error('Fixture IPC size limit')
       const message: unknown = JSON.parse(line)
       if (!message || typeof message !== 'object' || !('kind' in message))
         throw Error('Fixture IPC missing kind')
@@ -75,8 +84,18 @@ lines.on('line', (line) => {
             scope,
             privateKey: identity.privateKey,
             remotePublicKey,
-            deadlineMs: 8000,
+            lifetimeMs:
+              'lifetimeMs' in message && typeof message.lifetimeMs === 'number'
+                ? message.lifetimeMs
+                : 30000,
+            deadlineMs:
+              'deadlineMs' in message && typeof message.deadlineMs === 'number'
+                ? message.deadlineMs
+                : 8000,
           })
+          // Fixture fault injection: simulate a missing native gather notification.
+          if ('holdGathering' in message && message.holdGathering === true)
+            active.peer.onGatheringStateChange(() => {})
           output(await active.offer())
           break
         }
@@ -86,6 +105,34 @@ lines.on('line', (line) => {
           await active.answer(message.sdp)
           output({ ok: true })
           break
+        case 'flood': {
+          if (!active) throw Error('Peer missing')
+          const frame = JSON.stringify({
+            kind: 'synthetic-status',
+            value: 'fixture-idle',
+          })
+          let sent = 0
+          let sendFailure: string | undefined
+          for (let i = 0; i < 1200; i++) {
+            try {
+              if (
+                !active.channel.isOpen() ||
+                !active.channel.sendMessage(frame)
+              )
+                break
+              sent++
+            } catch (error) {
+              // Receiver overload closes RTC while this malicious fixture sends.
+              sendFailure =
+                error instanceof Error
+                  ? error.message.slice(0, 64)
+                  : 'fixture-send-failed'
+              break
+            }
+          }
+          output({ sent, ...(sendFailure ? { sendFailure } : {}) })
+          break
+        }
         case 'snapshot':
           output(active?.snapshot())
           break
@@ -102,10 +149,13 @@ lines.on('line', (line) => {
         snapshot: active?.snapshot(),
       })
     }
+  })().finally(() => {
+    busy = false
   })
 })
 lines.on('close', () => {
-  void queue.finally(async () => {
+  closing = true
+  void current.finally(async () => {
     await active?.close()
     cleanup()
   })

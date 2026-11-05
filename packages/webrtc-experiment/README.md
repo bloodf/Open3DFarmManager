@@ -11,6 +11,8 @@ bun test packages/webrtc-experiment/session.test.ts
 node --test packages/webrtc-experiment/interop.test.ts
 ```
 
+O receptor limita o payload bruto da aplicação a 32 KiB e oito frames pendentes, incluindo o ativo, com 2048 bytes UTF-8 por frame e 1024 frames admitidos por sessão. Diagnósticos têm tamanho fixo; sobrecarga e prazo encerram o peer inteiro. O prazo de oito segundos começa na construção, incluindo ofertas abandonadas, e a fixture tem vida total máxima de 30 segundos, sem conceder autorização de produção. Os testes cobrem filas antes do certificado, flood autenticado, expiração e zero provas nos dois sentidos quando o fingerprint SDP é adulterado. Os limites não abrangem alocações anteriores ao callback em SCTP, N-API ou no navegador.
+
 O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPOINT.md) descreve o backend nativo, a revisão de DTLS, o candidato descartado, limites da evidência e o contrato de integração pendente. Consulte também os avisos de dependências. O restante desta página descreve a prova original entre dois peers do Chromium, preservada como comparação.
 
 ## Executar a prova original

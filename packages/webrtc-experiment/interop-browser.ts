@@ -1,5 +1,6 @@
 import {
   SyntheticSession,
+  SYNTHETIC_LIMITS,
   transcript,
   encodeHex,
   decodeHex,
@@ -15,23 +16,48 @@ export type InteropScenario =
   | 'closed'
   | 'tampered-offer'
   | 'tampered-answer'
+  | 'pre-cert-overload'
+  | 'status-flood'
 const key = () =>
   crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify'])
-const browserKey = key()
-const strangerKey = key()
+const browserKey = key(),
+  strangerKey = key()
 let peer: RTCPeerConnection | undefined
 let session: SyntheticSession | undefined
 let oldProof: string | undefined
 let channel: RTCDataChannel | undefined
 let blockedProof: string | undefined
-type CertificateEvidence = {
+let closeCurrent: ((reason: string) => void) | undefined
+let sendCurrent: ((frame: string) => boolean) | undefined
+const STATUS = JSON.stringify({
+  kind: 'synthetic-status',
+  value: 'fixture-idle',
+})
+type Evidence = {
   actualRemoteFingerprint: string | undefined
   fingerprintMatches: boolean
+  receivedRtc: number
+  sent: number
+  rtcProofsSent: number
+  rtcProofsReceived: number
+  closeCount: number
+  receiveEnabled: boolean
+  activationTasks: number
+  sawDtlsFailure: boolean
 }
-let certificateEvidence: CertificateEvidence = {
+const freshEvidence = (): Evidence => ({
   actualRemoteFingerprint: undefined,
   fingerprintMatches: false,
-}
+  receivedRtc: 0,
+  sent: 0,
+  rtcProofsSent: 0,
+  rtcProofsReceived: 0,
+  closeCount: 0,
+  receiveEnabled: true,
+  activationTasks: 0,
+  sawDtlsFailure: false,
+})
+let evidence = freshEvidence()
 export async function publicIdentity() {
   return encodeHex(
     await crypto.subtle.exportKey('spki', (await browserKey).publicKey),
@@ -65,26 +91,84 @@ export async function answer(input: {
 }) {
   dispose()
   blockedProof = undefined
-  const evidence: CertificateEvidence = {
-    actualRemoteFingerprint: undefined,
-    fingerprintMatches: false,
-  }
-  certificateEvidence = evidence
+  const observed = freshEvidence()
+  evidence = observed
   const connection = new RTCPeerConnection({ iceServers: [] })
   peer = connection
-  let localSession: SyntheticSession | undefined
-  let localChannel: RTCDataChannel | undefined
-  let certificateCheck: Promise<boolean> | undefined
-  const checkCertificate = () =>
-    (certificateCheck ??= (async () => {
+  let localSession: SyntheticSession | undefined,
+    localChannel: RTCDataChannel | undefined
+  let terminalReason: string | undefined
+  let activationStarted = false
+  let releaseCertificate: () => void = () => {}
+  // Fixture-only held certificate gate, one task, no per-message awaiters.
+  const certificateGate =
+    input.scenario === 'pre-cert-overload'
+      ? new Promise<void>((resolve) => {
+          releaseCertificate = resolve
+        })
+      : Promise.resolve()
+  let authTimer: ReturnType<typeof setTimeout> | undefined
+  let lifetimeTimer: ReturnType<typeof setTimeout> | undefined
+  const terminal = (reason: string) => {
+    if (terminalReason) return
+    terminalReason = reason
+    observed.receiveEnabled = false
+    observed.closeCount++
+    clearTimeout(authTimer)
+    clearTimeout(lifetimeTimer)
+    if (localChannel) {
+      localChannel.onmessage = null
+      localChannel.onopen = null
+      localChannel.onclose = null
+      localChannel.onerror = null
+    }
+    connection.ondatachannel = null
+    connection.onconnectionstatechange = null
+    localSession?.readonly(reason)
+    releaseCertificate()
+    localChannel?.close()
+    connection.close()
+  }
+  closeCurrent = terminal
+  authTimer = setTimeout(() => terminal('deadline'), SYNTHETIC_LIMITS.authMs)
+  lifetimeTimer = setTimeout(
+    () => terminal('fixture-lifetime'),
+    SYNTHETIC_LIMITS.lifetimeMs,
+  )
+  const send = (frame: string) => {
+    if (terminalReason || !localChannel || localChannel.readyState !== 'open')
+      return false
+    localChannel.send(frame)
+    observed.sent = Math.min(observed.sent + 1, SYNTHETIC_LIMITS.observedEvents)
+    if (frame.startsWith('{"kind":"proof"'))
+      observed.rtcProofsSent = Math.min(
+        observed.rtcProofsSent + 1,
+        SYNTHETIC_LIMITS.observedEvents,
+      )
+    return true
+  }
+  sendCurrent = send
+  const activate = async () => {
+    if (
+      activationStarted ||
+      terminalReason ||
+      !localSession ||
+      localChannel?.readyState !== 'open'
+    )
+      return
+    activationStarted = true
+    observed.activationTasks++
+    try {
+      await certificateGate
+      if (terminalReason) return
       const report = await connection.getStats()
+      if (terminalReason) return
       const stats = new Map<string, unknown>()
       report.forEach((value: unknown, id) => {
         stats.set(id, value)
       })
       let remoteCertificateId: string | undefined
-      for (const entry of stats.values()) {
-        const stat: unknown = entry
+      for (const stat of stats.values()) {
         if (
           stat &&
           typeof stat === 'object' &&
@@ -95,7 +179,7 @@ export async function answer(input: {
         )
           remoteCertificateId = stat.remoteCertificateId
       }
-      const stat: unknown = remoteCertificateId
+      const stat = remoteCertificateId
         ? stats.get(remoteCertificateId)
         : undefined
       if (
@@ -107,60 +191,79 @@ export async function answer(input: {
         stat.fingerprintAlgorithm === 'sha-256' &&
         connection.remoteDescription
       ) {
-        evidence.actualRemoteFingerprint = stat.fingerprint.toUpperCase()
-        evidence.fingerprintMatches =
-          evidence.actualRemoteFingerprint ===
+        observed.actualRemoteFingerprint = stat.fingerprint.toUpperCase()
+        observed.fingerprintMatches =
+          observed.actualRemoteFingerprint ===
           dtlsFingerprint(connection.remoteDescription.sdp)
       }
-      if (!evidence.fingerprintMatches)
-        localSession?.readonly('actual-certificate-mismatch')
-      return evidence.fingerprintMatches
-    })().catch(() => {
-      localSession?.readonly('actual-certificate-unavailable')
-      return false
-    }))
-  let ready: () => void = () => {}
-  const readyPromise = new Promise<void>((resolve) => {
-    ready = resolve
-  })
+      if (!observed.fingerprintMatches) {
+        terminal('actual-certificate-mismatch')
+        return
+      }
+      localSession.activate()
+      await localSession.start()
+    } catch {
+      terminal('actual-certificate-unavailable')
+    }
+  }
   connection.onconnectionstatechange = () => {
+    if (terminalReason) return
+    observed.sawDtlsFailure ||= connection.sctp?.transport.state === 'failed'
     if (
       ['failed', 'disconnected', 'closed'].includes(connection.connectionState)
     )
-      localSession?.readonly('transport-' + connection.connectionState)
+      terminal('transport-' + connection.connectionState)
   }
   connection.ondatachannel = (event) => {
+    if (terminalReason) {
+      event.channel.close()
+      return
+    }
     if (localChannel || event.channel.label !== 'synthetic-node-v1') {
       event.channel.close()
-      localSession?.readonly('unexpected-channel')
+      terminal('unexpected-channel')
       return
     }
     localChannel = event.channel
     channel = localChannel
-    const active = localChannel
-    active.onmessage = (event) => {
-      void readyPromise.then(async () => {
-        if (await checkCertificate()) await localSession?.receive(event.data)
-      })
+    localChannel.onmessage = (event) => {
+      if (terminalReason) return
+      observed.receivedRtc = Math.min(
+        observed.receivedRtc + 1,
+        SYNTHETIC_LIMITS.observedEvents,
+      )
+      if (!localSession) {
+        terminal('message-before-session')
+        return
+      }
+      if (
+        typeof event.data === 'string' &&
+        event.data.length <= SYNTHETIC_LIMITS.frameBytes &&
+        event.data.startsWith('{"kind":"proof"')
+      )
+        observed.rtcProofsReceived = Math.min(
+          observed.rtcProofsReceived + 1,
+          SYNTHETIC_LIMITS.observedEvents,
+        )
+      void localSession.receive(event.data)
     }
-    active.onclose = () => localSession?.readonly('channel-closed')
-    active.onerror = () => localSession?.readonly('channel-error')
-    active.onopen = () => {
-      void readyPromise.then(async () => {
-        if (await checkCertificate()) await localSession?.start()
-      })
+    localChannel.onclose = () => terminal('channel-closed')
+    localChannel.onerror = () => terminal('channel-error')
+    localChannel.onopen = () => {
+      void activate()
     }
-    if (active.readyState === 'open')
-      void readyPromise.then(async () => {
-        if (await checkCertificate()) await localSession?.start()
-      })
+    if (localChannel.readyState === 'open') void activate()
   }
   try {
     await connection.setRemoteDescription(input.offer)
     await connection.setLocalDescription(await connection.createAnswer())
     await gathered(connection)
-    if (!connection.localDescription || !connection.remoteDescription)
-      throw Error('Browser descriptions missing')
+    if (
+      terminalReason ||
+      !connection.localDescription ||
+      !connection.remoteDescription
+    )
+      throw Error('Browser descriptions missing or terminal')
     const binding = transcript(
       input.scope,
       'browser',
@@ -174,8 +277,10 @@ export async function answer(input: {
       false,
       ['verify'],
     )
+    if (terminalReason) throw Error('Browser terminal')
     localSession = new SyntheticSession({
       role: 'browser',
+      waitForTransport: true,
       binding:
         input.scenario === 'substitution'
           ? binding.replace(
@@ -188,34 +293,37 @@ export async function answer(input: {
       ).privateKey,
       remotePublicKey,
       send: (frame) => {
-        const active = localChannel
-        if (!active) throw Error('Browser channel missing')
         if (input.scenario === 'timeout') {
-          if (frame.includes('"kind":"proof"')) blockedProof = frame
+          if (frame.startsWith('{"kind":"proof"')) blockedProof = frame
           return
         }
-        if (frame.includes('"kind":"proof"')) {
+        if (frame.startsWith('{"kind":"proof"')) {
           if (input.scenario === 'replay') {
-            if (!oldProof) throw Error('Replay fixture missing')
-            active.send(oldProof)
+            if (!oldProof || !send(oldProof)) throw Error('Replay send failed')
             return
           }
           if (input.scenario === 'valid') oldProof = frame
         }
-        active.send(frame)
+        if (!send(frame)) throw Error('Browser send failed')
       },
-      onReadonly: () => localChannel?.close(),
-      deadlineMs: 8000,
+      onVerified: () => {
+        clearTimeout(authTimer)
+        authTimer = undefined
+      },
+      onReadonly: () => {
+        const state = localSession?.state
+        terminal(state?.kind === 'readonly' ? state.reason : 'session-readonly')
+      },
     })
     session = localSession
-    ready()
+    if (terminalReason) localSession.readonly(terminalReason)
+    void activate()
     return {
       type: 'answer',
       sdp: connection.localDescription.sdp,
     } satisfies RTCSessionDescriptionInit
   } catch (error) {
-    ready()
-    dispose()
+    terminal('browser-negotiation-failed')
     throw error
   }
 }
@@ -231,35 +339,34 @@ export function snapshot() {
     channel: channel?.readyState,
     iceServers: peer?.getConfiguration().iceServers,
     heldProof: blockedProof !== undefined,
-    ...certificateEvidence,
+    ...evidence,
     expectedRemoteFingerprint: peer?.remoteDescription
       ? dtlsFingerprint(peer.remoteDescription.sdp)
       : undefined,
   }
 }
+/** Bounded malicious-fixture sender; never a Connector application send path. */
+export function flood(count: number) {
+  if (!Number.isInteger(count) || count < 1 || count > 1200)
+    throw Error('Fixture flood limit')
+  let sent = 0
+  for (let i = 0; i < count; i++) {
+    if (!sendCurrent?.(STATUS)) break
+    sent++
+  }
+  return sent
+}
 export function closePeer() {
-  session?.readonly('transport-closed')
-  peer?.close()
+  closeCurrent?.('transport-closed')
 }
 export function attemptAfterReadonly() {
-  const before = session?.sentProofs.length ?? 0
   void session?.start()
-  return { sentStatus: session?.sendStatus() ?? false, before }
+  return { sentStatus: session?.sendStatus() ?? false }
 }
 export function dispose() {
-  session?.dispose()
-  if (channel) {
-    channel.onmessage = null
-    channel.onopen = null
-    channel.onclose = null
-    channel.onerror = null
-    channel.close()
-  }
-  if (peer) {
-    peer.onconnectionstatechange = null
-    peer.ondatachannel = null
-    peer.close()
-  }
+  closeCurrent?.('disposed')
+  closeCurrent = undefined
+  sendCurrent = undefined
   session = undefined
   channel = undefined
   peer = undefined

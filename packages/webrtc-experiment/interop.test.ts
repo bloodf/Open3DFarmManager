@@ -47,6 +47,23 @@ async function until<T>(
   }
   throw Error('Fixture observation deadline')
 }
+function assertBounds(value: unknown) {
+  if (
+    !record(value) ||
+    !record(value.work) ||
+    !Array.isArray(value.accepted) ||
+    !Array.isArray(value.rejected)
+  )
+    throw Error('Missing bounded observation')
+  expect(value.work.maxPending).toBeLessThanOrEqual(8)
+  expect(value.work.maxRetainedBytes).toBeLessThanOrEqual(32768)
+  expect(value.work.admitted).toBeLessThanOrEqual(1024)
+  expect(value.work.pending).toBe(0)
+  expect(value.work.retainedBytes).toBe(0)
+  expect(value.accepted.length).toBeLessThanOrEqual(16)
+  expect(value.rejected.length).toBeLessThanOrEqual(8)
+  expect(JSON.stringify(value).length).toBeLessThan(8192)
+}
 class FixtureProcess {
   process: ChildProcessWithoutNullStreams
   #pending:
@@ -246,6 +263,31 @@ test(
         await expect(
           child.request({ kind: 'answer', sdp: 'invalid-sdp' }),
         ).rejects.toThrow('terminal')
+        const gatheringScope = {
+          session: randomNonce(),
+          browserNonce: randomNonce(),
+          connectorNonce: randomNonce(),
+          browserSpki,
+          connectorSpki,
+        }
+        await expect(
+          child.request({
+            kind: 'offer',
+            scope: gatheringScope,
+            deadlineMs: 100,
+            holdGathering: true,
+          }),
+        ).rejects.toThrow('Adapter terminal')
+        expect(await child.request({ kind: 'snapshot' })).toMatchObject({
+          state: { kind: 'readonly', reason: 'deadline' },
+          connection: 'closed',
+          resources: {
+            closeCount: 1,
+            receiveEnabled: false,
+            authTimer: false,
+            lifetimeTimer: false,
+          },
+        })
         const abandonedScope = {
           session: randomNonce(),
           browserNonce: randomNonce(),
@@ -253,11 +295,31 @@ test(
           browserSpki,
           connectorSpki,
         }
-        await child.request({ kind: 'offer', scope: abandonedScope })
-        expect(await child.request({ kind: 'close' })).toMatchObject({
-          state: { kind: 'readonly', reason: 'transport-closed' },
-          accepted: [],
+        await child.request({
+          kind: 'offer',
+          scope: abandonedScope,
+          deadlineMs: 300,
         })
+        const expiredOffer = await until(
+          () =>
+            child
+              ? child.request({ kind: 'snapshot' })
+              : Promise.reject(Error('Child missing')),
+          readonly,
+        )
+        expect(expiredOffer).toMatchObject({
+          state: { kind: 'readonly', reason: 'deadline' },
+          connection: 'closed',
+          accepted: [],
+          resources: {
+            closeCount: 1,
+            receiveEnabled: false,
+            authTimer: false,
+            lifetimeTimer: false,
+          },
+        })
+        expect(await child.request({ kind: 'close' })).toEqual(expiredOffer)
+        expect(await child.request({ kind: 'close' })).toEqual(expiredOffer)
         await expect(
           child.request({ kind: 'answer', sdp: '' }),
         ).rejects.toThrow('terminal')
@@ -266,16 +328,26 @@ test(
             ? ['valid']
             : probe === 'negative'
               ? ['valid', 'wrong-identity', 'substitution', 'replay']
-              : [
-                  'valid',
-                  'wrong-identity',
-                  'substitution',
-                  'replay',
-                  'timeout',
-                  'closed',
-                  'tampered-offer',
-                  'tampered-answer',
-                ]
+              : probe === 'bounds'
+                ? [
+                    'valid',
+                    'pre-cert-overload',
+                    'status-flood',
+                    'tampered-offer',
+                    'tampered-answer',
+                  ]
+                : [
+                    'valid',
+                    'wrong-identity',
+                    'substitution',
+                    'replay',
+                    'timeout',
+                    'closed',
+                    'tampered-offer',
+                    'tampered-answer',
+                    'pre-cert-overload',
+                    'status-flood',
+                  ]
         for (const scenario of scenarios) {
           const scenarioStarted = performance.now()
 
@@ -286,7 +358,11 @@ test(
             browserSpki,
             connectorSpki,
           }
-          const offer = await child.request({ kind: 'offer', scope })
+          const offer = await child.request({
+            kind: 'offer',
+            scope,
+            lifetimeMs: scenario === 'valid' ? 1500 : 30000,
+          })
           const originalSdp = textField(offer, 'sdp')
           const tamper = (sdp: string) =>
             sdp.replace(
@@ -337,7 +413,48 @@ test(
             child
               ? child.request({ kind: 'snapshot' })
               : Promise.reject(Error('Child missing'))
-          if (scenario === 'valid' || scenario === 'closed') {
+          if (scenario === 'pre-cert-overload') {
+            await until(
+              readBrowser,
+              (value) => record(value) && value.channel === 'open',
+            )
+            await child.request({ kind: 'flood' })
+            const browserResult = await until(readBrowser, readonly)
+            const connectorResult = await until(readConnector, readonly)
+            expect(browserResult).toMatchObject({
+              state: { kind: 'readonly', reason: 'pending-limit' },
+              accepted: [],
+              received: 0,
+              rtcProofsSent: 0,
+              activationTasks: 1,
+              fingerprintMatches: false,
+              closeCount: 1,
+              receiveEnabled: false,
+              work: {
+                admitted: 8,
+                maxPending: 8,
+                pending: 0,
+                retainedBytes: 0,
+              },
+            })
+            expect(connectorResult).toMatchObject({
+              state: { kind: 'readonly' },
+              accepted: [],
+              resources: {
+                closeCount: 1,
+                receiveEnabled: false,
+                authTimer: false,
+                lifetimeTimer: false,
+              },
+            })
+            assertBounds(browserResult)
+            expect(await child.request({ kind: 'flood' })).toEqual({ sent: 0 })
+            expect(await readBrowser()).toEqual(browserResult)
+          } else if (
+            scenario === 'valid' ||
+            scenario === 'closed' ||
+            scenario === 'status-flood'
+          ) {
             const connectorResult = await until(readConnector, accepted)
             const browserResult = await until(readBrowser, accepted)
             console.info(
@@ -391,6 +508,63 @@ test(
             expect(['host', 'prflx']).toContain(
               browserResult.candidates?.local ?? '',
             )
+            if (scenario === 'valid') {
+              const expired = await until(readConnector, readonly, 4000)
+              expect(expired).toMatchObject({
+                state: { kind: 'readonly', reason: 'fixture-lifetime' },
+                connection: 'closed',
+                resources: {
+                  closeCount: 1,
+                  receiveEnabled: false,
+                  authTimer: false,
+                  lifetimeTimer: false,
+                },
+              })
+              expect(await until(readBrowser, readonly)).toMatchObject({
+                state: { kind: 'readonly' },
+                connection: 'closed',
+                closeCount: 1,
+                receiveEnabled: false,
+              })
+            }
+            if (scenario === 'status-flood') {
+              await page.evaluate(async () => {
+                const path = '/interop.js'
+                const fixture: typeof import('./interop-browser.ts') =
+                  await import(path)
+                return fixture.flood(1200)
+              })
+              const saturated = await until(readConnector, readonly)
+              const browserClosed = await until(readBrowser, readonly)
+              expect(['pending-limit', 'message-budget']).toContain(
+                reason(saturated),
+              )
+              expect(saturated).toMatchObject({
+                state: { kind: 'readonly' },
+                resources: {
+                  closeCount: 1,
+                  receiveEnabled: false,
+                  authTimer: false,
+                  lifetimeTimer: false,
+                },
+              })
+              assertBounds(saturated)
+              expect(browserClosed).toMatchObject({
+                state: { kind: 'readonly' },
+                closeCount: 1,
+                receiveEnabled: false,
+              })
+              expect(
+                await page.evaluate(async () => {
+                  const path = '/interop.js'
+                  const fixture: typeof import('./interop-browser.ts') =
+                    await import(path)
+                  return fixture.flood(1200)
+                }),
+              ).toBe(0)
+              expect(await readConnector()).toEqual(saturated)
+              expect(await readBrowser()).toEqual(browserClosed)
+            }
             if (scenario === 'closed') {
               await page.evaluate(async () => {
                 const path = '/interop.js'
@@ -451,16 +625,27 @@ test(
             }
             if (scenario === 'tampered-offer')
               expect(browserResult).toMatchObject({
-                dtls: 'failed',
+                sawDtlsFailure: true,
                 accepted: [],
               })
-            if (scenario === 'tampered-answer')
+            if (scenario.startsWith('tampered-')) {
+              for (const result of [connectorResult, browserResult])
+                expect(result).toMatchObject({
+                  state: { kind: 'readonly' },
+                  accepted: [],
+                  rtcProofsSent: 0,
+                  rtcProofsReceived: 0,
+                  receivedRtc: 0,
+                })
               expect(connectorResult).toMatchObject({
-                state: { kind: 'readonly', reason: 'transport-failed' },
                 fingerprintMatches: false,
                 sent: 0,
-                receivedRtc: 0,
               })
+              expect(browserResult).toMatchObject({
+                fingerprintMatches: false,
+                sent: 0,
+              })
+            }
             const after = await page.evaluate(async () => {
               const path = '/interop.js'
               const fixture: typeof import('./interop-browser.ts') =

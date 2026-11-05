@@ -1,0 +1,7 @@
+# Signalling HTTPS acceptance checkpoint
+
+The generated Nuxt Node listener passed the opt-in HTTPS/WSS acceptance fixture at source commit `0c3c7c686a94fd83391ed60da6569e107871f04f`. The private build used the installed Nuxt 4.6.4 kit with the farm application as its root, a literal signalling opt-in, and private build and output directories. Its 455-file output manifest has SHA-256 `3f75753a41d159d4b78503a51f7b0dc32fe8b70985862df5f3dcb0e7547a0ba9`; tracked source and the complete output manifest were checked before and after acceptance.
+
+The isolated PostgreSQL fixture had the official migrations through 0017. The run completed raw upgrade rejections, the integrated Connector TLS handshake, ping and oversize controls, the original admission and signalling lifetime bounds, real Chromium owner and administrator login, browser device registration, Connector pairing, inbox and browser proofs, context proof, and a read-only rendezvous. The acceptance child exited successfully and its output drained before runtime cleanup completed.
+
+This proves the tested signalling admission and rendezvous path. Real Connector-to-browser WebRTC transport remains a separate pending gate. An earlier `869b46e` artifact failed while opening the browser socket; its evidence remains preserved. The cookie-adapter correction was tested in the fresh `0c3c7c6` build. The full `check:all` pass at `8299cfa` predates that correction, and later source commits are not included in this artifact. A full check on the current integrated head remains pending.

@@ -216,3 +216,36 @@ not extend the readiness deadline or grant device access.
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s infra/sim/experiments -p 'test_cpu_throttle_capture.py' -v
 ```
+
+## ARM64 CPU counter observation
+
+A later single run reused the exact retained ARM64 Supervisor configuration,
+image manifest, CPU and memory limits, PID limit, noexec mounts, network
+isolation and 90-second readiness window. The added diagnostic variable was a
+read-only CPU capture process and its read-only helper mount. The capture adds
+load and started after container startup, so it did not observe the earliest
+startup interval. The private cgroup reported `0::/` and a CPU quota of
+`100000 100000`, consistent with one CPU.
+
+The observer recorded 3,672 contiguous identification bytes, a terminal
+response and success. Moonraker first reported ready at 23.62 seconds and
+remained ready in the last sample at 89.83 seconds. Klippy warned that the
+configured 20 MHz MCU was running at approximately 3 MHz and logged clock
+prediction variance resets. No `Timer too close` shutdown was observed during
+this window. These sampled states do not establish complete simulator acceptance.
+
+The 77 CPU samples span approximately 76 seconds. Between the first and last,
+`nr_periods` increased by 760 and `nr_throttled` by 553; `throttled_usec`
+increased by 34,046,653. These are cumulative cgroup counters for all processes
+in the container, not per-process latency or a percentage of elapsed time.
+They demonstrate quota throttling in a run without the observed shutdown. They
+cannot establish whether throttling coincided with, or caused, the previous
+shutdown because that run lacked these counters. Host and VM scheduler delays
+remain unmeasured, and one observed run cannot rule out intermittent failure.
+The next useful comparison is a repeated series that captures the same counters
+in both failing and non-failing runs, with uninstrumented controls and unchanged
+security and readiness limits.
+
+The owned container, fresh volume and newly pulled image were removed. The
+bounded logs, counter samples, exact configuration, transformation and runtime
+metadata remain outside the repository for the unresolved diagnosis.

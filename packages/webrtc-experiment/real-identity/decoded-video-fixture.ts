@@ -17,6 +17,8 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
   #frameId: number | undefined
   #samples: { mediaTime: number; centerX: number; brightPixels: number }[] = []
   #framesDecoded = 0
+  #videoWidth = 0
+  #videoHeight = 0
   #timer: ReturnType<typeof setTimeout> | undefined
   #options: Readonly<{
     admit: (context: Parameters<FixtureOnlyVideoHooks['activate']>[0]) => number
@@ -64,6 +66,8 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
     this.#frameId = this.#video.requestVideoFrameCallback((_, metadata) => {
       if (!this.current()) return
       this.#callbacks++
+      this.#videoWidth = this.#video.videoWidth
+      this.#videoHeight = this.#video.videoHeight
       const context = this.#canvas.getContext('2d', {
         willReadFrequently: true,
       })
@@ -151,6 +155,8 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
       attached: this.#video.srcObject !== null,
       callbacks: this.#callbacks,
       framesDecoded: this.#framesDecoded,
+      videoWidth: this.#videoWidth,
+      videoHeight: this.#videoHeight,
       samples: this.#samples.map((sample) => ({ ...sample })),
     }
   }

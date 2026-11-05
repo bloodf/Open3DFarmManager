@@ -173,8 +173,44 @@ export async function disposeFiniteResources(
     )
 }
 
+export type EncodedFiniteMedia = Readonly<{
+  codec: string
+  width: number
+  height: number
+  totalBytes: number
+  units: readonly Readonly<{
+    data: string
+    keyframe: boolean
+    timestampUs: number
+  }>[]
+}>
+export type FiniteMediaTransport = Readonly<{
+  /** Starts source processes only after BOTH native and browser proof checks. */
+  transmit(
+    input: Readonly<{
+      deadlineMonoMs: number
+      signal: AbortSignal
+      send(
+        unit: Readonly<{
+          data: Uint8Array
+          keyframe: boolean
+          timestampUs: number
+        }>,
+      ): Promise<boolean>
+    }>,
+  ): Promise<void>
+  dispose(): Promise<void>
+}>
+export type FiniteMediaOptions = Readonly<{
+  /** Encoding preflight only, before native allocation; never starts RTSP PLAY. */
+  prepare(encoded: EncodedFiniteMedia): Promise<FiniteMediaTransport>
+}>
+
 /** Manual, explicitly gated phase. No production camera, registry or signalling service. */
-export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
+export async function runFiniteMediaPhase(
+  phase: 'encode' | 'native',
+  options?: FiniteMediaOptions,
+) {
   const entry =
     phase === 'encode'
       ? './moving-h264-source.ts'
@@ -206,6 +242,8 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
     res.writeHead(404)
     res.end()
   })
+  let transport: FiniteMediaTransport | undefined
+  const transportAbort = new AbortController()
   let browser: Browser | undefined,
     child: FixtureProcess | undefined,
     timer: ReturnType<typeof setTimeout> | undefined
@@ -286,6 +324,7 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
       await page.close()
       return
     }
+    transport = await options?.prepare(encoded)
     // Node only in the initial finite-media proof. No native process is started
     // until original fixture encoding above succeeds under the runtime gate.
     child = new FixtureProcess(process.execPath)
@@ -354,6 +393,8 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
       record(before) && record(before.media) && record(before.media.budget),
     )
     assert.equal(before.media.budget.frames, 0)
+    // Parent bound begins BEFORE either peer can activate its independent 5s lease.
+    const transportDeadlineMonoMs = performance.now() + 5000
     await child.request({ kind: 'admit', binding })
     await page.evaluate(async (binding) => {
       const path = '/fixture.js'
@@ -408,23 +449,61 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
       )
       assert.equal(receipt.peer.commands_enabled, false)
     }
-    for (const unit of encoded.units) {
-      assert.deepEqual(await child.request({ kind: 'media', ...unit }), {
-        sent: true,
+    if (transport) {
+      await transport.transmit({
+        deadlineMonoMs: transportDeadlineMonoMs,
+        signal: transportAbort.signal,
+        async send(unit) {
+          if (
+            transportAbort.signal.aborted ||
+            performance.now() >= transportDeadlineMonoMs
+          )
+            return false
+          const outcome = await child!.request({
+            kind: 'media',
+            data: Buffer.from(unit.data).toString('base64'),
+            keyframe: unit.keyframe,
+            timestampUs: unit.timestampUs,
+          })
+          return (
+            !transportAbort.signal.aborted &&
+            performance.now() < transportDeadlineMonoMs &&
+            record(outcome) &&
+            outcome.sent === true
+          )
+        },
       })
-      // Source-side finite pacing, deliberately below10fps. No native pacer/queue.
-      await new Promise((resolve) => setTimeout(resolve, 110))
+    } else {
+      for (const unit of encoded.units) {
+        assert.deepEqual(await child.request({ kind: 'media', ...unit }), {
+          sent: true,
+        })
+        // Source-side finite pacing, deliberately below10fps. No native pacer/queue.
+        await new Promise((resolve) => setTimeout(resolve, 110))
+      }
     }
     const decoded = await observe(
       webRead,
       (value) =>
         record(value.video) &&
         typeof value.video.framesDecoded === 'number' &&
-        value.video.framesDecoded >= 3 &&
+        value.video.framesDecoded >= (transport ? 30 : 3) &&
         typeof value.video.callbacks === 'number' &&
-        value.video.callbacks >= 3,
+        value.video.callbacks >= (transport ? 30 : 3),
     )
     assert.ok(record(decoded.video) && Array.isArray(decoded.video.samples))
+    if (transport) {
+      assert.equal(decoded.video.videoWidth, 128)
+      assert.equal(decoded.video.videoHeight, 96)
+      assert.ok(
+        typeof decoded.video.framesDecoded === 'number' &&
+          decoded.video.framesDecoded >= 30,
+      )
+      assert.ok(
+        typeof decoded.video.callbacks === 'number' &&
+          decoded.video.callbacks >= 30,
+      )
+    }
     const centers = new Set<number>()
     for (const sample of decoded.video.samples) {
       assert.ok(record(sample))
@@ -483,7 +562,9 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
     throw error
   } finally {
     clearTimeout(timer)
+    transportAbort.abort()
     await disposeFiniteResources([
+      () => transport?.dispose(),
       () => child?.stop(),
       () => browser?.close(),
       async () => {

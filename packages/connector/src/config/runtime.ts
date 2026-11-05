@@ -11,11 +11,13 @@ import {
 } from './local.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
+import { RuntimeSignalling } from './signalling.ts'
 
 const Runtime = z.strictObject({
   version: z.literal(1),
   collection: LocalCollectorConfigSchema,
   assignments: z.array(z.unknown()).min(1).max(16),
+  signalling: RuntimeSignalling.optional(),
   telemetry: z
     .strictObject({
       endpoint: z.string().min(1).max(2048),
@@ -71,6 +73,11 @@ export function readAgentRuntimeConfig(
         'Runtime assignment mapping does not match local collection',
       )
   }
-  return { collection, telemetry: input.telemetry, assignments }
+  return {
+    collection,
+    telemetry: input.telemetry,
+    assignments,
+    signalling: input.signalling,
+  }
 }
 export type AgentRuntimeConfig = ReturnType<typeof readAgentRuntimeConfig>

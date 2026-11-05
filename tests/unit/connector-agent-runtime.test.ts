@@ -114,15 +114,19 @@ function delivered(output: string): number {
     }, 0)
 }
 
-async function fixture() {
+async function fixture(signalling = false) {
   const temp = temporary()
   const data = join(temp.path, 'data')
   const identity = loadOrCreateIdentity(data)
   const farm = randomUUID(),
     agent = randomUUID(),
     assignment = randomUUID()
-  const token = 'aaa.bbb.ccc',
-    audience = 'agent-fixture'
+  const token = signalling
+    ? 'e30.' +
+      Buffer.from(JSON.stringify({ jti: randomUUID() })).toString('base64url') +
+      '.AA'
+    : 'aaa.bbb.ccc'
+  const audience = 'agent-fixture'
   const cert = join(temp.path, 'cert.pem'),
     key = join(temp.path, 'key.pem')
   const openssl = Bun.spawn(
@@ -209,6 +213,7 @@ async function fixture() {
     ReturnType<typeof TelemetryProofChallenge.parse>
   >()
   const failures: string[] = []
+  let signallingRequests = 0
   let holding = false
   const releases = new Set<() => void>()
   const cloud = Bun.serve({
@@ -217,6 +222,10 @@ async function fixture() {
     tls: { cert: readFileSync(cert), key: readFileSync(key) },
     async fetch(request) {
       cloudRequests++
+      if (new URL(request.url).pathname === '/api/signalling/connector') {
+        signallingRequests++
+        return new Response('Fixture signalling unavailable', { status: 503 })
+      }
       try {
         const body = await request.text()
         if (request.headers.get('authorization') !== 'Bearer ' + token)
@@ -363,6 +372,9 @@ async function fixture() {
     get cloudRequests() {
       return cloudRequests
     },
+    get signallingRequests() {
+      return signallingRequests
+    },
     accept() {
       accepting = true
     },
@@ -433,6 +445,41 @@ function seedScoped(server: Awaited<ReturnType<typeof fixture>>, now: number) {
     now,
   })
 }
+
+test('actual run composes default WSS retries with collection and joins on SIGTERM', async () => {
+  const server = await fixture(true)
+  const origin = new URL(server.configuration.telemetry.endpoint).origin
+  writeFileSync(
+    server.configPath,
+    JSON.stringify({
+      ...server.configuration,
+      signalling: {
+        endpoint:
+          origin.replace('https:', 'wss:') + '/api/signalling/connector',
+        origin,
+        audience: 'agent-fixture',
+        retryMinMs: 100,
+        retryMaxMs: 100,
+      },
+    }),
+  )
+  const running = server.launch()
+  try {
+    await running.until(
+      () =>
+        server.signallingRequests >= 2 && lines(running.output, 'queued') > 0,
+    )
+    const result = await running.stop()
+    expect(result.code).toBe(0)
+    expect(server.moonRequests).toBeGreaterThan(0)
+    expect(server.sockets.size).toBe(0)
+    expect(lines(result.output, 'agent-summary')).toBe(1)
+    expect(result.output).not.toContain(server.credential.approval.device_token)
+  } finally {
+    await running.close()
+    await server.close()
+  }
+}, 20000)
 
 test('standalone collection rechecks scope under lock before recovery', async () => {
   const server = await fixture()
@@ -761,6 +808,8 @@ test('expired or mismatched credentials fail before any queue or network', async
     'fifo',
     'missing-identity',
     'audience',
+    'signalling-origin',
+    'signalling-token',
   ]) {
     const server = await fixture()
     try {
@@ -773,6 +822,22 @@ test('expired or mismatched credentials fail before any queue or network', async
       if (mode === 'audience')
         server.configuration.telemetry.audience = 'invalid audience'
       server.save()
+      if (mode.startsWith('signalling-')) {
+        writeFileSync(
+          server.configPath,
+          JSON.stringify({
+            ...server.configuration,
+            signalling: {
+              endpoint: 'wss://farm.example/api/signalling/connector',
+              origin:
+                mode === 'signalling-origin'
+                  ? 'https://foreign.example'
+                  : 'https://farm.example',
+              audience: 'farm',
+            },
+          }),
+        )
+      }
       if (mode === 'oversized')
         writeFileSync(server.credentialPath, ' '.repeat(16 * 1024 + 1))
       if (mode === 'public') chmodSync(server.credentialPath, 0o644)

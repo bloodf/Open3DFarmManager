@@ -4,6 +4,8 @@ import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
 import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
+import { credentialLookupId } from '../config/signalling.ts'
+import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
 
 type AgentDiagnostic =
   | CollectionDiagnostic
@@ -60,6 +62,9 @@ export async function runConnectorAgent(input: {
     Date.now(),
   )
   const config = readAgentRuntimeConfig(input.configPath, credential)
+  const lookupId = config.signalling
+    ? credentialLookupId(credential.device_token)
+    : undefined
   if (input.signal.aborted) return
   bootstrapNetworking()
   const { createAuthenticatedTelemetrySender } = await import(
@@ -103,9 +108,74 @@ export async function runConnectorAgent(input: {
     controller.abort()
   }
   const tasks: Promise<void>[] = []
+  const refs = config.assignments.map((assignment) => ({
+    assignmentId: assignment.assignment_id,
+    agentId: assignment.agent_id,
+    printerKey: assignment.printer_key,
+  }))
+  let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
+    snapshots = config.signalling
+      ? createFarmSnapshotSource({ assignmentRefs: refs })
+      : undefined
     const { collectIntoQueue } = await import('./collect.ts')
     const { drainTelemetryOnce } = await import('../cloud/drain.ts')
+    if (config.signalling && lookupId && snapshots) {
+      const { AuthenticatedConnectorSignallingClient } = await import(
+        '../cloud/authenticated-signalling-client.ts'
+      )
+      const { FarmStatusSender } = await import(
+        '../webrtc/farm-status-sender.ts'
+      )
+      const { runSignallingLifecycle } = await import('./signalling.ts')
+      const signalling = config.signalling
+      const source = snapshots
+      tasks.push(
+        runSignallingLifecycle({
+          signal,
+          credentialExpiresAt: credential.expires_at,
+          retryMinMs: signalling.retryMinMs,
+          retryMaxMs: signalling.retryMaxMs,
+          createSession(onTerminal) {
+            const client = new AuthenticatedConnectorSignallingClient(
+              {
+                url: signalling.endpoint,
+                origin: signalling.origin,
+                audience: signalling.audience,
+                agentId: credential.agent_id,
+                farmId: credential.farm_id,
+                jti: lookupId,
+                token: credential.device_token,
+                identity,
+              },
+              { genuineStatus: { assignmentRefs: refs }, onTerminal },
+            )
+            let sender: InstanceType<typeof FarmStatusSender>
+            try {
+              sender = new FarmStatusSender({
+                client,
+                assignmentRefs: refs,
+                openSnapshots: source.open,
+                signal,
+              })
+            } catch (error) {
+              client.close('runtime-setup-failed')
+              // Preserve the cleanup promise in the lifecycle's owned session.
+              return {
+                start: () => Promise.reject(error),
+                close: () => client.close(),
+                dispose: (ms) => client.dispose(ms),
+              }
+            }
+            return {
+              start: () => sender.start(),
+              close: (reason) => sender.close(reason),
+              dispose: (ms) => client.dispose(ms),
+            }
+          },
+        }).catch(fail),
+      )
+    }
     async function drainLoop() {
       let backoff = config.telemetry.retryMinMs
       let notBefore = 0
@@ -204,6 +274,12 @@ export async function runConnectorAgent(input: {
         queue,
         signal,
         onDiagnostic: diagnostic,
+        ...(snapshots
+          ? {
+              onRawObservation: snapshots.observe,
+              onRawUnavailable: snapshots.invalidate,
+            }
+          : {}),
       }).catch(fail),
     )
     tasks.push(drainLoop().catch(fail))
@@ -212,6 +288,7 @@ export async function runConnectorAgent(input: {
     fail(error)
   } finally {
     controller.abort()
+    snapshots?.close()
     await Promise.all(tasks)
     try {
       queue.close()

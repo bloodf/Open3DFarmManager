@@ -163,6 +163,95 @@ export async function testPostgresPairing(
       'hashed-pre-farm-codes-owner-admin-only-fingerprint-binding-single-approval-single-claim',
     )
 
+    // Invalid account and session state cannot approve even a valid request.
+    const guardedCode = await start()
+    for (const state of ['disabled', 'version', 'revoked'] as const) {
+      const subject = await member()
+      if (state === 'disabled')
+        await admin`UPDATE farm.session_accounts SET disabled = true WHERE id = ${subject.sessionRecordId}`
+      else if (state === 'version')
+        await admin`UPDATE farm.session_accounts SET session_version = session_version + 1 WHERE id = ${subject.sessionRecordId}`
+      else
+        await admin`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE id = ${subject.sessionRecordId}`
+      assert.deepEqual(await decision(guardedCode, subject), {
+        ok: false,
+        reason: 'denied',
+      })
+    }
+    const actualFarmOwner = await member()
+    const otherFarmOwner = await member()
+    assert.deepEqual(
+      await decision(guardedCode, {
+        ...actualFarmOwner,
+        farmId: otherFarmOwner.farmId,
+      }),
+      {
+        ok: false,
+        reason: 'denied',
+      },
+    )
+    assert.equal((await decision(guardedCode, actualFarmOwner)).ok, true)
+    checks.push('disabled-revoked-version-and-two-existing-farms-denied')
+
+    for (const expiry of ['idle', 'absolute'] as const) {
+      const code = await start()
+      const subject = await member()
+      const before = now
+      if (expiry === 'idle') subject.policy.idleTimeoutMs = 10
+      now += expiry === 'idle' ? 10 : 2000000
+      assert.deepEqual(await decision(code, subject), {
+        ok: false,
+        reason: 'denied',
+      })
+      assert.equal(
+        Number(
+          (
+            await admin`SELECT revoked_at::float8 AS revoked_at FROM farm.account_sessions WHERE id = ${subject.sessionRecordId}`
+          )[0]?.revoked_at,
+        ),
+        now,
+      )
+      now = before
+      assert.deepEqual(await decision(code, subject), {
+        ok: false,
+        reason: 'denied',
+      })
+    }
+    checks.push(
+      'idle-and-absolute-expiry-persist-revocation-across-clock-regression',
+    )
+
+    // Invalid authorization does not wait for a locked pairing request.
+    const lockedCode = await start()
+    const unauthorized = await member('viewer')
+    const heldUnauthorized = await admin.reserve()
+    await heldUnauthorized`BEGIN`
+    await heldUnauthorized`SELECT agent_id FROM farm.pairing_requests WHERE user_code_hash = encode(sha256(convert_to(${lockedCode.user_code}, 'UTF8')), 'hex') FOR UPDATE`
+    try {
+      assert.deepEqual(await decision(lockedCode, unauthorized), {
+        ok: false,
+        reason: 'denied',
+      })
+    } finally {
+      await heldUnauthorized`ROLLBACK`
+      heldUnauthorized.release()
+    }
+    const nearExpiry = await start()
+    now = nearExpiry.expires_at - 1
+    assert.equal(
+      (await pairing.claim({ device_code: nearExpiry.device_code })).ok,
+      true,
+    )
+    assert.equal(
+      Number(
+        (
+          await admin`SELECT next_poll_at::float8 AS n FROM farm.pairing_requests WHERE device_code_hash = encode(sha256(convert_to(${nearExpiry.device_code}, 'UTF8')), 'hex')`
+        )[0]?.n,
+      ),
+      nearExpiry.expires_at,
+    )
+    checks.push('authorization-before-request-lock-and-poll-clamped-to-expiry')
+
     const denied = await start()
     assert.deepEqual(await decision(denied, await member(), 'deny'), {
       ok: true,
@@ -210,6 +299,48 @@ export async function testPostgresPairing(
       blocker.release()
     }
     assert.deepEqual(await race, { ok: false, reason: 'denied' })
+    const downgradeCode = await start()
+    const downgradeOwner = await member()
+    const downgradeGate = await admin.reserve()
+    await downgradeGate`BEGIN`
+    await downgradeGate`UPDATE farm.memberships SET role = 'viewer' WHERE farm_id = ${downgradeOwner.farmId}::uuid`
+    const downgrade = decision(downgradeCode, downgradeOwner)
+    try {
+      await waitForLock('SELECT role, revoked_at')
+    } finally {
+      await downgradeGate`COMMIT`
+      downgradeGate.release()
+    }
+    assert.deepEqual(await downgrade, { ok: false, reason: 'denied' })
+    const sessionWaitCode = await start()
+    const sessionWaitOwner = await member()
+    sessionWaitOwner.policy.idleTimeoutMs = 10
+    const sessionGate = await admin.reserve()
+    await sessionGate`BEGIN`
+    await sessionGate`SELECT agent_id FROM farm.pairing_requests WHERE user_code_hash = encode(sha256(convert_to(${sessionWaitCode.user_code}, 'UTF8')), 'hex') FOR UPDATE`
+    const sessionWait = decision(sessionWaitCode, sessionWaitOwner)
+    try {
+      await waitForLock('FROM farm.pairing_requests')
+      now += 10
+    } finally {
+      await sessionGate`COMMIT`
+      sessionGate.release()
+    }
+    assert.deepEqual(await sessionWait, { ok: false, reason: 'denied' })
+    assert.equal(
+      Number(
+        (
+          await admin`SELECT revoked_at::float8 AS revoked_at FROM farm.account_sessions WHERE id = ${sessionWaitOwner.sessionRecordId}`
+        )[0]?.revoked_at,
+      ),
+      now,
+    )
+    now -= 10
+    assert.deepEqual(await decision(sessionWaitCode, sessionWaitOwner), {
+      ok: false,
+      reason: 'denied',
+    })
+    checks.push('role-downgrade-and-session-expiry-during-lock-wait')
     // Expiry advances while waiting for the request lock, so clock must be sampled afterward.
     const delayed = await start()
     const delayedOwner = await member()

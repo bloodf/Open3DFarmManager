@@ -8,11 +8,11 @@ Migration `0007_pairing_requests` adds separate requests with a fixed 15-minute 
 
 `PostgresPairing.start` limits active requests to 1,000 across instances through a transaction advisory lock. Expired requests release active capacity. Tombstones remain, so this limit does not bound total database storage. A reviewed retention policy and abuse limits are required before public start or approval endpoints.
 
-`decide` locks the account, session, membership and request in that order. It evaluates the session after acquiring those locks and allows only a current owner or admin of the selected farm. The displayed fingerprint must match. Successful approval creates the actual farm-bound enrollment and approves it in the same transaction as the pairing decision and session touch. Denial creates no enrollment. A user code cannot approve again or select a different farm after a decision.
+`decide` locks the account, session, membership and request in that order. It validates the session and membership before acquiring the request lock, then samples the clock and evaluates the locked session again after the wait. Observed idle or absolute session expiry is persisted as terminal revocation. Only a current owner or admin of the selected farm can decide. The displayed fingerprint must match. Successful approval creates the actual farm-bound enrollment and approves it in the same transaction as the pairing decision and session touch. Denial creates no enrollment. A user code cannot approve again or select a different farm after a decision.
 
-`claim` is an internal, single-use metadata handoff. It returns the enrolled agent ID, farm ID, public SPKI and fingerprint only after committing consumption. It checks the enrollment is still approved under a shared row lock and checks expiry again after that lock. Concurrent claims produce at most one success. Pending polls use a five-second interval. Denied, expired and consumed requests cannot return metadata. Approved requests retain their historical decision after expiry, but cannot be claimed.
+`claim` is an internal, single-use metadata handoff. It returns the enrolled agent ID, farm ID, public SPKI and fingerprint only after committing consumption. It checks the enrollment is still approved under a shared row lock and checks expiry again after that lock. Concurrent claims produce at most one success. Pending polls use a five-second interval; the stored next poll time is capped at request expiry. Denied, expired and consumed requests cannot return metadata. Approved requests retain their historical decision after expiry, but cannot be claimed.
 
-The dedicated `farm_pairing_runtime` capability has no login or elevated cluster privileges. It can insert requests, update lifecycle fields, lock authorization records, touch sessions and create or approve enrollments. It cannot edit memberships, account security state, public keys or fingerprints, remove tombstones, or create schema objects. These are database capabilities for a trusted backend, not row isolation from another holder of the same backend credentials.
+The dedicated `farm_pairing_runtime` capability has no login or elevated cluster privileges. It can insert requests, update lifecycle fields, lock authorization records, touch sessions and create or approve enrollments. It cannot edit memberships, account security state, public keys or fingerprints, remove tombstones, or create schema objects. These are database capabilities for a trusted backend, not row isolation from another holder of the same backend credentials. In particular, the role can update enrollment status across rows, including revocation; it must not be given to clients or treated as a substitute for the application authorization checks.
 
 ## Verification
 
@@ -22,10 +22,12 @@ The real PostgreSQL checks passed:
 
 - Hashed codes before farm selection, owner/admin authorization, fingerprint and farm binding, racing approvals and single-use claims.
 - Denial replay, exact expiry deadlines, expiry while waiting for request or enrollment locks, and enrollment revocation before claim.
-- Membership revocation committed while approval waits, and deferred commit failure rolling back both enrollment and approval.
+- Disabled accounts, session-version changes, explicit revocation, idle and absolute expiry persisted across clock regression, and isolation between two existing farms.
+- Membership revocation and role downgrade committed while approval waits, session expiry while the request lock is held, and deferred commit failure rolling back both enrollment and approval.
+- Unauthorized requests return without waiting on the pairing row, and pending poll time is capped at expiry.
 - Restricted-role privileges, database identity and terminal-state guards, concurrent starts at the active-capacity boundary, and closed storage failing closed.
 
-Migration 0007 down/up executed successfully inside a transaction that was rolled back to preserve the shared fixture. Root TypeScript checking and the nine pairing/migration-catalog unit tests passed. `bun run check:all` passed with formatting, root and Nuxt type checks, 190 Bun tests, 95 Node tests, and both production builds. HTTP, proof-of-possession, credential delivery and Connector-to-browser integration remain pending.
+The updated helper passed all 12 reported groups against the disposable PostgreSQL fixture. Migration 0007 down/up executed successfully inside a transaction that was rolled back to preserve the shared fixture. Root TypeScript checking and the nine pairing/migration-catalog unit tests passed. `bun run check:all` passed with formatting, root and Nuxt type checks, 190 Bun tests, 95 Node tests, and both production builds. HTTP, proof-of-possession, credential delivery and Connector-to-browser integration remain pending.
 
 ## Remaining integration
 

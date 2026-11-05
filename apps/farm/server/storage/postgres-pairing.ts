@@ -127,27 +127,48 @@ export class PostgresPairing {
         const sessions = await tx<
           SessionRecord[]
         >`SELECT id, account_id AS "accountId", account_version::float8 AS "accountVersion", created_at::float8 AS "createdAt", last_seen_at::float8 AS "lastSeenAt", absolute_expires_at::float8 AS "absoluteExpiresAt", revoked_at::float8 AS "revokedAt" FROM farm.account_sessions WHERE id = ${input.sessionRecordId} FOR UPDATE`
-        const account = accounts[0]
-        if (!account) return { ok: false, reason: 'denied' }
+        const account = accounts[0] ?? null
+        const record = sessions[0] ?? null
+        const initialNow = this.now()
+        const initial = evaluateSession(
+          input.sessionRecordId,
+          record,
+          account,
+          initialNow,
+          input.policy,
+        )
+        if (!initial.ok) {
+          if (initial.reason === 'expired')
+            await tx`UPDATE farm.account_sessions SET revoked_at = ${initialNow} WHERE id = ${input.sessionRecordId}`
+          return { ok: false, reason: 'denied' }
+        }
         const members =
-          await tx`SELECT role, revoked_at FROM farm.memberships WHERE farm_id = ${request.farm_id}::uuid AND account_id = ${account.id} FOR SHARE`
+          await tx`SELECT role, revoked_at FROM farm.memberships WHERE farm_id = ${request.farm_id}::uuid AND account_id = ${initial.accountId} FOR SHARE`
+        if (
+          !members[0] ||
+          members[0].revoked_at !== null ||
+          !['owner', 'admin'].includes(members[0].role)
+        )
+          return { ok: false, reason: 'denied' }
         const rows = await tx<
           PairingRow[]
         >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, status, farm_id FROM farm.pairing_requests WHERE user_code_hash = ${hash(request.user_code)} FOR UPDATE`
         const now = this.now()
+        if (now < initialNow) return { ok: false, reason: 'denied' }
         const session = evaluateSession(
           input.sessionRecordId,
-          sessions[0] ?? null,
+          record,
           account,
           now,
           input.policy,
         )
+        if (!session.ok) {
+          if (session.reason === 'expired')
+            await tx`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE id = ${input.sessionRecordId}`
+          return { ok: false, reason: 'denied' }
+        }
         const row = rows[0]
         if (
-          !session.ok ||
-          !members[0] ||
-          members[0].revoked_at !== null ||
-          !['owner', 'admin'].includes(members[0].role) ||
           !row ||
           row.status !== 'pending' ||
           row.fingerprint !== request.expected_fingerprint ||
@@ -201,7 +222,7 @@ export class PostgresPairing {
         if (now < row.next_poll_at)
           return { ok: true, status: 'slow_down', retry_after_s: 5 }
         if (row.status === 'pending') {
-          await tx`UPDATE farm.pairing_requests SET next_poll_at = ${now + 5000} WHERE agent_id = ${row.agent_id}::uuid`
+          await tx`UPDATE farm.pairing_requests SET next_poll_at = ${Math.min(now + 5000, row.expires_at)} WHERE agent_id = ${row.agent_id}::uuid`
           return { ok: true, status: 'pending', retry_after_s: 5 }
         }
         const enrolled =

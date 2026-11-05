@@ -39,6 +39,7 @@ export function installSignallingWebSocketBounds(app: unknown): void {
   const nativeLimits = Object.freeze({
     maxPayload: SIGNALLING_NATIVE_MAX_PAYLOAD,
     perMessageDeflate: false,
+    autoPong: false,
   })
   const options = Object.freeze({ ...previous, serverOptions: nativeLimits })
   Object.assign(app.options, { websocket: options })
@@ -53,6 +54,31 @@ export function installSignallingWebSocketBounds(app: unknown): void {
       'WebSocket bounds were not installed before adapter initialization',
     )
   Object.freeze(resolved)
+}
+/** Install synchronously in the open hook before any asynchronous admission.
+ * This short-lived signalling protocol has no native ping heartbeat. Terminate
+ * ping senders rather than queueing automatic replies outside the byte budget. */
+export function installSignallingControlBounds(peer: unknown): void {
+  if (
+    !object(peer) ||
+    !('_internal' in peer) ||
+    !object(peer._internal) ||
+    !('ws' in peer._internal) ||
+    !object(peer._internal.ws)
+  )
+    throw new Error('Unsupported signalling native peer')
+  const socket = peer._internal.ws
+  if (
+    !('_autoPong' in socket) ||
+    socket._autoPong !== false ||
+    !('on' in socket) ||
+    typeof socket.on !== 'function' ||
+    !('terminate' in socket) ||
+    typeof socket.terminate !== 'function'
+  )
+    throw new Error('Native control reply policy unavailable')
+  const terminate = socket.terminate.bind(socket)
+  socket.on('ping', terminate)
 }
 /** Pinned CrossWS 0.3.5 NodeReqProxy. Unknown adapters fail closed; forwarded
  * URL/header representations never substitute for Node's original upgrade input. */

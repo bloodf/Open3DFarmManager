@@ -13,6 +13,7 @@ import {
 } from '../../apps/farm/server/utils/auth/boundary.ts'
 import {
   installSignallingWebSocketBounds,
+  installSignallingControlBounds,
   inspectSignallingUpgrade,
   signallingBrowserSession,
   SIGNALLING_NATIVE_MAX_PAYLOAD,
@@ -122,6 +123,7 @@ test('native limits are installed in the actual H3 cached options before adapter
     SIGNALLING_NATIVE_MAX_PAYLOAD,
   )
   assert.equal(app.websocket.serverOptions.perMessageDeflate, false)
+  assert.equal(app.websocket.serverOptions.autoPong, false)
   assert.equal(Object.isFrozen(app.websocket), true)
   const cached = createApp()
   void cached.websocket
@@ -351,6 +353,88 @@ test('actual upgrade hook unseals the maintained cookie without executing an ord
     assert.equal(httpCalls, 0)
   } finally {
     req.destroy()
+    adapter.closeAll(1000, undefined, true)
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    )
+  }
+})
+
+test('native masked ping burst terminates without automatic pong buffering', async () => {
+  const app = createApp()
+  let delivered = 0
+  app.use(
+    '/ping-test',
+    defineWebSocketHandler({
+      open(peer: unknown) {
+        installSignallingControlBounds(peer)
+      },
+      message() {
+        delivered++
+      },
+    }),
+  )
+  installSignallingWebSocketBounds(app)
+  const adapter = nodeAdapter(app.websocket)
+  const server = createServer(toNodeListener(app))
+  const sockets = new Set<Socket>()
+  server.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  })
+  server.on('upgrade', (req, socket, head) => {
+    void adapter.handleUpgrade(req, socket, head).catch(() => socket.destroy())
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  const req = request({
+    host: '127.0.0.1',
+    port: address.port,
+    path: '/ping-test',
+    headers: {
+      Upgrade: 'websocket',
+      Connection: 'Upgrade',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+    },
+  })
+  let client: Socket | undefined
+  try {
+    const upgraded = deadline(
+      new Promise<{ socket: Socket; head: Buffer }>((resolve, reject) => {
+        req.once('upgrade', (_response, socket, head) =>
+          resolve({ socket, head }),
+        )
+        req.once('error', reject)
+        req.once('response', () => reject(new Error('Upgrade rejected')))
+      }),
+    )
+    req.end()
+    const result = await upgraded
+    client = result.socket
+    let received = result.head.length
+    client.on('data', (chunk) => {
+      received += chunk.length
+    })
+    const closed = deadline(
+      new Promise<void>((resolve) => client!.once('close', () => resolve())),
+    )
+    client.on('error', () => {})
+    // Legal masked pings; the first must terminate, with no control output queued.
+    const ping = Buffer.concat([
+      Buffer.from([0x89, 0xfd]),
+      Buffer.alloc(4),
+      Buffer.alloc(125),
+    ])
+    client.write(Buffer.concat(Array.from({ length: 512 }, () => ping)))
+    await closed
+    assert.equal(received, 0)
+    assert.equal(delivered, 0)
+  } finally {
+    req.destroy()
+    client?.destroy()
     adapter.closeAll(1000, undefined, true)
     for (const socket of sockets) socket.destroy()
     await new Promise<void>((resolve, reject) =>

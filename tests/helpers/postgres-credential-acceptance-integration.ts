@@ -252,10 +252,16 @@ export async function testPostgresCredentialAcceptance(
     const pending = await challenge(protectedItem.request)
     now += 1000
     assert.equal((await acceptor().accept(protectedItem.request)).ok, false)
+    const signatureStart = protectedItem.request.token.lastIndexOf('.') + 1
+    const alteredToken =
+      protectedItem.request.token.slice(0, signatureStart) +
+      (protectedItem.request.token[signatureStart] === 'A' ? 'B' : 'A') +
+      protectedItem.request.token.slice(signatureStart + 1)
+    assert.notEqual(alteredToken, protectedItem.request.token)
     for (const patch of [
       { farmId: randomUUID() },
       { agentId: randomUUID() },
-      { token: protectedItem.request.token.slice(0, -1) + 'A' },
+      { token: alteredToken },
     ]) {
       now += 1000
       assert.equal(
@@ -546,6 +552,39 @@ export async function testPostgresCredentialAcceptance(
     }
     checks.push(
       'both-revocation-acceptance-race-orders-linearize-at-enrollment-no-continued-authority-after-revocation',
+    )
+
+    {
+      const boundary = await issued()
+      const pending = await challenge(boundary.request)
+      now += 1000
+      assert.equal(
+        accepted(await acceptor().accept(signed(boundary.request, pending))),
+        true,
+      )
+      const expiry = boundary.credential.expires_at * 1000
+      let reads = 0
+      const regressing = new PostgresConnectorCredentialAcceptance(
+        sql,
+        acceptanceConfig,
+        () => (++reads === 1 ? expiry : expiry - 2000),
+      )
+      assert.deepEqual(await regressing.issue(boundary.request), {
+        ok: false,
+        reason: 'denied',
+      })
+      const retained = await slot(boundary.credential.jti)
+      assert.equal(Number(retained?.observed_at), expiry)
+      assert.equal(Number(retained?.credential_expired_at), expiry)
+      now = expiry - 2000
+      assert.deepEqual(await acceptor().issue(boundary.request), {
+        ok: false,
+        reason: 'denied',
+      })
+      now = expiry
+    }
+    checks.push(
+      'existing-slot-retains-pre-lock-expiry-despite-post-lock-clock-regression',
     )
 
     for (const phase of [

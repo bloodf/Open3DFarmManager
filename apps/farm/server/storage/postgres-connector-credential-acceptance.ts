@@ -176,18 +176,20 @@ export class PostgresConnectorCredentialAcceptance {
           )[0]
           if (!slot) throw new Error('Missing credential proof slot')
           const now = readNow()
-          if (now < firstNow || now < slot.observed_at) return deny
-          await tx`UPDATE farm.connector_credential_proofs SET observed_at=${now} WHERE jti=${credential.jti}::uuid`
+          const observedAt = Math.max(firstNow, now, slot.observed_at)
+          await tx`UPDATE farm.connector_credential_proofs SET observed_at=${observedAt} WHERE jti=${credential.jti}::uuid`
           const expireCredential = async (observedAt: number) => {
             await tx`UPDATE farm.connector_credential_proofs SET observed_at=${observedAt},credential_expired_at=coalesce(credential_expired_at,${observedAt}),status=CASE WHEN status='pending' THEN 'expired' ELSE status END,consumed_at=CASE WHEN status='pending' THEN ${observedAt} ELSE consumed_at END WHERE jti=${credential.jti}::uuid`
           }
           if (
             slot.credential_expired_at !== null ||
-            credential.expires_at * 1000 <= now
+            credential.expires_at * 1000 <= observedAt
           ) {
-            if (slot.credential_expired_at === null) await expireCredential(now)
+            if (slot.credential_expired_at === null)
+              await expireCredential(observedAt)
             return deny
           }
+          if (now < firstNow || now < slot.observed_at) return deny
           if (now < slot.next_attempt_at)
             return busy(slot.next_attempt_at - now)
           // Bound active cryptographic transactions across processes, without allocating per-request rows.

@@ -55,22 +55,22 @@ func newDescription() (*description.Session, *description.Media) {
 
 // Snapshot contains saturating counters, never source addresses or authority.
 type Snapshot struct {
-	Accepted uint32
-	Rejected uint32
-	Plays uint32
+	Accepted    uint32
+	Rejected    uint32
+	Plays       uint32
 	AccessUnits uint32
-	Packets uint32
-	WireBytes uint32
-	Failed bool
+	Packets     uint32
+	WireBytes   uint32
+	Failed      bool
 }
 
 type counters struct {
-	accepted atomic.Uint32
-	rejected atomic.Uint32
-	plays atomic.Uint32
+	accepted    atomic.Uint32
+	rejected    atomic.Uint32
+	plays       atomic.Uint32
 	accessUnits atomic.Uint32
-	packets atomic.Uint32
-	wireBytes atomic.Uint32
+	packets     atomic.Uint32
+	wireBytes   atomic.Uint32
 }
 
 func increment(counter *atomic.Uint32) {

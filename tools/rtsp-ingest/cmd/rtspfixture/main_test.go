@@ -24,7 +24,7 @@ func TestReadConfigRejectsMalformed(t *testing.T) {
 
 type shortWriter struct{}
 
-func (shortWriter) Write(data []byte) (int, error) { return len(data)-1, nil }
+func (shortWriter) Write(data []byte) (int, error) { return len(data) - 1, nil }
 
 func TestWriteFixedRejectsShortWrite(t *testing.T) {
 	if writeFixed(shortWriter{}, []byte{1, 2}) == nil {

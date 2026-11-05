@@ -37,6 +37,7 @@ export class ReadonlyConnectorPeer {
   #admitted: RtcSessionBinding | undefined
   #session: ReadonlyRtcSession | undefined
   #terminal: string | undefined
+  #offerStarted = false
   #offer: string | undefined
   #answer: string | undefined
   #opened = false
@@ -177,7 +178,8 @@ export class ReadonlyConnectorPeer {
     return true
   }
   async offer() {
-    if (!this.current() || this.#offer) throw Error('Offer unavailable')
+    if (!this.current() || this.#offerStarted) throw Error('Offer unavailable')
+    this.#offerStarted = true
     try {
       this.#peer.setLocalDescription('offer')
       await this.#gathered

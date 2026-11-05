@@ -52,7 +52,13 @@ lines.on('line', (line) => {
             expectedAgentId: input.agent,
             admittedBinding,
           })
-          output({ sdp: await peer.offer() })
+          const first = peer.offer()
+          const duplicate = await peer.offer().then(
+            () => 'unexpected-success',
+            (error: unknown) =>
+              error instanceof Error ? error.message : 'unknown',
+          )
+          output({ sdp: await first, duplicate })
           break
         }
         case 'answer':

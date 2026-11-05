@@ -167,6 +167,8 @@ async function fixture(shortCapability = false) {
     writes = 0,
     allowed = true
   let onRevocationCheck: (() => void) | undefined
+  let onPeerCheck: (() => void) | undefined
+  let onClockSample: (() => void) | undefined
   const journal = openCommandJournal({ directory, clock: () => wall })
   const bindings = createPrinterBindingRegistry({
     allowedOrigins: ['http://127.0.0.1:7125'],
@@ -209,30 +211,6 @@ async function fixture(shortCapability = false) {
   let lateGuard: (() => boolean) | undefined
   let postCommit: (() => void) | undefined
   const driver = {
-    current: (binding: typeof printerBinding) => {
-      if (postCommit) {
-        const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
-        const row = db
-          .prepare(
-            "SELECT count(*) AS n FROM pause_commands WHERE status='write-started'",
-          )
-          .get()
-        db.close()
-        if (row?.n) {
-          const action = postCommit
-          postCommit = undefined
-          action()
-        }
-      }
-      const assignment = readPrinterBinding(binding)
-      return assignment
-        ? {
-            ...state,
-            assignmentId: assignment.assignment_id,
-            printerKey: assignment.printer_key,
-          }
-        : null
-    },
     pauseOnce: async ({ beforeSend }: { beforeSend: () => boolean }) => {
       if (mode === 'hang-before-send') {
         lateGuard = beforeSend
@@ -288,17 +266,38 @@ async function fixture(shortCapability = false) {
         },
       ],
     },
-    clock: { wallNow: () => wall, monotonicNow: () => mono },
+    clock: {
+      wallNow: () => {
+        onClockSample?.()
+        return wall
+      },
+      monotonicNow: () => mono,
+    },
     journal,
     driver,
     localRevocations: {
       check: () => {
+        if (postCommit) {
+          const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
+          const row = db
+            .prepare(
+              "SELECT count(*) AS n FROM pause_commands WHERE status='write-started'",
+            )
+            .get()
+          db.close()
+          if (row?.n) {
+            const action = postCommit
+            postCommit = undefined
+            action()
+          }
+        }
         onRevocationCheck?.()
         return allowed
       },
     },
     resultTimeoutMs: 50,
   })
+  dispatcher.observe(printerBinding, state)
   const controls = await import(
     '../../packages/farm-protocol/src/control-session-binding.ts'
   )
@@ -309,7 +308,10 @@ async function fixture(shortCapability = false) {
     binding: f.binding,
     printerBinding,
     peerGeneration: 1,
-    currentPeerGeneration: () => 1,
+    currentPeerGeneration: () => {
+      onPeerCheck?.()
+      return 1
+    },
   })
   const nonce = admission.challenge.admissionNonce
   const capability = await caps.signPauseCapability(
@@ -362,11 +364,19 @@ async function fixture(shortCapability = false) {
       printer_key,
       moonraker_origin: 'http://127.0.0.1:7125',
     })
+    dispatcher.observe(local, {
+      ...state,
+      assignmentId: assignment_id,
+      printerKey: printer_key,
+    })
     const a = dispatcher.beginAdmission({
       binding,
       printerBinding: local,
       peerGeneration: 1,
-      currentPeerGeneration: () => 1,
+      currentPeerGeneration: () => {
+        onPeerCheck?.()
+        return 1
+      },
     })
     const hash = await controls.controlBindingHash(binding),
       nonce = a.challenge.admissionNonce
@@ -449,6 +459,12 @@ async function fixture(shortCapability = false) {
     handle: result.handle,
     journal,
     directory,
+    setPeerCheck: (action: () => void) => {
+      onPeerCheck = action
+    },
+    setClockSample: (action: () => void) => {
+      onClockSample = action
+    },
     setRevocationCheck: (action: () => void) => {
       onRevocationCheck = action
     },
@@ -466,6 +482,7 @@ async function fixture(shortCapability = false) {
     getWrites: () => writes,
     setState: (value: typeof state) => {
       state = value
+      dispatcher.observe(printerBinding, value)
     },
     getState: () => state,
     advance: (n: number) => {
@@ -815,8 +832,15 @@ test('failed durable write-start commit prevents driver send', async () => {
   }
 })
 
-test('final revocation callback cannot permit a send after abort, close or expiry', async () => {
-  for (const change of ['abort', 'close', 'expiry'] as const) {
+test('final revocation callback cannot permit a send after local state or lifecycle invalidation', async () => {
+  for (const change of [
+    'connection',
+    'idle',
+    'not-ready',
+    'abort',
+    'close',
+    'expiry',
+  ] as const) {
     const f = await fixture(),
       abort = new AbortController()
     const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
@@ -831,6 +855,12 @@ test('final revocation callback cannot permit a send after abort, close or expir
           .get()
         if (!row || ++checks !== 3) return
         triggered = true
+        if (change === 'connection')
+          f.setState({ ...f.getState(), connectionGeneration: 2 })
+        if (change === 'idle')
+          f.setState({ ...f.getState(), printState: 'idle' })
+        if (change === 'not-ready')
+          f.setState({ ...f.getState(), ready: false })
         if (change === 'abort') abort.abort()
         if (change === 'close') f.dispatcher.close()
         if (change === 'expiry') f.advance(5000)
@@ -851,6 +881,77 @@ test('final revocation callback cannot permit a send after abort, close or expir
       )
     } finally {
       db.close()
+      f.cleanup()
+    }
+  }
+})
+
+test('final peer and clock callbacks cannot invalidate the latched printer state unnoticed', async () => {
+  for (const phase of ['peer', 'clock'] as const) {
+    const f = await fixture()
+    const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+    let checks = 0,
+      triggered = false
+    try {
+      f.setRevocationCheck(() => {
+        if (
+          !db
+            .prepare(
+              "SELECT status FROM pause_commands WHERE status = 'write-started'",
+            )
+            .get() ||
+          ++checks !== 3
+        )
+          return
+        const change = () => {
+          triggered = true
+          f.setState({ ...f.getState(), ready: false })
+        }
+        if (phase === 'peer') f.setPeerCheck(change)
+        else f.setClockSample(change)
+      })
+      const result = await f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+      })
+      assert.equal(triggered, true, phase)
+      assert.equal(result.kind, 'not-sent', phase)
+      assert.equal(f.getWrites(), 0, phase)
+    } finally {
+      db.close()
+      f.cleanup()
+    }
+  }
+})
+
+test('observations are copied, scoped and invalidated on malformed or disconnected input', async () => {
+  for (const mode of ['copy', 'scope', 'invalid', 'disconnect'] as const) {
+    const f = await fixture()
+    try {
+      const observation = { ...f.getState() }
+      assert.equal(f.dispatcher.observe(f.printerBinding, observation), true)
+      if (mode === 'copy') observation.ready = false
+      if (mode === 'scope')
+        assert.equal(
+          f.dispatcher.observe(f.printerBinding, {
+            ...observation,
+            assignmentId: randomUUID(),
+          }),
+          false,
+        )
+      if (mode === 'invalid')
+        assert.equal(f.dispatcher.observe(f.printerBinding, {}), false)
+      if (mode === 'disconnect')
+        assert.equal(f.dispatcher.observe(f.printerBinding, null), false)
+      const result = await f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+      })
+      assert.equal(result.kind, mode === 'copy' ? 'applied' : 'rejected', mode)
+      assert.equal(f.getWrites(), mode === 'copy' ? 1 : 0, mode)
+    } finally {
       f.cleanup()
     }
   }

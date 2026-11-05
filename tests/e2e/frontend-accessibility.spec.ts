@@ -18,6 +18,10 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   ).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(
+    page.getByRole('link', { name: 'Dispositivos do navegador' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(
     page.getByRole('link', { name: 'Entrar', exact: true }),
   ).toBeFocused()
   await page.keyboard.press('Tab')

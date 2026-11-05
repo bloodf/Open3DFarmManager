@@ -1,6 +1,6 @@
 # Atomic operation-bound telemetry checkpoint
 
-Work in progress: focused Node and TypeScript checks are available. Migration 0016, database races, rollback/restart acceptance and the integrated gate are pending their coordinated windows. No HTTP ingestion route, transport authentication or printer command is exposed.
+The internal storage/proof slice passed focused checks and real PostgreSQL acceptance through migration 0016. The integrated gate is pending coordination. HTTP/client integration and authenticated transport are separate slices; this primitive supplies no printer command.
 
 ## Narrow transaction contract
 
@@ -32,8 +32,14 @@ The down migration takes an exclusive proof-table lock and refuses rollback whil
 
 ## Verification status
 
-Three new Node tests passed for exact body/method/path/context signing, separate v1/v2 domains, changed body/trust/key/deadline rejection, immutable byte snapshots, bounded parsing and invalid printer encodings. Root and focused strict TypeScript checks passed. No database claim is made yet.
+Three new Node tests passed for exact body/method/path/context signing, separate v1/v2 domains, changed body/trust/key/deadline rejection, immutable byte snapshots, bounded parsing and invalid printer encodings. Root and focused strict TypeScript checks passed for the prepared source.
 
-The prepared disposable-fixture helper covers actual issued credentials and live identity signatures, one concurrent batch winner, fresh-proof dedup, v1/v2 separation/reset, altered bytes and ownership denial, entire-batch conflict rollback, both Connector/ownership race orders, expiry during assignment/event waits, deferred commit failure, expired acknowledgment retry and role/binding guards. A separate restart verifier is prepared for an identical-event retry with a fresh pending proof after PostgreSQL and process restart. Both generic regression runners now require the official contiguous schema through 0016 and include the root pre-lock expiry regression. Historical 0014 evidence applies to that original source only.
+The disposable-fixture helper passed nine real PostgreSQL groups: actual issued credentials and live identity signatures; two proof-row waiters with one commit and an exact busy loser; fresh-proof dedup; v1/v2 separation/reset; altered bytes and ownership denial; entire-batch conflict rollback; both Connector/ownership race orders; expiry during assignment/event waits; deferred commit failure; expired acknowledgment retry; and role/binding guards. These are nine grouped checks, not a separate count for each assertion above. All nine groups passed in the initial run, after restart, and while preparing the final restart fixture.
 
-The pairing and ownership workers hold the database windows ahead of this slice. No new container, cluster, proxy or worktree has been created for 0016. Exact migration checksums, resource ownership and final cleanup will be recorded locally when acceptance runs. Publication remains separately gated.
+The generic credential regression runner passed all twelve groups on schema 0016, including the retained `b2a5169` pre-lock expiry/clock-regression case. Generic input/output contracts remain unchanged. Both generic runners now validate the official contiguous journal through 0016; historical 0014 evidence applies to that original source only.
+
+A fresh isolated cluster applied official migrations 0001–0016. Empty/v1-only 0016 down/up passed, with all sixteen journal checksums unchanged. After v2 records existed, official down correctly refused rollback; journal, proof-slot, event and assignment counts/digests were unchanged. The final journal after actual PostgreSQL restart was byte-equal to the initial/reapplied journal. No historical entries were fabricated.
+
+A fresh-process restart verifier passed after an actual isolated PostgreSQL restart: a fresh pending proof retried an already committed identical batch with no duplicate events, and both old and newly consumed proofs were denied. Its first attempt exposed a test-clock sequencing error: two independent replay probes used the same time, so the second correctly returned busy rather than the asserted denial. The verifier now advances one second per probe. A new private fixture and actual restart verified the correction; production code was unchanged. The initial failure log remains bounded local evidence.
+
+The original shared database identity and six-row journal matched before and after. Task-owned cluster/proxy, restricted fixture roles, pools and private synthetic-token restart fixture were removed. No private key was persisted or token logged. No container, image, volume, network or worktree was added. Existing integration build output was preserved. Exact source hashes, journals, counts and cleanup evidence remain in the bounded local task ledger. `check:all` for the integrated current head remains pending; no full application or publication acceptance follows from these helpers.

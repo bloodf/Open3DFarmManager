@@ -5,7 +5,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "bun test ./transport.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "test": "bun test ./transport.test.ts && bun run test:session && bun run test:interop",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:interop": "node --test ./interop.test.ts",
+    "test:session": "bun test ./session.test.ts"
+  },
+  "devDependencies": {
+    "node-datachannel": "0.33.5"
   }
 }

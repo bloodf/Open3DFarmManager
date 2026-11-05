@@ -10,8 +10,12 @@ Uso:
   --help                            Exibir ajuda
   identity --data-dir <diretório>    Consultar identidade existente (JSON público)
   init-identity --data-dir <dir>     Criar ou reutilizar identidade local (JSON público)
+  run --config <arquivo> --credential-file <segredo> --data-dir <dir>
+                                    Coletar e enviar telemetria autenticada
+  collect --config <arquivo> --data-dir <dir>
+                                    Coletar telemetria local somente para leitura
 
-A consulta não cria uma identidade. Pareamento e conexão com impressoras ainda não estão disponíveis.`
+A consulta não cria uma identidade. O comando collect grava apenas localmente. O comando run exige uma identidade e uma credencial existentes para enviar telemetria autenticada. Nenhum dos dois faz pareamento.`
 
 export function main(args: string[]): number {
   let parsed: ReturnType<
@@ -73,4 +77,66 @@ export function main(args: string[]): number {
     return 1
   }
 }
-if (import.meta.main) process.exitCode = main(process.argv.slice(2))
+async function dispatch(args: string[]): Promise<number> {
+  if (args[0] !== 'collect' && args[0] !== 'run') return main(args)
+  const running = args[0] === 'run'
+  const controller = new AbortController()
+  const stop = () => controller.abort()
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  try {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        config: { type: 'string' },
+        'data-dir': { type: 'string' },
+        'credential-file': { type: 'string' },
+      },
+      allowPositionals: false,
+    })
+    if (
+      positionals.length ||
+      !values.config ||
+      !values['data-dir'] ||
+      (running
+        ? !values['credential-file']
+        : values['credential-file'] !== undefined)
+    ) {
+      console.error('Argumentos inválidos. Use --help.')
+      return 1
+    }
+    const common = {
+      configPath: values.config,
+      dataDirectory: values['data-dir'],
+      signal: controller.signal,
+      onDiagnostic(diagnostic: object) {
+        console.log(JSON.stringify(diagnostic))
+      },
+    }
+    if (running && values['credential-file']) {
+      const { runConnectorAgent } = await import('./runtime/agent.ts')
+      await runConnectorAgent({
+        ...common,
+        credentialPath: values['credential-file'],
+      })
+    } else {
+      const { collectLocalTelemetry } = await import('./runtime/collect.ts')
+      await collectLocalTelemetry(common)
+    }
+    return 0
+  } catch {
+    console.error(
+      'Não foi possível manter a coleta local. Verifique a configuração privada, as permissões e o armazenamento. Arquivos de recuperação exigem revisão; nenhum bloqueio antigo foi removido.',
+    )
+    return 1
+  } finally {
+    controller.abort()
+    process.off('SIGINT', stop)
+    process.off('SIGTERM', stop)
+  }
+}
+if (import.meta.main) {
+  void dispatch(process.argv.slice(2)).then((code) => {
+    process.exitCode = code
+  })
+}

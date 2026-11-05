@@ -38,7 +38,13 @@ test('inventory displays a selected farm and clears on authorization loss', asyn
     page.getByRole('heading', { name: 'Connectors da farm' }),
   ).toBeFocused()
   await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Início' })).toBeFocused()
   await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: 'Aprovar Connector' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Sair da conta' })).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(selection).toBeFocused()
   await page.keyboard.press('f')

@@ -58,15 +58,21 @@ export class PostgresPrinterOwnership {
   register(input: PrinterOwnershipRequest): Promise<PrinterOwnershipDecision> {
     return this.change(input, false)
   }
-  revoke(input: PrinterOwnershipRequest): Promise<PrinterOwnershipDecision> {
-    return this.change(input, true)
+  revoke(
+    input: PrinterOwnershipRequest & { expectedAssignmentId: string },
+  ): Promise<PrinterOwnershipDecision> {
+    return this.change(input, true, input.expectedAssignmentId)
   }
   private async change(
     input: PrinterOwnershipRequest,
     revoke: boolean,
+    expectedAssignmentId?: string,
   ): Promise<PrinterOwnershipDecision> {
     if (
       !input ||
+      (revoke &&
+        !PairingApprovalRequest.shape.farm_id.safeParse(expectedAssignmentId)
+          .success) ||
       !PairingApprovalRequest.shape.farm_id.safeParse(input.farmId).success ||
       !PairingApprovalRequest.shape.farm_id.safeParse(input.agentId).success ||
       !validPrinterOwnershipKey(input.printerKey)
@@ -125,7 +131,7 @@ export class PostgresPrinterOwnership {
           )
             return { ok: false, reason: 'denied' }
           const existing =
-            await tx`SELECT id FROM farm.printer_assignments WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND printer_key = ${printerKey} AND revoked_at IS NULL FOR UPDATE`
+            await tx`SELECT id, revoked_at FROM farm.printer_assignments WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND printer_key = ${printerKey} AND ((${revoke} AND id = ${expectedAssignmentId ?? null}::uuid) OR (NOT ${revoke} AND revoked_at IS NULL)) FOR UPDATE`
           const now = this.now()
           const current = evaluateSession(
             sessionRecordId,
@@ -140,6 +146,14 @@ export class PostgresPrinterOwnership {
             return { ok: false, reason: 'denied' }
           }
           if (revoke && !existing[0]) return { ok: false, reason: 'denied' }
+          if (revoke && existing[0]?.revoked_at !== null) {
+            await tx`UPDATE farm.account_sessions SET last_seen_at = ${current.touchAt} WHERE id = ${sessionRecordId}`
+            return {
+              ok: true,
+              assignmentId: String(existing[0]?.id),
+              status: 'revoked',
+            }
+          }
           if (!revoke && existing[0]) return { ok: false, reason: 'conflict' }
           if (!revoke) {
             const count =

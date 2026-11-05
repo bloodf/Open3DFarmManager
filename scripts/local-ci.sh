@@ -110,7 +110,12 @@ image_job() {
     return 2
   fi
   for base in oven/bun:1.4.2 node:24.20.0-alpine; do
-    if [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true) != linux/amd64 ]]; then
+    local platform
+    platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true)
+    if [[ $platform == / ]]; then
+      platform=$(docker image inspect --platform linux/amd64 --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true)
+    fi
+    if [[ $platform != linux/amd64 ]]; then
       printf 'UNSUPPORTED: preinstall linux/amd64 base image %s; this runner does not pull shared build bases.\n' "$base" >&2
       return 2
     fi

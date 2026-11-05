@@ -188,7 +188,10 @@ export function createMoonrakerSubscription(input: {
           })
       } finally {
         clearTimeout(staleTimer)
-        client?.close()
+        if (client) {
+          client.close()
+          await client.closed
+        }
         baseline = undefined
       }
       if (!signal.aborted) {

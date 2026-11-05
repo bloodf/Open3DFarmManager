@@ -2,6 +2,11 @@ import { z } from 'zod'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 import { parseMoonrakerServerInfo } from './parse.ts'
 
+// Set before module evaluation. Do not statically import ws or enable addons.
+process.env.WS_NO_BUFFER_UTIL = '1'
+process.env.WS_NO_UTF_8_VALIDATE = '1'
+const { default: WebSocket } = await import('ws')
+
 export type MoonrakerLimits = Readonly<{
   maxMessageBytes: number
   connectTimeoutMs: number
@@ -145,8 +150,8 @@ const Notification = z.strictObject({
   params: z.array(z.unknown()).max(4).optional(),
 })
 
-// Native WebSocket buffers messages before dispatch. This cap bounds parsing,
-// not native receive allocation. The API has no receive backpressure or maxPayload.
+// The ws receiver enforces payload/fragment/chunk bounds before message dispatch.
+// Compression, redirects and optional native addons are disabled.
 export function openMoonrakerClient(input: {
   origin: string
   limits: MoonrakerLimits
@@ -159,7 +164,15 @@ export function openMoonrakerClient(input: {
 } {
   const url = new URL('/websocket', input.origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  const socket = new WebSocket(url)
+  const socket = new WebSocket(url, {
+    maxPayload: input.limits.maxMessageBytes,
+    maxFragments: 128,
+    maxBufferedChunks: 128,
+    perMessageDeflate: false,
+    followRedirects: false,
+    handshakeTimeout: input.limits.connectTimeoutMs,
+    skipUTF8Validation: false,
+  })
   let finished = false
   let subscribed = false
   let resolveSnapshot: (value: unknown) => void = () => {}
@@ -178,19 +191,30 @@ export function openMoonrakerClient(input: {
     finished = true
     clearTimeout(timer)
     input.signal.removeEventListener('abort', abort)
-    socket.removeEventListener('open', open)
-    socket.removeEventListener('message', message)
-    socket.removeEventListener('error', error)
-    socket.removeEventListener('close', error)
+    socket.off('open', open)
+    socket.off('message', message)
     if (!subscribed) rejectSnapshot(new MoonrakerClientError(reason))
-    resolveClosed(reason)
-    socket.close()
+    // Keep the error listener until actual close: terminate during a handshake
+    // emits an asynchronous error. Joining closed observes destruction, not intent.
+    closedReason = reason
+    socket.terminate()
   }
   function abort() {
     finish('offline')
   }
-  function error() {
+  let closedReason: MoonrakerFailureReason = 'offline'
+  function error(cause: Error) {
+    const protocolError =
+      'code' in cause &&
+      typeof cause.code === 'string' &&
+      cause.code.startsWith('WS_ERR_')
+    finish(protocolError ? 'invalid-response' : 'offline')
+  }
+  function close() {
     finish('offline')
+    socket.off('error', error)
+    socket.off('close', close)
+    resolveClosed(closedReason)
   }
   function open() {
     if (finished) return
@@ -212,15 +236,16 @@ export function openMoonrakerClient(input: {
       }),
     )
   }
-  function message(event: MessageEvent) {
+  function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
     try {
       if (
-        typeof event.data !== 'string' ||
-        Buffer.byteLength(event.data, 'utf8') > input.limits.maxMessageBytes
+        isBinary ||
+        !Buffer.isBuffer(data) ||
+        data.byteLength > input.limits.maxMessageBytes
       )
         throw new Error('Invalid frame')
-      const value = parseBoundedJson(event.data, {
+      const value = parseBoundedJson(data.toString('utf8'), {
         maxBytes: input.limits.maxMessageBytes,
         maxDepth: 16,
         maxValues: 8192,
@@ -252,10 +277,10 @@ export function openMoonrakerClient(input: {
       finish('invalid-response')
     }
   }
-  socket.addEventListener('open', open)
-  socket.addEventListener('message', message)
-  socket.addEventListener('error', error)
-  socket.addEventListener('close', error)
+  socket.on('open', open)
+  socket.on('message', message)
+  socket.on('error', error)
+  socket.on('close', close)
   input.signal.addEventListener('abort', abort, { once: true })
   if (input.signal.aborted) abort()
   return { snapshot, closed, close: abort }

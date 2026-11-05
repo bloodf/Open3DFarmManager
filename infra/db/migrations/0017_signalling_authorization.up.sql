@@ -11,12 +11,20 @@ GRANT UPDATE (key_id) ON farm.browser_device_keys TO farm_signalling_reader;
 GRANT UPDATE (agent_id) ON farm.connector_enrollments TO farm_signalling_reader;
 GRANT UPDATE (jti) ON farm.connector_credentials TO farm_signalling_reader;
 
+-- This non-login owner has only the capabilities needed by the expiry function.
+-- It is not granted to the reader or any runtime login.
+CREATE ROLE farm_signalling_expiry_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT USAGE ON SCHEMA farm TO farm_signalling_expiry_owner;
+GRANT SELECT ON farm.session_accounts, farm.account_sessions TO farm_signalling_expiry_owner;
+GRANT UPDATE (id) ON farm.session_accounts TO farm_signalling_expiry_owner;
+GRANT UPDATE (revoked_at) ON farm.account_sessions TO farm_signalling_expiry_owner;
+
 -- No supplied clock, policy, account identity or revocation timestamp is accepted.
 -- The function can expire an actually expired session; it cannot renew or arbitrarily revoke one.
-CREATE FUNCTION farm.observe_signalling_session_expiry(session_id text) RETURNS bigint
+CREATE FUNCTION farm.observe_signalling_session_expiry(session_id pg_catalog.text) RETURNS pg_catalog.int8
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, farm, pg_temp AS $$
 DECLARE
-  first_now pg_catalog.int8 := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint;
+  first_now pg_catalog.int8 := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::pg_catalog.int8;
   observed_now pg_catalog.int8;
   expected_account pg_catalog.text;
   locked_account pg_catalog.text;
@@ -26,7 +34,7 @@ BEGIN
   SELECT s.account_id INTO expected_account FROM farm.account_sessions s WHERE s.id = session_id;
   SELECT a.id INTO locked_account FROM farm.session_accounts a WHERE a.id = expected_account FOR SHARE;
   SELECT s.* INTO session_row FROM farm.account_sessions s WHERE s.id = session_id FOR UPDATE;
-  observed_now := greatest(first_now, floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint);
+  observed_now := greatest(first_now, floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::pg_catalog.int8);
   IF observed_now NOT BETWEEN 0 AND 9007199254740991 THEN RAISE EXCEPTION 'Invalid signalling authorization clock'; END IF;
   IF locked_account IS NULL OR session_row.account_id IS DISTINCT FROM expected_account
      OR session_row.account_id IS DISTINCT FROM locked_account THEN RETURN NULL; END IF;
@@ -41,3 +49,8 @@ END;
 $$;
 REVOKE ALL ON FUNCTION farm.observe_signalling_session_expiry(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION farm.observe_signalling_session_expiry(text) TO farm_signalling_reader;
+
+-- Owner transfer requires CREATE on this schema; it is not retained after the migration.
+GRANT CREATE ON SCHEMA farm TO farm_signalling_expiry_owner;
+ALTER FUNCTION farm.observe_signalling_session_expiry(pg_catalog.text) OWNER TO farm_signalling_expiry_owner;
+REVOKE CREATE ON SCHEMA farm FROM farm_signalling_expiry_owner;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
-import type { Sql } from 'postgres'
+import postgres, { type Sql } from 'postgres'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { PostgresPairing } from '../../apps/farm/server/storage/postgres-pairing.ts'
 import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pairing-proof.ts'
@@ -22,6 +22,7 @@ export async function testPostgresSignallingAuthorization(
   admin: Sql,
   runtime: Sql,
   applicationName: string,
+  port: number,
   restartPath?: string,
 ): Promise<string[]> {
   const reader = () =>
@@ -183,6 +184,126 @@ export async function testPostgresSignallingAuthorization(
     admin`UPDATE farm.account_sessions SET account_id=${randomUUID()} WHERE id=${valid.scope.sessionRecordId}`,
     /Invalid session transition/i,
   )
+  const functionState = (
+    await admin`SELECT p.prosecdef,p.proconfig,pg_get_userbyid(p.proowner) AS owner FROM pg_proc p WHERE p.oid='farm.observe_signalling_session_expiry(text)'::regprocedure`
+  )[0]
+  assert.equal(functionState?.prosecdef, true)
+  assert.equal(functionState?.owner, 'farm_signalling_expiry_owner')
+  assert.deepEqual(
+    functionState?.proconfig.map((value: string) => value.replaceAll(' ', '')),
+    ['search_path=pg_catalog,farm,pg_temp'],
+  )
+  const flags = (
+    await admin`SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls FROM pg_roles WHERE rolname='farm_signalling_expiry_owner'`
+  )[0]
+  assert.ok(flags)
+  assert.ok(Object.values(flags).every((value) => value === false))
+  assert.equal(
+    (
+      await runtime`SELECT pg_has_role(current_user,'farm_signalling_expiry_owner','MEMBER') AS allowed`
+    )[0]?.allowed,
+    false,
+  )
+  await assert.rejects(
+    runtime`SET ROLE farm_signalling_expiry_owner`,
+    /permission denied/i,
+  )
+  await assert.rejects(
+    runtime`ALTER FUNCTION farm.observe_signalling_session_expiry(text) SECURITY INVOKER`,
+    /owner|permission denied/i,
+  )
+  await assert.rejects(
+    runtime`CREATE TABLE farm.signalling_forbidden_probe(id int)`,
+    /permission denied/i,
+  )
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL ROLE farm_signalling_expiry_owner`
+    assert.equal(
+      (
+        await tx`SELECT has_schema_privilege(current_user,'farm','CREATE') AS allowed`
+      )[0]?.allowed,
+      false,
+    )
+    assert.equal(
+      (
+        await tx`SELECT has_column_privilege(current_user,'farm.account_sessions','revoked_at','UPDATE') AS allowed`
+      )[0]?.allowed,
+      true,
+    )
+    assert.equal(
+      (
+        await tx`SELECT has_column_privilege(current_user,'farm.account_sessions','last_seen_at','UPDATE') AS allowed`
+      )[0]?.allowed,
+      false,
+    )
+    assert.equal(
+      (
+        await tx`SELECT has_table_privilege(current_user,'farm.connector_enrollments','SELECT') AS allowed`
+      )[0]?.allowed,
+      false,
+    )
+  })
+  for (const operation of [
+    (tx: import('postgres').TransactionSql) =>
+      tx`UPDATE farm.account_sessions SET last_seen_at=last_seen_at WHERE id=${valid.scope.sessionRecordId}`,
+    (tx: import('postgres').TransactionSql) =>
+      tx`UPDATE farm.session_accounts SET disabled=true WHERE id=${valid.scope.sessionRecordId}`,
+    (tx: import('postgres').TransactionSql) =>
+      tx`CREATE TABLE farm.signalling_owner_forbidden_probe(id int)`,
+    (tx: import('postgres').TransactionSql) =>
+      tx`SELECT jti FROM farm.connector_credentials`,
+    (tx: import('postgres').TransactionSql) =>
+      tx`ALTER TABLE farm.account_sessions DISABLE TRIGGER ALL`,
+  ])
+    await assert.rejects(
+      admin.begin(async (tx) => {
+        await tx`SET LOCAL ROLE farm_signalling_expiry_owner`
+        await operation(tx)
+      }),
+      /permission denied|must be owner/i,
+    )
+  const attack = postgres({
+    host: '127.0.0.1',
+    port,
+    database: 'fixture',
+    username: applicationName,
+    password: '',
+    max: 1,
+    connect_timeout: 3,
+  })
+  try {
+    // A fresh backend must compile the definer function only AFTER these hostile temporary types exist.
+    await attack`CREATE TEMP TABLE signalling_type_probe(actor pg_catalog.text NOT NULL)`
+    await attack`CREATE FUNCTION pg_temp.signalling_type_probe(value pg_catalog.text) RETURNS pg_catalog.bool LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN IF current_user <> session_user THEN RAISE EXCEPTION 'Definer execution reached caller temporary domain'; END IF; INSERT INTO pg_temp.signalling_type_probe(actor) VALUES(current_user); RETURN true; END $$`
+    await attack`CREATE DOMAIN pg_temp.text AS pg_catalog.text CHECK (pg_temp.signalling_type_probe(VALUE))`
+    await attack`SELECT 'reader-domain-probe'::pg_temp.text`
+    assert.deepEqual(
+      (await attack`SELECT actor FROM pg_temp.signalling_type_probe`).map(
+        (row) => row.actor,
+      ),
+      [applicationName],
+    )
+    await attack`TRUNCATE pg_temp.signalling_type_probe`
+    assert.ok(
+      (
+        await attack`SELECT farm.observe_signalling_session_expiry(${valid.scope.sessionRecordId})::float8 AS at`
+      )[0]?.at,
+    )
+    assert.equal(
+      Number(
+        (
+          await attack`SELECT count(*)::int AS n FROM pg_temp.signalling_type_probe`
+        )[0]?.n,
+      ),
+      0,
+    )
+  } finally {
+    await attack.end({ timeout: 3 })
+  }
+  checks.push(
+    'fresh restricted backend temporary text domain cannot execute inside the constrained definer owner',
+  )
+
   // All lock-only grants must reject identity writes through the real lifecycle triggers.
   await assert.rejects(
     runtime`UPDATE farm.memberships SET farm_id=${randomUUID()}::uuid WHERE farm_id=${valid.scope.farmId}::uuid AND account_id=${valid.scope.sessionRecordId}`,
@@ -378,7 +499,7 @@ export async function testPostgresSignallingAuthorization(
     'lock-timeout storage failure never claims expiry persistence; a later successful denial records expiry',
   )
 
-  const waiting = await actor(250)
+  const waiting = await actor(600)
   let release: (() => void) | undefined
   let locked: (() => void) | undefined
   const ready = new Promise<void>((resolve) => {
@@ -393,6 +514,11 @@ export async function testPostgresSignallingAuthorization(
     await gate
   })
   await ready
+  const waitingExpiry = Number(
+    (
+      await admin`SELECT absolute_expires_at::float8 AS at FROM farm.account_sessions WHERE id=${waiting.sessionRecordId}`
+    )[0]?.at,
+  )
   const pending = reader().authorize({
     ...valid.scope,
     sessionRecordId: waiting.sessionRecordId,
@@ -410,10 +536,18 @@ export async function testPostgresSignallingAuthorization(
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     assert.equal(sawWait, true)
-    await new Promise((resolve) => setTimeout(resolve, 280))
+    const liveAtWait = await dbNow()
+    assert.ok(
+      liveAtWait < waitingExpiry,
+      'Session must still be live when actual account contention is observed',
+    )
+    await new Promise((resolve) =>
+      setTimeout(resolve, waitingExpiry - liveAtWait + 25),
+    )
   } finally {
     release?.()
     await holding
+    await Promise.allSettled([pending])
   }
   assert.deepEqual(await pending, { ok: false, reason: 'denied' })
   assert.ok(
@@ -428,7 +562,7 @@ export async function testPostgresSignallingAuthorization(
   // Final expiry check must also run after a later membership lock wait.
   const lateSession = randomUUID(),
     lateNow = await dbNow()
-  await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES(${lateSession},${valid.scope.sessionRecordId},0,${lateNow - 2000},${lateNow - 1000},${lateNow + 250})`
+  await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES(${lateSession},${valid.scope.sessionRecordId},0,${lateNow - 2000},${lateNow - 1000},${lateNow + 600})`
   let releaseMember: (() => void) | undefined,
     memberLocked: (() => void) | undefined
   const memberReady = new Promise<void>((resolve) => {
@@ -464,10 +598,18 @@ export async function testPostgresSignallingAuthorization(
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     assert.equal(waitingForMember, true)
-    await new Promise((resolve) => setTimeout(resolve, 280))
+    const liveAtWait = await dbNow()
+    assert.ok(
+      liveAtWait < lateNow + 600,
+      'Session must still be live at the later membership wait',
+    )
+    await new Promise((resolve) =>
+      setTimeout(resolve, lateNow + 600 - liveAtWait + 25),
+    )
   } finally {
     releaseMember?.()
     await memberHolding
+    await Promise.allSettled([lateRead])
   }
   assert.deepEqual(await lateRead, { ok: false, reason: 'denied' })
   assert.ok(
@@ -499,7 +641,7 @@ export async function testPostgresSignallingAuthorization(
   const revokeApplication = applicationName.slice(0, 48) + '_revoke'
   try {
     let readerWaiting = false
-    const until = Date.now() + 500
+    const until = Date.now() + 300
     while (Date.now() < until) {
       if (
         Number(
@@ -520,7 +662,7 @@ export async function testPostgresSignallingAuthorization(
       await tx`UPDATE farm.account_sessions SET revoked_at=${await dbNow()} WHERE id=${linear.scope.sessionRecordId}`
     })
     let revokerWaiting = false
-    const revokeUntil = Date.now() + 500
+    const revokeUntil = Date.now() + 300
     while (Date.now() < revokeUntil) {
       if (
         Number(
@@ -538,6 +680,7 @@ export async function testPostgresSignallingAuthorization(
   } finally {
     releaseCredential?.()
     await credentialHolding
+    await Promise.allSettled([firstRead, revokePromise ?? Promise.resolve()])
   }
   try {
     assert.equal((await firstRead).ok, true)

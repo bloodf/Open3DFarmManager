@@ -125,6 +125,7 @@ try {
       admin,
       runtime,
       role,
+      port,
       process.env.SIGNALLING_READER_RESTART_FIXTURE,
     )
 } finally {

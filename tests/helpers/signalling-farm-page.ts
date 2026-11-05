@@ -44,12 +44,13 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       page.getByRole('heading', { name: 'Minha farm', exact: true }),
     ).toBeVisible()
-    await page
-      .getByLabel('Farm atual', { exact: true })
-      .selectOption(fixture.farmId)
-    await page
-      .getByLabel('Dispositivo aprovado deste navegador', { exact: true })
-      .selectOption(fixture.browserKeyId)
+    // The maintained view selects its sole farm and approved key automatically.
+    await expect(page.getByLabel('Farm atual', { exact: true })).toHaveValue(
+      fixture.farmId,
+    )
+    await expect(
+      page.getByLabel('Dispositivo aprovado deste navegador', { exact: true }),
+    ).toHaveValue(fixture.browserKeyId)
     const row = page.getByRole('article').filter({
       has: page.getByRole('heading', {
         name: assignment.printerKey,

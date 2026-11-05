@@ -13,20 +13,28 @@ export async function createTelemetryHttpRuntime(input: {
   config: Omit<CredentialAcceptanceConfig, 'publicKeys' | 'purpose'>
   bodyTimeoutMs: number
 }) {
-  const rows =
-    await input.sql`SELECT r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, r.rolbypassrls, pg_has_role(current_user,'farm_connector_telemetry_writer','USAGE') AS allowed, pg_has_role(current_user,'farm_pairing_runtime','MEMBER') AS pairing, pg_has_role(current_user,'farm_connector_revoker','MEMBER') AS revoker FROM pg_roles r WHERE r.rolname=current_user`
+  const rows = await input.sql`SELECT
+      pg_has_role(current_user, 'farm_connector_telemetry_writer', 'USAGE')
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_roles r
+        WHERE pg_has_role(current_user, r.oid, 'MEMBER')
+          AND (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls
+            OR r.rolname NOT IN (current_user, 'farm_connector_telemetry_writer', 'farm_connector_credential_acceptor'))
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_database d
+        WHERE d.datname = current_database() AND pg_has_role(current_user, d.datdba, 'MEMBER')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_namespace n
+        WHERE n.nspname = 'farm' AND pg_has_role(current_user, n.nspowner, 'MEMBER')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'farm' AND pg_has_role(current_user, c.relowner, 'MEMBER')
+      ) AS allowed`
   const role = rows[0]
-  if (
-    !role ||
-    role.rolsuper ||
-    role.rolcreatedb ||
-    role.rolcreaterole ||
-    role.rolreplication ||
-    role.rolbypassrls ||
-    role.allowed !== true ||
-    role.pairing ||
-    role.revoker
-  )
+  if (!role || role.allowed !== true)
     throw new Error('Invalid telemetry database role')
   const keys = await loadTelemetryVerificationKeys(input.keyFile)
   const store = new PostgresConnectorCredentialAcceptance(input.sql, {

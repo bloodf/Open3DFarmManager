@@ -1,6 +1,6 @@
 # Assignment-bound signalling server source checkpoint
 
-This slice is source-prepared. Tests, static type checks, formatting checks, official migration application/reversal, restart and PostgreSQL acceptance have not run for this addition. It supplies no integrated status or hardware acceptance.
+Focused Node and Bun checks each passed 81 tests with two runtime skips. Scoped strict TypeScript and formatting passed. Official migration application/reversal, restart and PostgreSQL acceptance have not run for this addition. It supplies no integrated status or hardware acceptance.
 
 ## Authority and transport
 
@@ -20,6 +20,6 @@ The maintained printer ownership register/revoke operations take enrollment UPDA
 
 Coordinator fixtures now carry digest/count and assert strict v2 output. Prepared negative cases deny missing pins and close on changed count or digest. The PostgreSQL helper provisions a default assignment through the maintained ownership API and compares actual reader pins to the shared digest. Additional prepared groups cover five-column visibility and forbidden reads/mutations; empty, 17-row and 16-row Unicode sets; real enrollment contention in both reader-first and writer-first orders for initially empty insert and revoke; same-key replacement with a new immutable ID; and an explicit direct-writer bypass demonstration. New gates drain lock holders/readers/writers and close their dedicated fixture pool even on failure.
 
-All these additions remain UNRUN. The historical reader runner still names prefix 0017 and needs coordinated adaptation to an official contiguous catalog through 0019, including actual 0018, before executing the new helper. No migration history may be fabricated or manually backfilled. Required acceptance includes up/down/up privileges and checksums, current session/credential expiry and restart regressions, actual lock races, cross-runtime digest vectors, no downgrade, local-list mismatch, exact complete frame limits and then one genuine built HTTPS/WSS/RTC synthetic-printer flow. No physical command is authorized.
+The PostgreSQL cases remain UNRUN. The maintained reader runner now requires the official contiguous catalog through 0019, including actual 0018. No migration history may be fabricated or manually backfilled. Required acceptance includes up/down/up privileges and checksums, current session/credential expiry and restart regressions, actual lock races, cross-runtime digest vectors, no downgrade, local-list mismatch, exact complete frame limits and then one genuine built HTTPS/WSS/RTC synthetic-printer flow. No physical command is authorized.
 
 No dependencies, processes, ports, containers, clusters, worktrees or generated outputs were created by preparing this source. Other protocol, peer, client, identity and runtime changes belong to the coordinating WebRTC worker and were preserved. No publication, deployment or runtime integration is claimed.

@@ -900,6 +900,17 @@ export async function testPostgresSignallingAuthorization(
       } else assert.equal(initial.ok, operation === 'insert-empty')
       const next = await reader().authorize(subject.scope)
       assert.equal(next.ok, operation === 'insert-empty')
+      if (next.ok) {
+        const expected = await assignmentSetDigest(subject.scope, [
+          {
+            assignmentId: changed.assignmentId,
+            agentId: request.agentId,
+            printerKey: request.printerKey,
+          },
+        ])
+        assert.equal(next.authority.assignment_count, expected.count)
+        assert.equal(next.authority.assignment_digest, expected.digest)
+      }
       if (operation === 'revoke') {
         // Same key with a fresh immutable assignment ID must change the pin.
         assert.ok(initial.ok || order === 'writer-first')
@@ -918,6 +929,15 @@ export async function testPostgresSignallingAuthorization(
           subject.scope,
           subject.assignmentRefs,
         )
+        const expected = await assignmentSetDigest(subject.scope, [
+          {
+            assignmentId: replacement.assignmentId,
+            agentId: request.agentId,
+            printerKey: request.printerKey,
+          },
+        ])
+        assert.equal(fresh.authority.assignment_count, expected.count)
+        assert.equal(fresh.authority.assignment_digest, expected.digest)
         assert.notEqual(fresh.authority.assignment_digest, prior.digest)
       }
       checks.push(

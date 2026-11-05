@@ -1,3 +1,5 @@
+import { BoundedReceive } from './bounded-receive.ts'
+
 /** Synthetic interoperability fixture only. This module grants no printer authority. */
 export type Role = 'browser' | 'connector'
 export type Scope = {
@@ -86,8 +88,6 @@ export const SYNTHETIC_LIMITS = Object.freeze({
   authMs: 8000,
   lifetimeMs: 30000,
 })
-const IDLE = Promise.resolve()
-const encoder = new TextEncoder()
 type SessionOptions = {
   role: Role
   binding: string
@@ -113,22 +113,13 @@ export class SyntheticSession {
   }
   #received = 0
   #acceptedTotal = 0
-  #admitted = 0
   #proofsReceived = 0
   #proofsSent = 0
   #timer: ReturnType<typeof setTimeout>
   #lifetime: ReturnType<typeof setTimeout>
   #authActive = true
   #lifetimeActive = true
-  #queue: string[] = []
-  #activeBytes = 0
-  #retainedBytes = 0
-  #maxPending = 0
-  #maxRetainedBytes = 0
-  #running = false
-  #transportReady: boolean
-  #idle = IDLE
-  #resolveIdle: (() => void) | undefined
+  #receive: BoundedReceive
   #options: SessionOptions
   #started = false
   #localProofSent = false
@@ -144,7 +135,15 @@ export class SyntheticSession {
       lifetime > SYNTHETIC_LIMITS.lifetimeMs
     )
       throw Error('Invalid fixture lifetime')
-    this.#transportReady = !options.waitForTransport
+    this.#receive = new BoundedReceive({
+      limits: SYNTHETIC_LIMITS,
+      paused: Boolean(options.waitForTransport),
+      process: async (raw) => {
+        this.#received++
+        await this.process(raw)
+      },
+      reject: (reason) => this.reject(reason),
+    })
     this.#timer = setTimeout(() => this.readonly('deadline'), deadline)
     this.#lifetime = setTimeout(
       () => this.readonly('fixture-lifetime'),
@@ -161,18 +160,14 @@ export class SyntheticSession {
     clearTimeout(this.#lifetime)
     this.#authActive = false
     this.#lifetimeActive = false
-    this.#queue.length = 0
-    this.#retainedBytes = this.#activeBytes
-    if (!this.#running) this.finishBatch()
+    this.#receive.close()
     this.#options.onReadonly?.()
   }
   activate() {
-    if (this.isReadonly() || this.#transportReady) return
-    this.#transportReady = true
-    this.pump()
+    this.#receive.activate()
   }
   async start() {
-    if (this.#started || this.isReadonly() || !this.#transportReady) return
+    if (this.#started || this.isReadonly() || !this.#receive.ready) return
     this.#started = true
     try {
       const signature = encodeHex(
@@ -195,76 +190,7 @@ export class SyntheticSession {
   }
   /** Admission is synchronous. No input gets its own pending promise or closure. */
   receive(raw: unknown): Promise<void> {
-    if (this.isReadonly()) return IDLE
-    // Bound code units before allocating a UTF-8 copy, including giant strings.
-    if (
-      typeof raw !== 'string' ||
-      raw.length > SYNTHETIC_LIMITS.frameBytes ||
-      encoder.encode(raw).byteLength > SYNTHETIC_LIMITS.frameBytes
-    ) {
-      this.reject('frame-limit')
-      return IDLE
-    }
-    const size = raw.length * 2 // Conservative retained UTF-16 payload accounting.
-    const pending = this.#queue.length + (this.#running ? 1 : 0)
-    if (this.#admitted === SYNTHETIC_LIMITS.totalFrames) {
-      this.reject('message-budget')
-      return IDLE
-    }
-    if (
-      pending === SYNTHETIC_LIMITS.pendingFrames ||
-      this.#retainedBytes + size > SYNTHETIC_LIMITS.retainedBytes
-    ) {
-      this.reject('pending-limit')
-      return IDLE
-    }
-    if (!pending)
-      this.#idle = new Promise((resolve) => {
-        this.#resolveIdle = resolve
-      })
-    this.#admitted++
-    this.#queue.push(raw)
-    this.#retainedBytes += size
-    this.#maxPending = Math.max(this.#maxPending, pending + 1)
-    this.#maxRetainedBytes = Math.max(
-      this.#maxRetainedBytes,
-      this.#retainedBytes,
-    )
-    this.pump()
-    return this.#idle
-  }
-  private pump() {
-    if (
-      !this.#running &&
-      this.#transportReady &&
-      this.#queue.length &&
-      !this.isReadonly()
-    )
-      void this.drain()
-  }
-  private async drain() {
-    this.#running = true
-    try {
-      while (!this.isReadonly() && this.#queue.length) {
-        const raw = this.#queue.shift()
-        if (raw === undefined) break
-        this.#activeBytes = raw.length * 2
-        this.#received++
-        await this.process(raw)
-        this.#retainedBytes -= this.#activeBytes
-        this.#activeBytes = 0
-      }
-    } finally {
-      this.#activeBytes = 0
-      this.#retainedBytes = 0
-      this.#running = false
-      this.finishBatch()
-    }
-  }
-  private finishBatch() {
-    this.#resolveIdle?.()
-    this.#resolveIdle = undefined
-    this.#idle = IDLE
+    return this.#receive.receive(raw)
   }
   private reject(reason: string) {
     if (this.isReadonly()) return
@@ -345,13 +271,7 @@ export class SyntheticSession {
       acceptedTotal: this.#acceptedTotal,
       proofsSent: this.#proofsSent,
       proofsReceived: this.#proofsReceived,
-      work: {
-        admitted: this.#admitted,
-        pending: this.#queue.length + (this.#running ? 1 : 0),
-        retainedBytes: this.#retainedBytes,
-        maxPending: this.#maxPending,
-        maxRetainedBytes: this.#maxRetainedBytes,
-      },
+      work: this.#receive.snapshot(),
     }
   }
   dispose() {

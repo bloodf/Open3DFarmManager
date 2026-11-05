@@ -28,6 +28,9 @@ export function signallingMetadata(): SignallingMetadata {
     ? active.metadata
     : DISABLED_SIGNALLING_METADATA
 }
+export function pauseSignallingMetadata(): SignallingMetadata {
+  return signallingRuntime()?.pauseMetadata() ?? DISABLED_SIGNALLING_METADATA
+}
 async function role(
   sql: Sql,
   required: 'farm_signalling_reader' | 'farm_connector_credential_acceptor',

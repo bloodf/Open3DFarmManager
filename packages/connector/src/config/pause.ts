@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { decodeBase64url } from '../../../farm-protocol/src/encoding.ts'
 import { PauseCapabilityV1 } from '../../../farm-protocol/src/pause-capability.ts'
+import {
+  PairingProofAudience,
+  PairingProofOrigin,
+} from '../../../farm-protocol/src/pairing-proof.ts'
 import type { PauseIssuer } from '../auth/pause-capability.ts'
 
 /**
@@ -25,13 +29,38 @@ const IssuerEntry = z.strictObject({
 })
 
 /**
- * A strict, optional pause section of the runtime configuration. It carries a
- * trusted issuer keyring and nothing else: no private key, no token, no secret,
- * no endpoint and no audience derivation.
+ * A strict, optional pause section of the runtime configuration. It carries
+ * independently provisioned signalling settings and trusted issuer keyring.
  */
 export const PauseRuntimeConfigSchema = z.strictObject({
   version: z.literal(1),
   issuers: z.array(IssuerEntry).min(1).max(MAX_PAUSE_ISSUER_KEYRING),
+  signalling: z
+    .strictObject({
+      endpoint: z.string().max(2048),
+      origin: PairingProofOrigin.refine((value) =>
+        value.startsWith('https://'),
+      ),
+      audience: PairingProofAudience,
+      credentialAudience: PairingProofAudience,
+    })
+    .refine((value) => {
+      try {
+        const target = new URL(value.endpoint)
+        return (
+          target.href === value.endpoint &&
+          target.protocol === 'wss:' &&
+          target.host === new URL(value.origin).host &&
+          target.pathname === '/api/signalling/pause-connector' &&
+          !target.search &&
+          !target.hash &&
+          !target.username &&
+          !target.password
+        )
+      } catch {
+        return false
+      }
+    }, 'Expected the exact configured WSS pause Connector endpoint'),
 })
 
 export type PauseIssuerEntry = Readonly<{
@@ -43,6 +72,7 @@ export type PauseIssuerEntry = Readonly<{
 export type PauseRuntimeConfig = Readonly<{
   version: 1
   issuers: readonly PauseIssuerEntry[]
+  signalling: Readonly<z.infer<typeof PauseRuntimeConfigSchema>['signalling']>
 }>
 
 function deepFreeze<T>(value: T): T {
@@ -89,14 +119,18 @@ function decodeEd25519Spki(encoded: string): Uint8Array {
  */
 export function parsePauseRuntimeConfig(input: unknown): PauseRuntimeConfig {
   const parsed = PauseRuntimeConfigSchema.parse(input)
+  validateIssuerEntries(parsed.issuers)
+  return deepFreeze(parsed)
+}
+
+function validateIssuerEntries(issuers: readonly PauseIssuerEntry[]): void {
   const seen = new Set<string>()
-  for (const entry of parsed.issuers) {
+  for (const entry of issuers) {
     const name = entry.issuer + '\0' + entry.kid
     if (seen.has(name)) throw new Error('Duplicate pause issuer key')
     seen.add(name)
     decodeEd25519Spki(entry.publicKeySpki)
   }
-  return deepFreeze(parsed)
 }
 
 /**
@@ -110,7 +144,7 @@ export async function loadPauseIssuerKeys(
   config: PauseRuntimeConfig | null | undefined,
 ): Promise<readonly PauseIssuer[]> {
   if (!config) return Object.freeze([])
-  // Parse and copy the whole keyring before any await can change its authority.
+  // Parse and copy the whole configuration before any await can change it.
   const snapshot = parsePauseRuntimeConfig(config)
   const issuers: PauseIssuer[] = []
   for (const entry of snapshot.issuers) {

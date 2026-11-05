@@ -8,6 +8,7 @@ import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pa
 import { PostgresBrowserDeviceRegistry } from '../../apps/farm/server/storage/postgres-browser-device-registry.ts'
 import { PostgresPauseAuthority } from '../../apps/farm/server/storage/postgres-pause-authority.ts'
 import { testPauseAuthorityRetention } from './postgres-pause-authority-catalog.ts'
+import { testPauseNegotiationRows } from './postgres-pause-negotiation-integration.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { signBrowserDeviceProof } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
@@ -26,6 +27,7 @@ export async function testPostgresPauseAuthority(
   admin: Sql,
   port: number,
   restartFile?: string,
+  mode: 'issuer' | 'negotiation' = 'issuer',
 ): Promise<string[]> {
   const cleanup: (() => Promise<unknown>)[] = []
   let primaryError: unknown
@@ -254,6 +256,29 @@ export async function testPostgresPauseAuthority(
     const assignment = randomUUID(),
       printerKey = 'synthetic-printer'
     await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${assignment}::uuid,${farm}::uuid,${pc.challenge.agent_id}::uuid,${printerKey},${await databaseNow()},${account})`
+    if (mode === 'negotiation') {
+      return await testPauseNegotiationRows({
+        admin,
+        runtime: sql,
+        applicationName: role,
+        config: {
+          origin,
+          audience,
+          credentialIssuer: origin,
+          credentialAudience,
+          idleTimeoutMs: 1800000,
+        },
+        scope: {
+          sessionRecordId: session,
+          farmId: farm,
+          agentId: pc.challenge.agent_id,
+          keyId: enrollment.challenge.key_id,
+          assignmentId: assignment,
+        },
+        accountId: account,
+        printerKey,
+      })
+    }
     const digest = () => randomBytes(32).toString('base64url'),
       issued = await databaseNow()
     const binding = {

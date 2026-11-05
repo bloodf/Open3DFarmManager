@@ -13,6 +13,7 @@ import { base64url } from '../../../../../packages/farm-protocol/src/encoding.ts
 import {
   encodePauseAdmissionProof,
   encodePauseCapability,
+  PAUSE_POLICY_HARD_MAXIMUMS,
   PauseAdmissionChallenge,
   signPauseAdmissionProof,
   SignedPauseCapabilityV1,
@@ -51,6 +52,10 @@ export type PauseCommandIssuer = Readonly<{
 /**
  * Transport seam of the browser client. Both callbacks are optional and
  * default to inert, so a client without a transport can never send anything.
+ *
+ * The contract is strict and synchronous: a callback must return a boolean.
+ * A throwing callback, a non boolean result or a thenable result is a
+ * transport fault. The client never treats it as a successful send.
  */
 export type PauseCommandTransport = Readonly<{
   sendPhase?(message: PausePhaseMessage): boolean
@@ -64,6 +69,12 @@ export type PauseCommandClientOptions = Readonly<{
   transport?: PauseCommandTransport
   /** Wall clock of the browser. Injectable for tests only. */
   now?(): number
+  /**
+   * Monotonic clock of the browser. It must share the time origin of the
+   * control transport, because the transport deadline is expressed in it.
+   * Injectable for tests only.
+   */
+  monotonicNow?(): number
   /** Notified once per command with its final outcome. */
   onOutcome?(outcome: PauseCommandOutcome): void
   /** Aborted when the control session ends. */
@@ -73,7 +84,16 @@ export type PauseCommandClientOptions = Readonly<{
 export type PauseCommandClientState = Readonly<{
   /** The browser sent its issued capability and admission proof. */
   admitted: boolean
-  /** The command was handed to the transport. */
+  /**
+   * The single operation of this session was reserved. A second `pause` is
+   * refused without touching the transport.
+   */
+  reserved: boolean
+  /**
+   * The command was handed to the transport, or the hand over was attempted.
+   * After this the outcome can be unknown: the client cannot know whether the
+   * printer paused.
+   */
   commandSent: boolean
   /** Retained asynchronous work is still running. */
   pending: boolean
@@ -93,11 +113,39 @@ export type PauseCommandClient = Readonly<{
   /** Ends the client. Every later send is permanently sealed. */
   abort(): void
   readonly state: PauseCommandClientState
-  /** Resolves when the retained asynchronous work actually settled. */
+  /**
+   * Resolves when the client is terminal, that is aborted or settled by its
+   * command, and every retained asynchronous task actually settled. While the
+   * client can still accept a phase or a command it never resolves.
+   */
   readonly settled: Promise<void>
 }>
 
 const inert = () => false
+
+/** Hard bounds of the pause policy. The client never widens them. */
+const ADMISSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.admissionMs
+const COMMAND_MS = PAUSE_POLICY_HARD_MAXIMUMS.commandMs
+const SESSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
+
+type SendState = 'sent' | 'refused' | 'faulted'
+
+/**
+ * Strict synchronous transport contract. A throwing callback, a non boolean
+ * result or a thenable result is a transport fault, never a successful send.
+ * A refused send is not a proof that the frame stayed inside the transport.
+ */
+function attemptSend(send: () => boolean): SendState {
+  let result: unknown
+  try {
+    result = send()
+  } catch {
+    return 'faulted'
+  }
+  if (result === true) return 'sent'
+  if (result === false) return 'refused'
+  return 'faulted'
+}
 
 /**
  * Library-only browser composition of the pause command path. The client owns
@@ -109,6 +157,7 @@ export function createPauseCommandClient(
   options: PauseCommandClientOptions,
 ): PauseCommandClient {
   const now = options.now ?? Date.now
+  const monotonicNow = options.monotonicNow ?? (() => performance.now())
   const sendPhase = options.transport?.sendPhase ?? inert
   const sendCommand = options.transport?.sendCommand ?? inert
   const controller = new AbortController()
@@ -118,9 +167,19 @@ export function createPauseCommandClient(
   let browserProofWire = ''
   let connectorProofWire = ''
   let admission: Promise<SignedPauseCapabilityV1> | undefined
+  let admissionIssued: SignedPauseCapabilityV1 | undefined
+  let admissionGate: Promise<void> | undefined
+  let resolveAdmissionGate: (() => void) | undefined
   let admitted = false
+  let reserved = false
   let commandSent = false
   let aborted = false
+  let terminal = false
+  let sessionTimer: ReturnType<typeof setTimeout> | undefined
+  let admissionTimer: ReturnType<typeof setTimeout> | undefined
+  let resultTimer: ReturnType<typeof setTimeout> | undefined
+  /** Monotonic session deadline. It is only ever tightened. */
+  let sessionDeadline = Infinity
   let command:
     | { id: string; settle: (outcome: PauseCommandOutcome) => void }
     | undefined
@@ -128,20 +187,85 @@ export function createPauseCommandClient(
     pending.add(work)
     const drop = () => {
       pending.delete(work)
-      if (!pending.size) {
-        for (const waiter of [...waiters]) waiter()
-        waiters.clear()
-      }
+      maybeSettled()
     }
     void work.then(drop, drop)
     return work
+  }
+  function maybeSettled(): void {
+    if (!terminal || pending.size) return
+    for (const waiter of [...waiters]) waiter()
+    waiters.clear()
+  }
+  function clearTimer(timer: ReturnType<typeof setTimeout> | undefined) {
+    if (timer === undefined) return
+    clearTimeout(timer)
   }
   function settleCommand(outcome: PauseCommandOutcome): void {
     const current = command
     if (!current) return
     command = undefined
+    clearTimer(resultTimer)
+    resultTimer = undefined
+    terminal = true
     current.settle(outcome)
-    options.onOutcome?.(outcome)
+    try {
+      options.onOutcome?.(outcome)
+    } catch {
+      // A throwing observer never breaks the settlement of the command.
+    }
+    maybeSettled()
+  }
+  function armSession(deadlineMonoMs?: number): void {
+    const current = monotonicNow()
+    clearTimer(sessionTimer)
+    sessionTimer = undefined
+    if (!Number.isFinite(current)) {
+      abort()
+      return
+    }
+    // The local bound is armed at construction and is never extended.
+    sessionDeadline = Math.min(sessionDeadline, current + SESSION_MS)
+    // The transport deadline tightens the bound when it is comparable. A
+    // deadline of another clock realm is not comparable, and the transport
+    // stays the authority of the session lifetime.
+    if (deadlineMonoMs !== undefined && deadlineMonoMs > current)
+      sessionDeadline = Math.min(sessionDeadline, deadlineMonoMs)
+    if (sessionDeadline <= current) {
+      abort()
+      return
+    }
+    sessionTimer = setTimeout(() => {
+      sessionTimer = undefined
+      abort()
+    }, sessionDeadline - current)
+  }
+  function armAdmission(): void {
+    const current = monotonicNow()
+    clearTimer(admissionTimer)
+    admissionTimer = undefined
+    if (!Number.isFinite(current)) {
+      controller.abort()
+      return
+    }
+    // The original admission window. It is armed once and never reset.
+    admissionTimer = setTimeout(() => {
+      admissionTimer = undefined
+      controller.abort()
+      // The admission operation ends here. The issuer call itself is not
+      // cancelled, it stays retained until it actually settles.
+      resolveAdmissionGate?.()
+    }, ADMISSION_MS)
+  }
+  function armResult(): void {
+    clearTimer(resultTimer)
+    resultTimer = undefined
+    resultTimer = setTimeout(() => {
+      resultTimer = undefined
+      // The command is on the wire and no result arrived. The client cannot
+      // know whether the printer paused.
+      settleCommand('outcome-unknown')
+    }, COMMAND_MS)
   }
   function scopeMatches(
     issued: Readonly<{
@@ -178,6 +302,7 @@ export function createPauseCommandClient(
     const expected = binding
     if (!expected) throw new Error('Missing control binding')
     const bindingHash = await controlBindingHash(expected)
+    if (aborted) throw new Error('Pause command client aborted')
     const challenge = PauseAdmissionChallenge.parse(
       await options.issuer.challenge({
         browserProofWire,
@@ -212,76 +337,106 @@ export function createPauseCommandClient(
     if (aborted) throw new Error('Pause command client aborted')
     // The transport accepts each phase once, after the admission nonce.
     if (
-      !sendPhase({
-        t: 'control.capability',
-        wire: encodePauseCapability(issued),
-      })
+      attemptSend(() =>
+        sendPhase({
+          t: 'control.capability',
+          wire: encodePauseCapability(issued),
+        }),
+      ) !== 'sent'
     )
       throw new Error('Pause capability phase refused')
-    if (!sendPhase({ t: 'control.admission-proof', wire: admissionProofWire }))
+    if (
+      attemptSend(() =>
+        sendPhase({ t: 'control.admission-proof', wire: admissionProofWire }),
+      ) !== 'sent'
+    )
       throw new Error('Pause admission proof phase refused')
     admitted = true
     return issued
   }
   async function runPause(): Promise<PauseCommandOutcome> {
-    if (aborted || commandSent) return 'rejected'
-    const work = admission
-    if (!work) return 'rejected'
-    let issued: SignedPauseCapabilityV1
     try {
-      issued = await work
+      if (aborted) return 'rejected'
+      const gate = admissionGate
+      if (!gate) return 'rejected'
+      // The gate ends with the admission itself or with its own deadline.
+      await gate
+      const issued = admissionIssued
+      if (!issued) return 'rejected'
+      if (aborted) return 'rejected'
+      const issuedAt = now()
+      if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) return 'rejected'
+      if (issuedAt < issued.issued_at) return 'rejected'
+      const expiresAt = Math.min(
+        issuedAt + MAX_COMMAND_V2_LIFETIME_MS,
+        issued.expires_at,
+      )
+      if (expiresAt <= issuedAt) return 'rejected'
+      const unsigned = {
+        v: 2 as const,
+        purpose: 'printer-pause' as const,
+        cmd_id: crypto.randomUUID(),
+        farm_id: issued.farm_id,
+        agent_id: issued.agent_id,
+        account_id: issued.account_id,
+        key_id: issued.key_id,
+        transport_id: issued.transport_id,
+        capability_id: issued.capability_id,
+        assignment_id: issued.assignment_id,
+        action: 'pause' as const,
+        args: {},
+        issued_at: issuedAt,
+        expires_at: expiresAt,
+        nonce: base64url(crypto.getRandomValues(new Uint8Array(16))),
+      }
+      let signed: SignedCommandV2
+      try {
+        signed = await signCommandV2(unsigned, options.privateKey)
+      } catch {
+        return 'rejected'
+      }
+      if (aborted) return 'rejected'
+      // Reserved before the send: one command per session, never a resend.
+      let settle!: (outcome: PauseCommandOutcome) => void
+      const reservedCommand = new Promise<PauseCommandOutcome>((resolve) => {
+        settle = resolve
+      })
+      command = { id: signed.cmd_id, settle }
+      const wire = encodeCommandV2(signed)
+      // From here the command is on its way. A refused or faulted hand over is
+      // never reported as a clean rejection: the frame may have left the
+      // transport before the failure.
+      commandSent = true
+      armResult()
+      if (
+        attemptSend(() => sendCommand({ t: 'control.command', wire })) !==
+        'sent'
+      )
+        settleCommand('outcome-unknown')
+      return await reservedCommand
     } catch {
       return 'rejected'
     }
-    if (aborted) return 'rejected'
-    const issuedAt = now()
-    if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) return 'rejected'
-    if (issuedAt < issued.issued_at) return 'rejected'
-    const expiresAt = Math.min(
-      issuedAt + MAX_COMMAND_V2_LIFETIME_MS,
-      issued.expires_at,
-    )
-    if (expiresAt <= issuedAt) return 'rejected'
-    const unsigned = {
-      v: 2 as const,
-      purpose: 'printer-pause' as const,
-      cmd_id: crypto.randomUUID(),
-      farm_id: issued.farm_id,
-      agent_id: issued.agent_id,
-      account_id: issued.account_id,
-      key_id: issued.key_id,
-      transport_id: issued.transport_id,
-      capability_id: issued.capability_id,
-      assignment_id: issued.assignment_id,
-      action: 'pause' as const,
-      args: {},
-      issued_at: issuedAt,
-      expires_at: expiresAt,
-      nonce: base64url(crypto.getRandomValues(new Uint8Array(16))),
-    }
-    let signed: SignedCommandV2
-    try {
-      signed = await signCommandV2(unsigned, options.privateKey)
-    } catch {
-      return 'rejected'
-    }
-    if (aborted) return 'rejected'
-    // Reserved before the send: one command per session, never a resend.
-    commandSent = true
-    const wire = encodeCommandV2(signed)
-    return await new Promise<PauseCommandOutcome>((resolve) => {
-      command = { id: signed.cmd_id, settle: resolve }
-      if (!sendCommand({ t: 'control.command', wire }))
-        settleCommand('rejected')
-    })
   }
   function abort(): void {
     if (aborted) return
     aborted = true
+    terminal = true
     controller.abort()
+    clearTimer(sessionTimer)
+    sessionTimer = undefined
+    clearTimer(admissionTimer)
+    admissionTimer = undefined
+    clearTimer(resultTimer)
+    resultTimer = undefined
+    // A pending admission operation ends with the abort, even when the issuer
+    // ignores the signal. The issuer call itself stays retained until it
+    // actually settles.
+    resolveAdmissionGate?.()
     // A command already on the wire keeps its unknown outcome. Nothing is
     // cancelled, resent or pretended.
     settleCommand(commandSent ? 'outcome-unknown' : 'rejected')
+    maybeSettled()
   }
   if (options.signal) {
     const signal = options.signal
@@ -289,18 +444,40 @@ export function createPauseCommandClient(
     signal.addEventListener('abort', onAbort, { once: true })
     if (signal.aborted) onAbort()
   }
+  armSession()
   return Object.freeze({
     proofsReady(ready: PauseProofsReady): void {
       if (aborted) return
-      binding = ready.binding
+      // The scope is snapshotted once and never read again.
+      binding = Object.freeze({
+        ...ready.binding,
+        browser_public_key: Object.freeze({
+          ...ready.binding.browser_public_key,
+        }),
+      })
       browserProofWire = ready.browserProofWire
       connectorProofWire = ready.connectorProofWire
+      armSession(ready.deadlineMonoMs)
     },
     phase(frame: Readonly<PausePhaseFrame>): void {
       if (aborted || admission) return
       if (frame.t !== 'control.admission-nonce') return
+      armAdmission()
+      admissionIssued = undefined
+      admissionGate = new Promise<void>((resolve) => {
+        resolveAdmissionGate = resolve
+      })
       const work = track(runAdmission(frame.admission_nonce))
       admission = work
+      void work.then(
+        (issued) => {
+          admissionIssued = issued
+          resolveAdmissionGate?.()
+        },
+        () => {
+          resolveAdmissionGate?.()
+        },
+      )
       void work.catch(() => {
         // A failed admission never reaches the transport and never retries.
         if (admission === work) admission = undefined
@@ -313,19 +490,24 @@ export function createPauseCommandClient(
       settleCommand(frame.outcome)
     },
     pause(): Promise<PauseCommandOutcome> {
+      if (aborted) return Promise.resolve('rejected')
+      // One operation per session, reserved before any await.
+      if (reserved) return Promise.resolve('rejected')
+      reserved = true
       return track(runPause())
     },
     abort,
     get state(): PauseCommandClientState {
       return Object.freeze({
         admitted,
+        reserved,
         commandSent,
         pending: pending.size > 0,
         aborted,
       })
     },
     get settled(): Promise<void> {
-      if (!pending.size) return Promise.resolve()
+      if (terminal && !pending.size) return Promise.resolve()
       return new Promise<void>((resolve) => waiters.add(resolve))
     },
   })

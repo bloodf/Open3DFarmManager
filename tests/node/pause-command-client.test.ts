@@ -23,11 +23,15 @@ import type {
 
 const digest = () => randomBytes(32).toString('base64url')
 
-async function waitFor(condition: () => boolean, timeoutMs = 2000) {
+/**
+ * Waits without a timer, so the wait also works while the fake timers of a
+ * test are enabled.
+ */
+async function waitFor(condition: () => boolean, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs
   while (!condition()) {
     if (Date.now() > deadline) throw new Error('Timed out waiting for state')
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await new Promise((resolve) => setImmediate(resolve))
   }
 }
 
@@ -35,7 +39,10 @@ async function waitFor(condition: () => boolean, timeoutMs = 2000) {
  * Synthetic browser enrollment with a real nonextractable P-256 key and a
  * local issuer double. No server, no network, no browser and no RTC.
  */
-async function clientFixture() {
+async function clientFixture(
+  t: test.TestContext,
+  options: { holdIssuer?: boolean } = {},
+) {
   const browser = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
@@ -113,10 +120,19 @@ async function clientFixture() {
   const outcomes: string[] = []
   let refuseCommand = false
   let refusePhase = false
+  let throwCommand = false
+  let thenableCommand = false
+  let reentrantAbort: (() => void) | undefined
+  let throwObserver = false
+  const nonce = digest()
   const client = createPauseCommandClient({
     privateKey: browser.privateKey,
     now: () => Date.now(),
-    onOutcome: (outcome) => outcomes.push(outcome),
+    monotonicNow: () => performance.now(),
+    onOutcome: (outcome) => {
+      outcomes.push(outcome)
+      if (throwObserver) throw new Error('Observer fault')
+    },
     transport: {
       sendPhase: (message) => {
         if (refusePhase) return false
@@ -124,13 +140,34 @@ async function clientFixture() {
         return true
       },
       sendCommand: (message) => {
+        if (reentrantAbort) {
+          const abort = reentrantAbort
+          reentrantAbort = undefined
+          // The frame is already on its way when the session is aborted.
+          commands.push(message)
+          abort()
+          return true
+        }
+        if (throwCommand) throw new Error('Transport fault')
+        if (thenableCommand) return Promise.resolve(true) as unknown as boolean
         if (refuseCommand) return false
         commands.push(message)
         return true
       },
     },
     issuer: {
-      async challenge({ admissionNonce }) {
+      async challenge({ admissionNonce, signal }) {
+        if (options.holdIssuer) {
+          await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => reject(new Error('aborted')),
+              {
+                once: true,
+              },
+            )
+          })
+        }
         return {
           v: 1 as const,
           purpose: 'pause-admission' as const,
@@ -184,7 +221,7 @@ async function clientFixture() {
       },
     },
   })
-  const nonce = digest()
+  t.after(() => client.abort())
   return {
     binding,
     client,
@@ -200,10 +237,22 @@ async function clientFixture() {
     setRefusePhase(value: boolean) {
       refusePhase = value
     },
+    setThrowCommand(value: boolean) {
+      throwCommand = value
+    },
+    setThenableCommand(value: boolean) {
+      thenableCommand = value
+    },
+    setThrowObserver(value: boolean) {
+      throwObserver = value
+    },
+    abortOnCommand(abort: () => void) {
+      reentrantAbort = abort
+    },
     proofsReady() {
       client.proofsReady({
         binding,
-        deadlineMonoMs: 30000,
+        deadlineMonoMs: performance.now() + 30000,
         browserProofWire,
         connectorProofWire,
       })
@@ -233,23 +282,23 @@ async function clientFixture() {
 }
 
 test('the admission nonce starts the admission and sends both phases in order', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
   assert.deepEqual(
     f.phases.map((phase) => phase.t),
     ['control.capability', 'control.admission-proof'],
   )
-  assert.equal(f.client.state.admitted, true)
   assert.equal(f.client.state.aborted, false)
+  f.client.abort()
 })
 
 test('pause signs one command from the issued capability and settles with the result', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
   const outcome = f.client.pause()
   await waitFor(() => f.commands.length === 1)
   assert.equal(f.commands.length, 1)
@@ -270,10 +319,10 @@ test('pause signs one command from the issued capability and settles with the re
 })
 
 test('a result with another command id never settles the command', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
   const outcome = f.client.pause()
   await waitFor(() => f.commands.length === 1)
   const command = decodeCommandV2(f.commands[0]!.wire)
@@ -284,10 +333,10 @@ test('a result with another command id never settles the command', async (t) => 
 })
 
 test('a second pause is rejected and never sends a second command', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
   const first = f.client.pause()
   await waitFor(() => f.commands.length === 1)
   const command = decodeCommandV2(f.commands[0]!.wire)
@@ -297,21 +346,83 @@ test('a second pause is rejected and never sends a second command', async (t) =>
   assert.equal(await first, 'applied')
 })
 
-test('a refused command settles as rejected without a result frame', async (t) => {
-  const f = await clientFixture()
+test('two concurrent pauses keep one command and settle every caller', async (t) => {
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
+  // Both callers arrive before any await of the first one.
+  const first = f.client.pause()
+  const second = f.client.pause()
+  assert.equal(await second, 'rejected')
+  await waitFor(() => f.commands.length === 1)
+  assert.equal(f.commands.length, 1)
+  const command = decodeCommandV2(f.commands[0]!.wire)
+  f.client.data(f.resultFrame(command.cmd_id, 'applied'))
+  assert.equal(await first, 'applied')
+  assert.deepEqual(f.outcomes, ['applied'])
+})
+
+test('a refused command settles as unknown, never as a clean rejection', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
   f.setRefuseCommand(true)
-  assert.equal(await f.client.pause(), 'rejected')
+  // The transport refused the hand over. The frame may have left the
+  // transport, so the outcome is unknown and never a clean rejection.
+  assert.equal(await f.client.pause(), 'outcome-unknown')
   assert.equal(f.commands.length, 0)
 })
 
-test('aborting before the command keeps the send sealed', async (t) => {
-  const f = await clientFixture()
+test('a throwing transport callback settles as unknown', async (t) => {
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
+  f.setThrowCommand(true)
+  assert.equal(await f.client.pause(), 'outcome-unknown')
+})
+
+test('a thenable transport callback settles as unknown', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
+  f.setThenableCommand(true)
+  assert.equal(await f.client.pause(), 'outcome-unknown')
+})
+
+test('a reentrant abort inside the send settles the caller as unknown', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
+  f.abortOnCommand(() => f.client.abort())
+  const outcome = f.client.pause()
+  assert.equal(await outcome, 'outcome-unknown')
+  assert.equal(f.client.state.aborted, true)
+  assert.equal(f.client.state.commandSent, true)
+})
+
+test('a throwing outcome observer never breaks the settlement', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
+  f.setThrowObserver(true)
+  const outcome = f.client.pause()
+  await waitFor(() => f.commands.length === 1)
+  const command = decodeCommandV2(f.commands[0]!.wire)
+  f.client.data(f.resultFrame(command.cmd_id, 'applied'))
+  assert.equal(await outcome, 'applied')
+})
+
+test('aborting before the command keeps the send sealed', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
   f.client.abort()
   assert.equal(await f.client.pause(), 'rejected')
   assert.equal(f.commands.length, 0)
@@ -319,16 +430,67 @@ test('aborting before the command keeps the send sealed', async (t) => {
 })
 
 test('aborting after the command keeps the unknown outcome and never resends', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   f.proofsReady()
   f.client.phase(f.nonceFrame())
-  await f.client.settled
+  await waitFor(() => f.client.state.admitted)
   const outcome = f.client.pause()
   await waitFor(() => f.commands.length === 1)
   f.client.abort()
   assert.equal(await outcome, 'outcome-unknown')
   assert.equal(f.commands.length, 1)
   assert.equal(await f.client.pause(), 'rejected')
+})
+
+test('a dropped result settles as unknown at the command bound', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
+  const outcome = f.client.pause()
+  await waitFor(() => f.commands.length === 1)
+  // The result never arrives. The bound ends the wait with an unknown outcome.
+  t.mock.timers.tick(5001)
+  assert.equal(await outcome, 'outcome-unknown')
+  assert.deepEqual(f.outcomes, ['outcome-unknown'])
+})
+
+test('the admission ends at its own deadline and never reaches the transport', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await clientFixture(t, { holdIssuer: true })
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  const outcome = f.client.pause()
+  t.mock.timers.tick(8001)
+  assert.equal(await outcome, 'rejected')
+  assert.equal(f.phases.length, 0)
+  assert.equal(f.commands.length, 0)
+})
+
+test('the session ends at its own deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.admitted)
+  const outcome = f.client.pause()
+  await waitFor(() => f.commands.length === 1)
+  t.mock.timers.tick(30001)
+  assert.equal(await outcome, 'outcome-unknown')
+  assert.equal(f.client.state.aborted, true)
+})
+
+test('an issuer that answers after the close never reaches the transport', async (t) => {
+  const f = await clientFixture(t, { holdIssuer: true })
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  const outcome = f.client.pause()
+  f.client.abort()
+  assert.equal(await outcome, 'rejected')
+  assert.equal(f.phases.length, 0)
+  assert.equal(f.commands.length, 0)
+  assert.equal(f.client.state.aborted, true)
 })
 
 test('a client without a transport never sends a phase', async (t) => {
@@ -358,13 +520,14 @@ test('a client without a transport never sends a phase', async (t) => {
     issued_at: Date.now(),
     expires_at: Date.now() + 8000,
   })
-  await client.settled
+  await waitFor(() => !client.state.pending)
   assert.equal(client.state.admitted, false)
   assert.equal(await client.pause(), 'rejected')
+  client.abort()
 })
 
 test('an issuer that answers outside the control scope never reaches the transport', async (t) => {
-  const f = await clientFixture()
+  const f = await clientFixture(t)
   const foreign = createPauseCommandClient({
     privateKey: (
       await crypto.subtle.generateKey(
@@ -401,12 +564,13 @@ test('an issuer that answers outside the control scope never reaches the transpo
   })
   foreign.proofsReady({
     binding: f.binding,
-    deadlineMonoMs: 30000,
+    deadlineMonoMs: performance.now() + 30000,
     browserProofWire: f.browserProofWire,
     connectorProofWire: f.connectorProofWire,
   })
+  t.after(() => foreign.abort())
   foreign.phase(f.nonceFrame())
-  await foreign.settled
+  await waitFor(() => !foreign.state.pending)
   assert.equal(foreign.state.admitted, false)
   assert.equal(await foreign.pause(), 'rejected')
 })

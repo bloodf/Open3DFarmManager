@@ -2,8 +2,9 @@
 
 Status: `em revisão`
 Slice: library only, no runtime wiring, no UI.
-Base source: `f57cb2059ca066ad0b8d3f0498435368cef92ae2`
-Branch: `t3/pause-command-relay`
+Base source: `084ffef380a9fb12b85d1e3c3ad591951a821c5d`
+Composed slice: `4fd6a7f6aa1d663a4141864455237f9a28bc4c36`
+Branch: `t3/harden-pause-command-relay`
 
 ## What this slice is
 
@@ -19,7 +20,7 @@ one adds a frame type, a schema or a table.
 | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `packages/connector/src/control/pause-command-relay.ts` | new. `createPauseCommandRelay` owns one `createPauseDispatcher` and exposes the peer lifecycle over the existing transport |
 | `apps/farm/app/utils/webrtc/pause-command-client.ts`    | new. `createPauseCommandClient` owns the browser admission exchange and the single signed command                          |
-| `tests/node/pause-command-relay.test.ts`                | new. focused tests for the relay                                                                                           |
+| `tests/node/pause-command-relay.test.ts`                | new. focused tests for the relay, including the real control transport                                                     |
 | `tests/node/pause-command-client.test.ts`               | new. focused tests for the browser client                                                                                  |
 
 No config, runtime, UI, protocol, index, signalling, dispatcher, verifier,
@@ -43,8 +44,10 @@ sequenceDiagram
     R->>T: control.admission-nonce
     T->>B: control.admission-nonce
     B->>B: issuer challenge, sign admission proof, issuer capability
-    B->>T: control.capability and control.admission-proof
-    T->>R: admitPeer(capability, proof)
+    B->>T: control.capability
+    T->>R: admitPeer(capability)
+    B->>T: control.admission-proof
+    T->>R: admitPeer(admission proof)
     R->>D: admit(token, capability, proofs)
     D-->>R: capability handle
     B->>T: control.command
@@ -76,16 +79,25 @@ is sent.
 **Local mapping agreement.** The relay refuses a peer whose local mapping
 disagrees with the control binding on farm, agent or assignment.
 
-**Admission is single use.** The relay admits once per peer. A repeated
-`admitPeer` returns the first outcome instead of consuming the token twice.
+**A new peer is validated before it replaces an old one.** The binding and both
+control proofs are parsed and matched to the binding before any peer of the
+same transport id is closed. An unverified peer never evicts a live peer.
+
+**Admission is single use and incremental.** The two admission phases arrive as
+two frames. The relay buffers either half and consumes the verifier token only
+when the exact capability and admission proof pair is complete. A half
+delivered pair never consumes the token: the admission deadline ends the wait.
+The deadline is the policy bound of eight seconds and it is never reset by a
+late half.
 
 **A command waits for its admission.** The transport delivers the command
 right after the admission phases, while the admission crypto is still running.
 The relay holds the command until the admission settles, so an in-flight
 admission never turns into a false `rejected`.
 
-**One command per peer.** The second command of a peer replays the first
-outcome. It is never dispatched twice.
+**One command per peer.** The command slot is reserved before any await, so a
+reentrant command replays the first promise. The second command of a peer
+replays the first outcome and is never dispatched twice.
 
 **Exact correlation.** The result frame carries the `cmd_id` decoded from the
 command wire, never a generated id. A wire that cannot be decoded produces no
@@ -94,11 +106,27 @@ result frame at all.
 **Closing seals.** `closePeer` aborts the in-flight dispatch, revokes the
 capability and closes the peer. After that, no result frame is ever sent. A
 dispatch that was already permitted settles as `outcome-unknown` and the
-journal keeps the durable unknown record.
+journal keeps the durable unknown record. An admission that succeeds after the
+peer was sealed revokes its handle and never resurrects the peer.
+
+**Real deadlines, no pretended cancellation.** Every bound is a real timer on a
+monotonic clock: the peer deadline at the admission lease, the capability
+deadline after a successful admission. A broken or rewound monotonic clock is
+never trusted for a deadline. No bound is implemented as a race that pretends
+to cancel work that keeps running.
+
+**Bounded state.** The peer map, the concurrent commands and the retained work
+are bounded. A peer, a command or a work item beyond its bound is refused,
+never queued. The retained work stays retained until it actually settles.
 
 **Inert by default.** `sendPhase` and `sendResult` are optional. Without them
 the relay cannot deliver the admission nonce, refuses the peer and sends
 nothing. Constructing a relay never enables a command anywhere.
+
+**Strict transport contract.** A transport callback must return a boolean. A
+throwing callback, a non boolean result or a thenable result is a transport
+fault: the peer is closed and the outcome stays local. The caller of
+`commandPeer` always receives an outcome and never a rejected promise.
 
 ## Rules the browser client enforces
 
@@ -110,24 +138,37 @@ admission proof schemas. No new schema, no new frame.
 capability the issuer actually issued, and the command lifetime is bounded by
 the capability expiry and by the existing five second command bound.
 
-**Local scope check.** The challenge and the capability are checked against
-the local control binding, including the control binding hash. A capability
-outside the scope never reaches the transport.
+**Local scope check.** The challenge and the capability are checked against the
+local control binding, including the control binding hash. A capability
+outside the scope never reaches the transport. The binding is snapshotted once
+and never read again.
 
-**One command.** The command is reserved before the send. A second `pause()`
-is rejected and never resends.
+**One operation per session.** `pause` reserves the single operation before
+any await. A second `pause` is refused without touching the transport, also
+when it arrives while the first one is still signing.
 
 **Exact correlation.** Only a result whose `command_id` equals the signed
 command id settles the command. Any other result is ignored.
+
+**Unknown is never a clean rejection.** A command that was handed to the
+transport, or whose hand over was refused or faulted, settles as
+`outcome-unknown`. Only a command that never reached the transport settles as
+`rejected`.
 
 **Abort seals.** After `abort` no phase and no command is sent again. A
 command that was already sent settles as `outcome-unknown`, because the client
 cannot know whether the printer paused. A command that was never sent settles
 as `rejected`.
 
+**Real deadlines.** The session ends at the smaller of the local bound and the
+transport deadline. The admission ends after eight seconds, the command result
+after five. A dropped result settles as `outcome-unknown`.
+
 **Retained work.** Every issuer call and every command stays retained until it
-actually settles. `settled` resolves only then. Nothing is cancelled and
-nothing is faked.
+actually settles. `settled` resolves when the client is terminal, that is
+aborted or settled by its command, and every retained task actually settled.
+While the client can still accept a phase or a command it never resolves.
+Nothing is cancelled and nothing is faked.
 
 ## Deviations from the proposal
 
@@ -143,30 +184,61 @@ actual source.
 | `revoke` after a failed admission                | changed. The peer stays open so a command already on the wire still receives an honest `rejected`                   |
 | abort resolves a pending command as `rejected`   | changed. A command already sent settles as `outcome-unknown`                                                        |
 
+## Review disposition
+
+The independent review of `4fd6a7f` reported thirteen findings. Each one was
+verified against the source and the disposition is recorded here.
+
+| Finding | Disposition                                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1      | fixed. The client reserves the single operation before any await. A second `pause` is refused without a send.                                                             |
+| D2      | fixed. A refused or faulted hand over settles as `outcome-unknown`, never as `rejected`.                                                                                  |
+| D3      | fixed. Every transport call goes through a strict synchronous guard. A fault closes the peer or keeps the result local, and the caller never receives a rejected promise. |
+| D4      | fixed. Real monotonic timers now expire the peer, the admission and the result. The peer map and the retained work are bounded.                                           |
+| D5      | fixed. The relay admits incrementally and consumes the verifier token only with the exact pair.                                                                           |
+| D6      | fixed. A late admission revokes its handle and never resurrects a sealed peer.                                                                                            |
+| D7      | fixed. A rejected admission resolves the gate with a reason instead of leaving it pending.                                                                                |
+| D8      | fixed. The admission bound comes from the shared policy constant and every deadline uses the monotonic clock.                                                             |
+| D9      | fixed. The admission failure reason is reported in `diagnostics().lastReason`.                                                                                            |
+| D10     | fixed. A throwing observer never breaks the settlement of the command.                                                                                                    |
+| D11     | fixed. `settled` has an exact meaning on both sides and never resolves while work can still arrive.                                                                       |
+| D12     | fixed. A new peer is validated before it replaces an old one.                                                                                                             |
+| D13     | fixed. The declared base source is the reviewed parent.                                                                                                                   |
+
+The review also warned against copying its own claim that a timer can never
+fire. The timers are armed with a real `setTimeout` and the focused tests
+advance them, so the expiry path is proven, not assumed.
+
 ## Evidence
 
 ```text
-node --test tests/node/pause-command-relay.test.ts tests/node/pause-command-client.test.ts
-tests 17, pass 17, fail 0
+node --test --test-timeout=20000 tests/node/pause-command-relay.test.ts tests/node/pause-command-client.test.ts
+tests 36, pass 36, fail 0
 
 tsc --noEmit (strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess)
-on the four new files: no diagnostics
+on the repository: no diagnostics
 
-prettier --check on the four new files: clean
+tsc --noEmit with the same flags on apps/farm/app/utils/webrtc/pause-command-client.ts
+no diagnostics
 ```
 
 The relay tests use real P-256 and Ed25519 keys, a real SQLite command journal
-and a local driver double. The browser tests use a real nonextractable P-256
-key, a real issuer signature and a local transport double. No printer, no
-Moonraker, no server, no browser, no container and no database server is
-touched.
+and a local driver double. The last relay test runs both sides of the real
+`PauseControlSession` in memory, with genuine keys and the real journal, and
+carries the two admission frames, the command and the result. The browser
+tests use a real nonextractable P-256 key, a real issuer signature and a local
+transport double. No printer, no Moonraker, no server, no browser, no container
+and no database server is touched.
+
+The evidence of the composed slice `4fd6a7f` is preserved in the history of
+this file: seventeen synthetic tests over local transport doubles. The run
+above replaces it and adds the transport level integration, the real deadlines
+and the bounded state.
 
 ## Not proven here
 
-- `bun run check:all` was not run. The heavy slot belongs to the dispatcher
-  fixture worker and the coordinator owns the release gate.
-- `bun run --cwd apps/farm typecheck` was not run. The Nuxt project references
-  were not prepared in this worktree.
+- `bun run check:all` was not run. The heavy slot belongs to the coordinator
+  and the release gate is not open for this slice.
 - The relay and the client are not wired to the runtime, to the signalling
   clients or to the UI. Nothing in the running product changed.
 - The runtime still loses the printer binding handle, so the connector cannot
@@ -175,6 +247,10 @@ touched.
   (`/api/pause-authority/challenges` and `/api/pause-authority/capabilities`),
   but the adapter that calls them with the session cookie is not part of this
   slice.
+- The browser client and the control transport must share the monotonic time
+  origin, because the transport deadline is expressed in it. A deadline of
+  another clock realm is ignored by the client and the transport stays the
+  authority of the session lifetime.
 - No real RTC session, no real Moonraker and no simulator run proves this
-  composition. The earlier real RTC result proves the transport, not this
-  relay.
+  composition. The in memory transport test proves the frame sequence, not the
+  network path.

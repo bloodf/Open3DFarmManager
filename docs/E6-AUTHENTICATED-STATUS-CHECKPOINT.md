@@ -18,7 +18,7 @@ The existing `StatusMessage` remains a complete snapshot with a strictly increas
 
 ## Integration still required
 
-The actual scoped key resolver and complete current-0015 assignment provider are not composed in this slice. The shared wire schema is unchanged. No Connector CLI, runtime, collector, farm view or composable is wired to this feed, and no production default is provided. Actual WebSocket/PostgreSQL authority integration and the current-head comprehensive checks remain separate gates.
+The browser composable now creates the scoped existing-key resolver and authenticated feed after mount, with exact current account/farm/view-epoch/key checks. The shared wire schema is unchanged. Connector CLI/runtime composition and the complete current-0015 assignment provider remain pending. Actual built-page WebSocket/PostgreSQL/RTC integration and current-head comprehensive checks remain separate gates. The browser wiring passed generated-app TypeScript, 25 farm-view tests with 181 assertions and six resolver tests; these are source checks, not runtime acceptance.
 
 ## Independent review corrections
 

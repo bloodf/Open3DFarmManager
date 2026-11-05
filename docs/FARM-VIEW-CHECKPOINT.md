@@ -18,7 +18,7 @@ Two `/api/auth/me` reads do not provide an atomic session snapshot. Farm and ass
 
 ## Status-consumer contract
 
-The production composable passes no feed. Inventory therefore displays `Conexão direta indisponível` and `Nenhum estado recebido`. No experiment peer or synthetic producer is imported into application runtime.
+The production composable creates the authenticated feed and existing-key resolver only after mount. Resolution must still match the current account, farm, view epoch and selected key; unavailable signalling metadata rejects admission. No experiment peer or synthetic producer is imported into application runtime. Connector runtime composition and actual built-page HTTP/PostgreSQL/RTC acceptance remain pending, so this wiring does not establish live-status acceptance.
 
 The exported `FarmStatusFeed` opens one read-only subscription per eligible Connector on the current assignment page:
 

@@ -1,13 +1,20 @@
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { createFarmView, type FarmViewState } from '../utils/farm-view.ts'
+import {
+  createFarmView,
+  type FarmStatusFeed,
+  type FarmViewState,
+} from '../utils/farm-view.ts'
 import { listDeviceKeys } from '../utils/device-key.ts'
+import { createAuthenticatedFarmStatusFeed } from '../utils/webrtc/farm-status-feed.ts'
+import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
 export function useFarmView() {
   // Per component instance, client-only. Never serialize private scope into a Nuxt payload.
   const state = shallowRef<FarmViewState>({ kind: 'loading' })
   const now = shallowRef({ wall: 0, mono: 0 })
   const clock = () => ({ wall: Date.now(), mono: performance.now() })
+  let feed: FarmStatusFeed | undefined
   const view = createFarmView({
     read: (path, signal, query) =>
       $fetch<unknown>(path, {
@@ -22,7 +29,15 @@ export function useFarmView() {
     changed: (next) => {
       state.value = next
     },
-    // A genuine admitted status producer is required before wiring a feed here.
+    feed: {
+      open(input) {
+        if (!feed) {
+          input.onHealth({ kind: 'closed', reason: 'rejected' })
+          return { close() {} }
+        }
+        return feed.open(input)
+      },
+    },
   })
   let timer: ReturnType<typeof setInterval> | undefined
   const revalidate = () => {
@@ -31,6 +46,22 @@ export function useFarmView() {
   }
   const hide = () => view.invalidate()
   onMounted(() => {
+    feed = createAuthenticatedFarmStatusFeed({
+      resolveKey: createFarmStatusKeyResolver({
+        isCurrent(scope, keyId) {
+          const current = state.value
+          return (
+            current.kind === 'ready' &&
+            current.accountId === scope.accountId &&
+            current.scope?.accountId === scope.accountId &&
+            current.scope.farmId === scope.farmId &&
+            current.scope.viewEpoch === scope.viewEpoch &&
+            current.keys.kind === 'available' &&
+            current.keys.selected === keyId
+          )
+        },
+      }),
+    })
     now.value = clock()
     void view.discover()
     timer = setInterval(() => {
@@ -46,6 +77,7 @@ export function useFarmView() {
   onBeforeRouteLeave(hide)
   onBeforeUnmount(() => {
     view.dispose()
+    feed = undefined
     clearInterval(timer)
     window.removeEventListener('focus', revalidate)
     window.removeEventListener('pageshow', revalidate)

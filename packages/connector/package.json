@@ -14,6 +14,7 @@
     "effect": "4.1.2",
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "werift": "0.26.0"
   }
 }

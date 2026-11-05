@@ -446,3 +446,22 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+## Experimental Connector WebRTC dependency
+
+The Connector's experimental WebRTC code depends on `werift@0.26.0`, a TypeScript WebRTC implementation. On 2026-11-04 we inspected its complete resolved `dependencies` closure in `bun.lock` and the installed package metadata. The closure includes MPL-2.0 and BSD-3-Clause components; it is not entirely MIT. Exact license texts are retained in `packages/connector/notices/werift/`.
+
+| Resolved package                                                                           | Declared license |
+| ------------------------------------------------------------------------------------------ | ---------------- |
+| `werift@0.26.0`                                                                            | MIT              |
+| `mediabunny@1.65.2`                                                                        | MPL-2.0          |
+| `ieee754@1.2.1`                                                                            | BSD-3-Clause     |
+| `buffer@6.0.3`, `base64-js@1.5.1`                                                          | MIT              |
+| `multicast-dns@7.2.5`, `dns-packet@5.6.1`, `thunky@1.1.0`, `@leichtgewicht/ip-codec@2.0.5` | MIT              |
+| `@types/dom-mediacapture-transform@0.1.12`, `@types/dom-webcodecs@0.1.13`                  | MIT              |
+
+The werift npm package omits a standalone license file. Its retained MIT notice comes from the [source revision identified by the exact registry package](https://github.com/shinyoshiaki/werift-webrtc/blob/d67314bddfae08c3b980fd6a9b2977a306a6841c/LICENSE). The other notices come from the corresponding installed packages. Registry source metadata is not proof of a reproducible build. The closure review does not establish security or production suitability.
+
+MPL-2.0 has file-level source availability and notice requirements when distributing covered executable code. `mediabunny@1.65.2` includes source files in its package; preserve the corresponding source and applicable MPL notices when distributing it or a bundle containing its covered code, including modifications to covered files. BSD-3-Clause requires its copyright notice, conditions and disclaimer in applicable distributions and restricts endorsement. MIT notices must accompany covered copies or substantial portions. The experimental adapter is not part of the current Connector CLI entry point; any future distribution that includes this dependency must explicitly package the notices and corresponding MPL source or otherwise satisfy its source availability requirements. The existing CLI build does not yet do so.
+
+The exact npm tarball's SHA-512 matched the `bun.lock` integrity value. The package's ESM entry point is a prebuilt bundle with monorepo source-path comments and no ESM source map. Its build script uses esbuild with external packages; a scan of the bundle's source-path comments found monorepo paths and no `node_modules` paths. This is not a complete source attribution or reproducible-build audit. The npm package omits the upstream [NOTICE at the registry-declared source revision](https://github.com/shinyoshiaki/werift-webrtc/blob/d67314bddfae08c3b980fd6a9b2977a306a6841c/NOTICE); we retain it and the Apache-2.0 license text alongside the dependency notices. That upstream notice lists material under BSD-3-Clause, MIT, ISC and Apache-2.0, but does not map every attribution to a bundle file. The upstream notice's `webm-encrypt` credit itself contains placeholder copyright fields; those fields are reproduced as published rather than treated as verified authorship. Review the exact shipped bundle and all attribution obligations before distributing it.

@@ -25,7 +25,10 @@ const options = {
 }
 const admin = postgres({ ...options, username: 'fixture' })
 const runtime = postgres({ ...options, username: 'session_fixture' })
-const store = new PostgresSessionRepository(runtime)
+const store = new PostgresSessionRepository(
+  runtime,
+  (requestedAt) => requestedAt,
+)
 const up = await readFile(
   new URL(
     '../infra/db/migrations/0004_account_sessions.up.sql',

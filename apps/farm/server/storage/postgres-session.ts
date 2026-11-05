@@ -15,8 +15,13 @@ const validTime = (now: number) => Number.isSafeInteger(now) && now >= 0
 /** Unwired persistence adapter. The caller owns a dedicated, bounded SQL pool. */
 export class PostgresSessionRepository implements SessionRepository {
   private readonly sql: Sql
-  constructor(sql: Sql) {
+  private readonly observeTime: (requestedAt: number) => number
+  constructor(
+    sql: Sql,
+    observeTime: (requestedAt: number) => number = Date.now,
+  ) {
     this.sql = sql
+    this.observeTime = observeTime
   }
 
   async authorizeAndTouch(
@@ -43,18 +48,23 @@ export class PostgresSessionRepository implements SessionRepository {
             absolute_expires_at::float8 AS "absoluteExpiresAt", revoked_at::float8 AS "revokedAt"
           FROM farm.account_sessions WHERE id = ${id} FOR UPDATE
         `
+        // A concurrent request may touch the session while this request waits.
+        // Reobserve after both locks; never clamp a genuinely regressed clock.
+        const observedAt = this.observeTime(now)
+        if (!validTime(observedAt) || observedAt < now)
+          return { ok: false, reason: 'invalid-state' }
         // evaluateSession validates every field from the database before accepting it.
         const decision = evaluateSession(
           id,
           sessions[0] ?? null,
           accounts[0] ?? null,
-          now,
+          observedAt,
           policy,
         )
         if (decision.ok)
           await tx`UPDATE farm.account_sessions SET last_seen_at = ${decision.touchAt} WHERE id = ${id}`
         else if (decision.reason === 'expired')
-          await tx`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE id = ${id}`
+          await tx`UPDATE farm.account_sessions SET revoked_at = ${observedAt} WHERE id = ${id}`
         return decision
       })
     } catch {

@@ -8,7 +8,10 @@ export async function testPostgresSessions(
   admin: Sql,
   runtime: Sql,
 ): Promise<string[]> {
-  const store = new PostgresSessionRepository(runtime)
+  const store = new PostgresSessionRepository(
+    runtime,
+    (requestedAt) => requestedAt,
+  )
   const checks: string[] = []
   async function seed(id: string) {
     await admin`INSERT INTO farm.session_accounts (id) VALUES (${id})`

@@ -79,8 +79,8 @@ function decodeEd25519Spki(encoded: string): Uint8Array {
 }
 
 /**
- * Parses the optional pause section. An absent section is not an error and
- * carries no authority. A present section is strict: unknown keys, a malformed
+ * Parses a present pause section. The runtime reader handles an absent section
+ * without calling this parser. Unknown keys, a malformed
  * issuer, a duplicate issuer and kid pair, and any key encoding that is not a
  * canonical Ed25519 public key are refused.
  *

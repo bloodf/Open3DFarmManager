@@ -88,10 +88,11 @@ export type PauseRelayDiagnostics = Readonly<{
 export type PauseCommandRelay = Readonly<{
   /**
    * Opens a control peer and starts the admission. Returns `false` when the
-   * relay is closed, the peer map is full, the binding or its control proofs do
+   * relay is closed, the peer map is full, the binding or its control proofs
    * do not parse or match, the assignment is not mapped locally, the local mapping
    * disagrees with the control binding, or the transport refuses the admission
-   * nonce. An existing transport id is refused without replacing its peer.
+   * nonce. An existing live transport id is refused without replacing its peer.
+   * Returns `false` if a synchronous send callback closes or replaces this peer.
    * Call only after the control transport has authenticated both peers.
    * The capability verifier checks cryptographic proofs during admission.
    */

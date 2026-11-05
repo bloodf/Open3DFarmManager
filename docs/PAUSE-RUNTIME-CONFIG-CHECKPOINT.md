@@ -6,8 +6,8 @@ available to a future relay and driver, and loads the trusted issuer keyring as 
 public keys.
 
 Nothing in this slice enables a pause. No command path is opened; existing `commandsEnabled`
-flags remain false. No new configuration endpoint, issuer issuance flow or signalling audience derivation
-is introduced.
+flags remain false. No new configuration endpoint, issuer issuance flow or signalling audience
+derivation is introduced.
 
 ## Runtime configuration
 

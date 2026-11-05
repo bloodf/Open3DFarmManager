@@ -29,6 +29,7 @@ const ledger = process.env.PAIRING_HTTP_TEST_LEDGER
 const portText = process.env.PAIRING_HTTP_SYNTHETIC_TEST_PORT
 const port = Number(portText)
 if (
+  Boolean(process.versions.bun) ||
   process.argv.length !== 2 ||
   !ledger ||
   !isAbsolute(ledger) ||
@@ -39,7 +40,7 @@ if (
   port > 65535
 )
   throw new Error(
-    'Explicit disposable loopback PostgreSQL fixture port required',
+    'Node and explicit disposable loopback PostgreSQL fixture port required',
   )
 const sql = postgres({
   host: '127.0.0.1',

@@ -6,7 +6,7 @@ This checkpoint is scoped to the exact contiguous catalog ending at `0014_connec
 PAIRING_HTTP_SYNTHETIC_TEST_DISPOSABLE=yes \
 PAIRING_HTTP_SYNTHETIC_TEST_PORT=<loopback-port> \
 PAIRING_HTTP_TEST_LEDGER=<absolute-task-ledger-path> \
-bun scripts/test-pairing-http.ts
+node scripts/test-pairing-http.ts
 ```
 
 The helper creates separate restricted login roles, synthetic accounts and farms, an ephemeral local HTTPS proxy, and temporary signing and TLS keys. It trusts the generated certificate for Node through `NODE_EXTRA_CA_CERTS`, runs Chromium against the built application, and tears down its roles, processes, and temporary files. Synthetic database rows remain in the caller-owned disposable database. The ledger records resource names and cleanup status without credentials.

@@ -19,6 +19,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -188,7 +189,12 @@ if (mode === '--prepare-layer') {
   await mkdir(layer, { mode: 0o700 })
   const app = join(checkout, 'apps/farm')
   const output = join(layer, 'output')
-  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(output)} } } })\n`
+  await symlink(
+    await realpath(join(app, 'node_modules')),
+    join(layer, 'node_modules'),
+    'dir',
+  )
+  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(output)} } } })\n`
   await writeFile(join(layer, 'nuxt.config.ts'), config, {
     mode: 0o600,
     flag: 'wx',

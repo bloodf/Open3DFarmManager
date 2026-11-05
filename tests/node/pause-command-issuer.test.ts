@@ -785,3 +785,38 @@ test('inner proof bounds count UTF-8 bytes before fetch', async () => {
   )
   assert.equal(stub.calls.length, 0)
 })
+
+test(
+  'deadline remains the first cause when cancellation aborts the caller',
+  { timeout: 6000 },
+  async () => {
+    const { challenge } = await issuerFixture()
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        controller.abort()
+      },
+    })
+    const issuer = createPauseCommandIssuer({
+      currentOrigin: 'https://farm.example',
+      fetch: stubFetch(() => new Response(body)).fetch,
+    })
+    await assert.rejects(
+      boundedFailure(
+        issuer.challenge({
+          browserProofWire: 'browser-proof',
+          connectorProofWire: 'connector-proof',
+          admissionNonce: challenge.admission_nonce,
+          signal: controller.signal,
+        }),
+        3500,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof PauseCommandIssuerError)
+        assert.equal(error.reason, 'timeout')
+        assert.equal(controller.signal.aborted, true)
+        return true
+      },
+    )
+  },
+)

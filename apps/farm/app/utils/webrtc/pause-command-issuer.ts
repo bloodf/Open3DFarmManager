@@ -282,10 +282,13 @@ export function createPauseCommandIssuer(
     }, REQUEST_TIMEOUT_MS)
 
     const guard = (): void => {
-      if (caller.aborted)
-        throw new PauseCommandIssuerError('aborted', ABORTED_MESSAGE)
-      if (performance.now() >= deadline)
-        throw new PauseCommandIssuerError('timeout', TIMEOUT_MESSAGE)
+      if (caller.aborted) failure ??= 'aborted'
+      if (performance.now() >= deadline) failure ??= 'timeout'
+      if (failure)
+        throw new PauseCommandIssuerError(
+          failure,
+          failure === 'timeout' ? TIMEOUT_MESSAGE : ABORTED_MESSAGE,
+        )
     }
     const classify = (error: unknown): PauseCommandIssuerError => {
       if (error instanceof PauseCommandIssuerError) return error
@@ -329,10 +332,7 @@ export function createPauseCommandIssuer(
         throw classify(error)
       }
 
-      if (caller.aborted)
-        throw new PauseCommandIssuerError('aborted', ABORTED_MESSAGE)
-      if (performance.now() >= deadline)
-        throw new PauseCommandIssuerError('timeout', TIMEOUT_MESSAGE)
+      guard()
       if (response.redirected || response.type === 'opaque')
         throw new PauseCommandIssuerError(
           'response',

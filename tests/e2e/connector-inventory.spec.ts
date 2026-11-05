@@ -34,8 +34,15 @@ test('inventory displays a selected farm and clears on authorization loss', asyn
   })
   await expect(selection.locator('option')).toHaveCount(2)
   await expect(selection).toBeEnabled()
-  await selection.focus()
-  await selection.selectOption(farm)
+  await expect(
+    page.getByRole('heading', { name: 'Connectors da farm' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(selection).toBeFocused()
+  await page.keyboard.press('f')
+  await expect(selection).toHaveValue(farm)
   await expect(page.getByText(connector)).toBeVisible()
   await expect(page.getByText('Pendente', { exact: true })).toBeVisible()
   await expect(

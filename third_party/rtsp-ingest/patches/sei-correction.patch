@@ -1,0 +1,54 @@
+--- a/pkg/format/rtph264/decoder.go
++++ b/pkg/format/rtph264/decoder.go
+@@ -423,6 +423,10 @@
+ 		d.resetFrameBuffer()
+ 	}
+ 
++	if d.limits != nil {
++		d.packets = 0
++	}
++
+ 	// Drop trailing SEI-only access units, that in reality should be leading the previous access unit.
+ 	// These cause problems in downstream components (DTS extractor, recorder).
+ 	if auIsOnlySEI(ret) {
+@@ -435,9 +439,6 @@
+ 		d.lastNonSEIReceived = true
+ 	}
+ 
+-	if d.limits != nil {
+-		d.packets = 0
+-	}
+ 	return ret, nil
+ }
+ 
+--- a/pkg/format/rtph264/decoder_limits_internal_test.go
++++ b/pkg/format/rtph264/decoder_limits_internal_test.go
+@@ -157,3 +157,28 @@
+ 	require.Zero(t, d.packets)
+ 	require.Nil(t, d.frameBuffer)
+ }
++
++func TestDecoderStrictTrailingSEIReset(t *testing.T) {
++	for _, tc := range []struct {
++		name    string
++		packets int
++	}{{"eight-packets", 8}, {"one-packet", 1}} {
++		t.Run(tc.name, func(t *testing.T) {
++			d := Decoder{Limits: &DecoderLimits{MaxAccessUnitBytes: 64, MaxPacketsPerAccessUnit: tc.packets, MaxFragmentsPerNAL: 1, MaxNALUsPerAccessUnit: 4}}
++			require.NoError(t, d.Init())
++			packet := func(seq uint16, ts uint32, nal byte) *rtp.Packet {
++				return &rtp.Packet{Header: rtp.Header{SequenceNumber: seq, Timestamp: ts, Marker: true}, Payload: []byte{nal}}
++			}
++			au, err := d.Decode(packet(1, 100, 0x65))
++			require.NoError(t, err)
++			require.Equal(t, [][]byte{{0x65}}, au)
++			au, err = d.Decode(packet(2, 100, 0x06))
++			require.ErrorIs(t, err, ErrMorePacketsNeeded)
++			require.Nil(t, au)
++			au, err = d.Decode(packet(3, 200, 0x65))
++			require.NoError(t, err)
++			require.Equal(t, [][]byte{{0x65}}, au)
++			require.False(t, d.terminal)
++		})
++	}
++}

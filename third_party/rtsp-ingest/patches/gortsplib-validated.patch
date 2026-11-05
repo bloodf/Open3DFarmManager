@@ -1,0 +1,1526 @@
+--- a/client.go
++++ b/client.go
+@@ -533,6 +533,16 @@
+ 	UserAgent string
+ 	// disable automatic RTCP sender reports.
+ 	DisableRTCPSenderReports bool
++	// DiscardIncomingRTCP drops inbound RTCP before decryption and parsing.
++	// Sender Reports are unavailable, so RTCP-based NTP synchronization is lost.
++	DiscardIncomingRTCP bool
++	// ReadLimits bounds RTSP bodies when set.
++	ReadLimits *base.ReadLimits
++	// SDPLimits bounds SDP parsing when set.
++	SDPLimits *sdpunmarshaler.Limits
++	// ValidateSDP is a trusted synchronous policy called before description conversion.
++	// It must not call Close.
++	ValidateSDP func(*sdp.SessionDescription) error
+ 	// explicitly request back channels to the server.
+ 	RequestBackChannels bool
+ 	// Range of ports used as source port in outbound UDP packets.
+@@ -577,6 +587,11 @@
+ 	//
+ 	// private
+ 	//
++
++	discardIncomingRTCP bool
++	readLimits          *base.ReadLimits
++	sdpLimits           *sdpunmarshaler.Limits
++	validateSDP         func(*sdp.SessionDescription) error
+ 
+ 	timeNow              func() time.Time
+ 	senderReportPeriod   time.Duration
+@@ -640,6 +655,26 @@
+ 
+ // Start initializes the connection to a server.
+ func (c *Client) Start() error {
++	// Snapshot and validate parser policies before any connection or parser work.
++	c.discardIncomingRTCP = c.DiscardIncomingRTCP
++	c.validateSDP = c.ValidateSDP
++	c.readLimits = nil
++	c.sdpLimits = nil
++	if c.ReadLimits != nil {
++		limits := *c.ReadLimits
++		if err := limits.Validate(); err != nil {
++			return fmt.Errorf("invalid RTSP read limits: %w", err)
++		}
++		c.readLimits = &limits
++	}
++	if c.SDPLimits != nil {
++		limits := *c.SDPLimits
++		if err := limits.Validate(); err != nil {
++			return fmt.Errorf("invalid SDP limits: %w", err)
++		}
++		c.sdpLimits = &limits
++	}
++
+ 	// RTSP parameters
+ 	if c.ReadTimeout == 0 {
+ 		c.ReadTimeout = 10 * time.Second
+@@ -1270,7 +1305,11 @@
+ 	c.propsMutex.Unlock()
+ 
+ 	bc := bytecounter.New(c.nconn, &c.bytesReceived, &c.bytesSent)
+-	c.conn = conn.NewConn(bufio.NewReader(bc), bc)
++	if c.readLimits != nil {
++		c.conn = conn.NewConnWithLimits(bufio.NewReader(bc), bc, *c.readLimits)
++	} else {
++		c.conn = conn.NewConn(bufio.NewReader(bc), bc)
++	}
+ 	c.reader = &clientReader{
+ 		c: c,
+ 	}
+@@ -1562,9 +1601,20 @@
+ 		return nil, nil, liberrors.ErrClientContentTypeUnsupported{CT: ct}
+ 	}
+ 
+-	ssd, err := sdpunmarshaler.Unmarshal(res.Body)
++	var ssd *sdp.SessionDescription
++	if c.sdpLimits != nil {
++		ssd, err = sdpunmarshaler.UnmarshalWithLimits(res.Body, *c.sdpLimits)
++	} else {
++		ssd, err = sdpunmarshaler.Unmarshal(res.Body)
++	}
+ 	if err != nil {
+ 		return nil, nil, liberrors.ErrClientSDPInvalid{Err: err}
++	}
++
++	if c.validateSDP != nil {
++		if err := c.validateSDP(ssd); err != nil {
++			return nil, nil, liberrors.ErrClientSDPInvalid{Err: err}
++		}
+ 	}
+ 
+ 	var desc description.Session
+--- a/client_media.go
++++ b/client_media.go
+@@ -282,6 +282,9 @@
+ }
+ 
+ func (cm *clientMedia) decodeRTCP(payload []byte) ([]rtcp.Packet, error) {
++	if cm.c.discardIncomingRTCP {
++		return nil, nil
++	}
+ 	if cm.srtpInCtx != nil {
+ 		var err error
+ 		payload, err = cm.srtpInCtx.decryptRTCP(payload, payload, nil)
+--- /dev/null
++++ b/client_rtcp_policy_test.go
+@@ -0,0 +1,150 @@
++// Patch contribution: original MIT-licensed test source. UNRUN.
++package gortsplib
++
++import (
++	"bufio"
++	"context"
++	"encoding/hex"
++	"errors"
++	"net"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/bluenviron/gortsplib/v5/pkg/base"
++	"github.com/bluenviron/gortsplib/v5/pkg/conn"
++	"github.com/bluenviron/gortsplib/v5/pkg/sdpunmarshaler"
++	"github.com/pion/rtp"
++	"github.com/pion/sdp/v3"
++)
++
++func TestIncomingRTCPPolicy(t *testing.T) {
++	valid := []byte{0x80, 0xc9, 0, 1, 0, 0, 0, 1}
++	normal := &clientMedia{c: &Client{}}
++	packets, err := normal.decodeRTCP(valid)
++	if err != nil || len(packets) != 1 {
++		t.Fatalf("default RTCP: %v %v", packets, err)
++	}
++	discard := &clientMedia{c: &Client{discardIncomingRTCP: true}}
++	for _, encoded := range []string{hex.EncodeToString(valid), "8fcd000900000000000000000000ffff000000003fff3fff3fff3fff3fff3fff3fff3fff20070000", "8fcd016d00000000000000000000ffff000000003fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff3fff3fff3fff3fff3fff3fff3fff3ff9bfff00000000"} {
++		payload, err := hex.DecodeString(encoded)
++		if err != nil {
++			t.Fatal(err)
++		}
++		packets, err = discard.decodeRTCP(payload)
++		if err != nil || len(packets) != 0 {
++			t.Fatalf("discard: %v %v", packets, err)
++		}
++	}
++	// An uninitialized SRTP context panics if decryptRTCP is entered.
++	discard.srtpInCtx = &wrappedSRTPContext{}
++	if packets, err = discard.decodeRTCP(valid); err != nil || len(packets) != 0 {
++		t.Fatalf("decrypt bypass: %v", err)
++	}
++	discard.srtpInCtx = nil
++	wire := []byte{0x80, 96, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 42}
++	var header rtp.Header
++	n, err := header.Unmarshal(wire)
++	if err != nil {
++		t.Fatal(err)
++	}
++	pkt, err := discard.decodeRTP(wire, &header, n)
++	if err != nil || len(pkt.Payload) != 1 || pkt.Payload[0] != 42 {
++		t.Fatalf("RTP: %v %v", pkt, err)
++	}
++}
++
++func TestClientPolicySnapshotsAndValidation(t *testing.T) {
++	limits := base.ReadLimits{MaxBodyBytes: 16384}
++	sdpLimits := sdpunmarshaler.Limits{MaxBodyBytes: 16384, MaxLineBytes: 2048, MaxLines: 64, MaxMediaDescriptions: 1, MaxFormatsPerMedia: 1, MaxAttributes: 32}
++	called := false
++	c := &Client{DiscardIncomingRTCP: true, ReadLimits: &limits, SDPLimits: &sdpLimits, ValidateSDP: func(*sdp.SessionDescription) error { called = true; return nil }}
++	if err := c.Start(); err != nil {
++		t.Fatal(err)
++	}
++	defer c.Close()
++	limits.MaxBodyBytes = 1
++	sdpLimits.MaxLines = 1
++	c.DiscardIncomingRTCP = false
++	c.ValidateSDP = nil
++	if !c.discardIncomingRTCP || c.readLimits.MaxBodyBytes != 16384 || c.sdpLimits.MaxLines != 64 || c.validateSDP == nil {
++		t.Fatal("policy changed after Start")
++	}
++	if err := c.validateSDP(&sdp.SessionDescription{}); err != nil || !called {
++		t.Fatal("hook snapshot changed")
++	}
++	for _, bad := range []Client{
++		{ReadLimits: &base.ReadLimits{MaxBodyBytes: 0}},
++		{ReadLimits: &base.ReadLimits{MaxBodyBytes: -1}},
++		{ReadLimits: &base.ReadLimits{MaxBodyBytes: int(^uint(0) >> 1)}},
++		{SDPLimits: &sdpunmarshaler.Limits{}},
++		{SDPLimits: &sdpunmarshaler.Limits{MaxBodyBytes: 16384, MaxLineBytes: -1, MaxLines: 64, MaxMediaDescriptions: 1, MaxFormatsPerMedia: 1, MaxAttributes: 32}},
++	} {
++		if err := bad.Start(); err == nil {
++			bad.Close()
++			t.Fatal("invalid limits accepted")
++		}
++		if bad.DialContext != nil {
++			t.Fatal("validation followed Start side effects")
++		}
++	}
++}
++
++func TestClientSDPPolicyVetoBeforeConversion(t *testing.T) {
++	client, server := net.Pipe()
++	defer client.Close()
++	defer server.Close()
++	deadline := time.Now().Add(5 * time.Second)
++	if err := client.SetDeadline(deadline); err != nil {
++		t.Fatal(err)
++	}
++	if err := server.SetDeadline(deadline); err != nil {
++		t.Fatal(err)
++	}
++	done := make(chan error, 1)
++	go func() {
++		defer server.Close()
++		wire := conn.NewConn(bufio.NewReader(server), server)
++		for i := 0; i < 2; i++ {
++			req, err := wire.ReadRequest()
++			if err != nil {
++				done <- err
++				return
++			}
++			res := &base.Response{StatusCode: base.StatusOK}
++			if req.Method == base.Options {
++				res.Header = base.Header{"Public": base.HeaderValue{"DESCRIBE"}}
++			} else {
++				res.Header = base.Header{"Content-Type": base.HeaderValue{"application/sdp"}}
++				res.Body = []byte("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=test\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=invalid\r\n")
++			}
++			if err = wire.WriteResponse(res); err != nil {
++				done <- err
++				return
++			}
++		}
++		done <- nil
++	}()
++	veto := errors.New("policy veto sentinel")
++	c := &Client{Scheme: "rtsp", Host: "example.invalid:554", DialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil }, ValidateSDP: func(*sdp.SessionDescription) error { return veto }}
++	if err := c.Start(); err != nil {
++		t.Fatal(err)
++	}
++	defer c.Close()
++	u, err := base.ParseURL("rtsp://example.invalid:554/test")
++	if err != nil {
++		t.Fatal(err)
++	}
++	_, _, err = c.Describe(u)
++	if err == nil || !strings.Contains(err.Error(), veto.Error()) {
++		t.Fatalf("expected policy veto before malformed codec conversion: %v", err)
++	}
++	select {
++	case err := <-done:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("server did not finish")
++	}
++}
+--- /dev/null
++++ b/client_sdp_limits_test.go
+@@ -0,0 +1,23 @@
++// Source-only tests: UNRUN. Requires combined P1/P3 patch. Original MIT contributions.
++package gortsplib
++
++import (
++	"github.com/bluenviron/gortsplib/v5/pkg/base"
++	"github.com/bluenviron/gortsplib/v5/pkg/sdpunmarshaler"
++	"testing"
++)
++
++func TestClientSDPBoundsRejectBeforeStart(t *testing.T) {
++	for _, c := range []*Client{
++		{ReadLimits: &base.ReadLimits{MaxBodyBytes: 128*1024 + 1}},
++		{SDPLimits: &sdpunmarshaler.Limits{MaxBodyBytes: 16384, MaxLineBytes: 2048, MaxLines: 2, MaxMediaDescriptions: 3, MaxFormatsPerMedia: 1, MaxAttributes: 1}},
++	} {
++		if err := c.Start(); err == nil {
++			c.Close()
++			t.Fatal("accepted invalid configuration")
++		}
++		if c.ctx != nil {
++			t.Fatal("started before limits validation")
++		}
++	}
++}
+--- a/pkg/base/body.go
++++ b/pkg/base/body.go
+@@ -14,7 +14,14 @@
+ type body []byte
+ 
+ func (b *body) unmarshal(header Header, rb *bufio.Reader) error {
++	return b.unmarshalWithLimits(header, rb, nil)
++}
++
++func (b *body) unmarshalWithLimits(header Header, rb *bufio.Reader, limits *ReadLimits) error {
+ 	cls, ok := header["Content-Length"]
++	if ok && len(cls) != 1 && limits != nil {
++		return fmt.Errorf("duplicate Content-Length")
++	}
+ 	if !ok || len(cls) != 1 {
+ 		*b = nil
+ 		return nil
+@@ -25,9 +32,13 @@
+ 		return fmt.Errorf("invalid Content-Length")
+ 	}
+ 
+-	if cl > rtspMaxBodySize {
++	maxBody := rtspMaxBodySize
++	if limits != nil {
++		maxBody = limits.MaxBodyBytes
++	}
++	if cl > uint64(maxBody) {
+ 		return fmt.Errorf("Content-Length exceeds %d (it's %d)",
+-			rtspMaxBodySize, cl)
++			maxBody, cl)
+ 	}
+ 
+ 	*b = make([]byte, cl)
+--- /dev/null
++++ b/pkg/base/read_limits.go
+@@ -0,0 +1,17 @@
++// Local limit additions are original MIT-licensed contributions.
++package base
++
++import "fmt"
++
++// ReadLimits bounds RTSP bodies; header and interleaved limits are unchanged.
++type ReadLimits struct {
++	MaxBodyBytes int
++}
++
++// Validate checks opt-in limits without reading input.
++func (l ReadLimits) Validate() error {
++	if l.MaxBodyBytes <= 0 || l.MaxBodyBytes > rtspMaxBodySize {
++		return fmt.Errorf("MaxBodyBytes must be in 1..%d", rtspMaxBodySize)
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/base/read_limits_test.go
+@@ -0,0 +1,75 @@
++// Source-only tests: UNRUN. Original MIT-licensed contributions.
++package base
++
++import (
++	"bufio"
++	"strings"
++	"testing"
++)
++
++func TestReadLimitsValidation(t *testing.T) {
++	for _, n := range []int{0, -1, 128*1024 + 1, int(^uint(0) >> 1)} {
++		var req Request
++		if err := req.UnmarshalWithLimits(nil, ReadLimits{MaxBodyBytes: n}); err == nil {
++			t.Fatal(n)
++		}
++		var res Response
++		if err := res.UnmarshalWithLimits(nil, ReadLimits{MaxBodyBytes: n}); err == nil {
++			t.Fatal(n)
++		}
++	}
++}
++
++func TestReadLimitsBodies(t *testing.T) {
++	for _, start := range []string{"RTSP/1.0 200 OK\r\n", "OPTIONS * RTSP/1.0\r\n"} {
++		for _, tc := range []struct {
++			headers, body string
++			wantErr       bool
++		}{
++			{"", "", false},
++			{"Content-Length: 0\r\n", "", false},
++			{"Content-Length: 3\r\n", "abc", false},
++			{"Content-Length: 4\r\n", "", true},
++			{"Content-Length: 3\r\nContent-Length: 3\r\n", "abc", true},
++			{"Content-Length: bad\r\n", "", true},
++			{"Content-Length: 18446744073709551616\r\n", "", true},
++			{"Content-Length: 3\r\n", "ab", true},
++		} {
++			br := bufio.NewReader(strings.NewReader(start + tc.headers + "\r\n" + tc.body))
++			var err error
++			if strings.HasPrefix(start, "RTSP") {
++				var res Response
++				err = res.UnmarshalWithLimits(br, ReadLimits{3})
++			} else {
++				var req Request
++				err = req.UnmarshalWithLimits(br, ReadLimits{3})
++			}
++			if (err != nil) != tc.wantErr {
++				t.Fatalf("%q: %v", tc.headers, err)
++			}
++		}
++	}
++}
++
++func TestReadLimitsRejectBeforeBodyMutation(t *testing.T) {
++	b := body("old")
++	br := bufio.NewReader(strings.NewReader("payload"))
++	limits := ReadLimits{3}
++	if err := b.unmarshalWithLimits(Header{"Content-Length": {"4"}}, br, &limits); err == nil {
++		t.Fatal("accepted")
++	}
++	if string(b) != "old" {
++		t.Fatal("allocated or mutated body before cap")
++	}
++	ch, err := br.ReadByte()
++	if err != nil || ch != 'p' {
++		t.Fatal("read body before cap")
++	}
++}
++
++func TestLegacyDuplicateLengthUnchanged(t *testing.T) {
++	var res Response
++	if err := res.Unmarshal(bufio.NewReader(strings.NewReader("RTSP/1.0 200 OK\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx"))); err != nil || res.Body != nil {
++		t.Fatal(err)
++	}
++}
+--- a/pkg/base/request.go
++++ b/pkg/base/request.go
+@@ -48,6 +48,18 @@
+ 
+ // Unmarshal reads a request.
+ func (req *Request) Unmarshal(br *bufio.Reader) error {
++	return req.unmarshal(br, nil)
++}
++
++// UnmarshalWithLimits reads a request with an opt-in body limit.
++func (req *Request) UnmarshalWithLimits(br *bufio.Reader, limits ReadLimits) error {
++	if err := limits.Validate(); err != nil {
++		return err
++	}
++	return req.unmarshal(br, &limits)
++}
++
++func (req *Request) unmarshal(br *bufio.Reader, limits *ReadLimits) error {
+ 	byts, err := readBytesLimited(br, ' ', requestMaxMethodLength)
+ 	if err != nil {
+ 		return err
+@@ -95,7 +107,7 @@
+ 		return err
+ 	}
+ 
+-	err = (*body)(&req.Body).unmarshal(req.Header, br)
++	err = (*body)(&req.Body).unmarshalWithLimits(req.Header, br, limits)
+ 	if err != nil {
+ 		return err
+ 	}
+--- a/pkg/base/response.go
++++ b/pkg/base/response.go
+@@ -135,6 +135,18 @@
+ 
+ // Unmarshal reads a response.
+ func (res *Response) Unmarshal(br *bufio.Reader) error {
++	return res.unmarshal(br, nil)
++}
++
++// UnmarshalWithLimits reads a response with an opt-in body limit.
++func (res *Response) UnmarshalWithLimits(br *bufio.Reader, limits ReadLimits) error {
++	if err := limits.Validate(); err != nil {
++		return err
++	}
++	return res.unmarshal(br, &limits)
++}
++
++func (res *Response) unmarshal(br *bufio.Reader, limits *ReadLimits) error {
+ 	byts, err := readBytesLimited(br, ' ', 255)
+ 	if err != nil {
+ 		return err
+@@ -177,7 +189,7 @@
+ 		return err
+ 	}
+ 
+-	err = (*body)(&res.Body).unmarshal(res.Header, br)
++	err = (*body)(&res.Body).unmarshalWithLimits(res.Header, br, limits)
+ 	if err != nil {
+ 		return err
+ 	}
+--- a/pkg/conn/conn.go
++++ b/pkg/conn/conn.go
+@@ -10,8 +10,9 @@
+ 
+ // Conn is a RTSP connection.
+ type Conn struct {
+-	br *bufio.Reader
+-	w  io.Writer
++	br     *bufio.Reader
++	w      io.Writer
++	limits *base.ReadLimits
+ 
+ 	// reuse interleaved frames. they should never be passed to secondary routines
+ 	fr base.InterleavedFrame
+@@ -25,8 +26,19 @@
+ 	}
+ }
+ 
++// NewConnWithLimits allocates a Conn with a value snapshot of opt-in body limits.
++// Invalid limits cause reads to fail before accessing input.
++func NewConnWithLimits(br *bufio.Reader, w io.Writer, limits base.ReadLimits) *Conn {
++	return &Conn{br: br, w: w, limits: &limits}
++}
++
+ // Read reads a Request, a Response or an Interleaved frame.
+ func (c *Conn) Read() (any, error) {
++	if c.limits != nil {
++		if err := c.limits.Validate(); err != nil {
++			return nil, err
++		}
++	}
+ 	for {
+ 		byts, err := c.br.Peek(2)
+ 		if err != nil {
+@@ -62,6 +74,10 @@
+ // ReadRequest reads a Request.
+ func (c *Conn) ReadRequest() (*base.Request, error) {
+ 	var req base.Request
++	if c.limits != nil {
++		err := req.UnmarshalWithLimits(c.br, *c.limits)
++		return &req, err
++	}
+ 	err := req.Unmarshal(c.br)
+ 	return &req, err
+ }
+@@ -69,12 +85,21 @@
+ // ReadResponse reads a Response.
+ func (c *Conn) ReadResponse() (*base.Response, error) {
+ 	var res base.Response
++	if c.limits != nil {
++		err := res.UnmarshalWithLimits(c.br, *c.limits)
++		return &res, err
++	}
+ 	err := res.Unmarshal(c.br)
+ 	return &res, err
+ }
+ 
+ // ReadInterleavedFrame reads a InterleavedFrame.
+ func (c *Conn) ReadInterleavedFrame() (*base.InterleavedFrame, error) {
++	if c.limits != nil {
++		if err := c.limits.Validate(); err != nil {
++			return nil, err
++		}
++	}
+ 	err := c.fr.Unmarshal(c.br)
+ 	return &c.fr, err
+ }
+--- /dev/null
++++ b/pkg/conn/read_limits_test.go
+@@ -0,0 +1,30 @@
++// Source-only tests: UNRUN. Original MIT-licensed contributions.
++package conn
++
++import (
++	"bufio"
++	"github.com/bluenviron/gortsplib/v5/pkg/base"
++	"io"
++	"strings"
++	"testing"
++)
++
++func TestConnLimitsSnapshot(t *testing.T) {
++	limits := base.ReadLimits{MaxBodyBytes: 3}
++	c := NewConnWithLimits(bufio.NewReader(strings.NewReader("RTSP/1.0 200 OK\r\nContent-Length: 4\r\n\r\nxxxx")), io.Discard, limits)
++	limits.MaxBodyBytes = 8
++	if _, err := c.Read(); err == nil {
++		t.Fatal("limit not applied")
++	}
++	if _, err := NewConnWithLimits(nil, io.Discard, base.ReadLimits{}).Read(); err == nil {
++		t.Fatal("invalid options read input")
++	}
++}
++
++func TestConnLimitedControlAndRequest(t *testing.T) {
++	for _, msg := range []string{"RTSP/1.0 200 OK\r\n\r\n", "OPTIONS * RTSP/1.0\r\n\r\n"} {
++		if _, err := NewConnWithLimits(bufio.NewReader(strings.NewReader(msg)), io.Discard, base.ReadLimits{MaxBodyBytes: 1}).Read(); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
+--- a/pkg/format/rtph264/decoder.go
++++ b/pkg/format/rtph264/decoder.go
+@@ -31,11 +31,22 @@
+ // Even though fragments must contain only
+ // one NAL unit, some vendors put multiple anyway.
+ func splitNALUs(b []byte) [][]byte {
++	ret, _ := splitNALUsChecked(b, nil)
++	return ret
++}
++
++func splitNALUsChecked(b []byte, check func(int, int) error) ([][]byte, error) {
++	total := 0
+ 	startCode := []byte{0x00, 0x00, 0x01}
+ 	nalus := make([][]byte, 0, 1)
+ 	for len(b) > 0 {
+ 		idx := bytes.Index(b, startCode)
+ 		if idx == -1 {
++			if check != nil {
++				if err := check(total+len(b), len(nalus)+1); err != nil {
++					return nil, err
++				}
++			}
+ 			nalus = append(nalus, b)
+ 			break
+ 		}
+@@ -48,10 +59,16 @@
+ 			b = b[sz:]
+ 			continue
+ 		}
++		if check != nil {
++			if err := check(total+idx, len(nalus)+1); err != nil {
++				return nil, err
++			}
++		}
++		total += idx
+ 		nalus = append(nalus, b[:idx])
+ 		b = b[idx+sz:]
+ 	}
+-	return nalus
++	return nalus, nil
+ }
+ 
+ func isAllZero(buf []byte) bool {
+@@ -81,9 +98,27 @@
+ 	return true
+ }
+ 
++// DecoderLimits bounds one access unit, including canonical output delimiters.
++type DecoderLimits struct {
++	MaxAccessUnitBytes      int
++	MaxPacketsPerAccessUnit int
++	MaxFragmentsPerNAL      int
++	MaxNALUsPerAccessUnit   int
++}
++
+ // Decoder is a RTP/H264 decoder.
+ // Specification: RFC6184
+ type Decoder struct {
++	// Limits is copied by Init. Nil preserves the legacy profile.
++	Limits          *DecoderLimits
++	limits          *DecoderLimits
++	initialized     bool
++	terminal        bool
++	packets         int
++	fragmentPackets int
++	strictTimestamp uint32
++	strictNextSeq   uint16
++
+ 	// indicates the packetization mode.
+ 	PacketizationMode int
+ 
+@@ -104,14 +139,36 @@
+ 
+ // Init initializes the decoder.
+ func (d *Decoder) Init() error {
++	if d.terminal || d.initialized {
++		return fmt.Errorf("decoder is already initialized or terminal")
++	}
++	if d.Limits != nil {
++		v := *d.Limits
++		maxInt := int(^uint(0) >> 1)
++		if v.MaxAccessUnitBytes <= 0 || v.MaxAccessUnitBytes > maxInt-4 ||
++			v.MaxPacketsPerAccessUnit <= 0 || v.MaxFragmentsPerNAL <= 0 ||
++			v.MaxFragmentsPerNAL > maxInt-1 || v.MaxNALUsPerAccessUnit <= 0 ||
++			v.MaxNALUsPerAccessUnit > maxInt/4 {
++			d.failStrict()
++			return fmt.Errorf("invalid decoder limits")
++		}
++		d.limits = &v
++		d.initialized = true
++	}
++
+ 	if d.PacketizationMode != 0 && d.PacketizationMode != 1 {
++		if d.Limits != nil {
++			d.failStrict()
++		}
+ 		return fmt.Errorf("unsupported packetization mode: %d", d.PacketizationMode)
+ 	}
+ 	return nil
+ }
+ 
+ func (d *Decoder) resetFragments() {
++	clear(d.fragments[:cap(d.fragments)])
+ 	d.fragments = d.fragments[:0]
++	d.fragmentPackets = 0
+ 	d.fragmentsSize = 0
+ }
+ 
+@@ -123,6 +180,9 @@
+ 
+ 	typ := h264.NALUType(pkt.Payload[0] & 0x1F)
+ 	var nalus [][]byte
++	if d.limits != nil && len(d.fragments) != 0 && typ != h264.NALUTypeFUA {
++		return nil, fmt.Errorf("unfinished fragmented NAL")
++	}
+ 
+ 	switch typ {
+ 	case h264.NALUTypeFUA:
+@@ -133,11 +193,30 @@
+ 		start := pkt.Payload[1] >> 7
+ 		end := (pkt.Payload[1] >> 6) & 0x01
+ 
++		if d.limits != nil {
++			if start == 1 && len(d.fragments) != 0 {
++				return nil, fmt.Errorf("repeated FU start")
++			}
++			if d.fragmentPackets >= d.limits.MaxFragmentsPerNAL {
++				return nil, fmt.Errorf("fragment limit exceeded")
++			}
++			if len(pkt.Payload)-2 > d.limits.MaxAccessUnitBytes-d.fragmentsSize {
++				return nil, fmt.Errorf("fragment byte limit exceeded")
++			}
++			size := d.fragmentsSize + (len(pkt.Payload) - 2)
++			if start == 1 {
++				size = len(pkt.Payload) - 1
++			}
++			if err := d.checkStrictNAL(size, 1); err != nil {
++				return nil, err
++			}
++		}
+ 		if start == 1 {
+ 			d.resetFragments()
+ 
+ 			nri := (pkt.Payload[0] >> 5) & 0x03
+ 			typ := pkt.Payload[1] & 0x1F
++			d.fragmentPackets = 1
+ 			d.fragmentsSize = len(pkt.Payload[1:])
+ 			d.fragments = append(d.fragments, []byte{(nri << 5) | typ}, pkt.Payload[2:])
+ 			d.fragmentNextSeqNum = pkt.SequenceNumber + 1
+@@ -152,7 +231,11 @@
+ 			// However, some vendors camera (e.g. CostarHD) have been observed to nevertheless
+ 			// emit one fragmented NAL unit for sufficiently small P-frames.
+ 			if end != 0 {
+-				nalus = splitNALUs(joinFragments(d.fragments, d.fragmentsSize))
++				var splitErr error
++				nalus, splitErr = d.splitFragments()
++				if splitErr != nil {
++					return nil, splitErr
++				}
+ 				d.resetFragments()
+ 				break
+ 			}
+@@ -173,6 +256,7 @@
+ 			return nil, fmt.Errorf("discarding frame since a RTP packet is missing")
+ 		}
+ 
++		d.fragmentPackets++
+ 		d.fragmentsSize += len(pkt.Payload[2:])
+ 
+ 		if d.fragmentsSize > h264.MaxAccessUnitSize {
+@@ -189,7 +273,11 @@
+ 			return nil, ErrMorePacketsNeeded
+ 		}
+ 
+-		nalus = splitNALUs(joinFragments(d.fragments, d.fragmentsSize))
++		var splitErr error
++		nalus, splitErr = d.splitFragments()
++		if splitErr != nil {
++			return nil, splitErr
++		}
+ 		d.resetFragments()
+ 
+ 	case h264.NALUTypeSTAPA:
+@@ -218,6 +306,15 @@
+ 				return nil, fmt.Errorf("invalid STAP-A packet (invalid size)")
+ 			}
+ 
++			if d.limits != nil {
++				current := auSize(nalus)
++				if int(size) > d.limits.MaxAccessUnitBytes-current {
++					return nil, fmt.Errorf("STAP byte limit exceeded")
++				}
++				if err := d.checkStrictNAL(current+int(size), len(nalus)+1); err != nil {
++					return nil, err
++				}
++			}
+ 			nalus = append(nalus, payload[:size])
+ 			payload = payload[size:]
+ 
+@@ -241,6 +338,14 @@
+ 	default:
+ 		d.resetFragments()
+ 		d.firstPacketReceived = true
++		if d.limits != nil && (d.annexBMode || bytes.Contains(pkt.Payload, []byte{0, 0, 0, 1})) {
++			remaining := d.limits.MaxAccessUnitBytes - d.frameBufferSize - 4*d.frameBufferLen
++			if len(pkt.Payload) > remaining {
++				return nil, fmt.Errorf("Annex-B input exceeds limit")
++			}
++		} else if err := d.checkStrictNAL(len(pkt.Payload), 1); err != nil {
++			return nil, err
++		}
+ 		nalus = [][]byte{pkt.Payload}
+ 	}
+ 
+@@ -258,7 +363,31 @@
+ 
+ // Decode decodes an access unit from a RTP packet.
+ // On success, the access unit contains at least one NALU, each with at least one byte.
+-func (d *Decoder) Decode(pkt *rtp.Packet) ([][]byte, error) {
++func (d *Decoder) Decode(pkt *rtp.Packet) (retAU [][]byte, retErr error) {
++	if d.Limits != nil && !d.initialized {
++		d.failStrict()
++		return nil, fmt.Errorf("strict decoder requires successful Init")
++	}
++	if d.terminal {
++		return nil, fmt.Errorf("decoder is terminal")
++	}
++	if d.limits != nil {
++		defer func() {
++			if retErr != nil && retErr != ErrMorePacketsNeeded {
++				d.failStrict()
++			}
++		}()
++		if d.packets >= d.limits.MaxPacketsPerAccessUnit {
++			return nil, fmt.Errorf("packet limit exceeded")
++		}
++		if d.packets > 0 && (pkt.Timestamp != d.strictTimestamp || pkt.SequenceNumber != d.strictNextSeq) {
++			return nil, fmt.Errorf("access unit discontinuity")
++		}
++		d.packets++
++		d.strictTimestamp = pkt.Timestamp
++		d.strictNextSeq = pkt.SequenceNumber + 1
++	}
++
+ 	nalus, err := d.decodeNALUs(pkt)
+ 	if err != nil {
+ 		return nil, err
+@@ -306,6 +435,9 @@
+ 		d.lastNonSEIReceived = true
+ 	}
+ 
++	if d.limits != nil {
++		d.packets = 0
++	}
+ 	return ret, nil
+ }
+ 
+@@ -316,6 +448,9 @@
+ }
+ 
+ func (d *Decoder) addToFrameBuffer(nalus [][]byte, l int, ts uint32) error {
++	if err := d.checkStrictNAL(auSize(nalus), l); err != nil {
++		return err
++	}
+ 	if (d.frameBufferLen + l) > h264.MaxNALUsPerAccessUnit {
+ 		errCount := d.frameBufferLen + l
+ 		d.resetFrameBuffer()
+@@ -350,14 +485,54 @@
+ 
+ 		if d.annexBMode {
+ 			if !bytes.HasPrefix(nalu, []byte{0x00, 0x00, 0x00, 0x01}) {
++				if d.limits != nil && len(nalu) > d.limits.MaxAccessUnitBytes-4 {
++					return nil, fmt.Errorf("Annex-B adaptation exceeds limit")
++				}
+ 				nalu = append([]byte{0x00, 0x00, 0x00, 0x01}, nalu...)
+ 			}
+ 
+ 			var annexb h264.AnnexB
+-			err := annexb.Unmarshal(nalu)
++			var err error
++			if d.limits != nil {
++				err = annexb.UnmarshalWithLimits(nalu, h264.AnnexBLimits{
++					MaxAccessUnitBytes:    d.limits.MaxAccessUnitBytes - d.frameBufferSize - 4*d.frameBufferLen,
++					MaxNALUsPerAccessUnit: d.limits.MaxNALUsPerAccessUnit - d.frameBufferLen,
++				})
++			} else {
++				err = annexb.Unmarshal(nalu)
++			}
+ 			return annexb, err
+ 		}
+ 	}
+ 
+ 	return nalus, nil
+ }
++
++func (d *Decoder) checkStrictNAL(size, count int) error {
++	if d.limits == nil {
++		return nil
++	}
++	v := d.limits
++	if count > v.MaxNALUsPerAccessUnit-d.frameBufferLen {
++		return fmt.Errorf("NAL count limit exceeded")
++	}
++	remaining := v.MaxAccessUnitBytes - d.frameBufferSize - 4*d.frameBufferLen
++	if count > remaining/4 || size > remaining-4*count {
++		return fmt.Errorf("access unit byte limit exceeded")
++	}
++	return nil
++}
++
++func (d *Decoder) splitFragments() ([][]byte, error) {
++	if err := d.checkStrictNAL(d.fragmentsSize, 1); err != nil {
++		return nil, err
++	}
++	return splitNALUsChecked(joinFragments(d.fragments, d.fragmentsSize), d.checkStrictNAL)
++}
++
++func (d *Decoder) failStrict() {
++	d.terminal = true
++	d.resetFragments()
++	clear(d.frameBuffer)
++	d.resetFrameBuffer()
++}
+--- /dev/null
++++ b/pkg/format/rtph264/decoder_limits_internal_test.go
+@@ -0,0 +1,159 @@
++package rtph264
++
++import (
++	"testing"
++
++	"github.com/pion/rtp"
++	"github.com/stretchr/testify/require"
++)
++
++// Source-only regression additions: not executed during patch preparation.
++func TestDecoderStrictLimits(t *testing.T) {
++	limits := DecoderLimits{MaxAccessUnitBytes: 12, MaxPacketsPerAccessUnit: 3, MaxFragmentsPerNAL: 2, MaxNALUsPerAccessUnit: 2}
++	packet := func(seq uint16, ts uint32, marker bool, payload ...byte) *rtp.Packet {
++		return &rtp.Packet{Header: rtp.Header{SequenceNumber: seq, Timestamp: ts, Marker: marker}, Payload: payload}
++	}
++	for _, tc := range []struct {
++		name    string
++		packets []*rtp.Packet
++		success bool
++	}{
++		{"Annex-B-boundary", []*rtp.Packet{packet(1, 1, true, 0, 0, 0, 1, 0x65, 1, 2, 3, 4, 5, 6, 7)}, true},
++		{"single-boundary", []*rtp.Packet{packet(1, 1, true, 0x65, 1, 2, 3, 4, 5, 6, 7)}, true},
++		{"single-delimiter-over", []*rtp.Packet{packet(1, 1, true, 0x65, 1, 2, 3, 4, 5, 6, 7, 8)}, false},
++		{"FU-wrap", []*rtp.Packet{packet(65535, 1, false, 0x7c, 0x85), packet(0, 1, true, 0x7c, 0x45, 1)}, true},
++		{"FU-zero-body-flood", []*rtp.Packet{packet(1, 1, false, 0x7c, 0x85), packet(2, 1, false, 0x7c, 5), packet(3, 1, true, 0x7c, 0x45)}, false},
++		{"FU-repeated-start", []*rtp.Packet{packet(1, 1, false, 0x7c, 0x85), packet(2, 1, true, 0x7c, 0x85)}, false},
++		{"hostile-marker", []*rtp.Packet{packet(1, 1, true, 0x7c, 0x85), packet(2, 2, true, 0x7c, 0x45)}, false},
++		{"sequence-gap", []*rtp.Packet{packet(1, 1, false, 0x65), packet(3, 1, true, 0x65)}, false},
++		{"combined-budget", []*rtp.Packet{packet(1, 1, false, 0x65, 1, 2), packet(2, 1, false, 0x7c, 0x85, 1, 2)}, false},
++		{"STAP-valid", []*rtp.Packet{packet(1, 1, true, 0x78, 0, 1, 0x65, 0, 1, 0x61)}, true},
++		{"STAP-dense", []*rtp.Packet{packet(1, 1, true, 0x78, 0, 1, 0x65, 0, 1, 0x61, 0, 1, 0x61)}, false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			d := Decoder{Limits: &limits}
++			require.NoError(t, d.Init())
++			var result [][]byte
++			var err error
++			for _, p := range tc.packets {
++				result, err = d.Decode(p)
++				if err != nil && err != ErrMorePacketsNeeded {
++					break
++				}
++			}
++			if tc.success {
++				require.NoError(t, err)
++				require.NotEmpty(t, result)
++			} else {
++				require.Error(t, err)
++				require.NotEqual(t, ErrMorePacketsNeeded, err)
++				require.True(t, d.terminal)
++				require.Empty(t, d.frameBuffer)
++				for _, ref := range d.fragments[:cap(d.fragments)] {
++					require.Nil(t, ref)
++				}
++				_, err = d.Decode(packet(9, 9, true, 0x65))
++				require.Error(t, err)
++				require.Error(t, d.Init())
++			}
++		})
++	}
++}
++
++func TestDecoderStrictSnapshotAndOwnership(t *testing.T) {
++	v := DecoderLimits{12, 3, 2, 2}
++	d := Decoder{Limits: &v}
++	require.NoError(t, d.Init())
++	v.MaxAccessUnitBytes = 1
++	au, err := d.Decode(&rtp.Packet{Header: rtp.Header{SequenceNumber: 1, Marker: true}, Payload: []byte{0x65}})
++	require.NoError(t, err)
++	_, err = d.Decode(&rtp.Packet{Header: rtp.Header{SequenceNumber: 2, Marker: true}, Payload: nil})
++	require.Error(t, err)
++	require.Equal(t, [][]byte{{0x65}}, au)
++}
++
++func TestDecoderStrictInvalidLimits(t *testing.T) {
++	maxInt := int(^uint(0) >> 1)
++	for field := 0; field < 4; field++ {
++		for _, bad := range []int{0, -1, maxInt} {
++			v := DecoderLimits{12, 3, 2, 2}
++			switch field {
++			case 0:
++				v.MaxAccessUnitBytes = bad
++			case 1:
++				v.MaxPacketsPerAccessUnit = bad
++			case 2:
++				v.MaxFragmentsPerNAL = bad
++			case 3:
++				v.MaxNALUsPerAccessUnit = bad
++			}
++			if field == 1 && bad == maxInt {
++				continue
++			} // packet count has no multiplied arithmetic
++			d := Decoder{Limits: &v}
++			require.Error(t, d.Init())
++		}
++	}
++}
++
++func TestDecoderStrictPacketBudgetAndFragmentClear(t *testing.T) {
++	v := DecoderLimits{64, 2, 8, 4}
++	d := Decoder{Limits: &v}
++	require.NoError(t, d.Init())
++	for i := 0; i < 3; i++ {
++		_, err := d.Decode(&rtp.Packet{Header: rtp.Header{SequenceNumber: uint16(i), Marker: true}, Payload: []byte{0x7c, map[bool]byte{true: 0x85, false: 5}[i == 0]}})
++		if i < 2 {
++			require.Equal(t, ErrMorePacketsNeeded, err)
++		} else {
++			require.Error(t, err)
++			require.True(t, d.terminal)
++		}
++	}
++	for _, ref := range d.fragments[:cap(d.fragments)] {
++		require.Nil(t, ref)
++	}
++	legacy := Decoder{}
++	require.NoError(t, legacy.Init())
++	legacy.fragments = [][]byte{{1}, {2}, {3}}
++	legacy.resetFragments()
++	for _, ref := range legacy.fragments[:cap(legacy.fragments)] {
++		require.Nil(t, ref)
++	}
++}
++
++func TestDecoderStrictSplitDescriptorBound(t *testing.T) {
++	d := Decoder{Limits: &DecoderLimits{64, 4, 4, 1}}
++	require.NoError(t, d.Init())
++	d.fragments = [][]byte{{0x65, 0, 0, 1, 0x61}}
++	d.fragmentsSize = 5
++	_, err := d.splitFragments()
++	require.Error(t, err)
++}
++
++func TestDecoderStrictRequiresSuccessfulInit(t *testing.T) {
++	for _, v := range []DecoderLimits{{}, {12, 3, 2, 2}} {
++		d := Decoder{Limits: &v}
++		// Nil packet proves rejection precedes payload/header access.
++		_, err := d.Decode(nil)
++		require.Error(t, err)
++		require.True(t, d.terminal)
++		require.Zero(t, d.packets)
++		require.Nil(t, d.fragments)
++		require.Nil(t, d.frameBuffer)
++		require.Error(t, d.Init())
++	}
++}
++
++func TestDecoderStrictInvalidModeNoRevival(t *testing.T) {
++	v := DecoderLimits{12, 3, 2, 2}
++	d := Decoder{Limits: &v, PacketizationMode: 2}
++	require.Error(t, d.Init())
++	require.True(t, d.terminal)
++	d.PacketizationMode = 1
++	d.Limits = nil
++	require.Error(t, d.Init())
++	_, err := d.Decode(nil)
++	require.Error(t, err)
++	require.Zero(t, d.packets)
++	require.Nil(t, d.frameBuffer)
++}
+--- /dev/null
++++ b/pkg/sdpunmarshaler/limits_test.go
+@@ -0,0 +1,98 @@
++// Source-only tests: UNRUN. Original MIT-licensed contributions.
++package sdpunmarshaler
++
++import (
++	"github.com/pion/sdp/v3"
++	"reflect"
++	"strings"
++	"testing"
++)
++
++func testLimits() Limits { return Limits{16384, 2048, 64, 1, 1, 32} }
++
++func TestLimitsValidation(t *testing.T) {
++	for field := 0; field < 6; field++ {
++		for _, n := range []int{0, -1, int(^uint(0) >> 1)} {
++			l := testLimits()
++			reflect.ValueOf(&l).Elem().Field(field).SetInt(int64(n))
++			if _, err := UnmarshalWithLimits(nil, l); err == nil {
++				t.Fatalf("field %d=%d", field, n)
++			}
++		}
++	}
++}
++
++func TestLimitsBoundaries(t *testing.T) {
++	valid := "v=0\ns=x\nt=0 0\nm=video 0 RTP/AVP 96\na=rtpmap:96 H264/90000\n"
++	legacy, err := Unmarshal([]byte(valid))
++	if err != nil {
++		t.Fatal(err)
++	}
++	limited, err := UnmarshalWithLimits([]byte(valid), testLimits())
++	if err != nil || !reflect.DeepEqual(legacy, limited) {
++		t.Fatal(err)
++	}
++	l := testLimits()
++	l.MaxBodyBytes = len(valid)
++	l.MaxLineBytes = 30
++	l.MaxLines = 5
++	l.MaxAttributes = 1
++	if _, err = UnmarshalWithLimits([]byte(valid), l); err != nil {
++		t.Fatal(err)
++	}
++	for _, text := range []string{valid + "\n", valid + "m=video 0 RTP/AVP 96\n", strings.Replace(valid, "AVP 96", "AVP 96 97", 1), valid + strings.Repeat("a=x\n", 32)} {
++		if _, err = UnmarshalWithLimits([]byte(text), testLimits()); err == nil && text != valid+"\n" {
++			t.Fatal("accepted amplification")
++		}
++	}
++	l.MaxBodyBytes = len(valid) - 1
++	if _, err = UnmarshalWithLimits([]byte(valid), l); err == nil {
++		t.Fatal("body bound")
++	}
++	l = testLimits()
++	l.MaxLineBytes = 4
++	if _, err = UnmarshalWithLimits([]byte(valid), l); err == nil {
++		t.Fatal("line bound")
++	}
++	l = testLimits()
++	l.MaxLines = 4
++	l.MaxAttributes = 4
++	if _, err = UnmarshalWithLimits([]byte(valid), l); err == nil {
++		t.Fatal("line count")
++	}
++}
++
++func TestStructuralChecksBeforeAppend(t *testing.T) {
++	b := &parseBudget{limits: testLimits()}
++	s := &sdp.SessionDescription{}
++	if err := unmarshalMediaDescription(s, "video 0 RTP/AVP 96", b); err != nil {
++		t.Fatal(err)
++	}
++	if err := unmarshalMediaDescription(s, "video 0 RTP/AVP 96", b); err == nil || len(s.MediaDescriptions) != 1 {
++		t.Fatal("media appended")
++	}
++	b.limits.MaxAttributes = 1
++	if err := unmarshalMediaAttribute(s, "x", b); err != nil {
++		t.Fatal(err)
++	}
++	if err := unmarshalMediaAttribute(s, "y", b); err == nil || len(s.MediaDescriptions[0].Attributes) != 1 {
++		t.Fatal("attribute appended")
++	}
++	b.ancillary = b.limits.MaxLines
++	if err := unmarshalMediaBandwidth(s, "AS:1", b); err == nil || len(s.MediaDescriptions[0].Bandwidth) != 0 {
++		t.Fatal("ancillary appended")
++	}
++}
++
++func TestAncillaryAmplification(t *testing.T) {
++	l := testLimits()
++	for _, text := range []string{
++		"v=0\nz=" + strings.Repeat("0 0 ", 65) + "\n",
++		"v=0\nt=0 0\nr=1 1 " + strings.Repeat("0 ", 65) + "\n",
++		"v=0\nm=video 0 " + strings.Repeat("RTP/", 65) + "AVP 96\n",
++	} {
++		if _, err := UnmarshalWithLimits([]byte(text), l); err == nil {
++			t.Fatal("ancillary amplification")
++		}
++	}
++}
+--- a/pkg/sdpunmarshaler/sdpunmarshaler.go
++++ b/pkg/sdpunmarshaler/sdpunmarshaler.go
+@@ -12,6 +12,50 @@
+ 
+ 	"github.com/pion/sdp/v3"
+ )
++
++// Limits bounds the existing SDP scanner and its structural collections.
++type Limits struct {
++	MaxBodyBytes         int
++	MaxLineBytes         int
++	MaxLines             int
++	MaxMediaDescriptions int
++	MaxFormatsPerMedia   int
++	MaxAttributes        int
++}
++
++// Validate rejects invalid limits before input processing.
++func (l Limits) Validate() error {
++	if l.MaxBodyBytes <= 0 || l.MaxBodyBytes > 128*1024 {
++		return fmt.Errorf("invalid SDP body limit")
++	}
++	for _, n := range []int{l.MaxLineBytes, l.MaxLines, l.MaxMediaDescriptions, l.MaxFormatsPerMedia, l.MaxAttributes} {
++		if n <= 0 || n > l.MaxBodyBytes {
++			return fmt.Errorf("invalid SDP structural limit")
++		}
++	}
++	if l.MaxMediaDescriptions > l.MaxLines || l.MaxAttributes > l.MaxLines {
++		return fmt.Errorf("invalid SDP line-derived limit")
++	}
++	return nil
++}
++
++type parseBudget struct {
++	limits     Limits
++	lines      int
++	attributes int
++	ancillary  int
++}
++
++func (b *parseBudget) chargeAncillary() error {
++	if b == nil {
++		return nil
++	}
++	if b.ancillary >= b.limits.MaxLines {
++		return fmt.Errorf("SDP ancillary limit exceeded")
++	}
++	b.ancillary++
++	return nil
++}
+ 
+ var (
+ 	errSDPInvalidSyntax       = errors.New("sdp: invalid syntax")
+@@ -282,17 +326,20 @@
+ 	}, nil
+ }
+ 
+-func unmarshalSessionBandwidth(s *sdp.SessionDescription, value string) error {
++func unmarshalSessionBandwidth(s *sdp.SessionDescription, value string, budget *parseBudget) error {
+ 	bandwidth, err := unmarshalBandwidth(s, value)
+ 	if err != nil {
+ 		return fmt.Errorf("%w `b=%v`", errSDPInvalidValue, value)
+ 	}
++	if err := budget.chargeAncillary(); err != nil {
++		return err
++	}
+ 	s.Bandwidth = append(s.Bandwidth, *bandwidth)
+ 
+ 	return nil
+ }
+ 
+-func unmarshalTimeZones(s *sdp.SessionDescription, value string) error {
++func unmarshalTimeZones(s *sdp.SessionDescription, value string, budget *parseBudget) error {
+ 	// These fields are transimitted in pairs
+ 	// z=<adjustment time> <offset> <adjustment time> <offset> ....
+ 	// so we are making sure that there are actually multiple of 2 total.
+@@ -315,6 +362,9 @@
+ 			return err
+ 		}
+ 
++		if err := budget.chargeAncillary(); err != nil {
++			return err
++		}
+ 		s.TimeZones = append(s.TimeZones, timeZone)
+ 	}
+ 
+@@ -327,7 +377,14 @@
+ 	return nil
+ }
+ 
+-func unmarshalSessionAttribute(s *sdp.SessionDescription, value string) error {
++func unmarshalSessionAttribute(s *sdp.SessionDescription, value string, budget *parseBudget) error {
++	if budget != nil {
++		if budget.attributes >= budget.limits.MaxAttributes {
++			return fmt.Errorf("SDP attribute limit exceeded")
++		}
++		budget.attributes++
++	}
++
+ 	i := strings.IndexRune(value, ':')
+ 	var a sdp.Attribute
+ 	if i > 0 {
+@@ -340,7 +397,7 @@
+ 	return nil
+ }
+ 
+-func unmarshalTiming(s *sdp.SessionDescription, value string) error {
++func unmarshalTiming(s *sdp.SessionDescription, value string, budget *parseBudget) error {
+ 	if value == "now-" {
+ 		// special case for some FLIR cameras with invalid timing element
+ 		value = "0 0"
+@@ -363,6 +420,9 @@
+ 		return fmt.Errorf("%w `%v`", errSDPInvalidNumericValue, fields[1])
+ 	}
+ 
++	if err := budget.chargeAncillary(); err != nil {
++		return err
++	}
+ 	s.TimeDescriptions = append(s.TimeDescriptions, td)
+ 
+ 	return nil
+@@ -404,7 +464,7 @@
+ 	return num, nil
+ }
+ 
+-func unmarshalRepeatTimes(s *sdp.SessionDescription, value string) error {
++func unmarshalRepeatTimes(s *sdp.SessionDescription, value string, budget *parseBudget) error {
+ 	fields := strings.Fields(value)
+ 	if len(fields) < 2 {
+ 		return fmt.Errorf("%w `r=%v`", errSDPInvalidSyntax, value)
+@@ -430,14 +490,24 @@
+ 		if err != nil {
+ 			return fmt.Errorf("%w `%v`", errSDPInvalidValue, fields)
+ 		}
++		if err := budget.chargeAncillary(); err != nil {
++			return err
++		}
+ 		newRepeatTime.Offsets = append(newRepeatTime.Offsets, offset)
+ 	}
++	if err := budget.chargeAncillary(); err != nil {
++		return err
++	}
+ 	latestTimeDesc.RepeatTimes = append(latestTimeDesc.RepeatTimes, newRepeatTime)
+ 
+ 	return nil
+ }
+ 
+-func unmarshalMediaDescription(s *sdp.SessionDescription, value string) error {
++func unmarshalMediaDescription(s *sdp.SessionDescription, value string, budget *parseBudget) error {
++	if budget != nil && len(s.MediaDescriptions) >= budget.limits.MaxMediaDescriptions {
++		return fmt.Errorf("SDP media limit exceeded")
++	}
++
+ 	fields := strings.Fields(value)
+ 	if len(fields) < 4 {
+ 		return fmt.Errorf("%w `m=%v`", errSDPInvalidSyntax, fields)
+@@ -486,11 +556,17 @@
+ 		}); i == -1 {
+ 			return fmt.Errorf("%w `%v`", errSDPInvalidNumericValue, fields[2])
+ 		}
++		if err := budget.chargeAncillary(); err != nil {
++			return err
++		}
+ 		newMediaDesc.MediaName.Protos = append(newMediaDesc.MediaName.Protos, proto)
+ 	}
+ 
+ 	// <fmt>...
+ 	for i := 3; i < len(fields); i++ {
++		if budget != nil && len(newMediaDesc.MediaName.Formats) >= budget.limits.MaxFormatsPerMedia {
++			return fmt.Errorf("SDP format limit exceeded")
++		}
+ 		newMediaDesc.MediaName.Formats = append(newMediaDesc.MediaName.Formats, fields[i])
+ 	}
+ 
+@@ -521,11 +597,14 @@
+ 	return nil
+ }
+ 
+-func unmarshalMediaBandwidth(s *sdp.SessionDescription, value string) error {
++func unmarshalMediaBandwidth(s *sdp.SessionDescription, value string, budget *parseBudget) error {
+ 	latestMediaDesc := s.MediaDescriptions[len(s.MediaDescriptions)-1]
+ 	bandwidth, err := unmarshalBandwidth(s, value)
+ 	if err != nil {
+ 		return fmt.Errorf("%w `b=%v`", errSDPInvalidSyntax, value)
++	}
++	if err := budget.chargeAncillary(); err != nil {
++		return err
+ 	}
+ 	latestMediaDesc.Bandwidth = append(latestMediaDesc.Bandwidth, *bandwidth)
+ 	return nil
+@@ -538,7 +617,14 @@
+ 	return nil
+ }
+ 
+-func unmarshalMediaAttribute(s *sdp.SessionDescription, value string) error {
++func unmarshalMediaAttribute(s *sdp.SessionDescription, value string, budget *parseBudget) error {
++	if budget != nil {
++		if budget.attributes >= budget.limits.MaxAttributes {
++			return fmt.Errorf("SDP attribute limit exceeded")
++		}
++		budget.attributes++
++	}
++
+ 	i := strings.IndexRune(value, ':')
+ 	var a sdp.Attribute
+ 	if i > 0 {
+@@ -561,7 +647,7 @@
+ 	stateTimeDescription
+ )
+ 
+-func unmarshalSession(s *sdp.SessionDescription, state *unmarshalState, key byte, val string) error {
++func unmarshalSession(s *sdp.SessionDescription, state *unmarshalState, key byte, val string, budget *parseBudget) error {
+ 	switch key {
+ 	case 'o':
+ 		err := unmarshalOrigin(s, val)
+@@ -606,13 +692,13 @@
+ 		}
+ 
+ 	case 'b':
+-		err := unmarshalSessionBandwidth(s, val)
++		err := unmarshalSessionBandwidth(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+ 
+ 	case 'z':
+-		err := unmarshalTimeZones(s, val)
++		err := unmarshalTimeZones(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -624,20 +710,20 @@
+ 		}
+ 
+ 	case 'a':
+-		err := unmarshalSessionAttribute(s, val)
++		err := unmarshalSessionAttribute(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+ 
+ 	case 't':
+-		err := unmarshalTiming(s, val)
++		err := unmarshalTiming(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+ 		*state = stateTimeDescription
+ 
+ 	case 'm':
+-		err := unmarshalMediaDescription(s, val)
++		err := unmarshalMediaDescription(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -650,10 +736,10 @@
+ 	return nil
+ }
+ 
+-func unmarshalMedia(s *sdp.SessionDescription, key byte, val string) error {
++func unmarshalMedia(s *sdp.SessionDescription, key byte, val string, budget *parseBudget) error {
+ 	switch key {
+ 	case 'm':
+-		err := unmarshalMediaDescription(s, val)
++		err := unmarshalMediaDescription(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -671,7 +757,7 @@
+ 		}
+ 
+ 	case 'b':
+-		err := unmarshalMediaBandwidth(s, val)
++		err := unmarshalMediaBandwidth(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -683,7 +769,7 @@
+ 		}
+ 
+ 	case 'a':
+-		err := unmarshalMediaAttribute(s, val)
++		err := unmarshalMediaAttribute(s, val, budget)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -698,11 +784,36 @@
+ // Unmarshal is a replacement for pion/sdp.Unmarshal, rewritten from scratch
+ // to provide compatibility with most RTSP implementations.
+ func Unmarshal(byts []byte) (*sdp.SessionDescription, error) {
++	return unmarshal(byts, nil)
++}
++
++// UnmarshalWithLimits uses the existing scanner with opt-in allocation bounds.
++func UnmarshalWithLimits(byts []byte, limits Limits) (*sdp.SessionDescription, error) {
++	if err := limits.Validate(); err != nil {
++		return nil, err
++	}
++	if len(byts) > limits.MaxBodyBytes {
++		return nil, fmt.Errorf("SDP body limit exceeded")
++	}
++	return unmarshal(byts, &parseBudget{limits: limits})
++}
++
++func unmarshal(byts []byte, budget *parseBudget) (*sdp.SessionDescription, error) {
+ 	s := &sdp.SessionDescription{}
+ 	str := string(byts)
+ 	state := stateInitial
+ 
+-	for line := range strings.SplitSeq(strings.ReplaceAll(str, "\r", ""), "\n") {
++	for line := range strings.SplitSeq(strings.TrimSuffix(str, "\n"), "\n") {
++		if budget != nil {
++			if budget.lines >= budget.limits.MaxLines {
++				return nil, fmt.Errorf("SDP line limit exceeded")
++			}
++			budget.lines++
++			if len(line) > budget.limits.MaxLineBytes {
++				return nil, fmt.Errorf("SDP line size limit exceeded")
++			}
++		}
++		line = strings.ReplaceAll(line, "\r", "")
+ 		if line == "" {
+ 			continue
+ 		}
+@@ -726,20 +837,20 @@
+ 
+ 			default:
+ 				state = stateSession
+-				err := unmarshalSession(s, &state, key, val)
++				err := unmarshalSession(s, &state, key, val, budget)
+ 				if err != nil {
+ 					return nil, err
+ 				}
+ 			}
+ 
+ 		case stateSession:
+-			err := unmarshalSession(s, &state, key, val)
++			err := unmarshalSession(s, &state, key, val, budget)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+ 
+ 		case stateMedia:
+-			err := unmarshalMedia(s, key, val)
++			err := unmarshalMedia(s, key, val, budget)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -747,14 +858,14 @@
+ 		case stateTimeDescription:
+ 			switch key {
+ 			case 'r':
+-				err := unmarshalRepeatTimes(s, val)
++				err := unmarshalRepeatTimes(s, val, budget)
+ 				if err != nil {
+ 					return nil, err
+ 				}
+ 
+ 			default:
+ 				state = stateSession
+-				err := unmarshalSession(s, &state, key, val)
++				err := unmarshalSession(s, &state, key, val, budget)
+ 				if err != nil {
+ 					return nil, err
+ 				}

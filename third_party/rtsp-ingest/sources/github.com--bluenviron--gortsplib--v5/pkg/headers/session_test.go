@@ -1,0 +1,96 @@
+package headers_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/headers"
+)
+
+var casesSession = []struct {
+	name string
+	vin  base.HeaderValue
+	vout base.HeaderValue
+	h    headers.Session
+}{
+	{
+		"base",
+		base.HeaderValue{`A3eqwsafq3rFASqew`},
+		base.HeaderValue{`A3eqwsafq3rFASqew`},
+		headers.Session{
+			Session: "A3eqwsafq3rFASqew",
+		},
+	},
+	{
+		"with timeout",
+		base.HeaderValue{`A3eqwsafq3rFASqew;timeout=47`},
+		base.HeaderValue{`A3eqwsafq3rFASqew;timeout=47`},
+		headers.Session{
+			Session: "A3eqwsafq3rFASqew",
+			Timeout: new(uint(47)),
+		},
+	},
+	{
+		"with timeout and space",
+		base.HeaderValue{`A3eqwsafq3rFASqew; timeout=47`},
+		base.HeaderValue{`A3eqwsafq3rFASqew;timeout=47`},
+		headers.Session{
+			Session: "A3eqwsafq3rFASqew",
+			Timeout: new(uint(47)),
+		},
+	},
+}
+
+func TestSessionUnmarshal(t *testing.T) {
+	for _, ca := range casesSession {
+		t.Run(ca.name, func(t *testing.T) {
+			var h headers.Session
+			err := h.Unmarshal(ca.vin)
+			require.NoError(t, err)
+			require.Equal(t, ca.h, h)
+		})
+	}
+}
+
+func TestSessionMarshal(t *testing.T) {
+	for _, ca := range casesSession {
+		t.Run(ca.name, func(t *testing.T) {
+			req := ca.h.Marshal()
+			require.Equal(t, ca.vout, req)
+		})
+	}
+}
+
+func FuzzSessionUnmarshal(f *testing.F) {
+	for _, ca := range casesSession {
+		f.Add(ca.vin[0])
+	}
+
+	f.Add("timeout=")
+
+	f.Fuzz(func(_ *testing.T, b string) {
+		var h headers.Session
+		err := h.Unmarshal(base.HeaderValue{b})
+		if err != nil {
+			return
+		}
+
+		h.Marshal()
+	})
+}
+
+func TestSessionAdditionalErrors(t *testing.T) {
+	func() {
+		var h headers.Session
+		err := h.Unmarshal(base.HeaderValue{})
+		require.Error(t, err)
+	}()
+
+	func() {
+		var h headers.Session
+		err := h.Unmarshal(base.HeaderValue{"a", "b"})
+		require.Error(t, err)
+	}()
+}

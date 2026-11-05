@@ -44,6 +44,7 @@ type Fixture struct {
 	playAccepted    bool
 	playedOnce      bool
 	failed          atomic.Bool
+	counts          counters
 }
 
 func newDescription() (*description.Session, *description.Media) {
@@ -52,8 +53,59 @@ func newDescription() (*description.Session, *description.Media) {
 	return &description.Session{Title: "fixture", Medias: []*description.Media{media}}, media
 }
 
+// Snapshot contains saturating counters, never source addresses or authority.
+type Snapshot struct {
+	Accepted uint32
+	Rejected uint32
+	Plays uint32
+	AccessUnits uint32
+	Packets uint32
+	WireBytes uint32
+	Failed bool
+}
+
+type counters struct {
+	accepted atomic.Uint32
+	rejected atomic.Uint32
+	plays atomic.Uint32
+	accessUnits atomic.Uint32
+	packets atomic.Uint32
+	wireBytes atomic.Uint32
+}
+
+func increment(counter *atomic.Uint32) {
+	for {
+		value := counter.Load()
+		if value == 65535 || counter.CompareAndSwap(value, value+1) {
+			return
+		}
+	}
+}
+
+func (f *Fixture) Snapshot() Snapshot {
+	return Snapshot{Accepted: f.counts.accepted.Load(), Rejected: f.counts.rejected.Load(),
+		Plays: f.counts.plays.Load(), AccessUnits: f.counts.accessUnits.Load(),
+		Packets: f.counts.packets.Load(), WireBytes: f.counts.wireBytes.Load(), Failed: f.failed.Load()}
+}
+
 // Start owns one TCP4 loopback listener and shuts it down within five seconds.
 func Start(parent context.Context) (*Fixture, error) {
+	return start(parent, netip.MustParseAddrPort("127.0.0.1:0"))
+}
+
+// StartAt permits only an explicit nonzero TCP4 127.0.0.1 port.
+func StartAt(parent context.Context, address netip.AddrPort) (*Fixture, error) {
+	if !validFixedAddress(address) {
+		return nil, errFixture
+	}
+	return start(parent, address)
+}
+
+func validFixedAddress(address netip.AddrPort) bool {
+	return address.IsValid() && address.Addr() == netip.MustParseAddr("127.0.0.1") && address.Port() != 0
+}
+
+func start(parent context.Context, address netip.AddrPort) (*Fixture, error) {
 	if parent == nil || parent.Err() != nil {
 		return nil, errFixture
 	}
@@ -69,11 +121,12 @@ func Start(parent context.Context) (*Fixture, error) {
 	}
 	ready := make(chan struct{})
 	deadline, _ := ctx.Deadline()
-	f.server = &gortsplib.Server{RTSPAddress: "127.0.0.1:0", Handler: f, WriteQueueSize: 16,
+	listenAddress := address.String()
+	f.server = &gortsplib.Server{RTSPAddress: listenAddress, Handler: f, WriteQueueSize: 16,
 		ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second,
 		DisableRTCPSenderReports: true,
 		Listen: func(network, address string) (net.Listener, error) {
-			if network != "tcp" || address != "127.0.0.1:0" {
+			if network != "tcp" || address != listenAddress {
 				return nil, errFixture
 			}
 			ln, err := net.Listen("tcp4", address)
@@ -86,7 +139,7 @@ func Start(parent context.Context) (*Fixture, error) {
 				return nil, errFixture
 			}
 			f.address = addr.AddrPort()
-			return &oneListener{Listener: ln, ready: ready, deadline: deadline, responseWritten: f.responseWritten}, nil
+			return &oneListener{Listener: ln, ready: ready, deadline: deadline, responseWritten: f.responseWritten, counts: &f.counts}, nil
 		},
 		ListenPacket: func(string, string) (net.PacketConn, error) { return nil, errFixture },
 	}
@@ -162,7 +215,9 @@ func (f *Fixture) SendAU(timestamp90k uint32, nalus [][]byte) error {
 			f.fail()
 			return errFixture
 		}
+		increment(&f.counts.packets)
 	}
+	increment(&f.counts.accessUnits)
 	return nil
 }
 
@@ -242,6 +297,7 @@ func (f *Fixture) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, e
 	if c.Conn != f.conn || c.Session != f.session || c.Path != "fixture" || c.Query != "" || f.playedOnce {
 		return &base.Response{StatusCode: base.StatusBadRequest}, nil
 	}
+	increment(&f.counts.plays)
 	f.playAccepted = true
 	return &base.Response{StatusCode: base.StatusOK}, nil
 }
@@ -251,6 +307,7 @@ func (f *Fixture) OnDecodeError(*gortsplib.ServerHandlerOnDecodeErrorCtx)       
 
 // oneListener admits one connection for the lifetime of the fixture.
 type oneListener struct {
+	counts *counters
 	net.Listener
 	ready           <-chan struct{}
 	deadline        time.Time
@@ -266,15 +323,18 @@ func (l *oneListener) Accept() (net.Conn, error) {
 			return nil, err
 		}
 		if l.accepted {
+			increment(&l.counts.rejected)
 			c.Close()
 			continue
 		}
 		l.accepted = true
-		return &budgetConn{Conn: c, deadline: l.deadline, responseWritten: l.responseWritten}, nil
+		increment(&l.counts.accepted)
+		return &budgetConn{Conn: c, deadline: l.deadline, responseWritten: l.responseWritten, counts: l.counts}, nil
 	}
 }
 
 type budgetConn struct {
+	counts *counters
 	net.Conn
 	deadline        time.Time
 	used            atomic.Int64
@@ -300,6 +360,7 @@ func (c *budgetConn) Read(p []byte) (int, error) {
 	}
 	n, err := c.Conn.Read(p)
 	c.used.Add(-int64(len(p) - n))
+	c.counts.wireBytes.Add(uint32(n))
 	return n, err
 }
 func (c *budgetConn) Write(p []byte) (int, error) {
@@ -308,6 +369,7 @@ func (c *budgetConn) Write(p []byte) (int, error) {
 	}
 	n, err := c.Conn.Write(p)
 	c.used.Add(-int64(len(p) - n))
+	c.counts.wireBytes.Add(uint32(n))
 	if err == nil && n == len(p) && c.playResponse.CompareAndSwap(true, false) {
 		close(c.responseWritten)
 	}

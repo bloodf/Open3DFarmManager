@@ -15,6 +15,8 @@ export type HelperExecutable = Readonly<{ path: string; sha256: string }>;
 export type LocalDestination = Readonly<{ address: string; port: number; path: string }>;
 type HelperAU = Awaited<ReturnType<typeof readAURecord>>;
 export type HelperSource = AsyncIterable<HelperAU> & {
+  /** Actual owned child PID, available before the first credit; never source authority. */
+  readonly pid: number;
   readonly closed: Promise<void>;
   stop(): Promise<void>;
 };
@@ -197,6 +199,13 @@ export async function openHelperSource(options: HelperSourceOptions): Promise<He
   let epochBytes = 0;
   let leaseBytes = 0;
   const source: HelperSource = {
+    get pid() {
+      const pid = child?.pid;
+      if (!Number.isSafeInteger(pid) || pid === undefined || pid <= 0) {
+        throw new HelperFailure("HELPER_SPAWN");
+      }
+      return pid;
+    },
     closed,
     stop() { beginStop(); return closed; },
     [Symbol.asyncIterator]() {
@@ -382,7 +391,7 @@ export async function openHelperSource(options: HelperSourceOptions): Promise<He
     }));
     checkBinding();
     state = "running";
-    return source;
+    return Object.freeze(source);
   } catch (error: unknown) {
     const sanitized = error instanceof HelperFailure ? error : new HelperFailure("HELPER_EXECUTABLE");
     beginStop(sanitized);

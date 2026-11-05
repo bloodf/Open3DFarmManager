@@ -58,9 +58,15 @@ function childPid(unit: Awaited<ReturnType<AsyncIterator<unknown>["next"]>>): nu
 test("one requested AU, stop and return observe exit and close", async (t) => {
   const f = await fixture(t);
   const source = await f.open();
+  const ownedPid = source.pid;
+  assert.ok(Number.isSafeInteger(ownedPid) && ownedPid > 0);
+  assert.ok(Object.isFrozen(source));
+  assert.throws(() => Object.defineProperty(source, "pid", { value: 1 }), TypeError);
   const iterator = source[Symbol.asyncIterator]();
   const unit = await iterator.next();
   const pid = childPid(unit);
+  assert.equal(ownedPid, pid);
+  assert.equal(source.pid, ownedPid);
   if (unit.done) throw new Error("missing AU");
   assert.equal(unit.value.timestampUs, 0);
   assert.equal(unit.value.keyframe, true);

@@ -4,6 +4,7 @@ package rtspfixture
 
 import (
 	"bytes"
+	"context"
 	"net/netip"
 	"testing"
 
@@ -36,5 +37,34 @@ func TestFixtureSDP(t *testing.T) {
 	}
 	if !bytes.Equal(annex, HeaderAnnexB()) {
 		t.Fatal("unexpected canonical fixture bytes")
+	}
+}
+
+// Rejection must happen before Start creates any listener.
+func TestStartAtRejectsNonFixedLoopback(t *testing.T) {
+	for _, address := range []string{"127.0.0.1:0", "127.0.0.2:18554", "0.0.0.0:18554", "[::1]:18554", "[::ffff:127.0.0.1]:18554"} {
+		if _, err := StartAt(context.Background(), netip.MustParseAddrPort(address)); err == nil {
+			t.Fatal("StartAt accepted disallowed address")
+		}
+		if validFixedAddress(netip.MustParseAddrPort(address)) {
+			t.Fatalf("accepted disallowed fixed address")
+		}
+	}
+	if !validFixedAddress(netip.MustParseAddrPort("127.0.0.1:18554")) {
+		t.Fatal("rejected fixed TCP4 loopback")
+	}
+	if _, err := StartAt(nil, netip.AddrPort{}); err == nil {
+		t.Fatal("accepted missing address")
+	}
+}
+
+func TestSnapshotCountersSaturate(t *testing.T) {
+	f := &Fixture{}
+	f.counts.rejected.Store(65534)
+	increment(&f.counts.rejected)
+	increment(&f.counts.rejected)
+	got := f.Snapshot()
+	if got.Rejected != 65535 || got.Accepted != 0 || got.WireBytes != 0 || got.Failed {
+		t.Fatal("unexpected bounded snapshot")
 	}
 }

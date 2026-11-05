@@ -165,13 +165,9 @@ type DriverWaiter = {
   settle: (error: Error | null) => void
 }
 
-// The dispatcher arms its result deadline with a real timer as soon as a
-// dispatch starts, while the driver is only reached after the threadpool
-// backed command signature verification completes. When the event loop stalls
-// (the parallel Node suite reached a 99ms stall on this machine) that timer
-// wins and the dispatch is finalized before the driver is ever reached. Every
-// waiter below is therefore bounded, and every budget leaves room well above
-// the observed stall.
+// Driver entry follows asynchronous signature verification. Tests that stop
+// after entry must synchronize with the driver, not assume crypto finishes
+// within a small real-time budget under parallel test load.
 function releaseDriverWaiters(waiters: DriverWaiter[], reached: number): void {
   for (const waiter of [...waiters]) {
     if (reached < waiter.count) continue
@@ -792,7 +788,7 @@ test('close or abort seals a delayed send boundary', async () => {
     // backed signature verification completes. This scenario waits for the
     // driver entry signal instead of polling a flag, so the stop below is
     // provably applied after the driver was reached, and it runs with the
-    // production maximum budget so the deadline cannot preempt that entry.
+    // production maximum budget to leave room for signature verification under test load.
     const f = await fixture(false, 5000)
     f.setMode('hang-before-send')
     const abort = new AbortController()
@@ -817,32 +813,34 @@ test('close or abort seals a delayed send boundary', async () => {
   }
 })
 
-test('a result deadline that elapses before the driver is reached never enters the driver', async () => {
-  // Bounded failure proof for the synchronization above: while the event
-  // loop is stalled past the result deadline, the deadline timer is due
-  // before the command signature verification completes, so the dispatch is
-  // finalized without ever reaching the driver. Waiting for the driver entry
-  // is therefore the only sound way to order an explicit stop.
-  const f = await fixture(false, 50)
-  f.setMode('hang-before-send')
-  try {
-    const pending = f.dispatcher.dispatch({
-      wire: f.wire,
-      capability: f.handle,
-      printerBinding: f.printerBinding,
-    })
-    const stallUntil = Date.now() + 150
-    while (Date.now() < stallUntil) {
-      // Deliberate stall: the event loop must not run while the deadline passes.
+test(
+  'a result deadline elapsed during signature verification never enters the driver',
+  { timeout: 5000 },
+  async () => {
+    const f = await fixture(false, 50)
+    f.setMode('hang-before-send')
+    try {
+      const pending = f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+      })
+      // dispatch awaits WebCrypto before driver entry. Advance its trusted clock
+      // before that continuation, independent of real timer/poll phase ordering.
+      f.advance(51)
+      const result = await pending
+      // A timer before the durable claim rejects; the post-claim clock guard
+      // records not-sent. Both must stop before invoking the driver.
+      assert.equal(result.reason, 'deadline')
+      assert.ok(result.kind === 'rejected' || result.kind === 'not-sent')
+      assert.equal(f.driverEntryCount(), 0)
+      assert.equal(f.getWrites(), 0)
+    } finally {
+      f.unblock()
+      f.cleanup()
     }
-    const result = await pending
-    assert.deepEqual(result, { kind: 'rejected', reason: 'deadline' })
-    assert.equal(f.driverEntryCount(), 0)
-    assert.equal(f.getWrites(), 0)
-  } finally {
-    f.cleanup()
-  }
-})
+  },
+)
 
 test('same assignment has no queue and timed-out work retains the global eight-slot bound', async () => {
   const f = await fixture(false, 1000)

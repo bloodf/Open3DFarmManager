@@ -1,0 +1,115 @@
+--- a/pkg/codecs/h264/annexb.go
++++ b/pkg/codecs/h264/annexb.go
+@@ -16,8 +16,31 @@
+ // Specification: ITU-T Rec. H.264, Annex B
+ type AnnexB [][]byte
+ 
++// AnnexBLimits bounds input and canonical four-byte-delimited output.
++type AnnexBLimits struct {
++	MaxAccessUnitBytes    int
++	MaxNALUsPerAccessUnit int
++}
++
++// UnmarshalWithLimits decodes with validated per-call limits.
++func (a *AnnexB) UnmarshalWithLimits(buf []byte, limits AnnexBLimits) error {
++	maxInt := int(^uint(0) >> 1)
++	if limits.MaxAccessUnitBytes <= 0 || limits.MaxNALUsPerAccessUnit <= 0 ||
++		limits.MaxNALUsPerAccessUnit > maxInt/4 || limits.MaxAccessUnitBytes > maxInt-4 {
++		return fmt.Errorf("invalid Annex-B limits")
++	}
++	if len(buf) > limits.MaxAccessUnitBytes {
++		return fmt.Errorf("Annex-B input exceeds limit")
++	}
++	return a.unmarshal(buf, &limits)
++}
++
+ // Unmarshal decodes an access unit from the Annex-B stream format.
+ func (a *AnnexB) Unmarshal(buf []byte) error {
++	return a.unmarshal(buf, nil)
++}
++
++func (a *AnnexB) unmarshal(buf []byte, limits *AnnexBLimits) error {
+ 	var pos int
+ 	switch {
+ 	case len(buf) >= 4 && buf[0] == 0x00 && buf[1] == 0x00 && buf[2] == 0x00 && buf[3] == 0x01:
+@@ -37,8 +60,23 @@
+ 		end   int
+ 	}
+ 
+-	positions := make([]naluPos, 0, 8)
++	capacity := 8
++	if limits != nil && limits.MaxNALUsPerAccessUnit < capacity {
++		capacity = limits.MaxNALUsPerAccessUnit
++	}
++	positions := make([]naluPos, 0, capacity)
+ 	auSize := 0
++	serialized := 0
++	charge := func(size int) error {
++		if limits != nil {
++			if len(positions) >= limits.MaxNALUsPerAccessUnit ||
++				limits.MaxAccessUnitBytes-serialized < 4 || size > limits.MaxAccessUnitBytes-serialized-4 {
++				return fmt.Errorf("Annex-B output exceeds limits")
++			}
++			serialized += size + 4
++		}
++		return nil
++	}
+ 
+ 	for pos < len(buf) {
+ 		i := bytes.Index(buf[pos:], []byte{0x00, 0x00, 0x01})
+@@ -48,6 +86,9 @@
+ 			if remaining > 0 {
+ 				if (auSize + remaining) > MaxAccessUnitSize {
+ 					return fmt.Errorf("access unit size (%d) is too big, maximum is %d", auSize+remaining, MaxAccessUnitSize)
++				}
++				if err := charge(remaining); err != nil {
++					return err
+ 				}
+ 				positions = append(positions, naluPos{start: pos, end: len(buf)})
+ 			}
+@@ -66,6 +107,9 @@
+ 			auSize += naluSize
+ 			if auSize > MaxAccessUnitSize {
+ 				return fmt.Errorf("access unit size (%d) is too big, maximum is %d", auSize, MaxAccessUnitSize)
++			}
++			if err := charge(naluSize); err != nil {
++				return err
+ 			}
+ 			positions = append(positions, naluPos{start: pos, end: naluEnd})
+ 		}
+--- a/pkg/codecs/h264/annexb_test.go
++++ b/pkg/codecs/h264/annexb_test.go
+@@ -190,3 +190,33 @@
+ 		require.NoError(t, err)
+ 	})
+ }
++
++// Source-only bounded scanner regressions, intentionally unrun.
++func TestAnnexBStrictLimits(t *testing.T) {
++	for _, tc := range []struct {
++		name   string
++		buf    []byte
++		limits h264.AnnexBLimits
++		valid  bool
++	}{
++		{"exact", []byte{0, 0, 0, 1, 0x65}, h264.AnnexBLimits{5, 1}, true},
++		{"three-byte-canonical-over", []byte{0, 0, 1, 0x65}, h264.AnnexBLimits{4, 1}, false},
++		{"dense", []byte{0, 0, 1, 0x65, 0, 0, 1, 0x61}, h264.AnnexBLimits{10, 1}, false},
++		{"input-over", []byte{0, 0, 0, 1, 0x65}, h264.AnnexBLimits{4, 1}, false},
++		{"zero", nil, h264.AnnexBLimits{0, 1}, false},
++		{"negative", nil, h264.AnnexBLimits{5, -1}, false},
++		{"overflow", nil, h264.AnnexBLimits{int(^uint(0) >> 1), 1}, false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			var a h264.AnnexB
++			err := a.UnmarshalWithLimits(tc.buf, tc.limits)
++			if tc.valid {
++				require.NoError(t, err)
++				require.Equal(t, h264.AnnexB{{0x65}}, a)
++			} else {
++				require.Error(t, err)
++				require.Nil(t, a)
++			}
++		})
++	}
++}

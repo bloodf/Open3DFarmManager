@@ -1,0 +1,1396 @@
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
+package codecs
+
+import (
+	"encoding/binary"
+	"errors"
+	"slices"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func createTestH265Header(pType, layerID, tid uint8, f bool) H265NALUHeader {
+	var fVal, zVal uint16
+	if f {
+		fVal = 1 << 15
+	}
+
+	return H265NALUHeader(uint16(tid) | (uint16(pType) << 9) | (uint16(layerID) << 3) | fVal | zVal)
+}
+
+func createTestH265NALU(pType uint8, payload []byte) []byte {
+	return createTestH265NALUWithLayer(pType, 0, payload)
+}
+
+func createTestH265NALUWithLayer(pType, layerID uint8, payload []byte) []byte {
+	nalu := make([]byte, 0, h265NaluHeaderSize+len(payload))
+	nalu = binary.BigEndian.AppendUint16(nalu, uint16(createTestH265Header(pType, layerID, 1, false)))
+
+	return append(nalu, payload...)
+}
+
+func createTestH265ExpGolombPayload(prefixBits uint, value uint32) []byte {
+	codeNum := value + 1
+	var codeNumBits uint
+	for current := codeNum; current != 0; current >>= 1 {
+		codeNumBits++
+	}
+
+	payload := make([]byte, (prefixBits+2*codeNumBits-1+7)/8)
+	bitPos := prefixBits + codeNumBits - 1
+	for bit := codeNumBits; bit > 0; bit-- {
+		if codeNum&(uint32(1)<<(bit-1)) != 0 {
+			payload[bitPos/8] |= 1 << (7 - (bitPos % 8))
+		}
+		bitPos++
+	}
+
+	return payload
+}
+
+func createTestH265SpsPayload() []byte {
+	return createTestH265ExpGolombPayload(104, 0)
+}
+
+func createTestH265SpsWithSubLayerPayload() []byte {
+	payload := make([]byte, 28)
+	payload[0] = 0x02
+	payload[13] = 0xc0
+	payload[27] = 0x40
+
+	return payload
+}
+
+func createTestH265AnnexB(nalus ...[]byte) []byte {
+	var payload []byte
+	for _, nalu := range nalus {
+		payload = append(payload, annexbNALUStartCode...)
+		payload = append(payload, nalu...)
+	}
+
+	return payload
+}
+
+func assertH265AggregationPayload(t *testing.T, payload []byte, expected ...[]byte) {
+	t.Helper()
+
+	aggregation, err := parseH265AggregationPacket(payload, false)
+	assert.NoError(t, err)
+	if aggregation == nil {
+		return
+	}
+
+	packets, err := splitH265AggregationPacket(*aggregation)
+	assert.NoError(t, err)
+	if !assert.Len(t, packets, len(expected)) {
+		return
+	}
+
+	for i, packet := range packets {
+		assert.Equal(t, expected[i], packet.serialize(nil))
+	}
+}
+
+func TestH265_NALU_Header(t *testing.T) {
+	tt := [...]struct {
+		RawHeader []byte
+
+		FBit    bool
+		Type    uint8
+		LayerID uint8
+		TID     uint8
+
+		IsAP   bool
+		IsFU   bool
+		IsPACI bool
+	}{
+		// FBit
+		{
+			RawHeader: []byte{0x80, 0x00},
+			Type:      0,
+			LayerID:   0,
+			TID:       0,
+			FBit:      true,
+		},
+		// VPS_NUT
+		{
+			RawHeader: []byte{0x40, 0x01},
+			Type:      32,
+			LayerID:   0,
+			TID:       1,
+		},
+		// SPS_NUT
+		{
+			RawHeader: []byte{0x42, 0x01},
+			Type:      33,
+			LayerID:   0,
+			TID:       1,
+		},
+		// PPS_NUT
+		{
+			RawHeader: []byte{0x44, 0x01},
+			Type:      34,
+			LayerID:   0,
+			TID:       1,
+		},
+		// PREFIX_SEI_NUT
+		{
+			RawHeader: []byte{0x4e, 0x01},
+			Type:      39,
+			LayerID:   0,
+			TID:       1,
+		},
+		// Fragmentation Unit
+		{
+			RawHeader: []byte{0x62, 0x01},
+			Type:      h265NaluFragmentationUnitType,
+			LayerID:   0,
+			TID:       1,
+			IsFU:      true,
+		},
+	}
+
+	for _, cur := range tt {
+		header := newH265NALUHeader(cur.RawHeader[0], cur.RawHeader[1])
+
+		assert.Equal(t, cur.FBit, header.F())
+		assert.Equal(t, cur.Type, header.Type())
+		// For any type < 32, NAL is a VLC NAL unit.
+		assert.Equal(t, header.IsTypeVCLUnit(), header.Type() < 32)
+		assert.Equal(t, cur.IsAP, header.IsAggregationPacket())
+		assert.Equal(t, cur.IsFU, header.IsFragmentationUnit())
+		assert.Equal(t, cur.IsPACI, header.IsPACIPacket())
+		assert.Equal(t, cur.LayerID, header.LayerID())
+		assert.Equal(t, cur.TID, header.TID())
+	}
+}
+
+func TestH265_FU_Header(t *testing.T) {
+	tt := [...]struct {
+		header H265FragmentationUnitHeader
+
+		S    bool
+		E    bool
+		Type uint8
+	}{
+		// Start | IDR_W_RADL
+		{
+			header: H265FragmentationUnitHeader(0x93),
+			S:      true,
+			E:      false,
+			Type:   19,
+		},
+		// Continuation | IDR_W_RADL
+		{
+			header: H265FragmentationUnitHeader(0x13),
+			S:      false,
+			E:      false,
+			Type:   19,
+		},
+		// End | IDR_W_RADL
+		{
+			header: H265FragmentationUnitHeader(0x53),
+			S:      false,
+			E:      true,
+			Type:   19,
+		},
+		// Start | TRAIL_R
+		{
+			header: H265FragmentationUnitHeader(0x81),
+			S:      true,
+			E:      false,
+			Type:   1,
+		},
+		// Continuation | TRAIL_R
+		{
+			header: H265FragmentationUnitHeader(0x01),
+			S:      false,
+			E:      false,
+			Type:   1,
+		},
+		// End | TRAIL_R
+		{
+			header: H265FragmentationUnitHeader(0x41),
+			S:      false,
+			E:      true,
+			Type:   1,
+		},
+	}
+
+	for _, cur := range tt {
+		assert.Equal(t, cur.S, cur.header.S())
+		assert.Equal(t, cur.E, cur.header.E())
+		assert.Equal(t, cur.header.FuType(), cur.Type)
+	}
+}
+
+func TestH265_SingleNALUnitPacket(t *testing.T) {
+	tt := [...]struct {
+		Raw            []byte
+		WithDONL       bool
+		ExpectedPacket *h265SingleNALUnitPacket
+		ExpectedErr    error
+	}{
+		{
+			Raw:         nil,
+			ExpectedErr: errNilPacket,
+		},
+		{
+			Raw:         []byte{},
+			ExpectedErr: errShortPacket,
+		},
+		{
+			Raw:         []byte{0x62},
+			ExpectedErr: errShortPacket,
+		},
+		{
+			Raw:         []byte{0x62, 0x01, 0x93},
+			ExpectedErr: errInvalidH265PacketType,
+		},
+		// FBit enabled in H265NALUHeader
+		{
+			Raw:         []byte{0x80, 0x01, 0x93, 0xaf, 0xaf, 0xaf, 0xaf},
+			ExpectedErr: errH265CorruptedPacket,
+		},
+		// Type '49' in H265NALUHeader
+		{
+			Raw:         []byte{0x62, 0x01, 0x93, 0xaf, 0xaf, 0xaf, 0xaf},
+			ExpectedErr: errInvalidH265PacketType,
+		},
+		// Type '50' in H265NALUHeader
+		{
+			Raw:         []byte{0x64, 0x01, 0x93, 0xaf, 0xaf, 0xaf, 0xaf},
+			ExpectedErr: errInvalidH265PacketType,
+		},
+		{
+			Raw: []byte{0x01, 0x01, 0xab, 0xcd, 0xef},
+			ExpectedPacket: &h265SingleNALUnitPacket{
+				payloadHeader: newH265NALUHeader(0x01, 0x01),
+				payload:       []byte{0xab, 0xcd, 0xef},
+			},
+		},
+		// DONL, payload too small
+		{
+			Raw:         []byte{0x01, 0x01, 0x93, 0xaf},
+			ExpectedErr: errShortPacket,
+			WithDONL:    true,
+		},
+		{
+			Raw: []byte{0x01, 0x01, 0xaa, 0xbb, 0xcc},
+			ExpectedPacket: &h265SingleNALUnitPacket{
+				payloadHeader: newH265NALUHeader(0x01, 0x01),
+				donl:          uint16ptr((uint16(0xaa) << 8) | uint16(0xbb)),
+				payload:       []byte{0xcc},
+			},
+			WithDONL: true,
+		},
+	}
+
+	for _, cur := range tt {
+		parsed, err := parseH265SingleNalUnitPacket(cur.Raw, cur.WithDONL)
+
+		// Just for code coverage sake
+		parsed.isH265Packet()
+
+		if cur.ExpectedErr == nil {
+			assert.NoError(t, err)
+		} else {
+			assert.ErrorIs(t, err, cur.ExpectedErr)
+		}
+
+		if cur.ExpectedPacket == nil {
+			continue
+		}
+
+		assert.Equal(t, cur.ExpectedPacket.PayloadHeader(), parsed.PayloadHeader())
+
+		if cur.ExpectedPacket.DONL() != nil {
+			assert.Equal(t, *cur.ExpectedPacket.DONL(), *parsed.DONL())
+		} else {
+			assert.Nil(t, parsed.DONL())
+		}
+
+		assert.Equal(t, cur.ExpectedPacket.Payload(), parsed.Payload())
+	}
+}
+
+func TestH265_TemporalScalabilityControlInformation(t *testing.T) {
+	tt := [...]struct {
+		Value             H265TSCI
+		ExpectedTL0PICIDX uint8
+		ExpectedIrapPicID uint8
+		ExpectedS         bool
+		ExpectedE         bool
+		ExpectedRES       uint8
+	}{
+		{},
+		{
+			Value:             H265TSCI((uint32(0xCA) << 24) | (uint32(0xFE) << 16)),
+			ExpectedTL0PICIDX: 0xCA,
+			ExpectedIrapPicID: 0xFE,
+		},
+		{
+			Value:     H265TSCI(uint32(1) << 15),
+			ExpectedS: true,
+		},
+		{
+			Value:     H265TSCI(uint32(1) << 14),
+			ExpectedE: true,
+		},
+		{
+			Value:       H265TSCI(uint32(0x0A) << 8),
+			ExpectedRES: 0x0A,
+		},
+		// Sets RES, and force sets S and E to 0.
+		{
+			Value:       H265TSCI((uint32(0xAA) << 8) & ^(uint32(1) << 15) & ^(uint32(1) << 14)),
+			ExpectedRES: 0xAA & 0b00111111,
+		},
+	}
+
+	for _, cur := range tt {
+		assert.Equal(t, cur.ExpectedTL0PICIDX, cur.Value.TL0PICIDX())
+		assert.Equal(t, cur.ExpectedIrapPicID, cur.Value.IrapPicID())
+		assert.Equal(t, cur.ExpectedS, cur.Value.S())
+		assert.Equal(t, cur.ExpectedE, cur.Value.E())
+		assert.Equal(t, cur.ExpectedRES, cur.Value.RES())
+	}
+}
+
+func TestH265IsPartitionHead(t *testing.T) {
+	h265 := H265Depacketizer{}
+
+	assert.False(t, h265.IsPartitionHead(nil), "nil must not be a partition head")
+	assert.False(t, h265.IsPartitionHead([]byte{}), "empty nalu must not be a partition head")
+
+	singleNalu := []byte{0x01, 0x01, 0xab, 0xcd, 0xef}
+	assert.True(t, h265.IsPartitionHead(singleNalu), "single nalu must be a partition head")
+
+	fbitNalu := []byte{0x80, 0x00, 0x00}
+	assert.True(t, h265.IsPartitionHead(fbitNalu), "fbit nalu must be a partition head")
+
+	fuStartNalu := []byte{0x62, 0x01, 0x93}
+	assert.True(t, h265.IsPartitionHead(fuStartNalu), "fu start nalu must be a partition head")
+
+	fuEndNalu := []byte{0x62, 0x01, 0x53}
+	assert.False(t, h265.IsPartitionHead(fuEndNalu), "fu end nalu must not be a partition head")
+}
+
+func TestH265IsPartitionTail(t *testing.T) {
+	h265 := H265Depacketizer{}
+
+	assert.False(t, h265.IsPartitionTail(false, nil), "nil must not be a partition tail")
+	assert.False(t, h265.IsPartitionTail(false, []byte{}), "empty nalu must not be a partition tail")
+
+	singleNalu := []byte{0x01, 0x01, 0xab, 0xcd, 0xef}
+	assert.False(t, h265.IsPartitionTail(false, singleNalu), "single nalu must not be a partition tail")
+
+	fbitNalu := []byte{0x80, 0x00, 0x00}
+	assert.False(t, h265.IsPartitionTail(false, fbitNalu), "fbit nalu must not be a partition tail")
+
+	fuStartNalu := []byte{0x62, 0x01, 0x93}
+	assert.False(t, h265.IsPartitionTail(false, fuStartNalu), "fu start nalu must not be a partition tail")
+
+	fuEndNalu := []byte{0x62, 0x01, 0x53}
+	assert.True(t, h265.IsPartitionTail(false, fuEndNalu), "fu end nalu mustw be a partition tail")
+}
+
+func TestH265_Packet_Real(t *testing.T) {
+	// Tests decoding of real H265 payloads extracted from a Wireshark dump.
+
+	// nolint: lll
+	tt := [...]string{
+		"\x40\x01\x0c\x01\xff\xff\x01\x60\x00\x00\x03\x00\xb0\x00\x00\x03\x00\x00\x03\x00\x7b\xac\x09",
+		"\x42\x01\x01\x01\x60\x00\x00\x03\x00\xb0\x00\x00\x03\x00\x00\x03\x00\x7b\xa0\x03\xc0\x80\x10\xe5\x8d\xae\x49\x32\xf4\xdc\x04\x04\x04\x02",
+		"\x44\x01\xc0\xf2\xf0\x3c\x90",
+		"\x4e\x01\xe5\x04\x61\x0c\x00\x00\x80",
+		"\x62\x01\x93\xaf\x0d\x5a\xfe\x67\x77\x29\xc0\x74\xf3\x57\x4c\x16\x94\xaa\x7c\x2a\x64\x5f\xe9\xa5\xb7\x2a\xa3\x95\x9d\x94\xa7\xb4\xd3\xc4\x4a\xb1\xb7\x69\xca\xbe\x75\xc5\x64\xa8\x97\x4b\x8a\xbf\x7e\xf0\x0f\xc3\x22\x60\x67\xab\xae\x96\xd6\x99\xca\x7a\x8d\x35\x93\x1a\x67\x60\xe7\xbe\x7e\x13\x95\x3c\xe0\x11\xc1\xc1\xa7\x48\xef\xf7\x7b\xb0\xeb\x35\x49\x81\x4e\x4e\x54\xf7\x31\x6a\x38\xa1\xa7\x0c\xd6\xbe\x3b\x25\xba\x08\x19\x0b\x49\xfd\x90\xbb\x73\x7a\x45\x8c\xb9\x73\x43\x04\xc5\x5f\xda\x0f\xd5\x70\x4c\x11\xee\x72\xb8\x6a\xb4\x95\x62\x64\xb6\x23\x14\x7e\xdb\x0e\xa5\x0f\x86\x31\xe4\xd1\x64\x56\x43\xf6\xb7\xe7\x1b\x93\x4a\xeb\xd0\xa6\xe3\x1f\xce\xda\x15\x67\x05\xb6\x77\x36\x8b\x27\x5b\xc6\xf2\x95\xb8\x2b\xcc\x9b\x0a\x03\x05\xbe\xc3\xd3\x85\xf5\x69\xb6\x19\x1f\x63\x2d\x8b\x65\x9e\xc3\x9d\xd2\x44\xb3\x7c\x86\x3b\xea\xa8\x5d\x02\xe5\x40\x03\x20\x76\x48\xff\xf6\x2b\x0d\x18\xd6\x4d\x49\x70\x1a\x5e\xb2\x89\xca\xec\x71\x41\x79\x4e\x94\x17\x0c\x57\x51\x55\x14\x61\x40\x46\x4b\x3e\x17\xb2\xc8\xbd\x1c\x06\x13\x91\x72\xf8\xc8\xfc\x6f\xb0\x30\x9a\xec\x3b\xa6\xc9\x33\x0b\xa5\xe5\xf4\x65\x7a\x29\x8b\x76\x62\x81\x12\xaf\x20\x4c\xd9\x21\x23\x9e\xeb\xc9\x0e\x5b\x29\x35\x7f\x41\xcd\xce\xa1\xc4\xbe\x01\x30\xb9\x11\xc3\xb1\xe4\xce\x45\xd2\x5c\xb3\x1e\x69\x78\xba\xb1\x72\xe4\x88\x54\xd8\x5d\xd0\xa8\x3a\x74\xad\xe5\xc7\xc1\x59\x7c\x78\x15\x26\x37\x3d\x50\xae\xb3\xa4\x5b\x6c\x7d\x65\x66\x85\x4d\x16\x9a\x67\x74\xad\x55\x32\x3a\x84\x85\x0b\x6a\xeb\x24\x97\xb4\x20\x4d\xca\x41\x61\x7a\xd1\x7b\x60\xdb\x7f\xd5\x61\x22\xcf\xd1\x7e\x4c\xf3\x85\xfd\x13\x63\xe4\x9d\xed\xac\x13\x0a\xa0\x92\xb7\x34\xde\x65\x0f\xd9\x0f\x9b\xac\xe2\x47\xe8\x5c\xb3\x11\x8e\xc6\x08\x19\xd0\xb0\x85\x52\xc8\x5c\x1b\x08\x0a\xce\xc9\x6b\xa7\xef\x95\x2f\xd0\xb8\x63\xe5\x4c\xd4\xed\x6e\x87\xe9\xd4\x0a\xe6\x11\x44\x63\x00\x94\x18\xe9\x28\xba\xcf\x92\x43\x06\x59\xdd\x37\x4f\xd3\xef\x9d\x31\x5e\x9b\x48\xf9\x1f\x3e\x7b\x95\x3a\xbd\x1f\x71\x55\x0c\x06\xf9\x86\xf8\x3d\x39\x16\x50\xb3\x21\x11\x19\x6f\x70\xa9\x48\xe8\xbb\x0a\x11\x23\xf8\xab\xfe\x44\xe0\xbb\xe8\x64\xfa\x85\xe4\x02\x55\x88\x41\xc6\x30\x7f\x10\xad\x75\x02\x4b\xef\xe1\x0b\x06\x3c\x10\x49\x83\xf9\xd1\x3e\x3e\x67\x86\x4c\xf8\x9d\xde\x5a\xc4\xc8\xcf\xb6\xf4\xb0\xd3\x34\x58\xd4\x7b\x4d\xd3\x37\x63\xb2\x48\x8a\x7e\x20\x00\xde\xb4\x42\x8f\xda\xe9\x43\x9e\x0c\x16\xce\x79\xac\x2c\x70\xc1\x89\x05\x36\x62\x6e\xd9\xbc\xfb\x63\xc6\x79\x89\x3c\x90\x89\x2b\xd1\x8c\xe0\xc2\x54\xc7\xd6\xb4\xe8\x9e\x96\x55\x6e\x7b\xd5\x7f\xac\xd4\xa7\x1c\xa0\xdf\x01\x30\xad\xc0\x9f\x69\x06\x10\x43\x7f\xf4\x5d\x62\xa3\xea\x73\xf2\x14\x79\x19\x13\xea\x59\x14\x79\xa8\xe7\xce\xce\x44\x25\x13\x41\x18\x57\xdd\xce\xe4\xbe\xcc\x20\x80\x29\x71\x73\xa7\x7c\x86\x39\x76\xf4\xa7\x1c\x63\x24\x21\x93\x1e\xb5\x9a\x5c\x8a\x9e\xda\x8b\x9d\x88\x97\xfc\x98\x7d\x26\x74\x04\x1f\xa8\x10\x4f\x45\xcd\x46\xe8\x28\xe4\x8e\x59\x67\x63\x4a\xcf\x1e\xed\xdd\xbb\x79\x2f\x8d\x94\xab\xfc\xdb\xc5\x79\x1a\x4d\xcd\x53\x41\xdf\xd1\x7a\x8f\x46\x3e\x1f\x79\x88\xe3\xee\x9f\xc4\xc1\xe6\x2e\x89\x4d\x28\xc9\xca\x28\xc2\x0a\xc5\xc7\xf1\x22\xcd\xb3\x36\xfa\xe3\x7e\xa6\xcd\x95\x55\x5e\x0e\x1a\x75\x7f\x65\x27\xd3\x37\x4f\x23\xc5\xab\x49\x68\x4e\x02\xb5\xbf\xd7\x95\xc0\x78\x67\xbc\x1a\xe9\xae\x6f\x44\x58\x8a\xc2\xce\x42\x98\x4e\x77\xc7\x2a\xa0\xa7\x7d\xe4\x3b\xd1\x20\x82\x1a\xd3\xe2\xc7\x76\x5d\x06\x46\xb5\x24\xd7\xfb\x57\x63\x2b\x19\x51\x48\x65\x6d\xfb\xe0\x98\xd1\x14\x0e\x17\x64\x29\x34\x6f\x6e\x66\x9e\x8d\xc9\x89\x49\x69\xee\x74\xf3\x35\xe6\x8b\x67\x56\x95\x7f\x1b\xe9\xed\x8c\x0f\xe2\x19\x59\xbf\x03\x35\x55\x3c\x04\xbc\x40\x52\x90\x10\x08\xad\xa7\x65\xe0\x31\xcb\xcf\x3d\xd4\x62\x68\x01\x0d\xed\xf5\x28\x64\x2d\xaa\x7c\x99\x15\x8d\x70\x32\x53\xb8\x9d\x0a\x3c\xbf\x91\x02\x04\xd0\xee\x87\xce\x04\xcc\x3e\xa8\x20\xfd\x97\xdf\xbf\x4a\xbc\xfc\xc9\x7c\x77\x21\xcc\x23\x6f\x59\x38\xd8\xd9\xa0\x0e\xb1\x23\x4e\x04\x3f\x14\x9e\xcc\x05\x54\xab\x20\x69\xed\xa4\xd5\x1d\xb4\x1b\x52\xed\x6a\xea\xeb\x7f\xd1\xbc\xfd\x75\x20\xa0\x1c\x59\x8c\x5a\xa1\x2a\x70\x64\x11\xb1\x7b\xc1\x24\x80\x28\x51\x4c\x94\xa1\x95\x64\x72\xe8\x90\x67\x38\x74\x2b\xab\x38\x46\x12\x71\xce\x19\x98\x98\xf7\x89\xd4\xfe\x2f\x2a\xc5\x61\x20\xd0\xa4\x1a\x51\x3c\x82\xc8\x18\x31\x7a\x10\xe8\x1c\xc6\x95\x5a\xa0\x82\x88\xce\x8f\x4b\x47\x85\x7e\x89\x95\x95\x52\x1e\xac\xce\x45\x57\x61\x38\x97\x2b\x62\xa5\x14\x6f\xc3\xaa\x6c\x35\x83\xc9\xa3\x1e\x30\x89\xf4\xb1\xea\x4f\x39\xde\xde\xc7\x46\x5c\x0e\x85\x41\xec\x6a\xa4\xcb\xee\x70\x9c\x57\xd9\xf4\xa1\xc3\x9c\x2a\x0a\xf0\x5d\x58\xb0\xae\xd4\xdc\xc5\x6a\xa8\x34\xfa\x23\xef\xef\x08\x39\xc3\x3d\xea\x11\x6e\x6a\xe0\x1e\xd0\x52\xa8\xc3\x6e\xc9\x1c\xfc\xd0\x0c\x4c\xea\x0d\x82\xcb\xdd\x29\x1a\xc4\x4f\x6e\xa3\x4d\xcb\x7a\x38\x77\xe5\x15\x6e\xad\xfa\x9d\x2f\x02\xb6\x39\x84\x3a\x60\x8f\x71\x9f\x92\xe5\x24\x4f\xbd\x18\x49\xd5\xef\xbf\x70\xfb\xd1\x4c\x2e\xfc\x2f\x36\xf3\x00\x31\x2e\x90\x18\xcc\xf4\x71\xb9\xe4\xf9\xbe\xcb\x5e\xff\xf3\xe7\xf8\xca\x03\x60\x66\xb3\xc9\x5a\xf9\x74\x09\x02\x57\xb6\x90\x94\xfc\x41\x35\xdc\x35\x3f\x32\x7a\xa6\xa5\xcd\x8a\x8f\xc8\x3d\xc8\x81\xc3\xec\x37\x74\x86\x61\x41\x0d\xc5\xe2\xc8\x0c\x84\x2b\x3b\x71\x58\xde\x1b\xe3\x20\x65\x2e\x76\xf4\x98\xd8\xaa\x78\xe6\xeb\xb8\x85\x0d\xa0\xd0\xf5\x57\x64\x01\x58\x55\x82\xd5\x0f\x2d\x9c\x3e\x2a\xa0\x7e\xaf\x42\xf3\x37\xd1\xb3\xaf\xda\x5b\xa9\xda\xe3\x89\x5d\xf1\xca\xa5\x12\x3d\xe7\x91\x95\x53\x21\x72\xca\x7f\xf6\x79\x59\x21\xcf\x30\x18\xfb\x78\x55\x40\x59\xc3\xf9\xf1\xdd\x58\x44\x5e\x83\x11\x5c\x2d\x1d\x91\xf6\x01\x3d\x3f\xd4\x33\x81\x66\x6c\x40\x7a\x9d\x70\x10\x58\xe6\x53\xad\x85\x11\x99\x3e\x4b\xbc\x31\xc6\x78\x9d\x79\xc5\xde\x9f\x2e\x43\xfa\x76\x84\x2f\xfd\x28\x75\x12\x48\x25\xfd\x15\x8c\x29\x6a\x91\xa4\x63\xc0\xa2\x8c\x41\x3c\xf1\xb0\xf8\xdf\x66\xeb\xbd\x14\x88\xa9\x81\xa7\x35\xc4\x41\x40\x6c\x10\x3f\x09\xbd\xb5\xd3\x7a\xee\x4b\xd5\x86\xff\x36\x03\x6b\x78\xde",
+		"\x62\x01\x53\x8a\xe9\x25\xe1\x06\x09\x8e\xba\x12\x74\x87\x09\x9a\x95\xe4\x86\x62\x2b\x4b\xf9\xa6\x2e\x7b\x35\x43\xf7\x39\x99\x0f\x3b\x6f\xfd\x1a\x6e\x23\x54\x70\xb5\x1d\x10\x1c\x63\x40\x96\x99\x41\xb6\x96\x0b\x70\x98\xec\x17\xb0\xaa\xdc\x4a\xab\xe8\x3b\xb7\x6b\x00\x1c\x5b\xc3\xe0\xa2\x8b\x7c\x17\xc8\x92\xc9\xb0\x92\xb6\x70\x84\x95\x30",
+		"\x4e\x01\xe5\x04\x35\xac\x00\x00\x80",
+		"\x62\x01\x41\xb0\x75\x5c\x27\x46\xef\x8a\xe7\x1d\x50\x38\xb2\x13\x33\xe0\x79\x35\x1b\xc2\xb5\x79\x73\xe7\xc2\x6f\xb9\x1a\x8c\x21\x0e\xa9\x54\x17\x6c\x41\xab\xc8\x16\x57\xec\x5e\xeb\x89\x3b\xa9\x90\x8c\xff\x4d\x46\x8b\xf0\xd9\xc0\xd0\x51\xcf\x8b\x88\xf1\x5f\x1e\x9e\xc1\xb9\x1f\xe3\x06\x45\x35\x8a\x47\xe8\x9a\xf2\x4f\x19\x4c\xf8\xce\x68\x1b\x63\x34\x11\x75\xea\xe5\xb1\x0f\x38\xcc\x05\x09\x8b\x3e\x2b\x88\x84\x9d\xc5\x03\xc3\xc0\x90\x32\xe2\x45\x69\xb1\xe5\xf7\x68\x6b\x16\x90\xa0\x40\xe6\x18\x74\xd8\x68\xf3\x34\x38\x99\xf2\x6c\xb7\x1a\x35\x21\xca\x52\x56\x4c\x7f\xb2\xa3\xd5\xb8\x40\x50\x48\x3e\xdc\xdf\x0b\xf5\x54\x5a\x15\x1a\xe2\xc3\xb4\x94\xda\x3f\xb5\x34\xa2\xca\xbc\x2f\xe0\xa4\xe5\x69\xf4\xbf\x62\x4d\x15\x21\x1b\x11\xfc\x39\xaa\x86\x74\x96\x63\xfd\x07\x53\x26\xf6\x34\x72\xeb\x14\x37\x98\x0d\xf4\x68\x91\x2c\x6b\x46\x83\x88\x82\x04\x8b\x9f\xb8\x32\x73\x75\x8b\xf9\xac\x71\x42\xd1\x2d\xb4\x28\x28\xf5\x78\xe0\x32\xf3\xe1\xfc\x43\x6b\xf9\x92\xf7\x48\xfe\x7f\xc0\x17\xbd\xfd\xba\x2f\x58\x6f\xee\x84\x03\x18\xce\xb0\x9d\x8d\xeb\x22\xf1\xfc\xb1\xcf\xff\x2f\xb2\x9f\x6c\xe5\xb4\x69\xdc\xdd\x20\x93\x00\x30\xad\x56\x04\x66\x7e\xa3\x3c\x18\x4b\x43\x66\x00\x27\x1e\x1c\x09\x11\xd8\xf4\x8a\x9e\xc5\x6a\x94\xe5\xae\x0b\x8a\xbe\x84\xda\xe5\x44\x7f\x38\x1c\xe7\xbb\x03\x19\x66\xe1\x5d\x1d\xc1\xbd\x3d\xc6\xb7\xe3\xff\x7f\x8e\xff\x1e\xf6\x9e\x6f\x58\x27\x74\x65\xef\x02\x5d\xa4\xde\x27\x7f\x51\xe3\x4b\x9e\x3f\x79\x83\xbd\x1b\x8f\x0d\x77\xfb\xbc\xc5\x9f\x15\xa7\x4e\x05\x8a\x24\x97\x66\xb2\x7c\xf6\xe1\x84\x54\xdb\x39\x5e\xf6\x1b\x8f\x05\x73\x1d\xb6\x8e\xd7\x09\x9a\xc5\x92\x80",
+	}
+
+	for _, cur := range tt {
+		pck := &H265Packet{}
+		_, err := pck.Unmarshal([]byte(cur))
+		assert.True(t, err == nil || errors.Is(err, errNotEnoughPackets))
+	}
+}
+
+func TestH265Payloader_Real(t *testing.T) {
+	// curl -LO "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/1080/Big_Buck_Bunny_1080_10s_1MB.mp4"
+	// ffmpeg -i Big_Buck_Bunny_1080_10s_1MB.mp4 -c:v copy Big_Buck_Bunny_1080_10s_1MB.h265
+	// hexdump -v -e '1/1 "0x%02x, "' Big_Buck_Bunny_1080_10s_1MB.h265 > aaa
+
+	// nolint: lll
+	payload := []byte{
+		0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x78, 0x95, 0x98, 0x09,
+		0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x78, 0xa0, 0x03, 0xc0, 0x80, 0x10, 0xe5, 0x96, 0x56, 0x69, 0x24, 0xca, 0xf0, 0x10, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x01, 0xe0, 0x80,
+		0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc1, 0x72, 0xb4, 0x62, 0x40,
+		0x00, 0x00, 0x00, 0x01, 0x4e, 0x01, 0x05, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x71, 0x2c, 0xa2, 0xde, 0x09, 0xb5, 0x17, 0x47, 0xdb, 0xbb, 0x55, 0xa4, 0xfe, 0x7f, 0xc2, 0xfc, 0x4e, 0x78, 0x32, 0x36, 0x35, 0x20, 0x28, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x20, 0x31, 0x35, 0x31, 0x29, 0x20, 0x2d, 0x20, 0x32, 0x2e, 0x36, 0x2b, 0x34, 0x39, 0x2d, 0x37, 0x32, 0x31, 0x39, 0x33, 0x37, 0x36, 0x64, 0x65, 0x34, 0x32, 0x61, 0x3a, 0x5b, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73, 0x5d, 0x5b, 0x47, 0x43, 0x43, 0x20, 0x37, 0x2e, 0x33, 0x2e, 0x30, 0x5d, 0x5b, 0x36, 0x34, 0x20, 0x62, 0x69, 0x74, 0x5d, 0x20, 0x38, 0x62, 0x69, 0x74, 0x2b, 0x31, 0x30, 0x62, 0x69, 0x74, 0x20, 0x2d, 0x20, 0x48, 0x2e, 0x32, 0x36, 0x35, 0x2f, 0x48, 0x45, 0x56, 0x43, 0x20, 0x63, 0x6f, 0x64, 0x65, 0x63, 0x20, 0x2d, 0x20, 0x43, 0x6f, 0x70, 0x79, 0x72, 0x69, 0x67, 0x68, 0x74, 0x20, 0x32, 0x30, 0x31, 0x33, 0x2d, 0x32, 0x30, 0x31, 0x38, 0x20, 0x28, 0x63, 0x29, 0x20, 0x4d, 0x75, 0x6c, 0x74, 0x69, 0x63, 0x6f, 0x72, 0x65, 0x77, 0x61, 0x72, 0x65, 0x2c, 0x20, 0x49, 0x6e, 0x63, 0x20, 0x2d, 0x20, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x78, 0x32, 0x36, 0x35, 0x2e, 0x6f, 0x72, 0x67, 0x20, 0x2d, 0x20, 0x6f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x3a, 0x20, 0x63, 0x70, 0x75, 0x69, 0x64, 0x3d, 0x31, 0x30, 0x35, 0x30, 0x31, 0x31, 0x31, 0x20, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x2d, 0x74, 0x68, 0x72, 0x65, 0x61, 0x64, 0x73, 0x3d, 0x33, 0x20, 0x6e, 0x75, 0x6d, 0x61, 0x2d, 0x70, 0x6f, 0x6f, 0x6c, 0x73, 0x3d, 0x38, 0x20, 0x77, 0x70, 0x70, 0x20, 0x6e, 0x6f, 0x2d, 0x70, 0x6d, 0x6f, 0x64, 0x65, 0x20, 0x6e, 0x6f, 0x2d, 0x70, 0x6d, 0x65, 0x20, 0x6e, 0x6f, 0x2d, 0x70, 0x73, 0x6e, 0x72, 0x20, 0x6e, 0x6f, 0x2d, 0x73, 0x73, 0x69, 0x6d, 0x20, 0x6c, 0x6f, 0x67, 0x2d, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x3d, 0x32, 0x20, 0x62, 0x69, 0x74, 0x64, 0x65, 0x70, 0x74, 0x68, 0x3d, 0x38, 0x20, 0x69, 0x6e, 0x70, 0x75, 0x74, 0x2d, 0x63, 0x73, 0x70, 0x3d, 0x31, 0x20, 0x66, 0x70, 0x73, 0x3d, 0x33, 0x30, 0x2f, 0x31, 0x20, 0x69, 0x6e, 0x70, 0x75, 0x74, 0x2d, 0x72, 0x65, 0x73, 0x3d, 0x31, 0x39, 0x32, 0x30, 0x78, 0x31, 0x30, 0x38, 0x30, 0x20, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6c, 0x61, 0x63, 0x65, 0x3d, 0x30, 0x20, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x2d, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x73, 0x3d, 0x30, 0x20, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x2d, 0x69, 0x64, 0x63, 0x3d, 0x30, 0x20, 0x68, 0x69, 0x67, 0x68, 0x2d, 0x74, 0x69, 0x65, 0x72, 0x3d, 0x31, 0x20, 0x75, 0x68, 0x64, 0x2d, 0x62, 0x64, 0x3d, 0x30, 0x20, 0x72, 0x65, 0x66, 0x3d, 0x34, 0x20, 0x6e, 0x6f, 0x2d, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x2d, 0x6e, 0x6f, 0x6e, 0x2d, 0x63, 0x6f, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x6e, 0x63, 0x65, 0x20, 0x6e, 0x6f, 0x2d, 0x72, 0x65, 0x70, 0x65, 0x61, 0x74, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73, 0x20, 0x61, 0x6e, 0x6e, 0x65, 0x78, 0x62, 0x20, 0x6e, 0x6f, 0x2d, 0x61, 0x75, 0x64, 0x20, 0x6e, 0x6f, 0x2d, 0x68, 0x72, 0x64, 0x20, 0x69, 0x6e, 0x66, 0x6f, 0x20, 0x68, 0x61, 0x73, 0x68, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x74, 0x65, 0x6d, 0x70, 0x6f, 0x72, 0x61, 0x6c, 0x2d, 0x6c, 0x61, 0x79, 0x65, 0x72, 0x73, 0x20, 0x6f, 0x70, 0x65, 0x6e, 0x2d, 0x67, 0x6f, 0x70, 0x20, 0x6d, 0x69, 0x6e, 0x2d, 0x6b, 0x65, 0x79, 0x69, 0x6e, 0x74, 0x3d, 0x32, 0x35, 0x20, 0x6b, 0x65, 0x79, 0x69, 0x6e, 0x74, 0x3d, 0x32, 0x35, 0x30, 0x20, 0x67, 0x6f, 0x70, 0x2d, 0x6c, 0x6f, 0x6f, 0x6b, 0x61, 0x68, 0x65, 0x61, 0x64, 0x3d, 0x30, 0x20, 0x62, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x73, 0x3d, 0x34, 0x20, 0x62, 0x2d, 0x61, 0x64, 0x61, 0x70, 0x74, 0x3d, 0x32, 0x20, 0x62, 0x2d, 0x70, 0x79, 0x72, 0x61, 0x6d, 0x69, 0x64, 0x20, 0x62, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x2d, 0x62, 0x69, 0x61, 0x73, 0x3d, 0x30, 0x20, 0x72, 0x63, 0x2d, 0x6c, 0x6f, 0x6f, 0x6b, 0x61, 0x68, 0x65, 0x61, 0x64, 0x3d, 0x32, 0x35, 0x20, 0x6c, 0x6f, 0x6f, 0x6b, 0x61, 0x68, 0x65, 0x61, 0x64, 0x2d, 0x73, 0x6c, 0x69, 0x63, 0x65, 0x73, 0x3d, 0x34, 0x20, 0x73, 0x63, 0x65, 0x6e, 0x65, 0x63, 0x75, 0x74, 0x3d, 0x34, 0x30, 0x20, 0x72, 0x61, 0x64, 0x6c, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x2d, 0x72, 0x65, 0x66, 0x72, 0x65, 0x73, 0x68, 0x20, 0x63, 0x74, 0x75, 0x3d, 0x36, 0x34, 0x20, 0x6d, 0x69, 0x6e, 0x2d, 0x63, 0x75, 0x2d, 0x73, 0x69, 0x7a, 0x65, 0x3d, 0x38, 0x20, 0x72, 0x65, 0x63, 0x74, 0x20, 0x6e, 0x6f, 0x2d, 0x61, 0x6d, 0x70, 0x20, 0x6d, 0x61, 0x78, 0x2d, 0x74, 0x75, 0x2d, 0x73, 0x69, 0x7a, 0x65, 0x3d, 0x33, 0x32, 0x20, 0x74, 0x75, 0x2d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x2d, 0x64, 0x65, 0x70, 0x74, 0x68, 0x3d, 0x31, 0x20, 0x74, 0x75, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x2d, 0x64, 0x65, 0x70, 0x74, 0x68, 0x3d, 0x31, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x2d, 0x74, 0x75, 0x3d, 0x30, 0x20, 0x72, 0x64, 0x6f, 0x71, 0x2d, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x3d, 0x32, 0x20, 0x64, 0x79, 0x6e, 0x61, 0x6d, 0x69, 0x63, 0x2d, 0x72, 0x64, 0x3d, 0x30, 0x2e, 0x30, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x73, 0x73, 0x69, 0x6d, 0x2d, 0x72, 0x64, 0x20, 0x73, 0x69, 0x67, 0x6e, 0x68, 0x69, 0x64, 0x65, 0x20, 0x6e, 0x6f, 0x2d, 0x74, 0x73, 0x6b, 0x69, 0x70, 0x20, 0x6e, 0x72, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x3d, 0x30, 0x20, 0x6e, 0x72, 0x2d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x63, 0x6f, 0x6e, 0x73, 0x74, 0x72, 0x61, 0x69, 0x6e, 0x65, 0x64, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x20, 0x73, 0x74, 0x72, 0x6f, 0x6e, 0x67, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x2d, 0x73, 0x6d, 0x6f, 0x6f, 0x74, 0x68, 0x69, 0x6e, 0x67, 0x20, 0x6d, 0x61, 0x78, 0x2d, 0x6d, 0x65, 0x72, 0x67, 0x65, 0x3d, 0x33, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x2d, 0x72, 0x65, 0x66, 0x73, 0x3d, 0x33, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x2d, 0x6d, 0x6f, 0x64, 0x65, 0x73, 0x20, 0x6d, 0x65, 0x3d, 0x33, 0x20, 0x73, 0x75, 0x62, 0x6d, 0x65, 0x3d, 0x33, 0x20, 0x6d, 0x65, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x3d, 0x35, 0x37, 0x20, 0x74, 0x65, 0x6d, 0x70, 0x6f, 0x72, 0x61, 0x6c, 0x2d, 0x6d, 0x76, 0x70, 0x20, 0x77, 0x65, 0x69, 0x67, 0x68, 0x74, 0x70, 0x20, 0x6e, 0x6f, 0x2d, 0x77, 0x65, 0x69, 0x67, 0x68, 0x74, 0x62, 0x20, 0x6e, 0x6f, 0x2d, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x2d, 0x73, 0x72, 0x63, 0x2d, 0x70, 0x69, 0x63, 0x73, 0x20, 0x64, 0x65, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x3d, 0x30, 0x3a, 0x30, 0x20, 0x73, 0x61, 0x6f, 0x20, 0x6e, 0x6f, 0x2d, 0x73, 0x61, 0x6f, 0x2d, 0x6e, 0x6f, 0x6e, 0x2d, 0x64, 0x65, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x20, 0x72, 0x64, 0x3d, 0x34, 0x20, 0x6e, 0x6f, 0x2d, 0x65, 0x61, 0x72, 0x6c, 0x79, 0x2d, 0x73, 0x6b, 0x69, 0x70, 0x20, 0x72, 0x73, 0x6b, 0x69, 0x70, 0x20, 0x6e, 0x6f, 0x2d, 0x66, 0x61, 0x73, 0x74, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x20, 0x6e, 0x6f, 0x2d, 0x74, 0x73, 0x6b, 0x69, 0x70, 0x2d, 0x66, 0x61, 0x73, 0x74, 0x20, 0x6e, 0x6f, 0x2d, 0x63, 0x75, 0x2d, 0x6c, 0x6f, 0x73, 0x73, 0x6c, 0x65, 0x73, 0x73, 0x20, 0x6e, 0x6f, 0x2d, 0x62, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x20, 0x6e, 0x6f, 0x2d, 0x73, 0x70, 0x6c, 0x69, 0x74, 0x72, 0x64, 0x2d, 0x73, 0x6b, 0x69, 0x70, 0x20, 0x72, 0x64, 0x70, 0x65, 0x6e, 0x61, 0x6c, 0x74, 0x79, 0x3d, 0x30, 0x20, 0x70, 0x73, 0x79, 0x2d, 0x72, 0x64, 0x3d, 0x32, 0x2e, 0x30, 0x30, 0x20, 0x70, 0x73, 0x79, 0x2d, 0x72, 0x64, 0x6f, 0x71, 0x3d, 0x31, 0x2e, 0x30, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x72, 0x64, 0x2d, 0x72, 0x65, 0x66, 0x69, 0x6e, 0x65, 0x20, 0x6e, 0x6f, 0x2d, 0x6c, 0x6f, 0x73, 0x73, 0x6c, 0x65, 0x73, 0x73, 0x20, 0x63, 0x62, 0x71, 0x70, 0x6f, 0x66, 0x66, 0x73, 0x3d, 0x30, 0x20, 0x63, 0x72, 0x71, 0x70, 0x6f, 0x66, 0x66, 0x73, 0x3d, 0x30, 0x20, 0x72, 0x63, 0x3d, 0x61, 0x62, 0x72, 0x20, 0x62, 0x69, 0x74, 0x72, 0x61, 0x74, 0x65, 0x3d, 0x38, 0x38, 0x30, 0x20, 0x71, 0x63, 0x6f, 0x6d, 0x70, 0x3d, 0x30, 0x2e, 0x36, 0x30, 0x20, 0x71, 0x70, 0x73, 0x74, 0x65, 0x70, 0x3d, 0x34, 0x20, 0x73, 0x74, 0x61, 0x74, 0x73, 0x2d, 0x77, 0x72, 0x69, 0x74, 0x65, 0x3d, 0x30, 0x20, 0x73, 0x74, 0x61, 0x74, 0x73, 0x2d, 0x72, 0x65, 0x61, 0x64, 0x3d, 0x30, 0x20, 0x69, 0x70, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x3d, 0x31, 0x2e, 0x34, 0x30, 0x20, 0x70, 0x62, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x3d, 0x31, 0x2e, 0x33, 0x30, 0x20, 0x61, 0x71, 0x2d, 0x6d, 0x6f, 0x64, 0x65, 0x3d, 0x31, 0x20, 0x61, 0x71, 0x2d, 0x73, 0x74, 0x72, 0x65, 0x6e, 0x67, 0x74, 0x68, 0x3d, 0x31, 0x2e, 0x30, 0x30, 0x20, 0x63, 0x75, 0x74, 0x72, 0x65, 0x65, 0x20, 0x7a, 0x6f, 0x6e, 0x65, 0x2d, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x73, 0x74, 0x72, 0x69, 0x63, 0x74, 0x2d, 0x63, 0x62, 0x72, 0x20, 0x71, 0x67, 0x2d, 0x73, 0x69, 0x7a, 0x65, 0x3d, 0x33, 0x32, 0x20, 0x6e, 0x6f, 0x2d, 0x72, 0x63, 0x2d, 0x67, 0x72, 0x61, 0x69, 0x6e, 0x20, 0x71, 0x70, 0x6d, 0x61, 0x78, 0x3d, 0x36, 0x39, 0x20, 0x71, 0x70, 0x6d, 0x69, 0x6e, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x63, 0x6f, 0x6e, 0x73, 0x74, 0x2d, 0x76, 0x62, 0x76, 0x20, 0x73, 0x61, 0x72, 0x3d, 0x31, 0x20, 0x6f, 0x76, 0x65, 0x72, 0x73, 0x63, 0x61, 0x6e, 0x3d, 0x30, 0x20, 0x76, 0x69, 0x64, 0x65, 0x6f, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x3d, 0x35, 0x20, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x3d, 0x30, 0x20, 0x63, 0x6f, 0x6c, 0x6f, 0x72, 0x70, 0x72, 0x69, 0x6d, 0x3d, 0x32, 0x20, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x65, 0x72, 0x3d, 0x32, 0x20, 0x63, 0x6f, 0x6c, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x72, 0x69, 0x78, 0x3d, 0x32, 0x20, 0x63, 0x68, 0x72, 0x6f, 0x6d, 0x61, 0x6c, 0x6f, 0x63, 0x3d, 0x30, 0x20, 0x64, 0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x2d, 0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x3d, 0x30, 0x20, 0x6d, 0x61, 0x78, 0x2d, 0x63, 0x6c, 0x6c, 0x3d, 0x30, 0x2c, 0x30, 0x20, 0x6d, 0x69, 0x6e, 0x2d, 0x6c, 0x75, 0x6d, 0x61, 0x3d, 0x30, 0x20, 0x6d, 0x61, 0x78, 0x2d, 0x6c, 0x75, 0x6d, 0x61, 0x3d, 0x32, 0x35, 0x35, 0x20, 0x6c, 0x6f, 0x67, 0x32, 0x2d, 0x6d, 0x61, 0x78, 0x2d, 0x70, 0x6f, 0x63, 0x2d, 0x6c, 0x73, 0x62, 0x3d, 0x38, 0x20, 0x76, 0x75, 0x69, 0x2d, 0x74, 0x69, 0x6d, 0x69, 0x6e, 0x67, 0x2d, 0x69, 0x6e, 0x66, 0x6f, 0x20, 0x76, 0x75, 0x69, 0x2d, 0x68, 0x72, 0x64, 0x2d, 0x69, 0x6e, 0x66, 0x6f, 0x20, 0x73, 0x6c, 0x69, 0x63, 0x65, 0x73, 0x3d, 0x31, 0x20, 0x6e, 0x6f, 0x2d, 0x6f, 0x70, 0x74, 0x2d, 0x71, 0x70, 0x2d, 0x70, 0x70, 0x73, 0x20, 0x6e, 0x6f, 0x2d, 0x6f, 0x70, 0x74, 0x2d, 0x72, 0x65, 0x66, 0x2d, 0x6c, 0x69, 0x73, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68, 0x2d, 0x70, 0x70, 0x73, 0x20, 0x6e, 0x6f, 0x2d, 0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x2d, 0x6f, 0x70, 0x74, 0x2d, 0x72, 0x70, 0x73, 0x20, 0x73, 0x63, 0x65, 0x6e, 0x65, 0x63, 0x75, 0x74, 0x2d, 0x62, 0x69, 0x61, 0x73, 0x3d, 0x30, 0x2e, 0x30, 0x35, 0x20, 0x6e, 0x6f, 0x2d, 0x6f, 0x70, 0x74, 0x2d, 0x63, 0x75, 0x2d, 0x64, 0x65, 0x6c, 0x74, 0x61, 0x2d, 0x71, 0x70, 0x20, 0x6e, 0x6f, 0x2d, 0x61, 0x71, 0x2d, 0x6d, 0x6f, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x6e, 0x6f, 0x2d, 0x68, 0x64, 0x72, 0x20, 0x6e, 0x6f, 0x2d, 0x68, 0x64, 0x72, 0x2d, 0x6f, 0x70, 0x74, 0x20, 0x6e, 0x6f, 0x2d, 0x64, 0x68, 0x64, 0x72, 0x31, 0x30, 0x2d, 0x6f, 0x70, 0x74, 0x20, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x73, 0x69, 0x73, 0x2d, 0x72, 0x65, 0x75, 0x73, 0x65, 0x2d, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x3d, 0x35, 0x20, 0x73, 0x63, 0x61, 0x6c, 0x65, 0x2d, 0x66, 0x61, 0x63, 0x74, 0x6f, 0x72, 0x3d, 0x30, 0x20, 0x72, 0x65, 0x66, 0x69, 0x6e, 0x65, 0x2d, 0x69, 0x6e, 0x74, 0x72, 0x61, 0x3d, 0x30, 0x20, 0x72, 0x65, 0x66, 0x69, 0x6e, 0x65, 0x2d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x3d, 0x30, 0x20, 0x72, 0x65, 0x66, 0x69, 0x6e, 0x65, 0x2d, 0x6d, 0x76, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x2d, 0x73, 0x61, 0x6f, 0x20, 0x63, 0x74, 0x75, 0x2d, 0x69, 0x6e, 0x66, 0x6f, 0x3d, 0x30, 0x20, 0x6e, 0x6f, 0x2d, 0x6c, 0x6f, 0x77, 0x70, 0x61, 0x73, 0x73, 0x2d, 0x64, 0x63, 0x74, 0x20, 0x72, 0x65, 0x66, 0x69, 0x6e, 0x65, 0x2d, 0x6d, 0x76, 0x2d, 0x74, 0x79, 0x70, 0x65, 0x3d, 0x30, 0x20, 0x63, 0x6f, 0x70, 0x79, 0x2d, 0x70, 0x69, 0x63, 0x3d, 0x31, 0x80,
+	}
+	pck := H265Payloader{}
+	res := pck.Payload(1400, payload)
+	// 1. Aggregating three NALUs into a single payload
+	// 2. Fragmented packets divided by MTU=1400
+	// 3. Remaining fragment packets split by MTU
+	assert.Len(t, res, 3, "Generated payload should be 3")
+}
+
+func TestH265_FragmentationMtu(t *testing.T) {
+	payload := make([]byte, 2000)
+
+	for i := range 2000 {
+		payload[i] = uint8(i) //nolint: gosec // idc
+	}
+
+	simplePacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 0, false),
+		nil,
+		payload,
+	}
+
+	serializeBuf := make([]byte, 0, 4096)
+
+	for mtu := uint16(800); mtu <= 1500; mtu++ {
+		fragments, err := newH265FragmentationPackets(mtu, &simplePacket)
+
+		assert.Nil(t, err)
+
+		for _, f := range fragments {
+			assert.LessOrEqual(t, len(f.serialize(serializeBuf)), int(mtu))
+			serializeBuf = serializeBuf[0:]
+		}
+	}
+
+	testDonl := uint16(100)
+	simplePacket.donl = &testDonl
+
+	for mtu := uint16(800); mtu <= 1500; mtu++ {
+		fragments, err := newH265FragmentationPackets(mtu, &simplePacket)
+
+		assert.Nil(t, err)
+
+		for _, f := range fragments {
+			assert.LessOrEqual(t, len(f.serialize(serializeBuf)), int(mtu))
+			serializeBuf = serializeBuf[0:]
+		}
+	}
+}
+
+func TestH265_FragmentationRoundtrip(t *testing.T) {
+	testFragmentation := func(packet h265SingleNALUnitPacket) {
+		for mtu := uint16(100); mtu < 1500; mtu++ {
+			fragments, err := newH265FragmentationPackets(100, &packet)
+			assert.Nil(t, err)
+
+			rebuilt, err := rebuildH265FragmentationPackets(fragments)
+			assert.Nil(t, err)
+
+			assert.Equal(
+				t,
+				packet,
+				*rebuilt,
+				"Expected packets to match after fragmentation",
+			)
+		}
+	}
+
+	payload := make([]byte, 0)
+	testDonl := uint16(100)
+
+	for i := range 200 {
+		payload = append(payload, uint8(i)) //nolint: gosec // idc
+	}
+
+	simplePacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 0, false),
+		nil,
+		payload,
+	}
+
+	testFragmentation(simplePacket)
+
+	packetWithDonl := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 0, false),
+		&testDonl,
+		payload,
+	}
+	testFragmentation(packetWithDonl)
+
+	everyFlagSet := h265SingleNALUnitPacket{
+		createTestH265Header(1, 1, 1, true),
+		&testDonl,
+		payload,
+	}
+
+	testFragmentation(everyFlagSet)
+}
+
+func TestH265_AggregationRoundtrip(t *testing.T) {
+	testAggregation := func(expected []h265SingleNALUnitPacket, withDonl bool) {
+		created, err := newH265AggregationPacket(expected)
+		assert.Nil(t, err)
+		packet := created.serialize(make([]byte, 0))
+		aggr, err := parseH265AggregationPacket(packet, withDonl)
+		assert.Nil(t, err)
+		split, err := splitH265AggregationPacket(*aggr)
+		assert.Equal(t, len(expected), len(split))
+		assert.Nil(t, err)
+
+		assert.True(t, slices.EqualFunc(split, expected, func(a, b h265SingleNALUnitPacket) bool {
+			donlMatch := true
+			if a.donl != nil && b.donl != nil {
+				donlMatch = *a.donl == *b.donl
+			} else if b.donl != nil {
+				donlMatch = false
+			}
+
+			return slices.Equal(a.payload, b.payload) && a.payloadHeader == b.payloadHeader && donlMatch
+		}))
+	}
+
+	simplePacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 1, false),
+		nil,
+		[]byte{0x00, 0x01, 0x02, 0x03},
+	}
+	diffPacket := h265SingleNALUnitPacket{
+		newH265NALUHeader(0b1000000, 0b00010000),
+		nil,
+		[]byte{0x03, 0x02, 0x01, 0x00, 0x12},
+	}
+
+	testAggregation([]h265SingleNALUnitPacket{simplePacket, simplePacket, simplePacket}, false)
+	testAggregation([]h265SingleNALUnitPacket{diffPacket, simplePacket, simplePacket}, false)
+	testAggregation([]h265SingleNALUnitPacket{diffPacket, diffPacket, simplePacket}, false)
+
+	withDonlCount := uint16(4)
+	withDonl := make([]h265SingleNALUnitPacket, withDonlCount)
+	for i := range withDonlCount {
+		donlVal := i
+		withDonl[i] = h265SingleNALUnitPacket{
+			createTestH265Header(0, 0, 1, false),
+			&donlVal,
+			[]byte{0x00, 0x01, 0x02, 0x03},
+		}
+	}
+
+	// With contiguous DONL values
+	testAggregation([]h265SingleNALUnitPacket{withDonl[0], withDonl[1], withDonl[2]}, true)
+	// With a gap in DONL values
+	testAggregation([]h265SingleNALUnitPacket{withDonl[0], withDonl[2], withDonl[3]}, true)
+}
+
+func TestH265_PACIRoundtrip(t *testing.T) {
+	testPACI := func(expected isH265Packet, withDonl bool) {
+		created, err := newH265PACIPacket(expected)
+		assert.Nil(t, err)
+		packet := created.serialize(make([]byte, 0))
+		paci, err := parseH265PACIPacket(packet, withDonl)
+		assert.Nil(t, err)
+
+		assert.Equal(t, expected, paci.payload)
+	}
+
+	testDONL := uint16(100)
+	testDONL2 := uint16(101)
+
+	simplePacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 1, false),
+		nil,
+		[]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+	}
+
+	testPACI(&simplePacket, false)
+
+	// With DONL
+	simplePacket.donl = &testDONL
+
+	testPACI(&simplePacket, true)
+
+	simplePacket.donl = nil
+
+	// fragmentation packets
+
+	fragments, err := newH265FragmentationPackets(10, &simplePacket)
+	assert.Nil(t, err)
+
+	for i := range fragments {
+		testPACI(&fragments[i], false)
+	}
+
+	// With DONL
+
+	simplePacket.donl = &testDONL
+
+	fragmentsWithDONL, err := newH265FragmentationPackets(10, &simplePacket)
+	assert.Nil(t, err)
+
+	for i := range fragmentsWithDONL {
+		testPACI(&fragmentsWithDONL[i], fragmentsWithDONL[i].donl != nil)
+	}
+
+	simplePacket.donl = nil
+
+	// aggregation packet
+
+	diffPacket := h265SingleNALUnitPacket{
+		simplePacket.payloadHeader,
+		nil,
+		simplePacket.payload,
+	}
+
+	aggregation, err := newH265AggregationPacket([]h265SingleNALUnitPacket{simplePacket, diffPacket})
+	assert.Nil(t, err)
+
+	testPACI(aggregation, false)
+
+	simplePacket.donl = &testDONL
+	diffPacket.donl = &testDONL2
+
+	aggregationWithDONL, err := newH265AggregationPacket([]h265SingleNALUnitPacket{simplePacket, diffPacket})
+	assert.Nil(t, err)
+
+	testPACI(aggregationWithDONL, true)
+}
+
+func TestH265_SingleRoundtrip(t *testing.T) {
+	testSingle := func(expected h265SingleNALUnitPacket) {
+		packet := expected.serialize(make([]byte, 0))
+		parsed, err := parseH265SingleNalUnitPacket(packet, expected.donl != nil)
+		assert.Nil(t, err)
+
+		assert.Equal(t, expected, *parsed)
+	}
+
+	simplePacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 1, false),
+		nil,
+		[]byte{0x00, 0x01, 0x02, 0x03},
+	}
+	diffPacket := h265SingleNALUnitPacket{
+		newH265NALUHeader(0b1000000, 0b00010000),
+		nil,
+		[]byte{0x03, 0x02, 0x01, 0x00, 0x12},
+	}
+
+	testSingle(simplePacket)
+	testSingle(diffPacket)
+
+	withDonlCount := uint16(4)
+	withDonl := make([]h265SingleNALUnitPacket, withDonlCount)
+	for i := range withDonlCount {
+		donlVal := i
+		withDonl[i] = h265SingleNALUnitPacket{
+			createTestH265Header(0, 0, 1, false),
+			&donlVal,
+			[]byte{0x00, 0x01, 0x02, 0x03},
+		}
+		testSingle(withDonl[i])
+	}
+}
+
+func TestH265Packetizer_Single(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	// type 1, 8 payload length NALU
+	basicPacket := make([]byte, 0)
+	basicPacket = append(basicPacket, annexbNALUStartCode...)
+	header := createTestH265Header(1, 0, 0, false)
+	basicPacket = binary.BigEndian.AppendUint16(basicPacket, uint16(header))
+	payload := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	basicPacket = append(basicPacket, payload...)
+
+	packets := packetizer.Payload(100, basicPacket)
+	assert.Equal(t, 1, len(packets), "Expected only 1 NALU to be generated")
+	assert.Equal(t, uint16(header), binary.BigEndian.Uint16(packets[0][0:2]), "Expected headers to match")
+	assert.Equal(t, payload, packets[0][2:], "Expected payloads to match")
+}
+
+func TestH265Packetizer_Aggregated(t *testing.T) {
+	packetizer := H265Payloader{}
+	// type 0, 8 payload length
+	basicPacket := make([]byte, 0)
+	basicPacket = append(basicPacket, annexbNALUStartCode...)
+	header := createTestH265Header(1, 0, 0, false)
+	basicPacket = binary.BigEndian.AppendUint16(basicPacket, uint16(header))
+	payload := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	basicPacket = append(basicPacket, payload...)
+
+	two := make([]byte, len(basicPacket)*2)
+	copy(two, basicPacket)
+	copy(two[len(basicPacket):], basicPacket)
+
+	packets := packetizer.Payload(100, two)
+
+	assert.Equal(t, 1, len(packets), "Expected only 1 NALU to be generated")
+	aggregated := packets[0]
+	parsedHeader := H265NALUHeader(binary.BigEndian.Uint16(aggregated[0:2]))
+
+	assert.Equal(t, h265NaluAggregationPacketType, int(parsedHeader.Type()), "NALU header should be type 28")
+
+	assert.Equal(
+		t,
+		h265NaluHeaderSize+len(payload),
+		int(binary.BigEndian.Uint16(aggregated[2:4])),
+		"Expected length to match",
+	)
+	assert.Equal(t, uint16(header), binary.BigEndian.Uint16(aggregated[4:6]), "Expected headers to match")
+	assert.Equal(t, payload, aggregated[6:14], "Expected payloads to match")
+
+	assert.Equal(
+		t,
+		h265NaluHeaderSize+len(payload),
+		int(binary.BigEndian.Uint16(aggregated[14:16])),
+		"Expected length to match",
+	)
+	assert.Equal(t, uint16(header), binary.BigEndian.Uint16(aggregated[16:18]), "Expected headers to match")
+	assert.Equal(t, payload, aggregated[18:], "Expected payloads to match")
+}
+
+func TestH265Payloader_Payload_VPS_SPS_PPS_handling(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vps := createTestH265NALU(h265NaluVpsType, []byte{0x00})
+	sps := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	pps := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	vcl := createTestH265NALU(19, []byte{0x06, 0x07})
+
+	assert.Empty(t, packetizer.Payload(1500, vps), "VPS should be cached")
+	assert.Empty(t, packetizer.Payload(1500, sps), "SPS should be cached")
+	assert.Empty(t, packetizer.Payload(1500, pps), "PPS should be cached")
+
+	payloads := packetizer.Payload(1500, vcl)
+	assert.Len(t, payloads, 1)
+
+	aggregation, err := parseH265AggregationPacket(payloads[0], false)
+	assert.NoError(t, err)
+
+	packets, err := splitH265AggregationPacket(*aggregation)
+	assert.NoError(t, err)
+	assert.Len(t, packets, 4)
+	assert.Equal(t, uint8(h265NaluVpsType), packets[0].payloadHeader.Type())
+	assert.Equal(t, uint8(h265NaluSpsType), packets[1].payloadHeader.Type())
+	assert.Equal(t, uint8(h265NaluPpsType), packets[2].payloadHeader.Type())
+	assert.Equal(t, uint8(19), packets[3].payloadHeader.Type())
+	assert.Equal(t, []byte{0x06, 0x07}, packets[3].payload)
+}
+
+func TestH265Payloader_Payload_MultipleParameterSets(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vps0 := createTestH265NALU(h265NaluVpsType, []byte{0x00})
+	vps1 := createTestH265NALU(h265NaluVpsType, []byte{0x10})
+	sps0 := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	pps0 := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	// For an enhancement layer, 7 signals multi_layer_ext_sps_flag. The SPS
+	// ID then follows immediately, without profile_tier_level.
+	sps1 := createTestH265NALUWithLayer(h265NaluSpsType, 1, []byte{0x0e, 0xa0})
+	pps1 := createTestH265NALUWithLayer(h265NaluPpsType, 1, createTestH265ExpGolombPayload(0, 1))
+	vcl0 := createTestH265NALU(19, []byte{0x06})
+	vcl1 := createTestH265NALUWithLayer(19, 1, []byte{0x07})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(vps0, vps1, sps0, pps0, sps1, pps1, vcl0, vcl1))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], vps0, vps1, sps0, pps0, sps1, pps1, vcl0, vcl1)
+}
+
+func TestH265Payloader_Payload_ReplacesSameIDParameterSetsAcrossLayers(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vps := createTestH265NALU(h265NaluVpsType, []byte{0x00})
+	baseLayerSps := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	pps := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	enhancementLayerSps := createTestH265NALUWithLayer(h265NaluSpsType, 1, []byte{0x0f})
+	vcl := createTestH265NALUWithLayer(19, 1, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(vps, baseLayerSps, pps, enhancementLayerSps, vcl))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], vps, pps, enhancementLayerSps, vcl)
+}
+
+func TestH265Payloader_Payload_ReplacesPendingParameterSet(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	spsOriginal := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	spsUpdate := append([]byte(nil), spsOriginal...)
+	spsUpdate[len(spsUpdate)-1] ^= 0x01
+	pps := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	sei := createTestH265NALU(39, []byte{0x04})
+	vcl := createTestH265NALU(20, []byte{0x05})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(spsOriginal, pps, spsUpdate, sei, vcl))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], pps, spsUpdate, sei, vcl)
+}
+
+func TestH265Payloader_Payload_OrdersUpdatedParameterSets(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vps0 := createTestH265NALU(h265NaluVpsType, []byte{0x00})
+	vps1 := createTestH265NALU(h265NaluVpsType, []byte{0x10})
+	sps0 := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	sps1Payload := append([]byte(nil), createTestH265SpsPayload()...)
+	sps1Payload[0] |= 0x10
+	sps1Payload[len(sps1Payload)-1] ^= 0x01
+	sps1 := createTestH265NALU(h265NaluSpsType, sps1Payload)
+	pps := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	sei := createTestH265NALU(39, []byte{0x04})
+	idr := createTestH265NALU(19, []byte{0x05})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(vps0, sps0, pps, vps1, sps1, pps, sei, idr))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], vps0, vps1, sps1, pps, sei, idr)
+}
+
+func TestH265Payloader_Payload_ReplacesRepeatedParameterSet(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vpsA := createTestH265NALU(h265NaluVpsType, []byte{0x00, 0x01})
+	vpsB := createTestH265NALU(h265NaluVpsType, []byte{0x00, 0x02})
+	vcl := createTestH265NALU(19, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(vpsA, vpsB, vpsA, vcl))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], vpsA, vcl)
+}
+
+func TestH265Payloader_Payload_UsesLatestPendingConfiguration(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	vpsA := createTestH265NALU(h265NaluVpsType, []byte{0x00, 0x01})
+	vpsB := createTestH265NALU(h265NaluVpsType, []byte{0x00, 0x02})
+	spsA := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	ppsA := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	vclA := createTestH265NALU(20, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(
+		vpsA, spsA, ppsA,
+		vpsB,
+		vpsA, spsA, ppsA,
+		vclA,
+	))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], vpsA, spsA, ppsA, vclA)
+}
+
+func TestH265Payloader_Payload_PreservesParameterSetOrder(t *testing.T) {
+	pps0 := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))
+	pps1 := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 1))
+	vcl := createTestH265NALU(19, []byte{0x06})
+	payload := createTestH265AnnexB(pps0, pps1, vcl)
+
+	for range 100 {
+		packetizer := H265Payloader{}
+		payloads := packetizer.Payload(1500, payload)
+		if !assert.Len(t, payloads, 1) {
+			return
+		}
+		assertH265AggregationPayload(t, payloads[0], pps0, pps1, vcl)
+	}
+}
+
+func TestH265ParameterSetIDs_RejectTruncatedInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func() (uint32, bool)
+	}{
+		{
+			name: "VPS",
+			parse: func() (uint32, bool) {
+				return h265VpsID(nil)
+			},
+		},
+		{
+			name: "PPS",
+			parse: func() (uint32, bool) {
+				return h265PpsID([]byte{0x00})
+			},
+		},
+		{
+			name: "SPS",
+			parse: func() (uint32, bool) {
+				return h265SpsID(0, []byte{0x00})
+			},
+		},
+		{
+			name: "empty SPS",
+			parse: func() (uint32, bool) {
+				return h265SpsID(0, nil)
+			},
+		},
+		{
+			name: "base-layer multilayer extension",
+			parse: func() (uint32, bool) {
+				return h265SpsID(0, []byte{0x0e})
+			},
+		},
+		{
+			name: "multilayer SPS",
+			parse: func() (uint32, bool) {
+				return h265SpsID(1, []byte{0x0e})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			id, ok := test.parse()
+			assert.False(t, ok)
+			assert.Zero(t, id)
+		})
+	}
+}
+
+func TestH265SpsID_ProfileTierLevelWithSubLayer(t *testing.T) {
+	id, ok := h265SpsID(0, createTestH265SpsWithSubLayerPayload())
+
+	assert.True(t, ok)
+	assert.Equal(t, uint32(1), id)
+}
+
+func TestH265SkipProfileTierLevel_RejectsTruncatedInput(t *testing.T) {
+	tests := []struct {
+		name   string
+		length int
+		flags  byte
+	}{
+		{name: "general profile", length: 3},
+		{name: "general compatibility", length: 4},
+		{name: "general constraint flags", length: 8},
+		{name: "general level", length: 11},
+		{name: "sub-layer flags", length: 12},
+		{name: "reserved bits", length: 13},
+		{name: "sub-layer profile space", length: 14, flags: 0x80},
+		{name: "sub-layer profile idc", length: 18, flags: 0x80},
+		{name: "sub-layer constraint flags", length: 22, flags: 0x80},
+		{name: "sub-layer level", length: 25, flags: 0xc0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := make([]byte, test.length)
+			if len(data) > 12 {
+				data[12] = test.flags
+			}
+			reader := h265ParamBits{data: data}
+			assert.False(t, h265SkipProfileTierLevel(&reader, 1))
+		})
+	}
+}
+
+func TestH265ParamBits_RejectsMalformedExpGolomb(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "more than 31 leading zeroes",
+			data: make([]byte, 4),
+		},
+		{
+			name: "missing suffix",
+			data: []byte{0x01},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reader := h265ParamBits{data: test.data}
+			_, ok := reader.ue()
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestH265Payloader_Payload_ForwardsOutOfRangeParameterSetID(t *testing.T) {
+	packetizer := H265Payloader{}
+	pps := createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, h265MaxPpsCount))
+	vcl := createTestH265NALU(19, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(pps, vcl))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], pps, vcl)
+}
+
+func TestH265Payloader_Payload_ForwardsTruncatedParameterSet(t *testing.T) {
+	packetizer := H265Payloader{}
+	truncatedPps := createTestH265NALU(h265NaluPpsType, []byte{0x00})
+	vcl := createTestH265NALU(19, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(truncatedPps, vcl))
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], truncatedPps, vcl)
+}
+
+func TestH265Payloader_Payload_ForwardsUnparseableParameterSets(t *testing.T) {
+	packetizer := H265Payloader{}
+	vps := createTestH265NALU(h265NaluVpsType, nil)
+	sps := createTestH265NALU(h265NaluSpsType, nil)
+	pps := createTestH265NALU(h265NaluPpsType, []byte{0x00})
+	vcl := createTestH265NALU(19, []byte{0x06})
+
+	payloads := packetizer.Payload(1500, createTestH265AnnexB(vps, sps, pps, vcl))
+	if !assert.Len(t, payloads, 3) {
+		return
+	}
+	assert.Equal(t, vps, payloads[0])
+	assert.Equal(t, sps, payloads[1])
+	assertH265AggregationPayload(t, payloads[2], pps, vcl)
+}
+
+func TestH265Payloader_Payload_VCLOnlyDoesNotCreateParameterSetCache(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	packetizer.Payload(1500, createTestH265NALU(19, []byte{0x06}))
+
+	assert.Nil(t, packetizer.cache)
+}
+
+func TestH265Payloader_Payload_ReplacesParameterSetOnlyCache(t *testing.T) {
+	const (
+		parameterSetCount = 1000
+		mtu               = 20
+	)
+
+	packetizer := H265Payloader{}
+	vcl := createTestH265NALU(19, []byte{0x06})
+	var latestVps []byte
+
+	for i := range parameterSetCount {
+		latestVps = createTestH265NALU(h265NaluVpsType, []byte{0x00, byte(i)})
+		assert.Empty(t, packetizer.Payload(mtu, latestVps))
+		if packetizer.cache != nil {
+			assert.Len(t, packetizer.cache.entries, 1)
+			assert.LessOrEqual(t, cap(packetizer.cache.entries), 4)
+		}
+	}
+
+	payloads := packetizer.Payload(mtu, vcl)
+	assert.Nil(t, packetizer.cache)
+	if !assert.Len(t, payloads, 1) {
+		return
+	}
+	assertH265AggregationPayload(t, payloads[0], latestVps, vcl)
+}
+
+func TestH265Payloader_Payload_CopiesCachedParameterSet(t *testing.T) {
+	packetizer := H265Payloader{}
+	sps := createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())
+	filler := createTestH265NALU(h265NaluFillerType, make([]byte, 1024))
+
+	assert.Empty(t, packetizer.Payload(1500, createTestH265AnnexB(sps, filler)))
+	if !assert.NotNil(t, packetizer.cache) || !assert.Len(t, packetizer.cache.entries, 1) {
+		return
+	}
+	cached := packetizer.cache.entries[0].packet.payload
+	assert.Equal(t, sps[h265NaluHeaderSize:], cached)
+	assert.Equal(t, len(cached), cap(cached))
+}
+
+func TestH265Payloader_Payload_DefersLargeParameterSetUntilVCL(t *testing.T) {
+	const mtu = 20
+
+	packetizer := H265Payloader{}
+	smallVps := createTestH265NALU(h265NaluVpsType, []byte{0x00})
+	largeVpsPayload := make([]byte, 50)
+	largeVps := createTestH265NALU(h265NaluVpsType, largeVpsPayload)
+
+	assert.Empty(t, packetizer.Payload(mtu, smallVps))
+	assert.Empty(t, packetizer.Payload(mtu, largeVps))
+	assert.NotNil(t, packetizer.cache)
+	assert.Len(t, packetizer.cache.entries, 1)
+
+	vcl := createTestH265NALU(19, []byte{0x06})
+	payloads := packetizer.Payload(mtu, vcl)
+	if !assert.Greater(t, len(payloads), 1) {
+		return
+	}
+	for _, payload := range payloads[:len(payloads)-1] {
+		header := H265NALUHeader(binary.BigEndian.Uint16(payload))
+		assert.True(t, header.IsFragmentationUnit())
+	}
+	assert.Equal(t, vcl, payloads[len(payloads)-1])
+	assert.Nil(t, packetizer.cache)
+}
+
+func TestH265Payloader_Payload_CachesLargeParameterSetsWithoutExtraIDExtractionAllocation(t *testing.T) {
+	const mtu = 60000
+
+	spsPayload := createTestH265SpsPayload()
+	spsPayload = append(spsPayload, make([]byte, int(mtu)-len(spsPayload))...)
+	sps := createTestH265NALU(h265NaluSpsType, spsPayload)
+	vps := createTestH265NALU(h265NaluVpsType, make([]byte, len(spsPayload)))
+
+	vpsAllocs := testing.AllocsPerRun(10, func() {
+		packetizer := H265Payloader{}
+		packetizer.Payload(mtu, vps)
+	})
+	spsAllocs := testing.AllocsPerRun(10, func() {
+		packetizer := H265Payloader{}
+		packetizer.Payload(mtu, sps)
+	})
+
+	assert.Equal(t, vpsAllocs, spsAllocs)
+}
+
+func BenchmarkH265Payloader_Payload_VCLOnly(b *testing.B) {
+	packetizer := H265Payloader{}
+	payload := createTestH265NALU(19, []byte{0x06})
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		packetizer.Payload(1500, payload)
+	}
+}
+
+func BenchmarkH265Payloader_Payload_ParameterSets(b *testing.B) {
+	packetizer := H265Payloader{}
+	payload := createTestH265AnnexB(
+		createTestH265NALU(h265NaluVpsType, []byte{0x00}),
+		createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload()),
+		createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0)),
+		createTestH265NALU(19, []byte{0x06}),
+	)
+	var payloads [][]byte
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		payloads = packetizer.Payload(1500, payload)
+	}
+	if len(payloads) == 0 {
+		b.Fatal("expected packetized payload")
+	}
+}
+
+func TestH265Payloader_Payload_VPS_SPS_PPS_before_fragmented(t *testing.T) {
+	packetizer := H265Payloader{}
+
+	assert.Empty(t, packetizer.Payload(40, createTestH265NALU(h265NaluVpsType, []byte{0x00})))
+	assert.Empty(t, packetizer.Payload(40, createTestH265NALU(h265NaluSpsType, createTestH265SpsPayload())))
+	assert.Empty(t, packetizer.Payload(40, createTestH265NALU(h265NaluPpsType, createTestH265ExpGolombPayload(0, 0))))
+
+	payload := make([]byte, 50)
+	for i := range payload {
+		payload[i] = uint8(i) //nolint:gosec // G115 test data
+	}
+	payloads := packetizer.Payload(40, createTestH265NALU(19, payload))
+	assert.Greater(t, len(payloads), 1)
+
+	aggregation, err := parseH265AggregationPacket(payloads[0], false)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	packets, err := splitH265AggregationPacket(*aggregation)
+	assert.NoError(t, err)
+	assert.Len(t, packets, 3)
+	assert.Equal(t, uint8(h265NaluVpsType), packets[0].payloadHeader.Type())
+	assert.Equal(t, uint8(h265NaluSpsType), packets[1].payloadHeader.Type())
+	assert.Equal(t, uint8(h265NaluPpsType), packets[2].payloadHeader.Type())
+
+	fragmentHeader := H265NALUHeader(binary.BigEndian.Uint16(payloads[1][0:2]))
+	assert.True(t, fragmentHeader.IsFragmentationUnit())
+}
+
+func TestH265Payloader_Payload_SkipAggregation(t *testing.T) {
+	packetizer := H265Payloader{SkipAggregation: true}
+
+	vps := createTestH265NALU(h265NaluVpsType, []byte{0x00, 0x01})
+	sps := createTestH265NALU(h265NaluSpsType, []byte{0x02, 0x03})
+	pps := createTestH265NALU(h265NaluPpsType, []byte{0x04, 0x05})
+	vcl := createTestH265NALU(19, []byte{0x06, 0x07})
+
+	assert.Equal(t, [][]byte{vps}, packetizer.Payload(1500, vps))
+	assert.Equal(t, [][]byte{sps}, packetizer.Payload(1500, sps))
+	assert.Equal(t, [][]byte{pps}, packetizer.Payload(1500, pps))
+	assert.Equal(t, [][]byte{vcl}, packetizer.Payload(1500, vcl))
+}
+
+func TestH265Packetizer_Fragmented(t *testing.T) {
+	initSequence := []byte{0x00, 0x00, 0x00, 0x01, 0x00}
+
+	packetizer := H265Payloader{}
+	// type 0, 50 payload length
+	bigPacket := make([]byte, 0)
+	bigPacket = append(bigPacket, initSequence...)
+	header := createTestH265Header(1, 0, 0, false)
+
+	bigPacket = binary.BigEndian.AppendUint16(bigPacket, uint16(header))
+
+	payload := make([]byte, 0)
+	for range 50 {
+		payload = append(payload, 0xff)
+	}
+	bigPacket = append(bigPacket, payload...)
+
+	packets := packetizer.Payload(50, bigPacket)
+
+	assert.Equal(t, 2, len(packets), "Expected 2 NALUs to be generated")
+	parsedHeader := H265NALUHeader(binary.BigEndian.Uint16(packets[0][0:2]))
+
+	assert.Equal(t, h265NaluFragmentationUnitType, int(parsedHeader.Type()), "NALU header should be type 28")
+	assert.True(t, H265FragmentationUnitHeader(packets[0][2]).S(), "First FU header should be S")
+	assert.True(t, H265FragmentationUnitHeader(packets[1][2]).E(), "Second FU header should be E")
+}
+
+func TestH265Depacketizer_Roundtrip(t *testing.T) {
+	testDepacketizer := func(packets [][]byte, expected []h265SingleNALUnitPacket, withDonl bool) {
+		depacketizer := H265Depacketizer{
+			hasDonl: withDonl,
+		}
+		output := make([]h265SingleNALUnitPacket, 0)
+		for _, packet := range packets {
+			p, err := depacketizer.Unmarshal(packet)
+			assert.Nil(t, err)
+
+			if p == nil {
+				continue
+			}
+
+			emitNalus(p, func(b []byte) {
+				parsed, err := parseH265SingleNalUnitPacket(b, false)
+				assert.Nil(t, err)
+				if err != nil {
+					return
+				}
+				output = append(output, *parsed)
+			})
+		}
+		same := slices.EqualFunc(expected, output, func(a h265SingleNALUnitPacket, b h265SingleNALUnitPacket) bool {
+			return slices.Equal(a.payload, b.payload) &&
+				a.payloadHeader == b.payloadHeader
+		})
+		assert.True(t, same)
+	}
+
+	testDonl := uint16(100)
+	testDonl2 := uint16(101)
+
+	// Single NAL
+
+	basicPacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 0, false),
+		nil,
+		[]byte{0xff, 0xff, 0xff},
+	}
+
+	testDepacketizer([][]byte{basicPacket.serialize(make([]byte, 0))}, []h265SingleNALUnitPacket{basicPacket}, false)
+
+	// with DONL
+
+	basicPacket.donl = &testDonl
+
+	testDepacketizer([][]byte{basicPacket.serialize(make([]byte, 0))}, []h265SingleNALUnitPacket{basicPacket}, true)
+
+	// Multiple NALs aggregated
+
+	firstPacket := h265SingleNALUnitPacket{
+		createTestH265Header(0, 0, 0, false),
+		nil,
+		[]byte{0xff, 0xff, 0xff},
+	}
+
+	secondPacket := h265SingleNALUnitPacket{
+		createTestH265Header(1, 2, 3, false),
+		nil,
+		[]byte{0x67, 0x67, 0x67},
+	}
+
+	aggregation, err := newH265AggregationPacket([]h265SingleNALUnitPacket{firstPacket, secondPacket})
+	assert.Nil(t, err)
+	aggregationPacketized := aggregation.serialize(make([]byte, 0))
+
+	testDepacketizer([][]byte{aggregationPacketized}, []h265SingleNALUnitPacket{firstPacket, secondPacket}, false)
+
+	// with DONL
+
+	firstPacket.donl = &testDonl
+	secondPacket.donl = &testDonl2
+
+	donlAggregation, err := newH265AggregationPacket([]h265SingleNALUnitPacket{firstPacket, secondPacket})
+	assert.Nil(t, err)
+	donlAggregationPacketized := donlAggregation.serialize(make([]byte, 0))
+
+	testDepacketizer([][]byte{donlAggregationPacketized}, []h265SingleNALUnitPacket{firstPacket, secondPacket}, true)
+
+	// Large NAL that gets fragmented
+
+	largePacket := &h265SingleNALUnitPacket{
+		createTestH265Header(1, 1, 1, false),
+		nil,
+		make([]byte, 0),
+	}
+	for i := range 512 {
+		largePacket.payload = append(largePacket.payload, uint8(i)) // nolint:gosec
+	}
+
+	fragments, err := newH265FragmentationPackets(100, largePacket)
+	assert.Nil(t, err)
+
+	fragmentsPacketized := make([][]byte, 0)
+
+	for _, f := range fragments {
+		fragmentsPacketized = append(fragmentsPacketized, f.serialize(make([]byte, 0)))
+	}
+
+	testDepacketizer(fragmentsPacketized, []h265SingleNALUnitPacket{*largePacket}, false)
+
+	// with DONL
+
+	largePacket.donl = &testDonl
+
+	donlFragments, err := newH265FragmentationPackets(100, largePacket)
+	assert.Nil(t, err)
+
+	donlFragmentsPacketized := make([][]byte, 0)
+
+	for _, f := range donlFragments {
+		donlFragmentsPacketized = append(donlFragmentsPacketized, f.serialize(make([]byte, 0)))
+	}
+
+	testDepacketizer(donlFragmentsPacketized, []h265SingleNALUnitPacket{*largePacket}, true)
+
+	testPACIPayload := h265SingleNALUnitPacket{
+		createTestH265Header(16, 1, 1, false),
+		nil,
+		[]byte{0xff, 0xff, 0xff},
+	}
+
+	paci := &H265PACIPacket{
+		payloadHeader:    createTestH265Header(h265NaluPACIPacketType, 1, 1, false),
+		paciHeaderFields: paciHeaderFields(uint16(16) << 9),
+		phes:             []byte{},
+		payload:          &testPACIPayload,
+	}
+
+	testDepacketizer([][]byte{paci.serialize(make([]byte, 0))}, []h265SingleNALUnitPacket{testPACIPayload}, false)
+
+	testPACIPayload.donl = &testDonl
+
+	testDepacketizer([][]byte{paci.serialize(make([]byte, 0))}, []h265SingleNALUnitPacket{testPACIPayload}, true)
+}
+
+func uint16ptr(v uint16) *uint16 {
+	return &v
+}

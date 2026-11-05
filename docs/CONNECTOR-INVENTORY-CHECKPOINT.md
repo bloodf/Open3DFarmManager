@@ -7,3 +7,5 @@ The focused pagination test checks bounded limits, canonical cursors, repeated p
 The runner requires an explicitly identified disposable loopback PostgreSQL database named `fixture`, with the complete local migration catalog applied and its journal verified. It refuses a missing or modified journal. The caller owns database teardown and must set `INVENTORY_SYNTHETIC_TEST_DISPOSABLE=yes` and `INVENTORY_SYNTHETIC_TEST_PORT` to its isolated port. Run `bun scripts/test-postgres-connector-inventory.ts` only after provisioning that database and applying every migration in order. The fixture creates and removes its own login roles, closes its connections, and leaves synthetic rows for the caller's disposable database teardown.
 
 This checkpoint does not establish hosted deployment, browser acceptance, physical device behavior, or the result of a PostgreSQL run. Record those results separately when the corresponding checks run.
+
+A Chromium test with mocked inventory responses checks selection, status display, the disabled revocation action, and clearing after a 401 response. It does not establish database authorization or keyboard selection behavior.

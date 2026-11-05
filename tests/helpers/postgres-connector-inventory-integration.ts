@@ -106,12 +106,19 @@ export async function testPostgresConnectorInventory(
     })
 
   // Hold each authorization row before the request; commit the denial while it waits.
-  for (const kind of ['membership', 'session', 'account', 'expiry'] as const) {
+  for (const kind of [
+    'membership',
+    'session',
+    'account',
+    'version',
+    'idle-expiry',
+    'absolute-expiry',
+  ] as const) {
     const id = randomUUID(),
       sid = randomUUID().replaceAll('-', ''),
       farm = randomUUID()
     await admin`INSERT INTO farm.session_accounts (id) VALUES (${id})`
-    await admin`INSERT INTO farm.account_sessions (id, account_id, account_version, created_at, last_seen_at, absolute_expires_at) VALUES (${sid}, ${id}, 0, 100, 100, 1000)`
+    await admin`INSERT INTO farm.account_sessions (id, account_id, account_version, created_at, last_seen_at, absolute_expires_at) VALUES (${sid}, ${id}, 0, 100, 100, ${kind === 'absolute-expiry' ? 150 : 1000})`
     await admin`INSERT INTO farm.farms (id) VALUES (${farm}::uuid)`
     await admin`INSERT INTO farm.memberships (farm_id, account_id, role) VALUES (${farm}::uuid, ${id}, 'owner')`
     const lock = await admin.reserve()
@@ -122,6 +129,8 @@ export async function testPostgresConnectorInventory(
       await lock`UPDATE farm.account_sessions SET revoked_at = 101 WHERE id = ${sid}`
     else {
       await lock`SELECT id FROM farm.session_accounts WHERE id = ${id} FOR UPDATE`
+      if (kind === 'version')
+        await lock`UPDATE farm.session_accounts SET session_version = session_version + 1 WHERE id = ${id}`
       if (kind === 'account')
         await lock`UPDATE farm.session_accounts SET disabled = true WHERE id = ${id}`
     }
@@ -130,6 +139,9 @@ export async function testPostgresConnectorInventory(
       ...input,
       sessionRecordId: sid,
       farmId: farm,
+      ...(kind === 'absolute-expiry'
+        ? { policy: { idleTimeoutMs: 10000 } }
+        : {}),
     })
     try {
       const start = performance.now()
@@ -143,7 +155,7 @@ export async function testPostgresConnectorInventory(
         )
         await sleep(5)
       }
-      if (kind === 'expiry') now = 200
+      if (kind === 'idle-expiry' || kind === 'absolute-expiry') now = 200
     } finally {
       await lock`COMMIT`
       lock.release()
@@ -293,15 +305,46 @@ export async function testPostgresConnectorInventory(
       assert.equal(denied.status, 401)
       assert.equal(denied.headers.get('cache-control'), 'no-store')
     }
+    for (const query of [
+      'limit=0',
+      'limit=1&limit=2',
+      'after=bad',
+      'unknown=1',
+    ]) {
+      const invalid = await fetch(base + '/api/farms?' + query, {
+        headers: { cookie: pair },
+      })
+      assert.equal(invalid.status, 400)
+      assert.equal(invalid.headers.get('cache-control'), 'no-store')
+    }
     const wrong = await fetch(
       base + '/api/farms/' + otherFarm + '/connectors',
       { headers: { cookie: pair } },
     )
     assert.equal(wrong.status, 403)
     assert.equal(wrong.headers.get('cache-control'), 'no-store')
+    await admin`UPDATE farm.memberships SET revoked_at = 101 WHERE farm_id = ${farms[0]!}::uuid AND account_id = ${httpAccount}`
+    const memberRevoked = await fetch(
+      base + '/api/farms/' + farms[0] + '/connectors',
+      { headers: { cookie: pair } },
+    )
+    assert.equal(memberRevoked.status, 403)
+    await admin`UPDATE farm.account_sessions SET revoked_at = ${Date.now()} WHERE account_id = ${httpAccount}`
+    const sessionRevoked = await fetch(base + '/api/farms', {
+      headers: { cookie: pair },
+    })
+    assert.equal(sessionRevoked.status, 401)
+    const secondLogin = await fetch(base + '/api/auth/login', {
+      method: 'POST',
+      headers: { origin: auth.origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    assert.equal(secondLogin.status, 200)
+    const secondCookie = secondLogin.headers.getSetCookie()[0]?.split(';')[0]
+    assert.ok(secondCookie)
     await admin`UPDATE farm.session_accounts SET disabled = true WHERE id = ${httpAccount}`
     const revoked = await fetch(base + '/api/farms', {
-      headers: { cookie: pair },
+      headers: { cookie: secondCookie },
     })
     assert.equal(revoked.status, 401)
   } finally {

@@ -23,7 +23,6 @@ if (
     'Explicit disposable loopback PostgreSQL port required; no arguments accepted',
   )
 const role = 'printer_ownership_fixture_' + randomUUID().replaceAll('-', '')
-const authRole = 'inventory_auth_fixture_' + randomUUID().replaceAll('-', '')
 const options = {
   host: '127.0.0.1',
   port,
@@ -39,9 +38,7 @@ const runtime = postgres({
   username: role,
   connection: { application_name: 'printer-ownership-fixture' },
 })
-const authSql = postgres({ ...options, username: authRole })
 let roleCreated = false
-let authRoleCreated = false
 let checks: string[] = []
 try {
   assert.equal(
@@ -50,7 +47,10 @@ try {
     'fixture',
   )
   assert.equal((await admin`SELECT current_user AS actor`)[0]?.actor, 'fixture')
-  const catalog = await loadMigrationCatalog()
+  const fullCatalog = await loadMigrationCatalog()
+  const catalog = fullCatalog.slice(0, 15)
+  assert.equal(catalog.length, 15)
+  assert.equal(catalog[14]?.id, '0015_printer_ownership')
   assert.ok(catalog.some((entry) => entry.id.startsWith('0011_')))
   assert.ok(catalog.some((entry) => entry.id.startsWith('0015_')))
   const history =
@@ -58,18 +58,14 @@ try {
   assert.equal(validateMigrationHistory(catalog, [...history]), catalog.length)
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_printer_ownership`
   roleCreated = true
-  await admin`CREATE ROLE ${admin(authRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_password_auth, farm_session_runtime`
-  authRoleCreated = true
   checks = [
     ...(await testPostgresPrinterOwnership(admin, runtime)),
     ...(await testPrinterOwnershipRaces(admin, runtime)),
   ]
 } finally {
   await runtime.end({ timeout: 3 })
-  await authSql.end({ timeout: 3 })
   try {
     if (roleCreated) await admin`DROP ROLE ${admin(role)}`
-    if (authRoleCreated) await admin`DROP ROLE ${admin(authRole)}`
   } finally {
     await admin.end({ timeout: 3 })
   }
@@ -80,7 +76,6 @@ console.log(
     checks,
     cleanup: {
       runtimeRoleRemoved: roleCreated,
-      authRoleRemoved: authRoleCreated,
       connectionsClosed: true,
       fixtureRows: 'caller-owned disposable database',
     },

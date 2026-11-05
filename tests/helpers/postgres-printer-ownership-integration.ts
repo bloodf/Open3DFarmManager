@@ -14,7 +14,8 @@ export async function testPostgresPrinterOwnership(
     otherFarm = randomUUID(),
     agentId = randomUUID(),
     agent2 = randomUUID(),
-    foreignAgent = randomUUID()
+    foreignAgent = randomUUID(),
+    cappedAgent = randomUUID()
   const owner = randomUUID(),
     ownerPeer = randomUUID(),
     viewer = randomUUID(),
@@ -33,6 +34,7 @@ export async function testPostgresPrinterOwnership(
     [agentId, farmId],
     [agent2, farmId],
     [foreignAgent, otherFarm],
+    [cappedAgent, farmId],
   ] as const) {
     await admin`INSERT INTO farm.connector_enrollments (agent_id,farm_id,public_key_spki,fingerprint) VALUES (${agent}::uuid,${farm}::uuid,${spki},${fingerprint})`
     await admin`UPDATE farm.connector_enrollments SET status='approved' WHERE agent_id=${agent}::uuid`
@@ -67,10 +69,25 @@ export async function testPostgresPrinterOwnership(
       .length,
     1,
   )
+  const sqlState = (code: string) => (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === code
   await assert.rejects(
     runtime`UPDATE farm.connector_enrollments SET status='revoked' WHERE agent_id=${agentId}::uuid`,
+    sqlState('42501'),
   )
-  await assert.rejects(runtime`DELETE FROM farm.printer_assignments`)
+  await assert.rejects(
+    runtime`DELETE FROM farm.printer_assignments`,
+    sqlState('42501'),
+  )
+  assert.equal(
+    (
+      await admin`SELECT status FROM farm.connector_enrollments WHERE agent_id=${agentId}::uuid`
+    )[0]?.status,
+    'approved',
+  )
   let clockReads = 0
   const expiring = new PostgresPrinterOwnership(runtime, () =>
     ++clockReads < 3 ? now : now - 1,
@@ -92,6 +109,57 @@ export async function testPostgresPrinterOwnership(
     ),
     0,
   )
+  // Exact Unicode and whitespace keys are distinct, with no normalization.
+  for (const variant of [
+    'é',
+    'e\u0301',
+    'Printer',
+    'printer',
+    'printer ',
+    '😀'.repeat(64),
+  ]) {
+    assert.equal(
+      (await service.register({ ...request, printerKey: variant })).ok,
+      true,
+    )
+    const rows =
+      await admin`SELECT printer_key FROM farm.printer_assignments WHERE farm_id=${farmId}::uuid AND printer_key=${variant} AND revoked_at IS NULL`
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0]?.printer_key, variant)
+  }
+  // Seed one below the API cap; concurrent registrations for this enrollment
+  // must serialize and leave exactly 1,000 live rows.
+  await admin`INSERT INTO farm.printer_assignments (id,farm_id,agent_id,printer_key,created_at,created_by) SELECT md5('cap-' || n::text || ${cappedAgent})::uuid, ${farmId}::uuid, ${cappedAgent}::uuid, 'cap-' || n::text, ${now}, ${owner} FROM generate_series(1,999) n`
+  const capped = await Promise.all([
+    service.register({ ...request, agentId: cappedAgent, printerKey: 'cap-a' }),
+    service.register({
+      ...request,
+      sessionRecordId: ownerPeer,
+      agentId: cappedAgent,
+      printerKey: 'cap-b',
+    }),
+  ])
+  assert.equal(capped.filter((result) => result.ok).length, 1)
+  assert.equal(
+    capped.filter((result) => !result.ok && result.reason === 'denied').length,
+    1,
+  )
+  assert.equal(
+    Number(
+      (
+        await admin`SELECT count(*)::int AS n FROM farm.printer_assignments WHERE agent_id=${cappedAgent}::uuid AND revoked_at IS NULL`
+      )[0]?.n,
+    ),
+    1000,
+  )
+  assert.deepEqual(
+    await service.register({
+      ...request,
+      agentId: cappedAgent,
+      printerKey: 'cap-c',
+    }),
+    { ok: false, reason: 'denied' },
+  )
   const first = await service.register(request)
   assert.equal(first.ok, true)
   assert.deepEqual(await service.register({ ...request, agentId: agent2 }), {
@@ -106,14 +174,44 @@ export async function testPostgresPrinterOwnership(
   })
   assert.equal(foreign.ok, true)
   assert.equal((await service.revoke(request)).ok, true)
-  assert.equal(
-    (await service.register({ ...request, agentId: agent2 })).ok,
-    true,
+  const replacement = await service.register({ ...request, agentId: agent2 })
+  assert.equal(replacement.ok, true)
+  if (!first.ok || !replacement.ok) throw new Error('Missing assignment')
+  assert.notEqual(first.assignmentId, replacement.assignmentId)
+  assert.notEqual(
+    (
+      await admin`SELECT revoked_at FROM farm.printer_assignments WHERE id=${first.assignmentId}::uuid`
+    )[0]?.revoked_at,
+    null,
   )
   await assert.rejects(
     admin`UPDATE farm.printer_assignments SET revoked_at=NULL,revoked_by=NULL WHERE id=${first.ok ? first.assignmentId : randomUUID()}::uuid`,
+    sqlState('P0001'),
+  )
+  await assert.rejects(
+    admin`DELETE FROM farm.printer_assignments WHERE id=${first.assignmentId}::uuid`,
+    sqlState('P0001'),
+  )
+  await assert.rejects(
+    admin`TRUNCATE farm.printer_assignments`,
+    sqlState('P0001'),
+  )
+  assert.notEqual(
+    (
+      await admin`SELECT revoked_at FROM farm.printer_assignments WHERE id=${first.assignmentId}::uuid`
+    )[0]?.revoked_at,
+    null,
   )
   await admin`UPDATE farm.connector_enrollments SET status='revoked' WHERE agent_id=${agentId}::uuid`
+  assert.equal((await service.revoke({ ...request, printerKey: 'é' })).ok, true)
+  assert.equal(
+    Number(
+      (
+        await admin`SELECT count(*)::int AS n FROM farm.printer_assignments WHERE agent_id=${agentId}::uuid AND printer_key='é' AND revoked_at IS NOT NULL`
+      )[0]?.n,
+    ),
+    1,
+  )
   assert.deepEqual(
     await service.register({ ...request, printerKey: 'other' }),
     { ok: false, reason: 'denied' },
@@ -135,7 +233,8 @@ export async function testPostgresPrinterOwnership(
   return [
     'owner authorization and wrong scope',
     'concurrent unique assignment, rollback and role restrictions',
-    'active uniqueness and farm isolation',
+    'active uniqueness, farm isolation and exact UTF-8 keys',
+    '999 and 1000 assignment limit under concurrent registration',
     'terminal revocation and reassignment',
     'revoked enrollment and expired session',
   ]

@@ -235,10 +235,51 @@ export async function testPrinterOwnershipRaces(
     ),
     1,
   )
+  // Fill this instance's admission slots while a real account lock prevents progress.
+  const limitedUser = await actor(),
+    limitedAgent = await agent()
+  let admissionHeld!: () => void
+  let admissionRelease!: () => void
+  const admissionReady = new Promise<void>((resolve) => {
+    admissionHeld = resolve
+  })
+  const admissionGate = new Promise<void>((resolve) => {
+    admissionRelease = resolve
+  })
+  const admissionLock = admin.begin(async (tx) => {
+    await tx`SELECT id FROM farm.session_accounts WHERE id=${limitedUser} FOR UPDATE`
+    admissionHeld()
+    await admissionGate
+  })
+  let admitted: Promise<unknown>[] = []
+  try {
+    await Promise.race([
+      admissionReady,
+      admissionLock.then(() => {
+        throw new Error('Admission lock exited early')
+      }),
+    ])
+    admitted = Array.from({ length: 32 }, (_, index) =>
+      service.register(request(limitedUser, limitedAgent, `slot-${index}`)),
+    )
+    await waitForBlocked('session_accounts')
+    assert.deepEqual(
+      await service.register(
+        request(limitedUser, limitedAgent, 'slot-overflow'),
+      ),
+      { ok: false, reason: 'storage-unavailable' },
+    )
+    assert.equal(await count('slot-overflow'), 0)
+  } finally {
+    admissionRelease()
+    await admissionLock
+    await Promise.allSettled(admitted)
+  }
   return [
     'account, session and membership changes while waiting',
     'lock-wait session expiry',
     'both enrollment revocation orders',
     'assignment shared-read versus revocation',
+    '32 in-flight requests and rejected 33rd',
   ]
 }

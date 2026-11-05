@@ -498,3 +498,33 @@ test('one early complete status waits for browser proof verification; overflow a
     }
   }
 })
+
+test('verification and consumer reentry preserve queued status order', async () => {
+  const f = await fixture()
+  const received: number[] = []
+  const frame = (seq: number) =>
+    JSON.stringify({ t: 'snapshot', seq, printers: [] })
+  const session = f.make({
+    role: 'browser',
+    signProof: f.browserProof,
+    genuineStatus: {
+      assignmentRefs: [],
+      onStatus: (message) => {
+        received.push(message.seq)
+        if (message.seq === 1) session.receiveApplication(frame(2))
+      },
+    },
+    onVerified: () => {
+      session.receiveApplication(frame(1))
+    },
+  })
+  try {
+    await session.start()
+    session.receiveApplication(frame(0))
+    await session.inspectProof(f.decode(f.connectorProof()))
+    assert.deepEqual(received, [0, 1, 2])
+    assert.equal(session.snapshot().state, 'verified')
+  } finally {
+    session.close()
+  }
+})

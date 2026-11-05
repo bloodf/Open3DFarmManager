@@ -156,7 +156,9 @@ export class ReadonlyRtcSession {
   #lastSentSeq = -1
   #sentStatus = 0
   #sendingStatus = false
-  #pendingStatus: string | undefined
+  #pendingStatus: string[] = []
+  #receivingStatus = false
+  #notifyingVerified = false
   #accepted = 0
   #acceptedSamples: string[] = []
   #leaseDeadline: number
@@ -259,12 +261,15 @@ export class ReadonlyRtcSession {
     )
       return
     this.#state = 'verified'
-    this.#options.onVerified()
+    this.#notifyingVerified = true
+    try {
+      this.#options.onVerified()
+    } finally {
+      this.#notifyingVerified = false
+    }
     if (this.current()) {
       this.schedule()
-      const pending = this.#pendingStatus
-      this.#pendingStatus = undefined
-      if (pending !== undefined) this.receiveApplication(pending)
+      this.drainApplication()
     }
   }
   receiveApplication(raw: unknown) {
@@ -275,13 +280,42 @@ export class ReadonlyRtcSession {
         if (
           this.#genuine &&
           this.#options.role === 'browser' &&
-          this.#pendingStatus === undefined
+          this.#pendingStatus.length === 0
         ) {
-          this.#pendingStatus = wire
+          this.#pendingStatus.push(wire)
           return
         }
         throw Error('readonly-only')
       }
+      // At most two 2 KiB frames, including the active callback's frame.
+      if (this.#pendingStatus.length + Number(this.#receivingStatus) >= 2)
+        throw Error('Application queue limit')
+      this.#pendingStatus.push(wire)
+      this.drainApplication()
+    } catch {
+      this.close('application-frame')
+    }
+  }
+  private drainApplication() {
+    if (
+      this.#receivingStatus ||
+      this.#notifyingVerified ||
+      this.#state !== 'verified'
+    )
+      return
+    this.#receivingStatus = true
+    try {
+      while (this.current()) {
+        const wire = this.#pendingStatus.shift()
+        if (wire === undefined) break
+        this.consumeApplication(wire)
+      }
+    } finally {
+      this.#receivingStatus = false
+    }
+  }
+  private consumeApplication(wire: string) {
+    try {
       if (this.#genuine) {
         if (this.#options.role !== 'browser') throw Error('Status direction')
         const message = validatedStatusMessage(
@@ -362,7 +396,7 @@ export class ReadonlyRtcSession {
   close(reason = 'closed') {
     if (this.#state === 'readonly') return
     this.#state = 'readonly'
-    this.#pendingStatus = undefined
+    this.#pendingStatus = []
     this.#reason = reason.slice(0, 64)
     clearTimeout(this.#timer)
     this.#options.onReadonly()

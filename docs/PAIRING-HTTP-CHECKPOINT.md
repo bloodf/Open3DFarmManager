@@ -30,3 +30,5 @@ The `8352a1e` application build's server entry SHA-256 was `6d122793380f4fd694d4
 The local task-owned PostgreSQL cluster and HTTPS test resources were removed after the hold snapshot. The pre-existing PostgreSQL instance remained available and its first six official migration journal entries validated on a read-only connection. The original pre-task journal was not snapshotted, so this is not a byte-for-byte baseline comparison. A future integrated gate must rerun the complete HTTPS matrix on its exact current build and catalog. The current 60-second proof policy remains unchanged.
 
 A future policy proposal could retain the verified identity during a bounded human approval and require a separate fresh claim-specific proof before issuance. That would require coordinated protocol and storage work and is not implemented.
+
+The bounded stage and response-capture diagnostics currently apply to the optional remaining-phase test only; the default full matrix does not yet use them. A stalled or failed capture must fail the diagnostic run.

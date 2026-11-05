@@ -96,6 +96,7 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
   ]
   const seen: string[] = []
   const reads: Promise<void>[] = []
+  let captureFailed = false
   const begin = async () => {
     const startedResponse = await machine('start', {
       public_key_spki: identity.publicKeySpki,
@@ -139,7 +140,9 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
           .then((headers) => {
             seen.push(JSON.stringify(headers))
           })
-          .catch(() => {}),
+          .catch(() => {
+            captureFailed = true
+          }),
       )
     })
     page.on('response', (response) => {
@@ -153,7 +156,9 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
             .then((headers) => {
               seen.push(JSON.stringify(headers))
             })
-            .catch(() => {}),
+            .catch(() => {
+              captureFailed = true
+            }),
         )
         reads.push(
           response
@@ -161,7 +166,9 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
             .then((body) => {
               seen.push(body)
             })
-            .catch(() => {}),
+            .catch(() => {
+              captureFailed = true
+            }),
         )
       }
     })
@@ -247,7 +254,27 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
     ).toBeGreaterThanOrEqual(400)
   } finally {
     await admin.end({ timeout: 3 })
-    await owner.context.close()
+    stage('owner-capture-drain')
+    try {
+      seen.push(
+        await owner.page.evaluate(
+          () =>
+            document.documentElement.outerHTML +
+            JSON.stringify(localStorage) +
+            JSON.stringify(sessionStorage),
+        ),
+      )
+      await waitForBrowserCapture(reads, 5000)
+      if (captureFailed) throw new Error('Browser response capture failed')
+      reads.length = 0
+    } finally {
+      stage('owner-context-close')
+      await waitForBrowserCapture(
+        [owner.context.close()],
+        5000,
+        'Browser context closure timed out',
+      )
+    }
   }
   stage('revoked-session-validated')
   const fresh = await login()
@@ -321,12 +348,18 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
     )
     stage('browser-state-captured')
     await waitForBrowserCapture(reads, 5000)
+    if (captureFailed) throw new Error('Browser response capture failed')
     stage('browser-response-capture-complete')
     const visible = seen.join('\n')
     for (const secret of secrets) expect(visible.includes(secret)).toBe(false)
     expect(/\"device_token\"\s*:/.test(visible)).toBe(false)
     stage('secret-exclusion-validated')
   } finally {
-    await fresh.context.close()
+    stage('fresh-context-close')
+    await waitForBrowserCapture(
+      [fresh.context.close()],
+      5000,
+      'Browser context closure timed out',
+    )
   }
 })

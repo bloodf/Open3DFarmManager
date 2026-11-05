@@ -79,9 +79,12 @@ is sent.
 **Local mapping agreement.** The relay refuses a peer whose local mapping
 disagrees with the control binding on farm, agent or assignment.
 
-**A new peer is validated before it replaces an old one.** The binding and both
-control proofs are parsed and matched to the binding before any peer of the
-same transport id is closed. An unverified peer never evicts a live peer.
+**An existing transport cannot be replaced.** Opening the same transport id
+is refused without closing its current peer or changing its admission nonce.
+The caller supplies the binding and proofs after mutual transport authentication.
+The relay parses the proof envelopes and matches their scope when opening;
+its capability verifier checks the signatures during admission. Parsing alone
+is not authentication.
 
 **Admission is single use and incremental.** The two admission phases arrive as
 two frames. The relay buffers either half and consumes the verifier token only
@@ -202,7 +205,7 @@ verified against the source and the disposition is recorded here.
 | D9      | fixed. The admission failure reason is reported in `diagnostics().lastReason`.                                                                                            |
 | D10     | fixed. A throwing observer never breaks the settlement of the command.                                                                                                    |
 | D11     | fixed. `settled` has an exact meaning on both sides and never resolves while work can still arrive.                                                                       |
-| D12     | fixed. A new peer is validated before it replaces an old one.                                                                                                             |
+| D12     | fixed. A duplicate transport is refused without replacing its live peer.                                                                                                  |
 | D13     | fixed. The declared base source is the reviewed parent.                                                                                                                   |
 
 The review also warned against copying its own claim that a timer can never
@@ -254,3 +257,17 @@ and the bounded state.
 - No real RTC session, no real Moonraker and no simulator run proves this
   composition. The in memory transport test proves the frame sequence, not the
   network path.
+
+## Follow-up lifecycle checks
+
+The client refuses a second proofs-ready context and permanently ends failed
+admission attempts. Expiration also stops an issuer that ignores abort from
+publishing late admission frames. Every rejected pause operation becomes
+terminal while actual pending issuer work remains retained until it settles.
+The relay validates bounded admission encodings before retaining either half,
+refuses duplicate live transport IDs, and handles invalid or throwing wall
+clocks without sending an admission nonce. The legacy `unsentResults` counter
+counts unconfirmed transport handoffs, not evidence that a frame was unsent.
+
+These changes have focused local regression coverage. Full repository checks
+and actual RTC, Moonraker and simulator composition remain separate gates.

@@ -76,7 +76,7 @@ export type PauseRelayDiagnostics = Readonly<{
   notSent: number
   applied: number
   outcomeUnknown: number
-  /** Result frames the transport refused or faulted. The peer never learns. */
+  /** Unconfirmed result handoffs. This does not prove the frame was unsent. */
   unsentResults: number
   /** Peers sealed by their own deadline, without any traffic. */
   expired: number
@@ -89,10 +89,11 @@ export type PauseCommandRelay = Readonly<{
   /**
    * Opens a control peer and starts the admission. Returns `false` when the
    * relay is closed, the peer map is full, the binding or its control proofs do
-   * not verify, the assignment is not mapped locally, the local mapping
+   * do not parse or match, the assignment is not mapped locally, the local mapping
    * disagrees with the control binding, or the transport refuses the admission
-   * nonce. A refused peer is closed, never left half open. A validated peer
-   * replaces an older peer of the same transport id only after it is validated.
+   * nonce. An existing transport id is refused without replacing its peer.
+   * Call only after the control transport has authenticated both peers.
+   * The capability verifier checks cryptographic proofs during admission.
    */
   openPeer(input: PauseRelayPeerInput): boolean
   /**
@@ -577,8 +578,8 @@ export function createPauseCommandRelay(
     }
     Object.freeze(binding.browser_public_key)
     Object.freeze(binding)
-    // The new peer is validated before it replaces an older one of the same
-    // transport id. An unverified peer never evicts a live peer.
+    if (peers.has(binding.transport_id)) return false
+    // Check envelope scope here; the verifier checks signatures at admission.
     let browserProof: ReturnType<typeof decodeControlProof>
     let connectorProof: ReturnType<typeof decodeControlProof>
     try {
@@ -609,8 +610,17 @@ export function createPauseCommandRelay(
     if (peers.size >= PAUSE_RELAY_MAX_PEERS) return false
     if (input.signal?.aborted) return false
     const startMono = sample()
-    const startWall = wallNow()
-    if (startMono === undefined || !Number.isSafeInteger(startWall))
+    let startWall: number
+    try {
+      startWall = wallNow()
+    } catch {
+      return false
+    }
+    if (
+      startMono === undefined ||
+      !Number.isSafeInteger(startWall) ||
+      startWall < 0
+    )
       return false
     const sendPhase = input.sendPhase ?? inert
     const sendResult = input.sendResult ?? inert
@@ -633,6 +643,11 @@ export function createPauseCommandRelay(
       }
     })()
     if (!opened || !publisher) return false
+    // Injected callbacks may reenter or close the relay before publication.
+    if (closed || peers.has(binding.transport_id) || input.signal?.aborted) {
+      publisher.close()
+      return false
+    }
     let resolveGate!: (value: PauseRelayAdmit) => void
     const gate = new Promise<PauseRelayAdmit>((resolve) => {
       resolveGate = resolve
@@ -672,8 +687,6 @@ export function createPauseCommandRelay(
       signal.addEventListener('abort', abort, { once: true })
       peer.removeAbort = () => signal.removeEventListener('abort', abort)
     }
-    // A replaced peer keeps no admission, no capability and no pending command.
-    closePeer(peer.transportId)
     peers.set(peer.transportId, peer)
     armExpiry(peer, peer.admissionDeadlineMono)
     if (peer.sealed) return false
@@ -686,7 +699,7 @@ export function createPauseCommandRelay(
       }),
     )
     if (sent !== 'sent') {
-      // The nonce never reached the peer. The peer is closed, never half open.
+      // Delivery is unconfirmed. Close the peer and revoke its admission.
       closePeer(peer.transportId)
       return false
     }

@@ -62,7 +62,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000) {
  */
 async function relayFixture(
   t: test.TestContext,
-  options: { hold?: boolean } = {},
+  options: { hold?: boolean; wallNow?: () => number } = {},
 ) {
   const cleanup: Array<() => unknown | Promise<unknown>> = []
   t.after(async () => {
@@ -181,7 +181,7 @@ async function relayFixture(
         { issuer: 'farm:issuer', kid: 'issuer-1', publicKey: issuer.publicKey },
       ],
     },
-    clock: { wallNow: Date.now, monotonicNow },
+    clock: { wallNow: options.wallNow ?? Date.now, monotonicNow },
     journal,
     driver,
     bindingFor: (assignmentId) => mappings.get(assignmentId),
@@ -1084,5 +1084,37 @@ for (const field of ['capabilityWire', 'admissionProofWire'] as const) {
     assert.equal(f.relay.diagnostics().admitted, 0)
     f.relay.close()
     await f.relay.settled
+  })
+}
+
+test('opening the same transport cannot replace its live admission', async (t) => {
+  const f = await relayFixture(t)
+  assert.equal(f.open(), true)
+  assert.equal(f.open(), false)
+  assert.equal(f.phases.length, 1)
+  const nonce = f.phases[0] as { admission_nonce: string }
+  const issued = await f.issueCapability(nonce.admission_nonce)
+  assert.deepEqual(
+    await f.relay.admitPeer({
+      transportId: f.transportId,
+      capabilityWire: issued.capabilityWire,
+      admissionProofWire: issued.admissionProofWire,
+    }),
+    { ok: true },
+  )
+  assert.equal(f.relay.diagnostics().peers, 1)
+})
+
+for (const wallNow of [
+  () => -1,
+  () => {
+    throw new Error('Clock unavailable')
+  },
+]) {
+  test('an invalid wall clock refuses admission without throwing or sending', async (t) => {
+    const f = await relayFixture(t, { wallNow })
+    assert.equal(f.open(), false)
+    assert.equal(f.phases.length, 0)
+    assert.equal(f.relay.diagnostics().peers, 0)
   })
 }

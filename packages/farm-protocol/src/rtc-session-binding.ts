@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
+import { parseBoundedJson } from './json.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
 import {
   BrowserDevicePublicKey,
@@ -61,6 +62,45 @@ export const ConnectorRtcProof = z.strictObject({
   signature,
 })
 export type ConnectorRtcProof = z.infer<typeof ConnectorRtcProof>
+/** Independent of the 2 KiB RTC application-frame limit. A 32 KiB pending-byte
+ * budget can hold at most four maximum-sized proof envelopes.
+ * Canonical JSON has a conservative schema-wide bound below 4 KiB: origin alone
+ * permits 256 UTF-16 units (at most 1536 JSON-escaped bytes); every other variable
+ * string is bounded ASCII. The schema-bound regression test accounts for all fields. */
+export const MAX_RTC_PROOF_WIRE_BYTES = 8192
+const RtcProof = z.discriminatedUnion('role', [
+  BrowserRtcProof,
+  ConnectorRtcProof,
+])
+export type RtcProof = z.infer<typeof RtcProof>
+export function encodeRtcProof(input: unknown): string {
+  const wire = canonicalize(RtcProof.parse(input))
+  if (new TextEncoder().encode(wire).byteLength > MAX_RTC_PROOF_WIRE_BYTES)
+    throw new Error('RTC proof byte limit exceeded')
+  return wire
+}
+/** Parse before any signature verification or expensive key import.
+ * The v1 proof wire representation is canonical JSON; whitespace/alternate escapes
+ * are rejected rather than creating unbounded equivalent wire encodings. */
+export function decodeRtcProof(wire: unknown): RtcProof {
+  if (
+    typeof wire !== 'string' ||
+    wire.length > MAX_RTC_PROOF_WIRE_BYTES ||
+    new TextEncoder().encode(wire).byteLength > MAX_RTC_PROOF_WIRE_BYTES
+  )
+    throw new Error('RTC proof byte limit exceeded')
+  const proof = RtcProof.parse(
+    parseBoundedJson(wire, {
+      maxBytes: MAX_RTC_PROOF_WIRE_BYTES,
+      maxDepth: 4,
+      maxValues: 100,
+      maxStringChars: 256,
+    }),
+  )
+  if (canonicalize(proof) !== wire)
+    throw new Error('Canonical RTC proof encoding required')
+  return proof
+}
 /** Exact UTF8 bytes, including SDP line endings. No normalization. */
 export async function rtcSdpHash(sdp: string): Promise<string> {
   rtcDtlsFingerprint(sdp)

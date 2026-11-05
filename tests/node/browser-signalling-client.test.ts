@@ -7,7 +7,7 @@ import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src
 import { verifyBrowserTransportProof } from '../../packages/farm-protocol/src/browser-transport-proof.ts'
 import type { SocketPort } from '../../packages/connector/src/webrtc/signalling-client-channel.ts'
 
-async function fixture() {
+async function fixture(mutate = false) {
   const key = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
@@ -65,10 +65,12 @@ async function fixture() {
   }
   let binding: Promise<unknown> | undefined
   let peerClosed = 0
+  let verified: (() => void) | undefined
   const answer = `v=0\r\na=fingerprint:sha-256 ${Array(32).fill('BB').join(':')}\r\n`
   const client = new AuthenticatedBrowserSignallingClient(scope, {
     peerFactory: (options) => {
       binding = options.admittedBinding
+      verified = options.onVerified
       return {
         answer: async () => answer,
         close: () => {
@@ -77,7 +79,19 @@ async function fixture() {
       }
     },
   })
-  client.connect(() => socket)
+  if (mutate) {
+    scope.farmId = randomUUID()
+    scope.agentId = randomUUID()
+    scope.accountId = 'other_account'
+    scope.keyId = randomUUID()
+  }
+  const pending = client.start(() => socket)
+  assert.equal(
+    client.start(() => {
+      throw Error('second socket')
+    }),
+    pending,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
   handlers?.open()
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -91,6 +105,8 @@ async function fixture() {
     peerClosed: () => peerClosed,
     binding: () => binding,
     answer,
+    pending,
+    verify: () => verified?.(),
   }
 }
 async function waitFor(check: () => boolean) {
@@ -207,8 +223,59 @@ test('ordered ready and offer deliver only the scoped admitted binding', async (
     f.push({ v: 1, t: 'rtc.binding', binding })
     await waitFor(() => f.binding() !== undefined)
     assert.deepEqual(await f.binding(), binding)
+    let settled = false
+    void f.pending.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    assert.equal(settled, false)
+    f.verify()
+    await f.pending
+    assert.equal(settled, true)
   } finally {
     f.client.close()
   }
   assert.equal(f.peerClosed(), 1)
+})
+
+test('caller mutation cannot alter begin or trusted challenge context', async () => {
+  const f = await fixture(true)
+  try {
+    const begin = JSON.parse(f.sent[0]!)
+    assert.equal(begin.farm_id, f.challenge.farm_id)
+    assert.equal(begin.agent_id, f.challenge.agent_id)
+    assert.equal(begin.key_id, f.challenge.key_id)
+    f.push({ v: 1, t: 'browser.challenge', challenge: f.challenge })
+    await waitFor(() => f.sent.length === 2)
+    assert.equal(f.client.snapshot().state, 'pending')
+  } finally {
+    f.client.close()
+  }
+  await assert.rejects(f.pending)
+})
+
+test('closed client ignores late frames and does not affect another account', async () => {
+  const a = await fixture(),
+    b = await fixture()
+  try {
+    a.client.close()
+    a.push({ v: 1, t: 'browser.challenge', challenge: a.challenge })
+    b.push({
+      v: 1,
+      t: 'browser.challenge',
+      challenge: {
+        ...b.challenge,
+        account_id: a.challenge.account_id,
+        farm_id: a.challenge.farm_id,
+      },
+    })
+    await waitFor(() => b.client.snapshot().state === 'readonly')
+    assert.equal(a.sent.length, 1)
+    assert.equal(b.sent.length, 1)
+    await assert.rejects(a.pending)
+    await assert.rejects(b.pending)
+  } finally {
+    a.client.close()
+    b.client.close()
+  }
 })

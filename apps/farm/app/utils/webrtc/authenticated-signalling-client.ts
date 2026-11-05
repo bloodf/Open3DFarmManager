@@ -91,10 +91,26 @@ export class AuthenticatedBrowserSignallingClient {
     this.#resolveBinding = resolve
   })
   #peerFactory: (options: PeerOptions) => Peer
+  #started = false
+  #resolveStart: () => void = () => {}
+  #rejectStart: (error: Error) => void = () => {}
+  #startPromise = new Promise<void>((resolve, reject) => {
+    this.#resolveStart = resolve
+    this.#rejectStart = reject
+  })
   constructor(
     scope: Scope,
     options: { peerFactory?: (options: PeerOptions) => Peer } = {},
   ) {
+    if (
+      scope.privateKey.type !== 'private' ||
+      scope.privateKey.extractable ||
+      scope.privateKey.algorithm.name !== 'ECDSA' ||
+      !('namedCurve' in scope.privateKey.algorithm) ||
+      scope.privateKey.algorithm.namedCurve !== 'P-256'
+    )
+      throw Error('Nonextractable P-256 browser key required')
+    void this.#startPromise.catch(() => {})
     BrowserDeviceUuid.parse(scope.farmId)
     BrowserDeviceUuid.parse(scope.agentId)
     BrowserDeviceUuid.parse(scope.keyId)
@@ -111,20 +127,27 @@ export class AuthenticatedBrowserSignallingClient {
         this.#channel.send({
           v: 1,
           t: 'browser.begin',
-          farm_id: scope.farmId,
-          agent_id: scope.agentId,
-          key_id: scope.keyId,
+          farm_id: this.#scope.farmId,
+          agent_id: this.#scope.agentId,
+          key_id: this.#scope.keyId,
         })
       },
       onFrame: (frame) => this.frame(frame),
-      onTerminal: (reason) => this.#peer?.close(reason),
+      onTerminal: (reason) => {
+        this.#rejectStart(Error(reason))
+        this.#peer?.close(reason)
+      },
     })
   }
-  connect(
+  start(
     factory: () => SocketPort | Promise<SocketPort> = () =>
       browserSocket('/api/signalling/browser'),
   ) {
-    this.#channel.connect(factory)
+    if (!this.#started) {
+      this.#started = true
+      this.#channel.connect(factory)
+    }
+    return this.#startPromise
   }
   private async frame(frame: SignallingServerFrame) {
     if (!this.#channel.current()) return
@@ -168,7 +191,14 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
-        onVerified: () => this.#channel.completeAdmission(),
+        onVerified: () => {
+          if (this.#phase !== 'active' || !this.#channel.current()) {
+            this.#channel.close('unexpected-verification')
+            return
+          }
+          this.#channel.completeAdmission()
+          if (this.#channel.current()) this.#resolveStart()
+        },
         onTerminal: (reason) => this.#channel.close(reason),
       })
       this.#phase = 'offer'

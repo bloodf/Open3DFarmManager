@@ -614,12 +614,32 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   const expiredClaim = await machine('claim', {
     device_code: expiry.started.device_code,
   })
-  expect(expiredClaim.ok).toBe(false)
+  expect(expiredClaim.ok).toBe(true)
+  const expiredClaimBody = await expiredClaim.text()
+  expect(PairingPollResponse.parse(JSON.parse(expiredClaimBody)).status).toBe(
+    'pending',
+  )
   expect(
-    /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(
-      await expiredClaim.text(),
-    ),
+    /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(expiredClaimBody),
   ).toBe(false)
+  const expiredSql = postgres({
+    host: '127.0.0.1',
+    port: Number(databasePort),
+    database: 'fixture',
+    username: 'fixture',
+    max: 1,
+    connect_timeout: 3,
+  })
+  try {
+    const rows =
+      await expiredSql`SELECT count(*)::int AS n FROM farm.connector_credentials WHERE agent_id=${expiry.challenge.agent_id}::uuid`
+    expect(rows[0]?.n).toBe(0)
+    const marker =
+      await expiredSql`SELECT proof_expired_at IS NOT NULL AS expired FROM farm.pairing_requests WHERE agent_id=${expiry.challenge.agent_id}::uuid`
+    expect(marker[0]?.expired).toBe(true)
+  } finally {
+    await expiredSql.end({ timeout: 3 })
+  }
 
   const revokedSessionCase = await begin()
   const revokeSessions = postgres({

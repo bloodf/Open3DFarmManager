@@ -58,3 +58,48 @@ browser rendering and packaged runtime acceptance remain pending. No hardware
 command or production service was started. `check:all` passed with 326 Bun tests,
 382 Node tests and two runtime skips, lint, TypeScript and both builds. This final
 results paragraph was added afterward and formatting/diff checks were repeated.
+
+## Authenticated runtime acceptance
+
+At `214b8f1cdf243d4b2d35fbf7307c55056e8cbfc9`, separate disconnect and
+revocation runs passed in 10.948 and 13.973 seconds. They used the generated
+HTTPS server, official PostgreSQL journal through 0019, real own-login,
+browser-key approval, Connector pairing credential and assignment registration.
+The child retained its Ed25519 identity on private local storage and invoked
+`runConnectorAgent` with the issued credential and real assignment. No binding
+or proof was fabricated by the fixture.
+
+An original finite loopback Moonraker protocol fixture answered the maintained
+subscribe and periodic query methods with their exact request IDs. The browser
+received `printing` with progress 0.25 and then 0.75 after a real subscription
+delta. Its actual DTLS certificate and both peer proofs passed before status.
+The remote socket-drop and owner-revocation cases then closed the browser and
+prevented subsequent status delivery. Local collection remained active until
+fixture shutdown. The native child exited with code zero without forced kill.
+
+Two earlier runs are retained as failures. They started the browser after the
+first local queue record, which does not imply a ready authenticated inbox.
+The server correctly rejects a browser context without a ready Connector.
+The corrected fixture waits for the actual `connector.inbox-ready` frame via a
+bounded runtime diagnostic. This event establishes availability only; it does
+not trigger RTC admission, authority or status publication. The regression
+checks that readiness is absent before the acknowledgement and that no peer or
+RTC admission exists when it arrives. No deadline was extended.
+
+The sealed artifact has 457 files and output digest
+`0e0636e041a3655f82a152e82a23f125324dbfda15685bc7bd694453b603c9b3`.
+Private receipts retain both failures, source/artifact pins and independent
+cleanup audits. All recorded children, app/TLS/Moonraker ports, temporary login
+roles and private runtime/TLS directories were absent afterward. The original
+database identity, journal and eleven table counts remained equal to baseline.
+The owned integration database and bridge remain intentionally retained.
+
+This is runtime-function acceptance with a protocol fixture, not a packaged CLI
+or genuine pinned Moonraker/Klipper acceptance. The fixture calls native cleanup
+after joining runtime shutdown; that does not establish packaged CLI native
+shutdown. Browser TLS uses the existing local ignore-certificate-errors model,
+while the Connector verifies the private CA. Production browser deployment,
+rendered farm-page integration, live simulator behavior, camera and pause remain
+separate gates. The complete check after the fixture/readiness changes passed:
+326 Bun tests, 383 Node tests with two runtime skips, lint, TypeScript and both
+builds. Only final checkpoint prose changed afterward.

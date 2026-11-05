@@ -18,7 +18,7 @@ The existing `StatusMessage` remains a complete snapshot with a strictly increas
 
 ## Integration still required
 
-The browser composable now creates the scoped existing-key resolver and authenticated feed after mount, with exact current account/farm/view-epoch/key checks. The shared wire schema is unchanged. Connector CLI/runtime composition and the complete current-0015 assignment provider remain pending. Actual built-page WebSocket/PostgreSQL/RTC integration and current-head comprehensive checks remain separate gates. The browser wiring passed generated-app TypeScript, 25 farm-view tests with 181 assertions and six resolver tests; these are source checks, not runtime acceptance.
+The browser composable now creates the scoped existing-key resolver and authenticated feed after mount, with exact current account/farm/view-epoch/key checks. The shared wire schema is unchanged. Connector runtime composition now reuses raw Moonraker observations and requires the server's v2 assignment digest. Its real HTTPS/PostgreSQL/RTC protocol-fixture acceptance is recorded in [the runtime checkpoint](CONNECTOR-RTC-RUNTIME-CHECKPOINT.md). Packaged CLI execution, genuine Moonraker/Klipper and rendered farm-page acceptance remain separate gates. The browser wiring passed generated-app TypeScript, 25 farm-view tests with 181 assertions and six resolver tests; those are source checks, not rendered-page runtime acceptance.
 
 ## Independent review corrections
 

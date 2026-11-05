@@ -72,6 +72,138 @@ esac
   }
 })
 
+const vocabulary = [
+  'communication-error',
+  'identify-response-error',
+  'identify-timeout',
+  'mcu-connect',
+  'mcu-identify',
+  'mcu-no-communication',
+  'serial-port-error',
+  'shutdown',
+  'supervisor-process-exited',
+  'supervisor-process-running',
+  'timer-too-close',
+  'traceback',
+]
+
+function collectWithLogs(logs: {
+  klippy?: string
+  moonraker?: string
+  supervisord?: string
+  stdout?: string
+}) {
+  const dir = mkdtempSync(join(tmpdir(), 'open3d-diag-test-'))
+  try {
+    for (const name of ['klippy', 'moonraker', 'supervisord', 'stdout'])
+      writeFileSync(join(dir, `${name}.log`), logs[name] ?? '')
+    writeFileSync(
+      join(dir, 'docker'),
+      `#!/bin/sh
+case "$*" in
+  *"ps -aq sv06"*) echo aaaaaaaaaaaa ;;
+  *"ps -aq u1"*) echo bbbbbbbbbbbb ;;
+  "inspect --format"*) echo 'running 0 false' ;;
+  *"supervisorctl status"*) printf 'klipper RUNNING\\nmoonraker RUNNING\\nsimulavr RUNNING\\nwebcamd RUNNING\\n' ;;
+  *klippy.log*) cat '${dir}/klippy.log' ;;
+  *moonraker.log*) cat '${dir}/moonraker.log' ;;
+  *supervisord.log*) cat '${dir}/supervisord.log' ;;
+  "logs"*) cat '${dir}/stdout.log' >&2 ;;
+esac
+`,
+      { mode: 0o700 },
+    )
+    const run = spawnSync(process.execPath, [script, 'synthetic-project'], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+    assert.equal(run.status, 0)
+    const rows = run.stdout
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    return { output: run.stdout + run.stderr, rows }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+test('classifies runtime exceptions and allowlisted Supervisor lifecycle events', () => {
+  const { output, rows } = collectWithLogs({
+    klippy: [
+      "mcu 'mcu': No communication with MCU",
+      "error: mcu 'mcu': Unable to obtain 'identify_response' response",
+      "mcu 'mcu': Unable to open serial port: [Errno 2] No such file or directory: '/dev/ttyACM0'",
+    ].join('\n'),
+    supervisord: [
+      '2026-11-05 10:00:00,000 INFO success: klipper entered RUNNING state, process has stayed up for > than 5 seconds (startsecs)',
+      '2026-11-05 10:00:01,000 INFO exited: simulavr (exit status 1; not expected)',
+    ].join('\n'),
+    stdout: "error: Unable to obtain 'identify_response' response\n",
+  })
+  assert.equal(rows.length, 2)
+  const row = rows[0]
+  assert.equal(row.logs.klippy.counts['mcu-no-communication'], 1)
+  assert.equal(row.logs.klippy.counts['identify-response-error'], 1)
+  assert.equal(row.logs.klippy.counts['serial-port-error'], 1)
+  assert.equal(row.logs.klippy.counts['traceback'], 0)
+  assert.equal(row.logs.klippy.counts['communication-error'], 0)
+  assert.equal(row.logs.supervisord.counts['supervisor-process-running'], 1)
+  assert.equal(row.logs.supervisord.counts['supervisor-process-exited'], 1)
+  assert.equal(row.logs.supervisord.counts['mcu-no-communication'], 0)
+  assert.equal(row.logs.moonraker.counts['identify-response-error'], 0)
+  assert.equal(row.stdout.counts['identify-response-error'], 1)
+  assert.deepEqual(Object.keys(row.logs.klippy.counts).sort(), vocabulary)
+  assert.doesNotMatch(
+    output,
+    /No communication with MCU|identify_response|Unable to open serial port|entered RUNNING state|exit status|ttyACM0/,
+  )
+})
+
+test('excludes configuration and macro text while keeping genuine exception lines', () => {
+  const { output, rows } = collectWithLogs({
+    klippy: [
+      '[config] No communication with MCU',
+      '#macro No communication with MCU',
+      '  No communication with MCU',
+      'No communication with MCU SECRET_MARKER',
+      'Traceback (most recent call last):',
+      '  File "/home/printer/klipper/klippy/serialhdl.py", line 512, in get_response',
+      "error: mcu 'mcu': Unable to obtain 'identify_response' response",
+    ].join('\n'),
+    supervisord: [
+      '2026-11-05 10:00:00,000 INFO exited: notaprogram (exit status 1; not expected)',
+      '2026-11-05 10:00:01,000 INFO success: notaprogram entered RUNNING state, process has stayed up for > than 5 seconds (startsecs)',
+    ].join('\n'),
+  })
+  const counts = rows[0].logs.klippy.counts
+  assert.equal(counts['mcu-no-communication'], 1)
+  assert.equal(counts['identify-response-error'], 1)
+  assert.equal(counts['traceback'], 1)
+  assert.equal(rows[0].logs.supervisord.counts['supervisor-process-exited'], 0)
+  assert.equal(rows[0].logs.supervisord.counts['supervisor-process-running'], 0)
+  assert.doesNotMatch(output, /SECRET_MARKER|notaprogram/)
+})
+
+test('bounds captured events and numeric stats with the new classifications', () => {
+  const { rows } = collectWithLogs({
+    klippy: `${Array.from({ length: 25 }, () => 'No communication with MCU').join('\n')}
+${Array.from(
+  { length: 8 },
+  (_, index) => `Stats ${index}.0: bytes_read=42 bytes_invalid=3 freq=1000`,
+).join('\n')}
+`,
+  })
+  const summary = rows[0].logs.klippy
+  assert.equal(summary.counts['mcu-no-communication'], 25)
+  assert.equal(summary.events.length, 20)
+  assert.equal(summary.stats.length, 5)
+  assert.ok(summary.events.every((event) => event === 'mcu-no-communication'))
+  assert.equal(summary.stats[0].at, 3)
+  assert.equal(summary.stats[4].at, 7)
+})
+
 test('rejects invalid project names before invoking Docker', () => {
   const run = spawnSync(process.execPath, [script, 'bad!'], {
     encoding: 'utf8',

@@ -3,9 +3,11 @@
 The simulator job still requires SV06 to become connected and ready within the
 existing 90-second smoke deadline. A failure runs
 `scripts/klipper-diagnostics.mjs` before Compose cleanup. The local CI runner
-uses the same collector and retains its output in `simulator-failure.log` in the
-external task ledger. The collector cannot turn a failed smoke or startup into a
-pass; the local runner returns the original failing command's status.
+uses the same collector and writes its output to `simulator-failure.log` inside
+the fresh evidence ledger it creates under `TMPDIR`, then prints that ledger
+path. The ledger is temporary, so the file does not reach a persistent task
+ledger. The collector cannot turn a failed smoke or startup into a pass; the
+local runner returns the original failing command's status.
 
 For each synthetic service, it reports the container state, exit and OOM flags,
 known Supervisor process states, recent Klipper, Moonraker and Supervisor log
@@ -23,6 +25,75 @@ output may still be available. Missing files, unsupported cgroup layouts,
 Docker errors, timeouts or oversized output are reported as unavailable rather
 than silently presented as zero. Counters are aggregate observations and do not
 establish why an MCU missed a deadline.
+
+## What the classifications observe
+
+Every classification is a fixed label with a bounded count over the captured
+tail. A label says that a captured line contained a known literal. It does not
+name a cause.
+
+The runtime exception and warning labels match literals from the pinned
+Klipper revision `ee2c6fb`:
+
+| classification            | matched literal                                 | source                                                                              |
+| ------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `mcu-no-communication`    | `No communication with MCU`                     | `klippy/serialhdl.py`, `raw_send_wait_ack` raising when the MCU did not acknowledge |
+| `identify-response-error` | `Unable to obtain 'identify_response' response` | `klippy/serialhdl.py`, `SerialRetryCommand.get_response` after its retry budget     |
+| `serial-port-error`       | `Unable to open serial port`                    | `klippy/serialhdl.py`, `connect_uart` warning when the port could not be opened     |
+
+The Supervisor lifecycle labels match literals from Supervisor 4.2.5, and only
+for the four programs in the pinned Supervisor configuration (`klipper`,
+`moonraker`, `simulavr`, `webcamd`):
+
+| classification               | matched literal                                                                 | source                                           |
+| ---------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `supervisor-process-running` | `<program> entered RUNNING state`                                               | `supervisor/process.py`, `Subprocess.transition` |
+| `supervisor-process-exited`  | `exited: <program> (exit status N` or `exited: <program> (terminated by SIG...` | `supervisor/process.py`, `Subprocess.finish`     |
+
+The program names are part of the pattern, so a line about any other program
+stays unclassified. Counts carry no program name, PID, exit status, signal,
+path or exception payload.
+
+A label reports an observed exception and stops there.
+`mcu-no-communication` records that the log held that exception text. The same
+evidence fits an MCU that never answered, an answer that was rejected, a host
+or emulator too slow to use the deadline, and a PTY that was wrong or absent.
+`identify-response-error` records that the identify response did not arrive
+within its retry budget, and it says nothing about how many bytes reached the
+MCU. `serial-port-error` records a warning from `connect_uart`, so it says the
+port could not be opened and nothing about why.
+
+A Supervisor `RUNNING` state is a liveness signal. Supervisor reports it for a
+process that started and stayed up, including one that stopped serving its
+UART.
+
+The emulator start banner printed by Klipper's `scripts/avrsim.py`
+(`Starting AVR simulation: machine=...`) is not classified. The pinned
+Supervisor configuration sets no `stdout_logfile`, so Supervisor routes
+program stdout, and with `redirect_stderr=true` program stderr, into its own
+child log under `childlogdir`, which defaults to the temporary directory. The
+collector reads the Klipper, Moonraker and Supervisor log files plus container
+stdout, and it does not read that child log. Adding a read would change the
+Docker call set, so the banner stays out of the vocabulary instead of becoming
+a label that can never match.
+
+None of these labels changes the 90-second deadline, and none of them claims
+that a simulator became ready.
+
+## Missing in-session evidence
+
+The collector has no in-session MCU traffic evidence. Klipper's
+`serialhdl.SerialReader.stats()` returns an empty string once `serialqueue`
+is `None`, and each captured failure so far produced `stats: []`, so
+`bytes_read` and `bytes_invalid` are absent from these runs instead of
+measured as zero.
+
+An absent counter leaves two failures indistinguishable. Without
+`bytes_read` the collector cannot separate an MCU that never answered from an
+MCU whose answer arrived. Without `bytes_invalid` it cannot separate a
+rejected response from a missing one. The new labels narrow the window by
+naming the exception that was logged, and the root cause stays open until a
+run captures traffic counters or an in-process observer.
 
 In [CI run 42054032381](https://github.com/bloodf/Open3DFarmManager/actions/runs/42054032381/job/127338415048),
 SV06 failed the 90-second readiness probe with one CPU per simulator. A fresh

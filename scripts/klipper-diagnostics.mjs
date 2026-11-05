@@ -28,6 +28,16 @@ function docker(args, includeStderr = false, acceptNonzero = false) {
   if (result.error || (!acceptNonzero && result.status !== 0)) return null
   return result.stdout + (includeStderr ? result.stderr : '')
 }
+// Only the programs declared by the pinned Supervisor configuration are
+// classified, and the emitted counts never carry a program name.
+const supervisorPrograms = ['klipper', 'moonraker', 'simulavr', 'webcamd']
+const supervisorProgramPattern = supervisorPrograms.join('|')
+const supervisorStatusPattern = new RegExp(
+  `^(${supervisorProgramPattern})\\s+(RUNNING|STARTING|BACKOFF|STOPPING|EXITED|FATAL|UNKNOWN)\\b`,
+)
+// Every label below matches a literal emitted by the pinned Klipper revision
+// ee2c6fb or by Supervisor 4.2.5. A count reports that a captured line
+// contained the literal, not the cause behind it.
 const patterns = [
   [
     'identify-timeout',
@@ -45,6 +55,30 @@ const patterns = [
     /unable to connect|lost communication|communication timeout/i,
   ],
   ['traceback', /traceback \(most recent call last\)/i],
+  // serialhdl.SerialReader.raw_send_wait_ack raising on a missing MCU reply.
+  ['mcu-no-communication', /no communication with mcu\b/i],
+  // serialhdl.SerialRetryCommand.get_response after its retry budget.
+  [
+    'identify-response-error',
+    /unable to obtain ['"]identify_response['"] response\b/i,
+  ],
+  // serialhdl.connect_uart warning when the serial port cannot be opened.
+  ['serial-port-error', /unable to open serial port\b/i],
+  // Supervisor process lifecycle, restricted to the allowlisted programs.
+  [
+    'supervisor-process-exited',
+    new RegExp(
+      `\\bexited: (?:${supervisorProgramPattern}) \\((?:exit status [0-9]+|terminated by SIG[A-Z]+)`,
+      'i',
+    ),
+  ],
+  [
+    'supervisor-process-running',
+    new RegExp(
+      `\\b(?:${supervisorProgramPattern}) entered RUNNING state\\b`,
+      'i',
+    ),
+  ],
 ]
 const counterKeys = new Set([
   'bytes_write',
@@ -162,10 +196,7 @@ for (const service of ['sv06', 'u1']) {
   const processes = {}
   if (supervisor !== null) {
     for (const line of supervisor.split('\n')) {
-      const match =
-        /^(klipper|moonraker|simulavr|webcamd)\s+(RUNNING|STARTING|BACKOFF|STOPPING|EXITED|FATAL|UNKNOWN)\b/.exec(
-          line,
-        )
+      const match = supervisorStatusPattern.exec(line)
       if (match) processes[match[1]] = match[2]
     }
   }

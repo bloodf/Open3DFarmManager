@@ -3,12 +3,10 @@ import {
   signallingBuildEnabled,
 } from './signalling-build-policy.ts'
 import { installSignallingWebSocketBounds } from './signalling-websocket-boundary.ts'
-import { SignallingWebSocketResources } from './signalling-websocket-limits.ts'
 
 /** Boundary preparation only: no routes, DB authority, or socket admissions are
  * installed here. A later runtime owns those and must use these resource limits. */
 export function createSignallingBoundaryLifecycle() {
-  let resources: SignallingWebSocketResources | undefined
   let closed = false
   return {
     start(input: {
@@ -34,21 +32,10 @@ export function createSignallingBoundaryLifecycle() {
         installSignallingWebSocketBounds(input.h3App)
       }
       if (!enabled) return 'disabled'
-      if (!resources)
-        resources = new SignallingWebSocketResources({
-          now: () => performance.now(),
-          after(milliseconds, callback) {
-            const timer = setTimeout(callback, milliseconds)
-            timer.unref()
-            return () => clearTimeout(timer)
-          },
-        })
       return 'prepared'
     },
     close(): void {
       closed = true
-      resources?.dispose()
-      resources = undefined
     },
   }
 }

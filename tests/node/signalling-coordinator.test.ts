@@ -170,7 +170,21 @@ async function fixture() {
     },
   }
   const coordinator = new SignallingCoordinator(
-    { read: () => read() },
+    {
+      read: async () => {
+        const value = await read()
+        return value
+          ? {
+              authority: value,
+              budget: {
+                observedAt: clock.now,
+                validUntil: value.validUntil,
+                monotonicDeadline: value.validUntil,
+              },
+            }
+          : null
+      },
+    },
     credentials,
     clock,
     clock,
@@ -185,8 +199,9 @@ async function fixture() {
       open.handle,
       connectorEndpoint,
       'synthetic-gateway-token',
+      { expiresAt: clock.now + 30_000, monotonicDeadline: clock.now + 30_000 },
     )
-    assert.ok(attached)
+    assert.ok(attached && attached.kind === 'challenge')
     assert.equal(
       await coordinator.prove(
         open.handle,
@@ -415,7 +430,7 @@ test('a stalled reader cannot accumulate unbounded queued frames or deliver a la
     ),
     true,
   )
-  for (let i = 0; i < 4; i++)
+  for (let i = 0; i < 3; i++)
     assert.equal(f.coordinator.receive(f.open.handle, ' '.repeat(8192)), true)
   assert.equal(f.coordinator.receive(f.open.handle, ' '.repeat(8192)), false)
   assert.equal(f.browserEndpoint.closed, 1)

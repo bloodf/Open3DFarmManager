@@ -17,7 +17,13 @@ import {
   rtcDtlsFingerprint,
   type RtcPeerRole,
 } from '../../../../packages/farm-protocol/src/rtc-session-binding.ts'
+import { acceptSignallingProof } from './signalling-proof-acceptance.ts'
 import { decodeAuthenticatedSignallingFrame } from '../../../../packages/farm-protocol/src/authenticated-signalling.ts'
+import {
+  signallingClockSample,
+  signallingRemaining,
+  type SignallingReadBudget,
+} from './signalling-clock.ts'
 import type { PostgresConnectorCredentialAcceptance } from '../storage/postgres-connector-credential-acceptance.ts'
 const Scope = z.strictObject({
   sessionRecordId: BrowserDeviceTextId,
@@ -42,10 +48,19 @@ const Authority = z.strictObject({
   validUntil: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 })
 export type SignallingAuthority = z.infer<typeof Authority>
+const Snapshot = z.strictObject({
+  authority: Authority,
+  budget: z.strictObject({
+    observedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    validUntil: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    monotonicDeadline: z.number().finite().nonnegative(),
+  }),
+})
+export type SignallingAuthoritySnapshot = z.infer<typeof Snapshot>
 /** Trusted reader must independently validate the current login/session, membership,
  * approved browser key, enrollment and issued credential. It must never touch the session. */
 export interface SignallingAuthoritySource {
-  read(scope: SignallingScope): Promise<SignallingAuthority | null>
+  read(scope: SignallingScope): Promise<SignallingAuthoritySnapshot | null>
 }
 /** Implemented by each trusted endpoint adapter, not by a received network frame.
  * armDeadline must own a monotonic timer and irrevocably close its peer on expiry.
@@ -77,6 +92,9 @@ interface Peer {
 interface Context {
   scope: SignallingScope
   authority: SignallingAuthority
+  budget: SignallingReadBudget
+  deadlineMono: number
+  admissionMono: number
   pins: string
   id: string
   createdWall: number
@@ -85,6 +103,7 @@ interface Context {
   observedMono: number
   deadline: number
   closed: boolean
+  abort: AbortController
   admitted: boolean
   browser: Peer
   connector: Peer | null
@@ -93,7 +112,12 @@ interface Context {
   token: string | null
   offer: string | null
   answer: string | null
-  queue: { peer: Peer; wire: string; bytes: number }[]
+  queue: {
+    peer: Peer
+    wire: string
+    bytes: number
+    settled: ((ok: boolean) => void) | null
+  }[]
   queuedBytes: number
   pumping: boolean
   revalidationCancel: (() => void) | null
@@ -160,7 +184,7 @@ export class SignallingCoordinator {
       }
       this.pendingReads.add(abandon)
       cancelReadDeadline = this.timers.after(8000, abandon)
-      let value: SignallingAuthority | null
+      let value: SignallingAuthoritySnapshot | null
       try {
         value = await this.readAuthority(parsed.data)
       } finally {
@@ -168,7 +192,10 @@ export class SignallingCoordinator {
         this.pendingReads.delete(abandon)
       }
       if (expired) return null
-      const auth = Authority.safeParse(value)
+      const snapshot = Snapshot.safeParse(value)
+      const auth = snapshot.success
+        ? Authority.safeParse(snapshot.data.authority)
+        : Authority.safeParse(null)
       const wall = this.clock.wall(),
         mono = this.clock.monotonic()
       if (
@@ -179,7 +206,9 @@ export class SignallingCoordinator {
         mono < startedMono ||
         wall - startedWall >= 8000 ||
         mono - startedMono >= 8000 ||
-        auth.data.validUntil <= wall ||
+        !snapshot.success ||
+        snapshot.data.budget.validUntil !== auth.data.validUntil ||
+        snapshot.data.budget.monotonicDeadline <= mono ||
         !this.matches(parsed.data, auth.data)
       )
         return null
@@ -192,8 +221,21 @@ export class SignallingCoordinator {
         ).length >= 4
       )
         return null
+      if (!snapshot.success) return null
+      const timing = signallingRemaining({
+        anchor: { wall: startedWall, monotonic: startedMono },
+        now: { wall, monotonic: mono },
+        authorization: snapshot.data.budget,
+      })
+      const admissionMono = Math.min(
+        startedMono + 8000,
+        timing.monotonicDeadline,
+      )
       const id = randomUUID(),
-        deadline = Math.min(startedWall + 30000, auth.data.validUntil)
+        deadline = Math.min(
+          auth.data.validUntil,
+          snapshot.data.budget.observedAt + timing.remaining,
+        )
       const challenge = BrowserTransportProofChallenge.parse({
         v: 1,
         purpose: 'signalling-admission',
@@ -206,8 +248,11 @@ export class SignallingCoordinator {
         origin: auth.data.origin,
         audience: auth.data.audience,
         nonce: base64url(randomBytes(32)),
-        issued_at: wall,
-        expires_at: Math.min(startedWall + 8000, deadline),
+        issued_at: snapshot.data.budget.observedAt,
+        expires_at: Math.min(
+          snapshot.data.budget.observedAt + Math.floor(admissionMono - mono),
+          deadline,
+        ),
       })
       const peer: Peer = {
         role: 'browser',
@@ -222,6 +267,9 @@ export class SignallingCoordinator {
       const context: Context = {
         scope: parsed.data,
         authority: auth.data,
+        budget: snapshot.data.budget,
+        deadlineMono: timing.monotonicDeadline,
+        admissionMono,
         pins: this.pins(auth.data),
         id,
         createdWall: startedWall,
@@ -230,6 +278,7 @@ export class SignallingCoordinator {
         observedMono: mono,
         deadline,
         closed: false,
+        abort: new AbortController(),
         admitted: false,
         browser: peer,
         connector: null,
@@ -247,7 +296,7 @@ export class SignallingCoordinator {
       this.contexts.add(context)
       this.handles.set(peer.handle, { context, peer })
       try {
-        peer.cancel = endpoint.armDeadline(deadline - wall, () =>
+        peer.cancel = endpoint.armDeadline(timing.remaining, () =>
           this.close(context),
         )
         if (context.closed) {
@@ -255,12 +304,12 @@ export class SignallingCoordinator {
           return null
         }
         context.cancels.push(
-          this.timers.after(challenge.expires_at - wall, () => {
+          this.timers.after(admissionMono - mono, () => {
             if (!context.admitted) this.close(context)
           }),
         )
         context.cancels.push(
-          this.timers.after(deadline - wall, () => this.close(context)),
+          this.timers.after(timing.remaining, () => this.close(context)),
         )
         this.revalidationTimer(context)
       } catch {
@@ -281,10 +330,16 @@ export class SignallingCoordinator {
     browserHandle: SignallingHandle,
     endpoint: SignallingEndpoint,
     token: string,
-  ): Promise<{
-    handle: SignallingHandle
-    challenge: CredentialProofChallenge
-  } | null> {
+    lifetime: { expiresAt: number; monotonicDeadline: number },
+  ): Promise<
+    | {
+        kind: 'challenge'
+        handle: SignallingHandle
+        challenge: CredentialProofChallenge
+      }
+    | { kind: 'busy'; retryAfterMs: number }
+    | null
+  > {
     const found = this.handles.get(browserHandle)
     if (!found || found.peer.role !== 'browser') return null
     const c = found.context
@@ -296,6 +351,23 @@ export class SignallingCoordinator {
       !token.length
     )
       return null
+    if (
+      !Number.isSafeInteger(lifetime.expiresAt) ||
+      !Number.isFinite(lifetime.monotonicDeadline) ||
+      lifetime.expiresAt <= c.budget.observedAt ||
+      lifetime.monotonicDeadline <= this.clock.monotonic()
+    ) {
+      this.close(c)
+      return null
+    }
+    c.deadline = Math.min(c.deadline, lifetime.expiresAt)
+    c.deadlineMono = Math.min(c.deadlineMono, lifetime.monotonicDeadline)
+    c.admissionMono = Math.min(c.admissionMono, c.deadlineMono)
+    c.browser.cancel()
+    c.browser.cancel = c.browser.endpoint.armDeadline(
+      c.deadlineMono - this.clock.monotonic(),
+      () => this.close(c),
+    )
     const peer: Peer = {
       role: 'connector',
       endpoint,
@@ -309,8 +381,9 @@ export class SignallingCoordinator {
     c.connector = peer
     this.handles.set(peer.handle, { context: c, peer })
     try {
-      peer.cancel = endpoint.armDeadline(c.deadline - this.clock.wall(), () =>
-        this.close(c),
+      peer.cancel = endpoint.armDeadline(
+        c.deadlineMono - this.clock.monotonic(),
+        () => this.close(c),
       )
       if (c.closed) {
         peer.cancel()
@@ -331,13 +404,19 @@ export class SignallingCoordinator {
       } finally {
         this.cryptoTasks--
       }
+      if (this.live(c) && !result.ok && result.reason === 'busy') {
+        this.handles.delete(peer.handle)
+        peer.cancel()
+        c.connector = null
+        return { kind: 'busy', retryAfterMs: result.retryAfterMs }
+      }
       if (!this.live(c) || !result.ok || result.kind !== 'challenge') {
         this.close(c)
         return null
       }
       const ch = result.challenge
       if (
-        ch.issued_at > this.clock.wall() ||
+        ch.issued_at > this.clock.wall() + 250 ||
         ch.expires_at <= this.clock.wall() ||
         ch.purpose !== 'signalling' ||
         ch.connection_id !== c.id ||
@@ -354,7 +433,11 @@ export class SignallingCoordinator {
       }
       c.connectorChallenge = structuredClone(ch)
       c.token = token
-      return { handle: peer.handle, challenge: structuredClone(ch) }
+      return {
+        kind: 'challenge',
+        handle: peer.handle,
+        challenge: structuredClone(ch),
+      }
     } catch {
       this.close(c)
       return null
@@ -371,6 +454,7 @@ export class SignallingCoordinator {
     peer.busy = true
     try {
       let valid = false
+      let proofExpiresAt = c.browserChallenge.expires_at
       if (peer.role === 'browser')
         valid = await verifyBrowserTransportProof(
           c.browserChallenge,
@@ -378,18 +462,26 @@ export class SignallingCoordinator {
           signature,
         )
       else if (c.connectorChallenge && c.token) {
-        const result = await this.credentials.accept({
-          token: c.token,
-          agentId: c.authority.agent_id,
-          farmId: c.authority.farm_id,
-          connectionId: c.id,
-          challenge: c.connectorChallenge,
-          signature,
+        proofExpiresAt = c.connectorChallenge.expires_at
+        const result = await acceptSignallingProof({
+          credentials: this.credentials,
+          clock: this.clock,
+          timers: this.timers,
+          deadline: Math.min(c.admissionMono, c.deadlineMono),
+          signal: c.abort.signal,
+          request: {
+            token: c.token,
+            agentId: c.authority.agent_id,
+            farmId: c.authority.farm_id,
+            connectionId: c.id,
+            challenge: c.connectorChallenge,
+            signature,
+          },
         })
         valid =
           result.ok &&
           result.kind === 'accepted' &&
-          result.acceptedAt <= this.clock.wall() &&
+          result.acceptedAt <= this.clock.wall() + 250 &&
           result.expiresAt > this.clock.wall() &&
           result.purpose === 'signalling' &&
           result.connectionId === c.id &&
@@ -398,7 +490,11 @@ export class SignallingCoordinator {
           result.farmId === c.authority.farm_id
         c.token = null
       }
-      if (!this.live(c) || !valid || !(await this.revalidate(c))) {
+      if (
+        !this.live(c) ||
+        !valid ||
+        !(await this.revalidate(c, proofExpiresAt))
+      ) {
         this.close(c)
         return false
       }
@@ -413,7 +509,43 @@ export class SignallingCoordinator {
       this.cryptoTasks--
     }
   }
+  /** Trusted runtime metadata only; every operation still revalidates current SQL. */
+  describe(handle: SignallingHandle): {
+    transportId: string
+    issuedAt: number
+    expiresAt: number
+    admissionExpiresAt: number
+    agentId: string
+    farmId: string
+    jti: string
+  } | null {
+    const found = this.handles.get(handle)
+    if (!found || !this.live(found.context)) return null
+    const c = found.context
+    return {
+      transportId: c.id,
+      issuedAt: c.budget.observedAt,
+      expiresAt: c.deadline,
+      admissionExpiresAt: Math.min(c.deadline, c.browserChallenge.expires_at),
+      agentId: c.authority.agent_id,
+      farmId: c.authority.farm_id,
+      jti: c.authority.credential_jti,
+    }
+  }
   receive(handle: SignallingHandle, wire: unknown): boolean {
+    return this.enqueue(handle, wire, null)
+  }
+  /** Holds the socket's in-flight resource budget through SQL and relay completion. */
+  receiveAndWait(handle: SignallingHandle, wire: unknown): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!this.enqueue(handle, wire, resolve)) resolve(false)
+    })
+  }
+  private enqueue(
+    handle: SignallingHandle,
+    wire: unknown,
+    settled: ((ok: boolean) => void) | null,
+  ): boolean {
     const found = this.handles.get(handle)
     if (!found) return false
     const { context: c, peer } = found
@@ -433,7 +565,7 @@ export class SignallingCoordinator {
       this.close(c)
       return false
     }
-    c.queue.push({ peer, wire, bytes })
+    c.queue.push({ peer, wire, bytes, settled })
     c.queuedBytes += bytes
     void this.pump(c)
     return true
@@ -454,70 +586,76 @@ export class SignallingCoordinator {
       while (this.live(c) && c.queue.length) {
         const item = c.queue.shift()
         if (!item) break
-        c.queuedBytes -= item.bytes
-        const frame = decodeAuthenticatedSignallingFrame(item.wire),
-          peer = item.peer
-        if (
-          frame.transport_id !== c.id ||
-          frame.seq !== peer.seq ||
-          !(await this.revalidate(c))
-        )
-          throw new Error('Denied')
-        peer.seq++
-        const other = peer.role === 'browser' ? c.connector : c.browser
-        if (!other || !this.live(c)) throw new Error('Closed')
-        switch (frame.t) {
-          case 'rtc.close':
-            this.close(c)
-            return
-          case 'rtc.offer':
-            if (peer.role !== 'connector' || c.offer)
-              throw new Error('Offer order')
-            c.offer = frame.p.sdp
-            break
-          case 'rtc.answer':
-            if (peer.role !== 'browser' || !c.offer || c.answer)
-              throw new Error('Answer order')
-            c.answer = frame.p.sdp
-            break
-          case 'rtc.ice':
-            if (!c.offer || ++peer.ice > 64) throw new Error('ICE limit')
-            break
-        }
-        other.endpoint.send(item.wire)
-        if (
-          frame.t === 'rtc.answer' &&
-          c.offer &&
-          c.answer &&
-          c.connectorChallenge
-        ) {
-          const offer = c.offer,
-            answer = c.answer
-          const [offerHash, answerHash] = await Promise.all([
-            rtcSdpHash(offer),
-            rtcSdpHash(answer),
-          ])
-          if (!(await this.revalidate(c)))
-            throw new Error('Denied after SDP hashing')
-          const { validUntil: _, ...pins } = c.authority
-          const binding = RtcSessionBinding.parse({
-            ...pins,
-            v: 1,
-            purpose: 'read-only-rtc',
-            transport_id: c.id,
-            browser_nonce: c.browserChallenge.nonce,
-            connector_nonce: c.connectorChallenge.nonce,
-            issued_at: c.createdWall,
-            expires_at: c.deadline,
-            commands_enabled: false,
-            offer_sha256: offerHash,
-            answer_sha256: answerHash,
-            browser_dtls: rtcDtlsFingerprint(answer),
-            connector_dtls: rtcDtlsFingerprint(offer),
-          })
-          c.browser.endpoint.bindReadOnly(structuredClone(binding))
-          if (!this.live(c)) throw new Error('Closed during binding')
-          c.connector?.endpoint.bindReadOnly(structuredClone(binding))
+        let delivered = false
+        try {
+          const frame = decodeAuthenticatedSignallingFrame(item.wire),
+            peer = item.peer
+          if (
+            frame.transport_id !== c.id ||
+            frame.seq !== peer.seq ||
+            !(await this.revalidate(c))
+          )
+            throw new Error('Denied')
+          peer.seq++
+          const other = peer.role === 'browser' ? c.connector : c.browser
+          if (!other || !this.live(c)) throw new Error('Closed')
+          switch (frame.t) {
+            case 'rtc.close':
+              this.close(c)
+              return
+            case 'rtc.offer':
+              if (peer.role !== 'connector' || c.offer)
+                throw new Error('Offer order')
+              c.offer = frame.p.sdp
+              break
+            case 'rtc.answer':
+              if (peer.role !== 'browser' || !c.offer || c.answer)
+                throw new Error('Answer order')
+              c.answer = frame.p.sdp
+              break
+            case 'rtc.ice':
+              if (!c.offer || ++peer.ice > 64) throw new Error('ICE limit')
+              break
+          }
+          other.endpoint.send(item.wire)
+          if (
+            frame.t === 'rtc.answer' &&
+            c.offer &&
+            c.answer &&
+            c.connectorChallenge
+          ) {
+            const offer = c.offer,
+              answer = c.answer
+            const [offerHash, answerHash] = await Promise.all([
+              rtcSdpHash(offer),
+              rtcSdpHash(answer),
+            ])
+            if (!(await this.revalidate(c)))
+              throw new Error('Denied after SDP hashing')
+            const { validUntil: _, ...pins } = c.authority
+            const binding = RtcSessionBinding.parse({
+              ...pins,
+              v: 1,
+              purpose: 'read-only-rtc',
+              transport_id: c.id,
+              browser_nonce: c.browserChallenge.nonce,
+              connector_nonce: c.connectorChallenge.nonce,
+              issued_at: c.budget.observedAt,
+              expires_at: c.deadline,
+              commands_enabled: false,
+              offer_sha256: offerHash,
+              answer_sha256: answerHash,
+              browser_dtls: rtcDtlsFingerprint(answer),
+              connector_dtls: rtcDtlsFingerprint(offer),
+            })
+            c.browser.endpoint.bindReadOnly(structuredClone(binding))
+            if (!this.live(c)) throw new Error('Closed during binding')
+            c.connector?.endpoint.bindReadOnly(structuredClone(binding))
+          }
+          delivered = true
+        } finally {
+          item.settled?.(delivered && !c.closed)
+          if (!c.closed) c.queuedBytes -= item.bytes
         }
       }
     } catch {
@@ -526,17 +664,44 @@ export class SignallingCoordinator {
       c.pumping = false
     }
   }
-  private async revalidate(c: Context): Promise<boolean> {
+  private async revalidate(
+    c: Context,
+    proofExpiresAt?: number,
+  ): Promise<boolean> {
     if (!this.live(c)) return false
     try {
-      const auth = Authority.safeParse(await this.readAuthority(c.scope))
-      return (
-        this.live(c) &&
-        auth.success &&
-        this.matches(c.scope, auth.data) &&
-        this.pins(auth.data) === c.pins &&
-        auth.data.validUntil >= c.deadline
+      const value = Snapshot.safeParse(await this.readAuthority(c.scope))
+      if (!this.live(c) || !value.success) return false
+      const { authority: auth, budget } = value.data
+      if (
+        !this.matches(c.scope, auth) ||
+        this.pins(auth) !== c.pins ||
+        budget.validUntil !== auth.validUntil ||
+        budget.observedAt < c.budget.observedAt ||
+        budget.observedAt >= c.deadline ||
+        (proofExpiresAt !== undefined && budget.observedAt >= proofExpiresAt)
       )
+        return false
+      const remaining = signallingRemaining({
+        anchor: { wall: c.createdWall, monotonic: c.createdMono },
+        now: signallingClockSample(this.clock),
+        authorization: budget,
+        previousDeadline: c.deadlineMono,
+      })
+      c.authority = auth
+      c.budget = budget
+      c.deadline = Math.min(c.deadline, auth.validUntil)
+      if (remaining.monotonicDeadline < c.deadlineMono) {
+        c.deadlineMono = remaining.monotonicDeadline
+        for (const peer of [c.browser, c.connector])
+          if (peer) {
+            peer.cancel()
+            peer.cancel = peer.endpoint.armDeadline(remaining.remaining, () =>
+              this.close(c),
+            )
+          }
+      }
+      return this.live(c)
     } catch {
       return false
     }
@@ -558,12 +723,10 @@ export class SignallingCoordinator {
       !this.validTime(wall, mono) ||
       wall < c.observedWall ||
       mono < c.observedMono ||
-      wall >= c.deadline ||
-      mono - c.createdMono >= c.deadline - c.createdWall ||
-      (!c.admitted &&
-        (wall >= c.browserChallenge.expires_at ||
-          mono - c.createdMono >=
-            c.browserChallenge.expires_at - c.createdWall))
+      Math.abs(wall - c.observedWall - (mono - c.observedMono)) > 250 ||
+      Math.abs(wall - c.createdWall - (mono - c.createdMono)) > 250 ||
+      mono >= c.deadlineMono ||
+      (!c.admitted && mono >= c.admissionMono)
     ) {
       this.close(c)
       return false
@@ -575,7 +738,9 @@ export class SignallingCoordinator {
   private close(c: Context): void {
     if (c.closed) return
     c.closed = true
+    c.abort.abort()
     c.token = null
+    for (const item of c.queue) item.settled?.(false)
     c.queue.length = 0
     c.queuedBytes = 0
     this.contexts.delete(c)
@@ -602,7 +767,7 @@ export class SignallingCoordinator {
   }
   private async readAuthority(
     scope: SignallingScope,
-  ): Promise<SignallingAuthority | null> {
+  ): Promise<SignallingAuthoritySnapshot | null> {
     if (this.disposed || this.authorityTasks >= 32) return null
     this.authorityTasks++
     try {

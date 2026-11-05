@@ -15,7 +15,14 @@ import {
   type AccountSessionState,
   type SessionRecord,
 } from '../utils/auth/session-contract.ts'
+import {
+  signallingClockSample,
+  signallingReadBudget,
+  type SignallingClock,
+  type SignallingReadBudget,
+} from '../services/signalling-clock.ts'
 import type {
+  SignallingAuthoritySnapshot,
   SignallingAuthority,
   SignallingAuthoritySource,
   SignallingScope,
@@ -46,8 +53,28 @@ const Credential = z.strictObject({
   issued_at: time,
   expires_at: time,
 })
+const ConnectorScope = z.strictObject({
+  agentId: BrowserDeviceUuid,
+  farmId: BrowserDeviceUuid,
+  jti: BrowserDeviceUuid,
+})
+export type ConnectorCurrentIdentity = Pick<
+  SignallingAuthority,
+  | 'agent_id'
+  | 'farm_id'
+  | 'connector_public_key_spki'
+  | 'connector_fingerprint'
+  | 'credential_jti'
+  | 'origin'
+  | 'audience'
+  | 'validUntil'
+>
+export interface ConnectorCurrentSnapshot {
+  identity: ConnectorCurrentIdentity
+  budget: SignallingReadBudget
+}
 export type SignallingReadDecision =
-  | { ok: true; authority: SignallingAuthority }
+  | { ok: true; authority: SignallingAuthority; observedAt: number }
   | { ok: false; reason: 'denied' | 'invalid-input' | 'storage-unavailable' }
 /** No bearer/session-cookie parsing or network authority is supplied by this adapter.
  * The expiry-only function owns session locks and uses DB time; callers supply neither clock nor policy.
@@ -57,13 +84,86 @@ export class PostgresSignallingAuthorization
 {
   private sql: Sql
   private config: SignallingReaderConfig
-  constructor(sql: Sql, config: unknown) {
+  private readonly clock: SignallingClock
+  constructor(
+    sql: Sql,
+    config: unknown,
+    clock: SignallingClock = {
+      wall: Date.now,
+      monotonic: () => performance.now(),
+    },
+  ) {
     this.sql = sql
     this.config = Config.parse(config)
+    this.clock = clock
   }
-  async read(scope: SignallingScope): Promise<SignallingAuthority | null> {
-    const result = await this.authorize(scope)
-    return result.ok ? result.authority : null
+  async read(
+    scope: SignallingScope,
+  ): Promise<SignallingAuthoritySnapshot | null> {
+    try {
+      const start = signallingClockSample(this.clock)
+      const result = await this.authorize(scope)
+      const end = signallingClockSample(this.clock)
+      if (!result.ok) return null
+      return {
+        authority: result.authority,
+        budget: signallingReadBudget({
+          start,
+          end,
+          observedAt: result.observedAt,
+          validUntil: result.authority.validUntil,
+        }),
+      }
+    } catch {
+      return null
+    }
+  }
+  async readConnectorCurrent(
+    input: unknown,
+  ): Promise<ConnectorCurrentSnapshot | null> {
+    const parsed = ConnectorScope.safeParse(input)
+    if (!parsed.success) return null
+    try {
+      const start = signallingClockSample(this.clock)
+      const candidate = await this.sql.begin(async (tx) => {
+        await tx`SET LOCAL statement_timeout = '2000ms'`
+        await tx`SET LOCAL lock_timeout = '1000ms'`
+        const first = await this.databaseTime(tx)
+        const identity = await this.connector(
+          tx,
+          parsed.data.agentId,
+          parsed.data.farmId,
+          first,
+        )
+        const observedAt = await this.databaseTime(tx)
+        if (
+          !identity ||
+          observedAt < first ||
+          observedAt >= identity.validUntil ||
+          identity.credential_jti !== parsed.data.jti
+        )
+          return null
+        return { identity, observedAt }
+      })
+      const end = signallingClockSample(this.clock)
+      if (!candidate) return null
+      return {
+        identity: candidate.identity,
+        budget: signallingReadBudget({
+          start,
+          end,
+          observedAt: candidate.observedAt,
+          validUntil: candidate.identity.validUntil,
+        }),
+      }
+    } catch {
+      return null
+    }
+  }
+  private async databaseTime(tx: TransactionSql): Promise<number> {
+    const rows =
+      await tx`SELECT floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::float8 AS observed_at`
+    return time.parse(rows[0]?.observed_at)
   }
   async authorize(input: unknown): Promise<SignallingReadDecision> {
     const parsed = Scope.safeParse(input)
@@ -131,6 +231,7 @@ export class PostgresSignallingAuthorization
         return {
           ok: true,
           authority: { ...authority, validUntil },
+          observedAt: final,
         } satisfies SignallingReadDecision
       })
     } catch {
@@ -174,22 +275,49 @@ export class PostgresSignallingAuthorization
       key.approved_at === null
     )
       return null
+    const [browser, connector] = await Promise.all([
+      validateBrowserDevicePublicKey(key.public_key),
+      this.connector(tx, scope.agentId, scope.farmId, observedAt),
+    ])
+    if (!connector || browser.thumbprint !== key.thumbprint) return null
+    return {
+      farm_id: scope.farmId,
+      agent_id: scope.agentId,
+      account_id: accountId,
+      key_id: scope.keyId,
+      browser_public_key: browser.publicKey,
+      browser_thumbprint: browser.thumbprint,
+      connector_public_key_spki: connector.connector_public_key_spki,
+      connector_fingerprint: connector.connector_fingerprint,
+      credential_jti: connector.credential_jti,
+      origin: this.config.origin,
+      audience: this.config.audience,
+      credentialExpiresAt: connector.validUntil,
+    }
+  }
+  private async connector(
+    tx: TransactionSql,
+    agentId: string,
+    farmId: string,
+    observedAt: number,
+  ): Promise<ConnectorCurrentIdentity | null> {
+    // Same enrollment -> credential order as revocation and proof acceptance.
     const enrollments =
-      await tx`SELECT farm_id, public_key_spki, fingerprint, status FROM farm.connector_enrollments WHERE agent_id = ${scope.agentId}::uuid FOR SHARE`
+      await tx`SELECT farm_id, public_key_spki, fingerprint, status FROM farm.connector_enrollments WHERE agent_id = ${agentId}::uuid FOR SHARE`
     const enrollment = enrollments[0]
     if (
       !enrollment ||
-      enrollment.farm_id !== scope.farmId ||
+      enrollment.farm_id !== farmId ||
       enrollment.status !== 'approved'
     )
       return null
     const issued =
-      await tx`SELECT jti, farm_id, fingerprint, thumbprint, issuer, audience, issued_at::float8 AS issued_at, expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id = ${scope.agentId}::uuid FOR SHARE`
+      await tx`SELECT jti, farm_id, fingerprint, thumbprint, issuer, audience, issued_at::float8 AS issued_at, expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id = ${agentId}::uuid FOR SHARE`
     const parsed = Credential.safeParse(issued[0])
     if (!parsed.success) return null
     const credential = parsed.data
     if (
-      credential.farm_id !== scope.farmId ||
+      credential.farm_id !== farmId ||
       credential.fingerprint !== enrollment.fingerprint ||
       credential.issuer !== this.config.issuer ||
       credential.audience !== this.config.audience ||
@@ -198,31 +326,23 @@ export class PostgresSignallingAuthorization
     )
       return null
     const revoked =
-      await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id = ${scope.agentId}::uuid OR credential_jti = ${credential.jti}::uuid`
+      await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id = ${agentId}::uuid OR credential_jti = ${credential.jti}::uuid`
     if (revoked.length) return null
-    const [browser, connector] = await Promise.all([
-      validateBrowserDevicePublicKey(key.public_key),
-      connectorKeyBinding(enrollment.public_key_spki),
-    ])
+    const connector = await connectorKeyBinding(enrollment.public_key_spki)
     if (
-      browser.thumbprint !== key.thumbprint ||
       connector.fingerprint !== enrollment.fingerprint ||
       connector.thumbprint !== credential.thumbprint
     )
       return null
     return {
-      farm_id: scope.farmId,
-      agent_id: scope.agentId,
-      account_id: accountId,
-      key_id: scope.keyId,
-      browser_public_key: browser.publicKey,
-      browser_thumbprint: browser.thumbprint,
+      agent_id: agentId,
+      farm_id: farmId,
       connector_public_key_spki: enrollment.public_key_spki,
       connector_fingerprint: connector.fingerprint,
       credential_jti: credential.jti,
       origin: this.config.origin,
       audience: this.config.audience,
-      credentialExpiresAt: credential.expires_at * 1000,
+      validUntil: credential.expires_at * 1000,
     }
   }
 }

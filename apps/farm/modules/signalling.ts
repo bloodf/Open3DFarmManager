@@ -12,10 +12,22 @@ export default defineNuxtModule({
         ? config.connectorSignalling
         : undefined
     const enabled = signallingBuildEnabled(signalling)
-    if (signalling === undefined)
-      Object.assign(nuxt.options.runtimeConfig, {
-        connectorSignalling: { enabled: false },
-      })
+    Object.assign(nuxt.options.runtimeConfig, {
+      connectorSignalling: Object.assign(
+        {
+          enabled: false,
+          origin: '',
+          issuer: '',
+          audience: '',
+          readerDatabaseUrl: '',
+          proofDatabaseUrl: '',
+          publicKeyRegistryPath: '',
+          tokenTtlSeconds: '',
+          proofTtlMs: '',
+        },
+        signalling,
+      ),
+    })
     nuxt.hook('nitro:config', (nitro) => {
       const preset = nitro.preset ?? 'node-server'
       if (enabled && preset !== 'node-server')

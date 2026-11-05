@@ -80,7 +80,25 @@ try {
   assert.equal(actor?.db, 'fixture')
   assert.equal(actor?.actor, 'fixture')
   const catalog = await loadMigrationCatalog()
-  assert.equal(catalog.at(-1)?.id, '0012_connector_inventory')
+  assert.deepEqual(
+    catalog.map((entry) => entry.id),
+    [
+      '0001_connector_enrollments',
+      '0002_telemetry_events',
+      '0003_runtime_capabilities',
+      '0004_account_sessions',
+      '0005_password_auth',
+      '0006_farm_memberships',
+      '0007_pairing_requests',
+      '0008_pairing_proofs',
+      '0009_pairing_proof_gates',
+      '0010_connector_credentials',
+      '0011_connector_revocations',
+      '0012_connector_inventory',
+      '0013_browser_device_registry',
+      '0014_connector_credential_proofs',
+    ],
+  )
   const history =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...history]), catalog.length)

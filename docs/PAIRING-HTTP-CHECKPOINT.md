@@ -1,6 +1,6 @@
 # Pairing HTTP acceptance checkpoint
 
-This checkpoint is scoped to the exact contiguous catalog ending at `0012_connector_inventory`; it must be reviewed and updated against later committed catalog changes before any run. The HTTPS acceptance fixture is opt-in and requires a disposable loopback PostgreSQL database named `fixture`, accessed by the synthetic `fixture` administrator. The caller must apply the complete official migration catalog through `0012_connector_inventory` and own database teardown. The helper checks the migration journal and does not alter it. Build the current app first, then run:
+This checkpoint is scoped to the exact contiguous catalog ending at `0014_connector_credential_proofs`; it must be reviewed and updated against later committed catalog changes before any run. The HTTPS acceptance fixture is opt-in and requires a disposable loopback PostgreSQL database named `fixture`, accessed by the synthetic `fixture` administrator. The caller must apply the complete official migration catalog through `0014_connector_credential_proofs` and own database teardown. The helper checks the migration journal and does not alter it. Build the current app first, then run:
 
 ```sh
 PAIRING_HTTP_SYNTHETIC_TEST_DISPOSABLE=yes \

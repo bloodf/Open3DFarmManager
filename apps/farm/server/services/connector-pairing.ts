@@ -124,23 +124,35 @@ export async function connectorPairing(
   if (origin !== auth.origin) return failure('storage-unavailable')
   const browser = operation === 'approve' || operation === 'revoke'
   pairingRequestBoundary(event.req, origin, browser)
+  const sessionRecordId = browser
+    ? await sealedSessionRecordId(event, auth)
+    : undefined
+  if (browser && !sessionRecordId) return failure('denied')
   // Durable limits shared by all app instances; never trust proxy-supplied headers.
-  // The conservative initial global cap is 60 mutations per 15 minutes.
+  // Anonymous traffic cannot spend an authenticated session's recovery budget.
+  // consumeLimit hashes keys before persistence; storage still rechecks authority.
   try {
-    const source =
-      getRequestIP(event, { xForwardedFor: false }) ?? 'unknown-source'
-    if (
-      !(await auth.credentials.consumeLimit('s', 'pairing-global')) ||
-      !(await auth.credentials.consumeLimit('s', 'pairing-source:' + source))
-    )
-      return failure('capacity')
+    if (browser) {
+      if (
+        !(await auth.credentials.consumeLimit(
+          's',
+          `pairing-browser:${operation}:${sessionRecordId}`,
+        ))
+      )
+        return failure('capacity')
+    } else {
+      const source =
+        getRequestIP(event, { xForwardedFor: false }) ?? 'unknown-source'
+      if (
+        !(await auth.credentials.consumeLimit('s', 'pairing-global')) ||
+        !(await auth.credentials.consumeLimit('s', 'pairing-source:' + source))
+      )
+        return failure('capacity')
+    }
   } catch (error) {
     if (error instanceof Error && 'status' in error) throw error
     return failure('storage-unavailable')
   }
-  const sessionRecordId = browser
-    ? await sealedSessionRecordId(event, auth)
-    : undefined
   const body = await readPairingBody(event.req)
   const runtime = await connectorPairingRuntime()
   switch (operation) {

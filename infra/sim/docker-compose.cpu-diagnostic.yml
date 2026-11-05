@@ -1,0 +1,5 @@
+services:
+  sv06:
+    cpus: 2.0
+  u1:
+    cpus: 2.0

@@ -72,7 +72,7 @@ type Scope = {
   publicKey: unknown
   privateKey: CryptoKey
 }
-type Peer = {
+type Peer = Partial<Pick<ReadonlyBrowserPeer, 'diagnostics'>> & {
   answer(sdp: string): Promise<string>
   close(reason?: string): void
 }
@@ -106,6 +106,7 @@ export class AuthenticatedBrowserSignallingClient {
   #binding = new Promise<unknown>((resolve) => {
     this.#resolveBinding = resolve
   })
+  #defaultPeerFactory: boolean
   #peerFactory: (options: PeerOptions) => Peer
   #started = false
   #resolveStart: () => void = () => {}
@@ -153,6 +154,7 @@ export class AuthenticatedBrowserSignallingClient {
           }
         : {}),
     })
+    this.#defaultPeerFactory = options.peerFactory === undefined
     this.#peerFactory =
       options.peerFactory ?? ((input) => new ReadonlyBrowserPeer(input))
     this.#channel = new SignallingClientChannel({
@@ -329,6 +331,21 @@ export class AuthenticatedBrowserSignallingClient {
   }
   close() {
     this.#channel.close('closed')
+  }
+  /** Custom test peer factories cannot supply accepted transport evidence. */
+  diagnostics() {
+    const actual = this.#defaultPeerFactory
+      ? this.#peer?.diagnostics?.()
+      : undefined
+    return Object.freeze({
+      certificateMatched: actual?.certificateMatched ?? false,
+      sentProofs: actual?.sentProofs ?? 0,
+      receivedProofs: actual?.receivedProofs ?? 0,
+      terminal:
+        this.#channel.snapshot().state === 'readonly' ||
+        actual?.terminal === true,
+      readOnly: true as const,
+    })
   }
   snapshot() {
     return this.#channel.snapshot()

@@ -76,6 +76,7 @@ export class ReadonlyConnectorPeer {
   #starting = false
   #stage = 'constructed'
   #closeCount = 0
+  #certificateMatched = false
   #sentProofs = 0
   #receivedProofs = 0
   #actualRemote: string | undefined
@@ -353,6 +354,7 @@ export class ReadonlyConnectorPeer {
       this.#actualRemote !== rtcDtlsFingerprint(remote)
     )
       throw Error('Actual certificate mismatch')
+    this.#certificateMatched = true
     this.#stage = 'role-proofs'
     this.#session = new ReadonlyRtcSession({
       binding: validated,
@@ -454,6 +456,16 @@ export class ReadonlyConnectorPeer {
     } catch {
       this.#stage = 'terminal-notification-failed'
     }
+  }
+  /** Historical nonsecret observations; no authority or transport handle. */
+  diagnostics() {
+    return Object.freeze({
+      certificateMatched: this.#certificateMatched,
+      sentProofs: Math.min(1024, this.#sentProofs),
+      receivedProofs: Math.min(1024, this.#receivedProofs),
+      terminal: this.#terminal !== undefined,
+      readOnly: true as const,
+    })
   }
   snapshot() {
     return {

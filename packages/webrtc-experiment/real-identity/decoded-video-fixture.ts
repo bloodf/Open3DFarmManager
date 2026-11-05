@@ -1,4 +1,4 @@
-import type { FixtureOnlyVideoHooks } from './browser-peer.ts'
+import type { FixtureOnlyVideoHooks } from '../../../apps/farm/app/utils/webrtc/readonly-peer.ts'
 
 /** Local finite observer. No video is attached before both RTC role proofs.
  * After stop, callbacks are cancelled and the element detached. This does not

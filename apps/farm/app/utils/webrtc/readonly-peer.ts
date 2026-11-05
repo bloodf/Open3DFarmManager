@@ -2,20 +2,20 @@ import {
   captureEffectiveRtcDescriptions,
   checkEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
-} from '../../connector/src/webrtc/rtc-descriptions.ts'
+} from '../../../../../packages/connector/src/webrtc/rtc-descriptions.ts'
 import {
   RtcSessionBinding,
   BrowserRtcProof,
   signRtcSessionProof,
   rtcBindingFromDescriptions,
   rtcDtlsFingerprint,
-} from '../../farm-protocol/src/rtc-session-binding.ts'
-import { BrowserDeviceUuid } from '../../farm-protocol/src/browser-device-proof.ts'
-import { ReadonlyRtcSession } from '../../connector/src/webrtc/readonly-session.ts'
+} from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
+import { BrowserDeviceUuid } from '../../../../../packages/farm-protocol/src/browser-device-proof.ts'
+import { ReadonlyRtcSession } from '../../../../../packages/connector/src/webrtc/readonly-session.ts'
 import {
   RtcProofInbox,
   boundRtcApplicationFrame,
-} from '../../connector/src/webrtc/rtc-proof-inbox.ts'
+} from '../../../../../packages/connector/src/webrtc/rtc-proof-inbox.ts'
 
 export type FixtureOnlyVideoHooks = Readonly<{
   onTrack: (

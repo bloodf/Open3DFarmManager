@@ -1,4 +1,4 @@
-import { ReadonlyBrowserPeer } from './browser-peer.ts'
+import { ReadonlyBrowserPeer } from '../../../apps/farm/app/utils/webrtc/readonly-peer.ts'
 import { DecodedVideoFixture } from './decoded-video-fixture.ts'
 import { RtcSessionBinding } from '../../farm-protocol/src/rtc-session-binding.ts'
 import { validateBrowserDevicePublicKey } from '../../farm-protocol/src/browser-device-proof.ts'

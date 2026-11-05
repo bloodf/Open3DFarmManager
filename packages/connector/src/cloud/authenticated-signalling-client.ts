@@ -98,6 +98,7 @@ export async function connectorSocket(
   )
   const ignore = () => {}
   socket.on('error', ignore)
+  const closed = new Promise<void>((resolve) => socket.on('close', resolve))
   return {
     isOpen: () => socket.readyState === 1,
     bufferedBytes: () => socket.bufferedAmount,
@@ -132,6 +133,7 @@ export async function connectorSocket(
       }
     },
     close: () => socket.terminate(),
+    waitClosed: () => closed,
   }
 }
 type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'> &
@@ -189,6 +191,9 @@ export class AuthenticatedConnectorSignallingClient {
   #terminalListener: ((reason: string) => void) | undefined
   #terminalSubscribed = false
   #peer: Peer | undefined
+  #peerFactorySettlement: Promise<void> = Promise.resolve()
+  #peerCloseFailed = false
+  #disposal: Promise<void> | undefined
   #retry: ReturnType<typeof setTimeout> | undefined
   #completion: Promise<void> | undefined
   #resolve: () => void = () => {}
@@ -267,8 +272,14 @@ export class AuthenticatedConnectorSignallingClient {
         this.#admission = undefined
         const terminalListener = this.#terminalListener
         this.#terminalListener = undefined
+        const peer = this.#peer
+        this.#peer = undefined
         try {
-          this.#peer?.close(reason)
+          try {
+            peer?.close(reason)
+          } catch {
+            this.#peerCloseFailed = true
+          }
         } finally {
           this.#reject(Error('Signalling readonly: ' + reason))
           try {
@@ -493,12 +504,37 @@ export class AuthenticatedConnectorSignallingClient {
           )
           return new ReadonlyConnectorPeer(options)
         })
-      const peer = await factory(input)
+      const loadingPeer = Promise.resolve()
+        .then(() => factory(input))
+        .then((peer) => {
+          if (!this.#channel.current()) {
+            try {
+              peer.close('late-peer')
+            } catch {
+              this.#peerCloseFailed = true
+            }
+            return undefined
+          }
+          this.#peer = peer
+          return peer
+        })
+      this.#peerFactorySettlement = loadingPeer.then(
+        () => {},
+        () => {},
+      )
+      const peer = await loadingPeer
+      if (!peer) return
       if (!this.#channel.current()) {
-        peer.close('late-peer')
+        if (this.#peer === peer) {
+          this.#peer = undefined
+          try {
+            peer.close('late-peer')
+          } catch {
+            this.#peerCloseFailed = true
+          }
+        }
         return
       }
-      this.#peer = peer
       this.#phase = 'answer'
       const offer = await peer.offer()
       if (!this.#channel.current()) return
@@ -595,6 +631,39 @@ export class AuthenticatedConnectorSignallingClient {
   }
   close(reason = 'closed') {
     this.#channel.close(reason)
+  }
+  /** Confirms socket closure and factory settlement, not native peer destruction. */
+  dispose(timeoutMs: number): Promise<void> {
+    if (this.#disposal) return this.#disposal
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 10000)
+      return Promise.reject(Error('Invalid disposal timeout'))
+    const deadline = performance.now() + timeoutMs
+    this.#disposal = Promise.resolve().then(async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          (async () => {
+            await Promise.all([
+              this.#channel.dispose(timeoutMs),
+              this.#peerFactorySettlement,
+            ])
+            if (this.#peerCloseFailed) throw Error('Peer close request failed')
+          })(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(Error('Client disposal timed out')),
+              Math.max(0, deadline - performance.now()),
+            )
+          }),
+        ])
+        if (performance.now() >= deadline)
+          throw Error('Client disposal timed out')
+      } finally {
+        clearTimeout(timer)
+      }
+    })
+    this.close('disposed')
+    return this.#disposal
   }
   /** Custom test peer factories cannot supply accepted transport evidence. */
   diagnostics() {

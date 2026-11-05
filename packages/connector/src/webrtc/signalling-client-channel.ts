@@ -17,6 +17,8 @@ export type SocketPort = {
     close(): void
   }): () => void
   close(): void
+  /** Optional evidence of an observed underlying socket close event. */
+  waitClosed?(): Promise<void>
 }
 export type ChannelClock = { now(): number; wallNow(): number }
 type ChannelOptions = {
@@ -49,6 +51,11 @@ export class SignallingClientChannel {
   #sent = 0
   #closed: Promise<void>
   #resolveClosed: () => void = () => {}
+  #factorySettlement: Promise<void> = Promise.resolve()
+  #ports = new Set<SocketPort>()
+  #closeRequested = new WeakSet<SocketPort>()
+  #closeFailed = false
+  #disposal: Promise<void> | undefined
   constructor(options: ChannelOptions) {
     this.#options = Object.freeze({ ...options })
     this.#clock = options.clock ?? {
@@ -163,17 +170,20 @@ export class SignallingClientChannel {
   connect(factory: () => SocketPort | Promise<SocketPort>) {
     if (this.#connected || !this.current()) return
     this.#connected = true
-    const weak = new WeakRef(this)
     const loading = Promise.resolve()
       .then(factory)
       .then((port) => {
-        const owner = weak.deref()
-        if (!owner?.current()) {
-          port.close()
+        this.#ports.add(port)
+        if (!this.current()) {
+          this.requestPortClose(port)
           return undefined
         }
         return port
       })
+    this.#factorySettlement = loading.then(
+      () => {},
+      () => {},
+    )
     void (async () => {
       try {
         const port = await Promise.race([
@@ -182,7 +192,7 @@ export class SignallingClientChannel {
         ])
         if (!port) return
         if (!this.current()) {
-          port.close()
+          this.requestPortClose(port)
           return
         }
         this.#port = port
@@ -206,6 +216,50 @@ export class SignallingClientChannel {
         this.close('socket-start')
       }
     })()
+  }
+  private requestPortClose(port: SocketPort) {
+    if (this.#closeRequested.has(port)) return
+    this.#closeRequested.add(port)
+    try {
+      port.close()
+    } catch {
+      this.#closeFailed = true
+    }
+  }
+  /** Confirms factory settlement and observed socket closure, not native RTC teardown. */
+  dispose(timeoutMs: number): Promise<void> {
+    if (this.#disposal) return this.#disposal
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 10000)
+      return Promise.reject(Error('Invalid disposal timeout'))
+    const deadline = performance.now() + timeoutMs
+    this.#disposal = Promise.resolve().then(async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          (async () => {
+            await this.#factorySettlement
+            if (this.#closeFailed) throw Error('Socket close request failed')
+            for (const port of this.#ports) {
+              if (!port.waitClosed)
+                throw Error('Socket close observation unavailable')
+              await port.waitClosed()
+            }
+          })(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(Error('Socket disposal timed out')),
+              Math.max(0, deadline - performance.now()),
+            )
+          }),
+        ])
+        if (performance.now() >= deadline)
+          throw Error('Socket disposal timed out')
+      } finally {
+        clearTimeout(timer)
+      }
+    })
+    this.close('disposed')
+    return this.#disposal
   }
   send(frame: SignallingClientFrame) {
     if (!this.current()) throw Error('Client terminal')
@@ -258,7 +312,7 @@ export class SignallingClientChannel {
       // Cleanup remains unconditional if an owner notification throws.
     } finally {
       try {
-        this.#port?.close()
+        if (this.#port) this.requestPortClose(this.#port)
       } catch {}
     }
   }

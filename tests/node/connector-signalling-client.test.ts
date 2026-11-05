@@ -32,7 +32,11 @@ type PeerOptions = Parameters<
     >['peerFactory']
   >
 >[0]
-async function fixture(holdPeer = false, onAdmission?: () => void) {
+async function fixture(
+  holdPeer = false,
+  onAdmission?: () => void,
+  observedClose = false,
+) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
   )
@@ -54,6 +58,10 @@ async function fixture(holdPeer = false, onAdmission?: () => void) {
   let input: PeerOptions | undefined, admitted: unknown
   const sent: Array<Record<string, unknown>> = []
   const answers: string[] = []
+  let resolveSocketClose: () => void = () => {}
+  const socketClosed = new Promise<void>((resolve) => {
+    resolveSocketClose = resolve
+  })
   const socket: SocketPort = {
     isOpen: () => true,
     bufferedBytes: () => 0,
@@ -67,7 +75,9 @@ async function fixture(holdPeer = false, onAdmission?: () => void) {
     },
     close: () => {
       closed++
+      if (observedClose) resolveSocketClose()
     },
+    ...(observedClose ? { waitClosed: () => socketClosed } : {}),
   }
   let releasePeer = () => {}
   const peerGate = new Promise<void>((resolve) => {
@@ -495,8 +505,17 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
     assert.equal(messages, 1)
     assert.equal(errors, 2)
     unbind()
+    let closeObserved = false
+    const closed = port.waitClosed!().then(() => {
+      closeObserved = true
+    })
     port.close()
+    await tick()
+    assert.equal(closeObserved, false)
     assert.equal(instance?.terminated, 1)
+    instance?.emit('close')
+    await closed
+    assert.equal(closeObserved, true)
   } finally {
     for (const [index, name] of [
       'WS_NO_BUFFER_UTIL',
@@ -561,6 +580,69 @@ test('a peer created after the original context deadline closes without emitting
     await assert.rejects(f.pending)
     f.input()?.onVerified?.()
     assert.equal(f.client.snapshot().state, 'readonly')
+  } finally {
+    f.releasePeer()
+    f.client.close()
+  }
+})
+
+test('client disposal waits for late peer factory and requests peer close once', async () => {
+  const f = await fixture(true, undefined, true)
+  try {
+    await f.inbox()
+    await f.push({
+      v: 1,
+      t: 'connector.context-challenge',
+      challenge: f.context,
+    })
+    await f.push({
+      v: 1,
+      t: 'rtc.ready',
+      transport_id: f.context.connection_id,
+      ...f.lease(),
+    })
+    assert.ok(f.input())
+    const disposal = f.client.dispose(1000)
+    assert.equal(f.client.dispose(10000), disposal)
+    let done = false
+    void disposal.then(() => {
+      done = true
+    })
+    await tick()
+    assert.equal(done, false)
+    f.releasePeer()
+    await disposal
+    assert.equal(f.peerClosed(), 1)
+    assert.equal(f.closed(), 1)
+    await assert.rejects(f.pending)
+  } finally {
+    f.releasePeer()
+    f.client.close()
+  }
+})
+
+test('client disposal rejects when peer factory remains unsettled', async () => {
+  const f = await fixture(true, undefined, true)
+  try {
+    await f.inbox()
+    await f.push({
+      v: 1,
+      t: 'connector.context-challenge',
+      challenge: f.context,
+    })
+    await f.push({
+      v: 1,
+      t: 'rtc.ready',
+      transport_id: f.context.connection_id,
+      ...f.lease(),
+    })
+    const disposal = f.client.dispose(100)
+    await assert.rejects(disposal, /timed out/)
+    assert.equal(f.client.dispose(10000), disposal)
+    f.releasePeer()
+    await tick()
+    assert.equal(f.peerClosed(), 1)
+    await assert.rejects(f.pending)
   } finally {
     f.releasePeer()
     f.client.close()

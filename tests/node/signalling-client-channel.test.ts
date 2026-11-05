@@ -338,3 +338,145 @@ test('outstanding write bytes cannot exceed 32 KiB even below four slots', async
     f.channel.close()
   }
 })
+
+test('disposal joins late factory and observed socket closure without extending deadline', async () => {
+  let release: (port: SocketPort) => void = () => {}
+  let observed: () => void = () => {}
+  let closes = 0
+  const factory = new Promise<SocketPort>((resolve) => {
+    release = resolve
+  })
+  const closed = new Promise<void>((resolve) => {
+    observed = resolve
+  })
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  channel.connect(() => factory)
+  const disposal = channel.dispose(1000)
+  assert.equal(channel.dispose(10000), disposal)
+  let done = false
+  void disposal.then(() => {
+    done = true
+  })
+  const port: SocketPort = {
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: () => closed,
+  }
+  release(port)
+  await tick()
+  assert.equal(closes, 1)
+  assert.equal(done, false)
+  observed()
+  await disposal
+  assert.equal(closes, 1)
+})
+
+test('disposal fails closed on absent observation or unsettled work', async () => {
+  const make = () =>
+    new SignallingClientChannel({
+      onFrame: async () => {},
+      onOpen: () => {},
+      onTerminal: () => {},
+    })
+  const empty = make()
+  await empty.dispose(100)
+  const failed = make()
+  failed.connect(() => Promise.reject(new Error('factory failed')))
+  await failed.dispose(1000)
+  const missing = make()
+  missing.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {},
+  }))
+  await tick()
+  await assert.rejects(missing.dispose(1000), /observation unavailable/)
+  const hung = make()
+  hung.connect(() => new Promise<SocketPort>(() => {}))
+  const pending = hung.dispose(100)
+  assert.equal(hung.dispose(10000), pending)
+  await assert.rejects(pending, /timed out/)
+  assert.equal(hung.dispose(10000), pending)
+  const stuckClose = make()
+  stuckClose.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {},
+    waitClosed: () => new Promise<void>(() => {}),
+  }))
+  await tick()
+  await assert.rejects(stuckClose.dispose(100), /timed out/)
+})
+
+test('terminal callback can reenter disposal without a second close request', async () => {
+  let closes = 0,
+    reentered: Promise<void> | undefined
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {
+      reentered = channel.dispose(1000)
+    },
+  })
+  channel.connect(() => ({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: async () => {},
+  }))
+  await tick()
+  const outer = channel.dispose(1000)
+  assert.equal(reentered, outer)
+  await outer
+  assert.equal(closes, 1)
+})
+
+test('a factory still settling after timeout remains charged and closes its late port once', async () => {
+  let release: (port: SocketPort) => void = () => {},
+    closes = 0
+  const channel = new SignallingClientChannel({
+    onFrame: async () => {},
+    onOpen: () => {},
+    onTerminal: () => {},
+  })
+  channel.connect(
+    () =>
+      new Promise<SocketPort>((resolve) => {
+        release = resolve
+      }),
+  )
+  await tick()
+  const disposal = channel.dispose(100)
+  await assert.rejects(disposal, /timed out/)
+  release({
+    isOpen: () => false,
+    bufferedBytes: () => 0,
+    send: () => {},
+    bind: () => () => {},
+    close: () => {
+      closes++
+    },
+    waitClosed: async () => {},
+  })
+  await tick()
+  assert.equal(closes, 1)
+  assert.equal(channel.dispose(10000), disposal)
+  await assert.rejects(disposal, /timed out/)
+})

@@ -26,6 +26,7 @@ export async function runSignallingLifecycle(input: {
   createSession(onTerminal: () => void): Session
 }): Promise<void> {
   let backoff = input.retryMinMs
+  let expired = false
   const deadlineMono =
     performance.now() + Math.max(0, input.credentialExpiresAt - Date.now())
   const remaining = () =>
@@ -33,7 +34,7 @@ export async function runSignallingLifecycle(input: {
       input.credentialExpiresAt - Date.now(),
       deadlineMono - performance.now(),
     )
-  while (!input.signal.aborted && remaining() > 0) {
+  while (!expired && !input.signal.aborted && remaining() > 0) {
     let finish = () => {}
     const terminal = new Promise<void>((resolve) => {
       finish = resolve
@@ -54,7 +55,15 @@ export async function runSignallingLifecycle(input: {
         endedSession()
       }
     }
-    const timer = setTimeout(stop, Math.max(0, remaining()))
+    const timer = setTimeout(
+      () => {
+        // Timer rounding can precede the sampled clock deadline. Once expiry
+        // closes the session, a positive remainder must never restart it.
+        expired = true
+        stop()
+      },
+      Math.max(0, remaining()),
+    )
     input.signal.addEventListener('abort', stop, { once: true })
     try {
       session = input.createSession(endedSession)
@@ -77,6 +86,7 @@ export async function runSignallingLifecycle(input: {
       }
     }
     if (closeFailure) throw closeFailure.error
+    if (expired) return
     await wait(Math.min(backoff, Math.max(0, remaining())), input.signal)
     backoff = Math.min(input.retryMaxMs, backoff * 2)
   }

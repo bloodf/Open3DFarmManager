@@ -206,3 +206,40 @@ test('credential expiry closes an admitted session without another attempt', asy
   assert.ok(closes > 0)
   assert.equal(disposals, 1)
 })
+
+test('expiry timer is terminal even when it fires before the sampled clock deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controller = new AbortController()
+  const credentialExpiresAt = Date.now() + 10000
+  let creates = 0,
+    disposals = 0
+  const running = runSignallingLifecycle({
+    ...policy,
+    credentialExpiresAt,
+    signal: controller.signal,
+    createSession() {
+      creates++
+      return {
+        start: async () => {},
+        close() {},
+        dispose: async () => {
+          disposals++
+        },
+      }
+    },
+  })
+  try {
+    // Advance the scheduler independently: real Date/performance clocks have
+    // not reached the sampled deadline, just as with an early rounded timer.
+    t.mock.timers.tick(10000)
+    await tick()
+    assert.ok(Date.now() < credentialExpiresAt)
+    t.mock.timers.tick(policy.retryMinMs)
+    await tick()
+    assert.equal(creates, 1)
+    assert.equal(disposals, 1)
+  } finally {
+    controller.abort()
+    await running
+  }
+})

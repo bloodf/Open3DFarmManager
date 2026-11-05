@@ -76,6 +76,7 @@ console.log(
     checks,
     cleanup: {
       runtimeRoleRemoved: roleCreated,
+      authRoleRemoved: authRoleCreated,
       connectionsClosed: true,
       fixtureRows: 'caller-owned disposable database',
     },

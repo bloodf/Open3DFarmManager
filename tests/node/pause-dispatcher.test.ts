@@ -159,7 +159,7 @@ async function authorityFixture() {
   }
 }
 
-async function fixture(shortCapability = false) {
+async function fixture(shortCapability = false, resultTimeoutMs = 50) {
   const f = await authorityFixture(),
     directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
@@ -318,7 +318,7 @@ async function fixture(shortCapability = false) {
     },
     journal,
     driver,
-    resultTimeoutMs: 50,
+    resultTimeoutMs,
   })
   dispatcher.observe(printerBinding, state)
   const controls = await import(
@@ -471,6 +471,7 @@ async function fixture(shortCapability = false) {
     printerBinding,
     driver,
     additional,
+    pendingDriverCount: () => unblocks.length,
     wire: encodeCommandV2(signed),
     handle: result.handle,
     peer,
@@ -733,7 +734,7 @@ test('close or abort seals a delayed send boundary', async () => {
 })
 
 test('same assignment has no queue and timed-out work retains the global eight-slot bound', async () => {
-  const f = await fixture()
+  const f = await fixture(false, 1000)
   f.setMode('hang-before-send')
   try {
     const extra = await Promise.all(
@@ -757,10 +758,19 @@ test('same assignment has no queue and timed-out work retains the global eight-s
       kind: 'rejected',
       reason: 'busy',
     })
+    const driverDeadline = performance.now() + 1000
+    while (f.pendingDriverCount() !== 8) {
+      assert.ok(
+        performance.now() < driverDeadline,
+        'All eight operations must reach the hanging driver before timeout assertions',
+      )
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
     const settled = await Promise.all(work)
     assert.equal(
       settled.every((result) => result.kind === 'not-sent'),
       true,
+      JSON.stringify(settled),
     )
     assert.deepEqual(await f.dispatcher.dispatch(ninth), {
       kind: 'rejected',

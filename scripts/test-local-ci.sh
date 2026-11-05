@@ -25,6 +25,25 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.2|node:24\.20\.0-alpine)$ ]]; then
+  if [[ ${3:-} == --platform ]]; then
+    case "$LOCAL_CI_FAKE_BASE" in
+      index) printf '%s\n' linux/amd64 ;;
+      explicit-error) exit 1 ;;
+      explicit-empty) exit 0 ;;
+      explicit-mismatch) printf '%s\n' linux/arm64 ;;
+    esac
+  else
+    case "$LOCAL_CI_FAKE_BASE" in
+      direct) printf '%s\n' linux/amd64 ;;
+      default-mismatch) printf '%s\n' linux/arm64 ;;
+      default-empty) exit 0 ;;
+      *) printf '%s\n' / ;;
+    esac
+  fi
+  exit 0
+fi
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == build ]]; then exit 43; fi
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then
   case "$*" in
     *'ps -aq sv06'*) printf '%s\n' aaaaaaaaaaaa ;;
@@ -53,6 +72,22 @@ grep -q 'pass --allow-emulation' "$scratch/output"
 expect_status 2 image --containers --allow-emulation
 grep -q 'preinstall linux/amd64 base image' "$scratch/output"
 if grep -q '^build ' "$scratch/docker-calls"; then exit 1; fi
+for mode in direct index; do
+  : > "$scratch/docker-calls"
+  export LOCAL_CI_FAKE_BASE=$mode
+  expect_status 43 image --containers --allow-emulation
+  grep -q '^build --platform linux/amd64 ' "$scratch/docker-calls"
+  if [[ $mode == index ]]; then
+    [[ $(grep -c '^image inspect --platform linux/amd64 ' "$scratch/docker-calls") == 2 ]]
+  elif grep -q '^image inspect --platform ' "$scratch/docker-calls"; then exit 1; fi
+done
+for mode in explicit-error explicit-empty explicit-mismatch default-mismatch default-empty; do
+  : > "$scratch/docker-calls"
+  export LOCAL_CI_FAKE_BASE=$mode
+  expect_status 2 image --containers --allow-emulation
+  if grep -q '^build ' "$scratch/docker-calls"; then exit 1; fi
+done
+unset LOCAL_CI_FAKE_BASE
 expect_status 42 code
 [[ $(cat "$scratch/calls") == 'install --frozen-lockfile --ignore-scripts' ]]
 if grep -q 'Selected local job(s) passed' "$scratch/output"; then exit 1; fi

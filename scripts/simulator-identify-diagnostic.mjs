@@ -6,18 +6,26 @@
 // never retries a failed run and never promotes a result to a CI pass. It reuses
 // the existing observer unchanged and emits only validated observer data plus
 // process lifecycle metadata.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const OPT_IN_TOKEN = 'synthetic-identification-diagnostic'
@@ -35,6 +43,8 @@ export const DOCKER_CALL_TIMEOUT_MS = 10_000
 export const CAPTURE_BYTE_LIMIT = 1024 * 1024
 export const ENTRYPOINT_SCRIPT_BYTE_LIMIT = 256 * 1024
 export const SUPERVISOR_CONFIG_BYTE_LIMIT = 256 * 1024
+export const CHILD_LOG_DIRECTORY_LIMIT = 64
+export const CHILD_LOG_FILE_LIMIT = 8
 export const OBSERVER_CLASSIFICATIONS = [
   'valid-incomplete-identification',
   'identification-complete-not-readiness',
@@ -56,11 +66,49 @@ export const COUNTER_KEYS = [
   'bytes_retransmit',
   'bytes_invalid',
 ]
+export const ROUTING_KINDS = [
+  'stdout-file',
+  'stderr-file',
+  'child-log',
+  'container-output',
+  'unresolved',
+]
+export const CAPTURE_REASONS = [
+  'observer-records-captured',
+  'no-observer-records',
+  'capture-unavailable',
+  'routing-unresolved',
+  'wrapper-not-applied',
+]
+export const WRAPPER_REASONS = [
+  'observer-in-command',
+  'observer-absent-from-command',
+  'supervisor-unavailable',
+  'program-not-running',
+  'command-unreadable',
+]
+export const STAGES = [
+  'preflight',
+  'baseline',
+  'discover',
+  'transform',
+  'sources',
+  'observe',
+  'verify',
+  'capture',
+  'analyze',
+  'report',
+  'cleanup',
+]
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 export const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, '..')
 const KLIPPY_SCRIPT_SUFFIX = '/klippy/klippy.py'
 const SHELL_METACHARACTERS = /[;&|<>`$(){}\[\]!*?\\\n\r]/
+const LABEL_KEY = 'com.open3dfarmmanager.identify-diagnostic'
+const LABEL_RUN_KEY = 'com.open3dfarmmanager.identify-diagnostic-run'
+const DEFAULT_DOCKER_BINARY = 'docker'
+const CONTAINER_LOG_LINE_LIMIT = 5000
 
 export class DiagnosticError extends Error {
   constructor(message, options = {}) {
@@ -248,7 +296,17 @@ export function findKlipperProgram(config) {
   return { section, command: commands[0] }
 }
 
+/** Return the single `[supervisord]` server section, when the file has one. */
+export function findSupervisorServerSection(config) {
+  const servers = config.sections.filter(
+    (section) => section.type === 'supervisord',
+  )
+  if (servers.length !== 1) return null
+  return servers[0]
+}
+
 function entryValue(section, key) {
+  if (!section) return undefined
   const found = section.entries.find((entry) => entry.key === key)
   return found ? found.value : undefined
 }
@@ -409,27 +467,75 @@ export function transformSupervisorConfig(text, options) {
 
 /**
  * Resolve where the child process stderr is routed, using only the extracted
- * configuration. Docker logs are used when Supervisor inherits the child's
- * stderr, never as an assumption.
+ * configuration.
+ *
+ * Supervisor decides with `redirect_stderr`. When the directive is present the
+ * decision is taken from it. When the directive is absent both branches stay
+ * possible, so both are returned as candidates and the capture decides by
+ * content, never by assumption.
+ *
+ * The routing is never a reason to abort the run: an unusable routing is
+ * reported as `unresolved` and costs the capture, not the observation.
  */
-export function resolveStderrRouting(section) {
-  const redirect = entryValue(section, 'redirect_stderr')
-  const stdoutFile = entryValue(section, 'stdout_logfile')
-  const stderrFile = entryValue(section, 'stderr_logfile')
-  if (redirect === 'true') {
-    if (!isAbsoluteContainerPath(stdoutFile))
-      throw diagnostic(
-        'redirect_stderr is enabled without a usable stdout_logfile',
-        'routing',
-      )
-    return { kind: 'stdout-file', path: stdoutFile }
+export function resolveStderrRouting(programSection, serverSection = null) {
+  const redirectRaw = entryValue(programSection, 'redirect_stderr')
+  const stdoutFile = entryValue(programSection, 'stdout_logfile')
+  const stderrFile = entryValue(programSection, 'stderr_logfile')
+  const childlogdir = entryValue(serverSection, 'childlogdir')
+  const redirect =
+    redirectRaw === undefined
+      ? null
+      : redirectRaw.trim().toLowerCase() === 'true'
+  const branches =
+    redirect === null ? ['true', 'false'] : [redirect ? 'true' : 'false']
+  const candidates = []
+  const rejected = []
+  const pushFile = (kind, path) => {
+    if (!isAbsoluteContainerPath(path)) {
+      rejected.push(`${path} is not a safe absolute container path`)
+      return
+    }
+    if (path.startsWith('/dev/')) {
+      // A device target is the container's own stream, not a file to tail.
+      candidates.push({ kind: 'container-output', path: null })
+      return
+    }
+    candidates.push({ kind, path })
   }
-  if (stderrFile !== undefined) {
-    if (!isAbsoluteContainerPath(stderrFile))
-      throw diagnostic('stderr_logfile is not a safe absolute path', 'routing')
-    return { kind: 'stderr-file', path: stderrFile }
+  for (const branch of branches) {
+    if (branch === 'true') {
+      if (stdoutFile !== undefined) {
+        pushFile('stdout-file', stdoutFile)
+      } else {
+        candidates.push({
+          kind: 'child-log',
+          path: null,
+          childlogdir: isAbsoluteContainerPath(childlogdir ?? '')
+            ? childlogdir
+            : null,
+        })
+      }
+    } else if (stderrFile !== undefined) {
+      pushFile('stderr-file', stderrFile)
+    } else {
+      candidates.push({ kind: 'container-output', path: null })
+    }
   }
-  return { kind: 'container-stdout', path: null }
+  if (candidates.length === 0)
+    return {
+      kind: 'unresolved',
+      path: null,
+      candidates: [],
+      ambiguous: redirect === null,
+      reason: rejected.join('; ') || 'no usable capture source',
+    }
+  return {
+    kind: candidates[0].kind,
+    path: candidates[0].path ?? null,
+    candidates,
+    ambiguous: redirect === null,
+    reason: null,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -541,20 +647,22 @@ export function readObserverSourcePins(text) {
 // Container specification
 // ---------------------------------------------------------------------------
 
-const FORBIDDEN_ARGUMENTS = [
+const FORBIDDEN_OPTION_NAMES = [
   '--privileged',
   '--device',
   '--publish',
   '--cap-add',
   '--cap-add-all',
-  '--security-opt=seccomp=unconfined',
-  '--pid=host',
-  '--ipc=host',
-  '--network=host',
-  '--userns=host',
-  '--userns=host-id',
-  '--privileged=true',
+  '--pid',
+  '--ipc',
+  '--userns',
 ]
+const FORBIDDEN_OPTION_VALUES = {
+  '--pid': ['host'],
+  '--ipc': ['host'],
+  '--userns': ['host', 'host-id'],
+}
+const ALLOWED_SECURITY_OPTIONS = ['no-new-privileges:true']
 
 /** Build the exact `docker create` argument vector for the diagnostic container. */
 export function buildContainerArguments(options) {
@@ -598,10 +706,30 @@ export function buildContainerArguments(options) {
 
 /** Refuse a container specification that widens the isolation of the run. */
 export function assertContainerIsolation(arguments_) {
-  for (const argument of arguments_) {
-    if (FORBIDDEN_ARGUMENTS.includes(argument))
+  for (let index = 0; index < arguments_.length; index++) {
+    const argument = arguments_[index]
+    const separator = argument.indexOf('=')
+    const name = separator === -1 ? argument : argument.slice(0, separator)
+    const inlineValue = separator === -1 ? null : argument.slice(separator + 1)
+    const value = inlineValue ?? arguments_[index + 1] ?? null
+    if (FORBIDDEN_OPTION_NAMES.includes(name))
       throw diagnostic(
-        `container specification contains a forbidden argument: ${argument}`,
+        `container specification contains a forbidden argument: ${name}`,
+        'isolation',
+      )
+    const forbiddenValues = FORBIDDEN_OPTION_VALUES[name]
+    if (forbiddenValues && value !== null && forbiddenValues.includes(value))
+      throw diagnostic(
+        `container specification contains a forbidden argument: ${name}=${value}`,
+        'isolation',
+      )
+    if (
+      name === '--security-opt' &&
+      value !== null &&
+      !ALLOWED_SECURITY_OPTIONS.includes(value)
+    )
+      throw diagnostic(
+        'container specification contains a forbidden security option',
         'isolation',
       )
     if (argument.startsWith('-p') && argument !== '--pull')
@@ -656,6 +784,37 @@ const ENDPOINT_ARGUMENTS = [
   '--printer',
 ]
 
+/**
+ * Validate the run settings. The command line and the programmatic entry point
+ * share this single source of truth, so a programmatic caller cannot create an
+ * unpinned container or observe longer than the readiness budget.
+ */
+export function assertRunSettings(settings, phase = 'arguments') {
+  if (settings.image !== PINNED_IMAGE_REFERENCE)
+    throw diagnostic(
+      'image reference does not match the reviewed pinned amd64 image',
+      phase,
+    )
+  if (settings.platform !== PINNED_PLATFORM)
+    throw diagnostic(
+      'platform does not match the reviewed amd64 platform',
+      phase,
+    )
+  if (
+    !Number.isSafeInteger(settings.observationMs) ||
+    settings.observationMs <= 0
+  )
+    throw diagnostic('observation window is not a positive integer', phase)
+  if (settings.observationMs > READINESS_BUDGET_MS)
+    throw diagnostic(
+      'observation window may not extend the original 90 second readiness budget',
+      phase,
+    )
+  if (!isAbsolute(settings.composeFile) || !isAbsolute(settings.observerPath))
+    throw diagnostic('compose and observer paths must be absolute', phase)
+  return settings
+}
+
 /** Validate the runner arguments. No Docker call happens before this passes. */
 export function parseArguments(argv) {
   const options = {
@@ -709,32 +868,7 @@ export function parseArguments(argv) {
       'explicit synthetic opt-in is required: --opt-in=' + OPT_IN_TOKEN,
       'arguments',
     )
-  if (options.image !== PINNED_IMAGE_REFERENCE)
-    throw diagnostic(
-      'image reference does not match the reviewed pinned amd64 image',
-      'arguments',
-    )
-  if (options.platform !== PINNED_PLATFORM)
-    throw diagnostic(
-      'platform does not match the reviewed amd64 platform',
-      'arguments',
-    )
-  if (
-    !Number.isSafeInteger(options.observationMs) ||
-    options.observationMs <= 0
-  )
-    throw diagnostic(
-      'observation window is not a positive integer',
-      'arguments',
-    )
-  if (options.observationMs > READINESS_BUDGET_MS)
-    throw diagnostic(
-      'observation window may not extend the original 90 second readiness budget',
-      'arguments',
-    )
-  if (!isAbsolute(options.composeFile) || !isAbsolute(options.observerPath))
-    throw diagnostic('compose and observer paths must be absolute', 'arguments')
-  return options
+  return assertRunSettings(options, 'arguments')
 }
 
 // ---------------------------------------------------------------------------
@@ -742,15 +876,18 @@ export function parseArguments(argv) {
 // ---------------------------------------------------------------------------
 
 /** Real Docker CLI runner. Every call uses an argument vector, never a shell. */
-export function createDockerRunner() {
+export function createDockerRunner(options = {}) {
+  const binary = options.binary ?? DEFAULT_DOCKER_BINARY
   return {
     async run(args, runOptions = {}) {
       const timeoutMs = runOptions.timeoutMs ?? DOCKER_CALL_TIMEOUT_MS
       const maxBuffer = runOptions.maxBuffer ?? 8 * 1024 * 1024
       return new Promise((resolvePromise) => {
-        const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+        const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'] })
         const stdout = []
         const stderr = []
+        let stdoutBytes = 0
+        let stderrBytes = 0
         let settled = false
         const finish = (result) => {
           if (settled) return
@@ -768,10 +905,14 @@ export function createDockerRunner() {
           })
         }, timeoutMs)
         child.stdout.on('data', (chunk) => {
-          if (Buffer.concat(stdout).length < maxBuffer) stdout.push(chunk)
+          if (stdoutBytes >= maxBuffer) return
+          stdoutBytes += chunk.length
+          stdout.push(chunk)
         })
         child.stderr.on('data', (chunk) => {
-          if (Buffer.concat(stderr).length < maxBuffer) stderr.push(chunk)
+          if (stderrBytes >= maxBuffer) return
+          stderrBytes += chunk.length
+          stderr.push(chunk)
         })
         child.on('error', (error) => {
           finish({
@@ -800,16 +941,22 @@ export function createDockerRunner() {
 // Runner
 // ---------------------------------------------------------------------------
 
-function readBoundedFile(path, limit) {
+function readBoundedText(path, limit) {
   const content = readFileSync(path)
   if (content.length > limit)
-    throw diagnostic('extracted file exceeds the permitted size', 'discover')
-  return content.toString('utf8')
+    return {
+      ok: false,
+      reason: `exceeds the permitted size of ${limit} bytes`,
+      bytes: content.length,
+    }
+  if (content.includes(0))
+    return { ok: false, reason: 'is not a text file', bytes: content.length }
+  return { ok: true, text: content.toString('utf8'), bytes: content.length }
 }
 
 function writeLedgerFile(ledgerDir, name, content) {
   const path = join(ledgerDir, name)
-  writeFileSync(path, content)
+  writeFileSync(path, content, { mode: 0o600 })
   return path
 }
 
@@ -834,16 +981,6 @@ async function dockerJson(docker, args, runOptions, phase) {
   }
 }
 
-async function copyOut(docker, container, path, destination, phase) {
-  await dockerRun(
-    docker,
-    ['cp', `${container}:${path}`, destination],
-    {},
-    phase,
-  )
-  return destination
-}
-
 function digestOfFile(path) {
   return sha256(readFileSync(path))
 }
@@ -852,12 +989,18 @@ function verifyComposePin(composeFile) {
   if (!existsSync(composeFile))
     throw diagnostic('compose file is missing', 'preflight')
   const text = readFileSync(composeFile, 'utf8')
-  if (!text.includes(PINNED_AMD64_DIGEST))
+  const images = [...text.matchAll(/^[ \t]*image:[ \t]*(\S+)[ \t]*$/gm)].map(
+    (match) => match[1],
+  )
+  if (!images.includes(PINNED_IMAGE_REFERENCE))
     throw diagnostic(
       'compose file does not pin the reviewed amd64 image digest',
       'preflight',
     )
-  if (!text.includes(`platform: ${PINNED_PLATFORM}`))
+  const platforms = [
+    ...text.matchAll(/^[ \t]*platform:[ \t]*(\S+)[ \t]*$/gm),
+  ].map((match) => match[1])
+  if (!platforms.includes(PINNED_PLATFORM))
     throw diagnostic(
       'compose file does not pin the reviewed amd64 platform',
       'preflight',
@@ -899,7 +1042,6 @@ function supervisorConfigPathFromScript(script) {
 async function discoverSupervisorConfig(docker, options, state) {
   const inspectionName = `${state.runName}-inspect`
   state.inspectionName = inspectionName
-  state.resources.push({ kind: 'container', name: inspectionName })
   await dockerRun(
     docker,
     [
@@ -916,6 +1058,7 @@ async function discoverSupervisorConfig(docker, options, state) {
     {},
     'discover',
   )
+  state.resources.push({ kind: 'container', name: inspectionName })
   const inspected = await dockerJson(
     docker,
     ['inspect', inspectionName],
@@ -928,6 +1071,7 @@ async function discoverSupervisorConfig(docker, options, state) {
     ...(Array.isArray(imageConfig.Entrypoint) ? imageConfig.Entrypoint : []),
     ...(Array.isArray(imageConfig.Cmd) ? imageConfig.Cmd : []),
   ].filter((value) => typeof value === 'string' && value.startsWith('/'))
+  const rejected = []
   let script = null
   for (const [index, candidate] of candidates.entries()) {
     const destination = join(state.workDir, `entrypoint-${index}`)
@@ -936,14 +1080,24 @@ async function discoverSupervisorConfig(docker, options, state) {
       `${inspectionName}:${candidate}`,
       destination,
     ])
-    if (result.status === 0 && existsSync(destination)) {
-      script = readBoundedFile(destination, ENTRYPOINT_SCRIPT_BYTE_LIMIT)
-      break
+    if (result.status !== 0 || !existsSync(destination)) {
+      rejected.push(`${candidate}: not a readable file in the image`)
+      continue
     }
+    const bounded = readBoundedText(destination, ENTRYPOINT_SCRIPT_BYTE_LIMIT)
+    if (!bounded.ok) {
+      rejected.push(`${candidate}: ${bounded.reason}`)
+      rmSync(destination, { force: true })
+      continue
+    }
+    script = bounded.text
+    break
   }
   if (script === null)
     throw diagnostic(
-      'image entrypoint script could not be extracted from the pinned image',
+      `image entrypoint script could not be extracted from the pinned image (rejected candidates: ${
+        rejected.join('; ') || 'none'
+      })`,
       'discover',
     )
   const configPath = supervisorConfigPathFromScript(script)
@@ -963,11 +1117,16 @@ async function discoverSupervisorConfig(docker, options, state) {
       'supervisor configuration could not be extracted read-only from the pinned image',
       'discover',
     )
-  const configText = readBoundedFile(
+  const configText = readBoundedText(
     configDestination,
     SUPERVISOR_CONFIG_BYTE_LIMIT,
   )
-  return { configPath, configText }
+  if (!configText.ok)
+    throw diagnostic(
+      `supervisor configuration ${configText.reason}`,
+      'discover',
+    )
+  return { configPath, configText: configText.text }
 }
 
 async function verifyKlipperSources(docker, state, root, pins) {
@@ -1004,7 +1163,8 @@ async function readSupervisorStatus(docker, container) {
   ])
   const states = {}
   const pids = {}
-  if (result.status !== 0) return { states, pids }
+  if (result.status !== 0)
+    return { available: false, states: {}, pids: {}, reason: 'status-refused' }
   for (const line of result.stdout.split('\n')) {
     const match = /^([A-Za-z0-9_-]+)\s+([A-Z]+)(?:\s+pid\s+(\d+))?/.exec(
       line.trim(),
@@ -1014,7 +1174,7 @@ async function readSupervisorStatus(docker, container) {
     states[match[1]] = match[2]
     if (match[3]) pids[match[1]] = Number(match[3])
   }
-  return { states, pids }
+  return { available: true, states, pids, reason: null }
 }
 
 async function readProcessCommand(docker, container, pid) {
@@ -1024,45 +1184,240 @@ async function readProcessCommand(docker, container, pid) {
     'cat',
     `/proc/${pid}/cmdline`,
   ])
-  if (result.status !== 0) return []
-  return result.stdout
+  if (result.status !== 0)
+    return { available: false, argv: [], reason: 'command-unreadable' }
+  const argv = result.stdout
     .split('\0')
     .filter((value) => value.length > 0)
     .map((value) => value.trim())
+  return { available: true, argv, reason: null }
 }
 
-function tailBytes(text, limit) {
+/** The observer is the wrapper; the command line must carry it in that order. */
+export function commandCarriesObserver(argv) {
+  const index = argv.indexOf(OBSERVER_MOUNT_PATH)
+  if (index === -1) return false
+  return argv[index + 1] === 'observe'
+}
+
+function countObserverRecords(text) {
+  return text.split('\n').filter((line) => line.startsWith(OBSERVER_PREFIX))
+    .length
+}
+
+/**
+ * Bound a captured stream to the capture limit.
+ *
+ * The tail cut lands on an arbitrary byte and the captured stream can end in
+ * the middle of a record. A partial last line is removed before the analyzer
+ * sees the text, because the observer aborts on the first malformed observer
+ * record and a lost analysis loses the whole observation.
+ *
+ * `truncated` says that the source was longer than the limit.
+ */
+export function boundCapture(text, limit, truncated = false) {
   const bytes = Buffer.from(text, 'utf8')
-  if (bytes.length <= limit) return bytes.toString('utf8')
-  return bytes.subarray(bytes.length - limit).toString('utf8')
+  let slice = bytes
+  let wasTruncated = truncated
+  if (bytes.length > limit) {
+    slice = bytes.subarray(bytes.length - limit)
+    wasTruncated = true
+  }
+  slice = dropTrailingPartialLine(slice)
+  return { text: slice.toString('utf8'), truncated: wasTruncated }
 }
 
-async function captureChildStderr(docker, container, routing, limit) {
-  if (routing.kind === 'container-stdout') {
-    const result = await docker.run(['logs', '--tail', '5000', container])
-    if (result.status !== 0) return { available: false, text: '', routing }
-    return {
-      available: true,
-      text: tailBytes(result.stdout, limit),
-      routing,
+function dropTrailingPartialLine(buffer) {
+  if (buffer.length === 0) return buffer
+  if (buffer[buffer.length - 1] === 0x0a) return buffer
+  const last = buffer.lastIndexOf(0x0a)
+  return last === -1 ? Buffer.alloc(0) : buffer.subarray(0, last + 1)
+}
+
+/**
+ * Split a captured stream into the observer records the analyzer can read.
+ *
+ * The observer aborts on the first record that does not parse, which turns a
+ * truncated capture into no analysis at all. A line that carries the observer
+ * prefix but is not a complete record is not an observer event, so it is
+ * dropped and counted. Every other line is kept unchanged, so the input
+ * bounds of the observer still apply.
+ */
+export function splitObserverRecords(text) {
+  const kept = []
+  let dropped = 0
+  for (const line of text.split('\n')) {
+    if (!line.startsWith(OBSERVER_PREFIX)) {
+      kept.push(line)
+      continue
     }
+    try {
+      const parsed = JSON.parse(line.slice(OBSERVER_PREFIX.length))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        kept.push(line)
+        continue
+      }
+    } catch {
+      // Not a complete record.
+    }
+    dropped += 1
   }
+  return { text: kept.join('\n'), dropped }
+}
+
+function containerJoin(directory, name) {
+  return directory.endsWith('/')
+    ? `${directory}${name}`
+    : `${directory}/${name}`
+}
+
+async function resolveChildLogDirectory(docker, container, candidate) {
+  if (candidate.childlogdir) return candidate.childlogdir
+  const environment = await docker.run([
+    'exec',
+    container,
+    'printenv',
+    'TMPDIR',
+  ])
+  if (environment.status === 0) {
+    const value = environment.stdout.trim()
+    if (isAbsoluteContainerPath(value)) return value
+  }
+  // Supervisor falls back to the temporary directory when TMPDIR is unset.
+  return '/tmp'
+}
+
+async function readChildLog(docker, container, candidate, limit) {
+  const directory = await resolveChildLogDirectory(docker, container, candidate)
+  const listing = await docker.run(
+    ['exec', container, 'ls', '-1t', directory],
+    { maxBuffer: 64 * 1024 },
+  )
+  if (listing.status !== 0)
+    return { available: false, text: '', truncated: false }
+  const names = listing.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, CHILD_LOG_FILE_LIMIT)
+  if (names.length === 0)
+    return { available: false, text: '', truncated: false }
+  let fallback = null
+  for (const name of names) {
+    const path = containerJoin(directory, name)
+    const result = await docker.run([
+      'exec',
+      container,
+      'tail',
+      '-c',
+      String(limit + 1),
+      path,
+    ])
+    if (result.status !== 0) continue
+    const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit
+    const bounded = boundCapture(result.stdout, limit, truncated)
+    if (countObserverRecords(bounded.text) > 0)
+      return {
+        available: true,
+        text: bounded.text,
+        truncated: bounded.truncated,
+      }
+    if (!fallback)
+      fallback = {
+        available: true,
+        text: bounded.text,
+        truncated: bounded.truncated,
+      }
+  }
+  return fallback ?? { available: false, text: '', truncated: false }
+}
+
+async function readRoutingSource(docker, container, candidate, limit) {
+  if (candidate.kind === 'container-output') {
+    const result = await docker.run(
+      ['logs', '--tail', String(CONTAINER_LOG_LINE_LIMIT), container],
+      { maxBuffer: limit + 1 },
+    )
+    if (result.status !== 0)
+      return { available: false, text: '', truncated: false }
+    const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit
+    const bounded = boundCapture(result.stdout, limit, truncated)
+    return { available: true, text: bounded.text, truncated: bounded.truncated }
+  }
+  if (candidate.kind === 'child-log')
+    return readChildLog(docker, container, candidate, limit)
   const result = await docker.run([
     'exec',
     container,
     'tail',
     '-c',
-    String(limit),
-    routing.path,
+    String(limit + 1),
+    candidate.path,
   ])
-  if (result.status !== 0) return { available: false, text: '', routing }
-  return { available: true, text: tailBytes(result.stdout, limit), routing }
+  if (result.status !== 0)
+    return { available: false, text: '', truncated: false }
+  const truncated = Buffer.byteLength(result.stdout, 'utf8') > limit
+  const bounded = boundCapture(result.stdout, limit, truncated)
+  return { available: true, text: bounded.text, truncated: bounded.truncated }
+}
+
+/**
+ * Capture the child stderr from the routes the extracted configuration allows.
+ *
+ * The route that actually carries the observer records is the proof. When no
+ * route carries records, the capture stays empty and the report says so; it
+ * never claims silence and never claims that the wrapper failed.
+ */
+async function captureChildStderr(docker, container, routing, limit) {
+  if (routing.kind === 'unresolved' || routing.candidates.length === 0)
+    return {
+      available: false,
+      text: '',
+      source: null,
+      truncated: false,
+      observerRecords: 0,
+      reason: 'routing-unresolved',
+    }
+  let fallback = null
+  for (const candidate of routing.candidates) {
+    const attempt = await readRoutingSource(docker, container, candidate, limit)
+    if (!attempt.available) continue
+    const records = countObserverRecords(attempt.text)
+    if (records > 0)
+      return {
+        available: true,
+        text: attempt.text,
+        source: candidate.kind,
+        truncated: attempt.truncated,
+        observerRecords: records,
+        reason: 'observer-records-captured',
+      }
+    if (!fallback)
+      fallback = {
+        available: true,
+        text: attempt.text,
+        source: candidate.kind,
+        truncated: attempt.truncated,
+        observerRecords: 0,
+        reason: 'no-observer-records',
+      }
+  }
+  if (fallback) return fallback
+  return {
+    available: false,
+    text: '',
+    source: null,
+    truncated: false,
+    observerRecords: 0,
+    reason: 'capture-unavailable',
+  }
 }
 
 async function analyzeCapture(docker, container, capture) {
+  const split = splitObserverRecords(capture.text)
   const result = await docker.run(
     ['exec', '-i', container, 'python3', OBSERVER_MOUNT_PATH, 'analyze'],
-    { input: capture.text },
+    { input: split.text },
   )
   if (result.status !== 0)
     throw diagnostic('observer analysis failed inside the container', 'analyze')
@@ -1076,14 +1431,30 @@ async function analyzeCapture(docker, container, capture) {
       cause,
     )
   }
-  return validateObserverAnalysis(parsed)
+  return {
+    analysis: validateObserverAnalysis(parsed),
+    invalidRecords: split.dropped,
+  }
 }
 
+/**
+ * Remove the resources this run created.
+ *
+ * Containers are removed before volumes, because a volume that is still
+ * mounted by a container cannot be removed and would be leaked. Every removal
+ * verifies the run label first, and a resource that was already removed is
+ * never inspected again, so a retry is safe.
+ */
 async function removeOwned(docker, state) {
-  if (state.cleanupDone) return state.cleanupErrors
-  state.cleanupDone = true
   const failures = []
-  for (const resource of state.resources) {
+  const pending = state.resources.filter(
+    (resource) => !state.removedResources.has(resource.name),
+  )
+  const ordered = [
+    ...pending.filter((resource) => resource.kind === 'container'),
+    ...pending.filter((resource) => resource.kind !== 'container'),
+  ]
+  for (const resource of ordered) {
     try {
       if (resource.kind === 'container') {
         const labels = await dockerJson(
@@ -1108,6 +1479,7 @@ async function removeOwned(docker, state) {
           throw new Error('label verification failed')
         await dockerRun(docker, ['volume', 'rm', resource.name], {}, 'cleanup')
       }
+      state.removedResources.add(resource.name)
     } catch (error) {
       failures.push({
         kind: resource.kind,
@@ -1116,7 +1488,6 @@ async function removeOwned(docker, state) {
       })
     }
   }
-  state.cleanupErrors = failures
   return failures
 }
 
@@ -1130,13 +1501,83 @@ function removeWorkDirectory(state) {
   }
 }
 
-function assertLedgerOutsideRepository(ledgerDir) {
-  const relation = relative(REPOSITORY_ROOT, ledgerDir)
-  if (relation === '' || (!relation.startsWith('..') && !isAbsolute(relation)))
-    throw diagnostic(
-      'ledger directory must stay outside the repository',
-      'preflight',
+/** Resolve a path to its canonical form, tolerating a missing leaf. */
+export function canonicalPath(path) {
+  const absolute = resolve(path)
+  const missing = []
+  let current = absolute
+  while (!existsSync(current)) {
+    const parent = dirname(current)
+    if (parent === current) return absolute
+    missing.unshift(basename(current))
+    current = parent
+  }
+  let real
+  try {
+    real = realpathSync(current)
+  } catch {
+    real = current
+  }
+  return join(real, ...missing)
+}
+
+function gitOutput(args) {
+  try {
+    return execFileSync('git', ['-C', REPOSITORY_ROOT, ...args], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Every directory that belongs to the repository, including the linked
+ * worktrees of the same repository and the shared git directory.
+ */
+export function repositoryExclusionRoots() {
+  const roots = new Set()
+  const add = (path) => {
+    if (!path) return
+    roots.add(canonicalPath(path))
+  }
+  add(REPOSITORY_ROOT)
+  const common =
+    gitOutput(['rev-parse', '--git-common-dir']) ??
+    gitOutput(['rev-parse', '--git-dir'])
+  if (common && common.trim().length > 0)
+    add(resolve(REPOSITORY_ROOT, common.trim()))
+  const worktrees = gitOutput(['worktree', 'list', '--porcelain'])
+  if (worktrees) {
+    for (const line of worktrees.split('\n')) {
+      if (!line.startsWith('worktree ')) continue
+      add(line.slice('worktree '.length).trim())
+    }
+  }
+  return [...roots]
+}
+
+/**
+ * Refuse a ledger that lives inside the repository or inside any linked
+ * worktree of the same repository. Both sides are resolved, so a symlink
+ * cannot smuggle the ledger inside the checkout.
+ */
+export function assertLedgerOutsideRepository(ledgerDir) {
+  const canonical = canonicalPath(ledgerDir)
+  for (const root of repositoryExclusionRoots()) {
+    const relation = relative(root, canonical)
+    if (
+      relation === '' ||
+      (!relation.startsWith('..') && !isAbsolute(relation))
     )
+      throw diagnostic(
+        'ledger directory must stay outside the repository and every linked worktree',
+        'preflight',
+      )
+  }
+  return canonical
 }
 
 /**
@@ -1147,42 +1588,60 @@ export async function runDiagnostic(options) {
   const docker = options.docker
   const clock = options.clock ?? { now: () => Date.now() }
   const sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-  const composeFile =
-    options.composeFile ?? join(REPOSITORY_ROOT, 'infra/sim/docker-compose.yml')
-  const observerPath =
-    options.observerPath ??
-    join(REPOSITORY_ROOT, 'infra/sim/experiments/serial_diagnostic.py')
-  const image = options.image ?? PINNED_IMAGE_REFERENCE
-  const platform = options.platform ?? PINNED_PLATFORM
-  const observationMs = options.observationMs ?? READINESS_BUDGET_MS
-  const settings = { composeFile, observerPath, image, platform, observationMs }
+  const settings = {
+    composeFile:
+      options.composeFile ??
+      join(REPOSITORY_ROOT, 'infra/sim/docker-compose.yml'),
+    observerPath:
+      options.observerPath ??
+      join(REPOSITORY_ROOT, 'infra/sim/experiments/serial_diagnostic.py'),
+    image: options.image ?? PINNED_IMAGE_REFERENCE,
+    platform: options.platform ?? PINNED_PLATFORM,
+    observationMs: options.observationMs ?? READINESS_BUDGET_MS,
+  }
+  assertRunSettings(settings, 'settings')
   const runId = options.runId
   const state = {
     runName: options.runName,
     runId,
-    labelKey: 'com.open3dfarmmanager.identify-diagnostic',
+    labelKey: LABEL_KEY,
     labelArguments: [
       '--label',
-      `com.open3dfarmmanager.identify-diagnostic=${runId}`,
+      `${LABEL_KEY}=${runId}`,
       '--label',
-      `com.open3dfarmmanager.identify-diagnostic-run=${options.runName}`,
+      `${LABEL_RUN_KEY}=${options.runName}`,
     ],
     resources: [],
+    removedResources: new Set(),
     workDir: null,
-    cleanupDone: false,
-    cleanupErrors: [],
     phase: 'preflight',
+    stages: {},
+  }
+  const runStartedAt = clock.now()
+  let stageStart = runStartedAt
+  let currentStage = 'preflight'
+  const enterStage = (name) => {
+    const now = clock.now()
+    state.stages[currentStage] = now - stageStart
+    currentStage = name
+    state.phase = name
+    stageStart = now
   }
 
   let ledgerDir = options.ledgerDir
   if (!ledgerDir) {
-    ledgerDir = mkdtempSync(join(tmpdir(), 'open3dfm-identify-diagnostic-'))
+    const base = canonicalPath(tmpdir())
+    assertLedgerOutsideRepository(base)
+    ledgerDir = mkdtempSync(join(base, 'open3dfm-identify-diagnostic-'))
   }
+  ledgerDir = assertLedgerOutsideRepository(ledgerDir)
   mkdirSync(ledgerDir, { recursive: true })
-  assertLedgerOutsideRepository(resolve(ledgerDir))
   state.workDir = join(ledgerDir, 'work')
   mkdirSync(state.workDir, { recursive: true })
 
+  let result = null
+  let pendingFailure = null
+  let caughtError = null
   try {
     // Phase: preflight ---------------------------------------------------
     const composeDigest = verifyComposePin(settings.composeFile)
@@ -1190,8 +1649,9 @@ export async function runDiagnostic(options) {
     const pinnedImage = settings.image
 
     // Phase: baseline ----------------------------------------------------
-    state.phase = 'baseline'
+    enterStage('baseline')
     const baseline = []
+    const baselineFailures = []
     for (const [name, args] of [
       ['containers', ['ps', '-a', '--no-trunc']],
       ['images', ['images', '--digests', '--no-trunc']],
@@ -1199,8 +1659,10 @@ export async function runDiagnostic(options) {
       ['networks', ['network', 'ls']],
       ['disk', ['system', 'df']],
     ]) {
-      const result = await docker.run(args)
-      baseline.push(`# ${name}\n${result.stdout}${result.stderr}`)
+      const result_ = await docker.run(args)
+      if (result_.status !== 0)
+        baselineFailures.push({ command: name, status: result_.status })
+      baseline.push(`# ${name}\n${result_.stdout}${result_.stderr}`)
     }
     writeLedgerFile(
       ledgerDir,
@@ -1209,7 +1671,7 @@ export async function runDiagnostic(options) {
     )
 
     // Phase: discover ----------------------------------------------------
-    state.phase = 'discover'
+    enterStage('discover')
     const discovered = await discoverSupervisorConfig(docker, settings, state)
     writeLedgerFile(
       ledgerDir,
@@ -1231,15 +1693,16 @@ export async function runDiagnostic(options) {
     )
 
     // Phase: transform ---------------------------------------------------
-    state.phase = 'transform'
+    enterStage('transform')
     const transformed = transformSupervisorConfig(discovered.configText, {
       observerPath: OBSERVER_MOUNT_PATH,
     })
     writeLedgerFile(ledgerDir, 'supervisord.transformed.conf', transformed.text)
     const transformedPath = join(state.workDir, 'supervisord.transformed.conf')
-    writeFileSync(transformedPath, transformed.text)
+    writeFileSync(transformedPath, transformed.text, { mode: 0o600 })
 
     // Phase: source gate -------------------------------------------------
+    enterStage('sources')
     // The pins come from the pinned observer bytes. The resolver is a test
     // seam only; the command line never overrides it.
     const sourcePins = options.resolveSourcePins
@@ -1253,17 +1716,16 @@ export async function runDiagnostic(options) {
     )
 
     // Phase: observe -----------------------------------------------------
-    state.phase = 'observe'
+    enterStage('observe')
     const volumeName = `${state.runName}-data`
-    state.resources.push({ kind: 'volume', name: volumeName })
     await dockerRun(
       docker,
       ['volume', 'create', ...state.labelArguments, volumeName],
       {},
       'observe',
     )
+    state.resources.push({ kind: 'volume', name: volumeName })
     const containerName = state.runName
-    state.resources.push({ kind: 'container', name: containerName })
     const containerArguments = buildContainerArguments({
       name: containerName,
       platform: settings.platform,
@@ -1273,7 +1735,7 @@ export async function runDiagnostic(options) {
       pidsLimit: '256',
       labels: [
         [state.labelKey, runId],
-        ['com.open3dfarmmanager.identify-diagnostic-run', state.runName],
+        [LABEL_RUN_KEY, state.runName],
       ],
       volume: volumeName,
       observerHostPath: settings.observerPath,
@@ -1282,17 +1744,17 @@ export async function runDiagnostic(options) {
     })
     assertContainerIsolation(containerArguments)
     await dockerRun(docker, containerArguments, {}, 'observe')
+    state.resources.push({ kind: 'container', name: containerName })
     await dockerRun(docker, ['start', containerName], {}, 'observe')
 
     const startedAt = clock.now()
     const deadline = startedAt + settings.observationMs
     while (clock.now() < deadline) {
-      const status = await docker.run([
-        'inspect',
-        '--format',
-        '{{.State.Status}}',
-        containerName,
-      ])
+      const remaining = Math.max(1, deadline - clock.now())
+      const status = await docker.run(
+        ['inspect', '--format', '{{.State.Status}}', containerName],
+        { timeoutMs: remaining },
+      )
       if (status.status !== 0) break
       if (status.stdout.trim() === 'exited') break
       await sleep(Math.min(1000, Math.max(0, deadline - clock.now())))
@@ -1300,61 +1762,92 @@ export async function runDiagnostic(options) {
     const observedFor = clock.now() - startedAt
 
     // Phase: verification ------------------------------------------------
-    state.phase = 'verify'
+    enterStage('verify')
     const supervisor = await readSupervisorStatus(docker, containerName)
-    const processes = supervisor.states
-    let wrapperApplied = false
-    const klipperPid = supervisor.pids.klipper
-    if (klipperPid) {
-      const command = await readProcessCommand(
-        docker,
-        containerName,
-        klipperPid,
-      )
-      wrapperApplied =
-        command.includes(OBSERVER_MOUNT_PATH) && command.includes('observe')
+    const processes = supervisor.available ? supervisor.states : 'unavailable'
+    let wrapperApplied = 'unavailable'
+    let wrapperReason = 'supervisor-unavailable'
+    if (supervisor.available) {
+      const klipperPid = supervisor.pids.klipper
+      if (klipperPid === undefined) {
+        wrapperReason = 'program-not-running'
+      } else {
+        const command = await readProcessCommand(
+          docker,
+          containerName,
+          klipperPid,
+        )
+        if (!command.available) {
+          wrapperReason = 'command-unreadable'
+        } else {
+          wrapperApplied = commandCarriesObserver(command.argv)
+          wrapperReason = wrapperApplied
+            ? 'observer-in-command'
+            : 'observer-absent-from-command'
+        }
+      }
     }
 
     // Phase: capture -----------------------------------------------------
-    state.phase = 'capture'
-    const program = findKlipperProgram(
-      parseSupervisorConfig(discovered.configText),
-    ).section
-    const routing = resolveStderrRouting(program)
+    enterStage('capture')
+    const parsedConfig = parseSupervisorConfig(discovered.configText)
+    const program = findKlipperProgram(parsedConfig).section
+    const routing = resolveStderrRouting(
+      program,
+      findSupervisorServerSection(parsedConfig),
+    )
     writeLedgerFile(
       ledgerDir,
       'paths.txt',
-      `configuration=${discovered.configPath}\nrouting=${routing.path ?? 'container-stdout'}\n`,
+      `configuration=${discovered.configPath}\nrouting=${routing.kind}\n`,
     )
-    const capture = await captureChildStderr(
-      docker,
-      containerName,
-      routing,
-      CAPTURE_BYTE_LIMIT,
-    )
-    writeLedgerFile(
-      ledgerDir,
-      'child-stderr.log',
-      capture.available ? capture.text : '',
-    )
-    const observerRecords = capture.text
-      .split('\n')
-      .filter((line) => line.startsWith(OBSERVER_PREFIX)).length
+    let capture = {
+      available: false,
+      text: '',
+      source: null,
+      truncated: false,
+      observerRecords: 0,
+      reason: 'wrapper-not-applied',
+    }
+    if (wrapperApplied === false) {
+      // The transformation provably did not reach the running process. A
+      // capture from it would prove nothing, so the capture is skipped and
+      // the run reports the verified absence instead of a false capture.
+      pendingFailure = new DiagnosticError(
+        'the observer wrapper is not in the running klippy process command line',
+        { phase: 'verify' },
+      )
+    } else {
+      capture = await captureChildStderr(
+        docker,
+        containerName,
+        routing,
+        CAPTURE_BYTE_LIMIT,
+      )
+      writeLedgerFile(
+        ledgerDir,
+        'child-stderr.log',
+        capture.available ? capture.text : '',
+      )
+    }
 
     // Phase: analyze -----------------------------------------------------
-    state.phase = 'analyze'
+    enterStage('analyze')
     let analysis = null
     let analysisError = null
-    if (capture.available && observerRecords > 0) {
+    let invalidRecords = 0
+    if (capture.available && capture.observerRecords > 0) {
       try {
-        analysis = await analyzeCapture(docker, containerName, capture)
+        const analyzed = await analyzeCapture(docker, containerName, capture)
+        analysis = analyzed.analysis
+        invalidRecords = analyzed.invalidRecords
       } catch (error) {
         analysisError = error.message
       }
     }
 
     // Phase: report ------------------------------------------------------
-    state.phase = 'report'
+    enterStage('report')
     const inspected = await dockerJson(
       docker,
       ['inspect', '--format', '{{json .State}}', containerName],
@@ -1363,7 +1856,7 @@ export async function runDiagnostic(options) {
     )
     const containerState =
       typeof inspected === 'string' ? JSON.parse(inspected) : inspected
-    const result = {
+    result = {
       schema: 'open3dfarmmanager.simulator-identify-diagnostic.v1',
       run: state.runName,
       image: pinnedImage,
@@ -1399,6 +1892,10 @@ export async function runDiagnostic(options) {
         exitCode: containerState?.ExitCode ?? null,
         oomKilled: containerState?.OOMKilled ?? null,
       },
+      baseline: {
+        recorded: true,
+        failures: baselineFailures,
+      },
       observation: {
         budgetMs: READINESS_BUDGET_MS,
         windowMs: settings.observationMs,
@@ -1408,21 +1905,22 @@ export async function runDiagnostic(options) {
       routing: {
         kind: routing.kind,
         pathDigest: routing.path ? sha256(routing.path) : null,
+        evidence: capture.observerRecords > 0 ? 'observer-records' : 'none',
+        ambiguous: routing.ambiguous,
       },
       capture: {
         available: capture.available,
-        reason: !capture.available
-          ? 'capture-unavailable'
-          : observerRecords > 0
-            ? 'observer-records-captured'
-            : 'no-observer-records',
+        reason: capture.reason,
         bytes: Buffer.byteLength(capture.text, 'utf8'),
         limitBytes: CAPTURE_BYTE_LIMIT,
-        observerRecords,
-        truncated:
-          Buffer.byteLength(capture.text, 'utf8') >= CAPTURE_BYTE_LIMIT,
+        observerRecords: capture.observerRecords,
+        invalidRecords,
+        truncated: capture.truncated,
+        source: capture.source,
       },
+      supervisorObservation: supervisor.available ? 'observed' : 'unavailable',
       wrapperApplied,
+      wrapperReason,
       processes,
       observerAnalysis: analysis,
       observerAnalysisError: analysisError,
@@ -1431,36 +1929,47 @@ export async function runDiagnostic(options) {
         'diagnostic-only observation; no readiness acceptance and no retry',
       ledger: ledgerDir,
     }
-    writeLedgerFile(ledgerDir, 'result.json', JSON.stringify(result, null, 2))
-    const cleanupErrors = await removeOwned(docker, state)
-    removeWorkDirectory(state)
-    result.cleanup = {
-      errors: cleanupErrors,
-      completed: cleanupErrors.length === 0,
-    }
-    writeLedgerFile(ledgerDir, 'result.json', JSON.stringify(result, null, 2))
-    if (cleanupErrors.length > 0) {
-      const cleanupFailure = new DiagnosticError('cleanup did not complete', {
-        phase: 'cleanup',
-        cleanupErrors,
-      })
-      cleanupFailure.result = result
-      throw cleanupFailure
-    }
-    return result
   } catch (error) {
-    const cleanupErrors = await removeOwned(docker, state)
-    removeWorkDirectory(state)
-    if (error instanceof DiagnosticError) {
-      error.cleanupErrors = cleanupErrors
-      throw error
+    caughtError = error
+  }
+
+  enterStage('cleanup')
+  const cleanupErrors = await removeOwned(docker, state)
+  // A removal that failed is retried once. The retry only touches the
+  // resources that are still there, so it is the final state of the cleanup.
+  const retried =
+    cleanupErrors.length > 0 ? await removeOwned(docker, state) : null
+  const finalCleanupErrors = retried ?? cleanupErrors
+  removeWorkDirectory(state)
+  state.stages.cleanup = clock.now() - stageStart
+  if (result) {
+    result.cleanup = {
+      errors: finalCleanupErrors,
+      completed: finalCleanupErrors.length === 0,
     }
-    throw new DiagnosticError(error.message, {
+    result.stages = state.stages
+    result.totalElapsedMs = clock.now() - runStartedAt
+    writeLedgerFile(ledgerDir, 'result.json', JSON.stringify(result, null, 2))
+  }
+  let failure = caughtError ?? pendingFailure
+  if (!failure && finalCleanupErrors.length > 0)
+    failure = new DiagnosticError('cleanup did not complete', {
+      phase: 'cleanup',
+      cleanupErrors: finalCleanupErrors,
+    })
+  if (failure) {
+    if (failure instanceof DiagnosticError) {
+      failure.cleanupErrors = finalCleanupErrors
+      if (result) failure.result = result
+      throw failure
+    }
+    throw new DiagnosticError(failure.message, {
       phase: state.phase,
-      cause: error,
-      cleanupErrors,
+      cause: failure,
+      cleanupErrors: finalCleanupErrors,
     })
   }
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,6 +2001,8 @@ async function main(argv) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     return 0
   } catch (error) {
+    if (error.result)
+      process.stdout.write(`${JSON.stringify(error.result, null, 2)}\n`)
     process.stderr.write(
       `${JSON.stringify({
         error: error.message,

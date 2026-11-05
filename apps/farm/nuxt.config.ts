@@ -8,6 +8,17 @@ export default defineNuxtConfig({
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
+    pauseAuthority: {
+      enabled: false,
+      databaseUrl: '',
+      issuerKeyPath: '',
+      issuerPublicKeySpki: '',
+      issuer: '',
+      kid: '',
+      audience: '',
+      credentialIssuer: '',
+      credentialAudience: '',
+    },
     connectorTelemetry: {
       enabled: false,
       databaseUrl: '',

@@ -6,6 +6,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
     connectorInventory: { enabled: false, databaseUrl: '' },
+    browserDevices: { enabled: false, databaseUrl: '' },
     connectorPairing: {
       enabled: false,
       origin: '',

@@ -11,6 +11,7 @@ onMounted(() => heading.value?.focus())
     <nav aria-label="Conta">
       <NuxtLink to="/connectors">Consultar Connectors</NuxtLink>
       <NuxtLink to="/parear">Aprovar Connector</NuxtLink>
+      <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>

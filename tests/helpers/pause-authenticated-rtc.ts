@@ -38,6 +38,18 @@ const PauseBrowserObservation = z.strictObject({
     .optional(),
   diagnostics: PauseRtcReply.options[5].shape.diagnostics.optional(),
 })
+/** Failure receipts omit transport/challenge identifiers and capability hashes. */
+export function pauseBrowserFailureProjection(value: unknown) {
+  const parsed = PauseBrowserObservation.parse(value)
+  return Object.freeze({
+    terminal: parsed.terminal,
+    failed: parsed.failed,
+    proofsReady: parsed.proofsReady,
+    issued: parsed.issued,
+    receiptPresent: parsed.receipt !== undefined,
+    diagnostics: parsed.diagnostics ?? null,
+  })
+}
 /** Both maintained clients must authenticate their peers before HTTP-issued authority is accepted. */
 export function verifyPauseRtcAcceptance(
   nativeValue: unknown,
@@ -52,6 +64,7 @@ export function verifyPauseRtcAcceptance(
   assert.equal(native.capabilityAccepted, true)
   assert.equal(native.terminal, false)
   assert.equal(native.failed, false)
+  assert.equal(native.progress.firstFailure, null)
   assert.equal(browser.proofsReady, true)
   assert.equal(browser.issued, true)
   assert.equal(browser.terminal, false)
@@ -527,6 +540,18 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
       )
         throw Error('Provisioned pause fixture scope mismatch')
       let completed = false
+      let lastNative:
+        | Extract<PauseRtcReply, { kind: 'observation' }>
+        | undefined
+      let nativeFailureRecorded = false
+      const retainNative = async () => {
+        if (nativeFailureRecorded) return
+        nativeFailureRecorded = true
+        await session.note(
+          'pause-native-failure-observation:' +
+            JSON.stringify(lastNative ?? null),
+        )
+      }
       try {
         input.signal.throwIfAborted()
         const refs = snapshotAssignmentRefs(
@@ -559,6 +584,8 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
           const value = await session.connector.request({ kind: 'observe' })
           if (value.kind !== 'observation')
             throw Error('Pause Connector observation missing')
+          lastNative = value
+          if (value.failed || value.terminal) await retainNative()
           assert.equal(value.failed, false)
           assert.equal(value.terminal, false)
           return value
@@ -596,6 +623,22 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
           'authenticated-pause-rtc-both-proofs-certificates-http-issued-native-verifier-accepted; no printer command',
         )
         completed = true
+      } catch (error) {
+        await retainNative()
+        try {
+          const browser = await bounded(
+            session.actor.evaluate((actor) => actor.observe()),
+            new AbortController().signal,
+            1000,
+          )
+          await session.note(
+            'pause-browser-failure-observation:' +
+              JSON.stringify(pauseBrowserFailureProjection(browser)),
+          )
+        } catch {
+          await session.note('pause-browser-failure-observation-unavailable')
+        }
+        throw error
       } finally {
         try {
           await input.identities.dispose()

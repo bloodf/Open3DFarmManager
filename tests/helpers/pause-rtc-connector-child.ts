@@ -21,6 +21,7 @@ import {
   createPauseCapabilityVerifier,
   type PauseAdmissionToken,
   type PauseCapabilityHandle,
+  type PauseCapabilityRejection,
 } from '../../packages/connector/src/auth/pause-capability.ts'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
 import type { PauseProofsReady } from '../../packages/connector/src/webrtc/pause-control-session.ts'
@@ -59,6 +60,150 @@ export const PauseRtcCommand = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('close') }),
 ])
 export type PauseRtcCommand = z.infer<typeof PauseRtcCommand>
+const ProgressStage = z.enum([
+  'created',
+  'identity-returned',
+  'pairing-signed',
+  'client-starting',
+  'inbox-ready',
+  'proofs-ready',
+  'admission-starting',
+  'admission-begun',
+  'nonce-sending',
+  'nonce-sent',
+  'admission-proof-received',
+  'capability-received',
+  'verifier-starting',
+  'verifier-accepted',
+])
+const FailureSource = z.enum([
+  'client-start',
+  'verifier-denied',
+  'verifier-error',
+  'ipc-capacity',
+  'ipc-frame',
+  'ipc-command',
+  'stdin-error',
+  'stdout-error',
+  'sigterm',
+])
+const ClientPhase = z.enum([
+  'open',
+  'inbox-challenge',
+  'inbox-ready',
+  'context-request',
+  'context-challenge',
+  'rtc-ready',
+  'answer',
+  'binding',
+  'active',
+  'other',
+])
+const TerminalReason = z.enum([
+  'receive-capacity',
+  'invalid-server-frame',
+  'deadline',
+  'context-expired',
+  'lease-expired',
+  'open-failed',
+  'socket-error',
+  'socket-closed',
+  'socket-start',
+  'socket-write',
+  'send-failed',
+  'disposed',
+  'fixture-closed',
+  'proofs-ready-callback',
+  'late-peer',
+  'binding-rejected',
+  'transport-closed',
+  'unexpected-channel',
+  'unexpected-media',
+  'channel-closed',
+  'channel-error',
+  'construction-failed',
+  'description-changed',
+  'offer-failed',
+  'answer-failed',
+  'certificate-or-binding',
+  'auth-deadline',
+  'expired',
+  'capacity',
+  'auth-failed',
+  'local-proof',
+  'remote-proof',
+  'invalid-frame',
+  'invalid-send',
+  'send-state',
+  'other',
+])
+const VerifierRejection = z.enum([
+  'invalid-admission',
+  'invalid-proof',
+  'scope-mismatch',
+  'untrusted-issuer',
+  'signature-rejected',
+  'expired-or-inactive',
+] satisfies readonly PauseCapabilityRejection[])
+export const PauseRtcProgress = z.strictObject({
+  stage: ProgressStage,
+  clientPhase: ClientPhase.nullable(),
+  terminalReason: TerminalReason.nullable(),
+  firstFailure: z
+    .strictObject({
+      source: FailureSource,
+      stage: ProgressStage,
+      clientPhase: ClientPhase.nullable(),
+      terminalReason: TerminalReason.nullable(),
+      verifierRejection: VerifierRejection.nullable(),
+    })
+    .nullable(),
+})
+/** Fixed metadata only. Cleanup cannot overwrite the first failure or its stage. */
+export function createPauseRtcProgress() {
+  let stage: z.infer<typeof ProgressStage> = 'created'
+  let clientPhase: z.infer<typeof ClientPhase> | null = null
+  let terminalReason: z.infer<typeof TerminalReason> | null = null
+  let firstFailure: z.infer<typeof PauseRtcProgress>['firstFailure'] = null
+  return Object.freeze({
+    advance(value: z.infer<typeof ProgressStage>) {
+      if (!firstFailure) stage = ProgressStage.parse(value)
+    },
+    phase(value: unknown) {
+      const parsed = ClientPhase.safeParse(value)
+      clientPhase = parsed.success ? parsed.data : 'other'
+    },
+    terminal(value: unknown) {
+      if (terminalReason !== null) return
+      const parsed = TerminalReason.safeParse(value)
+      terminalReason = parsed.success ? parsed.data : 'other'
+    },
+    fail(
+      source: z.infer<typeof FailureSource>,
+      rejection?: PauseCapabilityRejection,
+    ) {
+      if (firstFailure) return
+      firstFailure = Object.freeze({
+        source: FailureSource.parse(source),
+        stage,
+        clientPhase,
+        terminalReason,
+        verifierRejection:
+          rejection === undefined ? null : VerifierRejection.parse(rejection),
+      })
+    },
+    snapshot() {
+      return Object.freeze(
+        PauseRtcProgress.parse({
+          stage,
+          clientPhase,
+          terminalReason,
+          firstFailure,
+        }),
+      )
+    },
+  })
+}
 const Diagnostics = z.strictObject({
   certificateMatched: z.boolean(),
   sentProofs: z.number().int().min(0).max(1),
@@ -87,6 +232,7 @@ export const PauseRtcReply = z.discriminatedUnion('kind', [
     terminal: z.boolean(),
     failed: z.boolean(),
     diagnostics: Diagnostics,
+    progress: PauseRtcProgress,
   }),
 ])
 export type PauseRtcReply = z.infer<typeof PauseRtcReply>
@@ -125,6 +271,7 @@ async function run() {
     throw Error('Explicit isolated child required')
   const pair = generateKeyPairSync('ed25519'),
     identity = new ConnectorIdentity(pair.privateKey)
+  const progress = createPauseRtcProgress()
   let client: PauseConnectorSignallingClient | undefined,
     started = false,
     paired = false,
@@ -154,7 +301,12 @@ async function run() {
     })()
     return disposal
   }
-  const fail = () => {
+  const fail = (
+    source: z.infer<typeof FailureSource>,
+    rejection?: PauseCapabilityRejection,
+  ) => {
+    if (client) progress.phase(client.snapshot().phase)
+    progress.fail(source, rejection)
     failed = true
     void dispose().catch(() => {
       process.exitCode = 1
@@ -186,19 +338,26 @@ async function run() {
       a = admissionWire,
       c = capabilityWire
     admitting = (async () => {
+      progress.advance('verifier-starting')
       const result = await current.admit(token, {
         browserProofWire: proofs.browserProofWire,
         connectorProofWire: proofs.connectorProofWire,
         admissionProofWire: a,
         capabilityWire: c,
       })
-      if (!result.ok || closing) throw Error('Fixture capability denied')
+      if (!result.ok) {
+        fail('verifier-denied', result.reason)
+        return
+      }
+      if (closing) throw Error('Fixture capability denied')
       accepted = result.handle
-    })().catch(fail)
+      progress.advance('verifier-accepted')
+    })().catch(() => fail('verifier-error'))
   }
   async function handle(input: PauseRtcCommand) {
     switch (input.kind) {
       case 'identity':
+        progress.advance('identity-returned')
         output({
           kind: 'identity',
           publicKeySpki: identity.publicKeySpki,
@@ -217,6 +376,7 @@ async function run() {
             now: Date.now(),
           }),
         })
+        progress.advance('pairing-signed')
         return
       case 'start': {
         if (
@@ -277,17 +437,22 @@ async function run() {
           {
             onInboxReady: () => {
               inboxReady = true
+              progress.advance('inbox-ready')
             },
             onProofsReady: (value) => {
               if (ready || !verifier || !peer || closing)
                 throw Error('Unexpected control proofs')
               ready = value
+              progress.advance('proofs-ready')
+              progress.advance('admission-starting')
               const fresh = verifier.beginAdmission({
                 binding: value.binding,
                 printerBinding: printer,
                 peer: peer.peer,
               })
               admission = fresh.token
+              progress.advance('admission-begun')
+              progress.advance('nonce-sending')
               if (
                 !client?.sendPhase({
                   t: 'control.admission-nonce',
@@ -297,27 +462,34 @@ async function run() {
                 })
               )
                 throw Error('Nonce send failed')
+              progress.advance('nonce-sent')
             },
             onPhase: (frame) => {
-              if (frame.t === 'control.admission-proof' && !admissionWire)
+              if (frame.t === 'control.admission-proof' && !admissionWire) {
                 admissionWire = frame.wire
-              else if (frame.t === 'control.capability' && !capabilityWire)
+                progress.advance('admission-proof-received')
+              } else if (frame.t === 'control.capability' && !capabilityWire) {
                 capabilityWire = frame.wire
-              else throw Error('Unexpected fixture phase')
+                progress.advance('capability-received')
+              } else throw Error('Unexpected fixture phase')
               maybeAdmit()
             },
-            onTerminal: () => {
+            onTerminal: (reason) => {
+              progress.terminal(reason)
+              if (client) progress.phase(client.snapshot().phase)
               peer?.close()
               closing = true
             },
           },
         )
-        void client.start().catch(fail)
+        progress.advance('client-starting')
+        void client.start().catch(() => fail('client-start'))
         output({ kind: 'started' })
         return
       }
       case 'observe': {
         const diagnostics = client?.diagnostics()
+        if (client) progress.phase(client.snapshot().phase)
         output({
           kind: 'observation',
           inboxReady,
@@ -327,6 +499,7 @@ async function run() {
             !!verifier?.inspectAt(accepted, Date.now(), performance.now()).ok,
           terminal: closing,
           failed,
+          progress: progress.snapshot(),
           diagnostics: {
             certificateMatched: diagnostics?.certificateMatched ?? false,
             sentProofs: diagnostics?.sentProofs ?? 0,
@@ -355,14 +528,14 @@ async function run() {
       total > 65536 ||
       pending.byteLength + chunk.byteLength > PAUSE_RTC_IPC_BYTES
     ) {
-      fail()
+      fail('ipc-capacity')
       return
     }
     pending = Buffer.concat([pending, chunk])
     const newline = pending.indexOf(10)
     if (newline < 0) return
     if (newline !== pending.byteLength - 1 || ++count > 128) {
-      fail()
+      fail('ipc-frame')
       return
     }
     const frame = pending
@@ -380,7 +553,7 @@ async function run() {
       )
       .catch(() => {
         output({ kind: 'failed' })
-        fail()
+        fail('ipc-command')
       })
       .finally(() => {
         busy = false
@@ -391,9 +564,9 @@ async function run() {
       process.exitCode = 1
     })
   })
-  process.stdin.on('error', fail)
-  process.stdout.on('error', fail)
-  process.on('SIGTERM', fail)
+  process.stdin.on('error', () => fail('stdin-error'))
+  process.stdout.on('error', () => fail('stdout-error'))
+  process.on('SIGTERM', () => fail('sigterm'))
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   void run().catch(() => {

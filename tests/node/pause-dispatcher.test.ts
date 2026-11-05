@@ -252,6 +252,8 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
   }
   let mode:
     | 'normal'
+    | 'hang-preparation'
+    | 'hang-close'
     | 'unconfirmed'
     | 'hang-after-send'
     | 'hang-before-send'
@@ -263,6 +265,8 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
     | 'expire-after-send' = 'normal'
   const unblocks: Array<() => void> = []
   let lateGuard: (() => boolean) | undefined
+  let preparationCount = 0
+  let preparationSignal: AbortSignal | undefined
   let driverEntryCount = 0
   let driverCompletionCount = 0
   const driverEntryWaiters: DriverWaiter[] = []
@@ -271,6 +275,34 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
   let postCommitPhase: 'wall' | 'mono' = 'wall'
   let resultClock: (() => void) | undefined
   const driver = {
+    prepare: async ({
+      binding,
+      signal,
+    }: {
+      binding: typeof printerBinding
+      signal: AbortSignal
+    }) => {
+      preparationCount++
+      preparationSignal = signal
+      if (mode === 'hang-preparation')
+        await new Promise<void>((resolve) => {
+          unblocks.push(resolve)
+        })
+      const mapping = readPrinterBinding(binding)
+      if (mapping)
+        dispatcher.observe(binding, {
+          ...state,
+          assignmentId: mapping.assignment_id,
+          printerKey: mapping.printer_key,
+        })
+      return { connectionGeneration: state.connectionGeneration }
+    },
+    closeAttempt: async () => {
+      if (mode === 'hang-close')
+        await new Promise<void>((resolve) => {
+          unblocks.push(resolve)
+        })
+    },
     pauseOnce: async ({
       beforeSend,
       signal,
@@ -325,7 +357,7 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
         action?.()
       }
       const sent = mono
-      const delta = 1
+      const delta = mode === 'expire-after-send' ? 100 : 1
       wall += delta
       mono += delta
       return {
@@ -399,7 +431,7 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
   const capability = await caps.signPauseCapability(
     {
       ...f.capability,
-      expires_at: shortCapability ? 1001 : f.capability.expires_at,
+      expires_at: shortCapability ? 1100 : f.capability.expires_at,
       admission_nonce: nonce,
     },
     f.issuer.privateKey,
@@ -524,7 +556,7 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
     }
   }
   const signed = await signCommandV2(
-    { ...f.command, expires_at: shortCapability ? 1001 : f.command.expires_at },
+    { ...f.command, expires_at: shortCapability ? 1100 : f.command.expires_at },
     f.pair.privateKey,
   )
   return {
@@ -533,6 +565,8 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
     printerBinding,
     driver,
     additional,
+    preparationCount: () => preparationCount,
+    preparationSignal: () => preparationSignal,
     driverEntryCount: () => driverEntryCount,
     driverCompletionCount: () => driverCompletionCount,
     waitForDriverEntry: (count = 1, timeoutMs = 5000) =>
@@ -662,8 +696,14 @@ test('forged authority, modified command, revoked capability and stale fields ne
         capability,
         printerBinding: f.printerBinding,
       })
-      assert.equal(result.kind, 'rejected', scenario)
+      assert.equal(
+        result.kind,
+        scenario.startsWith('stale-') ? 'not-sent' : 'rejected',
+        scenario,
+      )
       assert.equal(f.getWrites(), 0, scenario)
+      if (['forged', 'tamper', 'revoked', 'expired'].includes(scenario))
+        assert.equal(f.preparationCount(), 0, scenario)
     } finally {
       f.cleanup()
     }
@@ -719,6 +759,8 @@ test('late driver completion cannot rewrite unknown or invoke a late send guard'
       const writes = f.getWrites()
       f.unblock()
       await f.waitForDriverCompletion(1)
+      f.dispatcher.close()
+      await f.dispatcher.settled
       assert.equal(f.getWrites(), writes)
       const stored = readCommandOutcome(f.journal, f.f.command.cmd_id)
       assert.equal(
@@ -1102,8 +1144,8 @@ test('observations are copied, scoped and invalidated on malformed or disconnect
         capability: f.handle,
         printerBinding: f.printerBinding,
       })
-      assert.equal(result.kind, mode === 'copy' ? 'applied' : 'rejected', mode)
-      assert.equal(f.getWrites(), mode === 'copy' ? 1 : 0, mode)
+      assert.equal(result.kind, 'applied', mode)
+      assert.equal(f.getWrites(), 1, mode)
     } finally {
       f.cleanup()
     }
@@ -1209,6 +1251,162 @@ test('journal write-start clock reentry is followed by pure authority checks', a
     )
   } finally {
     db.close()
+    f.cleanup()
+  }
+})
+
+test('aborted preparation returns promptly but retains its slot and journal until actual settlement', async () => {
+  const f = await fixture()
+  f.setMode('hang-preparation')
+  const controller = new AbortController()
+  const input = {
+    wire: f.wire,
+    capability: f.handle,
+    printerBinding: f.printerBinding,
+  }
+  try {
+    const command = f.dispatcher.dispatch({
+      ...input,
+      signal: controller.signal,
+    })
+    while (f.preparationCount() === 0)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    controller.abort()
+    assert.equal((await command).kind, 'not-sent')
+    assert.equal(f.preparationSignal()?.aborted, true)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'busy',
+    })
+    assert.equal(
+      readCommandOutcome(f.journal, f.f.command.cmd_id)?.status,
+      'outcome-unknown',
+    )
+    f.dispatcher.close()
+    let settled = false
+    void f.dispatcher.settled.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    assert.equal(settled, false)
+    f.unblock()
+    await f.dispatcher.settled
+    assert.equal(
+      readCommandOutcome(f.journal, f.f.command.cmd_id)?.status,
+      'not-sent',
+    )
+    assert.equal(f.getWrites(), 0)
+  } finally {
+    f.unblock()
+    f.cleanup()
+  }
+})
+
+test('result deadline aborts unresolved preparation without releasing its assignment', async () => {
+  const f = await fixture(false, 30)
+  f.setMode('hang-preparation')
+  const input = {
+    wire: f.wire,
+    capability: f.handle,
+    printerBinding: f.printerBinding,
+  }
+  try {
+    const result = await f.dispatcher.dispatch(input)
+    assert.equal(result.kind, 'not-sent')
+    assert.equal(f.preparationSignal()?.aborted, true)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'busy',
+    })
+    f.dispatcher.close()
+    f.unblock()
+    await f.dispatcher.settled
+    assert.equal(f.getWrites(), 0)
+  } finally {
+    f.unblock()
+    f.cleanup()
+  }
+})
+
+test('a slow driver close cannot delay the bounded result or release the journal', async () => {
+  const f = await fixture(false, 50)
+  f.setMode('hang-close')
+  const input = {
+    wire: f.wire,
+    capability: f.handle,
+    printerBinding: f.printerBinding,
+  }
+  try {
+    const result = await f.dispatcher.dispatch(input)
+    assert.equal(result.kind, 'outcome-unknown')
+    assert.equal(f.getWrites(), 1)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'busy',
+    })
+    assert.equal(
+      readCommandOutcome(f.journal, f.f.command.cmd_id)?.status,
+      'outcome-unknown',
+    )
+    f.dispatcher.close()
+    f.unblock()
+    await f.dispatcher.settled
+    assert.equal(
+      readCommandOutcome(f.journal, f.f.command.cmd_id)?.status,
+      'outcome-unknown',
+    )
+  } finally {
+    f.unblock()
+    f.cleanup()
+  }
+})
+
+test('original signed expiry cancels preparation before the longer result deadline', async () => {
+  const f = await fixture(true, 1000)
+  f.setMode('hang-preparation')
+  try {
+    const result = await f.dispatcher.dispatch({
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+    })
+    assert.equal(result.kind, 'not-sent')
+    assert.equal(f.preparationSignal()?.aborted, true)
+    assert.equal(f.getWrites(), 0)
+    f.dispatcher.close()
+    f.unblock()
+    await f.dispatcher.settled
+  } finally {
+    f.unblock()
+    f.cleanup()
+  }
+})
+
+test('abort reentered from the journal claim returns a correlated not-sent result', async () => {
+  const f = await fixture()
+  const controller = new AbortController()
+  f.setJournalClock(() => controller.abort())
+  try {
+    const result = await f.dispatcher.dispatch({
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+      signal: controller.signal,
+    })
+    assert.deepEqual(result, {
+      kind: 'not-sent',
+      cmdId: f.f.command.cmd_id,
+      reason: 'aborted',
+    })
+    assert.equal(f.preparationCount(), 0)
+    assert.equal(f.getWrites(), 0)
+    f.dispatcher.close()
+    await f.dispatcher.settled
+    assert.equal(
+      readCommandOutcome(f.journal, f.f.command.cmd_id)?.status,
+      'not-sent',
+    )
+  } finally {
     f.cleanup()
   }
 })

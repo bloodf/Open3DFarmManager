@@ -11,6 +11,10 @@ function recordResource(value: object) {
 }
 import { createMoonrakerSubscription } from '../../packages/connector/src/moonraker/subscription.ts'
 import type { ServerWebSocket } from 'bun'
+import type {
+  RawMoonrakerObservation,
+  RawMoonrakerUnavailable,
+} from '../../packages/connector/src/moonraker/subscription.ts'
 import { validateMoonrakerInput } from '../../packages/connector/src/moonraker/client.ts'
 
 const status = {
@@ -34,6 +38,7 @@ async function fixture(input: {
     socket: ServerWebSocket<undefined>,
     connection: number,
     later: (callback: () => void, ms: number) => void,
+    request: { id: number; method: string },
   ) => void
 }) {
   let connections = 0
@@ -67,7 +72,7 @@ async function fixture(input: {
       },
       message(socket, message) {
         rpcs.push(JSON.parse(String(message)))
-        input.subscribe(socket, connections, later)
+        input.subscribe(socket, connections, later, JSON.parse(String(message)))
       },
       close(socket) {
         sockets.delete(socket)
@@ -95,6 +100,10 @@ async function run(
   limits = {},
   mode = 'normal',
   durationMs = 800,
+  evidence?: {
+    raw: RawMoonrakerObservation[]
+    rawUnavailable: RawMoonrakerUnavailable[]
+  },
 ) {
   const process = Bun.spawn(
     [
@@ -134,12 +143,15 @@ async function run(
           : null,
     )
     expect(output.events.length).toBe(output.countAtAbort)
-    return output.events as Array<{
+    const events = output.events as Array<{
       kind: string
       reason?: string
       sourceEventtime?: number
       printer?: { progress: number }
     }>
+    evidence?.raw.push(...output.raw)
+    evidence?.rawUnavailable.push(...output.rawUnavailable)
+    return events
   } finally {
     clearTimeout(timer)
     if (process.exitCode === null) {
@@ -586,5 +598,240 @@ test('coalesced subscription reply and delta preserve the baseline and update wi
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     )
+  }
+})
+
+test('raw complete query refreshes unchanged fields before telemetry dedup; fixed read-only request only', async () => {
+  const evidence: {
+    raw: RawMoonrakerObservation[]
+    rawUnavailable: RawMoonrakerUnavailable[]
+  } = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { eventtime: 10, status },
+        }),
+      )
+      if (request.id === 1) later(() => socket.send(delta(11, 0.5)), 20)
+    },
+  })
+  try {
+    // Stop before the first full query to inspect independent delta stamps.
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 3000 },
+      'raw',
+      700,
+      evidence,
+    )
+    expect(evidence.raw.length).toBe(2)
+    const baseline = evidence.raw[0]!,
+      changed = evidence.raw[1]!
+    expect(changed.fieldObservedAtMonoMs.webhooks).toBe(
+      baseline.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(changed.fieldObservedAtMonoMs.printState).toBe(
+      baseline.fieldObservedAtMonoMs.printState,
+    )
+    expect(changed.fieldObservedAtMonoMs.progress).toBeGreaterThan(
+      baseline.fieldObservedAtMonoMs.progress,
+    )
+    expect(evidence.rawUnavailable.length).toBe(1)
+  } finally {
+    await service.close()
+  }
+  evidence.raw.length = 0
+  evidence.rawUnavailable.length = 0
+  const unchanged = await fixture({
+    subscribe(socket, _connection, _later, request) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { eventtime: 10, status },
+        }),
+      )
+    },
+  })
+  try {
+    const events = await run(
+      unchanged.origin,
+      { staleAfterMs: 3000 },
+      'raw',
+      1300,
+      evidence,
+    )
+    expect(events.filter((event) => event.kind === 'snapshot').length).toBe(1)
+    expect(evidence.raw.length).toBe(2)
+    expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBeGreaterThan(
+      evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(unchanged.rpcs).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'printer.objects.subscribe',
+        params: {
+          objects: {
+            webhooks: ['state'],
+            print_stats: ['state'],
+            virtual_sdcard: ['progress'],
+          },
+        },
+      },
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'printer.objects.query',
+        params: {
+          objects: {
+            webhooks: ['state'],
+            print_stats: ['state'],
+            virtual_sdcard: ['progress'],
+          },
+        },
+      },
+    ])
+  } finally {
+    await unchanged.close()
+  }
+})
+
+test('raw stale query response and missing complete field invalidate socket epoch', async () => {
+  for (const partial of [false, true]) {
+    const evidence: {
+      raw: RawMoonrakerObservation[]
+      rawUnavailable: RawMoonrakerUnavailable[]
+    } = { raw: [], rawUnavailable: [] }
+    const service = await fixture({
+      subscribe(socket, _connection, later, request) {
+        if (request.id === 1) {
+          socket.send(snapshot())
+          later(() => socket.send(delta(11, 0.5)), 20)
+        } else
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: {
+                eventtime: 10,
+                status: partial ? { webhooks: { state: 'ready' } } : status,
+              },
+            }),
+          )
+      },
+    })
+    try {
+      const events = await run(
+        service.origin,
+        { staleAfterMs: 3000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+        'raw',
+        1400,
+        evidence,
+      )
+      expect(evidence.raw.length).toBe(2)
+      expect(events.some((event) => event.reason === 'invalid-response')).toBe(
+        true,
+      )
+      expect(evidence.rawUnavailable.length).toBe(1)
+      expect(evidence.raw.every((value) => value.epoch === 1)).toBe(true)
+    } finally {
+      await service.close()
+    }
+  }
+})
+
+test('raw complete query has one pending request and <=1s timeout before epoch invalidation', async () => {
+  const evidence: {
+    raw: RawMoonrakerObservation[]
+    rawUnavailable: RawMoonrakerUnavailable[]
+  } = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, _later, request) {
+      if (request.id === 1) socket.send(snapshot())
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      {
+        requestTimeoutMs: 5000,
+        staleAfterMs: 5000,
+        reconnectMinMs: 3000,
+        reconnectMaxMs: 3000,
+      },
+      'raw',
+      2400,
+      evidence,
+    )
+    expect(service.rpcs.length).toBe(2)
+    expect(evidence.raw.length).toBe(1)
+    expect(evidence.rawUnavailable.length).toBe(1)
+    expect(events.some((event) => event.reason === 'stale')).toBe(true)
+  } finally {
+    await service.close()
+  }
+})
+
+test('overlapping complete query is discarded without regressing fields or stopping collection', async () => {
+  const evidence: {
+    raw: RawMoonrakerObservation[]
+    rawUnavailable: RawMoonrakerUnavailable[]
+  } = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      const reply = (eventtime: number, progress: number) =>
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              eventtime,
+              status: { ...status, virtual_sdcard: { progress } },
+            },
+          }),
+        )
+      if (request.id === 1) reply(10, 0.25)
+      else if (request.id === 2) {
+        later(() => socket.send(delta(11, 0.5)), 10)
+        later(() => reply(12, 0.6), 30)
+      } else reply(13, 0.7)
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+      'raw',
+      2400,
+      evidence,
+    )
+    expect(service.rpcs.length).toBe(3)
+    expect(
+      events
+        .filter((event) => event.kind === 'snapshot')
+        .map((event) => event.printer?.progress),
+    ).toEqual([0.25, 0.5, 0.7])
+    expect(evidence.raw.map((value) => value.printer.progress)).toEqual([
+      0.25, 0.5, 0.7,
+    ])
+    expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
+      evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBeGreaterThan(
+      evidence.raw[1]!.fieldObservedAtMonoMs.progress,
+    )
+    expect(
+      events.filter(
+        (event) =>
+          event.reason === 'invalid-response' || event.reason === 'stale',
+      ),
+    ).toEqual([])
+    expect(evidence.rawUnavailable.length).toBe(1)
+  } finally {
+    await service.close()
   }
 })

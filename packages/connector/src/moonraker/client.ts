@@ -82,7 +82,7 @@ export async function readMoonrakerReady(input: {
 
 const Reply = z.strictObject({
   jsonrpc: z.literal('2.0'),
-  id: z.literal(1),
+  id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   result: z.unknown(),
 })
 const Notification = z.strictObject({
@@ -91,6 +91,17 @@ const Notification = z.strictObject({
   params: z.array(z.unknown()).max(4).optional(),
 })
 
+export type MoonrakerCompleteObservation = Readonly<{
+  result: unknown
+  requestStartedAtMonoMs: number
+  receivedAtMonoMs: number
+}>
+const selectedObjects = {
+  webhooks: ['state'],
+  print_stats: ['state'],
+  virtual_sdcard: ['progress'],
+}
+
 // The ws receiver enforces payload/fragment/chunk bounds before message dispatch.
 // Compression, redirects and optional native addons are disabled.
 export function openMoonrakerClient(input: {
@@ -98,6 +109,9 @@ export function openMoonrakerClient(input: {
   limits: MoonrakerLimits
   signal: AbortSignal
   onStatus: (params: unknown) => void
+  /** Opt-in display evidence; default telemetry transport remains unchanged. */
+  onComplete?: (observation: MoonrakerCompleteObservation) => void
+  onInvalidated?: () => void
 }): {
   snapshot: Promise<unknown>
   closed: Promise<MoonrakerFailureReason>
@@ -116,6 +130,10 @@ export function openMoonrakerClient(input: {
     handshakeTimeout: input.limits.connectTimeoutMs,
     skipUTF8Validation: false,
   })
+  let queryTimer: ReturnType<typeof setTimeout> | undefined
+  let queryTimeout: ReturnType<typeof setTimeout> | undefined
+  let nextId = 1
+  let pending: { id: number; started: number } | undefined
   let finished = false
   let subscribed = false
   let resolveSnapshot: (value: unknown) => void = () => {}
@@ -133,6 +151,13 @@ export function openMoonrakerClient(input: {
     if (finished) return
     finished = true
     clearTimeout(timer)
+    clearTimeout(queryTimer)
+    clearTimeout(queryTimeout)
+    try {
+      input.onInvalidated?.()
+    } catch {
+      /* Still destroy native transport. */
+    }
     input.signal.removeEventListener('abort', abort)
     socket.off('open', open)
     socket.off('message', message)
@@ -162,23 +187,57 @@ export function openMoonrakerClient(input: {
   function open() {
     if (finished) return
     clearTimeout(timer)
-    timer = setTimeout(() => finish('offline'), input.limits.requestTimeoutMs)
-    // A new socket has exactly one request and one fixed, bounded request ID.
+    timer = setTimeout(
+      () => finish('offline'),
+      input.onComplete
+        ? Math.min(1000, input.limits.requestTimeoutMs)
+        : input.limits.requestTimeoutMs,
+    )
+    pending = { id: 1, started: performance.now() }
+    // Subscribe remains the only request unless raw display evidence is enabled.
     socket.send(
       JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
         method: 'printer.objects.subscribe',
         params: {
-          objects: {
-            webhooks: ['state'],
-            print_stats: ['state'],
-            virtual_sdcard: ['progress'],
-          },
+          objects: selectedObjects,
         },
       }),
     )
   }
+  function scheduleQuery() {
+    if (!input.onComplete || finished) return
+    queryTimer = setTimeout(
+      () => {
+        if (finished || pending || nextId >= Number.MAX_SAFE_INTEGER) {
+          finish('invalid-response')
+          return
+        }
+        const started = performance.now()
+        pending = { id: ++nextId, started }
+        queryTimeout = setTimeout(
+          () => finish('stale'),
+          Math.min(1000, input.limits.requestTimeoutMs),
+        )
+        try {
+          if (socket.bufferedAmount !== 0) throw Error('Outbound queue')
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: nextId,
+              method: 'printer.objects.query',
+              params: { objects: selectedObjects },
+            }),
+          )
+        } catch {
+          finish('offline')
+        }
+      },
+      Math.max(0, 1000 - (performance.now() - lastRequestStarted)),
+    )
+  }
+  let lastRequestStarted = 0
   function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
     try {
@@ -196,11 +255,36 @@ export function openMoonrakerClient(input: {
       })
       const reply = Reply.safeParse(value)
       if (reply.success) {
-        if (subscribed || !Object.hasOwn(reply.data, 'result'))
+        if (
+          !pending ||
+          reply.data.id !== pending.id ||
+          !Object.hasOwn(reply.data, 'result')
+        )
           throw new Error('Unexpected reply')
-        subscribed = true
-        clearTimeout(timer)
-        resolveSnapshot(reply.data.result)
+        const received = performance.now(),
+          started = pending.started
+        if (
+          received < started ||
+          (input.onComplete &&
+            received - started >= Math.min(1000, input.limits.requestTimeoutMs))
+        )
+          throw Error('Late observation')
+        pending = undefined
+        lastRequestStarted = started
+        clearTimeout(queryTimeout)
+        input.onComplete?.(
+          Object.freeze({
+            result: reply.data.result,
+            requestStartedAtMonoMs: started,
+            receivedAtMonoMs: received,
+          }),
+        )
+        if (!subscribed) {
+          subscribed = true
+          clearTimeout(timer)
+          resolveSnapshot(reply.data.result)
+        }
+        scheduleQuery()
         return
       }
       const notification = Notification.parse(value)

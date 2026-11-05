@@ -14,6 +14,25 @@ export type MoonrakerAssignment = Readonly<{
   printerKey: string
   origin: string
 }>
+export type RawMoonrakerObservation = Readonly<{
+  printerKey: string
+  epoch: number
+  printer: Readonly<PrinterState>
+  status: Readonly<{
+    [Key in keyof z.infer<typeof Status>]: Readonly<z.infer<typeof Status>[Key]>
+  }>
+  fieldObservedAtMonoMs: Readonly<{
+    webhooks: number
+    printState: number
+    progress: number
+  }>
+  receivedAtMonoMs: number
+}>
+export type RawMoonrakerUnavailable = Readonly<{
+  printerKey: string
+  epoch: number
+}>
+
 export type MoonrakerEvent =
   | { kind: 'snapshot'; printer: PrinterState; sourceEventtime: number }
   | {
@@ -69,6 +88,8 @@ export function createMoonrakerSubscription(input: {
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   onEvent: (event: MoonrakerEvent) => void
+  onRawObservation?: (observation: RawMoonrakerObservation) => void
+  onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   signal: AbortSignal
 }): { done: Promise<void> } {
   const { printerKey, origin, limits } = validateMoonrakerInput(input)
@@ -95,10 +116,39 @@ export function createMoonrakerSubscription(input: {
       controller.abort()
     }
   }
+  function rawCallback(callback: () => unknown) {
+    try {
+      const result = callback()
+      if (result !== undefined) {
+        if (result instanceof Promise) void result.catch(() => {})
+        throw Error('Raw callbacks must return synchronously with undefined')
+      }
+    } catch (error) {
+      callbackFailure = { error }
+      controller.abort()
+      throw error
+    }
+  }
+  let epoch = 0
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
     while (!signal.aborted) {
+      if (++epoch > Number.MAX_SAFE_INTEGER) throw Error('Epoch exhausted')
+      const currentEpoch = epoch
+      let invalidated = false
+      let fieldTimes:
+        | RawMoonrakerObservation['fieldObservedAtMonoMs']
+        | undefined
+      function invalidate() {
+        if (invalidated) return
+        invalidated = true
+        rawCallback(() =>
+          input.onRawUnavailable?.(
+            Object.freeze({ printerKey, epoch: currentEpoch }),
+          ),
+        )
+      }
       let client: ReturnType<typeof openMoonrakerClient> | undefined
       let staleTimer: ReturnType<typeof setTimeout> | undefined
       let stale = false
@@ -119,6 +169,27 @@ export function createMoonrakerSubscription(input: {
             observedAt: Date.now(),
           },
         )
+        if (input.onRawObservation && fieldTimes && !invalidated) {
+          const observedTimes = fieldTimes
+          rawCallback(() =>
+            input.onRawObservation?.(
+              Object.freeze({
+                printerKey,
+                epoch: currentEpoch,
+                printer: Object.freeze({ ...parsed.printer }),
+                status: Object.freeze({
+                  webhooks: Object.freeze({ ...value.status.webhooks }),
+                  print_stats: Object.freeze({ ...value.status.print_stats }),
+                  virtual_sdcard: Object.freeze({
+                    ...value.status.virtual_sdcard,
+                  }),
+                }),
+                fieldObservedAtMonoMs: Object.freeze({ ...observedTimes }),
+                receivedAtMonoMs: performance.now(),
+              }),
+            ),
+          )
+        }
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
@@ -134,6 +205,40 @@ export function createMoonrakerSubscription(input: {
           origin,
           limits,
           signal,
+          ...(input.onRawObservation
+            ? {
+                onInvalidated: invalidate,
+                onComplete(
+                  observation: import('./client.ts').MoonrakerCompleteObservation,
+                ) {
+                  const value = Snapshot.parse(observation.result)
+                  if (
+                    baseline &&
+                    (value.eventtime < baseline.eventtime ||
+                      (value.eventtime === baseline.eventtime &&
+                        JSON.stringify(value.status) !==
+                          JSON.stringify(baseline.status)))
+                  )
+                    throw Error('Ambiguous complete response ordering')
+                  const stamp = observation.requestStartedAtMonoMs
+                  // A delta received during this query has a newer local field
+                  // observation. Discard this overlapping response rather than
+                  // regress evidence or advance its conservative request anchor.
+                  // The next fixed query is still scheduled by the client.
+                  if (
+                    fieldTimes &&
+                    stamp < Math.max(...Object.values(fieldTimes))
+                  )
+                    return
+                  fieldTimes = {
+                    webhooks: stamp,
+                    printState: stamp,
+                    progress: stamp,
+                  }
+                  publish(value)
+                },
+              }
+            : {}),
           onStatus(params) {
             const [delta, eventtime] = Delta.parse(params)
             if (!baseline) throw new Error('No baseline')
@@ -164,10 +269,30 @@ export function createMoonrakerSubscription(input: {
               delta.virtual_sdcard?.progress === undefined
             )
               return
+            if (fieldTimes) {
+              const now = performance.now()
+              if (now < Math.max(...Object.values(fieldTimes)))
+                throw Error('Clock regression')
+              fieldTimes = {
+                webhooks:
+                  delta.webhooks?.state === undefined
+                    ? fieldTimes.webhooks
+                    : now,
+                printState:
+                  delta.print_stats?.state === undefined
+                    ? fieldTimes.printState
+                    : now,
+                progress:
+                  delta.virtual_sdcard?.progress === undefined
+                    ? fieldTimes.progress
+                    : now,
+              }
+            }
             publish({ eventtime, status })
           },
         })
-        publish(Snapshot.parse(await client.snapshot))
+        const initial = Snapshot.parse(await client.snapshot)
+        if (!input.onRawObservation) publish(initial)
         backoff = limits.reconnectMinMs
         const reason = await client.closed
         if (!signal.aborted)
@@ -187,12 +312,16 @@ export function createMoonrakerSubscription(input: {
                 : 'invalid-response',
           })
       } finally {
-        clearTimeout(staleTimer)
-        if (client) {
-          client.close()
-          await client.closed
+        try {
+          invalidate()
+        } finally {
+          clearTimeout(staleTimer)
+          if (client) {
+            client.close()
+            await client.closed
+          }
+          baseline = undefined
         }
-        baseline = undefined
       }
       if (!signal.aborted) {
         await delay(backoff, signal)

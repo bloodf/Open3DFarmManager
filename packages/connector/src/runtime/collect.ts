@@ -1,3 +1,7 @@
+import type {
+  RawMoonrakerObservation,
+  RawMoonrakerUnavailable,
+} from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import {
@@ -65,6 +69,8 @@ export async function collectLocalTelemetry(input: {
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
   config: LocalCollectorConfig
+  onRawObservation?: (observation: RawMoonrakerObservation) => void
+  onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   queue: TelemetryQueue
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
@@ -109,6 +115,12 @@ export async function collectIntoQueue(input: {
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,
         signal,
+        ...(input.onRawObservation
+          ? { onRawObservation: input.onRawObservation }
+          : {}),
+        ...(input.onRawUnavailable
+          ? { onRawUnavailable: input.onRawUnavailable }
+          : {}),
         onEvent(event) {
           if (signal.aborted) return
           try {

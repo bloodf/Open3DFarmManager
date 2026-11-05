@@ -1,6 +1,8 @@
 import {
   createMoonrakerSubscription,
   type MoonrakerEvent,
+  type RawMoonrakerObservation,
+  type RawMoonrakerUnavailable,
 } from '../../packages/connector/src/moonraker/subscription.ts'
 
 const origin = process.argv[2]!
@@ -9,6 +11,8 @@ const controller = new AbortController()
 const mode = process.argv[4]
 if (mode === 'pre-abort') controller.abort()
 const events: MoonrakerEvent[] = []
+const raw: RawMoonrakerObservation[] = []
+const rawUnavailable: RawMoonrakerUnavailable[] = []
 const timer = setTimeout(
   () => controller.abort(),
   Number(process.argv[5] ?? 800),
@@ -26,6 +30,16 @@ try {
       reconnectMaxMs: 60,
       ...(typeof overrides === 'object' && overrides !== null ? overrides : {}),
     },
+    ...(mode === 'raw'
+      ? {
+          onRawObservation(value: RawMoonrakerObservation) {
+            raw.push(value)
+          },
+          onRawUnavailable(value: RawMoonrakerUnavailable) {
+            rawUnavailable.push(value)
+          },
+        }
+      : {}),
     onEvent(event) {
       events.push(event)
       if (event.kind === 'snapshot' && mode === 'throw')
@@ -46,7 +60,9 @@ try {
   // Allow a native closing handshake, then report that abort emitted no later events.
   const countAtAbort = events.length
   await new Promise((resolve) => setTimeout(resolve, 30))
-  process.stdout.write(JSON.stringify({ events, countAtAbort, failure }))
+  process.stdout.write(
+    JSON.stringify({ events, countAtAbort, failure, raw, rawUnavailable }),
+  )
 } finally {
   clearTimeout(timer)
 }

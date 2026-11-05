@@ -561,9 +561,17 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
         // upgraded-socket close receipts. No local endpoint close can satisfy this.
         // Observe remaining local/server caps immediately before the fault.
         // Natural source/lease expiry must not stand in for remote closure.
+        // Revocation is observed on the server's 5s revalidation cadence;
+        // allow its bounded SQL work and polling without extending any lease.
+        const closureWaitMs = session.closure === 'revocation' ? 7500 : 3000
+        const sourceObservationStarted = performance.now()
         const beforeClosure = await observeConnector()
         assert.equal(beforeClosure.diagnostics.terminal, false)
-        assert.ok(beforeClosure.sourceRemainingMs >= 8000)
+        const sourceDeadline =
+          sourceObservationStarted + beforeClosure.sourceRemainingMs
+        assert.ok(
+          sourceDeadline - performance.now() >= 2000 + closureWaitMs + 500,
+        )
         await bounded(
           session.closure === 'disconnect'
             ? input.disconnectSignalling()
@@ -576,13 +584,13 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             observeConnector,
             (value) => value.diagnostics.terminal && value.providerClosed,
             input.signal,
-            3000,
+            closureWaitMs,
           ),
           until(
             observeBrowser,
             (value) => value.terminal && value.diagnostics?.terminal === true,
             input.signal,
-            3000,
+            closureWaitMs,
           ),
         ])
         await bounded(
@@ -594,6 +602,10 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           observeConnector(),
           observeBrowser(),
         ])
+        assert.ok(
+          performance.now() < sourceDeadline,
+          'Source expiry cannot prove remote closure',
+        )
         assert.deepEqual(laterNative, closedNative)
         assert.deepEqual(laterBrowser, closedBrowser)
         assert.equal(laterBrowser.acceptedStatusCount, 1)

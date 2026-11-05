@@ -85,15 +85,36 @@ export function openScopedTelemetryQueue(input: {
       'telemetry.lock',
       'telemetry.compact',
       RECEIPT,
+      PENDING,
     ]) {
       if (present(join(directory, name)))
         throw new Error('Queue initialization requires operator review')
     }
   }
-  const queue = new TelemetryQueue(directory, input.now)
+  const queue = new TelemetryQueue(
+    directory,
+    input.now,
+    {},
+    {
+      beforeRecovery: () => {
+        if (existing) verify()
+        else {
+          for (const name of [
+            'telemetry.jsonl',
+            'telemetry.compact',
+            RECEIPT,
+            PENDING,
+          ]) {
+            if (present(join(directory, name)))
+              throw new Error('Queue initialization requires operator review')
+          }
+        }
+        return undefined
+      },
+    },
+  )
   try {
-    if (existing) verify()
-    else {
+    if (!existing) {
       if (
         queue.depth !== 0 ||
         queue.recovery.expired ||

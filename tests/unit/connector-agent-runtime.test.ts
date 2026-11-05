@@ -23,6 +23,9 @@ import { join } from 'node:path'
 import type { ServerWebSocket } from 'bun'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
+import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
+import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
+import { openScopedTelemetryQueue } from '../../packages/connector/src/runtime/queue-scope.ts'
 import {
   telemetryProofPayload,
   TelemetryProofChallenge,
@@ -71,6 +74,9 @@ function job(args: string[], env = {}) {
   return {
     get output() {
       return output
+    },
+    get exited() {
+      return child.exitCode !== null
     },
     finish,
     async until(predicate: () => boolean) {
@@ -368,7 +374,7 @@ async function fixture() {
       for (const resolve of releases) resolve()
       releases.clear()
     },
-    launch() {
+    launch(extraEnv = {}) {
       return job(
         [
           'packages/connector/src/cli.ts',
@@ -384,6 +390,7 @@ async function fixture() {
           NODE_EXTRA_CA_CERTS: cert,
           WS_NO_BUFFER_UTIL: '',
           WS_NO_UTF_8_VALIDATE: '',
+          ...extraEnv,
         },
       )
     },
@@ -410,6 +417,139 @@ async function fixture() {
     },
   }
 }
+
+function seedScoped(server: Awaited<ReturnType<typeof fixture>>, now: number) {
+  const identity = loadOrCreateIdentity(server.data)
+  const credential = readRuntimeCredential(
+    server.credentialPath,
+    identity.fingerprint,
+    Date.now(),
+  )
+  const config = readAgentRuntimeConfig(server.configPath, credential)
+  return openScopedTelemetryQueue({
+    dataDirectory: server.data,
+    config,
+    credential,
+    now,
+  })
+}
+
+test('standalone collection rechecks scope under lock before recovery', async () => {
+  const server = await fixture()
+  const collection = join(server.temp.path, 'collection.json')
+  writeFileSync(collection, JSON.stringify(server.configuration.collection), {
+    mode: 0o600,
+  })
+  const running = job(
+    [
+      '--import',
+      './tests/helpers/connector-queue-race-loader.mjs',
+      'packages/connector/src/cli.ts',
+      'collect',
+      '--config',
+      collection,
+      '--data-dir',
+      server.data,
+    ],
+    { QUEUE_RACE_DIR: server.temp.path },
+  )
+  try {
+    await running.until(() => existsSync(join(server.temp.path, 'paused')))
+    const old = Date.now() - 25 * 60 * 60 * 1000
+    const queue = seedScoped(server, old)
+    queue.enqueue(
+      { printerKey: 'A/😀/a', state: 'idle', progress: 0, observedAt: old },
+      old,
+    )
+    queue.close()
+    const dir = join(server.data, 'telemetry')
+    const log = join(dir, 'telemetry.jsonl')
+    const receipt = join(dir, 'scope.json')
+    const compact = join(dir, 'telemetry.compact')
+    writeFileSync(compact, 'candidate', { mode: 0o600 })
+    const before = [
+      readFileSync(log),
+      readFileSync(receipt),
+      readFileSync(compact),
+    ]
+    writeFileSync(join(server.temp.path, 'resume'), 'go')
+    const deadline = Date.now() + 7000
+    while (
+      Date.now() < deadline &&
+      !running.exited &&
+      lines(running.output, 'queued') === 0
+    )
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    const result = running.exited
+      ? await running.finish()
+      : await running.stop()
+    expect(
+      result.code,
+      JSON.stringify({
+        moonRequests: server.moonRequests,
+        queued: lines(result.output, 'queued'),
+        logChanged: !readFileSync(log).equals(before[0]!),
+        compactExists: existsSync(compact),
+      }),
+    ).toBe(1)
+    expect([
+      readFileSync(log),
+      readFileSync(receipt),
+      readFileSync(compact),
+    ]).toEqual(before)
+    expect(server.moonRequests).toBe(0)
+    expect(server.sockets.size).toBe(0)
+    expect(existsSync(join(dir, 'telemetry.lock'))).toBe(false)
+  } finally {
+    await running.close()
+    await server.close()
+  }
+}, 20000)
+
+test('uncertain acknowledgement retains drain expiry in the agent summary', async () => {
+  const server = await fixture()
+  server.accept()
+  server.hold()
+  server.credential.approval.expires_at = Date.now() + 600000
+  server.save()
+  const now = Date.now()
+  const old = now - 24 * 60 * 60 * 1000 + 60000
+  const queue = seedScoped(server, old)
+  queue.enqueue(
+    { printerKey: 'A/😀/a', state: 'idle', progress: 0, observedAt: old },
+    old,
+  )
+  queue.enqueue(
+    { printerKey: 'A/😀/a', state: 'idle', progress: 0, observedAt: now },
+    now,
+  )
+  queue.close()
+  const running = server.launch({
+    NODE_OPTIONS: '--import ./tests/helpers/connector-queue-race-loader.mjs',
+    QUEUE_ADVANCE_DRAIN: '1',
+  })
+  try {
+    await running.until(() => server.completed.length >= 1)
+    expect(JSON.parse(server.completed[0]!.body)).toHaveLength(1)
+    const log = join(server.data, 'telemetry', 'telemetry.jsonl')
+    renameSync(log, log + '.saved')
+    mkdirSync(log, { mode: 0o700 })
+    server.release()
+    const result = await running.finish()
+    expect(result.code).toBe(1)
+    const summary = result.output
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((value) => value.kind === 'agent-summary')
+    expect(summary.expired).toBe(1)
+    expect(summary.delivered).toBe(0)
+    expect(server.sockets.size).toBe(0)
+  } finally {
+    await running.close()
+    await server.close()
+  }
+}, 20000)
 
 test('actual run CLI retries fresh proofs with durable IDs and resumes the scoped queue after restart', async () => {
   const server = await fixture()

@@ -157,12 +157,6 @@ export async function runConnectorAgent(input: {
           clearTimeout(timer)
           attempt.abort()
         }
-        if (
-          result.status === 'uncertain' ||
-          (result.status === 'retained' &&
-            ['busy', 'oversized'].includes(result.reason))
-        )
-          throw new Error('Telemetry drain requires operator review')
         if (result.loss) {
           totals.expired += result.loss.expired
           totals.capacity += result.loss.capacity
@@ -173,6 +167,12 @@ export async function runConnectorAgent(input: {
               capacity: result.loss.capacity,
             })
         }
+        if (
+          result.status === 'uncertain' ||
+          (result.status === 'retained' &&
+            ['busy', 'oversized'].includes(result.reason))
+        )
+          throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return
         if (result.status === 'delivered') {
           totals.delivered += result.count

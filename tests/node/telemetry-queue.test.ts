@@ -24,6 +24,88 @@ function scratch() {
   return mkdtempSync(join(tmpdir(), 'open3d-queue-test-'))
 }
 
+test('opening policy runs under the lock before any queue recovery or creation', () => {
+  const dir = scratch()
+  try {
+    const log = join(dir, 'telemetry.jsonl')
+    const compact = join(dir, 'telemetry.compact')
+    assert.throws(
+      () =>
+        new TelemetryQueue(
+          dir,
+          1000,
+          {},
+          {
+            beforeRecovery() {
+              assert.equal(existsSync(join(dir, 'telemetry.lock')), true)
+              assert.equal(existsSync(log), false)
+              throw new Error('denied')
+            },
+          },
+        ),
+      /denied/,
+    )
+    assert.equal(existsSync(log), false)
+    assert.equal(existsSync(join(dir, 'telemetry.lock')), false)
+
+    const queue = new TelemetryQueue(dir, 1000)
+    queue.enqueue(state, 1000)
+    queue.close()
+    appendFileSync(log, '{"partial":')
+    writeFileSync(compact, 'candidate', { mode: 0o600 })
+    const before = readFileSync(log)
+    assert.throws(
+      () =>
+        new TelemetryQueue(
+          dir,
+          1001,
+          {},
+          {
+            beforeRecovery() {
+              throw new Error('denied')
+            },
+          },
+        ),
+      /denied/,
+    )
+    assert.deepEqual(readFileSync(log), before)
+    assert.equal(readFileSync(compact, 'utf8'), 'candidate')
+    assert.equal(existsSync(join(dir, 'telemetry.lock')), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('opening policy rejects asynchronous and non-undefined results', () => {
+  const dir = scratch()
+  try {
+    for (const result of [
+      Promise.reject(new Error('denied')),
+      1,
+      {
+        get then() {
+          throw new Error('then getter')
+        },
+      },
+    ]) {
+      assert.throws(() =>
+        Reflect.construct(TelemetryQueue, [
+          dir,
+          1000,
+          {},
+          {
+            beforeRecovery: () => result,
+          },
+        ]),
+      )
+      assert.equal(existsSync(join(dir, 'telemetry.jsonl')), false)
+      assert.equal(existsSync(join(dir, 'telemetry.lock')), false)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('outage queue survives restart, repeats unacknowledged batches and persists FIFO acknowledgement', () => {
   const dir = scratch()
   try {

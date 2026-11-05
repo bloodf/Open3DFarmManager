@@ -32,6 +32,7 @@ export interface QueueLimits {
   maxBytes?: number
   maxAgeMs?: number
 }
+export type QueueOpeningPolicy = Readonly<{ beforeRecovery: () => undefined }>
 export interface QueueLoss {
   expired: number
   capacity: number
@@ -103,7 +104,12 @@ export class TelemetryQueue {
   private readonly directory: string
   readonly recovery: QueueLoss
 
-  constructor(directory: string, now: number, limits: QueueLimits = {}) {
+  constructor(
+    directory: string,
+    now: number,
+    limits: QueueLimits = {},
+    policy?: QueueOpeningPolicy,
+  ) {
     clock(now)
     this.directory = directory
     this.lastNow = now
@@ -131,6 +137,13 @@ export class TelemetryQueue {
       closeSync(lockFd)
     }
     try {
+      if (policy) {
+        const result: unknown = policy.beforeRecovery()
+        if (result !== undefined) {
+          void Promise.resolve(result).catch(() => {})
+          throw new Error('Queue opening policy must return undefined')
+        }
+      }
       this.recovery = emptyLoss()
       if (!existsSync(this.path)) {
         if (lstatSync(this.temporary, { throwIfNoEntry: false }))

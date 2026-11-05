@@ -44,7 +44,17 @@ export async function collectLocalTelemetry(input: {
   if (input.signal.aborted) return
   const directory = join(input.dataDirectory, 'telemetry')
   assertUnscopedCollection(directory)
-  const queue = new TelemetryQueue(directory, Date.now())
+  const queue = new TelemetryQueue(
+    directory,
+    Date.now(),
+    {},
+    {
+      beforeRecovery: () => {
+        assertUnscopedCollection(directory)
+        return undefined
+      },
+    },
+  )
   try {
     await collectIntoQueue({ ...input, config, queue })
   } finally {

@@ -50,6 +50,9 @@
         "ws": "8.22.1",
         "zod": "4.6.7",
       },
+      "devDependencies": {
+        "@types/ws": "8.18.2",
+      },
     },
     "packages/farm-protocol": {
       "name": "@open3dfarmmanager/farm-protocol",
@@ -411,6 +414,8 @@
     "@types/pluralize": ["@types/pluralize@0.0.33", "", {}, "sha512-JOqsl+ZoCpP4e8TDke9W79FDcSgPAR0l6pixx2JHkhnRjvShyYiAYw2LVsnA7K08Y6DeOnaU6ujmENO4os/cYg=="],
 
     "@types/resolve": ["@types/resolve@1.20.2", "", {}, "sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q=="],
+
+    "@types/ws": ["@types/ws@8.18.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w=="],
 
     "@unhead/bundler": ["@unhead/bundler@3.4.3", "", { "dependencies": { "magic-string": "^1.3.1", "oxc-walker": "^1.1.1", "unplugin": "^3.3.0" }, "peerDependencies": { "@unhead/cli": "^3.4.3", "@vitejs/devtools-kit": "^0.7.6", "esbuild": ">=0.17.0", "lightningcss": ">=1.20.0", "oxc-parser": ">=0.98.0", "rolldown": ">=1.0.0", "unhead": "^3.4.3", "vite": ">=6.4.2", "webpack": ">=5.0.0" }, "optionalPeers": ["@unhead/cli", "@vitejs/devtools-kit", "esbuild", "lightningcss", "oxc-parser", "rolldown", "vite", "webpack"] }, "sha512-noUTzazRB4fMgO/nluoirrZJXngNbNb3sQzIslA805tKkwakRv2fib4Xe4EdiTuNB7V5XmpUFvfQkKRdBQ9qAA=="],
 

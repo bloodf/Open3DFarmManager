@@ -17,5 +17,8 @@
     "zod": "4.6.7",
     "node-datachannel": "0.33.5",
     "ws": "8.22.1"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2"
   }
 }

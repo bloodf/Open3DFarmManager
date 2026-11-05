@@ -90,7 +90,7 @@ for (const { name, quota, pressure } of [
   },
   {
     name: 'duplicate',
-    quota: '0 100000',
+    quota: '200000 100000\n200000 100000',
     pressure:
       'some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nsome avg10=0.00 avg60=0.00 avg300=0.00 total=1',
   },
@@ -132,3 +132,44 @@ esac
     }
   })
 }
+
+test('preserves unlimited quota and all-zero pressure without trailing newlines', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'open3d-diag-test-'))
+  try {
+    writeFileSync(join(dir, 'quota'), 'max 100000')
+    writeFileSync(
+      join(dir, 'pressure'),
+      'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0',
+    )
+    writeFileSync(
+      join(dir, 'docker'),
+      `#!/bin/sh
+case "$*" in
+  *"ps -aq"*) echo aaaaaaaaaaaa ;;
+  *"cpu.max"*) cat '${dir}/quota' ;;
+  *"cpu.pressure"*) cat '${dir}/pressure' ;;
+  *) exit 1 ;;
+esac
+`,
+      { mode: 0o700 },
+    )
+    const run = spawnSync(process.execPath, [script], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+    assert.equal(run.status, 0)
+    const rows = run.stdout
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    assert.equal(rows.length, 2)
+    for (const row of rows) {
+      assert.deepEqual(row.cpuQuota, { quotaUsec: null, periodUsec: 100000 })
+      const zero = { avg10: 0, avg60: 0, avg300: 0, totalUsec: 0 }
+      assert.deepEqual(row.cpuPressure, { some: zero, full: zero })
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

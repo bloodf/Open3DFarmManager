@@ -39,13 +39,36 @@ identify timeouts. Throttling was only 0.015/0.171 seconds for SV06/U1 over the
 roughly 90-second window. That failure cannot be attributed to heavy quota
 throttling from these counters alone.
 
-The collector now also records Node's available parallelism and three host
-load averages, plus each container's effective cgroup v2 CPU quota and CPU
-pressure averages/cumulative microseconds. These are post-failure samples;
-host load includes unrelated processes, and pressure averages are not a
-continuous startup trace. Unavailable, malformed, duplicate or overflowing
-pressure/quota input is reported unavailable without printing the raw text.
-No CPU limit, readiness criterion, simulator code or retry policy changes.
+The collector also records scheduling observations. The new quota and pressure
+fields have only been exercised with synthetic Docker output. The simulator job
+passed at `1a8b885`, so its failure-only collector did not run; real remote
+collection of these fields remains pending.
+
+On the supported Linux CI host, `loadavg` contains the 1-, 5- and 15-minute
+averages of runnable or uninterruptible tasks, as absolute counts, not percentages
+or values normalized by CPU count. It includes unrelated work. Node's
+`availableParallelism` is an estimate of parallelism available to the process,
+not a measurement of container CPU quota. Dividing load by this estimate does
+not establish the cause of a simulator failure. Windows load averages are
+unsupported and return zeros; these must not be interpreted as an idle host.
+
+`cpuQuota` reports the visible cgroup v2 `cpu.max` quota and period in
+microseconds. `quotaUsec: null` means `max` (no limit at this level). For a finite
+quota, quota divided by period expresses CPU time allowed per period in CPU
+units, not actual utilization or guaranteed capacity. The container path assumes
+the usual private cgroup namespace; a host namespace or altered mount can expose
+a different cgroup. Ancestor limits are not collected.
+
+CPU pressure `avg10`, `avg60` and `avg300` are stall-time percentages over 10, 60
+and 300 seconds; `totalUsec` is cumulative stall time in microseconds. `some`
+means at least one task is stalled and `full` means all non-idle tasks are
+stalled. These are post-failure samples, not a continuous startup trace.
+Unavailable, malformed, duplicate or overflowing pressure/quota input is
+reported unavailable without printing raw text. No CPU limit, readiness
+criterion, simulator code or retry policy changes.
+
+See the [Node OS API](https://nodejs.org/api/os.html) and
+[Linux pressure documentation](https://docs.kernel.org/accounting/psi.html).
 
 The collector is intended only for the isolated synthetic Compose services.
 Synthetic tests exercise its redaction and the local runner's failure-status and

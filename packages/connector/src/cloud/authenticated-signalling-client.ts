@@ -1,3 +1,4 @@
+import { MAX_PAUSE_SIGNALLING_WIRE_BYTES } from '../../../farm-protocol/src/pause-signalling.ts'
 import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
@@ -61,9 +62,36 @@ type WsConstructor = new (
 /** Startup flags must precede EVERY ws import in the process. A cached earlier
  * import cannot be retroactively attested as addon-free. No environment mutation.
  */
-export async function connectorSocket(
+export function connectorSocket(
   url: string,
   load: () => Promise<{ WebSocket: WsConstructor }> = () => import('ws'),
+): Promise<SocketPort> {
+  return fixedConnectorSocket(
+    url,
+    '/api/signalling/connector',
+    'open3dfarm.signalling.v1',
+    MAX_SIGNALLING_SOCKET_BYTES,
+    load,
+  )
+}
+export function pauseConnectorSocket(
+  url: string,
+  load: () => Promise<{ WebSocket: WsConstructor }> = () => import('ws'),
+): Promise<SocketPort> {
+  return fixedConnectorSocket(
+    url,
+    '/api/signalling/pause-connector',
+    'open3dfarm.pause-signalling.v1',
+    MAX_PAUSE_SIGNALLING_WIRE_BYTES,
+    load,
+  )
+}
+async function fixedConnectorSocket(
+  url: string,
+  path: '/api/signalling/connector' | '/api/signalling/pause-connector',
+  protocol: 'open3dfarm.signalling.v1' | 'open3dfarm.pause-signalling.v1',
+  maxPayload: number,
+  load: () => Promise<{ WebSocket: WsConstructor }>,
 ): Promise<SocketPort> {
   if (
     process.env.WS_NO_BUFFER_UTIL !== '1' ||
@@ -73,7 +101,7 @@ export async function connectorSocket(
   const target = new URL(url)
   if (
     target.protocol !== 'wss:' ||
-    target.pathname !== '/api/signalling/connector' ||
+    target.pathname !== path ||
     target.search ||
     target.hash ||
     target.username ||
@@ -83,7 +111,7 @@ export async function connectorSocket(
   const module = await load()
   const options: Readonly<WsOptions> = Object.freeze({
     rejectUnauthorized: true,
-    maxPayload: MAX_SIGNALLING_SOCKET_BYTES,
+    maxPayload,
     perMessageDeflate: false,
     followRedirects: false,
     allowSynchronousEvents: true,
@@ -92,11 +120,7 @@ export async function connectorSocket(
     maxBufferedChunks: 16,
     autoPong: false,
   })
-  const socket = new module.WebSocket(
-    target,
-    'open3dfarm.signalling.v1',
-    options,
-  )
+  const socket = new module.WebSocket(target, protocol, options)
   const ignore = () => {}
   socket.on('error', ignore)
   const closed = new Promise<void>((resolve) => socket.on('close', resolve))
@@ -107,16 +131,10 @@ export async function connectorSocket(
       socket.send(wire, (error) => done(error ?? undefined)),
     bind: (handlers) => {
       const open = () =>
-        socket.protocol === 'open3dfarm.signalling.v1'
-          ? handlers.open()
-          : handlers.error()
+        socket.protocol === protocol ? handlers.open() : handlers.error()
       const message = (data: import('ws').RawData, binary: boolean) => {
         // ws delivers text as Buffer by default. Check before decoding/copying.
-        if (
-          binary ||
-          !Buffer.isBuffer(data) ||
-          data.byteLength > MAX_SIGNALLING_SOCKET_BYTES
-        ) {
+        if (binary || !Buffer.isBuffer(data) || data.byteLength > maxPayload) {
           handlers.error()
           return
         }

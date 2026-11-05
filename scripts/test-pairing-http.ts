@@ -104,6 +104,8 @@ try {
       '0012_connector_inventory',
       '0013_browser_device_registry',
       '0014_connector_credential_proofs',
+      '0015_printer_ownership',
+      '0016_telemetry_operation_proofs',
     ],
   )
   const history =

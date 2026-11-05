@@ -33,7 +33,7 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   page,
 }) => {
   test.skip(!enabled, 'Requires explicit disposable pairing HTTP fixture')
-  test.setTimeout(150_000)
+  test.setTimeout(180_000)
   if (
     !origin ||
     !username ||
@@ -643,6 +643,90 @@ test('real HTTPS pairing, lost claim recovery and fresh pairing', async ({
   } finally {
     await revokeSessions.end({ timeout: 3 })
   }
+  // Exercise recovery after the public machine bucket is exhausted. The identity,
+  // proof and a fresh sealed owner session exist before the anonymous flood.
+  const recoveryOwner = await openActor(username)
+  const quotaCase = await begin()
+  let machineLimited = false
+  for (let attempt = 0; attempt < 61; attempt++) {
+    const response = await machine('start', {})
+    if (response.status === 429) {
+      machineLimited = true
+      break
+    }
+    expect(response.status).toBe(400)
+  }
+  expect(machineLimited).toBe(true)
+  for (let attempt = 0; attempt < 61; attempt++) {
+    const response = await machine('approve', {}, { origin: url.origin })
+    expect(response.status).toBe(401)
+  }
+  expect(
+    await postAs(recoveryOwner.actorPage, {
+      ...approval,
+      user_code: quotaCase.started.user_code,
+    }),
+  ).toBe(200)
+  const inventoryAfterApproval = await recoveryOwner.actorPage.evaluate(
+    async (id) => {
+      const response = await fetch(`/api/farms/${id}/connectors`)
+      return { status: response.status, text: await response.text() }
+    },
+    farmId,
+  )
+  expect(inventoryAfterApproval.status).toBe(200)
+  const approvedItems = JSON.parse(inventoryAfterApproval.text).connectors
+  expect(
+    Array.isArray(approvedItems) &&
+      approvedItems.some(
+        (item: { agentId: string; fingerprint: string; status: string }) =>
+          item.agentId === quotaCase.challenge.agent_id &&
+          item.fingerprint === identity.fingerprint &&
+          item.status === 'approved',
+      ),
+  ).toBe(true)
+  const recoveryResult = await recoveryOwner.actorPage.evaluate(
+    async ({ path, fingerprint }) => {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expected_fingerprint: fingerprint }),
+      })
+      return response.status
+    },
+    {
+      path: `/api/farms/${farmId}/connectors/${quotaCase.challenge.agent_id}/revoke`,
+      fingerprint: identity.fingerprint,
+    },
+  )
+  expect(recoveryResult).toBe(200)
+  const inventoryAfterRevoke = await recoveryOwner.actorPage.evaluate(
+    async (id) => {
+      const response = await fetch(`/api/farms/${id}/connectors`)
+      return { status: response.status, text: await response.text() }
+    },
+    farmId,
+  )
+  expect(inventoryAfterRevoke.status).toBe(200)
+  const revokedItems = JSON.parse(inventoryAfterRevoke.text).connectors
+  expect(
+    Array.isArray(revokedItems) &&
+      revokedItems.some(
+        (item: { agentId: string; fingerprint: string; status: string }) =>
+          item.agentId === quotaCase.challenge.agent_id &&
+          item.fingerprint === identity.fingerprint &&
+          item.status === 'revoked',
+      ),
+  ).toBe(true)
+  browserBytes.push(
+    await recoveryOwner.actorPage.evaluate(
+      () =>
+        document.documentElement.outerHTML +
+        JSON.stringify(localStorage) +
+        JSON.stringify(sessionStorage),
+    ),
+  )
+  await recoveryOwner.actor.close()
   await Promise.all(responseReads)
   const browserState = await page.evaluate(
     () =>

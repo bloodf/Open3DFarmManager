@@ -66,6 +66,8 @@ const adminUsername = 'a' + randomBytes(12).toString('hex'),
 const directory = await mkdtemp(join(tmpdir(), 'open3dfarm-pairing-http-'))
 const created: string[] = []
 let app: ReturnType<typeof spawn> | undefined
+let test: ReturnType<typeof spawn> | undefined
+let stage = 'setup'
 let proxy: ReturnType<typeof createHttpsServer> | undefined
 try {
   await appendFile(
@@ -226,6 +228,7 @@ try {
     sessionSecret,
     { ...iron.defaults, ttl: 8 * 60 * 60 * 1000 },
   )
+  stage = 'app startup'
   app = spawn('node', ['apps/farm/.output/server/index.mjs'], {
     stdio: 'ignore',
     env: {
@@ -263,7 +266,8 @@ try {
       throw new Error('Built app did not become ready')
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  const test = spawn(
+  stage = 'browser acceptance'
+  test = spawn(
     './node_modules/.bin/playwright',
     [
       'test',
@@ -273,6 +277,7 @@ try {
     ],
     {
       stdio: 'inherit',
+      detached: true,
       env: {
         ...process.env,
         NODE_EXTRA_CA_CERTS: cert,
@@ -294,8 +299,23 @@ try {
       },
     },
   )
-  const [code] = await once(test, 'exit')
-  if (code !== 0) throw new Error('Pairing HTTP acceptance failed')
+  const result = await Promise.race([
+    once(test, 'exit').then(([code]) => code),
+    new Promise<'timeout'>((resolve) => {
+      const timer = setTimeout(() => resolve('timeout'), 210_000)
+      timer.unref()
+    }),
+  ])
+  if (result === 'timeout') throw new Error('Pairing HTTP acceptance timed out')
+  if (result !== 0) throw new Error('Pairing HTTP acceptance failed')
+  stage = 'complete'
+} catch (error) {
+  await writeFile(
+    ledger! + '.pairing-http-failure-' + randomUUID() + '.txt',
+    `Pairing HTTP fixture failed during ${stage}. Inspect the preserved task ledger and console receipt. Temporary browser artifacts are removed because they can contain sensitive material.\n`,
+    { mode: 0o600 },
+  )
+  throw error
 } finally {
   const failed: string[] = []
   async function cleanup(name: string, action: () => Promise<void>) {
@@ -305,6 +325,29 @@ try {
       failed.push(name)
     }
   }
+  await cleanup('browser process group', async () => {
+    if (
+      !test ||
+      test.exitCode !== null ||
+      test.signalCode !== null ||
+      !test.pid
+    )
+      return
+    const exited = once(test, 'exit')
+    try {
+      process.kill(-test.pid, 'SIGTERM')
+    } catch (error) {
+      if (test.exitCode === null && test.signalCode === null) throw error
+    }
+    const stopped = await Promise.race([
+      exited.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 3000)),
+    ])
+    if (!stopped) {
+      process.kill(-test.pid, 'SIGKILL')
+      await exited
+    }
+  })
   await cleanup('app', async () => {
     if (!app || app.exitCode !== null || app.signalCode !== null) return
     const exited = once(app, 'exit')
@@ -319,10 +362,17 @@ try {
     }
   })
   await cleanup('proxy', async () => {
-    if (proxy?.listening)
-      await new Promise<void>((resolve, reject) =>
-        proxy!.close((error) => (error ? reject(error) : resolve())),
-      )
+    if (proxy?.listening) {
+      proxy.closeAllConnections()
+      await Promise.race([
+        new Promise<void>((resolve, reject) =>
+          proxy!.close((error) => (error ? reject(error) : resolve())),
+        ),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Proxy close timed out')), 3000),
+        ),
+      ])
+    }
   })
   for (const role of created.reverse())
     await cleanup('role', async () => {

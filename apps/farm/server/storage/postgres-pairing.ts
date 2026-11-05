@@ -6,11 +6,17 @@ import {
   PairingStartResponse,
   PairingApprovalRequest,
   PairingPollRequest,
+  PairingPollResponse,
 } from '@open3dfarmmanager/farm-protocol'
 import {
   PairingProofOrigin,
   PairingProofAudience,
 } from '../../../../packages/farm-protocol/src/pairing-proof.ts'
+import {
+  issueConnectorCredential,
+  connectorKeyBinding,
+  type ConnectorCredentialIssuerConfig,
+} from '../utils/connector-credentials.ts'
 import {
   evaluateSession,
   type SessionPolicy,
@@ -25,18 +31,11 @@ type Failure = {
   reason: 'invalid-input' | 'denied' | 'storage-unavailable' | 'capacity'
 }
 type Decision = { ok: true; status: 'approved' | 'denied' } | Failure
-/** Internal handoff only. This is neither a bearer token nor a protocol poll response. */
+/** Credential delivery is internal-only until lost-response recovery and revocation have reviewed HTTP flows. */
 export type PairingClaim =
   | { ok: true; status: 'pending' | 'slow_down'; retry_after_s: 5 }
   | { ok: true; status: 'expired' | 'denied' }
-  | {
-      ok: true
-      status: 'claimed'
-      agentId: string
-      farmId: string
-      publicKeySpki: string
-      fingerprint: string
-    }
+  | ({ ok: true } & Extract<PairingPollResponse, { status: 'approved' }>)
   | Failure
 interface PairingRow {
   agent_id: string
@@ -48,6 +47,12 @@ interface PairingRow {
   proof_expired_at: number | null
   status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
   farm_id: string | null
+}
+
+class CredentialWindowExpired extends Error {
+  constructor(readonly observedAt: number) {
+    super('Credential issuance window expired')
+  }
 }
 
 interface VerifiedProof {
@@ -257,8 +262,12 @@ export class PostgresPairing {
       return { ok: false, reason: 'storage-unavailable' }
     }
   }
-  /** Consumes an approved code once. Future token issuance must join this transaction before exposing an endpoint. */
-  async claim(input: unknown): Promise<PairingClaim> {
+  /** Signs and records one credential inside the locked claim transaction; returns only after COMMIT. */
+  async claim(
+    input: unknown,
+    issuer: ConnectorCredentialIssuerConfig,
+  ): Promise<PairingClaim> {
+    const signing = { ...issuer }
     const parsed = PairingPollRequest.safeParse(input)
     if (!parsed.success) return { ok: false, reason: 'invalid-input' }
     try {
@@ -317,15 +326,67 @@ export class PostgresPairing {
           return { ok: true, status: 'expired' }
         if (!this.proofIsCurrent(proofs[0], row, deliveryNow))
           return { ok: false, reason: 'denied' }
-        await tx`UPDATE farm.pairing_requests SET status = 'consumed' WHERE agent_id = ${row.agent_id}::uuid`
-        return {
-          ok: true,
-          status: 'claimed',
+        const jti = randomUUID()
+        const issuedAt = Math.floor(deliveryNow / 1000)
+        const expiresAt = issuedAt + signing.ttlSeconds
+        const binding = await connectorKeyBinding(row.public_key_spki)
+        if (binding.fingerprint !== row.fingerprint)
+          throw new Error('Credential identity mismatch')
+        const token = await issueConnectorCredential({
+          ...signing,
+          nowSeconds: issuedAt,
           agentId: row.agent_id,
           farmId: row.farm_id,
           publicKeySpki: row.public_key_spki,
-          fingerprint: row.fingerprint,
+          jti,
+        })
+        const signedAt = this.now()
+        if (
+          signedAt >= deliveryNow &&
+          proofs[0] &&
+          signedAt >= proofs[0].expires_at
+        )
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${signedAt} WHERE agent_id = ${row.agent_id}::uuid`
+        if (
+          signedAt < deliveryNow ||
+          signedAt >= row.expires_at ||
+          !this.proofIsCurrent(proofs[0], row, signedAt) ||
+          Math.floor(signedAt / 1000) >= expiresAt
+        )
+          return { ok: false, reason: 'denied' }
+        const response = PairingPollResponse.parse({
+          status: 'approved',
+          agent_id: row.agent_id,
+          farm_id: row.farm_id,
+          device_token: token,
+          expires_at: expiresAt * 1000,
+        })
+        if (response.status !== 'approved')
+          throw new Error('Invalid credential response')
+        try {
+          await tx.savepoint(async (save) => {
+            await save`INSERT INTO farm.connector_credentials (jti, agent_id, farm_id, fingerprint, thumbprint, kid, issuer, audience, issued_at, expires_at) VALUES (${jti}::uuid, ${row.agent_id}::uuid, ${row.farm_id}::uuid, ${binding.fingerprint}, ${binding.thumbprint}, ${signing.kid}, ${signing.issuer}, ${signing.audience}, ${issuedAt}, ${expiresAt})`
+            await save`UPDATE farm.pairing_requests SET status = 'consumed' WHERE agent_id = ${row.agent_id}::uuid`
+            const recordedAt = this.now()
+            if (
+              recordedAt < signedAt ||
+              recordedAt >= row.expires_at ||
+              !this.proofIsCurrent(proofs[0], row, recordedAt) ||
+              Math.floor(recordedAt / 1000) >= expiresAt
+            )
+              throw new CredentialWindowExpired(recordedAt)
+          })
+        } catch (error) {
+          if (!(error instanceof CredentialWindowExpired)) throw error
+          if (
+            error.observedAt >= signedAt &&
+            proofs[0] &&
+            error.observedAt >= proofs[0].expires_at
+          )
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${error.observedAt} WHERE agent_id = ${row.agent_id}::uuid`
+          return { ok: false, reason: 'denied' }
         }
+        return { ok: true, ...response }
       })
     } catch {
       return { ok: false, reason: 'storage-unavailable' }

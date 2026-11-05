@@ -39,7 +39,7 @@ The official runner verifies migration 0009 down/up and the final journal. `bun 
 
 ## Approval and claim integration
 
-`PostgresPairing.decide` requires a current verified proof before approval. `claim` requires the same proof before returning metadata and rechecks its deadline after the enrollment lock. Each check reads the proof inside the transaction holding the shared pairing-row lock order. Origin and audience come from mandatory server configuration. Both stages must finish inside the at-most-60-second proof lifetime; an expired verified challenge cannot be renewed, so recovery requires a new pairing. This strict prototype policy does not automatically revoke an existing enrollment after proof expiry.
+`PostgresPairing.decide` requires a current verified proof before approval. `claim` requires the same proof before returning a real credential and rechecks its deadline after the enrollment lock, asynchronous signing and metadata/consumption writes. Each check reads the proof inside the transaction holding the shared pairing-row lock order. Origin and audience come from mandatory server configuration. Both stages must finish inside the at-most-60-second proof lifetime; an expired verified challenge cannot be renewed, so recovery requires a new pairing. This strict prototype policy does not automatically revoke an existing enrollment after proof expiry.
 
 Migration 0009 records observed proof expiry in an immutable `proof_expired_at` marker on the pairing request. Approval or claim commits that marker before denying an expired proof, even if approval committed earlier. Subsequent clock regression cannot restore usability. Session expiry observed during the proof lock wait is also committed as terminal session revocation. Denial grants no authority and does not require proof, but retains session, membership and fingerprint checks.
 
@@ -47,4 +47,4 @@ Migration 0009 records observed proof expiry in an immutable `proof_expired_at` 
 
 The verifier SQL role remains trusted, as does a backend that can directly manipulate authorization records. Verified database state is meaningful only through the reviewed service boundaries; a submitted boolean or standalone result is not a transport credential.
 
-Real credential issuance, delivery/retry semantics, independent-session approval endpoints with origin/CSRF and abuse checks, and browser/Connector simulator flows remain pending. This slice sends no printer command and provides no HTTP/server command fallback.
+Real credential issuance is integrated atomically with consumption as described in the [issuance checkpoint](CONNECTOR-CREDENTIAL-ISSUANCE-CHECKPOINT.md). Delivery/recovery/revocation semantics, independent-session approval endpoints with origin/CSRF and abuse checks, and browser/Connector simulator flows remain pending. This slice sends no printer command and provides no HTTP/server command fallback.

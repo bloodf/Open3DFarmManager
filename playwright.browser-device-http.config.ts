@@ -12,6 +12,7 @@ export default defineConfig({
     '/tmp/open3dfarm-browser-device-real-acceptance/unused-browser-output',
   // The fixture issues a disposable loopback certificate. No production TLS override.
   use: {
+    baseURL: process.env.BROWSER_DEVICE_HTTP_TEST_ORIGIN,
     browserName: 'chromium',
     ignoreHTTPSErrors: true,
     trace: 'off',

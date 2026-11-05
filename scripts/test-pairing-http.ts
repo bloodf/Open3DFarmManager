@@ -3,7 +3,14 @@ import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer as createHttpsServer } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -233,10 +240,10 @@ try {
   }
   if (!expiredSessionId)
     throw new Error('Synthetic expired session unavailable')
-  const appRequire = createRequire(
-    new URL('../apps/farm/package.json', import.meta.url),
+  const nuxtPackage = await realpath(
+    new URL('../apps/farm/node_modules/nuxt/package.json', import.meta.url),
   )
-  const nuxtRequire = createRequire(appRequire.resolve('nuxt'))
+  const nuxtRequire = createRequire(nuxtPackage)
   const iron = await import(
     pathToFileURL(nuxtRequire.resolve('iron-webcrypto')).href
   )
@@ -381,11 +388,12 @@ try {
   })
   await cleanup('proxy', async () => {
     if (proxy?.listening) {
+      const closed = new Promise<void>((resolve, reject) =>
+        proxy!.close((error) => (error ? reject(error) : resolve())),
+      )
       proxy.closeAllConnections()
       await Promise.race([
-        new Promise<void>((resolve, reject) =>
-          proxy!.close((error) => (error ? reject(error) : resolve())),
-        ),
+        closed,
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('Proxy close timed out')), 3000),
         ),

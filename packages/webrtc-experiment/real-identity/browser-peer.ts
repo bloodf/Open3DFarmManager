@@ -18,7 +18,9 @@ import {
 } from '../../connector/src/webrtc/rtc-proof-inbox.ts'
 
 export type FixtureOnlyVideoHooks = Readonly<{
-  onTrack: (event: RTCTrackEvent) => void
+  onTrack: (
+    event: Readonly<{ track: MediaStreamTrack; receiver: RTCRtpReceiver }>,
+  ) => void
   activate: (
     context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
   ) => void
@@ -86,7 +88,9 @@ export class ReadonlyBrowserPeer {
           return
         }
         try {
-          this.#options.fixtureOnlyVideo?.onTrack(event)
+          this.#options.fixtureOnlyVideo?.onTrack(
+            Object.freeze({ track: event.track, receiver: event.receiver }),
+          )
         } catch {
           this.close('fixture-video-track')
         }

@@ -12,6 +12,7 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
   #track: MediaStreamTrack | undefined
   #terminal = false
   #active = false
+  #deadline = 0
   #callbacks = 0
   #frameId: number | undefined
   #samples: { mediaTime: number; centerX: number; brightPixels: number }[] = []
@@ -51,6 +52,7 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
       )
     if (!Number.isFinite(deadline) || deadline <= now)
       throw Error('Video admission expired')
+    this.#deadline = deadline
     this.#active = true
     this.#video.srcObject = this.#stream
     this.#timer = setTimeout(() => this.terminal(), deadline - now)
@@ -58,9 +60,9 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
     this.scheduleFrame()
   }
   private scheduleFrame() {
-    if (!this.#active || this.#terminal || this.#callbacks >= 60) return
+    if (!this.current() || this.#callbacks >= 60) return
     this.#frameId = this.#video.requestVideoFrameCallback((_, metadata) => {
-      if (!this.#active || this.#terminal) return
+      if (!this.current()) return
       this.#callbacks++
       const context = this.#canvas.getContext('2d', {
         willReadFrequently: true,
@@ -95,9 +97,9 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
     })
   }
   async sample() {
-    if (this.#active && !this.#terminal && this.#receiver) {
+    if (this.current() && this.#receiver) {
       const stats = await this.#receiver.getStats()
-      if (this.#active && !this.#terminal)
+      if (this.current())
         stats.forEach((report) => {
           if (
             report.type === 'inbound-rtp' &&
@@ -112,6 +114,14 @@ export class DecodedVideoFixture implements FixtureOnlyVideoHooks {
         })
     }
     return this.snapshot()
+  }
+  private current() {
+    if (!this.#active || this.#terminal) return false
+    if (performance.now() >= this.#deadline) {
+      this.terminal()
+      return false
+    }
+    return true
   }
   private terminal() {
     if (this.#terminal) return

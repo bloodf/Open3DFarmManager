@@ -22,7 +22,7 @@ function field(value: unknown, key: string) {
     throw Error('Missing ' + key)
   return value[key]
 }
-class FixtureProcess {
+export class FixtureProcess {
   process: ChildProcessWithoutNullStreams
   #pending:
     | { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -30,12 +30,20 @@ class FixtureProcess {
   stderr = ''
   #exited: Promise<void>
   #closed: Promise<void>
+  #ipcError: Error | undefined
   constructor(runtime: string) {
     this.process = spawn(
       runtime,
       [new URL('./native-media-child.ts', import.meta.url).pathname],
       { stdio: 'pipe' },
     )
+    this.process.stdin.on('error', (error) => {
+      this.#ipcError = error
+      const pending = this.#pending
+      this.#pending = undefined
+      pending?.reject(error)
+      this.process.kill('SIGTERM')
+    })
     this.#exited = new Promise((resolve) => {
       this.process.once('exit', (code, signal) => {
         console.info(
@@ -92,6 +100,7 @@ class FixtureProcess {
     )
   }
   async request(value: unknown) {
+    if (this.#ipcError) throw this.#ipcError
     if (this.process.exitCode !== null || this.process.signalCode !== null)
       throw Error('Fixture already exited: ' + this.stderr)
     if (this.#pending) throw Error('Concurrent fixture IPC')
@@ -148,6 +157,20 @@ class FixtureProcess {
       }),
     ]).finally(() => clearTimeout(timer))
   }
+}
+
+export async function disposeFiniteResources(
+  disposals: readonly (() => unknown | Promise<unknown>)[],
+) {
+  const results = await Promise.allSettled(
+    disposals.map((dispose) => Promise.resolve().then(dispose)),
+  )
+  const failures = results.filter((result) => result.status === 'rejected')
+  if (failures.length)
+    throw new AggregateError(
+      failures.map((result) => result.reason),
+      'Finite fixture cleanup failed',
+    )
 }
 
 /** Manual, explicitly gated phase. No production camera, registry or signalling service. */
@@ -460,12 +483,16 @@ export async function runFiniteMediaPhase(phase: 'encode' | 'native') {
     throw error
   } finally {
     clearTimeout(timer)
-    await child?.stop()
-    await browser?.close()
-    server.closeAllConnections()
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    )
+    await disposeFiniteResources([
+      () => child?.stop(),
+      () => browser?.close(),
+      async () => {
+        server.closeAllConnections()
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        )
+      },
+    ])
     console.info(JSON.stringify({ stage: 'finite-resources-closed' }))
   }
 }

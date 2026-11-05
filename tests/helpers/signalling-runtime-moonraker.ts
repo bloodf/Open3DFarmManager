@@ -42,6 +42,8 @@ export async function createRuntimeMoonrakerFixture() {
     eventtime = 1
   let closeServer: (() => Promise<void>) | undefined
   let port = 0
+  let admitted = 0,
+    terminalReason: string | null = null
   let broadcast = () => {}
   let disposal: Promise<void> | undefined
   return {
@@ -221,6 +223,8 @@ export async function createRuntimeMoonrakerFixture() {
         signal: controller.signal,
         onDiagnostic(value) {
           if (value.kind === 'queued') queued++
+          if (value.kind === 'readonly-admitted') admitted++
+          if (value.kind === 'readonly-terminal') terminalReason = value.reason
         },
       })
         .catch(() => {
@@ -242,6 +246,8 @@ export async function createRuntimeMoonrakerFixture() {
         settled,
         directory,
         port,
+        admitted,
+        terminalReason,
       }
     },
     close() {

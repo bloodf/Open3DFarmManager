@@ -67,6 +67,11 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
     settled: z.boolean(),
     directory: z.string().min(1).max(512),
     port: z.number().int().min(0).max(65535),
+    admitted: z.number().int().min(0).max(64),
+    terminalReason: z
+      .string()
+      .regex(/^[a-zA-Z0-9:_-]{1,80}$/)
+      .nullable(),
   }),
   z.strictObject({
     kind: z.literal('observation'),

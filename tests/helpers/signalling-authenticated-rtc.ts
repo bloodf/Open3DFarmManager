@@ -717,6 +717,11 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           `authenticated-rtc-${session.closure}-verified-status-and-remote-close`,
         )
       } catch (error) {
+        if (process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes') {
+          try {
+            lastNative = await session.connector.request({ kind: 'observe' })
+          } catch {}
+        }
         await session.note(
           'rtc-failure-observations:' +
             JSON.stringify({

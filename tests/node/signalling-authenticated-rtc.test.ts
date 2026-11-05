@@ -144,6 +144,8 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       settled: false,
       directory: '/tmp/owned-runtime-fixture',
       port: 12345,
+      admitted: 0,
+      terminalReason: null,
     }).success,
     true,
   )
@@ -156,6 +158,8 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       settled: false,
       directory: '/tmp/owned-runtime-fixture',
       port: 12345,
+      admitted: 0,
+      terminalReason: null,
     }).success,
     false,
   )

@@ -10,6 +10,8 @@ import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
 type AgentDiagnostic =
   | CollectionDiagnostic
   | { kind: 'credential-expired' }
+  | { kind: 'readonly-admitted' }
+  | { kind: 'readonly-terminal'; reason: string }
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
   | {
@@ -148,7 +150,23 @@ export async function runConnectorAgent(input: {
                 token: credential.device_token,
                 identity,
               },
-              { genuineStatus: { assignmentRefs: refs }, onTerminal },
+              {
+                genuineStatus: { assignmentRefs: refs },
+                onVerifiedAdmission: () =>
+                  diagnostic({ kind: 'readonly-admitted' }),
+                onTerminal(reason) {
+                  try {
+                    diagnostic({
+                      kind: 'readonly-terminal',
+                      reason: /^[a-zA-Z0-9:_-]{1,80}$/.test(reason)
+                        ? reason
+                        : 'unclassified',
+                    })
+                  } finally {
+                    onTerminal()
+                  }
+                },
+              },
             )
             let sender: InstanceType<typeof FarmStatusSender>
             try {

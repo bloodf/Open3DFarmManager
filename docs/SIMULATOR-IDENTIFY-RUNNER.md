@@ -30,6 +30,11 @@ source, not a measurement.
 | Observation window | at most 90 000 ms, the original readiness budget                                                                         |
 | Readiness verdict  | always `not-evaluated`                                                                                                   |
 
+The Docker binary is resolved from `PATH` as `docker`. The runner never
+installs anything and never resolves a binary from a repository path, so a
+host whose `PATH` points at another `docker` executes that binary. The
+programmatic seam accepts a different binary name for a controlled harness.
+
 ## Invocation
 
 ```sh
@@ -38,30 +43,36 @@ node scripts/simulator-identify-diagnostic.mjs \
   --ledger-dir=/absolute/path/outside/the/repository
 ```
 
-| Argument                | Required | Meaning                                                         |
-| ----------------------- | -------- | --------------------------------------------------------------- |
-| `--opt-in=<token>`      | yes      | must equal `synthetic-identification-diagnostic`                |
-| `--ledger-dir=<path>`   | no       | external evidence directory, refused when inside the repository |
-| `--image=<reference>`   | no       | must equal the reviewed pinned amd64 reference                  |
-| `--platform=<name>`     | no       | must equal `linux/amd64`                                        |
-| `--observation-ms=<n>`  | no       | at most 90 000                                                  |
-| `--compose-file=<path>` | no       | Compose file whose pin is verified                              |
-| `--observer=<path>`     | no       | observer file whose hash is verified                            |
+| Argument                | Required | Meaning                                                    |
+| ----------------------- | -------- | ---------------------------------------------------------- |
+| `--opt-in=<token>`      | yes      | must equal `synthetic-identification-diagnostic`           |
+| `--ledger-dir=<path>`   | no       | external evidence directory, refused inside the repository |
+| `--image=<reference>`   | no       | must equal the reviewed pinned amd64 reference             |
+| `--platform=<name>`     | no       | must equal `linux/amd64`                                   |
+| `--observation-ms=<n>`  | no       | at most 90 000                                             |
+| `--compose-file=<path>` | no       | Compose file whose pin is verified                         |
+| `--observer=<path>`     | no       | observer file whose hash is verified                       |
 
 Any other argument is refused. Arguments that name an endpoint, a host, a port,
 a URL, a socket, a serial device, a printer or a network are refused before
 anything runs. The process exit code is `0` for a completed diagnostic, `2` for
 a refused invocation and `1` for a failed run.
 
-The runner writes one JSON object to standard output. On failure it writes one
-JSON object to standard error with the primary failure, the phase and the
-cleanup failures.
+The image, the platform and the observation window are validated in one place,
+`assertRunSettings`, and both the command line and the programmatic entry point
+call it. A programmatic caller cannot create a container from an unpinned image
+or observe longer than the readiness budget.
+
+The runner writes one JSON object to standard output. A failed run writes the
+report it managed to build to standard output first and then one JSON object
+to standard error with the primary failure, the phase and the cleanup
+failures.
 
 ## Safety model
 
 ```mermaid
 flowchart TD
-  A[Argument validation] --> B{Opt-in, pin and ledger valid?}
+  A[Argument validation] --> B{Opt-in, pin, window and ledger valid?}
   B -->|no| Z[Exit 2, no Docker call]
   B -->|yes| C[Baseline recorded in the ledger]
   C --> D[Inspection container: create only]
@@ -70,10 +81,12 @@ flowchart TD
   F -->|no| Y[Hard stop, cleanup, exit 1]
   F -->|yes| G[Diagnostic container: fresh volume, no ports, no network]
   G --> H[Observation inside the original 90 second budget]
-  H --> I[Bounded capture from the verified stderr routing]
-  I --> J[Observer analyzer inside the same container]
-  J --> K[Validated report, no readiness verdict]
-  K --> L[Independent cleanup of every owned resource]
+  H --> I{Wrapper verified in the running command line?}
+  I -->|no, verified absent| J[Capture skipped, report kept, exit 1]
+  I -->|yes or unknown| K[Bounded capture from the configured routing]
+  K --> L[Observer analyzer inside the same container]
+  L --> M[Validated report, no readiness verdict]
+  M --> N[Cleanup: containers first, then volumes]
 ```
 
 Container constraints, all enforced by `assertContainerIsolation`:
@@ -87,18 +100,30 @@ Container constraints, all enforced by `assertContainerIsolation`:
 | Mounts                | the observer and the transformed configuration read-only, one fresh named volume |
 | Temporary directories | `/tmp` and `printer_data/comms` with `noexec`                                    |
 
+The forbidden options are refused in every spelling the runner could produce,
+including the `--option=value` form, so a regression cannot widen the
+isolation by changing the spelling of an argument.
+
 The runner creates only resources that carry its own label
 `com.open3dfarmmanager.identify-diagnostic=<run id>`. A resource is removed
 only after its labels are verified. A label mismatch is a refusal, never a
 deletion. There is no prune, no broad filter and no process kill.
 
+Cleanup removes the containers before the volumes. A volume that is still
+mounted by a container cannot be removed, so the reverse order leaks a named
+volume on every run. A removal that fails is retried once, and the resources
+that were already removed are never inspected again.
+
 ## Configuration adaptation
 
 The Supervisor configuration is extracted read-only from the pinned image. The
-image entrypoint metadata yields the entrypoint script, the script yields the
-Supervisor configuration path, and the configuration is copied out of the
-inspection container. Nothing is guessed: when the derivation fails, the run
-stops and names the missing piece.
+image entrypoint metadata yields the entrypoint candidates, the first candidate
+that is a readable text file yields the entrypoint script, the script yields
+the Supervisor configuration path, and the configuration is copied out of the
+inspection container. Nothing is guessed: a candidate that is missing, binary
+or larger than the permitted size is rejected and the discovery continues with
+the next candidate, and a run that finds no usable candidate stops and names
+every rejected candidate.
 
 The transformation changes exactly one value, the `command` of the
 `[program:klipper]` section:
@@ -125,16 +150,42 @@ The extracted configuration belongs to the upstream image and stays under its
 GPL-3.0 licence. It is written to the external ledger with a notice file and
 is never committed.
 
-## Stderr routing
+## Child stderr routing
 
-The child's stderr is read from the routing verified in the extracted
-configuration, never from an assumption about Docker logs.
+The observer writes to the child's stderr. Where that stderr lands is decided
+by Supervisor, and the runner derives the answer from the extracted
+configuration instead of assuming it.
 
-| Configuration                                | Capture source                 |
-| -------------------------------------------- | ------------------------------ |
-| `stderr_logfile` set                         | that file inside the container |
-| `redirect_stderr=true` with `stdout_logfile` | the stdout log file            |
-| neither                                      | the container output           |
+| Configuration                                    | Capture source                               |
+| ------------------------------------------------ | -------------------------------------------- |
+| `redirect_stderr=true` with `stdout_logfile`     | that file inside the container               |
+| `redirect_stderr=true` without `stdout_logfile`  | the Supervisor child log under `childlogdir` |
+| `redirect_stderr=false` with `stderr_logfile`    | that file inside the container               |
+| `redirect_stderr=false` without `stderr_logfile` | the container output                         |
+| `redirect_stderr` absent                         | both branches stay possible                  |
+
+The last row matters. When the directive is absent, Supervisor's own default
+decides between the two branches, and the runner does not guess it. Both
+routes that the configuration permits are read, and the route that actually
+carries the observer records is the proof. The report then separates the two
+facts:
+
+| Field               | Meaning                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `routing.kind`      | the route the configuration describes                        |
+| `routing.ambiguous` | the directive is absent and more than one route was possible |
+| `routing.evidence`  | `observer-records` when a route carried records, else `none` |
+| `capture.source`    | the route the capture was actually read from                 |
+
+The child log branch never assumes a file name. The runner resolves the child
+log directory from the `childlogdir` directive of the `[supervisord]` section,
+or from the `TMPDIR` of the running container, and then lists that directory
+in a bounded way and reads the files it finds. The route is accepted when the
+file carries observer records, not when it matches a guessed name.
+
+An unusable routing is a reported condition, not an abort. The report carries
+`routing.kind: unresolved` and `capture.reason: routing-unresolved`, and the
+observation is kept.
 
 An empty capture is reported as an empty capture. It is not evidence of
 silence, and the report keeps the observer record count so that a missing
@@ -143,9 +194,14 @@ routing stays visible.
 ## Output
 
 The report carries validated observer data, process lifecycle metadata and
-digests. It never carries raw configuration, raw log lines, serial payloads,
-environment values, file paths or process identifiers. The captured child
-stderr stays in the external ledger.
+digests. It never carries raw configuration, raw log lines, serial payloads or
+environment values. The captured child stderr stays in the external ledger.
+
+The report does carry two kinds of path. The `ledger` field is the external
+evidence directory, which is outside the repository by construction, and the
+configuration delta and the source list carry container-internal paths such as
+the Klipper root and the observer mount path. Neither is a host path of the
+private configuration, and neither is a secret.
 
 ```jsonc
 {
@@ -180,22 +236,32 @@ stderr stays in the external ledger.
     "exitCode": 0,
     "oomKilled": false,
   },
+  "baseline": { "recorded": true, "failures": [] },
   "observation": {
     "budgetMs": 90000,
     "windowMs": 90000,
     "observedMs": 90000,
     "exceededBudget": false,
   },
-  "routing": { "kind": "stderr-file", "pathDigest": "…" },
+  "routing": {
+    "kind": "stderr-file",
+    "pathDigest": "…",
+    "evidence": "observer-records",
+    "ambiguous": false,
+  },
   "capture": {
     "available": true,
     "reason": "observer-records-captured",
     "bytes": 133,
     "limitBytes": 1048576,
     "observerRecords": 2,
+    "invalidRecords": 0,
     "truncated": false,
+    "source": "stderr-file",
   },
+  "supervisorObservation": "observed",
   "wrapperApplied": true,
+  "wrapperReason": "observer-in-command",
   "processes": {
     "klipper": "RUNNING",
     "moonraker": "RUNNING",
@@ -206,21 +272,45 @@ stderr stays in the external ledger.
   "readiness": "not-evaluated",
   "conclusion": "diagnostic-only observation; no readiness acceptance and no retry",
   "cleanup": { "errors": [], "completed": true },
+  "stages": { "preflight": 12, "observe": 90001, "cleanup": 40 },
+  "totalElapsedMs": 91200,
 }
 ```
 
 `capture.reason` states why the capture looks the way it does:
-`observer-records-captured`, `no-observer-records` or `capture-unavailable`.
-An empty capture is never presented as silence.
+`observer-records-captured`, `no-observer-records`, `capture-unavailable`,
+`routing-unresolved` or `wrapper-not-applied`. An empty capture is never
+presented as silence.
 
-`wrapperApplied` reports whether the running Klippy process really carries the
-observer wrapper. It is read from the process command line of the Supervisor
-program, so a configuration that did not take effect cannot pass silently.
+`supervisorObservation` and `wrapperApplied` keep three different facts apart.
+A Supervisor that cannot be read is `unavailable`, not an empty map, and it is
+not a statement about the wrapper:
+
+| `wrapperApplied` | `wrapperReason`                | What it means                                          |
+| ---------------- | ------------------------------ | ------------------------------------------------------ |
+| `true`           | `observer-in-command`          | the running process carries the observer wrapper       |
+| `false`          | `observer-absent-from-command` | the transformation provably did not reach the process  |
+| `unavailable`    | `supervisor-unavailable`       | Supervisor could not be read at all                    |
+| `unavailable`    | `program-not-running`          | the Klippy program has no process, for example `FATAL` |
+| `unavailable`    | `command-unreadable`           | the process exists but its command line is unreadable  |
+
+Only a verified absence is a failure. An unreadable observation never becomes
+a false wrapper failure and never stops the run.
+
+A verified absence does stop the run, because a capture taken without the
+wrapper proves nothing. The capture is skipped, the report is written to the
+ledger and to standard output, and the exit code is `1`.
 
 The observer analysis is validated against a closed vocabulary: one
 classification per session, finite elapsed times, non-negative counters and
 only the known counter names. Unknown fields are dropped before the report is
 written.
+
+The observer aborts on the first record that does not parse, which would turn
+a half written record into no analysis at all. The runner therefore hands the
+analyzer only the observer records it can read and reports how many it
+dropped in `capture.invalidRecords`. The observer still owns every
+classification.
 
 ## Bounds
 
@@ -232,26 +322,42 @@ written.
 | Observer input     | 16 MiB, 4 097 events, 65 536 byte lines | existing observer               |
 | Observer events    | 4 096 plus one truncation record        | existing observer               |
 
-A non-response cannot extend the original 90 seconds. The runner observes
-inside that budget and stops.
+The observation window is a bound on the observation phase. Each polling call
+receives the time that is left as its own timeout, so a Docker call that does
+not answer cannot push the phase past the deadline. The run as a whole has no
+fixed deadline: the baseline, the discovery, the creation, the capture, the
+analysis and the cleanup are bounded per call. The report carries the elapsed
+time of every stage in `stages` and the elapsed time of the whole run in
+`totalElapsedMs`, so the cost of a run is visible.
 
 ## Failure semantics
 
-Every phase failure aborts the run and triggers cleanup. The failure keeps the
-primary error and lists the cleanup failures next to it, one entry per owned
-resource. Cleanup runs once per resource and continues after a failed removal.
+A phase that cannot produce the evidence it promises stops the run and
+triggers the cleanup. A condition that only weakens the evidence is reported
+and the run continues, because the observation is still worth keeping.
 
-| Phase     | Hard stop condition                                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| preflight | missing opt-in, foreign image, extended window, ledger inside the repository, observer hash mismatch, Compose pin mismatch |
-| baseline  | the inventory cannot be recorded                                                                                           |
-| discover  | the configuration path cannot be derived or extracted, a Klipper source hash differs                                       |
-| transform | not exactly one klippy command, unsupported interpreter, metacharacters, a changed policy                                  |
-| observe   | the container cannot be created or started                                                                                 |
-| verify    | the wrapper is not in the running process command line                                                                     |
-| capture   | the verified routing cannot be read                                                                                        |
-| analyze   | the observer analyzer fails or returns an invalid shape                                                                    |
-| cleanup   | a removal fails; the observation is kept and the failure reported                                                          |
+| Phase     | Stops the run                                                                                                                                   | Only reported                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| preflight | missing opt-in, foreign image, extended window, ledger inside the repository or a linked worktree, observer hash mismatch, Compose pin mismatch | a failed inventory call in the baseline                 |
+| baseline  |                                                                                                                                                 | a failed inventory call, with its exit status           |
+| discover  | the configuration path cannot be derived or extracted, no usable entrypoint candidate, a Klipper source hash differs                            |                                                         |
+| transform | not exactly one klippy command, unsupported interpreter, metacharacters, a changed policy                                                       |                                                         |
+| observe   | the container cannot be created or started, a Docker call times out                                                                             |                                                         |
+| verify    | the wrapper is verified absent from the running process command line                                                                            | an unreadable Supervisor or process command line        |
+| capture   |                                                                                                                                                 | an unusable routing or an unreadable capture source     |
+| analyze   |                                                                                                                                                 | a failing analyzer, recorded as `observerAnalysisError` |
+| cleanup   | a removal still fails after the retry                                                                                                           |                                                         |
+
+The failure keeps the primary error and lists the cleanup failures next to
+it, one entry per owned resource. Cleanup continues after a failed removal.
+
+## Ledger isolation
+
+The evidence directory never lives inside the repository. The refusal covers
+the current worktree, the shared git directory and every linked worktree of
+the same repository, and it resolves both sides, so a symlink cannot smuggle
+the ledger inside a checkout. The refusal happens before anything is created,
+so a rejected path leaves no directory behind.
 
 ## Verification
 
@@ -260,15 +366,43 @@ node --test tests/node/simulator-identify-diagnostic.test.ts
 ```
 
 The tests use a fake Docker seam and fake processes. They start no container,
-no network, no browser and no printer. They cover the refused opt-in, the
-foreign pin, the refused endpoints, the shell injection attempt, the
-configuration mismatch, the source hash mismatch, the bounded capture, the
-validation of the observer data, the secret redaction, the timeout without a
-retry, the independent cleanup, the refusal to remove an unlabelled resource
-and the refusal to write the ledger inside the repository.
+no network, no browser and no printer. The fake reproduces the Docker
+behaviour that matters: a volume that is still mounted by a container refuses
+to be removed, and the fake analyzer is a port of the existing observer, so a
+capture that the observer would refuse really does fail the run.
 
-These checks are source-level. They are not part of `check:all` and they do not
-establish simulator acceptance.
+The suite covers the refused opt-in, the foreign pin, the refused endpoints,
+the programmatic bypass of the settings check, the shell injection attempt,
+the configuration mismatch, the source hash mismatch, the removal order, the
+volume that is in use, the cleanup retry, the refusal to remove an unlabelled
+resource, the bounded capture, the truncation inside an observer record, the
+child log routing, the unusable routing, the unavailable Supervisor, the
+program that is not running, the verified wrapper failure, the timeout without
+a retry, the observation window, the entrypoint candidate fallback, the
+secret redaction, the validation of the observer data and the ledger refusal
+for the repository, for a linked worktree and through a symlink.
+
+This test file is part of `check:all`: `test:node` runs the
+`tests/node/*.test.ts` glob and `typecheck` covers `tests/**/*.ts`. The Python
+observer tests stay outside `check:all`, exactly as the historical document
+states. The root gate has not been run against this head.
+
+## Divergence from the historical observations
+
+The two observations in
+[the serial diagnostic document](SIMULATOR-SERIAL-DIAGNOSTIC.md) disabled the
+Klippy restart and retry policy to match the previous diagnostic controls.
+This runner preserves the image's own `autorestart` and `startretries`, because
+changing them would change the behaviour under observation. A new observation
+is therefore **not comparable** with the two historical observations, and the
+difference is a deliberate choice of this instrument.
+
+The historical document also records that the pinned image's Supervisor
+routing was never established by the collector: an external diagnosis suggests
+the container output, while another reading assumed a Supervisor child log.
+This runner does not settle that question by reading. It derives the routing
+from the extracted configuration at run time and reports which route actually
+carried the records.
 
 ## Later CI integration
 
@@ -292,6 +426,12 @@ The runner is ready for that seam. The seam itself is not part of this change.
   verified. A derivation failure stops the run and names the missing piece.
 - The pinned image under the native amd64 CI host is not characterised by this
   task. The runner produces evidence; it does not conclude a cause.
+- Whether `supervisorctl` works inside the image is unknown. When it does not,
+  the report says `supervisorObservation: unavailable` and the wrapper stays
+  undecided.
+- The child log file name is not known in advance. The runner finds the file
+  by content, inside a bounded number of candidates, and reports the route it
+  used.
 - The historical observations in
   [the serial diagnostic document](SIMULATOR-SERIAL-DIAGNOSTIC.md) remain the
   source of what was seen locally. The observer has run before; nothing here
@@ -320,15 +460,46 @@ sections. The transformation refuses with
 container is started and the inspection container is removed. The runner exits
 with code 1.
 
-Example 4: the captured child stderr holds 2 lines that start with
+Example 4: the captured child stderr holds 2 records that start with
 `O3DFM_SERIAL_DIAGNOSTIC ` and 133 bytes in total. The report shows
 `capture.observerRecords: 2`, `capture.bytes: 133`,
-`capture.truncated: false` and the observer analysis of those two records.
+`capture.truncated: false`, `capture.invalidRecords: 0` and the observer
+analysis of those two records.
 
 Example 5: the captured child stderr holds 1 048 576 bytes or more. The report
-shows `capture.bytes: 1048576` and `capture.truncated: true`. The capture is
-never larger than the limit and the observation window stays inside 90 000 ms.
+shows `capture.truncated: true` and a `capture.bytes` that never exceeds
+`capture.limitBytes: 1048576`. The capture bound removes a half written last
+line, so `capture.bytes` can be a little smaller than the limit.
 
-Example 6: the removal of the diagnostic container fails while the volume
-removal succeeds. The run reports `cleanup.completed: false` with one cleanup
-error for the container, and the volume removal was still attempted.
+Example 6: the captured child stderr ends inside an observer record. The
+unchanged observer refuses that stream with exit code 78. The runner drops the
+records it cannot read, reports `capture.invalidRecords: 1` and keeps the
+analysis of the remaining records.
+
+Example 7: the removal of the diagnostic container fails while the volume
+removal succeeds. The report shows `cleanup.completed: false` with one cleanup
+error for the container, and the volume removal was still attempted. When the
+container cannot be removed, the volume stays mounted, so the volume removal
+fails too and the report shows two cleanup errors.
+
+Example 8: `supervisorctl status` fails inside the container. The report shows
+`supervisorObservation: unavailable`, `processes: "unavailable"` and
+`wrapperApplied: "unavailable"` with `wrapperReason: supervisor-unavailable`.
+The run continues and reports no readiness verdict.
+
+Example 9: the Supervisor reports `klipper FATAL` with no process. The report
+shows `processes.klipper: "FATAL"`, `wrapperApplied: "unavailable"` and
+`wrapperReason: program-not-running`. The run continues.
+
+Example 10: the running Klippy command line does not carry the observer. The
+runner skips the capture, writes `capture.reason: wrapper-not-applied`,
+`wrapperApplied: false` and `wrapperReason: observer-absent-from-command`,
+keeps the report in the ledger and on standard output and exits with code 1.
+
+Example 11: the ledger directory is inside the repository, inside a linked
+worktree or reaches the repository through a symlink. The run refuses before
+any Docker call, creates no directory and exits with code 1.
+
+Example 12: a programmatic caller passes an unpinned image or an observation
+window above 90 000 ms. The run refuses with the phase `settings` before any
+Docker call.

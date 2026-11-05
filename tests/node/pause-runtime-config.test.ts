@@ -104,6 +104,7 @@ async function countImports<T>(run: () => Promise<T>): Promise<{
   imports: number
 }> {
   const subtle = crypto.subtle
+  const descriptor = Object.getOwnPropertyDescriptor(subtle, 'importKey')
   const original = subtle.importKey
   let imports = 0
   Object.defineProperty(subtle, 'importKey', {
@@ -117,11 +118,8 @@ async function countImports<T>(run: () => Promise<T>): Promise<{
   try {
     return { result: await run(), imports }
   } finally {
-    Object.defineProperty(subtle, 'importKey', {
-      configurable: true,
-      writable: true,
-      value: original,
-    })
+    if (descriptor) Object.defineProperty(subtle, 'importKey', descriptor)
+    else Reflect.deleteProperty(subtle, 'importKey')
   }
 }
 
@@ -214,6 +212,57 @@ test('the pause section refuses an oversized, duplicated or malformed issuer key
       issuers: [{ ...entry, privateKeyPkcs8: spki }],
     }),
   )
+})
+
+test('the loader snapshots the entire keyring before asynchronous imports', async () => {
+  const { spki, pair } = await issuerFixture()
+  const entry = { issuer: ISSUER, kid: KID, publicKeySpki: spki }
+  const config = {
+    version: 1 as const,
+    issuers: [entry, { ...entry, kid: 'second' }],
+  }
+  const loading = loadPauseIssuerKeys(config)
+  entry.issuer = 'farm:changed'
+  entry.kid = 'changed'
+  config.issuers[1]!.kid = 'changed-second'
+  config.issuers.push({ ...entry, kid: 'unexpected' })
+  const keys = await loading
+  assert.deepEqual(
+    keys.map(({ issuer, kid }) => ({ issuer, kid })),
+    [
+      { issuer: ISSUER, kid: KID },
+      { issuer: ISSUER, kid: 'second' },
+    ],
+  )
+  const message = new TextEncoder().encode('snapshot verification')
+  const signature = await crypto.subtle.sign(
+    'Ed25519',
+    pair.privateKey,
+    message,
+  )
+  for (const key of keys)
+    assert.equal(
+      await crypto.subtle.verify('Ed25519', key.publicKey, signature, message),
+      true,
+    )
+})
+
+test('the loader validates the whole keyring before importing any key', async () => {
+  const { spki } = await issuerFixture()
+  const entry = { issuer: ISSUER, kid: KID, publicKeySpki: spki }
+  const counted = await countImports(async () => {
+    for (const issuers of [
+      [],
+      Array.from({ length: 9 }, (_, index) => ({
+        ...entry,
+        kid: `key-${index}`,
+      })),
+      [entry, { ...entry }],
+      [entry, { ...entry, kid: 'invalid key' }],
+    ])
+      await assert.rejects(loadPauseIssuerKeys({ version: 1, issuers }))
+  })
+  assert.equal(counted.imports, 0)
 })
 
 test('the pause section refuses a noncanonical, wrong algorithm or private public key', async () => {

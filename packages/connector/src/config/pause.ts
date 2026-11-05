@@ -110,8 +110,10 @@ export async function loadPauseIssuerKeys(
   config: PauseRuntimeConfig | null | undefined,
 ): Promise<readonly PauseIssuer[]> {
   if (!config) return Object.freeze([])
+  // Parse and copy the whole keyring before any await can change its authority.
+  const snapshot = parsePauseRuntimeConfig(config)
   const issuers: PauseIssuer[] = []
-  for (const entry of config.issuers) {
+  for (const entry of snapshot.issuers) {
     const bytes = new Uint8Array(decodeEd25519Spki(entry.publicKeySpki))
     const publicKey = await crypto.subtle.importKey(
       'spki',

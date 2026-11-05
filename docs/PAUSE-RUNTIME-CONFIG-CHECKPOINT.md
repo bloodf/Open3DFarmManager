@@ -5,8 +5,8 @@ pause section to the Connector runtime configuration, keeps the exact provisione
 available to a future relay and driver, and loads the trusted issuer keyring as verification-only
 public keys.
 
-Nothing in this slice enables a pause. No command path is opened, no `commandsEnabled` flag
-exists, and no new configuration endpoint, issuer issuance flow or signalling audience derivation
+Nothing in this slice enables a pause. No command path is opened; existing `commandsEnabled`
+flags remain false. No new configuration endpoint, issuer issuance flow or signalling audience derivation
 is introduced.
 
 ## Runtime configuration
@@ -100,13 +100,18 @@ configured issuer keyring proves trust in a signer, not the permission to pause 
 
 ## Validation boundary
 
-Eight focused Node tests in `tests/node/pause-runtime-config.test.ts` cover the consumer relevant
+Ten focused Node tests in `tests/node/pause-runtime-config.test.ts` cover the consumer relevant
 invariants with genuine cryptography and temporary private configuration files. They cover the
 optional default, the keyring bound, duplicate issuer and key id, wrong algorithm, private payload,
 malformed and noncanonical encodings, the immutability of the parsed configuration and of the
 loaded issuer list, the handle identity and mapping equality of the local resolver, the refusal of
 unknown and foreign identifiers, the refusal to serialize a handle, and a real capability signed by
 an issuer key that verifies against the loaded verification key.
+
+The loader independently parses and copies the entire keyring before its first asynchronous
+import. Tests mutate the caller's entries and append another key during loading, and verify that
+the original issuer identities and key count survive. Invalid keyrings are rejected before any
+import, including when a caller bypasses the synchronous runtime parser.
 
 Focused strict TypeScript over the Connector sources and the new test, and the formatting check,
 passed at this commit. The complete repository gate, the Bun unit suite that consumes

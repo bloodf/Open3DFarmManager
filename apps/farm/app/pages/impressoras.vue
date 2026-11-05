@@ -135,6 +135,10 @@ async function selectFarm() {
       await loadConnectors(signal, current)
   })
 }
+function cancelRevocation() {
+  revokeTarget.value = null
+  revokeConfirmed.value = false
+}
 function selectRevocation(printer: Printer) {
   revokeTarget.value = printer
   revokeConfirmed.value = false
@@ -367,14 +371,7 @@ onBeforeRouteLeave(clear)
         @click="revoke"
       >
         Confirmar revogação</button
-      ><button
-        type="button"
-        :disabled="pending"
-        @click="
-          revokeTarget = null
-          revokeConfirmed = false
-        "
-      >
+      ><button type="button" :disabled="pending" @click="cancelRevocation">
         Cancelar revogação
       </button>
     </section>

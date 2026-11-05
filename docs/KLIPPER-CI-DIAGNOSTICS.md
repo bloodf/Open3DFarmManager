@@ -29,8 +29,8 @@ establish why an MCU missed a deadline.
 ## What the classifications observe
 
 Every classification is a fixed label with a bounded count over the captured
-tail. A label says that a captured line contained a known literal. It does not
-name a cause.
+tail. A label reports a match against its fixed log pattern, which may match
+several messages. A match does not establish the underlying cause.
 
 The runtime exception and warning labels match literals from the pinned
 Klipper revision `ee2c6fb`:
@@ -67,26 +67,27 @@ A Supervisor `RUNNING` state is a liveness signal. Supervisor reports it for a
 process that started and stayed up, including one that stopped serving its
 UART.
 
-The emulator start banner printed by Klipper's `scripts/avrsim.py`
-(`Starting AVR simulation: machine=...`) is not classified. The pinned
-Supervisor configuration sets no `stdout_logfile`, so Supervisor routes
-program stdout, and with `redirect_stderr=true` program stderr, into its own
-child log under `childlogdir`, which defaults to the temporary directory. The
-collector reads the Klipper, Moonraker and Supervisor log files plus container
-stdout, and it does not read that child log. Adding a read would change the
-Docker call set, so the banner stays out of the vocabulary instead of becoming
-a label that can never match.
+The emulator start banner (`Starting AVR simulation: machine=...`) is not
+classified. Its routing in the pinned image has not been established by this
+collector: an external diagnosis suggests container stdout, while the proposed
+implementation assumed a Supervisor child log. Neither assumption justifies
+claiming that the banner is absent or unreachable. Verify the actual image's
+configuration and captured output before adding this measurement; no additional
+Docker reads are introduced here.
 
 None of these labels changes the 90-second deadline, and none of them claims
 that a simulator became ready.
 
 ## Missing in-session evidence
 
-The collector has no in-session MCU traffic evidence. Klipper's
+An empty `stats` array means that no line matching the collector's `Stats`
+pattern was captured. A matching line without recognized counters still emits
+an object containing `at`; it does not emit an empty array. Thus `stats: []`
+does not itself establish why statistics were missing. Klipper's
 `serialhdl.SerialReader.stats()` returns an empty string once `serialqueue`
-is `None`, and each captured failure so far produced `stats: []`, so
-`bytes_read` and `bytes_invalid` are absent from these runs instead of
-measured as zero.
+is `None`, but the captured tails do not prove how that behavior affected the
+upstream log emitter. Missing `bytes_read` and `bytes_invalid` remain absent
+measurements, not zeros.
 
 An absent counter leaves two failures indistinguishable. Without
 `bytes_read` the collector cannot separate an MCU that never answered from an
@@ -159,3 +160,19 @@ cleanup paths without starting Docker or a printer:
 node --test tests/node/klipper-diagnostics.test.ts
 bash scripts/test-local-ci.sh
 ```
+
+## Current-head remote classification evidence
+
+[Simulator run 42083752172](https://github.com/bloodf/Open3DFarmManager/actions/runs/42083752172)
+at `9c87157` exercised the new classifications on a real CI failure. SV06/U1
+recorded 15/14 identify timeouts and MCU no-communication exceptions, 1/2
+serial-port opening errors and zero identify-response errors. Each captured
+Supervisor log contained four RUNNING events and no exit events. Container
+stdout repeated those lifecycle observations; they must not be counted as
+additional starts. Captured tails are not exhaustive process histories.
+
+Both `stats` arrays were empty. The unchanged 90-second readiness gate failed;
+code and image checks passed. These observations validate remote diagnostic
+collection, not a cause, stable readiness or printing acceptance. The next
+measurement needs bounded observation inside an identification session before
+its serial queue is destroyed.

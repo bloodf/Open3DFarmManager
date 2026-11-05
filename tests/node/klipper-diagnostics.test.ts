@@ -312,3 +312,42 @@ esac
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+for (const available of [false, true]) {
+  test(`Supervisor ${available ? 'STOPPED states remain observable' : 'exec failure is unavailable'}`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'open3d-diag-test-'))
+    try {
+      writeFileSync(
+        join(dir, 'docker'),
+        `#!/bin/sh
+case "$*" in
+  *"ps -aq"*) echo aaaaaaaaaaaa ;;
+  *"supervisorctl status"*) ${available ? "printf 'klipper STOPPED Not started\\n'" : ':'}; exit 3 ;;
+  *) exit 1 ;;
+esac
+`,
+        { mode: 0o700 },
+      )
+      const run = spawnSync(process.execPath, [script], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        encoding: 'utf8',
+        timeout: 10000,
+      })
+      assert.equal(run.status, 0)
+      for (const line of run.stdout.trim().split('\n')) {
+        assert.deepEqual(
+          JSON.parse(line).processes,
+          available ? { klipper: 'STOPPED' } : 'unavailable',
+        )
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+test('a captured Stats line without counters differs from no captured Stats line', () => {
+  const { rows } = collectWithLogs({ klippy: 'Stats 123.0: ' })
+  assert.deepEqual(rows[0].logs.klippy.stats, [{ at: 123 }])
+  assert.deepEqual(rows[0].logs.moonraker.stats, [])
+})

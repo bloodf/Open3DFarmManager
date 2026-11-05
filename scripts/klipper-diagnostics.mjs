@@ -33,7 +33,7 @@ function docker(args, includeStderr = false, acceptNonzero = false) {
 const supervisorPrograms = ['klipper', 'moonraker', 'simulavr', 'webcamd']
 const supervisorProgramPattern = supervisorPrograms.join('|')
 const supervisorStatusPattern = new RegExp(
-  `^(${supervisorProgramPattern})\\s+(RUNNING|STARTING|BACKOFF|STOPPING|EXITED|FATAL|UNKNOWN)\\b`,
+  `^(${supervisorProgramPattern})\\s+(RUNNING|STARTING|BACKOFF|STOPPING|STOPPED|EXITED|FATAL|UNKNOWN)\\b`,
 )
 // Every label below matches a literal emitted by the pinned Klipper revision
 // ee2c6fb or by Supervisor 4.2.5. A count reports that a captured line
@@ -220,7 +220,8 @@ for (const service of ['sv06', 'u1']) {
     JSON.stringify({
       service,
       container,
-      processes: supervisor === null ? 'unavailable' : processes,
+      processes:
+        Object.keys(processes).length === 0 ? 'unavailable' : processes,
       logs,
       stdout: stdout === null ? 'unavailable' : summarize(stdout),
       cpu: cgroup === null ? 'unavailable' : cpu(cgroup),

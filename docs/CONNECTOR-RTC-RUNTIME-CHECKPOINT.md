@@ -103,3 +103,46 @@ rendered farm-page integration, live simulator behavior, camera and pause remain
 separate gates. The complete check after the fixture/readiness changes passed:
 326 Bun tests, 383 Node tests with two runtime skips, lint, TypeScript and both
 builds. Only final checkpoint prose changed afterward.
+
+## Packaged CLI acceptance
+
+At `17b4ac48c7e07731f62e8d3eb4e23e8ec4ba5a9f`, separate packaged CLI
+runs passed the disconnect case in 10.988 seconds and revocation in 13.659
+seconds. The fixture spawned `dist/cli.js run` as a separate Node process with
+its private configuration, issued credential and persisted identity. It used
+the same actual HTTP approvals, v2 assignment admission and Moonraker protocol
+fixture described above. The browser received both progress observations and
+closed after the corresponding real signalling drop or HTTP revocation.
+
+The first packaged attempt at `5805a61` failed before RTC proof exchange. The
+single bundle moved the native package loader into `dist`, where its optional
+binary package could not be resolved. The corrected build keeps
+`node-datachannel` external and splits dynamic imports so RTC remains lazy.
+The installed dependency graph and versions are unchanged. A loader trap also
+confirmed that `--version` does not resolve the native module.
+
+The accepted package manifest covers nineteen files, including every emitted
+chunk and retained notice, with SHA-256
+`8906e57fffc6d729a491bd087f21bb28748713a89897ed1b74aef7bd415927ac`.
+Its entry digest is
+`9608f56157884a1d8809fc1c62cefad546b5d7e053b2cfc665af3de6a27f9629`.
+The separately sealed HTTPS output covers 457 files with digest
+`ddbc4eaf4b27284b3051dabebadb55baa678975db6a0969a60680b572ee0ee7f`.
+Private receipts retain the failed baseline and both passing runs.
+
+Both CLI processes completed shutdown with code zero within the six-second
+grace period. The outer fixture did not load or clean up their native library.
+Independent audits found all recorded CLI/helper/server processes absent,
+ports closed, temporary directories removed, fixture roles absent and no other
+task database clients. The original database identity, journal and eleven table
+counts matched baseline. The integration database and bridge remain retained.
+
+This validates the packaged CLI with its installed dependencies. It does not
+establish a self-contained distributable, native binary provenance or license
+clearance. Genuine pinned Moonraker/Klipper, rendered farm-page integration,
+production browser TLS, RTSP camera and pause integration remain pending.
+
+The complete check after the packaging correction passed 326 Bun tests and
+383 Node tests with two runtime skips, lint, TypeScript and both builds. The
+final checkpoint prose was added afterward and checked separately for formatting
+and whitespace.

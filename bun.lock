@@ -72,6 +72,10 @@
         "zod": "4.6.7",
       },
     },
+    "packages/webrtc-experiment": {
+      "name": "@open3dfarmmanager/webrtc-experiment",
+      "version": "0.0.1",
+    },
   },
   "packages": {
     "@adonisjs/hash": ["@adonisjs/hash@9.1.1", "", { "dependencies": { "@phc/format": "^1.0.0", "@poppinss/utils": "^6.9.3" }, "peerDependencies": { "argon2": "^0.31.2 || ^0.41.0 || ^0.43.0", "bcrypt": "^5.1.1 || ^6.0.0" }, "optionalPeers": ["argon2", "bcrypt"] }, "sha512-ZkRguwjAp4skKvKDdRAfdJ2oqQ0N7p9l3sioyXO1E8o0WcsyDgEpsTQtuVNoIdMiw4sn4gJlmL3nyF4BcK1ZDQ=="],
@@ -251,6 +255,8 @@
     "@open3dfarmmanager/sim-cams": ["@open3dfarmmanager/sim-cams@workspace:packages/sim-cams"],
 
     "@open3dfarmmanager/sim-tools": ["@open3dfarmmanager/sim-tools@workspace:packages/sim-tools"],
+
+    "@open3dfarmmanager/webrtc-experiment": ["@open3dfarmmanager/webrtc-experiment@workspace:packages/webrtc-experiment"],
 
     "@oxc-project/types": ["@oxc-project/types@0.156.0", "", {}, "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw=="],
 

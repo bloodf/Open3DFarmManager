@@ -3,6 +3,7 @@ const username = ref('')
 const password = ref('')
 const pending = ref(false)
 const errorMessage = ref('')
+const errorSummary = ref<HTMLElement | null>(null)
 
 async function login() {
   if (pending.value) return
@@ -31,6 +32,10 @@ async function login() {
   } finally {
     password.value = ''
     pending.value = false
+    if (errorMessage.value) {
+      await nextTick()
+      errorSummary.value?.focus()
+    }
   }
 }
 </script>
@@ -74,7 +79,7 @@ async function login() {
         required
         :disabled="pending"
       />
-      <p role="alert">{{ errorMessage }}</p>
+      <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
       <button type="submit" :disabled="pending">
         {{ pending ? 'Entrando…' : 'Entrar' }}
       </button>

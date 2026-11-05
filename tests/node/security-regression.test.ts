@@ -6,7 +6,7 @@ import {
   base64url,
 } from '@open3dfarmmanager/farm-protocol'
 import { authorizeCommand } from '../../packages/connector/src/auth/verify.ts'
-import { spawn, spawnSync, execFileSync } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -233,8 +233,7 @@ test('SQLite claims serialize across separate OS processes', async () => {
   }
 })
 
-test('identity and queue readers reject FIFOs without blocking', () => {
-  const results: Array<number | null> = []
+test('identity and queue readers reject FIFOs without blocking', async () => {
   for (const kind of ['identity', 'queue']) {
     const dir = scratch()
     try {
@@ -253,18 +252,73 @@ test('identity and queue readers reject FIFOs without blocking', () => {
         kind === 'identity'
           ? 'mod.loadExistingIdentity(process.argv[1])'
           : 'new mod.TelemetryQueue(process.argv[1], 1000)'
-      const source = `import * as mod from ${JSON.stringify(module)}; try { ${invoke}; process.exitCode = 2 } catch (error) { if (!error.message.includes('private files')) process.exitCode = 3 }`
-      const child = spawnSync(
+      // The startup delay verifies the FIFO deadline begins only after imports and readiness.
+      const source = `import * as mod from ${JSON.stringify(module)}; setTimeout(() => { process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { ${invoke}; process.exitCode = 2 } catch (error) { if (!error.message.includes('private files')) process.exitCode = 3 } process.stdin.destroy() }) }, 250)`
+      const child = spawn(
         process.execPath,
         ['--input-type=module', '-e', source, dir],
-        { timeout: 2000, encoding: 'utf8' },
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
       )
-      results.push(child.status)
+      let spawnError: Error | undefined
+      child.on('error', (error) => {
+        spawnError = error
+      })
+      child.stdin.on('error', (error) => {
+        spawnError = error
+      })
+      const exited = new Promise<number | null>((resolve) =>
+        child.once('close', resolve),
+      )
+      const ready = new Promise<void>((resolve) => {
+        let output = ''
+        child.stdout.on('data', (chunk) => {
+          output += chunk.toString()
+          if (output.includes('ready\n')) resolve()
+        })
+      })
+      async function bounded<T>(
+        promise: Promise<T>,
+        milliseconds: number,
+        label: string,
+      ): Promise<T> {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error(label)), milliseconds)
+            }),
+          ])
+        } finally {
+          if (timer) clearTimeout(timer)
+        }
+      }
+      try {
+        await bounded(
+          Promise.race([
+            ready,
+            exited.then(() => {
+              throw (
+                spawnError ?? new Error('FIFO worker exited before readiness')
+              )
+            }),
+          ]),
+          5000,
+          'FIFO worker startup timed out',
+        )
+        child.stdin.end('run\n')
+        assert.equal(await bounded(exited, 2000, 'FIFO reader blocked'), 0)
+      } finally {
+        if (child.exitCode === null && child.signalCode === null)
+          child.kill('SIGKILL')
+        await exited
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   }
-  assert.deepEqual(results, [0, 0])
 })
 
 test('queue decoding errors never echo malformed telemetry contents', () => {

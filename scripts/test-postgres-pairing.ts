@@ -41,22 +41,22 @@ try {
   assert.equal(identity?.user, 'fixture')
 
   const catalog = await loadMigrationCatalog()
-  const requiredMigrations = catalog.slice(0, 9)
+  const requiredMigrations = catalog.slice(0, 10)
   assert.equal(
     requiredMigrations.length,
-    9,
-    'Migrations 0001–0009 are required',
+    10,
+    'Migrations 0001–0010 are required',
   )
   const applied = await admin`
     SELECT position, id, checksum
     FROM public.open3dfarm_migrations
-    WHERE position <= 9
+    WHERE position <= 10
     ORDER BY position
   `
   assert.equal(
     validateMigrationHistory(requiredMigrations, [...applied]),
-    9,
-    'Apply and verify migrations 0001–0009 before running this fixture',
+    10,
+    'Apply and verify migrations 0001–0010 before running this fixture',
   )
 
   for (const name of [

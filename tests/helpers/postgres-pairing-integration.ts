@@ -5,7 +5,7 @@ import { ConnectorIdentity } from '../../packages/connector/src/identity/store.t
 import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pairing-proof.ts'
 import { PostgresPairing } from '../../apps/farm/server/storage/postgres-pairing.ts'
 
-/** Caller owns disposable loopback DB and migrations 0001–0009; rows remain for caller teardown. */
+/** Caller owns disposable loopback DB and migrations 0001–0010; rows remain for caller teardown. */
 export async function testPostgresPairing(
   admin: Sql,
   port: number,
@@ -32,6 +32,20 @@ export async function testPostgresPairing(
     audience: 'open3dfarmmanager:pairing',
   }
   const pairing = new PostgresPairing(sql, config, () => now)
+  const signingKeys = await crypto.subtle.generateKey('Ed25519', false, [
+    'sign',
+    'verify',
+  ])
+  if (!('privateKey' in signingKeys))
+    throw new Error('Expected signing key pair')
+  const issuer = {
+    issuer: config.origin,
+    audience: 'open3dfarmmanager:connector',
+    kid: 'fixture-key-1',
+    privateKey: signingKeys.privateKey,
+    ttlSeconds: 300,
+  }
+  const claim = (input: unknown) => pairing.claim(input, issuer)
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
   )
@@ -125,7 +139,7 @@ export async function testPostgresPairing(
     await admin`INSERT INTO farm.connector_enrollments (agent_id, farm_id, public_key_spki, fingerprint) SELECT agent_id, ${absentOwner.farmId}::uuid, public_key_spki, fingerprint FROM farm.pairing_requests WHERE user_code_hash = encode(sha256(convert_to(${absent.user_code}, 'UTF8')), 'hex')`
     await admin`UPDATE farm.connector_enrollments SET status = 'approved' WHERE farm_id = ${absentOwner.farmId}::uuid`
     await admin`UPDATE farm.pairing_requests SET status = 'approved', farm_id = ${absentOwner.farmId}::uuid, decided_by = ${absentOwner.sessionRecordId} WHERE user_code_hash = encode(sha256(convert_to(${absent.user_code}, 'UTF8')), 'hex')`
-    assert.deepEqual(await pairing.claim({ device_code: absent.device_code }), {
+    assert.deepEqual(await claim({ device_code: absent.device_code }), {
       ok: false,
       reason: 'denied',
     })
@@ -135,7 +149,7 @@ export async function testPostgresPairing(
       ok: false,
       reason: 'denied',
     })
-    assert.deepEqual(await pairing.claim({ device_code: absent.device_code }), {
+    assert.deepEqual(await claim({ device_code: absent.device_code }), {
       ok: false,
       reason: 'denied',
     })
@@ -173,11 +187,14 @@ export async function testPostgresPairing(
     })
     assert.equal((await decision(ownOriginCode, ownOriginOwner)).ok, true)
     assert.deepEqual(
-      await wrongServer.claim({ device_code: ownOriginCode.device_code }),
+      await wrongServer.claim(
+        { device_code: ownOriginCode.device_code },
+        issuer,
+      ),
       { ok: false, reason: 'denied' },
     )
     assert.equal(
-      (await pairing.claim({ device_code: ownOriginCode.device_code })).ok,
+      (await claim({ device_code: ownOriginCode.device_code })).ok,
       true,
     )
     checks.push(
@@ -205,15 +222,15 @@ export async function testPostgresPairing(
     const claimProof = await prove(expiringClaim)
     assert.equal((await decision(expiringClaim, await member())).ok, true)
     now = claimProof.expires_at
-    assert.deepEqual(
-      await pairing.claim({ device_code: expiringClaim.device_code }),
-      { ok: false, reason: 'denied' },
-    )
+    assert.deepEqual(await claim({ device_code: expiringClaim.device_code }), {
+      ok: false,
+      reason: 'denied',
+    })
     now -= 1
-    assert.deepEqual(
-      await pairing.claim({ device_code: expiringClaim.device_code }),
-      { ok: false, reason: 'denied' },
-    )
+    assert.deepEqual(await claim({ device_code: expiringClaim.device_code }), {
+      ok: false,
+      reason: 'denied',
+    })
     checks.push(
       'proof-validity-required-at-both-stages-and-observed-expiry-survives-clock-regression',
     )
@@ -230,7 +247,7 @@ export async function testPostgresPairing(
       const operation =
         stage === 'approval'
           ? decision(code, subject)
-          : pairing.claim({ device_code: code.device_code })
+          : claim({ device_code: code.device_code })
       try {
         await waitForLock('FROM farm.pairing_proofs')
         now = challenge.expires_at
@@ -289,7 +306,7 @@ export async function testPostgresPairing(
     const enrollmentGate = await admin.reserve()
     await enrollmentGate`BEGIN`
     await enrollmentGate`SELECT agent_id FROM farm.connector_enrollments WHERE farm_id = ${delayedMember.farmId}::uuid FOR UPDATE`
-    const delayedClaim = pairing.claim({ device_code: delayedCode.device_code })
+    const delayedClaim = claim({ device_code: delayedCode.device_code })
     try {
       await waitForLock('SELECT status, farm_id')
       now = delayedProof.expires_at
@@ -311,12 +328,12 @@ export async function testPostgresPairing(
     assert.notEqual(stored.device_code_hash, code.device_code)
     assert.notEqual(stored.user_code_hash, code.user_code)
     assert.equal(stored.farm_id, null)
-    assert.deepEqual(await pairing.claim({ device_code: code.device_code }), {
+    assert.deepEqual(await claim({ device_code: code.device_code }), {
       ok: true,
       status: 'pending',
       retry_after_s: 5,
     })
-    assert.deepEqual(await pairing.claim({ device_code: code.device_code }), {
+    assert.deepEqual(await claim({ device_code: code.device_code }), {
       ok: true,
       status: 'slow_down',
       retry_after_s: 5,
@@ -362,25 +379,24 @@ export async function testPostgresPairing(
     })
     now += 5000
     const claimed = await Promise.all([
-      pairing.claim({ device_code: code.device_code }),
-      pairing.claim({ device_code: code.device_code }),
+      claim({ device_code: code.device_code }),
+      claim({ device_code: code.device_code }),
     ])
     assert.equal(
-      claimed.filter((x) => x.ok && x.status === 'claimed').length,
+      claimed.filter((x) => x.ok && x.status === 'approved').length,
       1,
     )
     assert.equal(
       claimed.filter((x) => !x.ok && x.reason === 'denied').length,
       1,
     )
-    const grant = claimed.find((x) => x.ok && x.status === 'claimed')
-    assert.ok(grant?.ok && grant.status === 'claimed')
-    if (grant?.ok && grant.status === 'claimed') {
-      assert.equal(grant.fingerprint, identity.fingerprint)
-      assert.equal(grant.publicKeySpki, identity.publicKeySpki)
+    const grant = claimed.find((x) => x.ok && x.status === 'approved')
+    assert.ok(grant?.ok && grant.status === 'approved')
+    if (grant?.ok && grant.status === 'approved') {
+      assert.equal(typeof grant.device_token, 'string')
       assert.equal(
         (
-          await admin`SELECT status FROM farm.connector_enrollments WHERE agent_id = ${grant.agentId}::uuid`
+          await admin`SELECT status FROM farm.connector_enrollments WHERE agent_id = ${grant.agent_id}::uuid`
         )[0]?.status,
         'approved',
       )
@@ -465,7 +481,7 @@ export async function testPostgresPairing(
     const nearExpiry = await start()
     now = nearExpiry.expires_at - 1
     assert.equal(
-      (await pairing.claim({ device_code: nearExpiry.device_code })).ok,
+      (await claim({ device_code: nearExpiry.device_code })).ok,
       true,
     )
     assert.equal(
@@ -487,7 +503,7 @@ export async function testPostgresPairing(
       ok: false,
       reason: 'denied',
     })
-    assert.deepEqual(await pairing.claim({ device_code: denied.device_code }), {
+    assert.deepEqual(await claim({ device_code: denied.device_code }), {
       ok: true,
       status: 'denied',
     })
@@ -498,17 +514,17 @@ export async function testPostgresPairing(
       ok: false,
       reason: 'denied',
     })
-    assert.deepEqual(
-      await pairing.claim({ device_code: expired.device_code }),
-      { ok: true, status: 'expired' },
-    )
+    assert.deepEqual(await claim({ device_code: expired.device_code }), {
+      ok: true,
+      status: 'expired',
+    })
     const approvedExpiry = await start()
     assert.equal((await decision(approvedExpiry, await member())).ok, true)
     now = approvedExpiry.expires_at
-    assert.deepEqual(
-      await pairing.claim({ device_code: approvedExpiry.device_code }),
-      { ok: true, status: 'expired' },
-    )
+    assert.deepEqual(await claim({ device_code: approvedExpiry.device_code }), {
+      ok: true,
+      status: 'expired',
+    })
     checks.push('denial-replay-exact-deadline-and-approved-delivery-expiry')
 
     // Revocation commits while decision waits: stale membership must never authorize.
@@ -588,16 +604,16 @@ export async function testPostgresPairing(
     const revokedOwner = await member()
     assert.equal((await decision(revoked, revokedOwner)).ok, true)
     await admin`UPDATE farm.connector_enrollments SET status = 'revoked' WHERE farm_id = ${revokedOwner.farmId}::uuid`
-    assert.deepEqual(
-      await pairing.claim({ device_code: revoked.device_code }),
-      { ok: false, reason: 'denied' },
-    )
+    assert.deepEqual(await claim({ device_code: revoked.device_code }), {
+      ok: false,
+      reason: 'denied',
+    })
     const deliveryExpiry = await start()
     assert.equal((await decision(deliveryExpiry, await member())).ok, true)
     const deliveryGate = await admin.reserve()
     await deliveryGate`BEGIN`
     await deliveryGate`SELECT agent_id FROM farm.connector_enrollments WHERE agent_id = (SELECT agent_id FROM farm.pairing_requests WHERE user_code_hash = encode(sha256(convert_to(${deliveryExpiry.user_code}, 'UTF8')), 'hex')) FOR UPDATE`
-    const lateClaim = pairing.claim({ device_code: deliveryExpiry.device_code })
+    const lateClaim = claim({ device_code: deliveryExpiry.device_code })
     try {
       await waitForLock('SELECT status, farm_id')
       now = deliveryExpiry.expires_at

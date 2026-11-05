@@ -54,6 +54,7 @@ async function fixture(
     wall = Date.now(),
     closed = 0,
     peerClosed = 0
+  let listening = 0
   let handlers: Parameters<SocketPort['bind']>[0] | undefined
   let input: PeerOptions | undefined, admitted: unknown
   const sent: Array<Record<string, unknown>> = []
@@ -84,6 +85,9 @@ async function fixture(
     releasePeer = resolve
   })
   const client = new AuthenticatedConnectorSignallingClient(scope, {
+    onInboxReady: () => {
+      listening++
+    },
     ...(onAdmission ? { onVerifiedAdmission: onAdmission } : {}),
     clock: { now: () => now, wallNow: () => wall },
     socketFactory: () => socket,
@@ -182,12 +186,39 @@ async function fixture(
     admitted: () => admitted,
     closed: () => closed,
     peerClosed: () => peerClosed,
+    listening: () => listening,
     advance: (ms: number) => {
       now += ms
       wall += ms
     },
   }
 }
+
+test('inbox readiness is emitted only after the server acknowledgement and grants no RTC admission', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.listening(), 0)
+    await f.push({
+      v: 1,
+      t: 'connector.inbox-challenge',
+      challenge: f.challenge,
+    })
+    assert.equal(f.listening(), 0)
+    await f.push({
+      v: 1,
+      t: 'connector.inbox-ready',
+      inbox_id: f.challenge.connection_id,
+      ...f.lease(),
+    })
+    assert.equal(f.listening(), 1)
+    assert.equal(f.client.snapshot().phase, 'context-request')
+    assert.equal(f.admitted(), undefined)
+    assert.equal(f.input(), undefined)
+  } finally {
+    f.client.close()
+    await assert.rejects(f.pending)
+  }
+})
 
 test('fresh TLS-phase challenges pin scope and permit generation gaps; RTC waits for ready and mutual verification', async () => {
   const admissions: VerifiedRtcAdmission[] = []

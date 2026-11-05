@@ -11,6 +11,7 @@ type AgentDiagnostic =
   | CollectionDiagnostic
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
+  | { kind: 'readonly-listening' }
   | { kind: 'readonly-terminal'; reason: string }
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
@@ -152,6 +153,7 @@ export async function runConnectorAgent(input: {
               },
               {
                 genuineStatus: { assignmentRefs: refs },
+                onInboxReady: () => diagnostic({ kind: 'readonly-listening' }),
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),
                 onTerminal(reason) {

@@ -528,7 +528,8 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           }
           const runtime = await until(
             observeRuntime,
-            (value) => value.queued > 0 && value.requests > 0,
+            (value) =>
+              value.queued > 0 && value.requests > 0 && value.listening === 1,
             input.signal,
             5000,
           )

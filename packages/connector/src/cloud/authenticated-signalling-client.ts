@@ -151,6 +151,8 @@ type Scope = {
   identity: ConnectorIdentity
 }
 type Options = {
+  /** Server-confirmed inbox availability only, never RTC or printer authority. */
+  onInboxReady?: () => void
   genuineStatus?: GenuineStatusOptions
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onTerminal?: (reason: string) => void
@@ -408,6 +410,7 @@ export class AuthenticatedConnectorSignallingClient {
       this.#channel.capLease(frame)
       this.#channel.completeAdmission()
       this.#phase = 'context-request'
+      runSynchronous(() => this.#options.onInboxReady?.())
       return
     }
     if (

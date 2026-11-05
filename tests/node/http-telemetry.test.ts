@@ -87,11 +87,16 @@ test(
 test(
   'deadline cancels stalled headers and stalled body and closes the response',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
     for (const phase of ['headers', 'body']) {
       let closed!: () => void
+      let arrived!: () => void
+      let fireDeadline!: () => void
       const closeObserved = new Promise<void>((resolve) => {
         closed = resolve
+      })
+      const ready = new Promise<void>((resolve) => {
+        arrived = resolve
       })
       const http = await server((request, response) => {
         request.resume()
@@ -100,16 +105,72 @@ test(
           response.writeHead(200, { 'content-type': 'application/json' })
           response.write('{')
         }
+        // Keep the server phase open across a delayed readiness notification.
+        setTimeout(arrived, 150)
       })
+      const originalSetTimeout = globalThis.setTimeout
+      const timer = t.mock.method(
+        globalThis,
+        'setTimeout',
+        (...args: Parameters<typeof setTimeout>) => {
+          if (args[1] === 27193) fireDeadline = () => args[0]()
+          return originalSetTimeout(...args)
+        },
+      )
       try {
-        await assert.rejects(
-          sender(http.endpoint, 100)(body, new AbortController().signal),
+        const attempt = assert.rejects(
+          sender(http.endpoint, 27193)(body, new AbortController().signal),
           /Telemetry transport failed/,
         )
-        await closeObserved
+        // The watchdog bounds a handler that never arrives, including an early failure.
+        let watchdog!: ReturnType<typeof setTimeout>
+        try {
+          await Promise.race([
+            ready,
+            new Promise<never>((_, reject) => {
+              watchdog = originalSetTimeout(
+                () => reject(new Error('Request did not reach handler')),
+                2000,
+              )
+            }),
+          ])
+        } finally {
+          clearTimeout(watchdog)
+        }
+        assert.equal(typeof fireDeadline, 'function')
+        fireDeadline()
+        await attempt
+        await Promise.race([
+          closeObserved,
+          new Promise<never>((_, reject) => {
+            watchdog = originalSetTimeout(
+              () => reject(new Error('Response did not close')),
+              2000,
+            )
+          }),
+        ]).finally(() => clearTimeout(watchdog))
       } finally {
+        timer.mock.restore()
         await http.close()
       }
+    }
+  },
+)
+
+test(
+  'real deadline rejects a stalled request without relying on handler arrival',
+  { timeout: 5000 },
+  async () => {
+    const http = await server((request) => {
+      request.resume()
+    })
+    try {
+      await assert.rejects(
+        sender(http.endpoint, 50)(body, new AbortController().signal),
+        /Telemetry transport failed/,
+      )
+    } finally {
+      await http.close()
     }
   },
 )

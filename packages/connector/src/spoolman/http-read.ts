@@ -45,7 +45,8 @@ export function createLoopbackSpoolmanReader(options: {
         throw new Error()
     }
     const pages: SpoolmanInventoryPage[] = []
-    const ids = new Set<number>()
+    let lastId = 0
+    let itemCount = 0
     let totalBytes = 0
     let offset: number | null = 0
     try {
@@ -113,8 +114,9 @@ export function createLoopbackSpoolmanReader(options: {
           observedAt,
         })
         for (const item of page.items) {
-          if (ids.has(item.id) || ids.size >= 10_000) throw new Error()
-          ids.add(item.id)
+          if (item.id <= lastId || itemCount >= 10_000) throw new Error()
+          lastId = item.id
+          itemCount++
         }
         pages.push({ wire, offset, observedAt })
         offset = page.nextOffset

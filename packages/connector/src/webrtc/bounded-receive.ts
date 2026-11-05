@@ -10,6 +10,7 @@ type ReceiveLimits = Readonly<{
 type ReceiveOptions = {
   limits: ReceiveLimits
   paused: boolean
+  byteAccounting?: 'utf16' | 'utf8'
   process: (raw: string) => Promise<void>
   reject: (reason: 'frame-limit' | 'message-budget' | 'pending-limit') => void
 }
@@ -55,15 +56,17 @@ export class BoundedReceive {
     if (this.#closed) return IDLE
     const limits = this.#options.limits
     // Check code units before allocating the bounded UTF-8 copy.
-    if (
-      typeof raw !== 'string' ||
-      raw.length > limits.frameBytes ||
-      encoder.encode(raw).byteLength > limits.frameBytes
-    ) {
+    if (typeof raw !== 'string' || raw.length > limits.frameBytes) {
       this.reject('frame-limit')
       return IDLE
     }
-    const size = raw.length * 2
+    const wireBytes = encoder.encode(raw).byteLength
+    if (wireBytes > limits.frameBytes) {
+      this.reject('frame-limit')
+      return IDLE
+    }
+    const size =
+      this.#options.byteAccounting === 'utf8' ? wireBytes : raw.length * 2
     const pending = this.#queue.length + (this.#running ? 1 : 0)
     if (this.#admitted === limits.totalFrames) {
       this.reject('message-budget')
@@ -105,7 +108,10 @@ export class BoundedReceive {
       while (!this.#closed && this.#queue.length) {
         const raw = this.#queue.shift()
         if (raw === undefined) break
-        this.#activeBytes = raw.length * 2
+        this.#activeBytes =
+          this.#options.byteAccounting === 'utf8'
+            ? encoder.encode(raw).byteLength
+            : raw.length * 2
         await this.#options.process(raw)
         this.#retainedBytes -= this.#activeBytes
         this.#activeBytes = 0

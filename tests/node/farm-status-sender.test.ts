@@ -300,3 +300,38 @@ test('client terminal notification immediately closes idle provider without anot
     f.sender.close()
   }
 })
+
+test('source expiry during validation prevents the first send', async () => {
+  const f = await fixture()
+  f.admit()
+  const now = performance.now()
+  const original = Object.getOwnPropertyDescriptor(performance, 'now')
+  let clock = now
+  Object.defineProperty(performance, 'now', {
+    configurable: true,
+    value: () => clock,
+  })
+  try {
+    f.complete({
+      capturedAtMonoMs: now,
+      validUntilMonoMs: now + 10,
+      printers: [
+        {
+          printerKey: 'printer-a',
+          state: 'printing',
+          progress: 0.5,
+          get observedAt() {
+            clock = now + 11
+            return Date.now()
+          },
+        },
+      ],
+    })
+    assert.equal(f.sent.length, 0)
+    assert.equal(f.closed(), 1)
+  } finally {
+    if (original) Object.defineProperty(performance, 'now', original)
+    else Reflect.deleteProperty(performance, 'now')
+    f.sender.close()
+  }
+})

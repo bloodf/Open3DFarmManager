@@ -19,3 +19,11 @@ The existing `StatusMessage` remains a complete snapshot with a strictly increas
 ## Integration still required
 
 The actual scoped key resolver and complete current-0015 assignment provider are not composed in this slice. The shared wire schema is unchanged. No Connector CLI, runtime, collector, farm view or composable is wired to this feed, and no production default is provided. Actual WebSocket/PostgreSQL authority integration and the current-head comprehensive checks remain separate gates.
+
+## Independent review corrections
+
+The feed projects exactly the three assignment fields from inventory rows. Connector admission subscribers installed reentrantly receive the stored admission once. The sender checks the incoming source deadline again after validation. The RTC session reserves sequence and message budget before calling the transport and refuses nested sends.
+
+A genuine-status browser session may retain one bounded raw application frame while its local proof verification is pending. It exposes no status before verification, closes on a second pending frame, and discards the retained frame on termination. The existing authentication deadline still applies. This handles asymmetric proof completion without claiming the other endpoint is already verified or changing the wire protocol.
+
+The four focused Node suites passed 34 tests, including real role proofs with delayed browser admission, overflow/closure discard, reentrant admission and send callbacks, full inventory records, and expiry during validation. Scoped strict TypeScript passed. These checks do not establish actual current-head native RTC, HTTPS/PostgreSQL integration, or full `check:all` acceptance.

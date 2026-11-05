@@ -196,6 +196,7 @@ export class FarmStatusSender {
       )
       // Parsed copies precede the external send callback; no caller array survives.
       if (!this.current()) return
+      if (performance.now() >= until) throw Error('Expired source')
       this.#captured = captured
       this.#seq++
       this.#sending = true

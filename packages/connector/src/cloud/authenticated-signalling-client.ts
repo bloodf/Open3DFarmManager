@@ -464,11 +464,12 @@ export class AuthenticatedConnectorSignallingClient {
             ),
           )
           this.#admission = copy
+          const listener = this.#admissionListener
           try {
             runSynchronous(() => this.#options.onVerifiedAdmission?.(copy))
-            if (this.#channel.current())
+            if (this.#channel.current() && listener === this.#admissionListener)
               runSynchronous(() =>
-                this.#admissionListener?.(
+                listener?.(
                   immutableAdmission(copy.binding, copy.deadlineMonoMs),
                 ),
               )

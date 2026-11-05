@@ -67,7 +67,13 @@ export function createAuthenticatedFarmStatusFeed(
     open(input) {
       const scope = Object.freeze({ ...input.scope })
       const refs = Object.freeze(
-        input.assignmentRefs.map((ref) => Object.freeze({ ...ref })),
+        input.assignmentRefs.map((ref) =>
+          Object.freeze({
+            assignmentId: ref.assignmentId,
+            agentId: ref.agentId,
+            printerKey: ref.printerKey,
+          }),
+        ),
       )
       const agentId = input.agentId,
         keyId = input.browserKeyId

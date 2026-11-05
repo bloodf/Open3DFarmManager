@@ -32,7 +32,7 @@ type PeerOptions = Parameters<
     >['peerFactory']
   >
 >[0]
-async function fixture(holdPeer = false) {
+async function fixture(holdPeer = false, onAdmission?: () => void) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
   )
@@ -74,6 +74,7 @@ async function fixture(holdPeer = false) {
     releasePeer = resolve
   })
   const client = new AuthenticatedConnectorSignallingClient(scope, {
+    ...(onAdmission ? { onVerifiedAdmission: onAdmission } : {}),
     clock: { now: () => now, wallNow: () => wall },
     socketFactory: () => socket,
     peerFactory: async (options) => {
@@ -179,14 +180,15 @@ async function fixture(holdPeer = false) {
 }
 
 test('fresh TLS-phase challenges pin scope and permit generation gaps; RTC waits for ready and mutual verification', async () => {
-  const f = await fixture()
-  let terminal = 0
   const admissions: VerifiedRtcAdmission[] = []
+  const f = await fixture(false, () => {
+    f.client.subscribeVerifiedAdmission((admission) => {
+      admissions.push(admission)
+    })
+  })
+  let terminal = 0
   f.client.subscribeTerminal(() => {
     terminal++
-  })
-  f.client.subscribeVerifiedAdmission((admission) => {
-    admissions.push(admission)
   })
   try {
     assert.equal(f.sent[0]?.t, 'connector.begin')

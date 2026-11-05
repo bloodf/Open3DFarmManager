@@ -155,6 +155,8 @@ export class ReadonlyRtcSession {
   #lastReceivedSeq = -1
   #lastSentSeq = -1
   #sentStatus = 0
+  #sendingStatus = false
+  #pendingStatus: string | undefined
   #accepted = 0
   #acceptedSamples: string[] = []
   #leaseDeadline: number
@@ -258,13 +260,28 @@ export class ReadonlyRtcSession {
       return
     this.#state = 'verified'
     this.#options.onVerified()
-    if (this.current()) this.schedule()
+    if (this.current()) {
+      this.schedule()
+      const pending = this.#pendingStatus
+      this.#pendingStatus = undefined
+      if (pending !== undefined) this.receiveApplication(pending)
+    }
   }
   receiveApplication(raw: unknown) {
     if (!this.current()) return
     try {
       const wire = boundRtcApplicationFrame(raw)
-      if (this.#state !== 'verified') throw Error('readonly-only')
+      if (this.#state !== 'verified') {
+        if (
+          this.#genuine &&
+          this.#options.role === 'browser' &&
+          this.#pendingStatus === undefined
+        ) {
+          this.#pendingStatus = wire
+          return
+        }
+        throw Error('readonly-only')
+      }
       if (this.#genuine) {
         if (this.#options.role !== 'browser') throw Error('Status direction')
         const message = validatedStatusMessage(
@@ -298,7 +315,8 @@ export class ReadonlyRtcSession {
       this.#state !== 'verified' ||
       !this.#localProof ||
       !this.#genuine ||
-      this.#options.role !== 'connector'
+      this.#options.role !== 'connector' ||
+      this.#sendingStatus
     )
       return false
     try {
@@ -313,13 +331,16 @@ export class ReadonlyRtcSession {
       )
         throw Error('Status sequence')
       if (!this.current()) return false
-      this.#options.sendApplication(JSON.stringify(message))
       this.#lastSentSeq = message.seq
       this.#sentStatus++
+      this.#sendingStatus = true
+      this.#options.sendApplication(JSON.stringify(message))
       return this.current()
     } catch {
       this.close('status-frame')
       return false
+    } finally {
+      this.#sendingStatus = false
     }
   }
   sendStatus() {
@@ -341,6 +362,7 @@ export class ReadonlyRtcSession {
   close(reason = 'closed') {
     if (this.#state === 'readonly') return
     this.#state = 'readonly'
+    this.#pendingStatus = undefined
     this.#reason = reason.slice(0, 64)
     clearTimeout(this.#timer)
     this.#options.onReadonly()

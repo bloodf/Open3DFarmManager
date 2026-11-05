@@ -420,3 +420,81 @@ test('genuine send lifetime count stays bounded without retaining a status histo
     session.close()
   }
 })
+
+test('genuine status reserves sequence before a reentrant transport send', async () => {
+  const f = await fixture()
+  const emitted: string[] = []
+  let nested: boolean | undefined
+  const session = f.make({
+    genuineStatus: { assignmentRefs: [] },
+    sendApplication: (wire) => {
+      emitted.push(wire)
+      nested = session.sendGenuineStatus({
+        t: 'snapshot',
+        seq: 0,
+        printers: [],
+      })
+    },
+  })
+  try {
+    await session.start()
+    await session.inspectProof(f.decode(await f.browserProof()))
+    assert.equal(
+      session.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+      true,
+    )
+    assert.equal(nested, false)
+    assert.equal(emitted.length, 1)
+    assert.equal(
+      session.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+      false,
+    )
+    assert.equal(emitted.length, 1)
+  } finally {
+    session.close()
+  }
+})
+
+test('one early complete status waits for browser proof verification; overflow and closure discard it', async () => {
+  for (const mode of ['verify', 'overflow', 'close'] as const) {
+    const f = await fixture()
+    const received: unknown[] = []
+    const browser = f.make({
+      role: 'browser',
+      signProof: f.browserProof,
+      genuineStatus: {
+        assignmentRefs: [],
+        onStatus: (message) => {
+          received.push(message)
+        },
+      },
+    })
+    const connector = f.make({
+      genuineStatus: { assignmentRefs: [] },
+      sendApplication: (wire) => browser.receiveApplication(wire),
+    })
+    try {
+      await browser.start()
+      await connector.start()
+      await connector.inspectProof(f.decode(await f.browserProof()))
+      assert.equal(
+        connector.sendGenuineStatus({ t: 'snapshot', seq: 0, printers: [] }),
+        true,
+      )
+      assert.equal(browser.snapshot().state, 'pending')
+      assert.equal(received.length, 0)
+      if (mode === 'overflow')
+        connector.sendGenuineStatus({ t: 'snapshot', seq: 1, printers: [] })
+      if (mode === 'close') browser.close()
+      await browser.inspectProof(f.decode(f.connectorProof()))
+      assert.equal(received.length, mode === 'verify' ? 1 : 0)
+      assert.equal(
+        browser.snapshot().state,
+        mode === 'verify' ? 'verified' : 'readonly',
+      )
+    } finally {
+      browser.close()
+      connector.close()
+    }
+  }
+})

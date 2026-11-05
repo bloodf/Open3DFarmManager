@@ -27,7 +27,15 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     agentId = randomUUID(),
     keyId = randomUUID(),
     assignmentId = randomUUID()
-  const refs = [{ assignmentId, agentId, printerKey: 'printer-a' }]
+  const refs = [
+    {
+      assignmentId,
+      agentId,
+      printerKey: 'printer-a',
+      status: 'active',
+      connectorStatus: 'approved',
+    },
+  ]
   const connector = new ConnectorIdentity(
       generateKeyPairSync('ed25519').privateKey,
     ),
@@ -107,6 +115,11 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
   for (let i = 0; i < 100 && !callbacks; i++)
     await new Promise((resolve) => setTimeout(resolve, 2))
   assert.ok(callbacks)
+  assert.deepEqual(Object.keys(callbacks.assignmentRefs[0]!).sort(), [
+    'agentId',
+    'assignmentId',
+    'printerKey',
+  ])
   return {
     scope,
     refs,

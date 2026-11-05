@@ -126,6 +126,9 @@ async function connectorChild(
         ...(process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes'
           ? { SIGNALLING_HTTPS_RTC_RUNTIME: 'yes' }
           : {}),
+        ...(process.env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes'
+          ? { SIGNALLING_HTTPS_RTC_PACKAGED: 'yes' }
+          : {}),
       },
     },
   )
@@ -538,6 +541,8 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               JSON.stringify({
                 directory: runtime.directory,
                 port: runtime.port,
+                packagedPid: runtime.packagedPid,
+                packagedSha256: runtime.packagedSha256,
               }),
           )
           await session.actor.evaluate((actor, scope) => actor.start(scope), {

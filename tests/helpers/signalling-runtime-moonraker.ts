@@ -3,6 +3,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -47,6 +50,22 @@ export async function createRuntimeMoonrakerFixture() {
     terminalReason: string | null = null
   let broadcast = () => {}
   let disposal: Promise<void> | undefined
+  let stopPackaged: (() => Promise<void>) | undefined
+  let packagedPid = 0,
+    packagedSha256: string | null = null
+  function diagnostic(value: unknown) {
+    const parsed = z
+      .object({
+        kind: z.string().max(64),
+        reason: z.string().max(80).optional(),
+      })
+      .parse(value)
+    if (parsed.kind === 'queued') queued++
+    if (parsed.kind === 'readonly-admitted') admitted++
+    if (parsed.kind === 'readonly-listening') listening++
+    if (parsed.kind === 'readonly-terminal')
+      terminalReason = parsed.reason ?? 'unclassified'
+  }
   return {
     identity,
     async start(input: {
@@ -214,6 +233,104 @@ export async function createRuntimeMoonrakerFixture() {
         }),
         { mode: 0o600, flag: 'wx' },
       )
+      if (process.env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes') {
+        const entry = new URL(
+          '../../packages/connector/dist/cli.js',
+          import.meta.url,
+        )
+        packagedSha256 = createHash('sha256')
+          .update(await readFile(entry))
+          .digest('hex')
+        const child = spawn(
+          process.execPath,
+          [
+            entry.pathname,
+            'run',
+            '--config',
+            configPath,
+            '--credential-file',
+            credentialPath,
+            '--data-dir',
+            data,
+          ],
+          {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, NODE_OPTIONS: '' },
+          },
+        )
+        packagedPid = child.pid ?? 0
+        let bytes = 0,
+          errors = 0,
+          buffer = ''
+        const closed = new Promise<void>((resolve) => {
+          child.once('error', () => {
+            failure = true
+          })
+          child.once('close', (code, signal) => {
+            if (code !== 0 || signal !== null || buffer.length) failure = true
+            settled = true
+            resolve()
+          })
+        })
+        child.stdout.on('data', (chunk: Buffer) => {
+          try {
+            bytes += chunk.length
+            if (
+              bytes > 262144 ||
+              Buffer.byteLength(buffer) + chunk.length > 16384
+            )
+              throw Error('Packaged output bound')
+            buffer += new TextDecoder('utf-8', { fatal: true }).decode(chunk)
+            let end: number
+            while ((end = buffer.indexOf('\n')) >= 0) {
+              diagnostic(
+                parseBoundedJson(buffer.slice(0, end), {
+                  maxBytes: 16384,
+                  maxDepth: 4,
+                  maxValues: 64,
+                  maxStringChars: 256,
+                }),
+              )
+              buffer = buffer.slice(end + 1)
+            }
+          } catch {
+            failure = true
+            child.kill('SIGTERM')
+          }
+        })
+        child.stderr.on('data', (chunk: Buffer) => {
+          errors += chunk.length
+          if (errors > 16384) {
+            failure = true
+            child.kill('SIGTERM')
+          }
+        })
+        stopPackaged = async () => {
+          if (child.exitCode === null && child.signalCode === null)
+            child.kill('SIGTERM')
+          let timer: ReturnType<typeof setTimeout> | undefined
+          try {
+            await Promise.race([
+              closed,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(Error('Packaged shutdown timeout')),
+                  6000,
+                )
+              }),
+            ])
+          } catch (error) {
+            failure = true
+            child.kill('SIGKILL')
+            await closed
+            throw error
+          } finally {
+            clearTimeout(timer)
+          }
+        }
+        running = closed
+        return
+      }
       const { runConnectorAgent } = await import(
         '../../packages/connector/src/runtime/agent.ts'
       )
@@ -222,12 +339,7 @@ export async function createRuntimeMoonrakerFixture() {
         credentialPath,
         dataDirectory: data,
         signal: controller.signal,
-        onDiagnostic(value) {
-          if (value.kind === 'queued') queued++
-          if (value.kind === 'readonly-admitted') admitted++
-          if (value.kind === 'readonly-listening') listening++
-          if (value.kind === 'readonly-terminal') terminalReason = value.reason
-        },
+        onDiagnostic: diagnostic,
       })
         .catch(() => {
           failure = true
@@ -251,12 +363,19 @@ export async function createRuntimeMoonrakerFixture() {
         admitted,
         listening,
         terminalReason,
+        packagedPid,
+        packagedSha256,
       }
     },
     close() {
       disposal ??= (async () => {
         controller.abort()
         const errors: unknown[] = []
+        try {
+          await stopPackaged?.()
+        } catch (error) {
+          errors.push(error)
+        }
         try {
           await running
         } catch (error) {

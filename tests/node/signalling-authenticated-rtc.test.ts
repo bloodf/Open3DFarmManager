@@ -147,6 +147,8 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       admitted: 0,
       listening: 0,
       terminalReason: null,
+      packagedPid: 0,
+      packagedSha256: null,
     }).success,
     true,
   )
@@ -162,6 +164,8 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       admitted: 0,
       listening: 0,
       terminalReason: null,
+      packagedPid: 0,
+      packagedSha256: null,
     }).success,
     false,
   )

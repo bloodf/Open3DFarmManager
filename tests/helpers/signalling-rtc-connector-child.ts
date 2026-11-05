@@ -73,6 +73,11 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .string()
       .regex(/^[a-zA-Z0-9:_-]{1,80}$/)
       .nullable(),
+    packagedPid: z.number().int().nonnegative(),
+    packagedSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
   }),
   z.strictObject({
     kind: z.literal('observation'),
@@ -237,6 +242,15 @@ async function run() {
         )
         const { createRequire } = await import('node:module')
         if (closing) return
+        if (
+          runtimeFixture &&
+          process.env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes'
+        ) {
+          started = true
+          await runtimeFixture.start(input)
+          output({ kind: 'started' })
+          return
+        }
         const ownedNative: NonNullable<typeof native> = createRequire(
           new URL('../../packages/connector/package.json', import.meta.url),
         )('node-datachannel')

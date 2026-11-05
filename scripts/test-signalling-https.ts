@@ -178,6 +178,23 @@ function auditPort(channel: ChildProcess | NodeJS.Process): PauseAuditPort {
     },
   }
 }
+function fixtureMode() {
+  const flags = [
+    process.env.SIGNALLING_HTTPS_RTC_FIXTURE,
+    process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE,
+    process.env.SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE,
+  ]
+  if (
+    flags.some((value) => value !== undefined && value !== 'yes') ||
+    flags.filter((value) => value === 'yes').length > 1
+  )
+    throw new Error('Invalid mutually exclusive fixture opt-in')
+  return {
+    rtcFixture: flags[0] === 'yes',
+    pauseFixture: flags[1] === 'yes',
+    pauseRtcFixture: flags[2] === 'yes',
+  }
+}
 const mode = process.argv[2]
 if (process.versions.bun || !process.versions.node.startsWith('24.'))
   throw new Error('Node 24 is required')
@@ -266,17 +283,14 @@ if (mode === '--prepare-layer') {
   } = process.env
   if (!origin || !ca || !farmId || !owner || !admin || !password)
     throw new Error('Missing disposable acceptance fixture')
-  const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
-  const pauseFixture = process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE === 'yes'
-  if (
-    (process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE && !pauseFixture) ||
-    (rtcFixture && pauseFixture)
-  )
-    throw new Error('Invalid mutually exclusive pause fixture opt-in')
+  const { rtcFixture, pauseFixture, pauseRtcFixture } = fixtureMode()
   const extensionPath = '../tests/helpers/signalling-authenticated-rtc.ts'
   const extensionModule:
     | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
     | undefined = rtcFixture ? await import(extensionPath) : undefined
+  const pauseRtcModule = pauseRtcFixture
+    ? await import('../tests/helpers/pause-authenticated-rtc.ts')
+    : undefined
   const pauseAudit = pauseFixture
     ? createPauseAuditClient(auditPort(process))
     : undefined
@@ -311,6 +325,15 @@ if (mode === '--prepare-layer') {
                 },
               }
             : {}),
+          ...(pauseRtcModule
+            ? {
+                extension:
+                  pauseRtcModule.createPauseAuthenticatedRtcFixtureExtension(),
+                extensionKind: 'pause-rtc' as const,
+                caPath: ca,
+                disconnectSignalling: requestProxyDisconnect,
+              }
+            : {}),
           ...(extensionModule
             ? {
                 extension:
@@ -324,7 +347,8 @@ if (mode === '--prepare-layer') {
     )
   } finally {
     pauseAudit?.close()
-    if ((rtcFixture || pauseFixture) && process.connected) process.disconnect()
+    if ((rtcFixture || pauseFixture || pauseRtcFixture) && process.connected)
+      process.disconnect()
   }
 } else if (mode === '--run') {
   if (
@@ -332,15 +356,7 @@ if (mode === '--prepare-layer') {
     process.env.SIGNALLING_HTTPS_DISPOSABLE !== 'yes'
   )
     throw new Error('Explicit disposable fixture required')
-  const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
-  const pauseFixture = process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE === 'yes'
-  if (
-    (process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE && !pauseFixture) ||
-    (rtcFixture && pauseFixture)
-  )
-    throw new Error('Invalid mutually exclusive pause fixture opt-in')
-  if (process.env.SIGNALLING_HTTPS_RTC_FIXTURE && !rtcFixture)
-    throw new Error('Invalid RTC fixture opt-in')
+  const { rtcFixture, pauseFixture, pauseRtcFixture } = fixtureMode()
   const portText = process.env.SIGNALLING_HTTPS_PORT,
     port = Number(portText)
   const requestedLedger = process.env.SIGNALLING_HTTPS_LEDGER
@@ -402,8 +418,10 @@ if (mode === '--prepare-layer') {
     'farm_connector_revoker',
     'farm_signalling_reader',
     'farm_connector_credential_acceptor',
-    ...(rtcFixture || pauseFixture ? ['farm_printer_ownership'] : []),
-    ...(pauseFixture ? ['farm_pause_authority'] : []),
+    ...(rtcFixture || pauseFixture || pauseRtcFixture
+      ? ['farm_printer_ownership']
+      : []),
+    ...(pauseFixture || pauseRtcFixture ? ['farm_pause_authority'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -525,9 +543,12 @@ if (mode === '--prepare-layer') {
     const appliedCount = assertSignallingCatalog(
       catalog,
       [...history],
-      rtcFixture || pauseFixture,
+      rtcFixture || pauseFixture || pauseRtcFixture,
     )
-    if (pauseFixture && catalog[17]?.id !== '0018_pause_authority')
+    if (
+      (pauseFixture || pauseRtcFixture) &&
+      catalog[17]?.id !== '0018_pause_authority'
+    )
       throw new Error('Pause authority official migration required')
     await note(
       `Official catalog and journal count ${appliedCount}; fixture source HEAD ${fixtureSource?.head ?? head}`,
@@ -625,7 +646,7 @@ if (mode === '--prepare-layer') {
       sessionSecret = randomBytes(32).toString('hex')
     privateValues.push(sessionSecret)
     let pauseIssuer: { path: string; publicKeySpki: string } | undefined
-    if (pauseFixture) {
+    if (pauseFixture || pauseRtcFixture) {
       const keys = generateKeyPairSync('ed25519')
       const privateKeyPkcs8 = keys.privateKey
         .export({ format: 'der', type: 'pkcs8' })
@@ -662,7 +683,7 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_ORIGIN: origin,
         NUXT_AUTH_SESSION_SECRET: sessionSecret,
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
-        ...(rtcFixture || pauseFixture
+        ...(rtcFixture || pauseFixture || pauseRtcFixture
           ? {
               NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
               NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
@@ -752,7 +773,7 @@ if (mode === '--prepare-layer') {
       {
         detached: true,
         stdio:
-          rtcFixture || pauseFixture
+          rtcFixture || pauseFixture || pauseRtcFixture
             ? ['ignore', 'pipe', 'pipe', 'ipc']
             : ['ignore', 'pipe', 'pipe'],
         env: {
@@ -768,9 +789,14 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_ADMIN: admin,
           SIGNALLING_HTTPS_PASSWORD: password,
           ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
+          ...(pauseRtcFixture
+            ? { SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE: 'yes' }
+            : {}),
           ...(pauseIssuer
             ? {
-                SIGNALLING_HTTPS_PAUSE_FIXTURE: 'yes',
+                ...(pauseFixture
+                  ? { SIGNALLING_HTTPS_PAUSE_FIXTURE: 'yes' }
+                  : {}),
                 SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY: pauseIssuer.publicKeySpki,
               }
             : {}),
@@ -791,7 +817,7 @@ if (mode === '--prepare-layer') {
         return receipt
       })
     }
-    if (rtcFixture)
+    if (rtcFixture || pauseRtcFixture)
       serveProxyDisconnect(child, () => proxy!.disconnectUpgrades())
     child.stdout?.on('data', (chunk: Buffer) =>
       captured.append('acceptance.stdout', chunk),
@@ -871,11 +897,13 @@ if (mode === '--prepare-layer') {
     )
     if (!failed && !failures.length)
       await note(
-        pauseFixture
-          ? 'PASS real generated Nitro HTTPS pause issuer; synthetic control proofs, no RTC or command execution'
-          : rtcFixture
-            ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
-            : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
+        pauseRtcFixture
+          ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
+          : pauseFixture
+            ? 'PASS real generated Nitro HTTPS pause issuer; synthetic control proofs, no RTC or command execution'
+            : rtcFixture
+              ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
+              : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
       )
     await ledger.close()
     globalThis.process.removeListener('SIGINT', interrupt)

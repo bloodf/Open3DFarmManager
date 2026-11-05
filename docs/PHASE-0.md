@@ -23,10 +23,14 @@ This is an independent MIT project. Accounts, sessions, credentials and database
 
 ## Current status snapshot
 
-Status refreshed on 2026-11-05 after the rendered farm-page gate. Source,
-packaged artifacts, database fixtures and native diagnostics have different
-acceptance scopes. No publication, deployment or complete Phase 0 acceptance
-follows from the results below.
+The table below retains the rendered farm-page checkpoint from 2026-11-05.
+Later source is published in [PR #14](https://github.com/bloodf/Open3DFarmManager/pull/14).
+The complete local gate passed before `7a749d8`; that commit adds a CPU-only
+comparison after the unchanged Klipper smoke test fails. Its remote result and
+merge remain pending. The prior `f5f2088` passed remote code and image checks but
+failed Klipper startup. Publication does not establish deployment or complete
+Phase 0 acceptance. Source, packaged artifacts, database fixtures and native
+diagnostics retain their distinct scopes.
 
 | Gate                         | Verified evidence                                                                                                                                                                                                                                                                                                                                                       | Remaining scope                                                                                                                                                                                                                          |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,6 +55,11 @@ The [implementation queue](IMPLEMENTATION-QUEUE.md) retains an older snapshot;
 its migration labels do not describe the current official catalog through 0019. Use this ledger and the exact checkpoint receipts when selecting remaining
 work. Historical counts and prepared-but-unrun tests are not current acceptance.
 
+The separate pause transport subsequently passed five actual native cases at
+`579f377`, recorded in [the control RTC checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
+Those cases use synthetic authority and execute no printer commands. They do
+not close the integrated issuer, signalling, driver and simulator gate below.
+
 ## Acceptance scope still required
 
 - **Runtime and database:** built application with PostgreSQL readiness, reversible journal-verified migrations, validated configuration and structured diagnostics. Run the final integrated CI on the exact candidate head.
@@ -73,4 +82,4 @@ These documents retain earlier scoped evidence and limitations. Their historical
 
 ## Publication and hardware gates
 
-Track work as local, tested, validated, published or merged, with the exact commit/PR head. Review the immutable publication diff for private material and license obligations. The existing local payload still requires explicit publication authorization. Deployment, DNS/credential changes and physical-printer tests remain separately authorized actions.
+Track work as local, tested, validated, published or merged, with the exact commit/PR head. Review the immutable publication diff for private material and license obligations. The owner has authorized publication and merging ready PRs. Required current-head checks, review resolution and repository protections still apply. Deployment, DNS/credential changes and physical-printer tests remain separately authorized actions.

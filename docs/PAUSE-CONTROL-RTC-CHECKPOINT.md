@@ -67,6 +67,20 @@ retaining its internal stage. Only bounded diagnostic collection changed
 before this successful attempt. Its cause remains unresolved; one passing
 attempt does not establish stability or close that historical failure.
 
+## Diagnostic review follow-up
+
+Unexpected signalling termination before capability acceptance now records
+`client-terminal`, including after `start()` has resolved at proof readiness.
+Requested disposal while verification is pending does not become a verifier
+failure. Unknown rejection details are omitted, and a missing child observation
+retains only the child exit code and signal, never stderr. Null exit fields do
+not prove process closure.
+
+Twelve focused contract tests pass, including pre-issuance projection and
+unknown rejection redaction. These tests do not execute native child lifecycle
+races. The actual runtime receipt above predates this follow-up; no fresh
+HTTPS/WSS/RTC acceptance is claimed for it.
+
 ## Remaining integration
 
 Durable command replay protection, the fixed Moonraker driver and a real

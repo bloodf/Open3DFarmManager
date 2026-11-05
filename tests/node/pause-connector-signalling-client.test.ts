@@ -45,6 +45,7 @@ async function fixture(
     url: 'wss://farm.example/api/signalling/pause-connector',
     origin: 'https://farm.example',
     audience: 'pause-client-test',
+    credentialAudience: 'credential-pop-client-test',
     agentId: randomUUID(),
     farmId: randomUUID(),
     assignmentId: randomUUID(),
@@ -161,7 +162,7 @@ async function fixture(
       .digest('base64url'),
     token_hash: createHash('sha256').update(scope.token).digest('base64url'),
     origin: scope.origin,
-    audience: scope.audience,
+    audience: scope.credentialAudience,
     purpose: 'signalling' as const,
     generation: 7,
     nonce: digest(),
@@ -322,6 +323,8 @@ test('pause inbox and context use genuine credential signatures, generation gaps
   })
   try {
     assert.equal(f.sent[0]?.t, 'pause.connector-begin')
+    assert.notEqual(f.scope.credentialAudience, f.scope.audience)
+    assert.equal(f.challenge.audience, f.scope.credentialAudience)
     assert.equal(f.counts().inboxReady, 0)
     await f.inbox()
     assert.equal(f.counts().inboxReady, 1)
@@ -697,5 +700,41 @@ test('pause socket preserves strict TLS/noOrigin/addon guards and distinct route
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  }
+})
+
+test('credential and pause audiences cannot substitute for one another', async () => {
+  const credential = await fixture()
+  try {
+    await credential.push({
+      v: 1,
+      t: 'pause.connector-inbox-challenge',
+      challenge: {
+        ...credential.challenge,
+        audience: credential.scope.audience,
+      },
+    })
+    await assert.rejects(credential.pending)
+    assert.equal(credential.sent.length, 1)
+  } finally {
+    await credential.cleanup()
+  }
+  const binding = await fixture()
+  try {
+    await binding.inbox()
+    await binding.notice()
+    await binding.contextProof()
+    await binding.rtcReady()
+    await binding.answer()
+    const value = await binding.makeBinding()
+    await binding.push({
+      v: 1,
+      t: 'pause.binding',
+      binding: { ...value.value, audience: binding.scope.credentialAudience },
+    })
+    await assert.rejects(binding.pending)
+    assert.equal(binding.binding(), undefined)
+  } finally {
+    await binding.cleanup()
   }
 })

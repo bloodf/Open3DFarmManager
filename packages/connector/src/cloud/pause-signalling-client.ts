@@ -42,6 +42,8 @@ export type PauseConnectorSignallingScope = Readonly<{
   url: string
   origin: string
   audience: string
+  /** Independently provisioned credential PoP audience; never inferred from pause frames. */
+  credentialAudience: string
   agentId: string
   farmId: string
   assignmentId: string
@@ -118,6 +120,7 @@ export class PauseConnectorSignallingClient {
     this.#begin = begin
     const origin = PairingProofOrigin.parse(scope.origin),
       audience = PairingProofAudience.parse(scope.audience),
+      credentialAudience = PairingProofAudience.parse(scope.credentialAudience),
       assignmentId = BrowserDeviceUuid.parse(scope.assignmentId)
     const target = new URL(scope.url)
     if (
@@ -134,6 +137,7 @@ export class PauseConnectorSignallingClient {
       ...scope,
       origin,
       audience,
+      credentialAudience,
       assignmentId,
       ...(scope.accountId !== undefined
         ? { accountId: BrowserDeviceTextId.parse(scope.accountId) }
@@ -215,7 +219,7 @@ export class PauseConnectorSignallingClient {
       c.jti !== s.jti ||
       c.connection_id !== connectionId ||
       c.origin !== s.origin ||
-      c.audience !== s.audience ||
+      c.audience !== s.credentialAudience ||
       c.purpose !== 'signalling' ||
       c.public_key_spki !== this.#publicKey ||
       c.fingerprint !== this.#fingerprint ||
@@ -231,7 +235,7 @@ export class PauseConnectorSignallingClient {
       challenge: c,
       token: this.#scope.token,
       expectedOrigin: this.#scope.origin,
-      expectedAudience: this.#scope.audience,
+      expectedAudience: this.#scope.credentialAudience,
       expectedPurpose: 'signalling',
       expectedConnectionId: connectionId,
       now: this.#channel.wallNow(),

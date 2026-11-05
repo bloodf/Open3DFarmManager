@@ -51,7 +51,6 @@ export type PauseRpcResult = { acknowledged: boolean }
  * reconnect, queue or retry. A false/throwing guard forbids every send for this attempt.
  */
 export interface PauseDriver {
-  current(binding: PrinterBinding): ControlObservation | null
   pauseOnce(input: {
     binding: PrinterBinding
     beforeSend(): boolean
@@ -127,7 +126,6 @@ export function createPauseDispatcher(config: {
     monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const journal = config.journal
   const driver = Object.freeze({
-    current: config.driver.current.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
     waitForPaused: config.driver.waitForPaused.bind(config.driver),
   })
@@ -137,6 +135,7 @@ export function createPauseDispatcher(config: {
   let closed = false,
     clockBroken = false
   let previous: Sample | undefined, baseline: Sample | undefined
+  const observations = new WeakMap<PrinterBinding, ControlObservation>()
   const slots = new Set<string>()
   const deniedHandles = new WeakSet<object>()
   const stopAttempts = new Set<() => void>()
@@ -173,12 +172,8 @@ export function createPauseDispatcher(config: {
     now: Sample,
   ): ControlObservation | null {
     try {
-      const observation = Object.freeze(
-        Observation.parse(driver.current(binding)),
-      )
-      const sampledAfterRead = sample()
-      if (!sampledAfterRead) return null
-      now = sampledAfterRead
+      const observation = observations.get(binding)
+      if (!observation) return null
       if (
         observation.assignmentId !== capability.assignment_id ||
         observation.printerKey !== capability.printer_key ||
@@ -228,6 +223,22 @@ export function createPauseDispatcher(config: {
     return true
   }
   return Object.freeze({
+    /** Trusted local observation publisher only; never accept this input from a command or server. */
+    observe(binding: PrinterBinding, input: unknown): boolean {
+      observations.delete(binding)
+      if (closed || input === null) return false
+      const mapping = readPrinterBinding(binding)
+      const parsed = Observation.safeParse(input)
+      if (
+        !mapping ||
+        !parsed.success ||
+        parsed.data.assignmentId !== mapping.assignment_id ||
+        parsed.data.printerKey !== mapping.printer_key
+      )
+        return false
+      observations.set(binding, Object.freeze(parsed.data))
+      return true
+    },
     beginAdmission(input: Parameters<typeof verifier.beginAdmission>[0]) {
       if (closed) throw new Error('Pause dispatcher is closed')
       const admitted = verifier.beginAdmission(input)
@@ -421,8 +432,9 @@ export function createPauseDispatcher(config: {
             deniedHandles.add(authorityHandle)
             return false
           }
-          const observation = Observation.parse(driver.current(printerBinding))
+          const observation = observations.get(printerBinding)
           return (
+            !!observation &&
             observation.assignmentId === mapping.assignment_id &&
             observation.printerKey === mapping.printer_key &&
             observation.connectionGeneration === connectionGeneration
@@ -468,13 +480,23 @@ export function createPauseDispatcher(config: {
         if (!capability || revoked(capability, authorityHandle)) return false
         if (!verifier.inspect(authorityHandle).ok) return false
         const now = sample()
+        // No external callback occurs after this final local snapshot read.
+        const finalObservation =
+          now && capability
+            ? readObservation(printerBinding, capability, now)
+            : null
         if (
           !now ||
           !capability ||
+          !finalObservation ||
+          !finalObservation.ready ||
+          finalObservation.printState !== 'printing' ||
+          finalObservation.connectionGeneration !== connectionGeneration ||
           now.mono >= resultDeadline ||
           now.mono >= commandDeadline ||
-          now.mono - current.readyObservedMono > verifier.policy.freshStateMs ||
-          now.mono - current.printStateObservedMono >
+          now.mono - finalObservation.readyObservedMono >
+            verifier.policy.freshStateMs ||
+          now.mono - finalObservation.printStateObservedMono >
             verifier.policy.freshStateMs ||
           now.wall >= command.expires_at ||
           now.wall >= capability.expires_at ||
@@ -489,8 +511,8 @@ export function createPauseDispatcher(config: {
         )
           return false
         cursor = Object.freeze({
-          connectionGeneration: current.connectionGeneration,
-          sequence: current.sequence,
+          connectionGeneration: finalObservation.connectionGeneration,
+          sequence: finalObservation.sequence,
           sentMono: now.mono,
         })
         permitted = true

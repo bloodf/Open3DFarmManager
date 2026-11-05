@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import postgres, { type Sql } from 'postgres'
-import { z } from 'zod'
+import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 
 const maxLogBytes = 5 * 1024 * 1024
 const maxAppendBytes = 64 * 1024

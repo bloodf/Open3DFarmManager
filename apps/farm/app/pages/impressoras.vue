@@ -135,6 +135,10 @@ async function selectFarm() {
       await loadConnectors(signal, current)
   })
 }
+function selectRevocation(printer: Printer) {
+  revokeTarget.value = printer
+  revokeConfirmed.value = false
+}
 async function register() {
   if (
     !confirmed.value ||
@@ -260,10 +264,7 @@ onBeforeRouteLeave(clear)
             v-if="canManage && printer.status === 'active'"
             type="button"
             :disabled="pending"
-            @click="
-              revokeTarget = printer
-              revokeConfirmed = false
-            "
+            @click="selectRevocation(printer)"
           >
             Revogar atribuição de {{ printer.printerKey }}
           </button>

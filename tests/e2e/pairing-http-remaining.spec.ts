@@ -2,12 +2,23 @@ import { generateKeyPairSync } from 'node:crypto'
 import { request as httpsRequest } from 'node:https'
 import { expect, test } from '@playwright/test'
 import postgres from 'postgres'
+import { waitForBrowserCapture } from '../helpers/pairing-http-capture.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   PairingPollResponse,
   PairingStartResponse,
 } from '../../packages/farm-protocol/src/pairing.ts'
 import { PairingProofChallenge } from '../../packages/farm-protocol/src/pairing-proof.ts'
+
+let lastStage = 'not-started'
+function stage(value: string) {
+  lastStage = value
+  console.info(`pairing fixture stage: ${value}`)
+}
+test.afterEach(async ({}, info) => {
+  if (info.status !== 'passed')
+    console.info(`pairing fixture last stage: ${lastStage}`)
+})
 
 // Separate continuation, valid only together with a recorded earlier full run.
 test('remaining expiry, revoked-session and exhausted-quota recovery gates', async ({
@@ -177,12 +188,14 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
       },
       { path, body },
     )
+  stage('owner-login')
   const owner = await login()
   const approval = (userCode: string) => ({
     user_code: userCode,
     farm_id: farmId,
     expected_fingerprint: identity.fingerprint,
   })
+  stage('proof-expiry-wait')
   const expired = await begin()
   await new Promise((resolve) =>
     setTimeout(
@@ -208,6 +221,7 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
   expect(
     /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(expiredText),
   ).toBe(false)
+  stage('expired-proof-response-validated')
   const admin = postgres({
     host: '127.0.0.1',
     port: Number(port),
@@ -221,6 +235,7 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
       await admin`SELECT proof_expired_at IS NOT NULL AS expired, (SELECT count(*)::int FROM farm.connector_credentials c WHERE c.agent_id=p.agent_id) AS credentials FROM farm.pairing_requests p WHERE p.agent_id=${expired.challenge.agent_id}::uuid`
     expect(rows[0]?.expired).toBe(true)
     expect(rows[0]?.credentials).toBe(0)
+    stage('expired-proof-database-validated')
     const revoked = await begin()
     await admin`UPDATE farm.account_sessions SET revoked_at=${Date.now()} WHERE account_id=${account} AND revoked_at IS NULL`
     expect(
@@ -234,9 +249,12 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
     await admin.end({ timeout: 3 })
     await owner.context.close()
   }
+  stage('revoked-session-validated')
   const fresh = await login()
   try {
+    stage('fresh-owner-login')
     const quota = await begin()
+    stage('machine-quota-flood')
     let limited = false
     for (let attempt = 0; attempt < 61; attempt++) {
       const response = await machine('start', {})
@@ -247,10 +265,12 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
       expect(response.status).toBe(400)
     }
     expect(limited).toBe(true)
+    stage('machine-quota-denial-validated')
     for (let attempt = 0; attempt < 61; attempt++)
       expect(
         (await machine('approve', {}, { origin: url.origin })).status,
       ).toBe(401)
+    stage('anonymous-browser-denial-validated')
     expect(
       await post(
         fresh.page,
@@ -275,6 +295,7 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
         )
       )
     }
+    stage('owner-approval-validated')
     const before = await inventory()
     expect(before.status).toBe(200)
     expect(matches(before.text, 'approved')).toBe(true)
@@ -285,9 +306,11 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
         { expected_fingerprint: identity.fingerprint },
       ),
     ).toBe(200)
+    stage('owner-revoke-response-validated')
     const after = await inventory()
     expect(after.status).toBe(200)
     expect(matches(after.text, 'revoked')).toBe(true)
+    stage('revoked-inventory-validated')
     seen.push(
       await fresh.page.evaluate(
         () =>
@@ -296,10 +319,13 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
           JSON.stringify(sessionStorage),
       ),
     )
-    await Promise.all(reads)
+    stage('browser-state-captured')
+    await waitForBrowserCapture(reads, 5000)
+    stage('browser-response-capture-complete')
     const visible = seen.join('\n')
     for (const secret of secrets) expect(visible.includes(secret)).toBe(false)
     expect(/\"device_token\"\s*:/.test(visible)).toBe(false)
+    stage('secret-exclusion-validated')
   } finally {
     await fresh.context.close()
   }

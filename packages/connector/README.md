@@ -7,6 +7,8 @@ bun run --cwd packages/connector build
 node packages/connector/dist/cli.js --help
 ```
 
+The built `dist/` directory includes `LICENSE`, `THIRD_PARTY.md` and `ZOD-LICENSE`. Keep these notices alongside `cli.js` in any distribution; copying only the bundled JavaScript omits required notices.
+
 ## Initialize and inspect local identity
 
 Choose a private data directory owned by your OS user. Replace the example path below with that directory. Initialization is explicit; there is no default path and help/version do not create files.

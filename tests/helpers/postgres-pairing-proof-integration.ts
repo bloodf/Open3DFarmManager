@@ -40,7 +40,7 @@ export async function testPostgresPairingProof(
     audience: 'open3dfarmmanager:pairing',
   }
   const proof = new PostgresPairingProof(sql, config, () => now)
-  const pairing = new PostgresPairing(admin, () => now)
+  const pairing = new PostgresPairing(admin, config, () => now)
   const keys = generateKeyPairSync('ed25519')
   const identity = new ConnectorIdentity(keys.privateKey)
   const checks: string[] = []
@@ -286,6 +286,32 @@ export async function testPostgresPairingProof(
       reason: 'denied',
     })
     checks.push('challenge-deadline-never-outlives-pairing')
+    for (const step of ['expiry', 'rollback']) {
+      const steppedDevice = await start()
+      const stepped = await issue(steppedDevice)
+      const steppedRequest = completion(steppedDevice, stepped)
+      const initial = now
+      let reads = 0
+      const steppedProof = new PostgresPairingProof(sql, config, () =>
+        reads++ === 0
+          ? initial
+          : step === 'expiry'
+            ? stepped.expires_at
+            : initial - 1,
+      )
+      assert.deepEqual(await steppedProof.complete(steppedRequest), {
+        ok: false,
+        reason: 'denied',
+      })
+      assert.equal(await state(stepped), 'expired')
+      assert.deepEqual(await proof.complete(steppedRequest), {
+        ok: false,
+        reason: 'denied',
+      })
+    }
+    checks.push(
+      'second-clock-read-after-real-verification-expiry-and-rollback-are-terminal',
+    )
 
     const rollbackDevice = await start()
     const rollback = await issue(rollbackDevice)

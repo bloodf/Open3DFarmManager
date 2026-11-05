@@ -8,6 +8,10 @@ import {
   PairingPollRequest,
 } from '@open3dfarmmanager/farm-protocol'
 import {
+  PairingProofOrigin,
+  PairingProofAudience,
+} from '../../../../packages/farm-protocol/src/pairing-proof.ts'
+import {
   evaluateSession,
   type SessionPolicy,
   type SessionRecord,
@@ -41,16 +45,49 @@ interface PairingRow {
   issued_at: number
   expires_at: number
   next_poll_at: number
+  proof_expired_at: number | null
   status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
   farm_id: string | null
 }
 
+interface VerifiedProof {
+  origin: string
+  audience: string
+  issued_at: number
+  expires_at: number
+  consumed_at: number
+}
+
 /** Unwired internal persistence. Clock is sampled after lock acquisition, not before waiting. */
 export class PostgresPairing {
+  private readonly origin: string
+  private readonly audience: string
   constructor(
     private readonly sql: Sql,
+    config: { origin: string; audience: string },
     private readonly clock: () => number = Date.now,
-  ) {}
+  ) {
+    this.origin = PairingProofOrigin.parse(config.origin)
+    this.audience = PairingProofAudience.parse(config.audience)
+  }
+  private proofIsCurrent(
+    proof: VerifiedProof | undefined,
+    row: PairingRow,
+    now: number,
+  ): boolean {
+    return (
+      row.proof_expired_at === null &&
+      !!proof &&
+      proof.origin === this.origin &&
+      proof.audience === this.audience &&
+      proof.issued_at >= row.issued_at &&
+      proof.expires_at <= row.expires_at &&
+      proof.consumed_at >= proof.issued_at &&
+      proof.consumed_at < proof.expires_at &&
+      now >= proof.consumed_at &&
+      now < proof.expires_at
+    )
+  }
   private now(): number {
     const now = this.clock()
     if (
@@ -152,7 +189,7 @@ export class PostgresPairing {
           return { ok: false, reason: 'denied' }
         const rows = await tx<
           PairingRow[]
-        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, status, farm_id FROM farm.pairing_requests WHERE user_code_hash = ${hash(request.user_code)} FOR UPDATE`
+        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, proof_expired_at::float8, status, farm_id FROM farm.pairing_requests WHERE user_code_hash = ${hash(request.user_code)} FOR UPDATE`
         const now = this.now()
         if (now < initialNow) return { ok: false, reason: 'denied' }
         const session = evaluateSession(
@@ -171,6 +208,7 @@ export class PostgresPairing {
         if (
           !row ||
           row.status !== 'pending' ||
+          (input.decision === 'approve' && row.proof_expired_at !== null) ||
           row.fingerprint !== request.expected_fingerprint ||
           now < row.issued_at
         )
@@ -179,14 +217,37 @@ export class PostgresPairing {
           await tx`UPDATE farm.pairing_requests SET status = 'expired' WHERE agent_id = ${row.agent_id}::uuid`
           return { ok: false, reason: 'denied' }
         }
+        let touchAt = session.touchAt
         if (input.decision === 'deny') {
           await tx`UPDATE farm.pairing_requests SET status = 'denied' WHERE agent_id = ${row.agent_id}::uuid`
         } else {
+          const proofs = await tx<
+            VerifiedProof[]
+          >`SELECT origin, audience, issued_at::float8, expires_at::float8, consumed_at::float8 FROM farm.pairing_proofs WHERE agent_id = ${row.agent_id}::uuid AND status = 'verified' FOR SHARE`
+          const approvalNow = this.now()
+          if (approvalNow < now) return { ok: false, reason: 'denied' }
+          if (proofs[0] && approvalNow >= proofs[0].expires_at)
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${approvalNow} WHERE agent_id = ${row.agent_id}::uuid`
+          const currentSession = evaluateSession(
+            input.sessionRecordId,
+            record,
+            account,
+            approvalNow,
+            input.policy,
+          )
+          if (!currentSession.ok) {
+            if (currentSession.reason === 'expired')
+              await tx`UPDATE farm.account_sessions SET revoked_at = ${approvalNow} WHERE id = ${input.sessionRecordId}`
+            return { ok: false, reason: 'denied' }
+          }
+          if (!this.proofIsCurrent(proofs[0], row, approvalNow))
+            return { ok: false, reason: 'denied' }
           await tx`INSERT INTO farm.connector_enrollments (agent_id, farm_id, public_key_spki, fingerprint) VALUES (${row.agent_id}::uuid, ${request.farm_id}::uuid, ${row.public_key_spki}, ${row.fingerprint})`
           await tx`UPDATE farm.connector_enrollments SET status = 'approved' WHERE agent_id = ${row.agent_id}::uuid`
           await tx`UPDATE farm.pairing_requests SET status = 'approved', farm_id = ${request.farm_id}::uuid, decided_by = ${session.accountId} WHERE agent_id = ${row.agent_id}::uuid`
+          touchAt = currentSession.touchAt
         }
-        await tx`UPDATE farm.account_sessions SET last_seen_at = ${session.touchAt} WHERE id = ${input.sessionRecordId}`
+        await tx`UPDATE farm.account_sessions SET last_seen_at = ${touchAt} WHERE id = ${input.sessionRecordId}`
         return {
           ok: true,
           status: input.decision === 'approve' ? 'approved' : 'denied',
@@ -206,7 +267,7 @@ export class PostgresPairing {
         await tx`SET LOCAL lock_timeout = '1000ms'`
         const rows = await tx<
           PairingRow[]
-        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, status, farm_id FROM farm.pairing_requests WHERE device_code_hash = ${hash(parsed.data.device_code)} FOR UPDATE`
+        >`SELECT agent_id, public_key_spki, fingerprint, issued_at::float8, expires_at::float8, next_poll_at::float8, proof_expired_at::float8, status, farm_id FROM farm.pairing_requests WHERE device_code_hash = ${hash(parsed.data.device_code)} FOR UPDATE`
         const row = rows[0]
         const now = this.now()
         if (!row || now < row.issued_at || row.status === 'consumed')
@@ -217,6 +278,8 @@ export class PostgresPairing {
           // Approved remains an immutable authorization decision; expiry prevents delivery.
           if (row.status === 'pending')
             await tx`UPDATE farm.pairing_requests SET status = 'expired' WHERE agent_id = ${row.agent_id}::uuid`
+          else if (row.proof_expired_at === null)
+            await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${now} WHERE agent_id = ${row.agent_id}::uuid`
           return { ok: true, status: 'expired' }
         }
         if (now < row.next_poll_at)
@@ -225,6 +288,16 @@ export class PostgresPairing {
           await tx`UPDATE farm.pairing_requests SET next_poll_at = ${Math.min(now + 5000, row.expires_at)} WHERE agent_id = ${row.agent_id}::uuid`
           return { ok: true, status: 'pending', retry_after_s: 5 }
         }
+        if (row.proof_expired_at !== null)
+          return { ok: false, reason: 'denied' }
+        const proofs = await tx<
+          VerifiedProof[]
+        >`SELECT origin, audience, issued_at::float8, expires_at::float8, consumed_at::float8 FROM farm.pairing_proofs WHERE agent_id = ${row.agent_id}::uuid AND status = 'verified' FOR SHARE`
+        const proofNow = this.now()
+        if (proofNow >= now && proofs[0] && proofNow >= proofs[0].expires_at)
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${proofNow} WHERE agent_id = ${row.agent_id}::uuid`
+        if (proofNow < now || !this.proofIsCurrent(proofs[0], row, proofNow))
+          return { ok: false, reason: 'denied' }
         const enrolled =
           await tx`SELECT status, farm_id FROM farm.connector_enrollments WHERE agent_id = ${row.agent_id}::uuid FOR SHARE`
         if (
@@ -234,8 +307,16 @@ export class PostgresPairing {
         )
           return { ok: false, reason: 'denied' }
         const deliveryNow = this.now()
-        if (deliveryNow < now || deliveryNow >= row.expires_at)
+        if (
+          deliveryNow >= proofNow &&
+          proofs[0] &&
+          deliveryNow >= proofs[0].expires_at
+        )
+          await tx`UPDATE farm.pairing_requests SET proof_expired_at = ${deliveryNow} WHERE agent_id = ${row.agent_id}::uuid`
+        if (deliveryNow < proofNow || deliveryNow >= row.expires_at)
           return { ok: true, status: 'expired' }
+        if (!this.proofIsCurrent(proofs[0], row, deliveryNow))
+          return { ok: false, reason: 'denied' }
         await tx`UPDATE farm.pairing_requests SET status = 'consumed' WHERE agent_id = ${row.agent_id}::uuid`
         return {
           ok: true,

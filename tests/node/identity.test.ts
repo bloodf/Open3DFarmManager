@@ -22,6 +22,7 @@ import {
   generateKeyPairSync,
 } from 'node:crypto'
 import { inspect } from 'node:util'
+import { pairingProofPayload } from '../../packages/farm-protocol/src/pairing-proof.ts'
 import {
   ConnectorIdentity,
   loadOrCreateIdentity,
@@ -208,6 +209,78 @@ test('canonical-looking invalid DER and duplicate properties do not trigger rege
     writeFileSync(path, duplicate)
     assert.throws(() => loadOrCreateIdentity(dir), /Noncanonical/)
     assert.equal(readFileSync(path, 'utf8'), duplicate)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loaded ConnectorIdentity signs only a trusted current pairing challenge without exposing its private key', () => {
+  const dir = scratch()
+  try {
+    const first = loadOrCreateIdentity(dir)
+    const second = loadOrCreateIdentity(dir)
+    const publicKey = createPublicKey({
+      key: Buffer.from(first.publicKeySpki, 'base64url'),
+      format: 'der',
+      type: 'spki',
+    })
+    const challenge = {
+      v: 1,
+      agent_id: '11111111-1111-4111-8111-111111111111',
+      public_key_spki: first.publicKeySpki,
+      fingerprint: first.fingerprint,
+      origin: 'https://farm.example',
+      audience: 'open3dfarmmanager:pairing',
+      nonce: randomBytes(32).toString('base64url'),
+      issued_at: 100,
+      expires_at: 60100,
+    }
+    const input = {
+      challenge,
+      expectedOrigin: challenge.origin,
+      expectedAudience: challenge.audience,
+      now: 100,
+    }
+    const signature = first.signPairingProof(input)
+    assert.equal(second.signPairingProof(input), signature)
+    assert.ok(
+      verify(
+        null,
+        pairingProofPayload(challenge),
+        publicKey,
+        Buffer.from(signature, 'base64url'),
+      ),
+    )
+    assert.equal(
+      verify(
+        null,
+        Buffer.from(challenge.nonce, 'base64url'),
+        publicKey,
+        Buffer.from(signature, 'base64url'),
+      ),
+      false,
+    )
+    for (const patch of [
+      { expectedOrigin: 'https://other.example' },
+      { expectedAudience: 'other:pairing' },
+      { now: 60100 },
+      { challenge: { ...challenge, fingerprint: 'SHA256:' + 'A'.repeat(43) } },
+    ])
+      assert.throws(() => first.signPairingProof({ ...input, ...patch }))
+    const injected = {
+      ...input,
+      privateKey: generateKeyPairSync('ed25519').privateKey,
+    }
+    assert.equal(first.signPairingProof(injected), signature)
+    assert.deepEqual(Object.keys(first).sort(), [
+      'fingerprint',
+      'publicKeySpki',
+    ])
+    const privateEncoding = JSON.parse(
+      readFileSync(join(dir, 'identity.json'), 'utf8'),
+    ).privateKey
+    assert.equal(JSON.stringify(first).includes(privateEncoding), false)
+    assert.equal(inspect(first).includes(privateEncoding), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

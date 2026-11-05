@@ -21,6 +21,8 @@ import {
   type PausePhaseFrame,
   type PausePhaseMessage,
   type PauseProofsReady,
+  type PauseDataFrame,
+  type PauseCommandMessage,
 } from '../../../../../packages/connector/src/webrtc/pause-control-session.ts'
 
 type Options = Readonly<{
@@ -31,6 +33,8 @@ type Options = Readonly<{
   lifetimeDeadline?: number
   onProofsReady?: (value: PauseProofsReady) => void
   onPhase?: (frame: Readonly<PausePhaseFrame>) => void
+  /** Optional result handler. Absent keeps the peer metadata only. */
+  onData?: (frame: Readonly<PauseDataFrame>) => void
   onTerminal?: (reason: string) => void
 }>
 function controlOnly(sdp: string) {
@@ -61,7 +65,8 @@ export function pauseBrowserCertificate(
     certificate.fingerprint.toUpperCase() === expected
   )
 }
-/** Separate browser control peer. No command path, readonly upgrade, or capability verification. */
+/** Separate browser control peer. Bounded command transport only; no readonly
+ * upgrade and no capability verification. */
 export class PauseBrowserPeer {
   readonly closed: Promise<void>
   #resolveClosed: () => void = () => {}
@@ -128,6 +133,9 @@ export class PauseBrowserPeer {
       },
       onPhase: (frame) => {
         if (this.current()) return this.#options.onPhase?.(frame)
+      },
+      onData: (frame) => {
+        if (this.current()) return this.#options.onData?.(frame)
       },
       onTerminal: (reason) => this.close(reason),
     })
@@ -338,6 +346,10 @@ export class PauseBrowserPeer {
   }
   sendPhase(input: PausePhaseMessage): boolean {
     return this.current() && this.#session.sendPhase(input)
+  }
+  /** Browser only command. The peer never emits a result. */
+  sendCommand(command: PauseCommandMessage): boolean {
+    return this.current() && this.#session.sendCommand(command)
   }
   close(reason = 'closed'): void {
     if (this.#terminal) return

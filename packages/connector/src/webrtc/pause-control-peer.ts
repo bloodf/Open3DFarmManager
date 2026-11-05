@@ -21,6 +21,8 @@ import {
   type PausePhaseFrame,
   type PausePhaseMessage,
   type PauseProofsReady,
+  type PauseDataFrame,
+  type PauseResultMessage,
 } from './pause-control-session.ts'
 
 type Options = Readonly<{
@@ -32,6 +34,8 @@ type Options = Readonly<{
   lifetimeDeadline?: number
   onProofsReady?: (value: PauseProofsReady) => void
   onPhase?: (frame: Readonly<PausePhaseFrame>) => void
+  /** Optional command handler. Absent keeps the peer metadata only. */
+  onData?: (frame: Readonly<PauseDataFrame>) => void
   onTerminal?: (reason: string) => void
 }>
 const noop = () => {}
@@ -94,6 +98,9 @@ export class PauseConnectorPeer {
       },
       onPhase: (frame) => {
         if (this.current()) return this.#options.onPhase?.(frame)
+      },
+      onData: (frame) => {
+        if (this.current()) return this.#options.onData?.(frame)
       },
       onTerminal: (reason) => this.close(reason),
     })
@@ -303,6 +310,10 @@ export class PauseConnectorPeer {
   }
   sendPhase(input: PausePhaseMessage): boolean {
     return this.current() && this.#session.sendPhase(input)
+  }
+  /** Connector only result. The peer never emits a command. */
+  sendResult(result: PauseResultMessage): boolean {
+    return this.current() && this.#session.sendResult(result)
   }
   close(reason = 'closed'): void {
     if (this.#terminal) return

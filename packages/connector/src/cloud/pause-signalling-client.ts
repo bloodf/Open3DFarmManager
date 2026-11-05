@@ -30,13 +30,16 @@ import {
   type PauseProofsReady,
   type PausePhaseFrame,
   type PausePhaseMessage,
+  type PauseDataFrame,
+  type PauseResultMessage,
 } from '../webrtc/pause-control-session.ts'
 import type { PauseConnectorPeer } from '../webrtc/pause-control-peer.ts'
 
 type Peer = Pick<
   PauseConnectorPeer,
   'offer' | 'answer' | 'close' | 'closed' | 'sendPhase' | 'diagnostics'
->
+> &
+  Partial<Pick<PauseConnectorPeer, 'sendResult'>>
 type PeerOptions = ConstructorParameters<typeof PauseConnectorPeer>[0]
 export type PauseConnectorSignallingScope = Readonly<{
   url: string
@@ -58,6 +61,8 @@ type Options = Readonly<{
   onInboxReady?: () => void
   onProofsReady?: (ready: PauseProofsReady) => void
   onPhase?: (frame: Readonly<PausePhaseFrame>) => void
+  /** Optional command handler. Absent keeps the client metadata only. */
+  onData?: (frame: Readonly<PauseDataFrame>) => void
   onTerminal?: (reason: string) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
@@ -404,6 +409,16 @@ export class PauseConnectorSignallingClient {
             throw Error('Unexpected pause metadata')
           pauseSynchronous(() => this.#options.onPhase?.(Object.freeze(frame)))
         },
+        onData: (value) => {
+          if (!this.#channel.current() || !this.#ready) return
+          const frame = PauseChannelFrame.parse(value)
+          if (
+            frame.t !== 'control.command' ||
+            frame.transport_id !== this.#contextId
+          )
+            throw Error('Unexpected pause data')
+          pauseSynchronous(() => this.#options.onData?.(Object.freeze(frame)))
+        },
         onTerminal: (reason) => this.#channel.close(reason),
       }
       const factory =
@@ -530,6 +545,15 @@ export class PauseConnectorSignallingClient {
       return false
     }
     return this.#peer?.sendPhase(message) ?? false
+  }
+  /** Connector only result. The client never emits a command. */
+  sendResult(result: PauseResultMessage): boolean {
+    if (!this.#ready || !this.#channel.current()) return false
+    if (result.t !== 'control.result') {
+      this.#channel.close('invalid-data-send')
+      return false
+    }
+    return this.#peer?.sendResult?.(result) ?? false
   }
   close(reason = 'closed') {
     this.#channel.close(reason)

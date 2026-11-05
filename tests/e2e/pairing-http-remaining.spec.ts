@@ -75,9 +75,16 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
       req.on('error', reject)
       req.end(JSON.stringify(body))
     })
-  const identity = new ConnectorIdentity(
-    generateKeyPairSync('ed25519').privateKey,
-  )
+  const keypair = generateKeyPairSync('ed25519')
+  const identity = new ConnectorIdentity(keypair.privateKey)
+  const secrets = [
+    keypair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    keypair.privateKey
+      .export({ type: 'pkcs8', format: 'der' })
+      .toString('base64url'),
+  ]
+  const seen: string[] = []
+  const reads: Promise<void>[] = []
   const begin = async () => {
     const startedResponse = await machine('start', {
       public_key_spki: identity.publicKeySpki,
@@ -86,6 +93,7 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
     })
     expect(startedResponse.ok).toBe(true)
     const started = PairingStartResponse.parse(await startedResponse.json())
+    secrets.push(started.device_code)
     const challengeResponse = await machine('challenge', {
       device_code: started.device_code,
     })
@@ -112,6 +120,40 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
   const login = async () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true })
     const page = await context.newPage()
+    page.on('request', (request) => {
+      seen.push(request.url(), request.postData() ?? '')
+      reads.push(
+        request
+          .allHeaders()
+          .then((headers) => {
+            seen.push(JSON.stringify(headers))
+          })
+          .catch(() => {}),
+      )
+    })
+    page.on('response', (response) => {
+      if (
+        new URL(response.url()).origin === url.origin &&
+        new URL(response.url()).pathname.startsWith('/api/')
+      ) {
+        reads.push(
+          response
+            .allHeaders()
+            .then((headers) => {
+              seen.push(JSON.stringify(headers))
+            })
+            .catch(() => {}),
+        )
+        reads.push(
+          response
+            .text()
+            .then((body) => {
+              seen.push(body)
+            })
+            .catch(() => {}),
+        )
+      }
+    })
     await page.goto(origin + '/entrar')
     await page.getByLabel('Usuário').fill(username)
     await page.getByLabel('Senha').fill(password)
@@ -246,6 +288,18 @@ test('remaining expiry, revoked-session and exhausted-quota recovery gates', asy
     const after = await inventory()
     expect(after.status).toBe(200)
     expect(matches(after.text, 'revoked')).toBe(true)
+    seen.push(
+      await fresh.page.evaluate(
+        () =>
+          document.documentElement.outerHTML +
+          JSON.stringify(localStorage) +
+          JSON.stringify(sessionStorage),
+      ),
+    )
+    await Promise.all(reads)
+    const visible = seen.join('\n')
+    for (const secret of secrets) expect(visible.includes(secret)).toBe(false)
+    expect(/\"device_token\"\s*:/.test(visible)).toBe(false)
   } finally {
     await fresh.context.close()
   }

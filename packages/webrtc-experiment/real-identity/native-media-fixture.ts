@@ -35,7 +35,7 @@ export class FiniteNativeMediaFixture implements FixtureOnlyMediaHooks {
   prepare: FixtureOnlyMediaHooks['prepare'] = (capability) => {
     if (this.#terminal || this.#track)
       throw Error('Fixture media already prepared')
-    const video = new Video('finite-fixture-video', 'SendOnly')
+    const video = new Video('finite-video', 'SendOnly')
     video.addH264Codec(
       102,
       'profile-level-id=42001e;packetization-mode=1;level-asymmetry-allowed=1',

@@ -166,3 +166,53 @@ the coordinator's external evidence directory, remove only disposable resources
 created for that experiment, and compare the final inventory with its baseline.
 Never delete a shared simulator, pre-existing image, worktree or another task's
 output. Report retained evidence and remaining resources explicitly.
+
+## Clock and scheduling evidence from the ARM64 shutdown
+
+The retained Klippy log reports identification before the first sampled ready
+state. At Klippy monotonic time 12501.6, it warned that the MCU was configured
+for 20 MHz but estimated at about 0.97 MHz. The estimate remained near that
+value until a clock prediction variance reset at 12512.1; it then moved to
+about 1.69 MHz. A filament sensor insertion event was logged at 12518.85,
+followed by the shutdown message and an MCU `Timer too close` report. This
+sequence does not establish that the insertion event caused shutdown.
+
+The last pre-shutdown statistics reported `print_stall=0`, 242 retransmitted
+bytes and zero invalid bytes. The shutdown dump reported a clock estimate of
+1,692,104.530 against a configured 20,000,000, with 242 retransmitted bytes
+and zero invalid bytes. These are Klippy's measurements and counters, not
+measurements of host CPU throttling. `print_stall` does not measure scheduler
+stalls. The run did not capture per-period cgroup throttling, emulator CPU time
+or host scheduling delays. The clock estimate and reset support investigating
+clock/scheduling behavior, but neither a CPU quota cause nor a firmware defect
+is established. The intermittent prior results also make a single repeated
+run insufficient to discriminate a cause.
+
+## Capture missing CPU quota evidence
+
+For a future isolated synthetic run, mount `cpu_throttle_capture.py` read-only
+and start it as a separate process in the simulator's private cgroup namespace
+without changing the pinned Supervisor configuration or limits. Verify that
+`/proc/self/cgroup` identifies the intended cgroup v2 root before interpreting
+`/sys/fs/cgroup/cpu.stat`. Capture stdout and stderr separately in the external
+ledger directory. For example, after the container starts:
+
+```sh
+docker exec SIMULATOR_CONTAINER python3 /opt/o3dfm/cpu_throttle_capture.py > cpu.jsonl 2> cpu-errors.log
+```
+
+The helper emits at most 90 cumulative counter samples, one per second, and
+starts no read at or after the end of its own 90-second sampling window. Stop
+the capture at the original container readiness deadline if it started later.
+Each record brackets the read with
+monotonic timestamps, which can be compared with Klippy's monotonic timestamps
+in the same container. Calculate deltas between successive samples; counters
+alone do not identify which process was delayed or prove why a timer failed.
+Missing cgroup v2 counters produce an error rather than a zero value. The extra
+process and reads add load, so compare with repeated uninstrumented controls and
+retain sampling start and exit status. This capture is diagnostic only and does
+not extend the readiness deadline or grant device access.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s infra/sim/experiments -p 'test_cpu_throttle_capture.py' -v
+```

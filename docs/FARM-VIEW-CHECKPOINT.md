@@ -1,6 +1,6 @@
 # E6 frontend implementation checkpoint
 
-E6 remains incomplete. This slice supplies authenticated HTTP inventory, scoped read-only presentation, a genuine status-feed consumer, and explicit local-interface bookmarks held in tab memory. It does not establish genuine browser-to-Connector status, camera, or command acceptance.
+This document retains the initial frontend slice and its later integration evidence. The rendered page now has actual HTTPS/PostgreSQL/RTC acceptance with the packaged Connector and an original Moonraker protocol fixture, recorded below. Genuine pinned Moonraker/Klipper, camera and command acceptance remain incomplete.
 
 The implementation started from `e7ae65eb81dcbfed838c8e571f6fddb39c69aa68`. Concurrent documentation advanced the shared branch to `43948542a802384e7ae6550a7a214593645816db` during this task. The coordinator records the resulting candidate commit and built-artifact identity when the remaining integration work settles. No application artifact was built in this task.
 
@@ -18,7 +18,7 @@ Two `/api/auth/me` reads do not provide an atomic session snapshot. Farm and ass
 
 ## Status-consumer contract
 
-The production composable creates the authenticated feed and existing-key resolver only after mount. Resolution must still match the current account, farm, view epoch and selected key; unavailable signalling metadata rejects admission. No experiment peer or synthetic producer is imported into application runtime. Connector runtime composition and actual built-page HTTP/PostgreSQL/RTC acceptance remain pending, so this wiring does not establish live-status acceptance.
+The production composable creates the authenticated feed and existing-key resolver only after mount. Resolution must still match the current account, farm, view epoch and selected key; unavailable signalling metadata rejects admission. No experiment peer or synthetic producer is imported into application runtime. Runtime composition and built-page HTTP/PostgreSQL/RTC now have the bounded protocol-fixture evidence below; genuine simulator acceptance remains pending.
 
 The exported `FarmStatusFeed` opens one read-only subscription per eligible Connector represented on the visible assignment page. Each subscription receives that Connector's complete validated active assignment tuple set across the farm, rather than just the visible rows:
 
@@ -82,3 +82,55 @@ Key selection, pagination, refresh, reentry, invalidation and disposal retire th
 The maintained focused suite passes with 32 tests and 250 assertions. It covers split-page Connector scope, mixed agents, incomplete/cyclic/duplicate/contradictory inventories, capacity limits, changed account, late scans, refresh, revocation and key replacement. The first run retained one failing legacy fixture that sent partial printer updates. That fixture now establishes a complete snapshot and asserts that a later partial update closes the feed without refreshing either row. Scope validation was not weakened. Root TypeScript and the installed generated-app `vue-tsc` check also pass; the test helper now uses the actual protocol printer type rather than inferring only the literal printing state. Prettier and diff checks pass for the three owned files.
 
 No build, browser, network, database, simulator or native peer ran for this addition. Checks created no task-owned generated application output; only bounded external verification logs are retained. Pre-existing dependencies, generated files and other workers' resources remain unchanged. Genuine production status acceptance remains pending runtime composition and exact-artifact integration.
+
+## Rendered page and packaged runtime acceptance
+
+At `422e83f0b9d5df40555848a5b81c1f7a7b78d66a`, the actual generated `/farm`
+page passed separate disconnect and revocation cases in 11.431 and 13.931
+seconds. The fixture enabled the existing farm flag only in its private runtime.
+It used real independent login, browser-key registration and approval, Connector
+pairing, issued credential, assignment readback and official PostgreSQL journal
+through 0019. No application API or RTC response was intercepted.
+
+The explicit fixture enrollment created a nonextractable P-256 key with the
+maintained IndexedDB API. A separate page in the same context then loaded the
+existing key through the production composable and resolver. Its sole farm and
+approved device were selected by the maintained view. The packaged Connector
+received original loopback Moonraker subscribe/query responses and a subsequent
+progress delta. The actual page displayed authenticated connection, progress
+0.25 then 0.75, uncertain source clock, and a disabled pause button. A real
+proxy signalling disconnect or owner HTTP revocation changed the displayed
+connection to unavailable while retaining only the previous observation. Pause
+remained disabled and no later status restored authentication.
+
+The initial page run and a bounded diagnostic run failed with a subsequent
+`/api/auth/me` 401. A separate actual PostgreSQL lock barrier reproduced the
+session adapter rejecting a request timestamp captured before a concurrent
+touch. The corrected adapter observes time after the account/session locks,
+without clamping regressed clocks. Three actual restricted-role tests passed:
+concurrent touch with the wall clock, plus controlled-clock expiry and regression
+after actual lock contention. Fixed
+historical timestamp fixtures explicitly retain their synthetic observer.
+The test also stopped redundantly reselecting the already auto-selected single
+scope. The initial receipts and one Node strip-only syntax failure in the new
+regression runner remain preserved.
+
+The sealed HTTPS output has 457 files and digest
+`3e0d2a5a7e44cc14abfbce28b03e80a8dde936c0793a2326a857c2acf942c8cd`.
+The package manifest remains the nineteen-file digest recorded in
+[the Connector runtime checkpoint](CONNECTOR-RTC-RUNTIME-CHECKPOINT.md).
+Independent audits confirmed all recorded test processes, ports, private
+directories and login roles removed, with the original database identity,
+journal and eleven table counts equal to baseline. The owned integration
+database and bridge remain intentionally retained.
+
+This is genuine application-page and authenticated transport evidence using
+a protocol fixture, not a pinned Moonraker/Klipper process. Browser TLS retains
+the private fixture's ignore-certificate-errors limitation. It does not prove
+production TLS deployment, cross-tab session rotation, every inventory race,
+camera, signed pause or physical-printer behavior.
+
+The final complete source check passed 326 Bun tests, 383 Node tests and two
+runtime skips, lint, TypeScript and both builds. This checkpoint update changed
+only documentation after those checks; its formatting and whitespace checks
+passed separately. No publication or complete Phase 0 acceptance is claimed.

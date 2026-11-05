@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// Prepared source only. This test file has not been executed under source approval.
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { PassThrough, Readable } from "node:stream";
@@ -45,11 +44,7 @@ test("accepts safe maximum timestamp and bounded maximum body", async () => {
   try {
     const result = readAURecord(reader, signal.signal);
     const raw = wire(BigInt(Number.MAX_SAFE_INTEGER), Buffer.alloc(262144, 0x65));
-    // Await between fragments so the runtime does not coalesce >64 KiB into one raw read.
-    for (let offset = 0; offset < raw.length; offset += 32768) {
-      stream.write(raw.subarray(offset, offset + 32768));
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    stream.write(raw);
     const unit = await result;
     assert.equal(unit.timestampUs, Number.MAX_SAFE_INTEGER);
     assert.equal(unit.data.byteLength, 262144);
@@ -152,13 +147,24 @@ test("abort releases a partial record wait", async () => {
   } finally { reader.stop(); }
 });
 
-test("rejects a runtime chunk larger than 65536 before copying", async () => {
+test("rejects runtime buffering beyond one maximum credited record", async () => {
   let supplied = false;
   const stream = new Readable({ read() {
-    if (!supplied) { supplied = true; this.push(Buffer.alloc(65537)); }
+    if (!supplied) { supplied = true; this.push(Buffer.alloc(262161)); }
   } });
   const reader = createRecordReader(stream, () => {});
   try {
     await assert.rejects(readAURecord(reader, new AbortController().signal), code("HELPER_PRESSURE"));
+  } finally { reader.stop(); }
+});
+
+test("accepts a valid record coalesced above 64 KiB", async () => {
+  const { stream, reader, signal } = setup();
+  try {
+    const result = readAURecord(reader, signal.signal);
+    const payload = Buffer.alloc(65521, 0x65);
+    payload.set([0, 0, 0, 1]);
+    stream.write(wire(0n, payload));
+    assert.deepEqual((await result).data, payload);
   } finally { reader.stop(); }
 });

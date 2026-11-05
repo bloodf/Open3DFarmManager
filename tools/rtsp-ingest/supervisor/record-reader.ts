@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 
 const MAX_CHUNK = 65_536;
 const MAX_BODY = 262_156;
+const MAX_BUFFERED = MAX_BODY + 4;
 const MAX_TIMESTAMP = BigInt(Number.MAX_SAFE_INTEGER);
 
 export type HelperFailureCode =
@@ -65,7 +66,7 @@ class BoundedPipeReader {
   }
 
   private onReadable = (): void => {
-    if (this.pipe.readableLength > MAX_CHUNK) {
+    if (this.pipe.readableLength > MAX_BUFFERED) {
       this.fail("HELPER_PRESSURE");
     } else if (!this.pending && this.pipe.readableLength !== 0) {
       this.fail("HELPER_PRESSURE");
@@ -90,11 +91,11 @@ class BoundedPipeReader {
       if (signal.aborted) throw this.fail("HELPER_CANCELED");
       if (this.fault) throw this.fault;
       if (!this.carry) {
-        if (this.pipe.readableLength > MAX_CHUNK) throw this.fail("HELPER_PRESSURE");
-        const chunk: unknown = this.pipe.read();
+        if (this.pipe.readableLength > MAX_BUFFERED) throw this.fail("HELPER_PRESSURE");
+        const chunk: unknown = this.pipe.read(Math.min(MAX_CHUNK, Math.max(1, this.pipe.readableLength)));
         if (this.fault) throw this.fault;
         if (chunk !== null) {
-          if (!Buffer.isBuffer(chunk) || chunk.length === 0 || chunk.length > MAX_CHUNK) {
+          if (!Buffer.isBuffer(chunk) || chunk.length === 0 || chunk.length > MAX_CHUNK || this.pipe.readableLength + chunk.length > MAX_BUFFERED) {
             throw this.fail("HELPER_PRESSURE");
           }
           this.carry = chunk;

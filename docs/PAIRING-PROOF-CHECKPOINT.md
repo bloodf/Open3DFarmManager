@@ -35,7 +35,7 @@ Acceptance checks cover:
 
 A fresh isolated synthetic cluster applied migrations 0001 through 0009 through the official migration runner. The runner validated all nine journal entries against the catalog. The updated pairing CLI passed 16 PostgreSQL check groups and this proof helper passed 11 groups. The helper now also uses a stepped clock to cross the deadline or regress immediately after real Ed25519 verification; both attempts become terminally expired and cannot be replayed. Exact applied checksums are retained in the local task evidence. The earlier shared fixture with manually applied migrations is not evidence of journal validation.
 
-The official runner verifies migration 0009 down/up and the final journal. `bun run check:all` passed formatting, root and Nuxt type checks, 193 Bun tests, 96 Node tests, and both production builds. The focused Connector build also preserves and byte-compares the project and Zod license notices alongside the bundle. Temporary database resources are stopped and removed after acceptance, while preserving the original shared fixture.
+The official runner verifies migration 0009 down/up and the final journal. `bun run check:all` passed formatting, root and Nuxt type checks, 213 Bun tests, 100 Node tests, and both production builds. The focused Connector build also preserves and byte-compares the project and Zod license notices alongside the bundle. Temporary database resources are stopped and removed after acceptance, while preserving the original shared fixture.
 
 ## Approval and claim integration
 

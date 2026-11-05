@@ -33,7 +33,7 @@ The real PostgreSQL checks passed:
 
 The updated helper passed 16 groups against a fresh isolated PostgreSQL cluster initialized through the official migration runner, including all ten journal entries/checksums. It additionally covers missing proofs, legacy approved rows without proofs, wrong pairing/origin/audience, current proof at both stages, proof expiry after either proof or enrollment locks, and durable expiry through clock regression. The proof helper passed 11 groups, including both stepped-clock outcomes after real Ed25519 verification. Live identity tests use the new narrow signing method without exporting a key.
 
-Migrations 0009 and 0010 down/up and their final journals are verified through the official runner. `bun run check:all` passed formatting, root and Nuxt type checks, 193 Bun tests, 96 Node tests, and both production builds. The focused Connector build also preserves and byte-compares the project and Zod license notices alongside the bundle. HTTP delivery/recovery/revocation and Connector-to-browser transport integration remain pending.
+Migrations 0009 and 0010 down/up and their final journals are verified through the official runner. `bun run check:all` passed formatting, root and Nuxt type checks, 213 Bun tests, 100 Node tests, and both production builds. The focused Connector build also preserves and byte-compares the project and Zod license notices alongside the bundle. HTTP delivery/recovery/revocation and Connector-to-browser transport integration remain pending.
 
 ## Remaining integration
 

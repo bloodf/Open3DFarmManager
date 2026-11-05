@@ -45,3 +45,50 @@ Como o mesmo sintoma ocorreu sem os wrappers, eles não foram necessários para 
 A leitura da fonte fixada mostra que o comando observado não fornece `-r`; o default da opção de pacing é zero, portanto o ramo opcional de pacing não é ativado. A constante nominal 10⁹ e `SetClockFreq` mostram a suposição do driver, não provam a unidade ou implementação interna da extensão nativa. Próximo ao shutdown, os logs do host reportaram estimativas `freq` em torno de 2,03 milhões, diante da configuração nominal de 20 MHz; essas estimativas não medem diretamente a frequência física nem demonstram por que o timer atrasou. A presença ou ausência de pacing, o avanço efetivo do AVR e o escalonamento do processo continuam hipóteses distintas.
 
 A próxima intervenção diagnóstica proposta é acrescentar somente coleta limitada e somente leitura de contadores de CPU do cgroup e de escalonamento por processo ao mesmo controle sem wrappers, com timestamps e limites de overhead registrados, mantendo a condição de pronto, o prazo e os limites de recursos. A comparação temporal pode verificar se há throttling ou atrasos observáveis próximos ao shutdown; contadores agregados não provam causalidade nem descartam outras causas. A opção `-r 1` mudaria o pacing da simulação e não aceleraria necessariamente um processo já atrasado; não deve ser tratada como correção ou comparação equivalente sem revisão e autorização próprias. Nenhum novo ensaio foi executado nesta continuação.
+
+## Ensaio posterior de observação do pacing
+
+Um ensaio posterior, autorizado separadamente, acrescentou `-r 1` e um produtor
+limitado de estatísticas ao AVR. Preservou a imagem, o firmware, o helper, a
+extensão, o launcher, os limites de recursos e o prazo original de 90 s. O
+watchdog confirmou a parada cerca de 170 ms após esse prazo. O adaptador
+terminou em 90,860 s, sem erro de lifecycle; esse resultado não equivale a
+aceitação do simulador.
+
+Das 659 consultas registradas, 23 tiveram erro durante a inicialização, 94
+observaram estado não pronto e 542 observaram pronto. Após a primeira resposta
+pronta, não houve outra resposta não pronta: as amostras prontas abrangem
+71,148 s, com intervalo máximo de aproximadamente 297 ms. Os logs de Klippy,
+Moonraker e Supervisor foram capturados sem truncamento; não contêm o shutdown
+`Timer too close` observado nos ensaios anteriores. O relatório estrito de
+cobertura amostrada continua falso porque seu predicado também rejeita os
+erros de consulta anteriores à primeira prontidão. Nenhum critério foi
+relaxado e a ausência de falha entre amostras não prova prontidão contínua.
+
+O coletor rejeitou o resumo AVR por um defeito concreto de metadados:
+`main()` atribui `_PACING_PROBE_OPTIONS` localmente, enquanto o emissor lê esse
+nome no namespace global. O evento contém `options: {}` em vez das opções
+exigidas. O evento bruto registra 34.345 observações de offset e zero chamadas
+de espera na janela inicial de 36 s, mas não é um recibo validado pelo coletor.
+Nem esse dado bruto nem a prontidão observada demonstram que o pacing causou
+a diferença em relação ao controle. As unidades da extensão e a cobertura de
+reinícios continuam não verificadas; a parada forçada não produziu footers
+normais.
+
+Dois testes sintéticos reproduziram o resumo vazio executando o parser real
+de opções de `main()` até um limite nativo substituído. Uma declaração
+`global` corrige a passagem das opções ao emissor. Os dois testes, junto com
+cinco verificações existentes do gerador, passaram; o resumo com velocidade
+não autorizada continua rejeitado pelo validador estrito. A fonte corrigida
+tem SHA-256 `b25b26690221b8865e8a7a805afffbffc20f01c2f86f435f0fa446a687625648`.
+Não houve execução nativa dessa correção. O arquivo executado, os recibos e
+as falhas anteriores foram preservados, sem reclassificação retroativa.
+
+O recibo original de resultado tem SHA-256
+`3c89e13e5190112852866435cb509fe1f0436d3e0dd052bb99dfd8386688f317`;
+o relatório de consultas,
+`0e557c07402c985a3043388a58696254cd22cb48085cc04f3556baa3d6d7efff`.
+O contêiner e a referência de imagem criados para o ensaio foram removidos.
+Os dois contêineres preexistentes foram preservados. Não houve SQL, comando
+para impressora, integração com o Connector ou aceitação completa da Fase 0
+nesse diagnóstico.

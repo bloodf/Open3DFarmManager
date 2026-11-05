@@ -67,3 +67,34 @@ Later isolated execution applied the official 18-entry catalog, but the first pr
 This issuer slice changes no existing auth code, migration 0017, protocol contract, index, dispatcher, journal, runtime, CLI, or native transport. The dependency merge and existing-path fixes owned by other work are outside the issuer's implementation scope. No PostgreSQL, Docker, network, build, browser, simulator, or physical-printer execution was used for this source-only issuer preparation. The coordinator owns dependency links and later resource cleanup.
 
 A real issuer-to-browser-to-authenticated-WebRTC-to-fixed-driver simulator pause remains unimplemented and unaccepted. It must prove current database authority, pinned issuer trust, the actual negotiated peer, durable replay-before-write, exactly one guarded pause RPC, and fresh paused simulator state. Such a pause gate would still not complete Phase 0's remaining commands, safety, status/camera, and outage-recovery acceptance.
+
+## Subsequent maintained PostgreSQL execution
+
+At `b21df2b39335218ea43fd4c211ca24ffd31c585b`, a fresh owned PostgreSQL
+17.11 cluster passed the maintained preparation phase in 55.965 seconds.
+Its twenty named checks include official journal 18 → 17 → 18, ACL and
+temporary-shadow isolation, current-authority and credential-slot contention,
+retention boundaries, signing failure, rollback versus lost response, and
+late-delivery denial after deferred commit. The global-cap test uses 4,095
+synthetic retained rows followed by two genuine competing allocations; it is
+not evidence of 4,096 authenticated issuances.
+
+The timeout helper correlated the exact backend identity, in-transaction
+settings, database interval and server FATAL `25P04` at about ten seconds.
+The client was pending before pool cleanup and rejected with
+`CONNECTION_DESTROYED` afterward. Server timeout enforcement passed; client
+propagation of the FATAL error did not. Earlier transport, dependency and
+probe failures remain recorded separately and were not counted as passes.
+
+An actual restart of that same cluster then passed three checks in a fresh
+process: exact journal and retained terminal/deadline hashes, restricted-role
+nonce uniqueness and terminal immutability, and rejection of the old proof.
+The replay case uses a new synthetic issuer key and does not establish
+continuity of the original issuer key. This restart covered 0018, not the
+later 0019 assignment authorization migration.
+
+Independent audits found no remaining test roles or client backends and
+confirmed the original database identity, journal and table counts unchanged.
+The owned database and bridge were explicitly handed back to root and retained
+for later integration. The production issuer-to-control-RTC-to-driver simulator
+pause remains a separate, incomplete gate.

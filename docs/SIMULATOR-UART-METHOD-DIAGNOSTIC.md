@@ -75,14 +75,18 @@ retain process status and complete bounded stderr.
 
 ## Proposed discriminating experiment, not authorized by this document
 
-1. Only after separate authorization, schedule an uninstrumented control and an
-   instrumented execution under the same reviewed isolation and original time
-   bounds. Keep local runtime configuration, host information and raw evidence
-   outside this repository. Record resource ownership before starting.
-2. In the instrumented run, replace only the emulator invocation with the helper,
-   preserving its interpreter and arguments, startup order, restart behavior,
-   firmware and original deadline. Keep helpers read-only and retain bounded
-   failure evidence outside the repository.
+1. Schedule a native amd64 uninstrumented control and instrumented execution
+   using image manifest
+   `sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47`
+   and simulator revision `e272bcd1060dad6cee1598d6debdaa5d5afae3c7`.
+   Reuse the exact separately retained private nonprivileged launcher/config,
+   UID 1000, one CPU, 1 GiB, 256 PIDs, dropped capabilities, no-new-privileges,
+   no network, no ports and no devices. Record ownership before starting.
+2. In the instrumented configuration, replace only the emulator executable
+   portion with the helper below, preserving interpreter, original arguments,
+   startup order/delay, restart settings, firmware and original 90-second bound.
+   Keep helpers read-only and capture stderr in bounded external evidence.
+   No native execution has occurred in this implementation task.
 3. Correlate returned master bytes, decoder write attempts and existing accepted
    identification events. Repeated controls are needed because observation adds
    clock reads, allocation, JSON and output overhead. This is passive only with

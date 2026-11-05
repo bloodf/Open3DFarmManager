@@ -2,15 +2,14 @@
 
 Implementação local original MIT, somente com a biblioteca padrão Python.
 `infra/sim/experiments/bounded_event_collector.py` não inicia processos, não abre
-PTY, não controla prazos e não executa simuladores. Não integra o Compose, um
-executor, a aplicação ou o CI. Nenhuma execução nativa foi realizada nesta
-tarefa. Nenhuma dependência ou implementação GPL foi incorporada.
+PTY, não controla prazos e não executa simuladores. Não integra o Compose, o
+executor privado, a aplicação ou o CI. Nenhuma execução nativa foi realizada
+nesta tarefa. Nenhuma dependência ou implementação GPL foi incorporada.
 
 O resultado histórico do commit `bf6c36855ffccfb57e81bd3274c12aa55205355d`
-continua inconclusivo: a captura por sufixo perdeu o início. Este coletor não
-recupera os bytes perdidos, não altera o experimento anterior nem reinterpreta
-a evidência antiga. Detalhes de executor, host e captura permanecem fora deste
-repositório.
+continua inconclusivo. O executor privado foi consultado somente para leitura.
+Sua captura por cauda de 1 MiB perdeu o início. Este coletor não recupera os bytes
+perdidos, não modifica o executor executado nem reinterpreta a evidência antiga.
 O [resultado nativo](SIMULATOR-UART-NATIVE-RESULT.md) permanece inalterado.
 
 ## Contrato local
@@ -34,8 +33,9 @@ A memória depende dos limites configurados, mais uma linha e seu JSON. O tempo
 e a quantidade total de entrada não são limitados pelo coletor. A leitura pode
 bloquear. O futuro chamador precisa impor o prazo original e drenar stdout e
 stderr sem bloqueio mútuo. Não usar `consume` como controlador de processo nem
-como leitor concorrente do PTY. Uma futura integração aprovada deve começar a captura na origem, preservar
-metadados fora dos logs e registrar qualquer perda anterior ao coletor. Ler uma cauda antiga não atende ao contrato.
+como leitor concorrente do PTY. A integração privada futura deve começar a
+captura na origem, preservar metadados fora dos logs e registrar qualquer perda
+anterior ao coletor. Ler uma cauda antiga não atende ao contrato.
 
 `report` exige `Completion` explícito. O chamador fornece o código real de saída
 ou `None`, a categoria de erro de processo, a parada deliberada, a observação de
@@ -106,11 +106,23 @@ de qualquer execução futura.
 | [`klippy/serialhdl.py`](https://github.com/Klipper3d/klipper/blob/ee2c6fb6b00b2b5d097ef70d0868df7d74943b51/klippy/serialhdl.py), sessão de identificação e desconexão                          | `72b1a8090d57b9ad7b03d379ce4385b35f8a3a14da709bce554a20f5aeb07dad` |
 | [`src/avr/serial.c`](https://github.com/Klipper3d/klipper/blob/ee2c6fb6b00b2b5d097ef70d0868df7d74943b51/src/avr/serial.c), `serial_init` e interrupções RX/TX                                  | `987c33388e07514671782b046141ce43da04abba9d484e0bfb8d1459868eb0f6` |
 
-As revisões de fonte Klipper e os hashes dos arquivos públicos examinados são
-registrados acima para tornar a análise do código upstream reproduzível. Imagens,
-binários locais, configurações e outros identificadores de execução ficam fora
-deste documento; hashes de fonte não comprovam quais binários foram carregados.
-Nenhum binário nativo foi inspecionado ou executado nesta tarefa.
+A referência de imagem continua sendo
+`sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47`,
+com revisão declarada do projeto de imagem
+`e272bcd1060dad6cee1598d6debdaa5d5afae3c7`. Os artefatos comparados em
+[revisão estática](SIMULATOR-SERIAL-STATIC-REVIEW.md) têm SHA-256
+`a1fd3c9723d5217b534cc4876700d9931b3db22f60b1f9410a8108b5de37ddef`
+para `klipper.elf` e
+`056531bf5ab68f337622fce947e5152a968593a0da39132ac7f7dc0aab86fe0a`
+para `klipper.dict`. Esses registros não substituem a verificação dos artefatos
+que seriam realmente carregados.
+
+A identidade do artefato nativo carregado de `pysimulavr` permanece
+indisponível: faltam hash dos bytes, build ID quando existente, versão exata de
+origem/compilação e dependências efetivamente carregadas. O mesmo vínculo entre
+fonte e binário deve ser registrado para o chelper carregado. Hash de fonte e
+digest da imagem não provam esse vínculo. Nenhum binário nativo foi inspecionado
+ou executado nesta tarefa.
 
 1. Antes de executar, obter autorização específica para a coleta correlacionada,
    seu orçamento e mecanismo de observação. Fazer inventário de espaço e recursos,

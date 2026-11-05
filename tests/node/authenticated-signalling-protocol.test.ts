@@ -303,3 +303,58 @@ test('signalling boundary only admits bounded direct SDP/ICE and control metadat
     assert.throws(() => decodeAuthenticatedSignallingFrame(JSON.stringify(bad)))
   assert.throws(() => decodeAuthenticatedSignallingFrame(' '.repeat(8193)))
 })
+
+test('maximum legal proof fields fit the explicit canonical wire budget and UTF8 is counted before parsing', async () => {
+  const { MAX_RTC_PROOF_WIRE_BYTES, encodeRtcProof, decodeRtcProof } =
+    await import('../../packages/farm-protocol/src/rtc-session-binding.ts')
+  const f = await fixture()
+  const origin = 'https://' + '"'.repeat(248)
+  const binding = RtcSessionBinding.parse({
+    ...f.binding,
+    account_id: 'a'.repeat(128),
+    origin,
+    audience: 'a'.repeat(128),
+    issued_at: Number.MAX_SAFE_INTEGER - 30000,
+    expires_at: Number.MAX_SAFE_INTEGER,
+  })
+  const signature = await signRtcSessionProof(
+    binding,
+    'connector',
+    f.connector.privateKey,
+  )
+  const proof = { v: 1, role: 'connector', binding, signature }
+  const wire = encodeRtcProof(proof)
+  assert.ok(
+    Buffer.byteLength(wire) > 2048,
+    'The synthetic 2 KiB data-frame limit cannot carry all legal proofs',
+  )
+  assert.ok(Buffer.byteLength(wire) <= MAX_RTC_PROOF_WIRE_BYTES)
+  assert.deepEqual(decodeRtcProof(wire), proof)
+  assert.equal(
+    await verifyRtcSessionProof(binding, 'connector', signature),
+    true,
+  )
+  // Every binding property is included. All regex-constrained strings are ASCII;
+  // this deliberately invalid origin overestimates ANY JSON escaping by six bytes per unit.
+  const conservative = JSON.stringify({
+    ...proof,
+    binding: { ...binding, origin: '\0'.repeat(256) },
+  })
+  assert.deepEqual(
+    Object.keys(binding).sort(),
+    Object.keys(RtcSessionBinding.shape).sort(),
+  )
+  assert.ok(Buffer.byteLength(conservative) < 4096)
+  assert.equal(MAX_RTC_PROOF_WIRE_BYTES, 8192)
+  assert.throws(() => decodeRtcProof(wire + ' '), /Canonical/)
+  assert.throws(
+    () => decodeRtcProof('"' + 'é'.repeat(4096) + '"'),
+    /byte limit/,
+  )
+  assert.throws(() => decodeRtcProof('é'.repeat(4096) + 'a'), /byte limit/)
+  assert.throws(() =>
+    decodeRtcProof(
+      JSON.stringify({ ...proof, binding: { ...binding, account_id: 'é' } }),
+    ),
+  )
+})

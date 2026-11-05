@@ -70,10 +70,11 @@ function setup(feedEnabled = false) {
     devices: [{ ...device }],
     local: [{ thumbprint }],
   }
-  const hooks: { read: Read | null; localError: boolean } = {
-    read: null,
-    localError: false,
-  }
+  const hooks: { read: Read | null; localError: boolean; close?: () => void } =
+    {
+      read: null,
+      localError: false,
+    }
   const baseRead: Read = async (path) => {
     if (path === '/api/auth/me') return { accountId: data.accountId }
     if (path === '/api/farms') return data.farms
@@ -110,6 +111,7 @@ function setup(feedEnabled = false) {
               return {
                 close: () => {
                   peer.closed++
+                  hooks.close?.()
                 },
               }
             },
@@ -898,4 +900,41 @@ test('producer teardown failure cannot prevent private state invalidation', asyn
   await view.discover()
   expect(() => view.invalidate()).not.toThrow()
   expect(result.state).toEqual({ kind: 'loading' })
+})
+
+test('reentrant producer teardown keeps only the winning key generation and owns its cleanup', async () => {
+  for (const trigger of ['selection', 'terminal'] as const) {
+    const h = setup(true)
+    const keyB = other,
+      keyC = '00000000-0000-4000-8000-000000000006'
+    const thumbB = 'B'.repeat(42) + 'A',
+      thumbC = 'C'.repeat(42) + 'A'
+    h.data.devices.push(
+      { ...device, keyId: keyB, thumbprint: thumbB },
+      { ...device, keyId: keyC, thumbprint: thumbC },
+    )
+    h.data.local.push({ thumbprint: thumbB }, { thumbprint: thumbC })
+    await h.view.discover()
+    h.view.selectKey(keyId)
+    h.hooks.close = () => {
+      delete h.hooks.close
+      h.view.selectKey(keyC)
+    }
+    if (trigger === 'selection') h.view.selectKey(keyB)
+    else h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    const keys = h.ready().keys
+    expect(keys.kind).toBe('available')
+    if (keys.kind === 'available') expect(keys.selected).toBe(keyC)
+    expect(h.peers).toHaveLength(2)
+    expect(h.peer(0).closed).toBe(1)
+    expect(h.peer(1).closed).toBe(0)
+    expect(h.first().connection).toBe('connecting')
+    h.authenticate(1, { ...h.session, browserKeyId: keyC })
+    expect(h.first().connection).toBe('authenticated')
+    h.peer(0).input.onHealth({ kind: 'authenticated', session: h.session })
+    expect(h.first().connection).toBe('authenticated')
+    h.view.dispose()
+    expect(h.peer(1).closed).toBe(1)
+    expect(h.peer(1).input.signal.aborted).toBe(true)
+  }
 })

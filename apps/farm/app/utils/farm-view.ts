@@ -257,20 +257,15 @@ export function createFarmView(deps: Dependencies) {
     deps.changed(next)
   }
   function retire() {
-    // Invalidate callbacks before abort/close, including synchronous close callbacks.
-    epoch++
-    requestGeneration++
-    controller.abort()
-    for (const connection of connections) connection.close()
-    connections = []
+    // Capture this run and detach old resources before external teardown can reenter.
+    const oldController = controller,
+      oldConnections = connections
+    const currentEpoch = ++epoch,
+      generation = ++requestGeneration
     controller = new AbortController()
-  }
-  function begin() {
-    retire()
-    const currentEpoch = epoch,
-      generation = requestGeneration,
-      signal = controller.signal
-    return {
+    connections = []
+    const signal = controller.signal
+    const run = {
       signal,
       epoch: currentEpoch,
       current: () =>
@@ -279,9 +274,16 @@ export function createFarmView(deps: Dependencies) {
         currentEpoch === epoch &&
         generation === requestGeneration,
     }
+    oldController.abort()
+    for (const connection of oldConnections) connection.close()
+    return run
+  }
+  function begin() {
+    return retire()
   }
   function failed(error: unknown) {
-    retire()
+    const run = retire()
+    if (!run.current()) return
     const status = httpStatus(error)
     if (status === 401) return publish({ kind: 'sign-in-required' })
     publish({
@@ -309,6 +311,7 @@ export function createFarmView(deps: Dependencies) {
   async function discover(after: string | null = null) {
     if (disposed) return
     const run = begin()
+    if (!run.current()) return
     publish({ kind: 'loading' })
     try {
       const accountId = await me(run.signal)
@@ -337,6 +340,7 @@ export function createFarmView(deps: Dependencies) {
         keys: { kind: 'loading' },
       })
       if (
+        run.current() &&
         after === null &&
         page.farms.length === 1 &&
         page.nextAfter === null &&
@@ -351,6 +355,7 @@ export function createFarmView(deps: Dependencies) {
     if (disposed || state.kind !== 'ready') return
     const previous = state
     const run = begin()
+    if (!run.current()) return
     if (!farmId || !previous.farms.some((farm) => farm.farmId === farmId)) {
       publish({
         ...previous,
@@ -509,10 +514,12 @@ export function createFarmView(deps: Dependencies) {
     )
       return
     const previous = state,
+      previousScope = state.scope,
       keys = state.keys
     if (keyId && !keys.choices.some((choice) => choice.keyId === keyId)) return
-    const run = begin(),
-      scope = { ...state.scope, viewEpoch: run.epoch }
+    const run = begin()
+    if (!run.current()) return
+    const scope = { ...previousScope, viewEpoch: run.epoch }
     publish({
       ...previous,
       scope,
@@ -562,7 +569,12 @@ export function createFarmView(deps: Dependencies) {
         state.kind === 'ready' &&
         state.scope?.viewEpoch === scope.viewEpoch
       const update = (change: (row: FarmRow) => FarmRow) => {
-        if (state.kind !== 'ready') return
+        if (
+          !run.current() ||
+          state.kind !== 'ready' ||
+          state.scope?.viewEpoch !== scope.viewEpoch
+        )
+          return
         publish({
           ...state,
           rows: state.rows.map((row) =>
@@ -790,8 +802,8 @@ export function createFarmView(deps: Dependencies) {
       for (const connection of connections) connection.expire(deps.clock())
     },
     invalidate: () => {
-      retire()
-      publish({ kind: 'loading' })
+      const run = retire()
+      if (run.current()) publish({ kind: 'loading' })
     },
     dispose: () => {
       disposed = true

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-// Isolated UI checks only. Supply a separately built opt-in farmView app.
+// Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
 // FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
 test.skip(
   process.env.FARM_VIEW_E2E !== 'true',

@@ -34,6 +34,7 @@ import {
   createFixtureReceipt,
 } from '../tests/helpers/signalling-https-manifest.ts'
 import {
+  createFixtureCapture,
   observeFixtureClose,
   waitFixtureClose,
 } from '../tests/helpers/signalling-https-process.ts'
@@ -298,8 +299,8 @@ if (mode === '--prepare-layer') {
   let proxy: ReturnType<typeof signallingHttpsProxy> | undefined
   let stage = 'journal validation',
     failed = false,
-    interrupted = false,
-    appLog = ''
+    interrupted = false
+  const captured = createFixtureCapture()
   const privateValues = [
     ...secrets,
     password,
@@ -325,23 +326,27 @@ if (mode === '--prepare-layer') {
   }
   globalThis.process.once('SIGINT', interrupt)
   globalThis.process.once('SIGTERM', interrupt)
-  const capture = (chunk: Buffer) => {
-    if (appLog.length < 16384)
-      appLog += chunk.toString('utf8').slice(0, 16384 - appLog.length)
-  }
-  function sanitizedLog() {
-    let text = appLog
-    for (const value of privateValues)
-      text = text.replaceAll(value, '[synthetic]')
-    return text
-      .replace(
-        /-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g,
-        '[private-key]',
-      )
-      .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, '[database-url]')
-      .replace(/(?:set-cookie|cookie|authorization):[^\r\n]*/gi, '[header]')
-      .replace(/[A-Za-z0-9_+\/=.-]{32,}/g, '[long-value]')
-      .slice(0, 12000)
+  function sanitizedLogs() {
+    return captured
+      .entries()
+      .map(([source, original]) => {
+        let text = original
+        for (const value of privateValues)
+          text = text.replaceAll(value, '[synthetic]')
+        text = text
+          .replace(
+            /-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g,
+            '[private-key]',
+          )
+          .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, '[database-url]')
+          .replace(/(?:set-cookie|cookie|authorization):[^\r\n]*/gi, '[header]')
+          .replace(/[A-Za-z0-9_+\/=.-]{32,}/g, '[long-value]')
+        return [
+          `[${source}]`,
+          Buffer.from(text).subarray(0, 16380).toString('utf8'),
+        ].join('\n')
+      })
+      .join('\n')
   }
   const pause = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -530,8 +535,12 @@ if (mode === '--prepare-layer') {
       },
     })
     appClose = observeFixtureClose(app)
-    app.stdout?.on('data', capture)
-    app.stderr?.on('data', capture)
+    app.stdout?.on('data', (chunk: Buffer) =>
+      captured.append('nitro.stdout', chunk),
+    )
+    app.stderr?.on('data', (chunk: Buffer) =>
+      captured.append('nitro.stderr', chunk),
+    )
     await note(
       `Owned Nitro PID ${app.pid}; TLS proxy port ${proxyAddress.port}; Nitro port ${appPort}`,
     )
@@ -582,8 +591,12 @@ if (mode === '--prepare-layer') {
       },
     )
     childClose = observeFixtureClose(child)
-    child.stdout?.on('data', capture)
-    child.stderr?.on('data', capture)
+    child.stdout?.on('data', (chunk: Buffer) =>
+      captured.append('acceptance.stdout', chunk),
+    )
+    child.stderr?.on('data', (chunk: Buffer) =>
+      captured.append('acceptance.stderr', chunk),
+    )
     if (!child.pid) throw new Error('Acceptance process did not start')
     await note(`Owned acceptance process group ${child.pid}`)
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -643,9 +656,11 @@ if (mode === '--prepare-layer') {
       await cleanup('private fixture directory', () =>
         rm(directory!, { recursive: true, force: true }),
       )
-    if (appLog)
+    if (captured.entries().length)
       await cleanup('sanitized app log', () =>
-        writeFile(ledgerPath + '.app-log.txt', sanitizedLog(), { mode: 0o600 }),
+        writeFile(ledgerPath + '.app-log.txt', sanitizedLogs(), {
+          mode: 0o600,
+        }),
       )
     await note(
       `Cleanup ${failures.length ? 'incomplete: ' + failures.join(',') : 'complete'}; caller owns disposable database rows`,

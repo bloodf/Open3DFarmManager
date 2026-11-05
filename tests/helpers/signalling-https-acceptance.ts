@@ -310,6 +310,7 @@ async function actualConnectorHandshake(origin: string) {
 async function controlBounds(origin: string, ca: Buffer) {
   const url = origin.replace('https:', 'wss:') + '/api/signalling/connector'
   for (const kind of ['ping', 'oversize', 'idle'] as const) {
+    console.error(`[fixture-stage] control-${kind}`)
     const socket = createFixtureSocket(url, { ca })
     socket.on('error', () => {})
     try {
@@ -352,14 +353,18 @@ export async function runSignallingHttpsAcceptance(input: {
     throw new Error('Fixture requires canonical HTTPS loopback')
   const port = Number(parsedOrigin.port),
     audience = 'open3dfarmmanager:signalling'
+  console.error('[fixture-stage] raw-negative-upgrades')
   await testRawUpgradeRejection({ port, ca: input.ca, origin: input.origin })
+  console.error('[fixture-stage] health-after-negatives')
   const health = await fetch(input.origin + '/healthz', {
     signal: AbortSignal.timeout(5000),
   })
   if (!health.ok)
     throw new Error('Nitro listener unavailable after rejected upgrades')
+  console.error('[fixture-stage] integrated-connector-handshake')
   await actualConnectorHandshake(input.origin)
   await controlBounds(input.origin, input.ca)
+  console.error('[fixture-stage] chromium-launch')
   const browser = await chromium.launch({ headless: true })
   const sockets: FixturePeer[] = []
   try {
@@ -367,8 +372,11 @@ export async function runSignallingHttpsAcceptance(input: {
     const adminContext = await browser.newContext({ ignoreHTTPSErrors: true })
     const owner = await ownerContext.newPage(),
       admin = await adminContext.newPage()
+    console.error('[fixture-stage] owner-login')
     await browserLogin(owner, input.origin, input.owner, input.password)
+    console.error('[fixture-stage] admin-login')
     await browserLogin(admin, input.origin, input.admin, input.password)
+    console.error('[fixture-stage] browser-registration')
     const keyPair = await crypto.subtle.generateKey(
       { name: 'ECDSA', namedCurve: 'P-256' },
       false,
@@ -398,6 +406,7 @@ export async function runSignallingHttpsAcceptance(input: {
         expected_thumbprint: challenge.thumbprint,
       }),
     )
+    console.error('[fixture-stage] connector-pairing')
     const identity = new ConnectorIdentity(
       generateKeyPairSync('ed25519').privateKey,
     )
@@ -455,6 +464,7 @@ export async function runSignallingHttpsAcceptance(input: {
       ),
     )
     sockets.push(machine)
+    console.error('[fixture-stage] machine-proof')
     await opened(machine.socket)
     machine.send({
       v: 1,
@@ -503,6 +513,7 @@ export async function runSignallingHttpsAcceptance(input: {
       ),
     )
     sockets.push(browserPeer)
+    console.error('[fixture-stage] browser-proof')
     await opened(browserPeer.socket)
     browserPeer.send({
       v: 1,
@@ -568,6 +579,7 @@ export async function runSignallingHttpsAcceptance(input: {
       connectorReady.commands_enabled !== false
     )
       throw new Error('Signalling binding was not read-only')
+    console.error('[fixture-stage] original-lifetime')
     await closed(machine.socket, 35000)
     const leaseElapsed = performance.now() - inboxStarted
     if (leaseElapsed < 28000 || leaseElapsed > 33000)

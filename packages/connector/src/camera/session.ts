@@ -4,17 +4,20 @@ import type { CameraScope, LocalCameraRegistry } from './source-policy.ts'
 export type CameraAccessUnit = Readonly<{
   data: Uint8Array
   keyframe: boolean
+  /** Stream time in microseconds; nonnegative safe integers must strictly increase. */
   timestampUs: number
 }>
 
 export type CameraLease = Readonly<{
   cameraId: string
   scope: CameraScope
+  /** Deadline in the performance.now() monotonic clock, independent of stream time. */
   expiresAt: number
   signal: AbortSignal
 }>
 
 export type CameraSink = {
+  /** Consume or copy the unit synchronously before returning. */
   trySend(unit: CameraAccessUnit): 'sent' | 'backpressured' | 'closed'
   close(): void
 }
@@ -131,6 +134,7 @@ export function startCameraSession({
         }
         if (
           !(data instanceof Uint8Array) ||
+          data.buffer instanceof SharedArrayBuffer ||
           !data.byteLength ||
           data.byteLength > 262_144 ||
           typeof keyframe !== 'boolean' ||
@@ -144,7 +148,11 @@ export function startCameraSession({
           return
         lastTimestamp = timestampUs
         if (
-          sink.trySend({ data: data.slice(), keyframe, timestampUs }) !== 'sent'
+          sink.trySend({
+            data: new Uint8Array(data),
+            keyframe,
+            timestampUs,
+          }) !== 'sent'
         )
           return
       }

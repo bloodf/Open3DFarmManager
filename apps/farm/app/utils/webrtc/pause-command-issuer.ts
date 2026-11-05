@@ -26,6 +26,8 @@ const CAPABILITIES_PATH = '/api/pause-authority/capabilities'
 const REQUEST_TIMEOUT_MS = 2_000
 /** Upper bound of a maintained pause authority response body. */
 const MAX_RESPONSE_BYTES = 16_384
+// Allows one-byte fragmentation while bounding empty-chunk work as well.
+const MAX_RESPONSE_CHUNKS = MAX_RESPONSE_BYTES
 /** Maintained outer body limits of the two maintained routes. */
 const CHALLENGE_REQUEST_LIMIT_BYTES = 102_400
 const CAPABILITY_REQUEST_LIMIT_BYTES = 51_200
@@ -39,13 +41,20 @@ const RESPONSE_JSON_LIMITS = Object.freeze({
 
 /** The maintained request shapes of the two routes. Nothing else is sent. */
 const ChallengeRequest = z.strictObject({
-  browserProofWire: z.string().max(MAX_CONTROL_PROOF_WIRE_BYTES),
-  connectorProofWire: z.string().max(MAX_CONTROL_PROOF_WIRE_BYTES),
+  browserProofWire: boundedWire(MAX_CONTROL_PROOF_WIRE_BYTES),
+  connectorProofWire: boundedWire(MAX_CONTROL_PROOF_WIRE_BYTES),
   admissionNonce: PauseAdmissionChallenge.shape.admission_nonce,
 })
 const CapabilityRequest = z.strictObject({
-  admissionProofWire: z.string().max(MAX_PAUSE_ADMISSION_WIRE_BYTES),
+  admissionProofWire: boundedWire(MAX_PAUSE_ADMISSION_WIRE_BYTES),
 })
+
+function boundedWire(limit: number) {
+  return z
+    .string()
+    .max(limit)
+    .refine((wire) => new TextEncoder().encode(wire).byteLength <= limit)
+}
 
 /** The maintained response envelopes. Unknown fields are rejected. */
 const ChallengeEnvelope = z.strictObject({ challenge: PauseAdmissionChallenge })
@@ -101,22 +110,20 @@ function pageOrigin(): string | undefined {
   return typeof origin === 'string' && origin.length > 0 ? origin : undefined
 }
 
-async function cancelReader(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-): Promise<void> {
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
   try {
-    await reader.cancel()
+    void reader.cancel().catch(() => {})
   } catch {
     // An already cancelled or errored stream needs no further disposal.
   }
 }
 
 /** Releases a response body without reading it. Best effort by design. */
-async function disposeResponse(response: Response): Promise<void> {
+function disposeResponse(response: Response): void {
   try {
     if (!response.body) return
     const reader = response.body.getReader()
-    await cancelReader(reader)
+    cancelReader(reader)
     try {
       reader.releaseLock()
     } catch {
@@ -250,6 +257,7 @@ export function createPauseCommandIssuer(
     /** True once the adapter stopped waiting for this request. */
     let abandoned = false
 
+    let interruptAbort = () => {}
     const interrupt = new Promise<never>((_, reject) => {
       const fail = () => {
         failure ??= 'aborted'
@@ -261,6 +269,7 @@ export function createPauseCommandIssuer(
         )
       }
       combined.addEventListener('abort', fail, { once: true })
+      interruptAbort = fail
     })
     // The race below consumes the rejection. This keeps an unused rejection
     // from being reported as an unhandled one.
@@ -339,7 +348,7 @@ export function createPauseCommandIssuer(
           'response',
           'Pause issuer response has no body.',
         )
-      const text = await readBody(response.body, guard, interrupt)
+      const text = await readBody(response.body, guard, combined)
       let parsed: unknown
       try {
         parsed = parseBoundedJson(text, RESPONSE_JSON_LIMITS)
@@ -359,10 +368,11 @@ export function createPauseCommandIssuer(
       }
     } catch (error) {
       abandoned = true
-      if (response) await disposeResponse(response)
+      if (response) disposeResponse(response)
       throw classify(error)
     } finally {
       clearTimeout(timer)
+      combined.removeEventListener('abort', interruptAbort)
     }
   }
 
@@ -414,16 +424,29 @@ export function createPauseCommandIssuer(
 async function readBody(
   body: ReadableStream<Uint8Array>,
   guard: () => void,
-  interrupt: Promise<never>,
+  signal: AbortSignal,
 ): Promise<string> {
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   let text = ''
   let bytes = 0
+  let chunks = 0
+  // Cancelling a ReadableStream closes pending reads immediately, even when
+  // its underlying cancellation promise never settles. Never await that promise.
+  const abort = () => cancelReader(reader)
+  signal.addEventListener('abort', abort, { once: true })
+  if (signal.aborted) abort()
   try {
     for (;;) {
-      const chunk = await Promise.race([reader.read(), interrupt])
+      guard()
+      const chunk = await reader.read()
+      guard()
       if (chunk.done) break
+      if (++chunks > MAX_RESPONSE_CHUNKS)
+        throw new PauseCommandIssuerError(
+          'response',
+          'Pause issuer response exceeds the chunk limit.',
+        )
       bytes += chunk.value.byteLength
       if (bytes > MAX_RESPONSE_BYTES)
         throw new PauseCommandIssuerError(
@@ -451,9 +474,10 @@ async function readBody(
     guard()
     return text
   } catch (error) {
-    await cancelReader(reader)
+    cancelReader(reader)
     throw error
   } finally {
+    signal.removeEventListener('abort', abort)
     try {
       reader.releaseLock()
     } catch {

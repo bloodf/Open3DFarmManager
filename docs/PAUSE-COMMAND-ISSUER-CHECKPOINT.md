@@ -53,14 +53,24 @@ Each request has one deadline of two seconds, armed before the fetch and never
 renewed. A body that keeps arriving does not extend it. The caller abort
 signal is mandatory: a missing signal fails closed without a request.
 
-The response is read as a stream. The limit is 16384 raw UTF-8 bytes, the
-decoding is strict, and the JSON parse is bounded. An invalid encoding, a
+The response is read as a stream. The limits are 16384 raw UTF-8 bytes and
+16384 chunks, including empty chunks. One abort listener cancels pending reads;
+the adapter does not retain an interrupt-promise reaction for each chunk.
+Cancellation is initiated without awaiting the underlying source's cancellation
+promise, and eventual cancellation rejections are consumed. This bounds the
+caller's wait but does not prove that an uncooperative source finished cleanup.
+Decoding is strict, and the JSON parse is bounded. An invalid encoding, a
 duplicate key, a wrong type, an unknown field, a wrong status, a redirect and
 a missing body all fail closed. A response that arrives after the adapter gave
-up is disposed and never delivered, and the reported failure never claims that
+up has cancellation requested and is never delivered. The reported failure never claims that
 issuance did not happen. A timeout reports that the issuance state is unknown.
 
 ## Evidence and limits
+
+Five review regressions failed before correction: hanging cancellation after
+status rejection, caller abort and deadline; empty-chunk flooding; and inner
+proofs exceeding their UTF-8 byte limit. All twenty adapter tests passed after
+correction. These are Fetch/stream tests in Node, not browser network acceptance.
 
 Fifteen focused Node tests passed at the base head `a8c6c7c`. They exercise
 the real Fetch `Response` and `ReadableStream` objects, the exact request

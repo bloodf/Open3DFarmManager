@@ -649,3 +649,139 @@ test('a request outside the maintained shape fails closed', async () => {
   )
   assert.equal(stub.calls.length, 0)
 })
+
+async function boundedFailure(work: Promise<unknown>, milliseconds: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Issuer did not settle')),
+          milliseconds,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+for (const mode of ['status', 'abort', 'timeout'] as const) {
+  test(
+    `unsettled stream cancellation cannot block ${mode}`,
+    { timeout: 6000 },
+    async () => {
+      const { challenge } = await issuerFixture()
+      let read = false,
+        cancelled = false
+      const body = new ReadableStream<Uint8Array>({
+        pull() {
+          read = true
+        },
+        cancel() {
+          cancelled = true
+          return new Promise<void>(() => {})
+        },
+      })
+      const stub = stubFetch(
+        () => new Response(body, { status: mode === 'status' ? 403 : 200 }),
+      )
+      const issuer = createPauseCommandIssuer({
+        currentOrigin: 'https://farm.example',
+        fetch: stub.fetch,
+      })
+      const controller = new AbortController()
+      const work = issuer.challenge({
+        browserProofWire: 'browser-proof',
+        connectorProofWire: 'connector-proof',
+        admissionNonce: challenge.admission_nonce,
+        signal: controller.signal,
+      })
+      const checked = assert.rejects(
+        boundedFailure(work, mode === 'timeout' ? 3500 : 1000),
+        (error: unknown) => {
+          assert.ok(error instanceof PauseCommandIssuerError)
+          assert.equal(error.reason, mode === 'abort' ? 'aborted' : mode)
+          return true
+        },
+      )
+      if (mode === 'abort') {
+        await waitFor(() => read && body.locked)
+        controller.abort()
+      }
+      await checked
+      assert.equal(cancelled, true)
+      assert.equal(body.locked, false)
+    },
+  )
+}
+
+test('empty chunks cannot evade the response work bound', async () => {
+  const { challenge } = await issuerFixture()
+  let pulls = 0,
+    cancelled = false
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (++pulls <= 17000) controller.enqueue(new Uint8Array())
+      else {
+        controller.enqueue(
+          new TextEncoder().encode(JSON.stringify({ challenge })),
+        )
+        controller.close()
+      }
+    },
+    cancel() {
+      cancelled = true
+    },
+  })
+  const stub = stubFetch(() => new Response(body))
+  const issuer = createPauseCommandIssuer({
+    currentOrigin: 'https://farm.example',
+    fetch: stub.fetch,
+  })
+  await assert.rejects(
+    issuer.challenge({
+      browserProofWire: 'browser-proof',
+      connectorProofWire: 'connector-proof',
+      admissionNonce: challenge.admission_nonce,
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof PauseCommandIssuerError)
+      assert.equal(error.reason, 'response')
+      return true
+    },
+  )
+  assert.ok(pulls <= 16386)
+  assert.equal(cancelled, true)
+})
+
+test('inner proof bounds count UTF-8 bytes before fetch', async () => {
+  const { challenge } = await issuerFixture()
+  const stub = stubFetch(() => jsonResponse({ challenge }))
+  const issuer = createPauseCommandIssuer({
+    currentOrigin: 'https://farm.example',
+    fetch: stub.fetch,
+  })
+  const input = {
+    browserProofWire: 'browser-proof',
+    connectorProofWire: 'connector-proof',
+    admissionNonce: challenge.admission_nonce,
+    signal: new AbortController().signal,
+  }
+  const oversized = 'é'.repeat(4097)
+  for (const field of ['browserProofWire', 'connectorProofWire'] as const) {
+    await assert.rejects(
+      issuer.challenge({ ...input, [field]: oversized }),
+      (error: unknown) =>
+        error instanceof PauseCommandIssuerError && error.reason === 'request',
+    )
+  }
+  await assert.rejects(
+    issuer.capability({ admissionProofWire: oversized, signal: input.signal }),
+    (error: unknown) =>
+      error instanceof PauseCommandIssuerError && error.reason === 'request',
+  )
+  assert.equal(stub.calls.length, 0)
+})

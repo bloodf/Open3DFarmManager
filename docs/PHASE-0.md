@@ -25,12 +25,19 @@ This is an independent MIT project. Accounts, sessions, credentials and database
 
 The table below retains the rendered farm-page checkpoint from 2026-11-05.
 Later source is published in [PR #14](https://github.com/bloodf/Open3DFarmManager/pull/14).
-The complete local gate passed before `7a749d8`; that commit adds a CPU-only
-comparison after the unchanged Klipper smoke test fails. Its remote result and
-merge remain pending. The prior `f5f2088` passed remote code and image checks but
-failed Klipper startup. Publication does not establish deployment or complete
-Phase 0 acceptance. Source, packaged artifacts, database fixtures and native
-diagnostics retain their distinct scopes.
+PR #14 was merged into `main` as `094fe1f`, containing head `60a702b` after
+its local complete gate and remote code, image and Klipper checks passed. The
+CPU-only comparison led to a two-CPU budget per simulator without changing the
+90-second readiness requirement. This is startup evidence, not the full
+simulator acceptance matrix.
+
+The first exact-artifact pause HTTPS/WSS/RTC attempt at `60a702b` completed
+login, enrollment and pairing but failed during Connector admission. Its owned
+processes, ports and roles were cleaned; the protected original database
+remained unchanged. No capability acceptance or printer command is claimed.
+Publication does not establish deployment or complete Phase 0 acceptance.
+Source, packaged artifacts, database fixtures and native diagnostics retain
+their distinct scopes.
 
 | Gate                         | Verified evidence                                                                                                                                                                                                                                                                                                                                                       | Remaining scope                                                                                                                                                                                                                          |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

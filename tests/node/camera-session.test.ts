@@ -15,7 +15,7 @@ const unit = (timestampUs = 0): CameraAccessUnit => ({
 })
 function setup(
   openSource: Parameters<typeof startCameraSession>[0]['openSource'],
-  result: 'sent' | 'backpressured' = 'sent',
+  result: 'sent' | 'backpressured' | 'closed' = 'sent',
   duration = 1000,
 ) {
   const controller = new AbortController()
@@ -194,4 +194,80 @@ test('copies admitted source bytes before sending', async () => {
   await s.done
   original.data[0] = 9
   assert.deepEqual([...s.sent[0]!.data], [1])
+})
+
+test('copies Buffer bytes in both directions and rejects shared memory', async () => {
+  const data = Buffer.from([7])
+  const s = setup(async () => stream([{ ...unit(1), data }])())
+  await s.done
+  data[0] = 8
+  assert.equal(s.sent[0]!.data[0], 7)
+  s.sent[0]!.data[0] = 9
+  assert.equal(data[0], 8)
+  const shared = setup(async () =>
+    stream([{ ...unit(1), data: new Uint8Array(new SharedArrayBuffer(1)) }])(),
+  )
+  await shared.done
+  assert.equal(shared.sent.length, 0)
+})
+
+test('requires strictly increasing safe integer stream timestamps', async () => {
+  for (const timestampUs of [10, 9, 10.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const s = setup(async () => stream([unit(10), unit(timestampUs)])())
+    await s.done
+    assert.deepEqual(
+      s.sent.map((value) => value.timestampUs),
+      [10],
+    )
+  }
+  const s = setup(async () => stream([unit(Number.MAX_SAFE_INTEGER)])())
+  await s.done
+  assert.equal(s.sent.length, 1)
+})
+
+test('closes on closed sink and on source or sink exceptions', async () => {
+  const closed = setup(async () => stream([unit(), unit(1)])(), 'closed')
+  await closed.done
+  assert.equal(closed.sent.length, 1)
+  assert.equal(closed.closed(), 1)
+  const sourceError = setup(async () => {
+    throw new Error('secret')
+  })
+  await sourceError.done
+  assert.equal(sourceError.closed(), 1)
+  let closeCount = 0
+  let returned = 0
+  const session = startCameraSession({
+    cameraId: 'camera',
+    scope,
+    registry,
+    lease: {
+      cameraId: 'camera',
+      scope,
+      expiresAt: performance.now() + 1000,
+      signal: new AbortController().signal,
+    },
+    openSource: async () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({ done: false, value: unit() }),
+          return: async () => {
+            returned++
+            return { done: true, value: undefined }
+          },
+        }
+      },
+    }),
+    sink: {
+      trySend() {
+        throw new Error('secret')
+      },
+      close() {
+        closeCount++
+      },
+    },
+  })
+  await session.done
+  assert.equal(closeCount, 1)
+  assert.equal(returned, 1)
 })

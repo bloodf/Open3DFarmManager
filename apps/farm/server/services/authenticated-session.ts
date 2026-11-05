@@ -175,7 +175,17 @@ export async function sealedSessionRecordId(
   runtime: Pick<AuthRuntime, 'cookie'>,
 ): Promise<string> {
   authResponse(event)
-  if (!getCookie(event, SESSION_COOKIE_NAME)) throw unauthorized()
+  // Nitro aliases getCookie to an h3 Node event reader. Upgrade authentication
+  // supplies a portable Request; useSession remains responsible for unsealing.
+  const prefix = SESSION_COOKIE_NAME + '='
+  const hasSessionCookie = event.req.headers
+    .get('cookie')
+    ?.split(';')
+    .some((part: string) => {
+      const value = part.trim()
+      return value.startsWith(prefix) && value.length > prefix.length
+    })
+  if (!hasSessionCookie) throw unauthorized()
   const cookie = await useSession(event, runtime.cookie)
   const id = cookie.data.sessionRecordId
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id))

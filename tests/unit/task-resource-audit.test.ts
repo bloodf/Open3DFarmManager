@@ -377,6 +377,95 @@ describe('report assembly', () => {
     expect(EXIT_LEFTOVERS).toBe(3)
   })
 
+  test('never reports clean when an owned resource lies beyond the listing cap', async () => {
+    const { buildReport } = await import(
+      '../../scripts/audit-task-resources.ts'
+    )
+    const foreignLine = containerLine.replace(
+      JSON.stringify(TASK),
+      JSON.stringify('foreign'),
+    )
+    const runner: CommandRunner = async (file, args, options) => {
+      if (file === 'docker' && args[0] === 'ps')
+        return {
+          code: 0,
+          stdout: [
+            ...Array<string>(5000).fill(foreignLine),
+            containerLine,
+          ].join('\n'),
+          stderr: '',
+          failed: false,
+          error: null,
+        }
+      return dockerRunner(file, args, options)
+    }
+    const report = await buildReport(
+      { taskLabel: TASK, repository: '/repo', pretty: false },
+      environment(runner),
+    )
+    expect(report.docker.owned.container.count).toBe(0)
+    expect(report.status).toBe('partial')
+    expect(report.exitCode).toBe(EXIT_PARTIAL)
+    expect(report.docker.reason).toContain('exceeded 5000')
+  })
+
+  test('invalid Docker rows make the audit incomplete without echoing their content', async () => {
+    const { buildReport } = await import(
+      '../../scripts/audit-task-resources.ts'
+    )
+    const runner: CommandRunner = async (file, args, options) => {
+      if (file === 'docker' && args[0] === 'ps')
+        return {
+          code: 0,
+          stdout: 'private malformed payload\n',
+          stderr: '',
+          failed: false,
+          error: null,
+        }
+      return dockerRunner(file, args, options)
+    }
+    const report = await buildReport(
+      { taskLabel: TASK, repository: '/repo', pretty: false },
+      environment(runner),
+    )
+    expect(report.status).toBe('partial')
+    expect(report.exitCode).toBe(EXIT_PARTIAL)
+    expect(report.docker.reason).toContain('1 invalid rows')
+    expect(JSON.stringify(report)).not.toContain('private malformed payload')
+  })
+
+  test('reports each missing filesystem even when repository capacity succeeds', async () => {
+    const { buildReport } = await import(
+      '../../scripts/audit-task-resources.ts'
+    )
+    const runner: CommandRunner = async (file, args, options) => {
+      if (file === 'git' && args.includes('worktree'))
+        return {
+          code: 0,
+          stdout:
+            'worktree /repo\nHEAD abc123\n\nworktree /other-disk\nHEAD def456\n',
+          stderr: '',
+          failed: false,
+          error: null,
+        }
+      return dockerRunner(file, args, options)
+    }
+    const env = environment(runner)
+    const report = await buildReport(
+      { taskLabel: TASK, repository: '/repo', pretty: false },
+      {
+        ...env,
+        capacity: (path) =>
+          path === '/other-disk' ? Promise.resolve(null) : env.capacity(path),
+      },
+    )
+    expect(report.filesystem.capacity).toHaveLength(1)
+    expect(report.filesystem.status).toBe('partial')
+    expect(report.filesystem.reason).toContain('/other-disk')
+    expect(report.status).toBe('partial')
+    expect(report.exitCode).toBe(EXIT_PARTIAL)
+  })
+
   test('keeps other projects resource details out of non-owned buckets', async () => {
     const { buildReport } = await import(
       '../../scripts/audit-task-resources.ts'

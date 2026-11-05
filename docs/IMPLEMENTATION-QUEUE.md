@@ -1,50 +1,41 @@
 # Implementation queue
 
-This queue describes the independent MIT product. It does not adopt private deployment configuration, shared authentication, another product's implementation or its commercial plans. Existing checkpoints remain evidence of their specific tests, not complete feature acceptance.
+This queue tracks the independent MIT project without private deployment configuration, accounts, credentials or planning documents. Phase 0 remains incomplete. Checkpoint evidence applies only to its named slice and recorded source; local test success is not product acceptance, publication or a merged release.
 
-## Verified component work
+## Current checkpoint
 
-- PostgreSQL adapters run under Node. Isolated real-database checks passed for session persistence, expiry/revocation, concurrency and restricted permissions, and for migration ordering/checksums, concurrent runners and transactional rollback.
-- Independent login/logout passed against the built Node application, a temporary HTTPS endpoint and Chromium. The flow uses its own host-only secure cookie and current database session state. Authentication dependencies and their notices were reviewed. Login remains opt-in; production account provisioning and recovery are incomplete.
-- Real PostgreSQL credential checks passed for stale password/version rejection, disabled accounts, session-version changes, transaction/COMMIT failures, restricted permissions and shared rate limits.
-- Farm approval helpers passed real PostgreSQL checks for allowed roles, farm scope, session/membership revocation ordering, rollback/COMMIT failures and restricted permissions. These are internal service checks, not a completed authenticated pairing API.
+The shared head is `e5b50ca`. The latest `bun run check:all` passed formatting, type checks, 222 Bun tests, 110 Node tests and both production builds using the `0014` source and a frozen, uncommitted `0015` source snapshot. It does not establish a clean committed-head result or `0015` PostgreSQL acceptance. Rerun the gate after current source changes settle on a committed candidate.
 
-These results cover their tested components. The farm isolation check includes two existing farms. Migration reversals passed in an isolated PostgreSQL cluster. `bun run check:all` passed with 190 Bun tests, 95 Node tests and builds. Full enrollment, WebRTC and simulator acceptance remain incomplete.
+- **0013 browser-device registry — accepted slice:** source `828bd579` was integrated at `741dd1f`. The official contiguous migration history, rollback/reapply, restart persistence and bundled browser proof were exercised. This is an internal registry and proof component; it does not supply enrollment/approval HTTP, authenticated signalling, transport leases or browser-to-Connector dispatch. See [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md).
+- **0014 credential proof — accepted point-in-time slice:** `e5b50ca` records eleven real PostgreSQL groups passing twice, official 0014 down/up, and a fresh-process check across a database restart. The consumed proof is a point-in-time receipt, not a durable authorization or telemetry write. The offline Connector cannot learn remote revocation immediately. No HTTP telemetry endpoint or transport lease is accepted. See [credential acceptance checkpoint](CONNECTOR-CREDENTIAL-ACCEPTANCE-CHECKPOINT.md).
+- **0015 printer ownership — in progress:** migration and storage sources are uncommitted. Focused checks and the `check:all` snapshot cover static/unit/build behavior only. No real PostgreSQL, official migration reversal, or race/privilege acceptance is claimed. See [printer ownership checkpoint](PRINTER-OWNERSHIP-CHECKPOINT.md).
+- **0016 operation-bound telemetry — in progress:** source work is uncommitted. It must bind current authorization, proof consumption and telemetry persistence into one database operation. Do not reuse the 0014 receipt as authority for a later write. Real PostgreSQL acceptance and integrated checks remain pending.
 
-## Current work
+A separate pairing HTTP branch has exact-catalog evidence at `8352a1e` and the root recovery rate-limit fix at `14d018e`. Its full HTTPS gate is running and is not accepted yet. Keep its result distinct from the `0013`/`0014` acceptance.
 
-1. Diagnose the pinned simulator's MCU identification failure. Capture progress before serial disconnect, distinguish observed traffic from inferred causes, and keep the existing readiness deadline and resource restrictions. A diagnostic result does not count as simulator acceptance.
-2. Connect the verified authentication, authorization and persistence components to enrollment without weakening their transaction boundaries.
+## Active work and dependency order
 
-The coordinator owns container execution to avoid duplicate databases and simulators. Workers own distinct source files and report resources retained or removed.
+1. Finish `0015` against a disposable PostgreSQL cluster using the official contiguous migration runner. Validate down/up, races, privilege boundaries and current authorization checks. Commit the slice, then run the integrated gate on that committed candidate rather than treating the frozen `0015` snapshot as committed-head acceptance.
+2. Finish `0016` operation-bound telemetry after its storage and authorization interfaces settle. Test concurrent proof/revocation/write outcomes, retries and rollback against real PostgreSQL, then verify bounded outage recovery and exact event acknowledgement. Keep the HTTP gate separate until its HTTPS checks complete.
+3. Resolve the WebRTC queue blocker. Native Node/Chromium interoperability passed at `1e1ceba`, but independent review found an unbounded queue. Corrective work is uncommitted and unvalidated. Define bounded queue/backpressure behavior, test saturation and disconnect/reconnect, then rerun interoperability and review. The earlier pass is not current acceptance.
+4. Re-run simulator evidence with the bounded collector. The UART pair at `bf6c368` was inconclusive because collector startup output was lost. The local collector fix at `da5d377` has 52 experimental checks only; it is not simulator acceptance and establishes no printer or architecture claim. Preserve failure evidence and the original failing exit status.
+5. Once these slices have settled on one committed candidate, run the required integrated, database, browser/WebRTC and simulator gates for that exact head. Report each local, validated, integrated, published and merged state separately.
 
-## Authentication and enrollment
+## Phase 0 acceptance still required
 
-1. Extend the verified independent login with account provisioning/recovery and operational audit requirements. Keep authentication opt-in until deployment configuration and remaining acceptance gates are addressed; do not treat isolated login success as complete Phase 0.
-2. Wire the verified farm-membership and approval service into authenticated request boundaries. Enforce farm scope on every exposed read and mutation; retain atomic approval checks against session, membership and enrollment revocation.
-3. Connect the pairing contracts to single-use expiring codes, bounded polling and fingerprint confirmation. Approve only from an authenticated authorized browser. Authenticate Connector transport with the approved identity and proof of possession.
-4. Register browser signing keys through authenticated sessions. Bind keys to current farm permissions and distribute authenticated authorization context to the Connector.
+Phase 0 must deliver independent login and browser-device approval, authenticated signalling, and actual browser-to-Connector WebRTC for live status, camera and signed commands. The Connector must enforce command safety through server outages. Keep live data and signed commands peer-to-peer: no TURN and no HTTP/server command fallback. Degraded mode stays read-only.
 
-The offline policy must state how long cached authorization can remain usable. A disconnected Connector cannot learn immediate remote revocation. Expiry must fail closed without claiming that loss of connectivity stops an ongoing print.
+End-to-end evidence must cover signed pause, identity and farm authorization, tampering, replay, revocation, outage and recovery, bounded telemetry drain, and the offline-revocation lifetime tradeoff. Define how long previously issued authorization may remain usable while a Connector is offline, then verify expiry fails closed. Test with simulators only; never send automated commands to physical printers.
 
-## Integrated Phase 0
+Simulator acceptance remains open, including the two-printer/four-tool scenarios, Spoolman read-only inventory, camera/RTSP behavior, network faults and database readiness. Resolve startup and stability failures with bounded diagnostics; do not relax readiness or safety limits based on inconclusive runs. See the [simulator follow-up](SIMULATOR-ACCEPTANCE-FOLLOWUP.md), [evidence summary](SIMULATOR-EVIDENCE-SUMMARY.md), [UART experiment](SIMULATOR-UART-NATIVE-RESULT.md) and [CI diagnostics](KLIPPER-CI-DIAGNOSTICS.md).
 
-1. Complete simulator acceptance for two virtual printers, four tools, camera and read-only Spoolman. Include negative faults and repeat startup on required architectures; retain bounded diagnostic evidence.
-2. Authenticate telemetry ingestion and signalling. Exercise queue recovery after lost responses and server/database restart with durable idempotency. The server must never accept or return executable printer commands.
-3. Select a WebRTC implementation through an isolated experiment. Authenticate the browser-to-Connector peer and carry live status, camera and signed commands over that connection. No TURN or command fallback.
-4. Connect verified commands to the simulator driver behind Connector-local safety checks. Test tampering, replay, expired authorization, known revocation, wrong roles and wrong scope. Hardware is excluded from automated acceptance.
-5. Extend the tested accessible pt-BR login/logout pages with pairing, device management and farm views. Show data age and disable controls when P2P fails. Verify login-to-pairing-to-simulator behavior in a real browser and the built application.
+## Later product work
 
-## After the integrated core
-
-1. Complete Moonraker discovery, configuration, history, metadata and tool reporting; keep Spoolman as a read-only source of inventory truth.
-2. Add original job costing and traceable material attribution, then maintenance, inventory, quotes/orders and notifications with farm-scoped access.
-3. Add installation/update documentation, packaging, synthetic backup/restore, retention, resource limits and operational diagnostics.
-4. Evaluate additional printer families only with their own simulator and licensing review. Product integrations and commercial features require independent configuration rather than shared secrets or accounts.
+After integrated Phase 0 acceptance, continue with Moonraker discovery, configuration, history, metadata and tool reporting, keeping Spoolman read-only. Later slices include costing, traceable material use, maintenance, inventory, quotes/orders, notifications and operational backup/restore guidance. Additional printer families need their own simulator acceptance and licensing review.
 
 ## Completion and publication gates
 
-- Every task names a behavior, its test evidence, remaining integration gaps and its cleanup result. Do not count an idle or queued agent as active implementation.
-- Run `bun run check:all` for integrated changes, plus the relevant real database, simulator and browser checks. Existing CI gates remain enabled.
-- Review the complete publication diff for private material, secrets and license obligations. Obtain the pending explicit publication authorization before pushing or opening draft PRs.
-- Keep local, published, validated and merged states separate. Deployment, DNS/credential changes and physical printer testing require separate authorization.
+- Run `bun run check:all` on the final committed candidate and complete required PostgreSQL, browser/WebRTC and simulator checks for that same head. State pending local or remote checks explicitly.
+- Keep diagnostic evidence bounded and outside committed reports; do not include private paths, host details, credentials or account identifiers.
+- Review publication diffs for private material, secrets and license obligations. The existing local payload still requires its separate explicit publication authorization. Do not deploy, change DNS or credentials, start production services, or test physical printers without separate authorization.
+- Preserve worktree outputs and other tasks' resources until ownership, active use and integration are verified. Report cleanup ownership at task completion.

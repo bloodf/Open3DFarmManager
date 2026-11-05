@@ -30,6 +30,7 @@
         "postgres": "3.4.9",
         "vue": "3.5.44",
         "vue-router": "5.4.0",
+        "zod": "4.6.7",
       },
       "devDependencies": {
         "vue-tsc": "3.3.14",
@@ -221,21 +222,13 @@
     "@mapbox/node-pre-gyp": ["@mapbox/node-pre-gyp@2.0.3", "", { "dependencies": { "consola": "^3.2.3", "detect-libc": "^2.0.0", "https-proxy-agent": "^7.0.5", "node-fetch": "^2.6.7", "nopt": "^8.0.0", "semver": "^7.5.3", "tar": "^7.4.0" }, "bin": { "node-pre-gyp": "bin/node-pre-gyp" } }, "sha512-uwPAhccfFJlsfCxMYTwOdVfOz3xqyj8xYL3zJj8f0pb30tLohnnFPhLuqp4/qoEz8sNxe4SESZedcBojRefIzg=="],
 
     "@node-datachannel/android-arm64": ["@node-datachannel/android-arm64@0.33.5", "", { "os": "android", "cpu": "arm64" }, "sha512-OXD8JRmOUaxvfxJNN8skGrKudZefOishYGvf7hCxhw3kGVqHAE38U6js4dzngscz5WV7+Thk7u5a1EnimvB56g=="],
-
     "@node-datachannel/darwin-arm64": ["@node-datachannel/darwin-arm64@0.33.5", "", { "os": "darwin", "cpu": "arm64" }, "sha512-ACIT9BEQtVwa54iwnDkGjbckW/q/gkwBitbwut4O6RC4LgQYxKApfJDvnnNypn1UP3xWbgrKo488hINvCfX5qw=="],
-
     "@node-datachannel/darwin-x64": ["@node-datachannel/darwin-x64@0.33.5", "", { "os": "darwin", "cpu": "x64" }, "sha512-UjxKpp64KA7Bh5A4eEunAtxz7MaFcn2vMlFyVACOcnGC0uJB+g6GAVXOLNtt9OwmGbgjoLJgP0PBclqaokK/qg=="],
-
     "@node-datachannel/linux-arm64-gnu": ["@node-datachannel/linux-arm64-gnu@0.33.5", "", { "os": "linux", "cpu": "arm64" }, "sha512-YLZfsKHJ1JzYKXptkPE+QCSO/xQoyGGQy/cthmkMWtNJ5ozjoP0x0Pch2Hw3tZZFbv3b/HdDKTNnvkmNhowZ7g=="],
-
     "@node-datachannel/linux-arm64-musl": ["@node-datachannel/linux-arm64-musl@0.33.5", "", { "os": "linux", "cpu": "arm64" }, "sha512-8wQ6EZJIfiKafCeAqOyMEmKS2CL3xTrM6F7wlIr74XdUsIqOhtVGL+QwCd1RpeyaiIyTADQU0NUjMluHWZDutg=="],
-
     "@node-datachannel/linux-x64-gnu": ["@node-datachannel/linux-x64-gnu@0.33.5", "", { "os": "linux", "cpu": "x64" }, "sha512-CMoHDhirrXZkQzozvbJB2NQRWoPHuYHxJgVj0zkjZISAQVXhypAZBvtDv6DUNRaJJpPzYEL4B4aqjdCT6WtVtQ=="],
-
     "@node-datachannel/linux-x64-musl": ["@node-datachannel/linux-x64-musl@0.33.5", "", { "os": "linux", "cpu": "x64" }, "sha512-45BRlZqPS6P87RdZJnVfc3YpXw8BfNfpsb8/3yaKLZcpmFn6/mwGR+0vbfHuPeHrplpf3axnBS+DYxWEWJeuLQ=="],
-
     "@node-datachannel/win32-arm64-msvc": ["@node-datachannel/win32-arm64-msvc@0.33.5", "", { "os": "win32", "cpu": "arm64" }, "sha512-oYy4XDNwL0adn7K8m8r4PUwBJ7VmpdzuTe8RLSzhEJY7leF/Ni2wJ2FibZUQs+nbo/8R6oxvelpuGr+T030LVA=="],
-
     "@node-datachannel/win32-x64-msvc": ["@node-datachannel/win32-x64-msvc@0.33.5", "", { "os": "win32", "cpu": "x64" }, "sha512-XrfB3MWuzsEeqzaQh4BXhxl2JKPZ4qkXUZs4vhaM6P/fkaxhbp4Ubbwyvd0zDBHerVm/Zw7wZrTHGiYsfop4BA=="],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
@@ -897,6 +890,7 @@
     "nanotar": ["nanotar@0.3.0", "", {}, "sha512-Kv2JYYiCzt16Kt5QwAc9BFG89xfPNBx+oQL4GQXD9nLqPkZBiNaqaCWtwnbk/q7UVsTYevvM1b0UF8zmEI4pCg=="],
 
     "nitropack": ["nitropack@2.13.6", "", { "dependencies": { "@cloudflare/kv-asset-handler": "^0.4.2", "@rollup/plugin-alias": "^6.0.1", "@rollup/plugin-commonjs": "^29.0.3", "@rollup/plugin-inject": "^5.0.5", "@rollup/plugin-json": "^6.1.0", "@rollup/plugin-node-resolve": "^16.0.3", "@rollup/plugin-replace": "^6.0.3", "@rollup/plugin-terser": "^1.0.2", "@vercel/nft": "^1.11.0", "archiver": "^8.0.0", "c12": "^3.3.4", "chokidar": "^5.0.0", "citty": "^0.2.2", "compatx": "^0.2.0", "confbox": "^0.2.4", "consola": "^3.4.2", "cookie-es": "^2.0.1", "croner": "^10.0.1", "crossws": "^0.3.5", "db0": "^0.3.4", "defu": "^6.1.7", "destr": "^2.0.5", "dot-prop": "^10.2.0", "esbuild": "^0.28.2", "escape-string-regexp": "^5.0.0", "etag": "^1.8.1", "exsolve": "^1.2.0", "globby": "^16.2.4", "gzip-size": "^7.0.0", "h3": "^1.15.11", "hookable": "^5.5.3", "httpxy": "^0.5.6", "ioredis": "^5.11.1", "jiti": "^2.7.0", "klona": "^2.0.6", "knitwork": "^1.3.0", "listhen": "^1.10.1", "magic-string": "^0.30.21", "magicast": "^0.5.5", "mime": "^4.1.2", "mlly": "^1.8.2", "node-fetch-native": "^1.6.7", "node-mock-http": "^1.0.5", "ofetch": "^1.5.1", "ohash": "^2.0.12", "pathe": "^2.0.3", "perfect-debounce": "^2.1.0", "pkg-types": "^2.4.0", "pretty-bytes": "^7.2.0", "radix3": "^1.1.2", "rollup": "^4.67.4", "rollup-plugin-visualizer": "^7.1.1", "scule": "^1.3.0", "semver": "^7.8.5", "serve-placeholder": "^2.0.2", "serve-static": "^2.2.1", "source-map": "^0.7.6", "std-env": "^4.3.0", "ufo": "^1.6.4", "ultrahtml": "^1.7.0", "uncrypto": "^0.1.3", "unctx": "^2.5.0", "unenv": "2.0.0-rc.24", "unimport": "^6.5.0", "unplugin-utils": "^0.3.2", "unstorage": "^1.17.6", "untyped": "^2.0.0", "unwasm": "^0.5.3", "youch": "^4.1.1", "youch-core": "^0.3.3" }, "peerDependencies": { "xml2js": "^0.6.2" }, "optionalPeers": ["xml2js"], "bin": { "nitro": "dist/cli/index.mjs", "nitropack": "dist/cli/index.mjs" } }, "sha512-RY2hH/sy7LfzaadY7Hs+naGNyDoZTGTpuhQjIt1r+TYPk1rr/TW5w3s+nZZnHanm86wv4FwTrYnvqKgk+BmBOA=="],
+
 
     "node-datachannel": ["node-datachannel@0.33.5", "", { "dependencies": { "detect-libc": "^2.0.4" }, "optionalDependencies": { "@node-datachannel/android-arm64": "0.33.5", "@node-datachannel/darwin-arm64": "0.33.5", "@node-datachannel/darwin-x64": "0.33.5", "@node-datachannel/linux-arm64-gnu": "0.33.5", "@node-datachannel/linux-arm64-musl": "0.33.5", "@node-datachannel/linux-x64-gnu": "0.33.5", "@node-datachannel/linux-x64-musl": "0.33.5", "@node-datachannel/win32-arm64-msvc": "0.33.5", "@node-datachannel/win32-x64-msvc": "0.33.5" } }, "sha512-EbQEgpEalODneaK4AU78g4k4iXUvkSEI9htwP0wzgrawOIK/0MYT61xq5v/r+eRScmMZw4PVYC7RfyIW54NjZw=="],
 

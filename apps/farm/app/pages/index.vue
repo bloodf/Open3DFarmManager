@@ -9,6 +9,9 @@ onMounted(() => heading.value?.focus())
     <small>Open3DFarmManager · Desenvolvimento</small>
     <h1 ref="heading" tabindex="-1">Sua farm de impressão, em um só lugar.</h1>
     <nav aria-label="Conta">
+      <NuxtLink to="/connectors">Consultar Connectors</NuxtLink>
+      <NuxtLink to="/parear">Aprovar Connector</NuxtLink>
+      <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
@@ -16,8 +19,8 @@ onMounted(() => heading.value?.focus())
       <h2 id="disponibilidade">Recursos ainda indisponíveis</h2>
       <p>
         A conexão com Klipper, Moonraker e Spoolman está em desenvolvimento. O
-        pareamento de um Connector depende de uma etapa futura que ainda não
-        está disponível.
+        pareamento de um Connector depende da configuração segura do serviço e
+        da aprovação de um proprietário ou administrador da farm.
       </p>
       <p>
         O estado das impressoras e as câmeras ainda não estão disponíveis. Sem

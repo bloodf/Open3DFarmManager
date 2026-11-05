@@ -59,6 +59,8 @@ flowchart TD
 
 Exit code 2 is the important one for automation. When the Docker daemon is unreachable, the tool still prints the disk and Git sections it managed to collect, marks the Docker section `unavailable` with the reason, and exits 2. An empty Docker list never gets reported as a clean result.
 
+Incomplete Docker listings (more than 5000 rows per kind or malformed rows) mark the section `partial` and also exit 2. Valid entries collected before the limit remain visible, but their counts are not a complete inventory. A failed capacity lookup for any worktree likewise prevents a complete report, even if the repository's own lookup succeeds; the reason identifies the missing paths.
+
 ## Reporting a task-owned resource
 
 The audit answers whether resources remain. Removing them is a separate, deliberate step that a person performs after checking each one.
@@ -119,7 +121,7 @@ A dirty worktree holds work that no other branch has. Confirm that its commits a
 
 - The audit reads the host it runs on. It reports the Docker daemon of the current context.
 - Ownership depends on the `o3dfm.task` label. A resource created without that label is unlabeled no matter which task started it, so the label has to be set at creation time.
-- The tool lists at most 5000 resources per Docker kind and reports at most 200 owned entries and 10 sample entries per bucket. A `truncated` flag marks a bucket that hit the limit.
+- The tool reads at most 5000 resources per Docker kind; exceeding this limit makes the audit partial. It displays at most 200 owned entries and 10 sample entries per bucket. A `truncated` flag marks display truncation; counts remain complete when all input rows were successfully read.
 - Every command runs with a 15 second timeout and a bounded output buffer, so a hung daemon cannot stall the audit.
 - The Git status of a very large repository can be slow. The timeout applies there too.
 - The report is a snapshot. Resources created or removed during the run may be missing or stale.

@@ -259,6 +259,25 @@ test(
           const browserIdentity = await page.evaluate(async () => {
             const path = '/fixture.js'
             const f: typeof import('./browser-fixture.ts') = await import(path)
+            const OriginalPeer = globalThis.RTCPeerConnection
+            let allocations = 0
+            globalThis.RTCPeerConnection = new Proxy(OriginalPeer, {
+              construct(target, args) {
+                allocations++
+                return Reflect.construct(target, args)
+              },
+            })
+            let rejected = false
+            try {
+              f.create('invalid-agent')
+            } catch {
+              rejected = true
+            } finally {
+              globalThis.RTCPeerConnection = OriginalPeer
+              f.close()
+            }
+            if (!rejected || allocations !== 0)
+              throw Error('Invalid constructor allocated a browser peer')
             return f.identity()
           })
           const scenarios =
@@ -279,10 +298,12 @@ test(
           let priorBinding: RtcSessionBinding | undefined
           for (const scenario of scenarios) {
             const agent = randomUUID()
-            const offer = field(
-              await child.request({ kind: 'offer', agent }),
-              'sdp',
-            )
+            const offered: unknown = await child.request({
+              kind: 'offer',
+              agent,
+            })
+            assert.equal(field(offered, 'duplicate'), 'Offer unavailable')
+            const offer = field(offered, 'sdp')
             if (scenario === 'abandoned-offer') {
               const expired = await until(
                 () => child!.request({ kind: 'snapshot' }),
@@ -412,6 +433,8 @@ test(
               )
               assert.equal(native.sentProofs, 1)
               assert.equal(web.sentProofs, 1)
+              assert.equal(native.receivedProofs, 1)
+              assert.equal(web.receivedProofs, 1)
               assert.equal(native.commands_enabled, false)
               assert.equal(web.commands_enabled, false)
               if (scenario === 'valid') {
@@ -477,6 +500,18 @@ test(
                 )
 
               if (scenario.startsWith('tampered-')) {
+                assert.ok(
+                  [native.terminal, web.terminal].some((reason) =>
+                    ['transport-failed', 'binding-or-certificate'].includes(
+                      String(reason),
+                    ),
+                  ),
+                  'Tampered SDP requires an explicit transport or binding rejection: ' +
+                    JSON.stringify({
+                      native: native.terminal,
+                      web: web.terminal,
+                    }),
+                )
                 assert.equal(native.sentProofs, 0)
                 assert.equal(web.sentProofs, 0)
                 assert.equal(native.receivedProofs, 0)

@@ -10,6 +10,26 @@ The Connector identity store can sign the fixed Connector RTC proof domain using
 
 Focused protocol tests passed seven cases each under Node and Bun. Signer and existing identity/credential tests passed thirteen cases each under Node and Bun. The global TypeScript gate passed after dependency installation. A controlled Node-only real-identity probe passed in 1.803 seconds. Both actual certificate fingerprints matched the signed pins; each endpoint sent and received one proof, reached mutual verification before exchanging the synthetic `fixture-idle` status over RTC, and kept commands disabled. Both closed once with empty receive queues. The child exited normally, and its standard output and error streams drained before cleanup. The subsequent full matrix passed twenty scenarios, ten each with Node 24.20.0 and Bun 1.4.2 against Chromium 156.0.8078.4 and libdatachannel 0.24.5, in 34.833 seconds. It covered valid exchange, altered farm, wrong identity, tampered offer and answer, admission timeout, abandoned offer and late admission, replay, pre-authentication status and closure. Both tampered-SDP cases had zero actual proof sends, decoded proof receives and accepted application frames on both endpoints. The altered farm was rejected. The replay used a previously valid proof on a fresh RTC session; root proof verification succeeded before expected-binding verification rejected it. Child exit and close were successful, with stdout and stderr drained before browser and server cleanup. Twelve focused cases passed under each runtime, including the three description regressions. Focused strict TypeScript, formatting and diff checks passed. These results do not establish SQL registry, WebSocket authority or production authorization integration. Current-head integrated checks remain pending.
 
+## Independent review corrections
+
+The follow-up closes the concurrent `offer()` window by consuming the one-shot
+attempt before native gathering starts. The interoperability child calls
+`offer()` twice without awaiting the first call on every scenario and requires
+that the second call reject while the first completes. Browser agent validation
+now precedes peer allocation; an actual Chromium constructor-counting probe
+requires invalid input to allocate zero peers. Successful exchanges assert one
+sent and one received proof at each endpoint.
+
+Tampered offer and answer tests now require an explicit `transport-failed` or
+`binding-or-certificate` terminal result at an endpoint, in addition to zero
+proof sends, receives and accepted application frames. An authentication timeout
+alone cannot satisfy this gate. The ten-scenario matrix passed separately with
+Node 24.20.0 and Bun 1.4.2 against Chromium 156.0.8078.4; both tampered cases
+reported transport failure in each run. Root TypeScript and focused formatting
+checks passed. Child processes exited and closed normally, browser/server cleanup
+completed, and no PostgreSQL or Docker resource was used. Full integrated CI and
+production signalling authorization remain pending.
+
 ## Integration contract
 
 A trusted owner constructs the endpoint with the expected Connector agent ID and a one-shot admitted-binding promise. That owner supplies the binding after the exact final offer and answer are known. Hash the immutable remote input bytes actually passed to a successful `setRemoteDescription`, and the final local description bytes actually transmitted after successful `setLocalDescription`. A later SDP getter may reserialize the description and is not the signed byte source. The strict protocol parser must check effective role fingerprints against the signed binding, independently of the actual negotiated certificate check. Reject replacement, renegotiation, rollback and description-type mismatch; do not normalize bytes or substitute a new binding. An RTC frame, peer-provided key or server-provided identifier alone cannot create this trust. The endpoints verify the expected binding and actual negotiated certificate and enforce their deadlines before and after asynchronous work. Expiry, revocation or transport failure closes the endpoint into read-only state. `commands_enabled` remains false for every identity; no command path, TURN or server fallback is introduced.

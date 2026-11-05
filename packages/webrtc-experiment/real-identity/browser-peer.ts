@@ -25,7 +25,7 @@ type Options = {
 }
 /** Real P256 primitive fixture, not0013 browser-registry enrollment acceptance. */
 export class ReadonlyBrowserPeer {
-  #peer = new RTCPeerConnection({ iceServers: [] })
+  #peer: RTCPeerConnection
   #proof: RTCDataChannel | undefined
   #application: RTCDataChannel | undefined
   #inbox: RtcProofInbox
@@ -53,6 +53,7 @@ export class ReadonlyBrowserPeer {
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
     this.#options = Object.freeze({ ...options })
+    this.#peer = new RTCPeerConnection({ iceServers: [] })
     this.#inbox = new RtcProofInbox({
       paused: true,
       inspect: async (proof) => {

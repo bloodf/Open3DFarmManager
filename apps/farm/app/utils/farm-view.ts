@@ -44,6 +44,9 @@ export const FarmAssignmentPage = z
       new Set(page.printers.map((row) => row.assignmentId)).size ===
       page.printers.length,
   )
+const BoundedAssignmentPage = FarmAssignmentPage.refine(
+  (page) => page.printers.length <= 20,
+)
 export type FarmAssignment = z.infer<
   typeof FarmAssignmentPage
 >['printers'][number]
@@ -141,6 +144,7 @@ type Ready = {
   farmAfter: string | null
   scope: FarmScope | null
   inventory: 'loading' | 'ready'
+  feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
   nextPrinter: string | null
   printerAfter: string | null
@@ -333,6 +337,7 @@ export function createFarmView(deps: Dependencies) {
         farmAfter: after,
         scope: null,
         inventory: 'ready',
+        feedScope: deps.feed ? 'idle' : 'disabled',
         rows: [],
         nextPrinter: null,
         printerAfter: null,
@@ -362,6 +367,7 @@ export function createFarmView(deps: Dependencies) {
         scope: null,
         rows: [],
         inventory: 'ready',
+        feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
         nextPrinter: null,
         printerAfter: null,
@@ -378,6 +384,7 @@ export function createFarmView(deps: Dependencies) {
       ...previous,
       scope,
       inventory: 'loading',
+      feedScope: deps.feed ? 'idle' : 'disabled',
       rows: [],
       nextPrinter: null,
       printerAfter: after,
@@ -387,7 +394,7 @@ export function createFarmView(deps: Dependencies) {
     try {
       await me(run.signal, scope.accountId)
       if (!run.current()) return
-      const page = FarmAssignmentPage.parse(
+      const page = BoundedAssignmentPage.parse(
         await deps.read(`/api/farms/${farmId}/printers`, run.signal, {
           limit: 20,
           ...(after ? { after: BrowserDeviceUuid.parse(after) } : {}),
@@ -489,7 +496,7 @@ export function createFarmView(deps: Dependencies) {
       const selected =
         choices.length === 1 && choices[0] ? choices[0].keyId : ''
       publish({ ...state, keys: { kind: 'available', choices, selected } })
-      if (selected) openFeeds(scope, selected, run)
+      if (selected) await prepareFeeds(scope, selected, run)
     } catch (error) {
       if (!run.current()) return
       if (
@@ -505,7 +512,7 @@ export function createFarmView(deps: Dependencies) {
         publish({ ...state, keys: { kind: 'unavailable', reason: 'registry' } })
     }
   }
-  function selectKey(keyId: string) {
+  async function selectKey(keyId: string) {
     if (
       disposed ||
       state.kind !== 'ready' ||
@@ -530,13 +537,153 @@ export function createFarmView(deps: Dependencies) {
         localOrigin: null,
       })),
       keys: { ...keys, selected: keyId },
+      feedScope: deps.feed ? 'idle' : 'disabled',
     })
-    if (keyId) openFeeds(scope, keyId, run)
+    if (keyId) await prepareFeeds(scope, keyId, run)
+  }
+  async function prepareFeeds(
+    scope: FarmScope,
+    browserKeyId: string,
+    run: ReturnType<typeof begin>,
+  ) {
+    if (!deps.feed || !run.current() || state.kind !== 'ready') return
+    const visible = state.rows.map(({ assignment }) =>
+      Object.freeze({ ...assignment }),
+    )
+    const agents = new Set(
+      visible
+        .filter(
+          (row) =>
+            row.status === 'active' && row.connectorStatus === 'approved',
+        )
+        .map((row) => row.agentId),
+    )
+    if (!agents.size) return
+    publish({ ...state, feedScope: 'loading' })
+    if (!run.current()) return
+    try {
+      await me(run.signal, scope.accountId)
+      if (!run.current()) return
+      const assignments = new Map<string, Readonly<FarmAssignment>>()
+      const cursors = new Set<string>()
+      const activeKeys = new Set<string>()
+      const connectorStatuses = new Map<
+        string,
+        FarmAssignment['connectorStatus']
+      >()
+      let after: string | null = null,
+        complete = false
+      for (let pageNumber = 0; pageNumber < 32; pageNumber++) {
+        const page = BoundedAssignmentPage.parse(
+          await deps.read(`/api/farms/${scope.farmId}/printers`, run.signal, {
+            limit: 20,
+            ...(after ? { after } : {}),
+          }),
+        )
+        if (!run.current()) return
+        for (const row of page.printers) {
+          if (assignments.has(row.assignmentId))
+            throw Error('Duplicate inventory assignment')
+          const status = connectorStatuses.get(row.agentId)
+          if (status !== undefined && status !== row.connectorStatus)
+            throw Error('Contradictory Connector status')
+          connectorStatuses.set(row.agentId, row.connectorStatus)
+          if (row.status === 'active') {
+            const key = JSON.stringify([row.agentId, row.printerKey])
+            if (activeKeys.has(key)) throw Error('Duplicate active printer key')
+            activeKeys.add(key)
+          }
+          assignments.set(row.assignmentId, Object.freeze({ ...row }))
+        }
+        if (page.nextAfter === null) {
+          complete = true
+          break
+        }
+        if (!page.printers.length || cursors.has(page.nextAfter))
+          throw Error('Inventory cursor cycle')
+        cursors.add(page.nextAfter)
+        after = page.nextAfter
+      }
+      await me(run.signal, scope.accountId)
+      if (!run.current() || state.kind !== 'ready') return
+      if (!complete) throw Error('Incomplete inventory scope')
+      for (const row of visible) {
+        const candidate = assignments.get(row.assignmentId)
+        if (
+          !candidate ||
+          candidate.agentId !== row.agentId ||
+          candidate.printerKey !== row.printerKey ||
+          candidate.status !== row.status ||
+          candidate.connectorStatus !== row.connectorStatus
+        )
+          throw Error('Visible assignment changed during scan')
+      }
+      const groups = new Map<
+        string,
+        readonly Pick<
+          FarmAssignment,
+          'assignmentId' | 'agentId' | 'printerKey'
+        >[]
+      >()
+      for (const agentId of agents) {
+        const refs = Object.freeze(
+          [...assignments.values()]
+            .filter(
+              (row) =>
+                row.agentId === agentId &&
+                row.status === 'active' &&
+                row.connectorStatus === 'approved',
+            )
+            .map(({ assignmentId, agentId, printerKey }) =>
+              Object.freeze({ assignmentId, agentId, printerKey }),
+            ),
+        )
+        // Reserve conservative numeric JSON width as well as escaped UTF8 keys.
+        // This is a capacity check, not an invitation to truncate or split sets.
+        const bytes =
+          new TextEncoder().encode(
+            JSON.stringify({
+              t: 'snapshot',
+              seq: Number.MAX_SAFE_INTEGER,
+              printers: refs.map((ref) => ({
+                printerKey: ref.printerKey,
+                state: 'printing',
+                progress: 0,
+                observedAt: Number.MAX_SAFE_INTEGER,
+              })),
+            }),
+          ).byteLength +
+          refs.length * 24
+        if (!refs.length || refs.length > 100 || bytes > 2048)
+          throw Error('Complete Connector frame capacity')
+        groups.set(agentId, refs)
+      }
+      publish({ ...state, feedScope: 'ready' })
+      if (!run.current()) return
+      openFeeds(scope, browserKeyId, run, groups)
+    } catch (error) {
+      if (!run.current()) return
+      if (
+        httpStatus(error) === 401 ||
+        httpStatus(error) === 403 ||
+        error instanceof AccountChanged
+      ) {
+        failed(error)
+        return
+      }
+      // Scope failure is distinct from local-key/registry availability.
+      if (state.kind === 'ready')
+        publish({ ...state, feedScope: 'unavailable' })
+    }
   }
   function openFeeds(
     scope: FarmScope,
     browserKeyId: string,
     run: ReturnType<typeof begin>,
+    groups: ReadonlyMap<
+      string,
+      readonly Pick<FarmAssignment, 'assignmentId' | 'agentId' | 'printerKey'>[]
+    >,
   ) {
     if (!deps.feed || state.kind !== 'ready') return
     const agents = new Set(
@@ -550,14 +697,8 @@ export function createFarmView(deps: Dependencies) {
     )
     for (const agentId of agents) {
       if (!run.current() || state.kind !== 'ready') return
-      const refs = state.rows
-        .filter(
-          (row) =>
-            row.assignment.agentId === agentId &&
-            row.assignment.status === 'active' &&
-            row.assignment.connectorStatus === 'approved',
-        )
-        .map((row) => row.assignment)
+      const refs = groups.get(agentId)
+      if (!refs) return
       let terminal = false,
         session: FarmAdmittedSession | null = null,
         seq = -1
@@ -705,6 +846,18 @@ export function createFarmView(deps: Dependencies) {
               snapshot.receivedAtWallMs > now.wall ||
               snapshot.receivedAtMonoMs < started.mono ||
               snapshot.receivedAtMonoMs > now.mono
+            ) {
+              end()
+              return
+            }
+            if (
+              message.printers.length !== refs.length ||
+              refs.some(
+                (ref) =>
+                  !message.printers.some(
+                    (printer) => printer.printerKey === ref.printerKey,
+                  ),
+              )
             ) {
               end()
               return

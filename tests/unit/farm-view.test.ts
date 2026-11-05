@@ -152,7 +152,7 @@ function setup(feedEnabled = false) {
   }
   function frame(
     seq = 0,
-    printers = [
+    printers: FarmSnapshot['message']['printers'] = [
       {
         printerKey: row.printerKey,
         state: 'printing' as const,
@@ -385,7 +385,7 @@ test('all registry pages are joined to current account/local thumbprints before 
     selected: '',
   })
   expect(many.peers).toHaveLength(0)
-  many.view.selectKey(other)
+  await many.view.selectKey(other)
   expect(many.peer().input.browserKeyId).toBe(other)
 })
 
@@ -453,7 +453,20 @@ test('one read-only feed per eligible Connector; revoked and pending assignments
   h.authenticate()
   expect(h.first().connection).toBe('authenticated')
   expect(h.first().observation).toBeNull()
-  h.frame()
+  h.frame(0, [
+    {
+      printerKey: row.printerKey,
+      state: 'printing',
+      progress: 0.5,
+      observedAt: h.time.wall,
+    },
+    {
+      printerKey: 'second',
+      state: 'idle',
+      progress: 0,
+      observedAt: h.time.wall,
+    },
+  ])
   expect(h.first().observation?.state.state).toBe('printing')
   expect(
     h.ready().rows.find((item) => item.assignment.assignmentId === keyId)
@@ -461,7 +474,7 @@ test('one read-only feed per eligible Connector; revoked and pending assignments
   ).toBeNull()
 })
 
-test('duplicates and older sequence numbers do not refresh receipt age; missing rows become historical', async () => {
+test('duplicates do not refresh age; a non-complete printer set terminally retains history', async () => {
   const h = setup(true)
   await h.view.discover()
   h.authenticate()
@@ -665,7 +678,7 @@ test('farm/key/page invalidation aborts and closes peers; old assignment callbac
   expect(h.first().assignment.assignmentId).toBe(other)
   expect(h.first().observation).toBeNull()
   expect(h.first().localOrigin).toBeNull()
-  h.view.selectKey('')
+  await h.view.selectKey('')
   expect(h.peer(1).closed).toBe(1)
   h.view.dispose()
   expect(h.result.state).toEqual({ kind: 'loading' })
@@ -778,7 +791,7 @@ test('bounded registry scan does not claim that an unseen later key is missing',
   expect(h.peers).toHaveLength(0)
 })
 
-test('another printer never refreshes the first row; equal source data cannot conceal an old observation', async () => {
+test('partial printer updates refresh no rows; equal source data cannot conceal an old observation', async () => {
   const h = setup(true)
   h.data.printers.printers.push({
     ...row,
@@ -787,7 +800,20 @@ test('another printer never refreshes the first row; equal source data cannot co
   })
   await h.view.discover()
   h.authenticate()
-  h.frame(1)
+  h.frame(1, [
+    {
+      printerKey: row.printerKey,
+      state: 'printing',
+      progress: 0.5,
+      observedAt: h.time.wall,
+    },
+    {
+      printerKey: 'second',
+      state: 'printing',
+      progress: 0.1,
+      observedAt: h.time.wall,
+    },
+  ])
   h.time.wall += 1000
   h.time.mono += 1000
   h.frame(2, [
@@ -799,7 +825,9 @@ test('another printer never refreshes the first row; equal source data cannot co
     },
   ])
   expect(h.first().observation?.received.wall).toBe(100_000)
-  expect(h.ready().rows[1]?.observation?.received.wall).toBe(101_000)
+  expect(h.ready().rows[1]?.observation?.received.wall).toBe(100_000)
+  expect(h.first().connection).toBe('closed')
+  expect(h.ready().rows.every((row) => row.observation?.historical)).toBe(true)
   const old = setup(true)
   await old.view.discover()
   old.authenticate()
@@ -915,13 +943,16 @@ test('reentrant producer teardown keeps only the winning key generation and owns
     )
     h.data.local.push({ thumbprint: thumbB }, { thumbprint: thumbC })
     await h.view.discover()
-    h.view.selectKey(keyId)
+    await h.view.selectKey(keyId)
     h.hooks.close = () => {
       delete h.hooks.close
       h.view.selectKey(keyC)
     }
-    if (trigger === 'selection') h.view.selectKey(keyB)
+    if (trigger === 'selection') await h.view.selectKey(keyB)
     else h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    // Reentrant selection deliberately starts a new asynchronous complete scan.
+    for (let step = 0; step < 50 && h.peers.length < 2; step++)
+      await Promise.resolve()
     const keys = h.ready().keys
     expect(keys.kind).toBe('available')
     if (keys.kind === 'available') expect(keys.selected).toBe(keyC)
@@ -937,4 +968,281 @@ test('reentrant producer teardown keeps only the winning key generation and owns
     expect(h.peer(1).closed).toBe(1)
     expect(h.peer(1).input.signal.aborted).toBe(true)
   }
+})
+
+function installInventoryPages(
+  h: ReturnType<typeof setup>,
+  pages: {
+    printers: FarmAssignment[]
+    nextAfter: string | null
+    canManage: boolean
+  }[],
+) {
+  let reads = 0
+  h.hooks.read = async (path, signal, query) => {
+    if (path !== `/api/farms/${farm}/printers`)
+      return h.baseRead(path, signal, query)
+    if (reads++ === 0) return h.data.printers // Visible page remains independent.
+    const index = query?.after
+      ? pages.findIndex((page) => page.nextAfter === query.after) + 1
+      : 0
+    const page = pages[index]
+    if (!page) throw Error('Unexpected inventory cursor')
+    return page
+  }
+}
+function inventoryPage(
+  printers: FarmAssignment[],
+  nextAfter: string | null = null,
+) {
+  return { printers, nextAfter, canManage: true }
+}
+
+test('complete scope crosses inventory pages without adding hidden rows to presentation', async () => {
+  const h = setup(true)
+  const hidden = { ...row, assignmentId: other, printerKey: 'hidden' }
+  h.data.printers.nextAfter = assignment
+  installInventoryPages(h, [
+    inventoryPage([row], assignment),
+    inventoryPage([hidden]),
+  ])
+  await h.view.discover()
+  expect(h.ready().rows.map((value) => value.assignment.assignmentId)).toEqual([
+    assignment,
+  ])
+  expect(h.ready().nextPrinter).toBe(assignment)
+  expect(h.ready().feedScope).toBe('ready')
+  expect(h.peer().input.assignmentRefs).toEqual([
+    { assignmentId: assignment, agentId: agent, printerKey: row.printerKey },
+    { assignmentId: other, agentId: agent, printerKey: 'hidden' },
+  ])
+  expect(Object.isFrozen(h.peer().input.assignmentRefs)).toBe(true)
+  h.authenticate()
+  h.frame(0, [
+    {
+      printerKey: row.printerKey,
+      state: 'printing',
+      progress: 0.5,
+      observedAt: h.time.wall,
+    },
+    {
+      printerKey: 'hidden',
+      state: 'paused',
+      progress: 0.7,
+      observedAt: h.time.wall,
+    },
+  ])
+  expect(h.ready().rows).toHaveLength(1)
+  expect(h.first().observation?.state.state).toBe('printing')
+  expect(
+    h.requests
+      .filter((request) => request.path.endsWith('/printers'))
+      .map((request) => request.query),
+  ).toEqual([{ limit: 20 }, { limit: 20 }, { limit: 20, after: assignment }])
+  h.view.dispose()
+})
+
+test('only visible eligible agents open, with their complete distinct tuple sets', async () => {
+  const h = setup(true)
+  const visibleB = {
+    ...row,
+    assignmentId: other,
+    agentId: keyId,
+    printerKey: 'visible-b',
+  }
+  const hiddenA = {
+    ...row,
+    assignmentId: '00000000-0000-4000-8000-000000000006',
+    printerKey: 'hidden-a',
+  }
+  const hiddenB = {
+    ...row,
+    assignmentId: '00000000-0000-4000-8000-000000000007',
+    agentId: keyId,
+    printerKey: 'hidden-b',
+  }
+  const hiddenC = {
+    ...row,
+    assignmentId: '00000000-0000-4000-8000-000000000008',
+    agentId: other,
+    printerKey: 'hidden-c',
+  }
+  h.data.printers.printers = [row, visibleB]
+  installInventoryPages(h, [
+    inventoryPage([row, visibleB], other),
+    inventoryPage([hiddenA, hiddenB, hiddenC]),
+  ])
+  await h.view.discover()
+  expect(h.peers).toHaveLength(2)
+  expect(h.peer(0).input.assignmentRefs.map((ref) => ref.printerKey)).toEqual([
+    row.printerKey,
+    'hidden-a',
+  ])
+  expect(h.peer(1).input.assignmentRefs.map((ref) => ref.printerKey)).toEqual([
+    'visible-b',
+    'hidden-b',
+  ])
+  expect(h.peers.some((peer) => peer.input.agentId === other)).toBe(false)
+  h.view.dispose()
+})
+
+test('cycle, duplicate, oversized and contradictory scope retain inventory and keys without feeds', async () => {
+  const cases = [
+    [
+      inventoryPage([row], assignment),
+      inventoryPage(
+        [{ ...row, assignmentId: other, printerKey: 'other' }],
+        assignment,
+      ),
+    ],
+    [inventoryPage([row], assignment), inventoryPage([row])],
+    [inventoryPage([{ ...row, printerKey: 'changed' }])],
+    [inventoryPage([])],
+    [
+      inventoryPage(
+        Array.from({ length: 21 }, (_, i) => ({
+          ...row,
+          assignmentId: `00000000-0000-4000-8000-${String(i + 20).padStart(12, '0')}`,
+          printerKey: `key-${i}`,
+        })),
+      ),
+    ],
+    [
+      inventoryPage([row], assignment),
+      inventoryPage([
+        {
+          ...row,
+          assignmentId: other,
+          connectorStatus: 'revoked' as const,
+          printerKey: 'changed',
+        },
+      ]),
+    ],
+  ]
+  for (const pages of cases) {
+    const h = setup(true)
+    installInventoryPages(h, pages)
+    await h.view.discover()
+    expect(h.ready().inventory).toBe('ready')
+    expect(h.first().assignment).toEqual(row)
+    expect(h.ready().feedScope).toBe('unavailable')
+    expect(h.ready().keys.kind).toBe('available')
+    expect(h.peers).toHaveLength(0)
+    h.view.dispose()
+  }
+})
+
+test('32-page incomplete scan and over-cap complete Connector set do not open a split feed', async () => {
+  for (const capacity of [false, true]) {
+    const h = setup(true)
+    let count = 0
+    h.hooks.read = async (path, signal, query) => {
+      if (!path.endsWith('/printers')) return h.baseRead(path, signal, query)
+      if (count++ === 0) return h.data.printers
+      if (capacity)
+        return inventoryPage([
+          row,
+          ...Array.from({ length: 15 }, (_, i) => ({
+            ...row,
+            assignmentId: `00000000-0000-4000-8000-${String(i + 20).padStart(12, '0')}`,
+            printerKey: `${i}${'界'.repeat(100)}`,
+          })),
+        ])
+      const assignmentId = `00000000-0000-4000-8000-${String(count + 20).padStart(12, '0')}`
+      return inventoryPage(
+        count === 2
+          ? [row]
+          : [{ ...row, assignmentId, printerKey: `key-${count}` }],
+        assignmentId,
+      )
+    }
+    await h.view.discover()
+    expect(h.ready().feedScope).toBe('unavailable')
+    expect(h.peers).toHaveLength(0)
+    expect(h.ready().rows).toHaveLength(1)
+    expect(count).toBe(capacity ? 2 : 33)
+    h.view.dispose()
+  }
+})
+
+test('changed account during scope scan clears private inventory', async () => {
+  const h = setup(true)
+  let reads = 0
+  h.hooks.read = async (path, signal, query) => {
+    if (path.endsWith('/printers') && ++reads === 2) {
+      h.data.accountId = 'account-two'
+      return h.data.printers
+    }
+    return h.baseRead(path, signal, query)
+  }
+  await h.view.discover()
+  expect(h.result.state).toEqual({ kind: 'error', reason: 'account-changed' })
+  expect(h.peers).toHaveLength(0)
+  h.view.dispose()
+})
+
+test('late scope scan after invalidate or key replacement cannot open or reuse old tuples', async () => {
+  for (const action of ['invalidate', 'key'] as const) {
+    const h = setup(true),
+      pending = deferred<unknown>(),
+      entered = deferred<void>()
+    let reads = 0
+    h.hooks.read = async (path, signal, query) => {
+      if (path.endsWith('/printers') && ++reads === 2) {
+        entered.resolve()
+        return pending.promise
+      }
+      return h.baseRead(path, signal, query)
+    }
+    const old = h.view.discover()
+    await entered.promise
+    expect(h.ready().feedScope).toBe('loading')
+    expect(h.peers).toHaveLength(0)
+    if (action === 'invalidate') h.view.invalidate()
+    else {
+      await h.view.selectKey('')
+      await h.view.selectKey(keyId)
+    }
+    pending.resolve(inventoryPage([{ ...row, printerKey: 'stale-hidden-key' }]))
+    await old
+    expect(h.peers).toHaveLength(action === 'invalidate' ? 0 : 1)
+    if (action === 'key')
+      expect(h.peer().input.assignmentRefs[0]?.printerKey).toBe(row.printerKey)
+    else expect(h.result.state).toEqual({ kind: 'loading' })
+    h.view.dispose()
+  }
+})
+
+test('refresh rebuilds full scope and cannot replay the prior complete tuple cache', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.frame()
+  const old = h.peer()
+  const hidden = { ...row, assignmentId: other, printerKey: 'new-hidden' }
+  h.data.printers.nextAfter = assignment
+  installInventoryPages(h, [
+    inventoryPage([row], assignment),
+    inventoryPage([hidden]),
+  ])
+  await h.view.selectFarm(farm)
+  expect(old.closed).toBe(1)
+  expect(old.input.signal.aborted).toBe(true)
+  expect(h.peer(1).input.assignmentRefs.map((ref) => ref.printerKey)).toEqual([
+    row.printerKey,
+    'new-hidden',
+  ])
+  expect(h.first().observation).toBeNull()
+  h.frame(9)
+  expect(h.first().observation).toBeNull()
+  installInventoryPages(h, [
+    inventoryPage([row], assignment),
+    inventoryPage([{ ...hidden, status: 'revoked' }]),
+  ])
+  await h.view.selectFarm(farm)
+  expect(h.peer(1).closed).toBe(1)
+  expect(h.peer(2).input.assignmentRefs.map((ref) => ref.printerKey)).toEqual([
+    row.printerKey,
+  ])
+  h.view.dispose()
 })

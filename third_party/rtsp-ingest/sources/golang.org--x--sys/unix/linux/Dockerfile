@@ -1,4 +1,4 @@
-FROM ubuntu:25.04
+FROM ubuntu:plucky-20251001
 
 # Disable interactive prompts on package installation
 ENV DEBIAN_FRONTEND=noninteractive

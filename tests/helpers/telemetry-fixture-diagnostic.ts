@@ -17,8 +17,8 @@ export function captureFixtureStderr(
     .flatMap((secret) => secret.split(/\r?\n/))
     .filter((value) => value.length >= 8)
     .map((value) => value.slice(0, 8))
-  return () => ({
-    text: raw
+  return () => {
+    const text = raw
       .split(/\r?\n/)
       .map((line) =>
         markers.some((marker) => line.includes(marker)) ||
@@ -29,7 +29,10 @@ export function captureFixtureStderr(
               '?',
             ),
       )
-      .join('\n'),
-    truncated,
-  })
+      .join('\n')
+    return {
+      text: text.slice(0, max),
+      truncated: truncated || text.length > max,
+    }
+  }
 }

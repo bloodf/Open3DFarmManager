@@ -10,10 +10,12 @@ Uso:
   --help                            Exibir ajuda
   identity --data-dir <diretório>    Consultar identidade existente (JSON público)
   init-identity --data-dir <dir>     Criar ou reutilizar identidade local (JSON público)
+  run --config <arquivo> --credential-file <segredo> --data-dir <dir>
+                                    Coletar e enviar telemetria autenticada
   collect --config <arquivo> --data-dir <dir>
                                     Coletar telemetria local somente para leitura
 
-A consulta não cria uma identidade. A coleta usa uma configuração local privada e não envia dados à nuvem. Pareamento não está disponível neste comando.`
+A consulta não cria uma identidade. O comando collect grava apenas localmente. O comando run exige uma identidade e uma credencial existentes para enviar telemetria autenticada. Nenhum dos dois faz pareamento.`
 
 export function main(args: string[]): number {
   let parsed: ReturnType<
@@ -76,7 +78,8 @@ export function main(args: string[]): number {
   }
 }
 async function dispatch(args: string[]): Promise<number> {
-  if (args[0] !== 'collect') return main(args)
+  if (args[0] !== 'collect' && args[0] !== 'run') return main(args)
+  const running = args[0] === 'run'
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.on('SIGINT', stop)
@@ -84,23 +87,42 @@ async function dispatch(args: string[]): Promise<number> {
   try {
     const { values, positionals } = parseArgs({
       args: args.slice(1),
-      options: { config: { type: 'string' }, 'data-dir': { type: 'string' } },
+      options: {
+        config: { type: 'string' },
+        'data-dir': { type: 'string' },
+        'credential-file': { type: 'string' },
+      },
       allowPositionals: false,
     })
-    if (positionals.length || !values.config || !values['data-dir']) {
+    if (
+      positionals.length ||
+      !values.config ||
+      !values['data-dir'] ||
+      (running
+        ? !values['credential-file']
+        : values['credential-file'] !== undefined)
+    ) {
       console.error('Argumentos inválidos. Use --help.')
       return 1
     }
-    const { collectLocalTelemetry } = await import('./runtime/collect.ts')
-    await collectLocalTelemetry({
+    const common = {
       configPath: values.config,
       dataDirectory: values['data-dir'],
       signal: controller.signal,
-      onDiagnostic(diagnostic) {
-        // Fixed-schema, bounded diagnostics contain no keys, paths or endpoints.
+      onDiagnostic(diagnostic: object) {
         console.log(JSON.stringify(diagnostic))
       },
-    })
+    }
+    if (running && values['credential-file']) {
+      const { runConnectorAgent } = await import('./runtime/agent.ts')
+      await runConnectorAgent({
+        ...common,
+        credentialPath: values['credential-file'],
+      })
+    } else {
+      const { collectLocalTelemetry } = await import('./runtime/collect.ts')
+      await collectLocalTelemetry(common)
+    }
     return 0
   } catch {
     console.error(

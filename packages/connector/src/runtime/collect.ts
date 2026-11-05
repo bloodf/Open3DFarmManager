@@ -1,9 +1,12 @@
 import { join } from 'node:path'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
-import { readLocalCollectorConfig } from '../config/local.ts'
-import { createMoonrakerSubscription } from '../moonraker/subscription.ts'
+import {
+  readLocalCollectorConfig,
+  type LocalCollectorConfig,
+} from '../config/local.ts'
+import { assertUnscopedCollection } from './queue-scope.ts'
 
-type Diagnostic =
+export type Diagnostic =
   | { kind: 'queued'; depth: number }
   | {
       kind: 'loss'
@@ -39,9 +42,26 @@ export async function collectLocalTelemetry(input: {
 }): Promise<void> {
   const config = readLocalCollectorConfig(input.configPath)
   if (input.signal.aborted) return
-  const queue = new TelemetryQueue(
-    join(input.dataDirectory, 'telemetry'),
-    Date.now(),
+  const directory = join(input.dataDirectory, 'telemetry')
+  assertUnscopedCollection(directory)
+  const queue = new TelemetryQueue(directory, Date.now())
+  try {
+    await collectIntoQueue({ ...input, config, queue })
+  } finally {
+    queue.close()
+  }
+}
+
+/** Caller owns the already-open queue and its scope/close lifecycle. */
+export async function collectIntoQueue(input: {
+  config: LocalCollectorConfig
+  queue: TelemetryQueue
+  signal: AbortSignal
+  onDiagnostic: (diagnostic: Diagnostic) => void
+}): Promise<void> {
+  const { config, queue } = input
+  const { createMoonrakerSubscription } = await import(
+    '../moonraker/subscription.ts'
   )
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
@@ -106,11 +126,6 @@ export async function collectLocalTelemetry(input: {
   } finally {
     controller.abort()
     await Promise.all(subscriptions.map((subscription) => subscription.done))
-    try {
-      queue.close()
-    } catch (error) {
-      fail(error)
-    }
     try {
       input.onDiagnostic({ kind: 'summary', ...totals })
     } catch (error) {

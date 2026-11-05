@@ -48,3 +48,24 @@ command fallback, physical printer execution or publication is introduced.
 Validation: ten focused tests pass on Node 24.20.0 and Bun 1.4.2; scoped
 strict TypeScript and targeted formatting pass. These tests use boundary
 doubles and do not establish actual PostgreSQL or network acceptance.
+
+## Real PostgreSQL negotiation reader
+
+At source `22a7216813ae7d293327332ea9f836cac2f648c1`, the maintained
+negotiation fixture passed on Bun 1.4.2 against the existing isolated PostgreSQL
+17.11 database with all 19 official migration checksums validated. The run took
+4.60 seconds under a 30-second outer deadline. It exercised the actual restricted
+role, current scope, a membership downgrade committed while the reader waited
+on a row lock, unchanged session activity, and absolute session expiry during a
+second observed lock wait. The fixture used maintained pairing and browser-key
+approval but synthetic account/session/assignment rows. This is reader acceptance,
+not coordinator WSS or control RTC acceptance.
+
+The initial Node 24.20.0 invocation failed before opening any connection because
+a maintained dependency uses a TypeScript parameter property unsupported by
+Node's strip-only mode. That receipt was preserved; no production source was
+changed to accommodate the runner. The subsequent Bun run passed. Independent
+audits found the original database unchanged, roles restored, zero remaining
+fixture backends and zero bridge errors; the logged connection high-water was
+three. The caller-owned disposable database and bridge remain reserved for later
+integration. No reset, migration, restart or command execution occurred.

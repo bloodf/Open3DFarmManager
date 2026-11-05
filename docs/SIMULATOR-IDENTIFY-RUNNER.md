@@ -544,6 +544,49 @@ Reused session IDs suppress merged analysis. A container log with stderr output
 is also treated as incomplete because the separate streams have no reliable
 combined order.
 
+## Reproduce fixture provenance
+
+Both compressed fixtures are byte-identical to immutable Klipper revision
+`ee2c6fb6b00b2b5d097ef70d0868df7d74943b51`, with no local modifications:
+
+| Upstream path                                                                                                                                   | SHA-256                                                            | Original notice                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------- |
+| [klippy/serialhdl.py](https://github.com/Klipper3d/klipper/blob/ee2c6fb6b00b2b5d097ef70d0868df7d74943b51/klippy/serialhdl.py)                   | `72b1a8090d57b9ad7b03d379ce4385b35f8a3a14da709bce554a20f5aeb07dad` | Copyright (C) 2016-2021 Kevin O'Connor, GPLv3 |
+| [klippy/chelper/serialqueue.c](https://github.com/Klipper3d/klipper/blob/ee2c6fb6b00b2b5d097ef70d0868df7d74943b51/klippy/chelper/serialqueue.c) | `d519a5554233070f2560aff550899fa2402d69de08569df68b1306914823869d` | Copyright (C) 2016-2025 Kevin O'Connor, GPLv3 |
+
+The following read-only comparison downloads only those two source files. It
+extracts and decompresses the fixture strings without executing either fixture.
+Run from the repository root with Python 3 and network access to GitHub:
+
+```python
+import base64
+import gzip
+import hashlib
+import pathlib
+import re
+import urllib.request
+
+text = pathlib.Path('tests/node/simulator-identify-diagnostic.test.ts').read_text()
+encoded = re.findall(r"'([A-Za-z0-9+/=]{1000,})'", text)
+fixtures = {}
+for value in encoded:
+    source = gzip.decompress(base64.b64decode(value))
+    fixtures[hashlib.sha256(source).hexdigest()] = source
+revision = 'ee2c6fb6b00b2b5d097ef70d0868df7d74943b51'
+for path in ['klippy/serialhdl.py', 'klippy/chelper/serialqueue.c']:
+    url = f'https://raw.githubusercontent.com/Klipper3d/klipper/{revision}/{path}'
+    with urllib.request.urlopen(url, timeout=20) as response:
+        upstream = response.read(100000)
+    digest = hashlib.sha256(upstream).hexdigest()
+    assert fixtures[digest] == upstream
+    print(path, digest, 'byte-identical')
+```
+
+This comparison was performed for both fixtures. Their original notices remain
+inside the decoded bytes; the license below covers those upstream fixtures.
+The independent project's MIT license does not relicense them. This comparison
+establishes source provenance, not the contents or behavior of a running image.
+
 ## GPL-3.0 license for the Klipper test fixtures
 
 The following is the unmodified license accompanying the fixtures.

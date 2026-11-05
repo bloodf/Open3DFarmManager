@@ -1043,6 +1043,7 @@ function supervisorConfigPathFromScript(script) {
 async function discoverSupervisorConfig(docker, options, state) {
   const inspectionName = `${state.runName}-inspect`
   state.inspectionName = inspectionName
+  state.resources.push({ kind: 'container', name: inspectionName })
   await dockerRun(
     docker,
     [
@@ -1059,7 +1060,6 @@ async function discoverSupervisorConfig(docker, options, state) {
     {},
     'discover',
   )
-  state.resources.push({ kind: 'container', name: inspectionName })
   const inspected = await dockerJson(
     docker,
     ['inspect', inspectionName],
@@ -1629,12 +1629,39 @@ export function repositoryExclusionRoots() {
   ]).trim()
   add(common)
   const worktrees = gitOutput(['worktree', 'list', '--porcelain', '-z'])
-  if (!worktrees.endsWith('\0'))
+  if (!worktrees.endsWith('\0\0'))
     throw diagnostic('invalid worktree discovery', 'preflight')
-  const paths = worktrees
-    .split('\0')
-    .filter((field) => field.startsWith('worktree '))
-    .map((field) => field.slice('worktree '.length))
+  const paths = []
+  for (const record of worktrees.slice(0, -2).split('\0\0')) {
+    const fields = record.split('\0')
+    const first = fields.shift()
+    if (!first?.startsWith('worktree ') || !isAbsolute(first.slice(9)))
+      throw diagnostic('invalid worktree record', 'preflight')
+    const seen = new Set()
+    for (const field of fields) {
+      const key = field.split(' ', 1)[0]
+      if (
+        seen.has(key) ||
+        !(
+          /^HEAD [0-9a-f]{40,64}$/.test(field) ||
+          /^branch refs\/[^\s]+$/.test(field) ||
+          /^(bare|detached)$/.test(field) ||
+          /^(locked|prunable)( .*)?$/.test(field)
+        )
+      )
+        throw diagnostic('invalid worktree field', 'preflight')
+      seen.add(key)
+    }
+    if (
+      seen.has('bare')
+        ? fields.length !== 1
+        : !seen.has('HEAD') || seen.has('branch') === seen.has('detached')
+    )
+      throw diagnostic('incomplete worktree record', 'preflight')
+    if (paths.includes(first.slice(9)))
+      throw diagnostic('duplicate worktree record', 'preflight')
+    paths.push(first.slice(9))
+  }
   if (
     !paths.length ||
     !paths.some((path) => path === realpathSync(REPOSITORY_ROOT))
@@ -1816,13 +1843,13 @@ export async function runDiagnostic(options) {
     // Phase: observe -----------------------------------------------------
     enterStage('observe')
     const volumeName = `${state.runName}-data`
+    state.resources.push({ kind: 'volume', name: volumeName })
     await dockerRun(
       docker,
       ['volume', 'create', ...state.labelArguments, volumeName],
       {},
       'observe',
     )
-    state.resources.push({ kind: 'volume', name: volumeName })
     const containerName = state.runName
     const containerArguments = buildContainerArguments({
       name: containerName,
@@ -1841,8 +1868,8 @@ export async function runDiagnostic(options) {
       configContainerPath: discovered.configPath,
     })
     assertContainerIsolation(containerArguments)
-    await dockerRun(docker, containerArguments, {}, 'observe')
     state.resources.push({ kind: 'container', name: containerName })
+    await dockerRun(docker, containerArguments, {}, 'observe')
     await dockerRun(docker, ['start', containerName], {}, 'observe')
 
     const startedAt = clock.now()

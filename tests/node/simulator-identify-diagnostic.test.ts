@@ -735,7 +735,7 @@ function runOptions(
   docker: FakeDocker,
   overrides: Partial<RunOptions> = {},
 ): RunOptions {
-  const ledger = createLedger()
+  const ledger = overrides.ledgerDir ?? createLedger()
   const { clock, sleep } = createClock()
   return {
     docker,
@@ -814,6 +814,7 @@ test('the programmatic entry point refuses an unpinned image or an extended wind
       () =>
         diagnostic.runDiagnostic(
           runOptions(docker, {
+            ledgerDir: ledger,
             observationMs: diagnostic.READINESS_BUDGET_MS + 1,
           }),
         ),
@@ -827,7 +828,6 @@ test('the programmatic entry point refuses an unpinned image or an extended wind
     )
   } finally {
     cleanupLedger(ledger)
-    cleanupLedger(runOptions(docker).ledgerDir as string)
   }
 })
 
@@ -2224,13 +2224,20 @@ test('Git discovery failure refuses ledger preflight before creation', () => {
 case "$DISCOVERY_FAILURE:$3" in
   common:rev-parse|worktrees:worktree) exit 1 ;;
   empty:worktree) exit 0 ;;
+  corrupt:worktree) \"$ACTUAL_GIT\" \"$@\"; printf 'HEAD deadbeef\\0\\0'; exit 0 ;;
   malformed:worktree) printf 'worktree relative-path\\n'; exit 0 ;;
 esac
 exec "$ACTUAL_GIT" "$@"
 `,
       { mode: 0o700 },
     )
-    for (const mode of ['common', 'worktrees', 'empty', 'malformed']) {
+    for (const mode of [
+      'common',
+      'worktrees',
+      'empty',
+      'malformed',
+      'corrupt',
+    ]) {
       const ledger = join(dir, mode, 'ledger')
       const source = `import assert from 'node:assert/strict';
         import { existsSync } from 'node:fs';
@@ -2257,3 +2264,35 @@ exec "$ACTUAL_GIT" "$@"
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+for (const creation of ['inspection', 'volume', 'container']) {
+  test(`reconciles ${creation} creation after a lost successful response`, async () => {
+    const docker = createFakeDocker()
+    const original = docker.run.bind(docker)
+    let attemptedName = ''
+    docker.run = async (args, options) => {
+      const result = await original(args, options)
+      const name = args[args.indexOf('--name') + 1] ?? ''
+      const matches =
+        creation === 'volume'
+          ? args[0] === 'volume' && args[1] === 'create'
+          : args[0] === 'create' &&
+            name.endsWith('-inspect') === (creation === 'inspection')
+      if (matches) {
+        attemptedName = creation === 'volume' ? (args.at(-1) ?? '') : name
+        return { status: null, stdout: '', stderr: '', timedOut: true }
+      }
+      return result
+    }
+    const options = runOptions(docker)
+    try {
+      await assert.rejects(diagnostic.runDiagnostic(options), /timed out/)
+      assert.ok(attemptedName)
+      assert.ok(
+        removalCalls(docker).some((args) => args.at(-1) === attemptedName),
+      )
+    } finally {
+      cleanupLedger(options.ledgerDir as string)
+    }
+  })
+}

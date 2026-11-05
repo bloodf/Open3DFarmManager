@@ -6,6 +6,18 @@ export default defineNuxtConfig({
   runtimeConfig: {
     auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
     connectorInventory: { enabled: false, databaseUrl: '' },
+    connectorPairing: {
+      enabled: false,
+      origin: '',
+      databaseUrl: '',
+      proofDatabaseUrl: '',
+      revocationDatabaseUrl: '',
+      audience: '',
+      issuer: '',
+      signingKeyId: '',
+      signingKeyPath: '',
+      tokenTtlSeconds: '',
+    },
     public: { flags: { farmView: false } },
   },
   typescript: { strict: true },

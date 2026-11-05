@@ -6,6 +6,65 @@ import {
 } from '../../packages/connector/src/webrtc/signalling-client-channel.ts'
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+for (const phase of ['open', 'frame'] as const) {
+  test(`disposal waits for pending ${phase} work after observed socket close`, async () => {
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let handlers: Parameters<SocketPort['bind']>[0] | undefined
+    const channel = new SignallingClientChannel({
+      onOpen: () => (phase === 'open' ? held : undefined),
+      onFrame: async () => {
+        if (phase === 'frame') await held
+      },
+      onTerminal: () => {},
+    })
+    channel.connect(() => ({
+      isOpen: () => true,
+      bufferedBytes: () => 0,
+      send: () => {},
+      bind: (value) => {
+        handlers = value
+        return () => {}
+      },
+      close: () => {},
+      waitClosed: async () => {},
+    }))
+    try {
+      await tick()
+      assert.ok(handlers)
+      handlers.open()
+      if (phase === 'frame') {
+        handlers.message(
+          JSON.stringify({
+            v: 1,
+            t: 'retry',
+            phase: 'inbox',
+            retry_after_ms: 1,
+          }),
+        )
+        // Overload must not erase the still-running callback's settlement.
+        for (let i = 0; i < 5; i++) handlers.message('x')
+      }
+      await tick()
+      let disposed = false
+      const result = channel.dispose(1000).then(() => {
+        disposed = true
+      })
+      await tick()
+      assert.equal(disposed, false)
+      release()
+      await result
+      assert.equal(disposed, true)
+    } finally {
+      release()
+      channel.close()
+    }
+  })
+}
+
 async function fixture(
   onFrame: ConstructorParameters<
     typeof SignallingClientChannel

@@ -52,6 +52,8 @@ export class SignallingClientChannel {
   #closed: Promise<void>
   #resolveClosed: () => void = () => {}
   #factorySettlement: Promise<void> = Promise.resolve()
+  #openSettlement: Promise<void> = Promise.resolve()
+  #receiveWork = new Set<Promise<void>>()
   #ports = new Set<SocketPort>()
   #closeRequested = new WeakSet<SocketPort>()
   #closeFailed = false
@@ -200,14 +202,20 @@ export class SignallingClientChannel {
           open: () => {
             if (this.#opened || !this.current()) return
             this.#opened = true
-            void Promise.resolve()
+            this.#openSettlement = Promise.resolve()
               .then(() => {
                 if (this.current()) return this.#options.onOpen()
               })
               .catch(() => this.close('open-failed'))
           },
           message: (raw) => {
-            if (!this.#terminal) void this.#queue.receive(raw)
+            if (!this.#terminal) {
+              const work = this.#queue.receive(raw)
+              this.#receiveWork.add(work)
+              void work
+                .finally(() => this.#receiveWork.delete(work))
+                .catch(() => {})
+            }
           },
           error: () => this.close('socket-error'),
           close: () => this.close('socket-closed'),
@@ -244,6 +252,8 @@ export class SignallingClientChannel {
                 throw Error('Socket close observation unavailable')
               await port.waitClosed()
             }
+            await this.#openSettlement
+            await Promise.all(this.#receiveWork)
           })(),
           new Promise<never>((_, reject) => {
             timer = setTimeout(

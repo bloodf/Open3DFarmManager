@@ -627,3 +627,27 @@ test(
     }
   },
 )
+
+test('a repeated proofs-ready callback terminates the original context', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.proofsReady()
+  assert.equal(f.client.state.aborted, true)
+  assert.equal(await f.client.pause(), 'rejected')
+  assert.equal(f.phases.length, 0)
+  await f.client.settled
+})
+
+test('failed admission cannot restart on a later nonce', async (t) => {
+  const f = await clientFixture(t)
+  f.proofsReady()
+  f.setRefusePhase(true)
+  f.client.phase(f.nonceFrame())
+  await waitFor(() => f.client.state.aborted)
+  await f.client.settled
+  const count = f.phases.length
+  f.setRefusePhase(false)
+  f.client.phase(f.nonceFrame())
+  assert.equal(await f.client.pause(), 'rejected')
+  assert.equal(f.phases.length, count)
+})

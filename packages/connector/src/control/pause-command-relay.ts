@@ -323,8 +323,8 @@ export function createPauseCommandRelay(
       }),
     )
     if (state !== 'sent') {
-      // The browser will time out with an unknown outcome. The relay only knows
-      // that the frame did not leave through the transport.
+      // This counts unconfirmed handoffs, not proof that no frame was sent.
+      // The browser will time out with an unknown outcome.
       unsentResults++
     }
   }
@@ -408,6 +408,17 @@ export function createPauseCommandRelay(
         ok: false,
         reason: 'unknown-peer',
       })
+    // Validate bounded wire encodings before retaining either half.
+    try {
+      if (input.capabilityWire !== undefined)
+        decodePauseCapability(input.capabilityWire)
+      if (input.admissionProofWire !== undefined)
+        decodePauseAdmissionProof(input.admissionProofWire)
+    } catch {
+      lastReason = 'invalid-proof'
+      closePeer(peer.transportId)
+      return Promise.resolve({ ok: false, reason: 'invalid-proof' })
+    }
     if (input.capabilityWire !== undefined) {
       if (
         peer.capabilityWire !== undefined &&

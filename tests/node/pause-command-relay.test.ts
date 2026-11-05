@@ -1070,3 +1070,19 @@ test('the real control transport carries the two admission frames, the command a
   f.relay.close()
   await f.relay.settled
 })
+
+for (const field of ['capabilityWire', 'admissionProofWire'] as const) {
+  test(`oversized partial ${field} is rejected before retention`, async (t) => {
+    const f = await relayFixture(t)
+    assert.equal(f.open(), true)
+    const result = await f.relay.admitPeer({
+      transportId: f.transportId,
+      [field]: 'x'.repeat(8193),
+    })
+    assert.deepEqual(result, { ok: false, reason: 'invalid-proof' })
+    assert.equal(f.relay.diagnostics().peers, 0)
+    assert.equal(f.relay.diagnostics().admitted, 0)
+    f.relay.close()
+    await f.relay.settled
+  })
+}

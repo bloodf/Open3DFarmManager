@@ -456,6 +456,10 @@ export function createPauseCommandClient(
   return Object.freeze({
     proofsReady(ready: PauseProofsReady): void {
       if (aborted) return
+      if (binding !== undefined) {
+        abort()
+        return
+      }
       // The scope is snapshotted once and never read again.
       binding = Object.freeze({
         ...ready.binding,
@@ -488,7 +492,7 @@ export function createPauseCommandClient(
       )
       void work.catch(() => {
         // A failed admission never reaches the transport and never retries.
-        if (admission === work) admission = undefined
+        abort()
       })
     },
     data(frame: Readonly<PauseDataFrame>): void {

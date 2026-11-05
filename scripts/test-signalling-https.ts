@@ -29,6 +29,11 @@ import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
 import {
+  ARTIFACT_HEAD,
+  assertArtifactSeal,
+  assertSplitTrees,
+} from '../tests/helpers/signalling-https-split-pin.ts'
+import {
   Receipt,
   outputSnapshot,
   createFixtureReceipt,
@@ -105,7 +110,11 @@ async function shaFile(path: string) {
     .update(await readFile(path))
     .digest('hex')
 }
-async function verifyReceipt(layer: string, receipt: z.infer<typeof Receipt>) {
+async function verifyReceipt(
+  layer: string,
+  receipt: z.infer<typeof Receipt>,
+  expectedFixture?: { head: string; sourceSha256: string },
+) {
   const source = await sourceSnapshot(),
     output = await outputSnapshot(join(layer, 'output'))
   const configSha256 = await shaFile(join(layer, 'nuxt.config.ts'))
@@ -119,11 +128,20 @@ async function verifyReceipt(layer: string, receipt: z.infer<typeof Receipt>) {
   )
     throw new Error('Built output file manifest mismatch')
   const { entries: _entries, ...summary } = output
-  if (
+  if (expectedFixture) {
+    if (
+      receipt.head !== ARTIFACT_HEAD ||
+      JSON.stringify(source) !== JSON.stringify(expectedFixture)
+    )
+      throw new Error('Split source pin mismatch')
+    assertSplitTrees(checkout, ARTIFACT_HEAD, expectedFixture.head)
+    assertArtifactSeal({ configSha256, ...summary }, receipt)
+  } else if (
     JSON.stringify({ ...source, configSha256, ...summary }) !==
     JSON.stringify(receipt)
-  )
+  ) {
     throw new Error('Built output or source manifest mismatch')
+  }
 }
 const mode = process.argv[2]
 if (process.versions.bun || !process.versions.node.startsWith('24.'))
@@ -246,7 +264,13 @@ if (mode === '--prepare-layer') {
       await readFile(join(layer, 'fixture-build-receipt.json'), 'utf8'),
     ),
   )
-  await verifyReceipt(layer, receipt)
+  const requestedFixtureHead = process.env.SIGNALLING_HTTPS_SPLIT_FIXTURE_HEAD
+  const fixtureSource = requestedFixtureHead
+    ? await sourceSnapshot()
+    : undefined
+  if (fixtureSource && fixtureSource.head !== requestedFixtureHead)
+    throw new Error('Fixture head mismatch')
+  await verifyReceipt(layer, receipt, fixtureSource)
   const head = receipt.head
   const entry = join(layer, 'output/server/index.mjs')
   const actualHash = await shaFile(entry)
@@ -388,7 +412,7 @@ if (mode === '--prepare-layer') {
 
   try {
     await note(
-      `HEAD ${head}; isolated built entry SHA256 ${actualHash}; fixture port ${port}`,
+      `Artifact HEAD ${head}; fixture HEAD ${fixtureSource?.head ?? head}; fixture source SHA256 ${fixtureSource?.sourceSha256 ?? receipt.sourceSha256}; isolated built entry SHA256 ${actualHash}; fixture port ${port}`,
     )
     const actor = (
       await sql`SELECT current_database() AS db,current_user AS actor`
@@ -633,7 +657,7 @@ if (mode === '--prepare-layer') {
       }
     }
     await cleanup('source and artifact manifest', () =>
-      verifyReceipt(layer, receipt),
+      verifyReceipt(layer, receipt, fixtureSource),
     )
     await cleanup('acceptance process group', () => stop(child, true))
     await cleanup('Nitro process', () => stop(app, false))

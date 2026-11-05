@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import type {
+  FixtureIdentityHandles,
+  SignallingFixtureExtension,
+} from './signalling-https-fixture-contract.ts'
 import { randomBytes } from 'node:crypto'
 import { connect as tlsConnect } from 'node:tls'
 
@@ -343,6 +347,10 @@ export async function runSignallingHttpsAcceptance(input: {
   owner: string
   admin: string
   password: string
+  caPath?: string
+  extension?: SignallingFixtureExtension
+  signal?: AbortSignal
+  disconnectSignalling?: () => Promise<void>
 }) {
   const parsedOrigin = new URL(input.origin)
   if (
@@ -353,21 +361,25 @@ export async function runSignallingHttpsAcceptance(input: {
     throw new Error('Fixture requires canonical HTTPS loopback')
   const port = Number(parsedOrigin.port),
     audience = 'open3dfarmmanager:signalling'
-  console.error('[fixture-stage] raw-negative-upgrades')
-  await testRawUpgradeRejection({ port, ca: input.ca, origin: input.origin })
-  console.error('[fixture-stage] health-after-negatives')
-  const health = await fetch(input.origin + '/healthz', {
-    signal: AbortSignal.timeout(5000),
-  })
-  if (!health.ok)
-    throw new Error('Nitro listener unavailable after rejected upgrades')
-  console.error('[fixture-stage] integrated-connector-handshake')
-  await actualConnectorHandshake(input.origin)
-  await controlBounds(input.origin, input.ca)
+  if (!input.extension) {
+    console.error('[fixture-stage] raw-negative-upgrades')
+    await testRawUpgradeRejection({ port, ca: input.ca, origin: input.origin })
+    console.error('[fixture-stage] health-after-negatives')
+    const health = await fetch(input.origin + '/healthz', {
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!health.ok)
+      throw new Error('Nitro listener unavailable after rejected upgrades')
+    console.error('[fixture-stage] integrated-connector-handshake')
+    await actualConnectorHandshake(input.origin)
+    await controlBounds(input.origin, input.ca)
+  }
   console.error('[fixture-stage] chromium-launch')
   const browser = await chromium.launch({ headless: true })
   const sockets: FixturePeer[] = []
+  let identities: FixtureIdentityHandles | undefined
   try {
+    // The synthetic browser fixture trusts its private test certificate; the native child validates the supplied CA.
     const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true })
     const adminContext = await browser.newContext({ ignoreHTTPSErrors: true })
     const owner = await ownerContext.newPage(),
@@ -376,23 +388,58 @@ export async function runSignallingHttpsAcceptance(input: {
     await browserLogin(owner, input.origin, input.owner, input.password)
     console.error('[fixture-stage] admin-login')
     await browserLogin(admin, input.origin, input.admin, input.password)
+    const extensionInput =
+      input.extension && input.caPath && input.disconnectSignalling
+        ? {
+            origin: input.origin,
+            audience,
+            caPath: input.caPath,
+            ownerPage: owner,
+            ownerContext,
+            adminPage: admin,
+            accountId: await owner.evaluate(async () => {
+              const response = await fetch('/api/auth/me')
+              if (!response.ok) throw new Error('Fixture account lookup denied')
+              const data: unknown = await response.json()
+              if (
+                !data ||
+                typeof data !== 'object' ||
+                !('accountId' in data) ||
+                typeof data.accountId !== 'string'
+              )
+                throw new Error('Invalid fixture account')
+              return data.accountId
+            }),
+            farmId: input.farmId,
+            signal: input.signal ?? AbortSignal.timeout(180000),
+          }
+        : undefined
+    if (input.extension && !extensionInput)
+      throw new Error('Incomplete extension fixture')
+    if (input.extension && extensionInput)
+      identities = await input.extension.identityHandles(extensionInput)
+    if (input.extension && !identities)
+      throw new Error('Fixture identity handles unavailable')
     console.error('[fixture-stage] browser-registration')
-    const keyPair = await crypto.subtle.generateKey(
-      { name: 'ECDSA', namedCurve: 'P-256' },
-      false,
-      ['sign', 'verify'],
-    )
-    const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+    const keyPair = identities
+      ? undefined
+      : await crypto.subtle.generateKey(
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          false,
+          ['sign', 'verify'],
+        )
+    const jwk = identities
+      ? identities.browser.publicJwk
+      : await crypto.subtle.exportKey('jwk', keyPair!.publicKey)
     const challenge = BrowserDeviceHttpChallengeResponse.parse(
       await pagePost(owner, '/api/browser-devices/challenges', {
         farm_id: input.farmId,
         public_key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
       }),
     ).challenge
-    const signature = await signBrowserDeviceProof(
-      challenge,
-      keyPair.privateKey,
-    )
+    const signature = identities
+      ? await identities.browser.signEnrollment(challenge)
+      : await signBrowserDeviceProof(challenge, keyPair!.privateKey)
     BrowserDeviceHttpMutationResponse.parse(
       await pagePost(owner, '/api/browser-devices/proofs', {
         challenge_id: challenge.challenge_id,
@@ -407,12 +454,13 @@ export async function runSignallingHttpsAcceptance(input: {
       }),
     )
     console.error('[fixture-stage] connector-pairing')
-    const identity = new ConnectorIdentity(
-      generateKeyPairSync('ed25519').privateKey,
-    )
+    const identity = identities
+      ? undefined
+      : new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
+    const connector = identities?.connector ?? identity!
     const started = PairingStartResponse.parse(
       await machinePost(input.origin, '/api/connector-pairing/start', {
-        public_key_spki: identity.publicKeySpki,
+        public_key_spki: connector.publicKeySpki,
         platform: 'linux',
         version: '0.0.1',
       }),
@@ -425,17 +473,23 @@ export async function runSignallingHttpsAcceptance(input: {
     await machinePost(input.origin, '/api/connector-pairing/proof', {
       device_code: started.device_code,
       challenge: pairing,
-      signature: identity.signPairingProof({
-        challenge: pairing,
-        expectedOrigin: input.origin,
-        expectedAudience: audience,
-        now: Date.now(),
-      }),
+      signature: identities
+        ? await identities.connector.signPairing(
+            pairing,
+            input.origin,
+            audience,
+          )
+        : identity!.signPairingProof({
+            challenge: pairing,
+            expectedOrigin: input.origin,
+            expectedAudience: audience,
+            now: Date.now(),
+          }),
     })
     await pagePost(owner, '/api/connector-pairing/approve', {
       user_code: started.user_code,
       farm_id: input.farmId,
-      expected_fingerprint: identity.fingerprint,
+      expected_fingerprint: connector.fingerprint,
     })
     const claim = PairingPollResponse.parse(
       await machinePost(input.origin, '/api/connector-pairing/claim', {
@@ -444,6 +498,71 @@ export async function runSignallingHttpsAcceptance(input: {
     )
     if (claim.status !== 'approved' || claim.farm_id !== input.farmId)
       throw new Error('Synthetic pairing did not complete')
+    if (
+      input.extension &&
+      extensionInput &&
+      identities &&
+      input.disconnectSignalling
+    ) {
+      const printerKey = 'synthetic-readonly-printer'
+      const path = `/api/farms/${input.farmId}/printers`
+      const registration = await pagePost(owner, path, {
+        agentId: claim.agent_id,
+        printerKey,
+        confirmedLocalConfiguration: true,
+      })
+      if (
+        !registration ||
+        typeof registration !== 'object' ||
+        !('assignmentId' in registration) ||
+        typeof registration.assignmentId !== 'string'
+      )
+        throw new Error('Fixture printer registration failed')
+      const assignmentId = registration.assignmentId
+      const listing: unknown = await owner.evaluate(async (target) => {
+        const response = await fetch(target)
+        if (!response.ok) throw new Error('Fixture printer readback failed')
+        return await response.json()
+      }, path)
+      if (
+        !listing ||
+        typeof listing !== 'object' ||
+        !('printers' in listing) ||
+        !Array.isArray(listing.printers) ||
+        !listing.printers.some(
+          (row: unknown) =>
+            row &&
+            typeof row === 'object' &&
+            'assignmentId' in row &&
+            row.assignmentId === assignmentId &&
+            'agentId' in row &&
+            row.agentId === claim.agent_id &&
+            'printerKey' in row &&
+            row.printerKey === printerKey,
+        )
+      )
+        throw new Error('Fixture printer readback mismatch')
+      await input.extension.afterProvisioned({
+        ...extensionInput,
+        identities,
+        claim,
+        browserKeyId: challenge.key_id,
+        browserThumbprint: challenge.thumbprint,
+        assignmentRefs: [{ assignmentId, agentId: claim.agent_id, printerKey }],
+        disconnectSignalling: input.disconnectSignalling,
+        revokeConnector: async () => {
+          await pagePost(
+            owner,
+            `/api/farms/${input.farmId}/connectors/${claim.agent_id}/revoke`,
+            { expected_fingerprint: connector.fingerprint },
+          )
+        },
+      })
+      return {
+        realWrapperFixtureCompleted: true,
+        syntheticPrinterObservation: true,
+      }
+    }
     const payload: unknown = JSON.parse(
       Buffer.from(claim.device_token.split('.')[1] ?? '', 'base64url').toString(
         'utf8',
@@ -480,7 +599,7 @@ export async function runSignallingHttpsAcceptance(input: {
     machine.send({
       v: 1,
       t: 'connector.inbox-proof',
-      signature: identity.signCredentialProof({
+      signature: identity!.signCredentialProof({
         challenge: inbox.challenge,
         token: claim.device_token,
         expectedOrigin: input.origin,
@@ -544,7 +663,7 @@ export async function runSignallingHttpsAcceptance(input: {
       t: 'browser.proof',
       signature: await signBrowserTransportProof(
         browserChallenge.challenge,
-        keyPair.privateKey,
+        keyPair!.privateKey,
       ),
     })
     console.error('[fixture-stage] browser-proof-sent')
@@ -569,7 +688,7 @@ export async function runSignallingHttpsAcceptance(input: {
     machine.send({
       v: 1,
       t: 'connector.context-proof',
-      signature: identity.signCredentialProof({
+      signature: identity!.signCredentialProof({
         challenge: next.challenge,
         token: claim.device_token,
         expectedOrigin: input.origin,
@@ -613,6 +732,10 @@ export async function runSignallingHttpsAcceptance(input: {
     }
   } finally {
     for (const peer of sockets) peer.close()
-    await browser.close()
+    try {
+      await identities?.dispose()
+    } finally {
+      await browser.close()
+    }
   }
 }

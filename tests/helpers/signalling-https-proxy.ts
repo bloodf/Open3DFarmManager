@@ -39,6 +39,33 @@ export function signallingFixtureUpgradeWire(input: {
   return wire
 }
 
+export async function disconnectFixtureUpgrades(upgrades: ReadonlySet<Duplex>) {
+  const active = [...upgrades]
+  if (!active.length) throw new Error('No active fixture upgrades')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Promise.all(
+        active.map(
+          (socket) =>
+            new Promise<void>((resolve) => {
+              socket.once('close', resolve)
+              socket.destroy()
+            }),
+        ),
+      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Fixture upgrade close timeout')),
+          3000,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Fixture-only TLS forwarder. Nitro owns the upstream upgrade listener. */
 export function signallingHttpsProxy(input: {
   key: Buffer
@@ -79,11 +106,14 @@ export function signallingHttpsProxy(input: {
     },
   )
   const clients = new Set<Duplex>()
+  const upgrades = new Set<Duplex>()
   server.on('connection', (socket) => {
     clients.add(socket)
     socket.once('close', () => clients.delete(socket))
   })
   server.on('upgrade', (req, socket, head) => {
+    upgrades.add(socket)
+    socket.once('close', () => upgrades.delete(socket))
     if (
       !req.url ||
       req.rawHeaders.length > 128 ||
@@ -120,6 +150,7 @@ export function signallingHttpsProxy(input: {
   })
   return {
     server,
+    disconnectUpgrades: () => disconnectFixtureUpgrades(upgrades),
     async close() {
       if (!server.listening) return
       const stopped = new Promise<void>((resolve, reject) =>

@@ -28,6 +28,12 @@ import postgres from 'postgres'
 import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
+import { assertSignallingCatalog } from '../tests/helpers/signalling-https-catalog.ts'
+import {
+  requestProxyDisconnect,
+  serveProxyDisconnect,
+} from '../tests/helpers/signalling-https-disconnect-ipc.ts'
+import type { SignallingFixtureExtension } from '../tests/helpers/signalling-https-fixture-contract.ts'
 import {
   ARTIFACT_HEAD,
   assertArtifactSeal,
@@ -44,10 +50,7 @@ import {
   waitFixtureClose,
 } from '../tests/helpers/signalling-https-process.ts'
 import { runSignallingHttpsAcceptance } from '../tests/helpers/signalling-https-acceptance.ts'
-import {
-  loadMigrationCatalog,
-  validateMigrationHistory,
-} from './db/migrations.ts'
+import { loadMigrationCatalog } from './db/migrations.ts'
 
 const checkout = await realpath(new URL('..', import.meta.url))
 function outside(path: string) {
@@ -226,24 +229,44 @@ if (mode === '--prepare-layer') {
   } = process.env
   if (!origin || !ca || !farmId || !owner || !admin || !password)
     throw new Error('Missing disposable acceptance fixture')
-  console.log(
-    JSON.stringify(
-      await runSignallingHttpsAcceptance({
-        origin,
-        ca: await readFile(ca),
-        farmId,
-        owner,
-        admin,
-        password,
-      }),
-    ),
-  )
+  const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
+  const extensionPath = '../tests/helpers/signalling-authenticated-rtc.ts'
+  const extensionModule:
+    | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
+    | undefined = rtcFixture ? await import(extensionPath) : undefined
+  try {
+    console.log(
+      JSON.stringify(
+        await runSignallingHttpsAcceptance({
+          origin,
+          ca: await readFile(ca),
+          farmId,
+          owner,
+          admin,
+          password,
+          ...(extensionModule
+            ? {
+                extension:
+                  extensionModule.createAuthenticatedRtcFixtureExtension(),
+                caPath: ca,
+                disconnectSignalling: requestProxyDisconnect,
+              }
+            : {}),
+        }),
+      ),
+    )
+  } finally {
+    if (rtcFixture && process.connected) process.disconnect()
+  }
 } else if (mode === '--run') {
   if (
     process.argv.length !== 3 ||
     process.env.SIGNALLING_HTTPS_DISPOSABLE !== 'yes'
   )
     throw new Error('Explicit disposable fixture required')
+  const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
+  if (process.env.SIGNALLING_HTTPS_RTC_FIXTURE && !rtcFixture)
+    throw new Error('Invalid RTC fixture opt-in')
   const portText = process.env.SIGNALLING_HTTPS_PORT,
     port = Number(portText)
   const requestedLedger = process.env.SIGNALLING_HTTPS_LEDGER
@@ -305,6 +328,7 @@ if (mode === '--prepare-layer') {
     'farm_connector_revoker',
     'farm_signalling_reader',
     'farm_connector_credential_acceptor',
+    ...(rtcFixture ? ['farm_printer_ownership'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -420,14 +444,16 @@ if (mode === '--prepare-layer') {
     assert.equal(actor?.db, 'fixture')
     assert.equal(actor?.actor, 'fixture')
     const catalog = await loadMigrationCatalog()
-    if (
-      catalog.length !== 17 ||
-      catalog.at(-1)?.id !== '0017_signalling_authorization'
-    )
-      throw new Error('Exact 17-migration catalog required')
     const history =
       await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-    assert.equal(validateMigrationHistory(catalog, [...history]), 17)
+    const appliedCount = assertSignallingCatalog(
+      catalog,
+      [...history],
+      rtcFixture,
+    )
+    await note(
+      `Official catalog and journal count ${appliedCount}; fixture source HEAD ${fixtureSource?.head ?? head}`,
+    )
     await note(`Verified official journal ${JSON.stringify(history)}`)
     checkInterrupt()
     stage = 'restricted fixture setup'
@@ -533,6 +559,12 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_ORIGIN: origin,
         NUXT_AUTH_SESSION_SECRET: sessionSecret,
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
+        ...(rtcFixture
+          ? {
+              NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
+              NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
+            }
+          : {}),
         NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
         NUXT_CONNECTOR_INVENTORY_DATABASE_URL: dbUrl(1),
         NUXT_BROWSER_DEVICES_ENABLED: 'true',
@@ -598,7 +630,9 @@ if (mode === '--prepare-layer') {
       ],
       {
         detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: rtcFixture
+          ? ['ignore', 'pipe', 'pipe', 'ipc']
+          : ['ignore', 'pipe', 'pipe'],
         env: {
           ...env,
           NODE_EXTRA_CA_CERTS: cert,
@@ -611,10 +645,13 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_OWNER: owner,
           SIGNALLING_HTTPS_ADMIN: admin,
           SIGNALLING_HTTPS_PASSWORD: password,
+          ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
         },
       },
     )
     childClose = observeFixtureClose(child)
+    if (rtcFixture)
+      serveProxyDisconnect(child, () => proxy!.disconnectUpgrades())
     child.stdout?.on('data', (chunk: Buffer) =>
       captured.append('acceptance.stdout', chunk),
     )

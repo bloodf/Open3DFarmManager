@@ -1,0 +1,7 @@
+# Printer assignment HTTP acceptance preparation
+
+The disposable fixture is opt-in and uses the real built application, HTTPS forwarder, PostgreSQL, and Chromium login. It requires Node 24, a caller-owned disposable loopback fixture with the complete official migrations through 0017, and a built app with the printer assignment runtime configured. The runner checks every migration ID and the journal checksums before seeding. It creates dedicated runtime logins and records their names and cleanup in the caller's private ledger.
+
+The prepared browser scenario exercises explicit local-configuration attestation, owner and admin registration, viewer and operator restrictions, farm and Connector scope, exact opaque Unicode keys, pagination, and stale revocation against a replacement. It also checks current membership downgrade, membership revocation, and session revocation. The database role helper calls the production policy with a valid dedicated login and rejects extra inherited or non-inherited membership, direct table privilege, and schema ownership.
+
+**Status: preparation only.** The HTTP, database role, and browser scenarios have not run against a built app or PostgreSQL. The source worktree must first receive the actual 0017 migration and the runner must be checked against the integrated source. Controlled HTTP lock-wait and post-lock session expiry remain to be implemented and verified; sequential revocation does not establish race behavior. No simulator or printer is involved.

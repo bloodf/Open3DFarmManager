@@ -123,6 +123,9 @@ async function connectorChild(
         WS_NO_BUFFER_UTIL: '1',
         WS_NO_UTF_8_VALIDATE: '1',
         SIGNALLING_AUTHENTICATED_RTC_CHILD: 'yes',
+        ...(process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes'
+          ? { SIGNALLING_HTTPS_RTC_RUNTIME: 'yes' }
+          : {}),
       },
     },
   )
@@ -236,7 +239,7 @@ async function connectorChild(
       try {
         await waitFixtureClose(
           closed.then((receipt) => [receipt]),
-          3000,
+          process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes' ? 8000 : 3000,
         )
       } catch {
         forced = true
@@ -504,6 +507,7 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           }
           return value
         }
+        const runtimeStartedAt = performance.now()
         const started = await session.connector.request({
           kind: 'start',
           origin: input.origin,
@@ -512,6 +516,94 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           assignmentRefs: refs.map((ref) => ({ ...ref })),
         })
         assert.equal(started.kind, 'started')
+        if (process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes') {
+          const observeRuntime = async () => {
+            const reply = await session.connector.request({ kind: 'observe' })
+            if (reply.kind !== 'runtime-observation')
+              throw Error('Runtime observation missing')
+            assert.equal(reply.failure, false)
+            assert.equal(reply.settled, false)
+            lastNative = reply
+            return reply
+          }
+          const runtime = await until(
+            observeRuntime,
+            (value) => value.queued > 0 && value.requests > 0,
+            input.signal,
+            5000,
+          )
+          await session.note(
+            'runtime-fixture-resources:' +
+              JSON.stringify({
+                directory: runtime.directory,
+                port: runtime.port,
+              }),
+          )
+          await session.actor.evaluate((actor, scope) => actor.start(scope), {
+            browserKeyId: input.browserKeyId,
+            agentId: input.claim.agent_id,
+            assignmentRefs: refs,
+          })
+          const first = await until(
+            observeBrowser,
+            (value) =>
+              value.verifiedAdmission &&
+              value.acceptedStatusCount > 0 &&
+              !value.terminal,
+            input.signal,
+            7500,
+          )
+          assert.deepEqual(first.diagnostics, {
+            certificateMatched: true,
+            sentProofs: 1,
+            receivedProofs: 1,
+            terminal: false,
+            readOnly: true,
+          })
+          const initial = StatusMessage.parse(first.latestStatus)
+          assert.equal(initial.printers.length, 1)
+          assert.equal(initial.printers[0]?.printerKey, refs[0]?.printerKey)
+          assert.equal(initial.printers[0]?.state, 'printing')
+          assert.equal(initial.printers[0]?.progress, 0.25)
+          await session.connector.request({ kind: 'advance-runtime' })
+          const changed = await until(
+            observeBrowser,
+            (value) =>
+              !value.terminal &&
+              value.latestStatus?.printers[0]?.progress === 0.75,
+            input.signal,
+            3000,
+          )
+          assert.ok(changed.acceptedStatusCount > first.acceptedStatusCount)
+          assert.ok(StatusMessage.parse(changed.latestStatus).seq > initial.seq)
+          const runtimeClosureWait =
+            session.closure === 'revocation' ? 7500 : 3000
+          assert.ok(
+            performance.now() - runtimeStartedAt + runtimeClosureWait + 2500 <
+              28000,
+          )
+          await bounded(
+            session.closure === 'disconnect'
+              ? input.disconnectSignalling()
+              : input.revokeConnector(),
+            input.signal,
+            2000,
+          )
+          const closed = await until(
+            observeBrowser,
+            (value) => value.terminal && value.diagnostics?.terminal === true,
+            input.signal,
+            runtimeClosureWait,
+          )
+          await new Promise<void>((resolve) => setTimeout(resolve, 250))
+          assert.deepEqual(await observeBrowser(), closed)
+          assert.ok(performance.now() - runtimeStartedAt < 28000)
+          assert.ok((await observeRuntime()).queued >= 2)
+          await session.note(
+            `authenticated-runtime-moonraker-${session.closure}-status-transition-and-browser-close`,
+          )
+          return
+        }
         await until(
           observeConnector,
           (value) => value.inboxReady && !value.diagnostics.terminal,

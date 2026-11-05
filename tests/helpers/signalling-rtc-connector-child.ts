@@ -38,6 +38,7 @@ export const RtcFixtureCommand = z.discriminatedUnion('kind', [
     assignmentRefs: z.array(Assignment).length(1),
   }),
   z.strictObject({ kind: z.literal('observe') }),
+  z.strictObject({ kind: z.literal('advance-runtime') }),
   z.strictObject({ kind: z.literal('close') }),
 ])
 export const RtcFixtureDiagnostics = z.strictObject({
@@ -58,6 +59,15 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
     signature: PairingProofCompletion.shape.signature,
   }),
   z.strictObject({ kind: z.literal('started') }),
+  z.strictObject({
+    kind: z.literal('runtime-observation'),
+    requests: z.number().int().min(0).max(65),
+    queued: z.number().int().min(0).max(64),
+    failure: z.boolean(),
+    settled: z.boolean(),
+    directory: z.string().min(1).max(512),
+    port: z.number().int().min(0).max(65535),
+  }),
   z.strictObject({
     kind: z.literal('observation'),
     inboxReady: z.boolean(),
@@ -105,9 +115,15 @@ async function run() {
   const { ConnectorIdentity } = await import(
     '../../packages/connector/src/identity/store.ts'
   )
-  const identity = new ConnectorIdentity(
-    generateKeyPairSync('ed25519').privateKey,
-  )
+  const runtimeFixture =
+    process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes'
+      ? await (
+          await import('./signalling-runtime-moonraker.ts')
+        ).createRuntimeMoonrakerFixture()
+      : undefined
+  const identity =
+    runtimeFixture?.identity ??
+    new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
   let client: AuthenticatedConnectorSignallingClient | undefined
   let sender: FarmStatusSender | undefined
   let paired = false,
@@ -134,8 +150,6 @@ async function run() {
       () => sender?.close('fixture-closed'),
       () => client?.close('fixture-closed'),
       () => process.stdin.destroy(),
-      // Only this process owns the native module and peers.
-      () => native?.cleanup(),
     ]) {
       try {
         close()
@@ -143,6 +157,20 @@ async function run() {
         process.exitCode = 1
       }
     }
+    void (async () => {
+      try {
+        await runtimeFixture?.close()
+      } catch {
+        process.exitCode = 1
+      } finally {
+        // Only this process owns the native module and peers.
+        try {
+          native?.cleanup()
+        } catch {
+          process.exitCode = 1
+        }
+      }
+    })()
     pending = Buffer.alloc(0)
   }
   const lifetime = setTimeout(stop, 30_000)
@@ -213,6 +241,11 @@ async function run() {
         await import('../../packages/connector/src/webrtc/readonly-peer.ts')
         if (closing) return
         started = true
+        if (runtimeFixture) {
+          await runtimeFixture.start(input)
+          output({ kind: 'started' })
+          return
+        }
         client = new AuthenticatedConnectorSignallingClient(
           {
             url:
@@ -277,6 +310,10 @@ async function run() {
         return
       }
       case 'observe': {
+        if (runtimeFixture) {
+          output(runtimeFixture.observe())
+          return
+        }
         if (!client) throw Error('Client unavailable')
         const diagnostics = client.diagnostics()
         const snapshot = client.snapshot()
@@ -300,6 +337,12 @@ async function run() {
         })
         return
       }
+      case 'advance-runtime':
+        if (!runtimeFixture || !started)
+          throw Error('Runtime fixture not started')
+        runtimeFixture.advance()
+        output(runtimeFixture.observe())
+        return
       case 'close':
         stop()
         output({ kind: 'closed' })

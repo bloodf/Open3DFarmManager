@@ -132,6 +132,33 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
   assert.deepEqual(parseRtcFixtureCommand('{"kind":"observe"}'), {
     kind: 'observe',
   })
+  assert.deepEqual(parseRtcFixtureCommand('{"kind":"advance-runtime"}'), {
+    kind: 'advance-runtime',
+  })
+  assert.equal(
+    RtcFixtureReply.safeParse({
+      kind: 'runtime-observation',
+      requests: 1,
+      queued: 1,
+      failure: false,
+      settled: false,
+      directory: '/tmp/owned-runtime-fixture',
+      port: 12345,
+    }).success,
+    true,
+  )
+  assert.equal(
+    RtcFixtureReply.safeParse({
+      kind: 'runtime-observation',
+      requests: 1000,
+      queued: 1,
+      failure: false,
+      settled: false,
+      directory: '/tmp/owned-runtime-fixture',
+      port: 12345,
+    }).success,
+    false,
+  )
   for (const command of [
     { ...start, claim: { status: 'pending', retry_after_s: 5 } },
     { ...start, assignmentRefs: [] },

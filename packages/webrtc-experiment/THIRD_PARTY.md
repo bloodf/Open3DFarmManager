@@ -2,11 +2,11 @@
 
 Reviewed 2026-11-04 against the root `bun.lock` and the installed packages. The experiment uses native Chromium WebRTC and Web Crypto through Playwright. Both peers run in the browser; the synthetic Connector is not a Node.js or Bun WebRTC implementation. This does not establish Connector runtime, hardware, camera, or production network compatibility.
 
-| Package | Version | Declared license | Declared runtime dependencies |
-| --- | --- | --- | --- |
-| `@playwright/test` | 1.64.1 | Apache-2.0 | `playwright@1.64.1` |
-| `playwright` | 1.64.1 | Apache-2.0 | `playwright-core@1.64.1` |
-| `playwright-core` | 1.64.1 | Apache-2.0 | None |
+| Package            | Version | Declared license | Declared runtime dependencies |
+| ------------------ | ------- | ---------------- | ----------------------------- |
+| `@playwright/test` | 1.64.1  | Apache-2.0       | `playwright@1.64.1`           |
+| `playwright`       | 1.64.1  | Apache-2.0       | `playwright-core@1.64.1`      |
+| `playwright-core`  | 1.64.1  | Apache-2.0       | None                          |
 
 These are existing development dependencies, not new WebRTC libraries. The complete license and notice files shipped by each installed package are retained in `notices/`; the two packages that ship `ThirdPartyNotices.txt` retain those files too. Preserve applicable Apache-2.0 license, attribution and notice materials when redistributing these packages or their covered portions. These copies do not constitute an audit of all root dependencies or of a resulting distribution.
 

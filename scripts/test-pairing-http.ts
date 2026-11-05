@@ -19,10 +19,8 @@ import { PostgresCredentials } from '../apps/farm/server/storage/postgres-creden
 import { isAbsolute, join } from 'node:path'
 import postgres from 'postgres'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
-import {
-  loadMigrationCatalog,
-  validateMigrationHistory,
-} from './db/migrations.ts'
+import { loadMigrationCatalog } from './db/migrations.ts'
+import { validatePairingHttpCatalog } from './db/pairing-http-catalog.ts'
 
 const ledger = process.env.PAIRING_HTTP_TEST_LEDGER
 const portText = process.env.PAIRING_HTTP_SYNTHETIC_TEST_PORT
@@ -87,30 +85,9 @@ try {
   assert.equal(actor?.db, 'fixture')
   assert.equal(actor?.actor, 'fixture')
   const catalog = await loadMigrationCatalog()
-  assert.deepEqual(
-    catalog.map((entry) => entry.id),
-    [
-      '0001_connector_enrollments',
-      '0002_telemetry_events',
-      '0003_runtime_capabilities',
-      '0004_account_sessions',
-      '0005_password_auth',
-      '0006_farm_memberships',
-      '0007_pairing_requests',
-      '0008_pairing_proofs',
-      '0009_pairing_proof_gates',
-      '0010_connector_credentials',
-      '0011_connector_revocations',
-      '0012_connector_inventory',
-      '0013_browser_device_registry',
-      '0014_connector_credential_proofs',
-      '0015_printer_ownership',
-      '0016_telemetry_operation_proofs',
-    ],
-  )
   const history =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...history]), catalog.length)
+  validatePairingHttpCatalog(catalog, [...history])
   for (let index = 0; index < roles.length; index++) {
     const role = roles[index]!,
       capability = capabilities[index]!,

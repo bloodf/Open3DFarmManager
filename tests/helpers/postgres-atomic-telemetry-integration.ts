@@ -231,13 +231,13 @@ export async function testPostgresAtomicTelemetry(
     (
       await admin`SELECT generation::float8,observed_at::float8,status,proof_version,operation_method,operation_path,body_sha256,body_bytes,credential_expired_at::float8 FROM farm.connector_credential_proofs WHERE jti=${jti}::uuid`
     )[0]
-  async function waiting(fragment: string, application = prefix) {
+  async function waiting(fragment: string, application = prefix, count = 1) {
     const end = performance.now() + 750
     while (true) {
       if (
         (
           await admin`SELECT 1 FROM pg_stat_activity WHERE application_name=${application} AND wait_event_type='Lock' AND query LIKE ${'%' + fragment + '%'}`
-        ).length
+        ).length >= count
       )
         return
       assert.ok(
@@ -254,11 +254,29 @@ export async function testPostgresAtomicTelemetry(
     const pending = await challenge(actual, body)
     const proof = signed(actual, body, pending)
     now += 1000
-    const result = await Promise.all([
+    const gate = await admin.reserve()
+    await gate`BEGIN`
+    await gate`SELECT jti FROM farm.connector_credential_proofs WHERE jti=${actual.credential.jti}::uuid FOR UPDATE`
+    const contenders = [
       service().commitTelemetryWithProof(proof, body),
       service().commitTelemetryWithProof(proof, body),
-    ])
+    ]
+    try {
+      await waiting('FROM farm.connector_credential_proofs', prefix, 2)
+    } finally {
+      await gate`ROLLBACK`
+      gate.release()
+    }
+    const result = await Promise.all(contenders)
     assert.equal(result.filter(committed).length, 1)
+    assert.deepEqual(
+      result.find((decision) => !decision.ok),
+      {
+        ok: false,
+        reason: 'busy',
+        retryAfterMs: 1000,
+      },
+    )
     const success = result.find(committed)
     assert.ok(success?.ok && success.kind === 'telemetry-committed')
     assert.deepEqual(
@@ -267,6 +285,11 @@ export async function testPostgresAtomicTelemetry(
     )
     assert.equal(await count(actual), 2)
     assert.equal((await slot(actual.credential.jti))?.status, 'consumed')
+    now += 1000
+    assert.deepEqual(await service().commitTelemetryWithProof(proof, body), {
+      ok: false,
+      reason: 'denied',
+    })
     now += 1000
     const fresh = await challenge(actual, body)
     assert.equal(fresh.generation, pending.generation + 1)

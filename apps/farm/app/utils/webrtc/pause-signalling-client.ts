@@ -283,24 +283,30 @@ export class PauseBrowserSignallingClient {
             this.close('phase-callback')
           }
         },
-        onData: (value) => {
-          if (!this.#channel.current() || !this.#proofsReady) return
-          if (value.transport_id !== this.#transport) {
-            this.close('data-scope')
-            return
-          }
-          if (value.t !== 'control.result') {
-            this.close('data-direction')
-            return
-          }
-          try {
-            pauseSynchronous(() =>
-              this.#options.onData?.(Object.freeze(structuredClone(value))),
-            )
-          } catch {
-            this.close('data-callback')
-          }
-        },
+        ...(this.#options.onData
+          ? {
+              onData: (value: Readonly<PauseDataFrame>) => {
+                if (!this.#channel.current() || !this.#proofsReady) return
+                if (value.transport_id !== this.#transport) {
+                  this.close('data-scope')
+                  return
+                }
+                if (value.t !== 'control.result') {
+                  this.close('data-direction')
+                  return
+                }
+                try {
+                  pauseSynchronous(() =>
+                    this.#options.onData?.(
+                      Object.freeze(structuredClone(value)),
+                    ),
+                  )
+                } catch {
+                  this.close('data-callback')
+                }
+              },
+            }
+          : {}),
         onTerminal: (reason) => this.close(reason),
       })
       this.#peer = peer
@@ -388,6 +394,7 @@ export class PauseBrowserSignallingClient {
   }
   /** Browser only command. The client never emits a result. */
   sendCommand(command: PauseCommandMessage): boolean {
+    if (!this.#options.onData) return false
     if (!this.#channel.current() || !this.#proofsReady) return false
     if (command.t !== 'control.command') {
       this.close('invalid-data-send')

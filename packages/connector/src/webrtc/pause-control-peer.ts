@@ -99,9 +99,13 @@ export class PauseConnectorPeer {
       onPhase: (frame) => {
         if (this.current()) return this.#options.onPhase?.(frame)
       },
-      onData: (frame) => {
-        if (this.current()) return this.#options.onData?.(frame)
-      },
+      ...(this.#options.onData
+        ? {
+            onData: (frame: Readonly<PauseDataFrame>) => {
+              if (this.current()) return this.#options.onData?.(frame)
+            },
+          }
+        : {}),
       onTerminal: (reason) => this.close(reason),
     })
     this.closed = new Promise((resolve) => {
@@ -313,6 +317,7 @@ export class PauseConnectorPeer {
   }
   /** Connector only result. The peer never emits a command. */
   sendResult(result: PauseResultMessage): boolean {
+    if (!this.#options.onData) return false
     return this.current() && this.#session.sendResult(result)
   }
   close(reason = 'closed'): void {

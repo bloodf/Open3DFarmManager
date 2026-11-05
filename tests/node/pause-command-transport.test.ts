@@ -357,7 +357,7 @@ test(
   { timeout: 5000 },
   async () => {
     const f = await fixture()
-    const p = await pair(f)
+    const p = await pair(f, { browserOnData: () => {} })
     try {
       const command = await buildCommand(f)
       assert.equal(
@@ -497,6 +497,7 @@ test(
     const f = await fixture()
     const commands: PauseDataFrame[] = []
     const p = await pair(f, {
+      browserOnData: () => {},
       connectorOnData: (frame) => {
         commands.push(frame)
       },
@@ -686,6 +687,7 @@ test(
   async () => {
     const f = await fixture()
     const p = await pair(f, {
+      browserOnData: () => {},
       connectorOnData: () => {
         throw Error('handler failure')
       },
@@ -716,6 +718,7 @@ test(
   async () => {
     const f = await fixture()
     const p = await pair(f, {
+      browserOnData: () => {},
       connectorOnData: (() => Promise.resolve()) as unknown as () => void,
     })
     try {
@@ -972,6 +975,31 @@ test(
     } finally {
       browser.close()
       connector.close()
+    }
+  },
+)
+
+test(
+  'a proof-ready metadata-only session refuses to send commands',
+  { timeout: 5000 },
+  async () => {
+    const f = await fixture()
+    const p = await pair(f)
+    try {
+      const command = await buildCommand(f)
+      assert.equal(
+        p.browser.sendCommand({ t: 'control.command', wire: command.wire }),
+        false,
+      )
+      assert.equal(p.browser.diagnostics().terminal, true)
+      assert.equal(
+        frameTypes(p.browserFrames).includes('control.command'),
+        false,
+      )
+    } finally {
+      p.browser.close()
+      p.connector.close()
+      await bounded(Promise.all([p.browser.closed, p.connector.closed]))
     }
   },
 )

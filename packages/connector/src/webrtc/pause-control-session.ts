@@ -482,6 +482,7 @@ export class PauseControlSession {
   }
   /** Browser only. One command per control peer, after the admission sequence. */
   sendCommand(command: PauseCommandMessage): boolean {
+    if (!this.#options.onData) return this.invalidSend()
     if (this.#options.role !== 'browser') return this.invalidSend()
     if (!this.current() || !this.#notified) return false
     try {
@@ -503,6 +504,7 @@ export class PauseControlSession {
   }
   /** Connector only. One result per received command, correlated by command id. */
   sendResult(result: PauseResultMessage): boolean {
+    if (!this.#options.onData) return this.invalidSend()
     if (this.#options.role !== 'connector') return this.invalidSend()
     if (!this.current() || !this.#notified) return false
     try {

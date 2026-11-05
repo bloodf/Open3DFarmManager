@@ -409,16 +409,22 @@ export class PauseConnectorSignallingClient {
             throw Error('Unexpected pause metadata')
           pauseSynchronous(() => this.#options.onPhase?.(Object.freeze(frame)))
         },
-        onData: (value) => {
-          if (!this.#channel.current() || !this.#ready) return
-          const frame = PauseChannelFrame.parse(value)
-          if (
-            frame.t !== 'control.command' ||
-            frame.transport_id !== this.#contextId
-          )
-            throw Error('Unexpected pause data')
-          pauseSynchronous(() => this.#options.onData?.(Object.freeze(frame)))
-        },
+        ...(this.#options.onData
+          ? {
+              onData: (value: Readonly<PauseDataFrame>) => {
+                if (!this.#channel.current() || !this.#ready) return
+                const frame = PauseChannelFrame.parse(value)
+                if (
+                  frame.t !== 'control.command' ||
+                  frame.transport_id !== this.#contextId
+                )
+                  throw Error('Unexpected pause data')
+                pauseSynchronous(() =>
+                  this.#options.onData?.(Object.freeze(frame)),
+                )
+              },
+            }
+          : {}),
         onTerminal: (reason) => this.#channel.close(reason),
       }
       const factory =
@@ -548,6 +554,7 @@ export class PauseConnectorSignallingClient {
   }
   /** Connector only result. The client never emits a command. */
   sendResult(result: PauseResultMessage): boolean {
+    if (!this.#options.onData) return false
     if (!this.#ready || !this.#channel.current()) return false
     if (result.t !== 'control.result') {
       this.#channel.close('invalid-data-send')

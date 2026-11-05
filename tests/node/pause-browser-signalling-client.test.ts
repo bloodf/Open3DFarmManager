@@ -118,6 +118,7 @@ async function fixture(
       ready++
     },
     peerFactory: (options) => {
+      assert.equal(options.onData, undefined)
       peerOptions = options
       if (extra.reentrant) options.onTerminal?.('construction-terminal')
       return {

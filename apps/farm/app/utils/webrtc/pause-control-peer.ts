@@ -134,9 +134,13 @@ export class PauseBrowserPeer {
       onPhase: (frame) => {
         if (this.current()) return this.#options.onPhase?.(frame)
       },
-      onData: (frame) => {
-        if (this.current()) return this.#options.onData?.(frame)
-      },
+      ...(this.#options.onData
+        ? {
+            onData: (frame: Readonly<PauseDataFrame>) => {
+              if (this.current()) return this.#options.onData?.(frame)
+            },
+          }
+        : {}),
       onTerminal: (reason) => this.close(reason),
     })
     const weak = new WeakRef(this)
@@ -349,6 +353,7 @@ export class PauseBrowserPeer {
   }
   /** Browser only command. The peer never emits a result. */
   sendCommand(command: PauseCommandMessage): boolean {
+    if (!this.#options.onData) return false
     return this.current() && this.#session.sendCommand(command)
   }
   close(reason = 'closed'): void {

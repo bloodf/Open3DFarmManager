@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "effect": "4.1.2",
+    "node-datachannel": "0.33.5",
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
     "zod": "4.6.7"

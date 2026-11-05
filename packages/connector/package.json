@@ -15,6 +15,6 @@
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
     "zod": "4.6.7",
-    "werift": "0.26.0"
+    "node-datachannel": "0.33.5"
   }
 }

@@ -154,6 +154,7 @@ export async function testPrinterOwnershipRaces(
   // A competing uncommitted key holds the unique index while registration holds
   // its enrollment lock. Roll it back only after enrollment revocation waits.
   const competitor = await agent()
+  const competingOwner = await actor()
   let prepared!: () => void
   let unblock!: () => void
   const ready = new Promise<void>((resolve) => {
@@ -165,7 +166,7 @@ export async function testPrinterOwnershipRaces(
   const rollback = new Error('fixture rollback')
   const blocker = admin
     .begin(async (tx) => {
-      await tx`INSERT INTO farm.printer_assignments (id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${randomUUID()}::uuid,${farmId}::uuid,${competitor}::uuid,'registration-first',${now},${user})`
+      await tx`INSERT INTO farm.printer_assignments (id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${randomUUID()}::uuid,${farmId}::uuid,${competitor}::uuid,'registration-first',${now},${competingOwner})`
       prepared()
       await gate
       throw rollback

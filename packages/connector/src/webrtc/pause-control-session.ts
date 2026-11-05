@@ -24,6 +24,7 @@ import {
   MAX_PAUSE_CHANNEL_WIRE_BYTES,
   MAX_PAUSE_CHANNEL_SEQUENCE,
 } from '../../../farm-protocol/src/pause-channel.ts'
+import { decodeCommandV2 } from '../../../farm-protocol/src/command-v2.ts'
 import { BoundedReceive } from './bounded-receive.ts'
 import type { EffectiveRtcDescriptions } from './rtc-descriptions.ts'
 
@@ -55,6 +56,27 @@ type StripEnvelope<T> = T extends PausePhaseFrame
   ? Omit<T, 'v' | 'transport_id' | 'seq'>
   : never
 export type PausePhaseMessage = StripEnvelope<PausePhaseFrame>
+/** Bounded command/result channel. Transport delivery only, never authority. */
+export type PauseDataFrame = Extract<
+  PauseChannelFrame,
+  { t: 'control.command' | 'control.result' }
+>
+type StripDataEnvelope<T> = T extends PauseDataFrame
+  ? Omit<T, 'v' | 'transport_id' | 'seq'>
+  : never
+export type PauseDataMessage = StripDataEnvelope<PauseDataFrame>
+export type PauseCommandMessage = Extract<
+  PauseDataMessage,
+  { t: 'control.command' }
+>
+export type PauseResultMessage = Extract<
+  PauseDataMessage,
+  { t: 'control.result' }
+>
+export type PauseCommandOutcome = Extract<
+  PauseDataFrame,
+  { t: 'control.result' }
+>['outcome']
 export type PauseProofsReady = Readonly<{
   binding: Readonly<
     Omit<ControlSessionBinding, 'browser_public_key'> & {
@@ -76,6 +98,8 @@ export type PauseSessionOptions = Identity & {
   send(wire: string): void
   onProofsReady?(value: PauseProofsReady): void
   onPhase?(frame: Readonly<PausePhaseFrame>): void
+  /** Optional command/result handler. Absent means the data channel is disabled. */
+  onData?(frame: Readonly<PauseDataFrame>): void
   onTerminal?(reason: string): void
 }
 export function pausePrivateKey(key: CryptoKey): void {
@@ -160,6 +184,11 @@ export class PauseControlSession {
   #receiveSeq = 0
   #sentPhases = new Set<string>()
   #receivedPhases = new Set<string>()
+  #commandSent = false
+  #commandReceived = false
+  #resultSent = false
+  #resultReceived = false
+  #commandId: string | undefined
   #lastMono: number
   #lastWall: number
   #authDeadline: number
@@ -383,6 +412,10 @@ export class PauseControlSession {
         this.current()
         return
       }
+      if (frame.t === 'control.command' || frame.t === 'control.result') {
+        this.data(frame)
+        return
+      }
       if (!this.#notified || !this.phaseAllowed(frame, false))
         throw Error('Unexpected pause phase')
       this.#receivedPhases.add(frame.t)
@@ -411,6 +444,95 @@ export class PauseControlSession {
       )
     )
   }
+  /** Bounded command/result channel. A delivered frame is never authority. */
+  private data(frame: PauseDataFrame): void {
+    if (!this.#notified) throw Error('Unexpected pause data')
+    if (!this.#options.onData) throw Error('Pause data disabled')
+    if (frame.t === 'control.command') {
+      if (this.#options.role !== 'connector')
+        throw Error('Unexpected pause data')
+      if (this.#commandReceived) throw Error('Duplicate pause command')
+      if (
+        !this.#receivedPhases.has('control.capability') ||
+        !this.#receivedPhases.has('control.admission-proof')
+      )
+        throw Error('Unexpected pause data')
+      const command = decodeCommandV2(frame.wire)
+      // Reserve before the callback so a reentrant call cannot open a second command.
+      this.#commandReceived = true
+      this.#commandId = command.cmd_id
+      this.publish(frame)
+      return
+    }
+    if (this.#options.role !== 'browser') throw Error('Unexpected pause data')
+    if (this.#resultReceived) throw Error('Duplicate pause result')
+    if (!this.#commandSent || !this.#commandId)
+      throw Error('Unexpected pause result')
+    if (frame.command_id !== this.#commandId)
+      throw Error('Mismatched pause result')
+    this.#resultReceived = true
+    this.publish(frame)
+  }
+  private publish(frame: PauseDataFrame): void {
+    try {
+      pauseSynchronous(() => this.#options.onData?.(Object.freeze(frame)))
+    } catch {
+      this.close('data-callback')
+    }
+  }
+  /** Browser only. One command per control peer, after the admission sequence. */
+  sendCommand(command: PauseCommandMessage): boolean {
+    if (!this.#options.onData) return this.invalidSend()
+    if (this.#options.role !== 'browser') return this.invalidSend()
+    if (!this.current() || !this.#notified) return false
+    try {
+      if (this.#commandSent) throw Error('Duplicate pause command')
+      if (
+        !this.#sentPhases.has('control.capability') ||
+        !this.#sentPhases.has('control.admission-proof')
+      )
+        throw Error('Unexpected pause command')
+      const decoded = decodeCommandV2(command.wire)
+      // Reserve before the send so a reentrant call cannot send a second command.
+      this.#commandSent = true
+      this.#commandId = decoded.cmd_id
+      return this.send(command)
+    } catch {
+      this.close('invalid-send')
+      return false
+    }
+  }
+  /** Connector only. One result per received command, correlated by command id. */
+  sendResult(result: PauseResultMessage): boolean {
+    if (!this.#options.onData) return this.invalidSend()
+    if (this.#options.role !== 'connector') return this.invalidSend()
+    if (!this.current() || !this.#notified) return false
+    try {
+      if (this.#resultSent) throw Error('Duplicate pause result')
+      if (!this.#commandReceived || !this.#commandId)
+        throw Error('Unexpected pause result')
+      if (result.command_id !== this.#commandId)
+        throw Error('Mismatched pause result')
+      PauseChannelFrame.parse({
+        v: 1,
+        t: 'control.result',
+        transport_id: this.#options.expected.transportId,
+        seq: 0,
+        command_id: result.command_id,
+        outcome: result.outcome,
+      })
+      // Reserve before the send so a reentrant call cannot send a second result.
+      this.#resultSent = true
+      return this.send(result)
+    } catch {
+      this.close('invalid-send')
+      return false
+    }
+  }
+  private invalidSend(): boolean {
+    this.close('invalid-send')
+    return false
+  }
   sendPhase(input: PausePhaseMessage): boolean {
     if (!this.current() || !this.#notified) return false
     try {
@@ -429,7 +551,10 @@ export class PauseControlSession {
     }
   }
   private send(
-    input: Readonly<{ t: string; wire?: string }> | PausePhaseMessage,
+    input:
+      | Readonly<{ t: string; wire?: string }>
+      | PausePhaseMessage
+      | PauseDataMessage,
   ): boolean {
     if (
       !this.current() ||

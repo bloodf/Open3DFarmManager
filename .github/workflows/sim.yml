@@ -16,6 +16,6 @@ jobs:
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
       - run: bun run sim:smoke
       - if: failure()
-        run: docker compose -f infra/sim/docker-compose.yml logs --tail 150
+        run: node scripts/klipper-diagnostics.mjs
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down

@@ -30,6 +30,7 @@
         "postgres": "3.4.9",
         "vue": "3.5.44",
         "vue-router": "5.4.0",
+        "zod": "4.6.7",
       },
       "devDependencies": {
         "vue-tsc": "3.3.14",
@@ -71,6 +72,10 @@
         "effect": "4.1.2",
         "zod": "4.6.7",
       },
+    },
+    "packages/webrtc-experiment": {
+      "name": "@open3dfarmmanager/webrtc-experiment",
+      "version": "0.0.1",
     },
   },
   "packages": {
@@ -251,6 +256,8 @@
     "@open3dfarmmanager/sim-cams": ["@open3dfarmmanager/sim-cams@workspace:packages/sim-cams"],
 
     "@open3dfarmmanager/sim-tools": ["@open3dfarmmanager/sim-tools@workspace:packages/sim-tools"],
+
+    "@open3dfarmmanager/webrtc-experiment": ["@open3dfarmmanager/webrtc-experiment@workspace:packages/webrtc-experiment"],
 
     "@oxc-project/types": ["@oxc-project/types@0.156.0", "", {}, "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw=="],
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const pending = ref(false)
 const errorMessage = ref('')
+const errorSummary = ref<HTMLElement | null>(null)
 
 async function logout() {
   if (pending.value) return
@@ -19,6 +20,10 @@ async function logout() {
       'Não foi possível sair agora. Tente novamente. Sua sessão pode continuar ativa.'
   } finally {
     pending.value = false
+    if (errorMessage.value) {
+      await nextTick()
+      errorSummary.value?.focus()
+    }
   }
 }
 </script>
@@ -34,7 +39,7 @@ async function logout() {
       :aria-busy="pending"
       @submit.prevent="logout"
     >
-      <p role="alert">{{ errorMessage }}</p>
+      <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
       <button type="submit" :disabled="pending">
         {{ pending ? 'Saindo…' : 'Sair da conta' }}
       </button>

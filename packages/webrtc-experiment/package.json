@@ -1,0 +1,11 @@
+{
+  "name": "@open3dfarmmanager/webrtc-experiment",
+  "private": true,
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "bun test ./transport.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

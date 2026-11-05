@@ -169,6 +169,19 @@ export async function login(
   }
   return { accountId: snapshot.accountId }
 }
+/** Reads only the sealed host-only cookie. Callers must authorize the ID in their transaction. */
+export async function sealedSessionRecordId(
+  event: AuthEvent,
+  runtime: Pick<AuthRuntime, 'cookie'>,
+): Promise<string> {
+  authResponse(event)
+  if (!getCookie(event, SESSION_COOKIE_NAME)) throw unauthorized()
+  const cookie = await useSession(event, runtime.cookie)
+  const id = cookie.data.sessionRecordId
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id))
+    throw unauthorized()
+  return id
+}
 export async function authenticatedSession(
   event: AuthEvent,
   runtime: AuthRuntime,

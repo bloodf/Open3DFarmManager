@@ -27,6 +27,12 @@ for (let iteration = 0; iteration < 2; iteration++)
   })
 const baseline = await read(200)
 assert.equal(baseline.items.length, 6)
+const ids = baseline.items.map((item) => item.id)
+assert.deepEqual(
+  ids,
+  [...ids].sort((a, b) => a - b),
+)
+assert.equal(new Set(ids).size, 6)
 assert.deepEqual(
   baseline.items.map((item) => item.remaining_weight),
   [1000, 900, 800, 700, 600, 500],
@@ -73,5 +79,6 @@ console.log(
     spools: 6,
     pageLimits: [1, 2, 4, 200],
     archivedIncluded: true,
+    ascendingIdsAcrossPages: true,
   }),
 )

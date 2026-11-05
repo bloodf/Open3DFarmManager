@@ -19,3 +19,24 @@ Two prior setup attempts using an internal Docker network yielded no published p
 Cleanup removed each run's container, volume, network and newly pulled unused image. Label-filtered inventories were empty afterward; pre-existing resources were preserved. Local evidence retains the setup failures, successful result, inspection restrictions and application log outside the public repository.
 
 `bun run check:all` also passed: lint, typecheck, 173 Bun tests, 92 Node tests and Connector/Nuxt builds. The separate real API compatibility run is not counted as a new unit test. No GitHub Actions run, publication, production access or full simulator acceptance is implied.
+
+## Ordered-reader follow-up
+
+The 2026-11-04 follow-up reviewed the exact image source revision
+[`ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b`](https://github.com/Donkie/Spoolman/blob/ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b/spoolman/api/v1/spool.py).
+The endpoint accepts `allow_archived`, `sort`, `limit` and `offset`; its
+[database query](https://github.com/Donkie/Spoolman/blob/ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b/spoolman/database/spool.py)
+applies ordering before offset and limit. The label is provenance, not a
+reproducible-build attestation.
+
+The updated reader passed against a fresh container of the same pinned amd64
+image, with the same UID, capability, CPU, memory and PID limits. The synthetic
+fixture was seeded twice, returned six distinct ascending IDs and the expected
+weights and relationships across page limits 1, 2, 4 and 200, and retained the
+archived spool. The reader's requests remain GET-only; setup deliberately writes
+synthetic records. Concurrent inventory changes can still produce omissions;
+this is not a snapshot guarantee.
+
+The task-owned container, volume, bridge and newly pulled image were removed.
+Bounded result, service and resource evidence remain outside the repository.
+The bridge permitted outbound traffic and the loopback port was synthetic only.

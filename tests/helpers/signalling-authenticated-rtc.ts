@@ -543,6 +543,8 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 port: runtime.port,
                 packagedPid: runtime.packagedPid,
                 packagedSha256: runtime.packagedSha256,
+                packagedManifestSha256: runtime.packagedManifestSha256,
+                packagedFiles: runtime.packagedFiles,
               }),
           )
           await session.actor.evaluate((actor, scope) => actor.start(scope), {

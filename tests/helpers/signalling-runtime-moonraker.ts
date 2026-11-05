@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
@@ -53,6 +53,8 @@ export async function createRuntimeMoonrakerFixture() {
   let stopPackaged: (() => Promise<void>) | undefined
   let packagedPid = 0,
     packagedSha256: string | null = null
+  let packagedManifestSha256: string | null = null,
+    packagedFiles = 0
   function diagnostic(value: unknown) {
     const parsed = z
       .object({
@@ -238,6 +240,29 @@ export async function createRuntimeMoonrakerFixture() {
           '../../packages/connector/dist/cli.js',
           import.meta.url,
         )
+        const dist = new URL('.', entry)
+        const files = (await readdir(dist, { withFileTypes: true })).sort(
+          (a, b) => a.name.localeCompare(b.name, 'en'),
+        )
+        if (files.length > 64 || files.some((file) => !file.isFile()))
+          throw Error('Packaged file bound')
+        let totalBytes = 0
+        const manifest = []
+        for (const file of files) {
+          const bytes = await readFile(new URL(file.name, dist))
+          totalBytes += bytes.length
+          if (bytes.length > 2 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024)
+            throw Error('Packaged byte bound')
+          manifest.push({
+            name: file.name,
+            bytes: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          })
+        }
+        packagedFiles = manifest.length
+        packagedManifestSha256 = createHash('sha256')
+          .update(JSON.stringify(manifest))
+          .digest('hex')
         packagedSha256 = createHash('sha256')
           .update(await readFile(entry))
           .digest('hex')
@@ -365,6 +390,8 @@ export async function createRuntimeMoonrakerFixture() {
         terminalReason,
         packagedPid,
         packagedSha256,
+        packagedManifestSha256,
+        packagedFiles,
       }
     },
     close() {

@@ -1,17 +1,30 @@
-# Experimento local de transporte WebRTC
+# Experimentos locais de transporte WebRTC
 
-Este pacote privado MIT comprova um RTCDataChannel real e criptografado entre dois peers nativos do Chromium. Um peer representa o navegador e o outro representa um Connector sintético. Não executa o Connector de produção, não acessa impressoras e não contém despacho de comandos. O único dado aceito é o literal `fixture-idle`, com tipo `synthetic-status`.
+A prova original deste pacote privado MIT comprova um RTCDataChannel real e criptografado entre dois peers nativos do Chromium. Um peer representa o navegador e o outro representa um Connector sintético. Não executa o Connector de produção, não acessa impressoras e não contém despacho de comandos. O único dado aceito é o literal `fixture-idle`, com tipo `synthetic-status`.
 
-## Executar
+## Interoperabilidade real com o Connector
+
+A prova adicional em `interop.test.ts` conecta o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em processos Node e Bun reais com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
+
+```sh
+bun test packages/webrtc-experiment/session.test.ts
+node --test packages/webrtc-experiment/interop.test.ts
+```
+
+O receptor limita o payload bruto da aplicação a 32 KiB e oito frames pendentes, incluindo o ativo, com 2048 bytes UTF-8 por frame e 1024 frames admitidos por sessão. Diagnósticos têm tamanho fixo; sobrecarga e prazo encerram o peer inteiro. O prazo de oito segundos começa na construção, incluindo ofertas abandonadas, e a fixture tem vida total máxima de 30 segundos, sem conceder autorização de produção. Os testes cobrem filas antes do certificado, flood autenticado, expiração e zero provas nos dois sentidos quando o fingerprint SDP é adulterado. Os limites não abrangem alocações anteriores ao callback em SCTP, N-API ou no navegador.
+
+O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPOINT.md) descreve o backend nativo, a revisão de DTLS, o candidato descartado, limites da evidência e o contrato de integração pendente. Consulte também os avisos de dependências. O restante desta página descreve a prova original entre dois peers do Chromium, preservada como comparação.
+
+## Executar a prova original
 
 Na raiz, com as dependências de desenvolvimento já instaladas pelo lockfile e o Chromium correspondente ao Playwright disponível:
 
 ```sh
 bun run --cwd packages/webrtc-experiment typecheck
-bun run --cwd packages/webrtc-experiment test
+bun test packages/webrtc-experiment/transport.test.ts
 ```
 
-O teste usa o Playwright 1.64.1 do workspace e as APIs nativas WebRTC e Web Crypto. Não adiciona biblioteca de RTC, dependência de execução ou lockfile. Consulte [THIRD_PARTY.md](THIRD_PARTY.md) para licenças e avisos.
+O teste original usa o Playwright 1.64.1 do workspace e as APIs nativas WebRTC e Web Crypto. Não adiciona biblioteca de RTC, dependência de execução ou lockfile. Consulte [THIRD_PARTY.md](THIRD_PARTY.md) para licenças e avisos.
 
 Um único processo de navegador executa sete casos sequenciais. Cada caso cria dois peers e os fecha em `finally`. Um servidor HTTP temporário escuta somente em `127.0.0.1`, em porta escolhida pelo sistema, para servir a página e o módulo estáticos. Apenas `/` e `/fixture.js` aceitam GET; outros caminhos recebem 404 e outros métodos recebem 405. Esse servidor não recebe sinalização, status ou comandos. A sinalização do teste passa diretamente entre objetos locais em memória. Não há STUN, TURN, relay ou fallback HTTP de controle.
 

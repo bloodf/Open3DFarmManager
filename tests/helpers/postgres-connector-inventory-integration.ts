@@ -372,7 +372,7 @@ export async function testPostgresConnectorInventory(
         '/api/farms',
         '/api/farms/' + farms[1] + '/connectors',
       ]) {
-        const unavailable = await fetch(base + path, {
+        const unavailable: Response = await fetch(base + path, {
           headers: { cookie: thirdCookie },
         })
         assert.equal(unavailable.status, 503)

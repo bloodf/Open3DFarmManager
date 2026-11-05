@@ -36,6 +36,7 @@ test('lost acknowledgement retries identical event bytes with a fresh challenge'
     redirectFollowed = false
   let challenges = 0,
     commits = 0
+  let pendingBusy = true
   const connectionIds = new Set<string>()
   let origin = ''
   const store: Pick<
@@ -85,6 +86,10 @@ test('lost acknowledgement retries identical event bytes with a fresh challenge'
     async commitTelemetryWithProof(input, raw) {
       assert.ok(issued && raw instanceof Uint8Array)
       assert.deepEqual(Buffer.from(raw), Buffer.from(issued))
+      if (pendingBusy) {
+        pendingBusy = false
+        return { ok: false, reason: 'busy', retryAfterMs: 1 }
+      }
       commits++
       assert.ok(input && typeof input === 'object' && 'signature' in input)
       return {

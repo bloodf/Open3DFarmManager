@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import {
   parseBoundedJson,
   TelemetryBatch,
@@ -62,6 +63,7 @@ export function createAuthenticatedTelemetrySender(options: {
   return async (body, callerSignal) => {
     const controller = new AbortController()
     const signal = AbortSignal.any([callerSignal, controller.signal])
+    const deadlineAt = Date.now() + timeoutMs
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       if (signal.aborted) throw new Error()
@@ -77,7 +79,7 @@ export function createAuthenticatedTelemetrySender(options: {
       async function post(
         path: string,
         requestHeaders: Record<string, string>,
-      ): Promise<unknown> {
+      ): Promise<{ status: number; value: unknown }> {
         const response = await fetch(path, {
           method: 'POST',
           body: bytes,
@@ -88,7 +90,7 @@ export function createAuthenticatedTelemetrySender(options: {
           headers: requestHeaders,
         })
         if (
-          response.status !== 200 ||
+          ![200, 429].includes(response.status) ||
           !/^application\/json(?:\s*;|\s*$)/i.test(
             response.headers.get('content-type') ?? '',
           ) ||
@@ -113,7 +115,7 @@ export function createAuthenticatedTelemetrySender(options: {
             chunks.push(value)
           }
           if (signal.aborted) throw new Error()
-          return parseBoundedJson(
+          const value = parseBoundedJson(
             new TextDecoder('utf-8', { fatal: true }).decode(
               Buffer.concat(chunks),
             ),
@@ -124,12 +126,51 @@ export function createAuthenticatedTelemetrySender(options: {
               maxStringChars: 2048,
             },
           )
+          return { status: response.status, value }
         } finally {
           await reader.cancel().catch(() => {})
           reader.releaseLock()
         }
       }
-      const reply = await post(endpoint + '/challenge', headers)
+      async function requestWithRetry(
+        path: string,
+        requestHeaders: Record<string, string>,
+        expiresAt: number,
+      ): Promise<unknown> {
+        for (let attempt = 0; attempt < 8; attempt++) {
+          if (
+            signal.aborted ||
+            Date.now() >= expiresAt ||
+            Date.now() >= deadlineAt
+          )
+            throw new Error()
+          const response = await post(path, requestHeaders)
+          if (response.status === 200) return response.value
+          const value = response.value
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            Array.isArray(value) ||
+            Object.keys(value).sort().join(',') !== 'error,retryAfterMs' ||
+            !('error' in value) ||
+            typeof value.error !== 'string' ||
+            !('retryAfterMs' in value) ||
+            typeof value.retryAfterMs !== 'number' ||
+            !Number.isSafeInteger(value.retryAfterMs) ||
+            value.retryAfterMs < 1 ||
+            value.retryAfterMs > 60000 ||
+            Date.now() + value.retryAfterMs >= Math.min(expiresAt, deadlineAt)
+          )
+            throw new Error()
+          await delay(value.retryAfterMs, undefined, { signal })
+        }
+        throw new Error()
+      }
+      const reply = await requestWithRetry(
+        endpoint + '/challenge',
+        headers,
+        deadlineAt,
+      )
       if (
         !reply ||
         typeof reply !== 'object' ||
@@ -153,11 +194,15 @@ export function createAuthenticatedTelemetrySender(options: {
       const encoded = Buffer.from(JSON.stringify(challenge)).toString(
         'base64url',
       )
-      const result = await post(endpoint, {
-        ...headers,
-        'x-telemetry-challenge': encoded,
-        'x-telemetry-signature': signature,
-      })
+      const result = await requestWithRetry(
+        endpoint,
+        {
+          ...headers,
+          'x-telemetry-challenge': encoded,
+          'x-telemetry-signature': signature,
+        },
+        challenge.expires_at,
+      )
       if (
         !result ||
         typeof result !== 'object' ||

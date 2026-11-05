@@ -110,16 +110,22 @@ export function createTelemetryHttpHandler(store: Store, timeoutMs: number) {
           ? await store.issueTelemetryChallenge(input, body)
           : await store.commitTelemetryWithProof(input, body)
       if (!decision.ok) {
+        if (decision.reason === 'busy')
+          return {
+            status: 429,
+            body: {
+              error: 'Tente novamente.',
+              retryAfterMs: decision.retryAfterMs,
+            },
+          }
         const status =
-          decision.reason === 'busy'
-            ? 429
-            : decision.reason === 'storage-unavailable'
-              ? 503
-              : decision.reason === 'conflict'
-                ? 409
-                : decision.reason === 'invalid-input'
-                  ? 400
-                  : 403
+          decision.reason === 'storage-unavailable'
+            ? 503
+            : decision.reason === 'conflict'
+              ? 409
+              : decision.reason === 'invalid-input'
+                ? 400
+                : 403
         return {
           status,
           body: { error: 'Não foi possível processar a telemetria.' },

@@ -35,6 +35,10 @@ The first exact-artifact pause HTTPS/WSS/RTC attempt at `60a702b` completed
 login, enrollment and pairing but failed during Connector admission. Its owned
 processes, ports and roles were cleaned; the protected original database
 remained unchanged. No capability acceptance or printer command is claimed.
+A subsequent instrumented attempt at `2913588` passed actual WSS/control RTC,
+HTTP capability issuance and Connector verification. No printer command ran;
+the earlier failure remains unexplained. The exact scope is recorded in the
+[pause control checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
 Publication does not establish deployment or complete Phase 0 acceptance.
 Source, packaged artifacts, database fixtures and native diagnostics retain
 their distinct scopes.

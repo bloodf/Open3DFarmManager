@@ -37,12 +37,41 @@ The same source passed `bun run check:all` before these opt-in executions:
 supervisor tests, seven framing tests, type checks, formatting and builds.
 The five native cases are additional evidence, not included in those counts.
 
+## Integrated authority and transport
+
+A separate generated-application attempt passed at
+`2913588be3002c68c13bb9a03b3347d899dd1197`. The sealed application contained
+467 output files with manifest digest
+`019fcb33bdeb9aea636e738a000dd36dd517e1024220fd993b20561cf533dda3`.
+The complete process took 13.778 seconds under its 120-second outer guard.
+
+This fixture performed independent owner/admin HTTP login, approved a
+page-local nonextractable browser key, paired the Connector's own identity,
+and read back a current printer assignment from the real restricted database
+path. The actual browser and Node Connector used the maintained WSS clients
+and separate native control peers. Both endpoints required matching actual
+DTLS certificates and one sent/received proof each. The browser obtained the
+capability through the maintained HTTP issuer; the Connector accepted it
+through the maintained verifier. Commands remained disabled. The local
+printer mapping was synthetic and no Moonraker driver or printer was contacted.
+
+The browser fixture ignores HTTPS certificate errors; the Connector uses its
+private fixture CA with explicit verification. This does not prove production
+browser TLS. Original eight-second admission and thirty-second lifetime limits
+were unchanged. Cleanup independently confirmed all recorded processes absent,
+ports closed, temporary TLS files removed, role and migration baselines
+unchanged, and the protected original database byte-identical.
+
+The preceding attempt at `60a702b` failed during Connector admission without
+retaining its internal stage. Only bounded diagnostic collection changed
+before this successful attempt. Its cause remains unresolved; one passing
+attempt does not establish stability or close that historical failure.
+
 ## Remaining integration
 
-Signalling admission and issuer authority in this fixture are synthetic and
-trusted by construction. Current database authorization, real pause WSS
-admission, capability verification, durable command replay protection, the
-fixed Moonraker driver and a real isolated simulator pause must still be
-composed and validated together. No command was executed, and readonly peers
-were never upgraded to control peers. Native artifact provenance and resource
-limits retain their existing documented limitations.
+Durable command replay protection, the fixed Moonraker driver and a real
+isolated printing simulator must still be composed with this authority and
+transport path. Integrated rejection, revocation, outage and recovery cases
+remain pending. No command was executed, and readonly peers were never upgraded
+to control peers. Native artifact provenance and resource limits retain their
+existing documented limitations.

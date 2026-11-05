@@ -73,7 +73,11 @@ test('opted-in build stays capped when disabled; enabled startup prepares no aut
       enabled ? 'prepared' : 'disabled',
     )
     assert.deepEqual(target.websocket, {
-      serverOptions: { maxPayload: 12_288, perMessageDeflate: false },
+      serverOptions: {
+        maxPayload: 12_288,
+        perMessageDeflate: false,
+        autoPong: false,
+      },
     })
     assert.equal(Object.isFrozen(target.websocket), true)
     lifecycle.close()

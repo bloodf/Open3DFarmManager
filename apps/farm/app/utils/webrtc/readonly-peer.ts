@@ -27,6 +27,11 @@ export type FixtureOnlyVideoHooks = Readonly<{
   stop: () => void
 }>
 type Options = {
+  /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
+  authDeadline?: number | undefined
+  lifetimeDeadline?: number
+  onVerified?: () => void
+  onTerminal?: (reason: string) => void
   fixtureOnlyVideo?: FixtureOnlyVideoHooks
   privateKey: CryptoKey
   expectedAgentId: string
@@ -62,6 +67,19 @@ export class ReadonlyBrowserPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
+    const now = performance.now()
+    for (const cap of [options.authDeadline, options.lifetimeDeadline])
+      if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
+        throw Error('Expired owner deadline')
+    this.#authDeadline = Math.min(
+      this.#authDeadline,
+      options.authDeadline ?? Infinity,
+    )
+    this.#lifetimeDeadline = Math.min(
+      this.#lifetimeDeadline,
+      options.lifetimeDeadline ?? Infinity,
+    )
+
     this.#options = Object.freeze({
       ...options,
       ...(options.fixtureOnlyVideo
@@ -122,10 +140,13 @@ export class ReadonlyBrowserPeer {
       return binding
     })
     void this.#binding.catch(() => weak.deref()?.close('admission-rejected'))
-    this.#authTimer = setTimeout(() => this.close('auth-deadline'), 8000)
+    this.#authTimer = setTimeout(
+      () => this.close('auth-deadline'),
+      Math.max(0, this.#authDeadline - performance.now()),
+    )
     this.#lifetimeTimer = setTimeout(
       () => this.close('prototype-lifetime'),
-      30000,
+      Math.max(0, this.#lifetimeDeadline - performance.now()),
     )
     this.#peer.onconnectionstatechange = () => {
       if (
@@ -340,6 +361,7 @@ export class ReadonlyBrowserPeer {
       },
       onVerified: () => {
         clearTimeout(this.#authTimer)
+        if (this.current()) this.#options.onVerified?.()
         if (this.#options.fixtureOnlyVideo && this.current())
           this.#options.fixtureOnlyVideo.activate(
             Object.freeze({
@@ -381,18 +403,28 @@ export class ReadonlyBrowserPeer {
     if (this.#application) this.#application.onmessage = null
     this.#peer.onsignalingstatechange = null
     this.#peer.ondatachannel = null
-    this.#peer.onsignalingstatechange = () => {
-      if (this.#answer && this.#peer.signalingState !== 'stable')
-        this.close('signalling-replacement')
-    }
     this.#peer.onnegotiationneeded = null
     this.#peer.onconnectionstatechange = null
     this.#peer.onicegatheringstatechange = null
     this.#resolveGathered()
     this.#closeCount++
-    this.#proof?.close()
-    this.#application?.close()
-    this.#peer.close()
+    try {
+      this.#proof?.close()
+    } finally {
+      try {
+        this.#application?.close()
+      } finally {
+        try {
+          this.#peer.close()
+        } finally {
+          try {
+            this.#options.onTerminal?.(this.#terminal)
+          } catch {
+            this.#stage = 'terminal-notification-failed'
+          }
+        }
+      }
+    }
   }
   snapshot() {
     return {

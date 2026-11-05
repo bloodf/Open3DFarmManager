@@ -32,6 +32,11 @@ export type FixtureOnlyMediaHooks = Readonly<{
 }>
 
 type Options = {
+  /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
+  authDeadline?: number | undefined
+  lifetimeDeadline?: number
+  onVerified?: () => void
+  onTerminal?: (reason: string) => void
   fixtureOnlyMedia?: FixtureOnlyMediaHooks
   identity: ConnectorIdentity
   /** Trusted enrollment/runtime configuration, never the RTC binding's agent_id. */
@@ -73,6 +78,19 @@ export class ReadonlyConnectorPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
+    const now = performance.now()
+    for (const cap of [options.authDeadline, options.lifetimeDeadline])
+      if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
+        throw Error('Expired owner deadline')
+    this.#authDeadline = Math.min(
+      this.#authDeadline,
+      options.authDeadline ?? Infinity,
+    )
+    this.#lifetimeDeadline = Math.min(
+      this.#lifetimeDeadline,
+      options.lifetimeDeadline ?? Infinity,
+    )
+
     this.#options = Object.freeze({
       ...options,
       ...(options.fixtureOnlyMedia
@@ -136,10 +154,13 @@ export class ReadonlyConnectorPeer {
     this.#gathered = new Promise((resolve) => {
       this.#resolveGathered = resolve
     })
-    this.#authTimer = setTimeout(() => this.close('auth-deadline'), 8000)
+    this.#authTimer = setTimeout(
+      () => this.close('auth-deadline'),
+      Math.max(0, this.#authDeadline - performance.now()),
+    )
     this.#lifetimeTimer = setTimeout(
       () => this.close('prototype-lifetime'),
-      30000,
+      Math.max(0, this.#lifetimeDeadline - performance.now()),
     )
     this.#peer.onGatheringStateChange((state) => {
       if (state === 'complete') this.#resolveGathered()
@@ -334,6 +355,7 @@ export class ReadonlyConnectorPeer {
       },
       onVerified: () => {
         clearTimeout(this.#authTimer)
+        if (this.current()) this.#options.onVerified?.()
         if (this.#options.fixtureOnlyMedia && this.current())
           this.#options.fixtureOnlyMedia.activate(
             Object.freeze({
@@ -377,7 +399,18 @@ export class ReadonlyConnectorPeer {
       this.#proof.close()
       this.#application.close()
     } finally {
-      this.#peer.close()
+      try {
+        this.#peer.close()
+      } finally {
+        this.notifyTerminal()
+      }
+    }
+  }
+  private notifyTerminal() {
+    try {
+      this.#options.onTerminal?.(this.#terminal ?? 'closed')
+    } catch {
+      this.#stage = 'terminal-notification-failed'
     }
   }
   snapshot() {

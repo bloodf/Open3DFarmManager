@@ -78,6 +78,7 @@ const ProgressStage = z.enum([
 ])
 const FailureSource = z.enum([
   'client-start',
+  'client-terminal',
   'verifier-denied',
   'verifier-error',
   'ipc-capacity',
@@ -178,18 +179,17 @@ export function createPauseRtcProgress() {
       const parsed = TerminalReason.safeParse(value)
       terminalReason = parsed.success ? parsed.data : 'other'
     },
-    fail(
-      source: z.infer<typeof FailureSource>,
-      rejection?: PauseCapabilityRejection,
-    ) {
+    fail(source: z.infer<typeof FailureSource>, rejection?: unknown) {
       if (firstFailure) return
+      const parsedRejection = VerifierRejection.safeParse(rejection)
       firstFailure = Object.freeze({
         source: FailureSource.parse(source),
         stage,
         clientPhase,
         terminalReason,
-        verifierRejection:
-          rejection === undefined ? null : VerifierRejection.parse(rejection),
+        verifierRejection: parsedRejection.success
+          ? parsedRejection.data
+          : null,
       })
     },
     snapshot() {
@@ -345,14 +345,16 @@ async function run() {
         admissionProofWire: a,
         capabilityWire: c,
       })
+      if (closing) return
       if (!result.ok) {
         fail('verifier-denied', result.reason)
         return
       }
-      if (closing) throw Error('Fixture capability denied')
       accepted = result.handle
       progress.advance('verifier-accepted')
-    })().catch(() => fail('verifier-error'))
+    })().catch(() => {
+      if (!closing) fail('verifier-error')
+    })
   }
   async function handle(input: PauseRtcCommand) {
     switch (input.kind) {
@@ -477,8 +479,9 @@ async function run() {
             onTerminal: (reason) => {
               progress.terminal(reason)
               if (client) progress.phase(client.snapshot().phase)
-              peer?.close()
+              if (!accepted && !closing) fail('client-terminal')
               closing = true
+              peer?.close()
             },
           },
         )

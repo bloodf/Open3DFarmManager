@@ -313,3 +313,38 @@ test('browser failure projection excludes receipt identifiers and refuses secret
     }),
   )
 })
+
+test('unexpected client termination keeps the proof-ready stage and excludes unknown rejection details', () => {
+  const progress = createPauseRtcProgress()
+  progress.advance('proofs-ready')
+  progress.phase('active')
+  progress.terminal('socket-closed')
+  progress.fail('client-terminal', { token: 'private-secret' })
+  progress.fail('verifier-error')
+  const snapshot = progress.snapshot()
+  assert.deepEqual(snapshot.firstFailure, {
+    source: 'client-terminal',
+    stage: 'proofs-ready',
+    clientPhase: 'active',
+    terminalReason: 'socket-closed',
+    verifierRejection: null,
+  })
+  assert.equal(JSON.stringify(snapshot).includes('private-secret'), false)
+})
+
+test('pre-issuance browser failure has no receipt and missing proof diagnostics cannot pass acceptance', () => {
+  const { native, browser } = observations()
+  const projection = pauseBrowserFailureProjection({
+    ...browser,
+    issued: false,
+    receipt: undefined,
+  })
+  assert.equal(projection.receiptPresent, false)
+  assert.equal(projection.issued, false)
+  assert.throws(() =>
+    verifyPauseRtcAcceptance(native, {
+      ...browser,
+      diagnostics: undefined,
+    }),
+  )
+})

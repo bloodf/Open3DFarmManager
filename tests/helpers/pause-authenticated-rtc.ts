@@ -323,7 +323,15 @@ async function connectorChild(
     await dispose()
     throw Error('RTC resource receipt failed')
   }
-  return { request, dispose }
+  return {
+    request,
+    dispose,
+    exitDiagnostics: () =>
+      Object.freeze({
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+      }),
+  }
 }
 
 /** Import and factory invocation are inert. Parent owns login, pairing, current
@@ -549,7 +557,12 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
         nativeFailureRecorded = true
         await session.note(
           'pause-native-failure-observation:' +
-            JSON.stringify(lastNative ?? null),
+            JSON.stringify(
+              lastNative ?? {
+                observation: null,
+                process: session.connector.exitDiagnostics(),
+              },
+            ),
         )
       }
       try {

@@ -91,10 +91,10 @@ try {
   assert.equal(identity?.database, 'fixture')
   assert.notEqual(identity.started, fixture.databaseStarted)
   assert.notEqual(process.pid, fixture.seedPid)
-  const catalog = (await loadMigrationCatalog()).slice(0, 14)
+  const catalog = (await loadMigrationCatalog()).slice(0, 16)
   const history =
     await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...history]), 14)
+  assert.equal(validateMigrationHistory(catalog, [...history]), 16)
   const publicKey = await crypto.subtle.importKey(
     'spki',
     Buffer.from(fixture.publicKeySpki, 'base64url'),

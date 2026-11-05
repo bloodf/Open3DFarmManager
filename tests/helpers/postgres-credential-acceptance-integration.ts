@@ -495,7 +495,7 @@ export async function testPostgresCredentialAcceptance(
     }
     assert.equal((await acceptor().issue(capped.request)).ok, true)
     checks.push(
-      'cluster-wide-fixed-crypto-admission-bound-returns-busy-without-unbounded-challenge-allocation',
+      'database-wide-fixed-crypto-admission-bound-returns-busy-without-unbounded-challenge-allocation',
     )
 
     for (const order of ['revoke-first', 'accept-first']) {

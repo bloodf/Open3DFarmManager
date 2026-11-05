@@ -49,6 +49,16 @@ import {
   observeFixtureClose,
   waitFixtureClose,
 } from '../tests/helpers/signalling-https-process.ts'
+import {
+  createPauseAuthorityHttpsFixtureExtension,
+  PauseHttpsIssuer,
+} from '../tests/helpers/pause-authority-https-acceptance.ts'
+import {
+  createPauseAuditClient,
+  createPauseDatabaseAudit,
+  servePauseAudit,
+  type PauseAuditPort,
+} from '../tests/helpers/pause-authority-https-audit.ts'
 import { runSignallingHttpsAcceptance } from '../tests/helpers/signalling-https-acceptance.ts'
 import { loadMigrationCatalog } from './db/migrations.ts'
 
@@ -146,6 +156,27 @@ async function verifyReceipt(
     throw new Error('Built output or source manifest mismatch')
   }
 }
+function auditPort(channel: ChildProcess | NodeJS.Process): PauseAuditPort {
+  return {
+    connected: () => channel.connected === true,
+    send(value, callback) {
+      if (!channel.send) throw new Error('Pause audit IPC unavailable')
+      channel.send(value as object, undefined, undefined, callback)
+    },
+    onMessage(listener) {
+      channel.on('message', listener)
+      return () => {
+        channel.off('message', listener)
+      }
+    },
+    onDisconnect(listener) {
+      channel.on('disconnect', listener)
+      return () => {
+        channel.off('disconnect', listener)
+      }
+    },
+  }
+}
 const mode = process.argv[2]
 if (process.versions.bun || !process.versions.node.startsWith('24.'))
   throw new Error('Node 24 is required')
@@ -230,10 +261,30 @@ if (mode === '--prepare-layer') {
   if (!origin || !ca || !farmId || !owner || !admin || !password)
     throw new Error('Missing disposable acceptance fixture')
   const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
+  const pauseFixture = process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE === 'yes'
+  if (
+    (process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE && !pauseFixture) ||
+    (rtcFixture && pauseFixture)
+  )
+    throw new Error('Invalid mutually exclusive pause fixture opt-in')
   const extensionPath = '../tests/helpers/signalling-authenticated-rtc.ts'
   const extensionModule:
     | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
     | undefined = rtcFixture ? await import(extensionPath) : undefined
+  const pauseAudit = pauseFixture
+    ? createPauseAuditClient(auditPort(process))
+    : undefined
+  const pauseExtension = pauseAudit
+    ? createPauseAuthorityHttpsFixtureExtension({
+        ...PauseHttpsIssuer.parse({
+          issuer: origin,
+          kid: 'pause-fixture',
+          audience: 'open3dfarmmanager:pause',
+          publicKeySpki: process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY,
+        }),
+        audit: (request) => pauseAudit.request(request),
+      })
+    : undefined
   try {
     console.log(
       JSON.stringify(
@@ -244,6 +295,16 @@ if (mode === '--prepare-layer') {
           owner,
           admin,
           password,
+          ...(pauseExtension
+            ? {
+                extension: pauseExtension,
+                extensionKind: 'pause-authority' as const,
+                caPath: ca,
+                disconnectSignalling: async () => {
+                  throw new Error('Pause fixture must not use signalling')
+                },
+              }
+            : {}),
           ...(extensionModule
             ? {
                 extension:
@@ -256,7 +317,8 @@ if (mode === '--prepare-layer') {
       ),
     )
   } finally {
-    if (rtcFixture && process.connected) process.disconnect()
+    pauseAudit?.close()
+    if ((rtcFixture || pauseFixture) && process.connected) process.disconnect()
   }
 } else if (mode === '--run') {
   if (
@@ -265,6 +327,12 @@ if (mode === '--prepare-layer') {
   )
     throw new Error('Explicit disposable fixture required')
   const rtcFixture = process.env.SIGNALLING_HTTPS_RTC_FIXTURE === 'yes'
+  const pauseFixture = process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE === 'yes'
+  if (
+    (process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE && !pauseFixture) ||
+    (rtcFixture && pauseFixture)
+  )
+    throw new Error('Invalid mutually exclusive pause fixture opt-in')
   if (process.env.SIGNALLING_HTTPS_RTC_FIXTURE && !rtcFixture)
     throw new Error('Invalid RTC fixture opt-in')
   const portText = process.env.SIGNALLING_HTTPS_PORT,
@@ -328,7 +396,8 @@ if (mode === '--prepare-layer') {
     'farm_connector_revoker',
     'farm_signalling_reader',
     'farm_connector_credential_acceptor',
-    ...(rtcFixture ? ['farm_printer_ownership'] : []),
+    ...(rtcFixture || pauseFixture ? ['farm_printer_ownership'] : []),
+    ...(pauseFixture ? ['farm_pause_authority'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -342,6 +411,7 @@ if (mode === '--prepare-layer') {
   let directory: string | undefined,
     app: ChildProcess | undefined,
     child: ChildProcess | undefined
+  let closePauseAudit: (() => Promise<void>) | undefined
   let appClose: Promise<unknown[]> | undefined,
     childClose: Promise<unknown[]> | undefined
   let proxy: ReturnType<typeof signallingHttpsProxy> | undefined
@@ -449,8 +519,10 @@ if (mode === '--prepare-layer') {
     const appliedCount = assertSignallingCatalog(
       catalog,
       [...history],
-      rtcFixture,
+      rtcFixture || pauseFixture,
     )
+    if (pauseFixture && catalog[17]?.id !== '0018_pause_authority')
+      throw new Error('Pause authority official migration required')
     await note(
       `Official catalog and journal count ${appliedCount}; fixture source HEAD ${fixtureSource?.head ?? head}`,
     )
@@ -460,10 +532,13 @@ if (mode === '--prepare-layer') {
     for (const [index, role] of roles.entries()) {
       const secret = secrets[index]!,
         capability = capabilities[index]!
+      if ((await sql`SELECT 1 FROM pg_roles WHERE rolname=${role}`).length)
+        throw new Error('Fixture role collision')
+      await note(`Reserved owned fixture role ${role}`)
+      created.push(role)
       await sql.unsafe(
         `CREATE ROLE ${role} LOGIN PASSWORD '${secret}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${capability}`,
       )
-      created.push(role)
     }
     const hash = await hashPassword(password)
     for (const [id, name] of [
@@ -543,6 +618,28 @@ if (mode === '--prepare-layer') {
       audience = 'open3dfarmmanager:signalling',
       sessionSecret = randomBytes(32).toString('hex')
     privateValues.push(sessionSecret)
+    let pauseIssuer: { path: string; publicKeySpki: string } | undefined
+    if (pauseFixture) {
+      const keys = generateKeyPairSync('ed25519')
+      const privateKeyPkcs8 = keys.privateKey
+        .export({ format: 'der', type: 'pkcs8' })
+        .toString('base64url')
+      const publicKeySpki = keys.publicKey
+        .export({ format: 'der', type: 'spki' })
+        .toString('base64url')
+      const path = join(directory, 'pause-issuer.json')
+      const content = JSON.stringify({
+        version: 1,
+        issuer: origin,
+        kid: 'pause-fixture',
+        privateKeyPkcs8,
+      })
+      if (Buffer.byteLength(content) > 4096)
+        throw new Error('Pause issuer file exceeded bound')
+      privateValues.push(privateKeyPkcs8)
+      await writeFile(path, content, { mode: 0o600, flag: 'wx' })
+      pauseIssuer = { path, publicKeySpki }
+    }
     const dbUrl = (index: number) =>
       `postgres://${roles[index]}:${secrets[index]}@127.0.0.1:${port}/fixture`
     const env = { ...process.env }
@@ -559,7 +656,7 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_ORIGIN: origin,
         NUXT_AUTH_SESSION_SECRET: sessionSecret,
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
-        ...(rtcFixture
+        ...(rtcFixture || pauseFixture
           ? {
               NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
               NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
@@ -567,6 +664,20 @@ if (mode === '--prepare-layer') {
                 process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes'
                   ? 'true'
                   : 'false',
+            }
+          : {}),
+        ...(pauseIssuer
+          ? {
+              NUXT_PAUSE_AUTHORITY_ENABLED: 'true',
+              NUXT_PAUSE_AUTHORITY_DATABASE_URL: dbUrl(9),
+              NUXT_PAUSE_AUTHORITY_ISSUER_KEY_PATH: pauseIssuer.path,
+              NUXT_PAUSE_AUTHORITY_ISSUER_PUBLIC_KEY_SPKI:
+                pauseIssuer.publicKeySpki,
+              NUXT_PAUSE_AUTHORITY_ISSUER: origin,
+              NUXT_PAUSE_AUTHORITY_KID: 'pause-fixture',
+              NUXT_PAUSE_AUTHORITY_AUDIENCE: 'open3dfarmmanager:pause',
+              NUXT_PAUSE_AUTHORITY_CREDENTIAL_ISSUER: origin,
+              NUXT_PAUSE_AUTHORITY_CREDENTIAL_AUDIENCE: audience,
             }
           : {}),
         NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
@@ -583,7 +694,7 @@ if (mode === '--prepare-layer') {
         NUXT_CONNECTOR_PAIRING_SIGNING_KEY_ID: 'fixture',
         NUXT_CONNECTOR_PAIRING_SIGNING_KEY_PATH: signingKey,
         NUXT_CONNECTOR_PAIRING_TOKEN_TTL_SECONDS: '300',
-        NUXT_CONNECTOR_SIGNALLING_ENABLED: 'true',
+        NUXT_CONNECTOR_SIGNALLING_ENABLED: pauseFixture ? 'false' : 'true',
         NUXT_CONNECTOR_SIGNALLING_ORIGIN: origin,
         NUXT_CONNECTOR_SIGNALLING_ISSUER: origin,
         NUXT_CONNECTOR_SIGNALLING_AUDIENCE: audience,
@@ -634,9 +745,10 @@ if (mode === '--prepare-layer') {
       ],
       {
         detached: true,
-        stdio: rtcFixture
-          ? ['ignore', 'pipe', 'pipe', 'ipc']
-          : ['ignore', 'pipe', 'pipe'],
+        stdio:
+          rtcFixture || pauseFixture
+            ? ['ignore', 'pipe', 'pipe', 'ipc']
+            : ['ignore', 'pipe', 'pipe'],
         env: {
           ...env,
           NODE_EXTRA_CA_CERTS: cert,
@@ -650,10 +762,29 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_ADMIN: admin,
           SIGNALLING_HTTPS_PASSWORD: password,
           ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
+          ...(pauseIssuer
+            ? {
+                SIGNALLING_HTTPS_PAUSE_FIXTURE: 'yes',
+                SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY: pauseIssuer.publicKeySpki,
+              }
+            : {}),
         },
       },
     )
     childClose = observeFixtureClose(child)
+    if (pauseFixture) {
+      const audit = createPauseDatabaseAudit(sql, {
+        farmId,
+        accountId: ownerId,
+      })
+      closePauseAudit = servePauseAudit(auditPort(child), async (request) => {
+        const receipt = await audit(request)
+        await note(
+          `Pause audit ${JSON.stringify({ stage: request.stage, rows: receipt.rows, issued: receipt.issued, attempts: receipt.attempts, status: receipt.row?.status ?? null, scopeMatches: receipt.row?.scopeMatches ?? null, revokedSession: receipt.row?.revokedSession ?? null, expectedHashMatches: receipt.row?.expectedHashMatches ?? null })}`,
+        )
+        return receipt
+      })
+    }
     if (rtcFixture)
       serveProxyDisconnect(child, () => proxy!.disconnectUpgrades())
     child.stdout?.on('data', (chunk: Buffer) =>
@@ -702,6 +833,8 @@ if (mode === '--prepare-layer') {
     )
     await cleanup('acceptance process group', () => stop(child, true))
     await cleanup('Nitro process', () => stop(app, false))
+    if (closePauseAudit)
+      await cleanup('pause audit settlement', closePauseAudit)
     for (const [name, closed] of [
       ['acceptance', childClose],
       ['Nitro', appClose],
@@ -714,7 +847,7 @@ if (mode === '--prepare-layer') {
     if (proxy) await cleanup('TLS proxy', () => proxy!.close())
     for (const role of created.reverse())
       await cleanup('fixture role', async () => {
-        await sql`DROP ROLE ${sql(role)}`
+        await sql`DROP ROLE IF EXISTS ${sql(role)}`
       })
     await cleanup('database connection', () => sql.end({ timeout: 3 }))
     if (directory)
@@ -732,9 +865,11 @@ if (mode === '--prepare-layer') {
     )
     if (!failed && !failures.length)
       await note(
-        rtcFixture
-          ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
-          : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
+        pauseFixture
+          ? 'PASS real generated Nitro HTTPS pause issuer; synthetic control proofs, no RTC or command execution'
+          : rtcFixture
+            ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
+            : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
       )
     await ledger.close()
     globalThis.process.removeListener('SIGINT', interrupt)

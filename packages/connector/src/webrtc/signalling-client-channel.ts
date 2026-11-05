@@ -5,6 +5,13 @@ import {
   type SignallingServerFrame,
   type SignallingClientFrame,
 } from '../../../farm-protocol/src/signalling-socket.ts'
+import {
+  decodePauseSignallingServerFrame,
+  encodePauseSignallingClientFrame,
+  MAX_PAUSE_SIGNALLING_WIRE_BYTES,
+  type PauseSignallingServerFrame,
+  type PauseSignallingClientFrame,
+} from '../../../farm-protocol/src/pause-signalling.ts'
 import { BoundedReceive } from './bounded-receive.ts'
 export type SocketPort = {
   isOpen(): boolean
@@ -21,17 +28,22 @@ export type SocketPort = {
   waitClosed?(): Promise<void>
 }
 export type ChannelClock = { now(): number; wallNow(): number }
-type ChannelOptions = {
-  onFrame: (frame: SignallingServerFrame) => Promise<void>
+type ChannelOptions<ServerFrame> = {
+  onFrame: (frame: ServerFrame) => Promise<void>
   onOpen: () => void | Promise<void>
   onTerminal: (reason: string) => void
   clock?: ChannelClock
 }
 export const CLIENT_WRITE_LIMIT = 32768
 /** Application-owned queues only. These caps do not bound native/socket RSS. */
-export class SignallingClientChannel {
+class ClientChannel<ClientFrame, ServerFrame> {
+  #codec: Readonly<{
+    decode(wire: unknown): ServerFrame
+    encode(frame: ClientFrame): string
+    maxBytes: number
+  }>
   #options: Readonly<{
-    onFrame: (frame: SignallingServerFrame) => Promise<void>
+    onFrame: (frame: ServerFrame) => Promise<void>
     onOpen: () => void | Promise<void>
     onTerminal: (reason: string) => void
     clock?: ChannelClock
@@ -58,7 +70,15 @@ export class SignallingClientChannel {
   #closeRequested = new WeakSet<SocketPort>()
   #closeFailed = false
   #disposal: Promise<void> | undefined
-  constructor(options: ChannelOptions) {
+  constructor(
+    options: ChannelOptions<ServerFrame>,
+    codec: Readonly<{
+      decode(wire: unknown): ServerFrame
+      encode(frame: ClientFrame): string
+      maxBytes: number
+    }>,
+  ) {
+    this.#codec = codec
     this.#options = Object.freeze({ ...options })
     this.#clock = options.clock ?? {
       now: () => performance.now(),
@@ -73,7 +93,7 @@ export class SignallingClientChannel {
     })
     this.#queue = new BoundedReceive({
       limits: {
-        frameBytes: MAX_SIGNALLING_SOCKET_BYTES,
+        frameBytes: this.#codec.maxBytes,
         pendingFrames: 4,
         retainedBytes: 32768,
         totalFrames: 512,
@@ -84,7 +104,7 @@ export class SignallingClientChannel {
       process: async (raw) => {
         if (!this.current()) return
         try {
-          await this.#options.onFrame(decodeSignallingServerFrame(raw))
+          await this.#options.onFrame(this.#codec.decode(raw))
         } catch {
           this.close('invalid-server-frame')
         }
@@ -271,10 +291,10 @@ export class SignallingClientChannel {
     this.close('disposed')
     return this.#disposal
   }
-  send(frame: SignallingClientFrame) {
+  send(frame: ClientFrame) {
     if (!this.current()) throw Error('Client terminal')
     try {
-      const wire = encodeSignallingClientFrame(frame),
+      const wire = this.#codec.encode(frame),
         charge = new TextEncoder().encode(wire).byteLength + 14
       const buffered = this.#port?.bufferedBytes()
       if (
@@ -336,5 +356,32 @@ export class SignallingClientChannel {
       work: this.#queue.snapshot(),
       ...this.deadlines(),
     }
+  }
+}
+
+/** Maintained read-only domain remains the default public channel. */
+export class SignallingClientChannel extends ClientChannel<
+  SignallingClientFrame,
+  SignallingServerFrame
+> {
+  constructor(options: ChannelOptions<SignallingServerFrame>) {
+    super(options, {
+      decode: decodeSignallingServerFrame,
+      encode: encodeSignallingClientFrame,
+      maxBytes: MAX_SIGNALLING_SOCKET_BYTES,
+    })
+  }
+}
+/** Separate strict pause domain with the identical resource and lifecycle machinery. */
+export class PauseSignallingClientChannel extends ClientChannel<
+  PauseSignallingClientFrame,
+  PauseSignallingServerFrame
+> {
+  constructor(options: ChannelOptions<PauseSignallingServerFrame>) {
+    super(options, {
+      decode: decodePauseSignallingServerFrame,
+      encode: encodePauseSignallingClientFrame,
+      maxBytes: MAX_PAUSE_SIGNALLING_WIRE_BYTES,
+    })
   }
 }

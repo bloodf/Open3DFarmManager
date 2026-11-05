@@ -7,6 +7,17 @@ export default defineNuxtConfig({
     auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
+    connectorTelemetry: {
+      enabled: false,
+      databaseUrl: '',
+      origin: '',
+      issuer: '',
+      audience: '',
+      publicKeyRegistryPath: '',
+      tokenTtlSeconds: '',
+      proofTtlMs: '',
+      bodyTimeoutMs: '',
+    },
     connectorPairing: {
       enabled: false,
       origin: '',

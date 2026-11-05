@@ -1602,7 +1602,7 @@ function gitOutput(args) {
       stdio: ['ignore', 'pipe', 'ignore'],
     })
   } catch {
-    return null
+    throw diagnostic('repository exclusion discovery failed', 'preflight')
   }
 }
 
@@ -1613,22 +1613,34 @@ function gitOutput(args) {
 export function repositoryExclusionRoots() {
   const roots = new Set()
   const add = (path) => {
-    if (!path) return
-    roots.add(canonicalPath(path))
-  }
-  add(REPOSITORY_ROOT)
-  const common =
-    gitOutput(['rev-parse', '--git-common-dir']) ??
-    gitOutput(['rev-parse', '--git-dir'])
-  if (common && common.trim().length > 0)
-    add(resolve(REPOSITORY_ROOT, common.trim()))
-  const worktrees = gitOutput(['worktree', 'list', '--porcelain'])
-  if (worktrees) {
-    for (const line of worktrees.split('\n')) {
-      if (!line.startsWith('worktree ')) continue
-      add(line.slice('worktree '.length).trim())
+    if (!path || !isAbsolute(path))
+      throw diagnostic('invalid repository exclusion root', 'preflight')
+    try {
+      roots.add(realpathSync(path))
+    } catch {
+      throw diagnostic('unresolved repository exclusion root', 'preflight')
     }
   }
+  add(REPOSITORY_ROOT)
+  const common = gitOutput([
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]).trim()
+  add(common)
+  const worktrees = gitOutput(['worktree', 'list', '--porcelain', '-z'])
+  if (!worktrees.endsWith('\0'))
+    throw diagnostic('invalid worktree discovery', 'preflight')
+  const paths = worktrees
+    .split('\0')
+    .filter((field) => field.startsWith('worktree '))
+    .map((field) => field.slice('worktree '.length))
+  if (
+    !paths.length ||
+    !paths.some((path) => path === realpathSync(REPOSITORY_ROOT))
+  )
+    throw diagnostic('incomplete worktree discovery', 'preflight')
+  for (const path of paths) add(path)
   return [...roots]
 }
 

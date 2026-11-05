@@ -2210,3 +2210,50 @@ test('caller cannot replace reviewed source pins', async () => {
     cleanupLedger(options.ledgerDir as string)
   }
 })
+
+test('Git discovery failure refuses ledger preflight before creation', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'open3dfm-git-discovery-'))
+  const actualGit = spawnSync('which', ['git'], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  assert.ok(actualGit)
+  try {
+    writeFileSync(
+      join(dir, 'git'),
+      `#!/bin/sh
+case "$DISCOVERY_FAILURE:$3" in
+  common:rev-parse|worktrees:worktree) exit 1 ;;
+  empty:worktree) exit 0 ;;
+  malformed:worktree) printf 'worktree relative-path\\n'; exit 0 ;;
+esac
+exec "$ACTUAL_GIT" "$@"
+`,
+      { mode: 0o700 },
+    )
+    for (const mode of ['common', 'worktrees', 'empty', 'malformed']) {
+      const ledger = join(dir, mode, 'ledger')
+      const source = `import assert from 'node:assert/strict';
+        import { existsSync } from 'node:fs';
+        const m = await import(process.argv[1]);
+        await assert.rejects(m.runDiagnostic({ledgerDir: process.argv[2], docker: {run() {throw Error('Docker must not run')}}}), e => e.phase === 'preflight');
+        assert.equal(existsSync(process.argv[2]), false);`
+      const result = spawnSync(
+        process.execPath,
+        ['--input-type=module', '-e', source, moduleUrl, ledger],
+        {
+          encoding: 'utf8',
+          timeout: 10000,
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            ACTUAL_GIT: actualGit,
+            DISCOVERY_FAILURE: mode,
+          },
+        },
+      )
+      assert.equal(result.status, 0, `${mode}: ${result.stderr}`)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

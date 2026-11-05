@@ -6,9 +6,9 @@ service using only the session reference from the application's sealed login.
 They neither accept commands nor upgrade a read-only RTC connection.
 
 The private Nuxt configuration and sanitized environment placeholders are wired
-with the runtime disabled by default. Actual restricted-role PostgreSQL HTTP
-validation, generated Nitro startup and
-`check:all` remain separate integration gates. No production issuer key is
+with the runtime disabled by default. Restricted-role PostgreSQL HTTPS issuance
+and generated Nitro startup passed in the isolated fixture described below.
+No production issuer key is
 created, and no service is enabled by this checkpoint.
 
 ## Boundary and custody
@@ -84,3 +84,45 @@ ten new TypeScript paths, including the plugin using existing generated Nitro
 types. Formatting and whitespace checks cover the owned files. These checks
 are not the full repository gate.
 No publication or full Phase 0 completion is implied.
+
+## Built HTTPS acceptance, 2026-11-05
+
+The actual maintained HTTPS fixture passed once at
+`b7abaaf8559ef3a6f7a89025f49c5c380e09de44` in 8.994 seconds. Its sealed private
+Nuxt build contains 463 files, manifest SHA256
+`5d658414969ab4b1b23d714084136433e0ce181860c8d48a92f3e48b7bf83074`, and server
+entry SHA256 `0529069f2c036c72ccd83eff7e2345666e28fe6dc4aae7167bde7cb68079d8e9`.
+Artifact and fixture source were the same immutable commit. The runner verified
+all 19 official migration IDs and checksums before provisioning test identities.
+
+Maintained HTTP login, browser-key approval, Connector pairing and immutable
+printer assignment preceded actual challenge and capability issuance. Negative
+authentication, origin, shape and body-limit requests allocated nothing. SQL
+audit observed one pending challenge, then one issued capability; replay left
+its stored hash and allocation count unchanged. A second pending challenge was
+denied after actual owner logout, with SQL confirming session revocation and no
+second issuance. The dedicated issuer signature and capability scope were
+verified against an independent public pin.
+
+The bridge recorded eight concurrent connections at its high-water mark, zero
+rejections/errors and all connection closures. Independent post-run checks found
+no remaining test backends and the original role inventory restored. The original
+database identity, journal and table counts matched the prior baseline before
+and after execution. Fixture rows remain in the separately owned disposable DB.
+Runtime children, proxy and private issuer/TLS directory were closed or removed.
+
+`check:all` passed at parent `6a208d883d8167dac3f7aab21d1fe46e00caec73`, including
+424 Node passes with two explicit skips and 66 RTSP supervisor passes. The later
+runner-only correction fixed external-layer dependency resolution and the app
+source alias; root TypeScript and formatting passed, followed by the fresh
+private build and this HTTPS run. The earlier two build failures are retained
+as evidence, not counted as successful runs. Full CI on the final integrated
+head remains required before publication.
+
+Control transcript descriptions and certificate pins were synthetic. Browser
+enrollment used the native fixture's nonextractable P-256 key, not IndexedDB key
+custody. Chromium ignored the private fixture certificate error; native HTTPS
+requests verified the private CA explicitly. This proves the issuer HTTP/DB
+boundary, not browser TLS deployment, control RTC negotiation, command delivery,
+driver execution or an isolated simulator pause. The separate control peer and
+end-to-end pause remain pending.

@@ -14,12 +14,12 @@ GRANT UPDATE (jti) ON farm.connector_credentials TO farm_signalling_reader;
 -- No supplied clock, policy, account identity or revocation timestamp is accepted.
 -- The function can expire an actually expired session; it cannot renew or arbitrarily revoke one.
 CREATE FUNCTION farm.observe_signalling_session_expiry(session_id text) RETURNS bigint
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, farm AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, farm, pg_temp AS $$
 DECLARE
-  first_now bigint := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint;
-  observed_now bigint;
-  expected_account text;
-  locked_account text;
+  first_now pg_catalog.int8 := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint;
+  observed_now pg_catalog.int8;
+  expected_account pg_catalog.text;
+  locked_account pg_catalog.text;
   session_row farm.account_sessions%ROWTYPE;
 BEGIN
   IF first_now NOT BETWEEN 0 AND 9007199254740991 THEN RAISE EXCEPTION 'Invalid signalling authorization clock'; END IF;

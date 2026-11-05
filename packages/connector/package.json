@@ -15,6 +15,7 @@
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
     "zod": "4.6.7",
-    "node-datachannel": "0.33.5"
+    "node-datachannel": "0.33.5",
+    "ws": "8.22.1"
   }
 }

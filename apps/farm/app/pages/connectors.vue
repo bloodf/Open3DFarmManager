@@ -12,6 +12,10 @@ const nextFarm = ref<string | null>(null)
 const nextConnector = ref<string | null>(null)
 const pending = ref(false)
 const error = ref('')
+const pairingEnabled = ref(false)
+const recoveryTarget = ref<Connector | null>(null)
+const recoveryConfirmed = ref(false)
+const recoveryMessage = ref('')
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
@@ -27,6 +31,8 @@ function cancel() {
   controller?.abort()
   controller = undefined
   connectors.value = []
+  recoveryTarget.value = null
+  recoveryConfirmed.value = false
   nextConnector.value = null
 }
 async function load(kind: 'farms' | 'connectors', after: string | null = null) {
@@ -50,7 +56,12 @@ async function load(kind: 'farms' | 'connectors', after: string | null = null) {
         '/api/farms',
         options,
       )
+      const capability = await $fetch<{ enabled: boolean }>(
+        '/api/connector-pairing/capability',
+        { signal: controller.signal, retry: 0, timeout: 10000 },
+      ).catch(() => ({ enabled: false }))
       if (current !== generation) return
+      pairingEnabled.value = capability.enabled
       farms.value = page.farms
       nextFarm.value = page.nextAfter
     } else {
@@ -83,9 +94,52 @@ async function load(kind: 'farms' | 'connectors', after: string | null = null) {
     if (current === generation) pending.value = false
   }
 }
+function selectRecovery(target: Connector | null) {
+  recoveryTarget.value = target
+  recoveryConfirmed.value = false
+}
 function selectFarm() {
   cancel()
   if (farmId.value) void load('connectors')
+}
+async function revoke() {
+  const target = recoveryTarget.value
+  const selected = farmId.value
+  if (
+    !pairingEnabled.value ||
+    !target ||
+    !recoveryConfirmed.value ||
+    pending.value
+  )
+    return
+  const current = generation
+  controller = new AbortController()
+  pending.value = true
+  recoveryMessage.value = ''
+  try {
+    await $fetch(`/api/farms/${selected}/connectors/${target.agentId}/revoke`, {
+      method: 'POST',
+      body: { expected_fingerprint: target.fingerprint },
+      signal: controller.signal,
+      retry: 0,
+      timeout: 10000,
+    })
+    if (current !== generation || selected !== farmId.value) return
+    recoveryMessage.value =
+      'Registro revogado. Inicie um novo pareamento no Connector e confira a nova aprovação.'
+    await load('connectors')
+  } catch {
+    if (current !== generation) return
+    cancel()
+    farms.value = []
+    farmId.value = ''
+    nextFarm.value = null
+    pairingEnabled.value = false
+    recoveryMessage.value =
+      'Não foi possível confirmar a revogação. Entre novamente e atualize o inventário antes de continuar.'
+  } finally {
+    pending.value = false
+  }
 }
 onMounted(() => {
   heading.value?.focus()
@@ -109,6 +163,7 @@ onBeforeRouteLeave(() => {
     <h1 ref="heading" tabindex="-1">Connectors da farm</h1>
     <nav aria-label="Conta">
       <NuxtLink to="/">Início</NuxtLink> ·
+      <NuxtLink to="/parear">Aprovar Connector</NuxtLink> ·
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
     <p>
@@ -172,6 +227,14 @@ onBeforeRouteLeave(() => {
               <dt>Estado do registro</dt>
               <dd>{{ statusLabel[connector.status] }}</dd>
             </dl>
+            <button
+              v-if="pairingEnabled && connector.status !== 'revoked'"
+              type="button"
+              :disabled="pending"
+              @click="selectRecovery(connector)"
+            >
+              Revogar este Connector
+            </button>
           </li>
         </ul>
         <button
@@ -187,15 +250,41 @@ onBeforeRouteLeave(() => {
     <section aria-labelledby="recovery-heading">
       <h2 id="recovery-heading">Recuperação e revogação</h2>
       <p>
-        A recuperação de credenciais e a revogação ainda não estão disponíveis
-        nesta interface. Consultar um registro não altera sua autorização.
+        Se a confirmação do pareamento foi perdida, selecione o registro exato
+        no inventário, confira a impressão digital e revogue-o. Depois, inicie
+        um novo pareamento no Connector. Uma credencial anterior não será
+        reenviada.
       </p>
-      <button type="button" disabled aria-describedby="recovery-help">
-        Revogar Connector
-      </button>
-      <p id="recovery-help">
-        A ação depende da integração de segurança em desenvolvimento.
-      </p>
+      <p role="status">{{ recoveryMessage }}</p>
+      <template v-if="recoveryTarget">
+        <p>Farm: {{ farmId }}</p>
+        <p>Connector: {{ recoveryTarget.agentId }}</p>
+        <p>Impressão digital: {{ recoveryTarget.fingerprint }}</p>
+        <label
+          ><input
+            v-model="recoveryConfirmed"
+            type="checkbox"
+            :disabled="pending"
+          />
+          Conferi este Connector e quero revogar seu registro.</label
+        >
+        <button
+          type="button"
+          :disabled="pending || !recoveryConfirmed"
+          @click="revoke"
+        >
+          Confirmar revogação
+        </button>
+        <button type="button" :disabled="pending" @click="selectRecovery(null)">
+          Cancelar revogação
+        </button>
+      </template>
+      <template v-if="!pairingEnabled">
+        <button type="button" disabled aria-describedby="recovery-help">
+          Revogar Connector
+        </button>
+        <p id="recovery-help">A revogação está indisponível nesta sessão.</p>
+      </template>
       <p>
         Sem conexão direta com o Connector, o modo degradado é somente leitura.
         Comandos e câmeras não estão disponíveis por esta consulta HTTP.

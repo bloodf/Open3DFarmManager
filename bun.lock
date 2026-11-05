@@ -30,6 +30,7 @@
         "postgres": "3.4.9",
         "vue": "3.5.44",
         "vue-router": "5.4.0",
+        "zod": "4.6.7",
       },
       "devDependencies": {
         "vue-tsc": "3.3.14",

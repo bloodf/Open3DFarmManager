@@ -10,6 +10,14 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   })
   await page.keyboard.press('Tab')
   await expect(
+    page.getByRole('link', { name: 'Consultar Connectors' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: 'Aprovar Connector' }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(
     page.getByRole('link', { name: 'Entrar', exact: true }),
   ).toBeFocused()
   await page.keyboard.press('Tab')
@@ -21,7 +29,7 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
     page.getByRole('heading', { name: 'Recursos ainda indisponíveis' }),
   ).toBeVisible()
   await expect(page.getByRole('main')).toContainText(
-    'O pareamento de um Connector depende de uma etapa futura que ainda não está disponível.',
+    'O pareamento de um Connector depende da configuração segura do serviço e da aprovação de um proprietário ou administrador da farm.',
   )
   await expect(page.getByRole('main')).toContainText(
     'Sem conexão, o modo degradado será somente leitura; comandos não estarão disponíveis.',

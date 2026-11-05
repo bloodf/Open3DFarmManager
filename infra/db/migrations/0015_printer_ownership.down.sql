@@ -1,0 +1,10 @@
+REVOKE UPDATE (id) ON farm.session_accounts FROM farm_printer_ownership;
+REVOKE UPDATE (last_seen_at, revoked_at) ON farm.account_sessions FROM farm_printer_ownership;
+REVOKE UPDATE (farm_id) ON farm.memberships FROM farm_printer_ownership;
+REVOKE UPDATE (agent_id) ON farm.connector_enrollments FROM farm_printer_ownership;
+REVOKE UPDATE (revoked_at, revoked_by) ON farm.printer_assignments FROM farm_printer_ownership;
+REVOKE ALL PRIVILEGES ON farm.printer_assignments, farm.session_accounts, farm.account_sessions, farm.memberships, farm.connector_enrollments FROM farm_printer_ownership;
+REVOKE USAGE ON SCHEMA farm FROM farm_printer_ownership;
+DROP ROLE farm_printer_ownership;
+DROP TABLE farm.printer_assignments;
+DROP FUNCTION farm.printer_assignment_lifecycle();

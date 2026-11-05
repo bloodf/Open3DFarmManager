@@ -110,3 +110,37 @@ test('rejects an oversized chunked body without retrying', async () => {
     await fixture.close()
   }
 })
+
+test(
+  'caller cancellation during a body permits a fresh read',
+  { timeout: 5000 },
+  async () => {
+    const controller = new AbortController()
+    let requests = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const fixture = await server((_req, res) => {
+      requests++
+      res.setHeader('content-type', 'application/json')
+      if (requests === 1) {
+        res.write('[')
+        timer = setTimeout(() => controller.abort('private reason'), 100)
+      } else res.end(JSON.stringify([spool(4)]))
+    })
+    try {
+      const read = reader(fixture.origin)
+      await assert.rejects(
+        read(controller.signal),
+        /^Error: Local Spoolman read failed$/,
+      )
+      assert.equal(requests, 1)
+      assert.deepEqual(
+        (await read()).items.map((item) => item.id),
+        [4],
+      )
+      assert.equal(requests, 2)
+    } finally {
+      clearTimeout(timer)
+      await fixture.close()
+    }
+  },
+)

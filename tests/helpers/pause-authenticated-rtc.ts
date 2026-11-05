@@ -107,9 +107,9 @@ async function until<T>(
     )
     if (accept(value)) return value
     await bounded(
-      new Promise<void>((resolve) => setTimeout(resolve, 100)),
+      new Promise<void>((resolve) => setTimeout(resolve, 200)),
       signal,
-      150,
+      250,
     )
   }
   throw Error('RTC fixture observation deadline')
@@ -388,15 +388,23 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
         disposal = (async () => {
           input.signal.removeEventListener('abort', abort)
           const results = await Promise.allSettled([
-            (async () => {
-              try {
-                await actor?.evaluate((actor) => actor.dispose())
-              } finally {
-                await actor?.dispose()
-              }
-            })(),
+            bounded(
+              (async () => {
+                try {
+                  await actor?.evaluate((actor) => actor.dispose())
+                } finally {
+                  await actor?.dispose()
+                }
+              })(),
+              new AbortController().signal,
+              3000,
+            ),
             connector?.dispose(),
-            input.ownerPage.unroute(route, serve),
+            bounded(
+              input.ownerPage.unroute(route, serve),
+              new AbortController().signal,
+              3000,
+            ),
           ])
           current = undefined
           await note(
@@ -413,24 +421,28 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
       try {
         await input.ownerPage.route(route, serve)
         input.signal.throwIfAborted()
-        actor = await input.ownerPage.evaluateHandle(
-          async ({ path, scope }) => {
-            const module: typeof import('./pause-rtc-browser.ts') =
-              await import(path)
-            return module.createPauseRtcBrowserActor(scope)
-          },
-          {
-            path: route,
-            scope: {
-              accountId: input.accountId,
-              farmId: input.farmId,
-              origin: input.origin,
-              audience: issuer.audience,
-              issuer: issuer.issuer,
-              kid: issuer.kid,
-              publicKeySpki: issuer.publicKeySpki,
+        actor = await bounded(
+          input.ownerPage.evaluateHandle(
+            async ({ path, scope }) => {
+              const module: typeof import('./pause-rtc-browser.ts') =
+                await import(path)
+              return module.createPauseRtcBrowserActor(scope)
             },
-          },
+            {
+              path: route,
+              scope: {
+                accountId: input.accountId,
+                farmId: input.farmId,
+                origin: input.origin,
+                audience: issuer.audience,
+                issuer: issuer.issuer,
+                kid: issuer.kid,
+                publicKeySpki: issuer.publicKeySpki,
+              },
+            },
+          ),
+          input.signal,
+          10000,
         )
         input.signal.throwIfAborted()
         await note('pause-browser-nonextractable-identity-created')
@@ -454,9 +466,13 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
               >[0],
             ) => {
               input.signal.throwIfAborted()
-              return ownedActor.evaluate(
-                (actor, challenge) => actor.signEnrollment(challenge),
-                challenge,
+              return bounded(
+                ownedActor.evaluate(
+                  (actor, challenge) => actor.signEnrollment(challenge),
+                  challenge,
+                ),
+                input.signal,
+                2000,
               )
             },
           }),

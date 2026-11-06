@@ -1,12 +1,14 @@
 # Bounded HTTP telemetry checkpoint
 
-The existing one-attempt drain now has a native-fetch adapter in `packages/connector/src/cloud/http-telemetry.ts`. It validates an outbound printer-state batch before sending and maps the internal ingestion result `{ ok: true, acceptedEventIds }` to the exact-ID confirmation expected by the drain. This is a prototype HTTP mapping; no application ingestion route, credential provider or scheduled Connector loop is installed.
+The one-attempt drain has two HTTP adapters. `createTelemetryHttpSender` in `packages/connector/src/cloud/http-telemetry.ts` validates an outbound printer-state batch before sending and maps the internal ingestion result `{ ok: true, acceptedEventIds }` to the exact-ID confirmation expected by the drain. It is a prototype mapping, and `tests/node/http-telemetry.test.ts:9` is the only module that imports it. The maintained sender is `createAuthenticatedTelemetrySender` in `packages/connector/src/cloud/authenticated-http-telemetry.ts`, and `packages/connector/src/runtime/agent.ts:73` imports it for the Connector runtime.
 
-The configured endpoint requires HTTPS by default, rejects URL credentials/query/fragment and disables redirects. Tests explicitly opt into HTTP only for loopback IP literals. That option must not be enabled in a production transport configuration. The adapter sends no credentials and does not authenticate an agent. The loopback test server is a test fixture, not an exposed Nuxt endpoint.
+Both adapters require HTTPS by default and accept plain HTTP only for loopback IP literals when a test opts in explicitly. The prototype rejects URL credentials, a query string and a fragment. The maintained sender requires the endpoint to be exactly the origin plus `/api/connector/telemetry`, which excludes the same three parts. Both send `redirect: 'error'` and `credentials: 'omit'`. The loopback option must not be enabled in a production transport configuration. The prototype sends no credentials and does not authenticate an agent. The loopback test server is a test fixture, not an exposed Nuxt endpoint.
 
-The caller's cancellation signal is combined with an explicit 1–60,000 ms request deadline. The deadline covers fetch headers and streaming body reads. Cleanup clears the timer and aborts the native request. Success requires status 200, JSON content type, at most 8 KiB of response bytes, valid UTF-8 and bounded unambiguous JSON with only the expected acceptance fields. The existing drain still checks exact event-ID correspondence before deleting queue records. The adapter never retries automatically and rejects command-shaped outbound payloads.
+Both adapters combine the caller's cancellation signal with an explicit 1 to 60,000 ms request deadline, and the deadline covers fetch headers and streaming body reads. Cleanup clears the timer and aborts the native request. Success requires status 200, a JSON content type, at most 8 KiB of response bytes, valid UTF-8 and bounded unambiguous JSON. The prototype accepts only the expected acceptance fields, and the maintained sender also accepts status 429, because a busy proof service answers 429 with a bounded retry interval. The existing drain still checks exact event-ID correspondence before deleting queue records. The prototype never retries automatically and rejects command-shaped outbound payloads. The maintained sender retries only a busy answer, at most 8 times, and stays inside the request deadline and the proof lifetime.
 
 ## Actual local transport verification
+
+The evidence in this section belongs to the 2026-11-04 slice. The counts and results describe that commit, not the current tree.
 
 Six Node tests use a real HTTP server bound to an ephemeral port on 127.0.0.1:
 
@@ -17,10 +19,20 @@ Six Node tests use a real HTTP server bound to an ephemeral port on 127.0.0.1:
 - Disallowed endpoint configuration and invalid outbound command-shaped data do not send requests.
 - A maximum batch of 100 accepted event IDs fits the response bounds.
 
-`check:all` passed with 148 Bun and 75 Node tests, lint, typecheck and builds. Browser code was unchanged and the nine existing Chromium tests were not repeated.
+`check:all` passed for that slice with 148 Bun and 75 Node tests, lint, typecheck and builds. Browser code was unchanged and the nine existing Chromium tests were not repeated.
+
+## Current state
+
+An application ingestion route, a credential provider and a Connector drain loop exist today.
+
+The routes are `apps/farm/server/api/connector/telemetry.post.ts` and `apps/farm/server/api/connector/telemetry/challenge.post.ts`. Each rejects a request that fails the boundary inspection with 400, and each answers 503 while `telemetryHttpRuntime()` returns no handler. `apps/farm/server/plugins/telemetry-lifecycle.ts` starts the runtime from the `connectorTelemetry` Nuxt runtime configuration, and `apps/farm/nuxt.config.ts` ships `enabled: false`, so the handler stays uninstalled until an operator supplies the full configuration.
+
+The credential provider is `PostgresConnectorCredentialAcceptance` in `apps/farm/server/storage/postgres-connector-credential-acceptance.ts`. The handler in `apps/farm/server/services/telemetry-http.ts:24` checks the bearer token and the farm and agent headers, then asks the provider to issue a proof challenge on the challenge route and to commit the batch on the final route. The provider checks the printer assignment rows and the proof lifetime before it writes.
+
+The drain loop is the Connector runtime's own serial loop, `drainLoop` in `packages/connector/src/runtime/agent.ts:199`, which calls `drainTelemetryOnce` at `packages/connector/src/runtime/agent.ts:238`. It runs inside the Connector process and is not a deployment-level scheduler.
 
 ## Limits
 
-Cancellation cannot prove that the server did not commit before the response was lost. Stable event IDs and durable server deduplication remain required; no exactly-once network claim is made. This adapter is for telemetry only and provides no command path or physical-action retry.
+Cancellation cannot prove that the server did not commit before the response was lost. Stable event IDs and durable server deduplication remain required; no exactly-once network claim is made. Both adapters are for telemetry only and provide no command path or physical-action retry.
 
-The real authenticated endpoint, credential lifecycle, TLS/deployment verification, durable database adapter, rate limits and scheduler remain unimplemented. The loopback fixture's enrollment context and in-memory destination are synthetic. HTTPS certificate behavior and real network failures outside loopback were not tested here. There is no plaintext fallback in the normal configuration.
+Deployment TLS verification and an external scheduler remain absent, as do event retention and storage quotas. The loopback fixture's enrollment context and in-memory destination are synthetic. Certificate behavior and real network failures outside loopback were not covered by the tests recorded above, and the prototype's loopback option must not reach a production transport configuration. There is no plaintext fallback in the normal configuration.

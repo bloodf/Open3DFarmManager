@@ -17,6 +17,7 @@ async function login() {
       timeout: 15_000,
     })
     password.value = ''
+    window.dispatchEvent(new Event('open3dfarmmanager:auth-invalidated'))
     await navigateTo('/')
   } catch (error: unknown) {
     const status =

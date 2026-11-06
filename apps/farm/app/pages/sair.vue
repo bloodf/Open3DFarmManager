@@ -14,6 +14,7 @@ async function logout() {
       retry: 0,
       timeout: 15_000,
     })
+    window.dispatchEvent(new Event('open3dfarmmanager:auth-invalidated'))
     await navigateTo('/')
   } catch {
     errorMessage.value =

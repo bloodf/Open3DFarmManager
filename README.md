@@ -58,7 +58,7 @@ Testes locais, integração com fixtures e aceitação com simuladores são evid
 
 ## Execute localmente
 
-Você precisa de **Node.js 24.15+ na série 24.x** e **Bun 1.4.2**. Os fluxos de CI usam Node 24.20.0. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
+Você precisa de **Node.js 24.15+ na série 24.x** e **Bun 1.4.4**. Os fluxos de CI usam Node 24.20.0. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
 
 ```sh
 git clone https://github.com/bloodf/Open3DFarmManager.git

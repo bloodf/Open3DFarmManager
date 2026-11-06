@@ -7,10 +7,10 @@ import {
 import { createServer as createHttpsServer } from 'node:https'
 import { createHash } from 'node:crypto'
 import type { Duplex } from 'node:stream'
-import type { AddressInfo } from 'node:net'
+import { once } from 'node:events'
 
 export interface WsTestSocket {
-  send: (text: string) => void
+  send: (text: string | Buffer) => void
   close: () => void
   terminate: () => void
 }
@@ -23,14 +23,14 @@ export interface WsTestServer {
 // Minimal RFC6455 test fixture: plain HTTP via `http`, and WebSocket
 // upgrade/text frames for the former Bun.serve websocket tests. Only what
 // the Moonraker fixtures need: text messages, close, ping/pong and terminate.
-export function serveWsTestServer(handlers: {
+export async function serveWsTestServer(handlers: {
   http: (request: Request) => Response | Promise<Response>
   upgrade?: (request: Request) => boolean | 'hang'
   onOpen?: (socket: WsTestSocket) => void
   onMessage?: (socket: WsTestSocket, message: string) => void
   onClose?: (socket: WsTestSocket) => void
   tls?: { cert: Buffer; key: Buffer }
-}): WsTestServer {
+}): Promise<WsTestServer> {
   const sockets = new Set<Duplex>()
   const server: Server = handlers.tls
     ? createHttpsServer(handlers.tls, (req, res) => {
@@ -55,7 +55,7 @@ export function serveWsTestServer(handlers: {
           const request = new Request(
             `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
             {
-              method: req.method,
+              method: req.method ?? 'GET',
               headers,
               ...(hasBody ? { body: Buffer.concat(chunks) } : {}),
             },
@@ -74,15 +74,21 @@ export function serveWsTestServer(handlers: {
       })()
     })
   }
-  server.on('upgrade', (request, socket) => {
+  server.on('upgrade', (request, socket, head) => {
     sockets.add(socket)
     socket.on('error', () => {})
     socket.once('close', () => sockets.delete(socket))
     const upgradeRequest = new Request(
       `http://${request.headers.host ?? '127.0.0.1'}${request.url ?? '/'}`,
       {
-        method: request.method,
-        headers: request.headers as Record<string, string>,
+        method: request.method ?? 'GET',
+        headers: Object.entries(request.headers).flatMap(([name, value]) =>
+          value === undefined
+            ? []
+            : (Array.isArray(value) ? value : [value]).map(
+                (item) => [name, item] satisfies [string, string],
+              ),
+        ),
       },
     )
     const accept = handlers.upgrade?.(upgradeRequest) ?? false
@@ -123,14 +129,21 @@ export function serveWsTestServer(handlers: {
       return Buffer.concat([header, payload])
     }
     const ws: WsTestSocket = {
-      send: (text) => socket.write(frame(0x1, Buffer.from(text))),
+      send: (text) =>
+        socket.write(
+          frame(typeof text === 'string' ? 0x1 : 0x2, Buffer.from(text)),
+        ),
       close: () => {
         socket.write(frame(0x8, Buffer.alloc(0)))
         socket.end()
       },
       terminate: () => socket.destroy(),
     }
-    let buffer = Buffer.alloc(0)
+    socket.once('close', () => handlers.onClose?.(ws))
+    let buffer: Buffer = Buffer.alloc(0)
+    let fragments: Buffer[] = []
+    let fragmentBytes = 0
+    let fragmentOpcode = 0
     socket.on('data', (chunk: Buffer) => {
       buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk])
       for (;;) {
@@ -149,6 +162,10 @@ export function serveWsTestServer(handlers: {
           length = Number(buffer.readBigUInt64BE(2))
           offset = 10
         }
+        if (!Number.isSafeInteger(length) || length > 1024 * 1024) {
+          socket.destroy()
+          return
+        }
         const maskOffset = offset
         if (masked) offset += 4
         if (buffer.length < offset + length) return
@@ -160,7 +177,6 @@ export function serveWsTestServer(handlers: {
         }
         buffer = buffer.subarray(offset + length)
         if (opcode === 0x8) {
-          handlers.onClose?.(ws)
           socket.end()
           return
         }
@@ -168,14 +184,54 @@ export function serveWsTestServer(handlers: {
           socket.write(frame(0xa, payload))
           continue
         }
-        if (opcode === 0x1 && fin)
-          handlers.onMessage?.(ws, payload.toString('utf8'))
+        if (opcode === 0x1 || opcode === 0x2 || opcode === 0x0) {
+          if (opcode !== 0) {
+            if (fragmentOpcode !== 0) {
+              socket.destroy()
+              return
+            }
+            fragmentOpcode = opcode
+          } else if (fragmentOpcode === 0) {
+            socket.destroy()
+            return
+          }
+          fragments.push(payload)
+          fragmentBytes += payload.length
+          if (fragmentBytes > 1024 * 1024) {
+            socket.destroy()
+            return
+          }
+          if (fin) {
+            if (fragmentOpcode === 0x1)
+              handlers.onMessage?.(
+                ws,
+                Buffer.concat(fragments).toString('utf8'),
+              )
+            fragments = []
+            fragmentBytes = 0
+            fragmentOpcode = 0
+          }
+        }
       }
     })
     handlers.onOpen?.(ws)
+    if (head.length) socket.emit('data', head)
   })
-  server.listen(0, '127.0.0.1')
-  const { port } = server.address() as AddressInfo
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+  } catch (error) {
+    for (const socket of sockets) socket.destroy()
+    server.closeAllConnections()
+    server.close()
+    throw error
+  }
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    throw Error('Missing fixture port')
+  }
+  const { port } = address
   return {
     port,
     stop: () =>

@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { buildSync } from 'esbuild'
+import { browserBundle } from './browser-bundle.ts'
 import { chromium, type Browser, type Page } from '@playwright/test'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { BrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
@@ -288,21 +288,9 @@ export function assertPauseFixtureClosed(input: unknown) {
 export async function runPauseControlRtc(
   scenario: PauseControlRtcScenario,
 ): Promise<void> {
-  const built = buildSync({
-    entryPoints: [
-      new URL('./pause-control-rtc-browser.ts', import.meta.url).pathname,
-    ],
-    bundle: true,
-    target: 'browser',
-    write: false,
-    logLevel: 'silent',
-  })
-  assert.equal(
-    built.errors.length,
-    0,
-    'Bounded in-memory browser bundle failed',
+  const bundleText = await browserBundle(
+    new URL('./pause-control-rtc-browser.ts', import.meta.url).pathname,
   )
-  const bundleText = built.outputFiles![0]!.text
   assert.ok(Buffer.byteLength(bundleText) <= 1024 * 1024)
   const server = createServer((request, response) => {
     if (request.method !== 'GET') {

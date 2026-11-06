@@ -18,7 +18,9 @@ test('four-tool acceptance fails when even one expected tool macro is missing', 
     'gcode_macro T3',
     'save_variables',
   ]
-  const server = serveTestServer(() => Response.json({ result: { objects } }))
+  const server = await serveTestServer(() =>
+    Response.json({ result: { objects } }),
+  )
   try {
     expect(await verifyFourTools(server.url.origin)).toBe(9)
     objects.splice(objects.indexOf('gcode_macro T3'), 1)
@@ -26,21 +28,21 @@ test('four-tool acceptance fails when even one expected tool macro is missing', 
       'gcode_macro T3',
     )
   } finally {
-    await server.stop(true)
+    await server.stop()
   }
 })
 test('webcam acceptance rejects an empty webcam list', async () => {
-  const server = serveTestServer(() =>
+  const server = await serveTestServer(() =>
     Response.json({ result: { webcams: [] } }),
   )
   try {
     await expect(verifyWebcam(server.url.origin)).rejects.toThrow()
   } finally {
-    await server.stop(true)
+    await server.stop()
   }
 })
 test('camera acceptance rejects HTML disguised as a snapshot', async () => {
-  const server = serveTestServer(
+  const server = await serveTestServer(
     () =>
       new Response('<html>error</html>', {
         headers: { 'Content-Type': 'image/jpeg' },
@@ -49,7 +51,7 @@ test('camera acceptance rejects HTML disguised as a snapshot', async () => {
   try {
     await expect(verifyCamera(server.url.origin)).rejects.toThrow('Invalid')
   } finally {
-    await server.stop(true)
+    await server.stop()
   }
 })
 

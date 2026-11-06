@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { once } from 'node:events'
 
 export interface TestServer {
   url: URL
@@ -7,12 +7,10 @@ export interface TestServer {
   stop: () => Promise<void>
 }
 
-// Minimal node:http stand-in for the former Bun.serve test fixtures.
-// The handler speaks standard Fetch API; the returned server exposes the
-// same `url`/`stop(true)` surface the tests used under Bun.
-export function serveTestServer(
+// HTTP fixture with a Fetch API handler and explicit connection cleanup.
+export async function serveTestServer(
   handler: (request: Request) => Response | Promise<Response>,
-): TestServer {
+): Promise<TestServer> {
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -29,7 +27,7 @@ export function serveTestServer(
           const request = new Request(
             `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
             {
-              method: req.method,
+              method: req.method ?? 'GET',
               headers,
               ...(hasBody ? { body: Buffer.concat(chunks) } : {}),
             },
@@ -48,8 +46,20 @@ export function serveTestServer(
       })()
     })
   })
-  server.listen(0, '127.0.0.1')
-  const { port } = server.address() as AddressInfo
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+  } catch (error) {
+    server.closeAllConnections()
+    server.close()
+    throw error
+  }
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    throw Error('Missing fixture port')
+  }
+  const { port } = address
   return {
     url: new URL(`http://127.0.0.1:${port}`),
     port,

@@ -55,7 +55,7 @@ async function fixture(input: {
     }, ms)
     timers.add(timer)
   }
-  const server = serveWsTestServer({
+  const server = await serveWsTestServer({
     async http(request) {
       const path = new URL(request.url).pathname
       requests.push({ path, method: request.method })
@@ -139,9 +139,11 @@ async function run(
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
-  const exited = new Promise<number | null>((resolve) =>
-    child.on('exit', (code) => resolve(code)),
-  )
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+  void exited.catch(() => {})
   recordResource({
     kind: 'node-child',
     pid: child.pid,

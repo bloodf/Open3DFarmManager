@@ -5,7 +5,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
+import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
 import { chromium, type Browser } from '@playwright/test'
 import {
   RtcSessionBinding,
@@ -30,6 +30,8 @@ export class FixtureProcess {
   #closed: Promise<void>
   #ipcError: Error | undefined
   constructor(runtime: string) {
+    if (runtime !== process.execPath || process.versions.bun)
+      throw Error('Node runtime required')
     this.process = spawn(
       runtime,
       [new URL('./native-media-child.ts', import.meta.url).pathname],
@@ -213,17 +215,9 @@ export async function runFiniteMediaPhase(
     phase === 'encode'
       ? './moving-h264-source.ts'
       : './browser-media-fixture.ts'
-  // esbuild is declared by the workspace root; the harness reuses that copy.
-  const built = await build({
-    absWorkingDir: fileURLToPath(new URL('.', import.meta.url)),
-    entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
-    bundle: true,
-    platform: 'browser',
-    format: 'esm',
-    write: false,
-    legalComments: 'none',
-  })
-  const fixtureBundle = built.outputFiles[0]!.text
+  const fixtureBundle = await browserBundle(
+    fileURLToPath(new URL(entry, import.meta.url)),
+  )
   const server = createServer((req, res) => {
     if (req.method !== 'GET') {
       res.writeHead(405)

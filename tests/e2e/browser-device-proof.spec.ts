@@ -26,7 +26,7 @@ test.beforeAll(async () => {
       ),
     ],
     bundle: true,
-    target: 'browser',
+    platform: 'browser',
     format: 'esm',
     outfile,
     logLevel: 'silent',

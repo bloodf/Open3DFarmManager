@@ -12,6 +12,5 @@ export default defineConfig({
     environment: 'node',
     isolate: true,
     maxWorkers: 2,
-    minWorkers: 1,
   },
 })

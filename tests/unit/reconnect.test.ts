@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import {
   SignallingBackoff,
   waitForReconnect,
@@ -54,8 +54,8 @@ test('aborted shutdown cancels a pending long wait immediately and preserves the
 })
 test('completed wait removes its listener and rejects invalid timer bounds', async () => {
   const controller = new AbortController()
-  const add = spyOn(controller.signal, 'addEventListener')
-  const remove = spyOn(controller.signal, 'removeEventListener')
+  const add = vi.spyOn(controller.signal, 'addEventListener')
+  const remove = vi.spyOn(controller.signal, 'removeEventListener')
   try {
     await waitForReconnect(0, controller.signal)
     expect(add).toHaveBeenCalledTimes(1)

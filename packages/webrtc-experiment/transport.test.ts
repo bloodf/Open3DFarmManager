@@ -2,14 +2,14 @@ import { expect, test } from 'vitest'
 import { createServer } from 'node:http'
 import { build } from 'esbuild'
 import { chromium, type Browser } from '@playwright/test'
-import type { AddressInfo } from 'node:net'
+import { once } from 'node:events'
 import type { Scenario } from './fixture'
 
 test('native encrypted DataChannel verifies synthetic identity and fails closed', async () => {
   const bundle = await build({
     entryPoints: [new URL('./fixture.ts', import.meta.url).pathname],
     bundle: true,
-    target: 'browser',
+    platform: 'browser',
     write: false,
   })
   const script = bundle.outputFiles[0]!.text
@@ -23,8 +23,14 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
         const request = new Request(
           `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
           {
-            method: req.method,
-            headers: req.headers as Record<string, string>,
+            method: req.method ?? 'GET',
+            headers: Object.entries(req.headers).flatMap(([name, value]) =>
+              value === undefined
+                ? []
+                : (Array.isArray(value) ? value : [value]).map(
+                    (item) => [name, item] satisfies [string, string],
+                  ),
+            ),
           },
         )
         const response = await received(request)
@@ -36,8 +42,20 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
       })()
     })
   })
-  server.listen(0, '127.0.0.1')
-  const { port } = server.address() as AddressInfo
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+  } catch (error) {
+    server.closeAllConnections()
+    server.close()
+    throw error
+  }
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    throw Error('Missing fixture port')
+  }
+  const { port } = address
   received = (request) => {
     if (request.method !== 'GET')
       return new Response('Somente leitura', { status: 405 })

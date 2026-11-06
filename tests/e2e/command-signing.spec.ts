@@ -17,7 +17,7 @@ test('Chromium persisted nonextractable key survives reload and signs a command 
     buildSync({
       entryPoints: ['./tests/helpers/browser-device-entry.ts'],
       bundle: true,
-      target: 'browser',
+      platform: 'browser',
       outfile,
       logLevel: 'silent',
     })

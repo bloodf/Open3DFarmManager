@@ -64,7 +64,7 @@ async function loopback(
 ) {
   const sockets = new Set<WsTestSocket>()
   const requests: { path: string; extension: string | null }[] = []
-  const server = serveWsTestServer({
+  const server = await serveWsTestServer({
     http(request) {
       requests.push({
         path: new URL(request.url).pathname,
@@ -156,15 +156,21 @@ function launch(args: string[], auditPath?: string) {
     for await (const part of child.stdout!) output += part.toString('utf8')
   })()
   const stderr = collectStream(child.stderr)
-  const exited = new Promise<number | null>((resolve) =>
-    child.on('exit', (code) => resolve(code)),
-  )
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
   const timer = setTimeout(() => child.kill('SIGKILL'), 8000)
   let recorded = false
+  void exited.catch(() => {})
   async function finish() {
-    const code = await exited
-    await stdout
-    clearTimeout(timer)
+    let code: number | null
+    try {
+      code = await exited
+      await stdout
+    } finally {
+      clearTimeout(timer)
+    }
     if (!recorded) {
       resource({ kind: 'child', id: child.pid, state: 'reaped' })
       recorded = true

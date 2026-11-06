@@ -59,15 +59,21 @@ function job(args: string[], env = {}) {
     for await (const bytes of child.stdout!) output += bytes.toString('utf8')
   })()
   const error = collectStream(child.stderr)
-  const exited = new Promise<number | null>((resolve) =>
-    child.on('exit', (code) => resolve(code)),
-  )
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
   const timer = setTimeout(() => child.kill('SIGKILL'), 10000)
   let recorded = false
+  void exited.catch(() => {})
   async function finish() {
-    const code = await exited
-    await reading
-    clearTimeout(timer)
+    let code: number | null
+    try {
+      code = await exited
+      await reading
+    } finally {
+      clearTimeout(timer)
+    }
     if (!recorded) {
       resource({ kind: 'child', id: child.pid, state: 'reaped' })
       recorded = true
@@ -169,7 +175,7 @@ async function fixture(signalling = false) {
   }
   const sockets = new Set<WsTestSocket>()
   let moonRequests = 0
-  const moon = serveWsTestServer({
+  const moon = await serveWsTestServer({
     http(request) {
       moonRequests++
       return Response.json({
@@ -217,7 +223,7 @@ async function fixture(signalling = false) {
   let signallingRequests = 0
   let holding = false
   const releases = new Set<() => void>()
-  const cloud = serveWsTestServer({
+  const cloud = await serveWsTestServer({
     tls: { cert: readFileSync(cert), key: readFileSync(key) },
     http: async (request) => {
       cloudRequests++

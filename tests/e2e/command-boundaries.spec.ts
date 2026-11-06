@@ -21,7 +21,7 @@ test.beforeAll(() => {
   buildSync({
     entryPoints: ['./tests/helpers/browser-device-entry.ts'],
     bundle: true,
-    target: 'browser',
+    platform: 'browser',
     outfile,
     logLevel: 'silent',
   })

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { appendFile, open, realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
-import { build } from 'esbuild'
+import { browserBundle } from './browser-bundle.ts'
 import type { JSHandle } from '@playwright/test'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import type {
@@ -377,18 +377,10 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
       })
       const note = await resourceLedger(input)
       await note('parent-baseline-required; no simulator or printer resources')
-      const bundle = await build({
-        entryPoints: [
-          new URL('./pause-rtc-browser.ts', import.meta.url).pathname,
-        ],
-        bundle: true,
-        target: 'browser',
-        write: false,
-        logLevel: 'silent',
-      }).catch(() => {
-        throw Error('Pause RTC browser bundle failed')
-      })
-      const bundleText = bundle.outputFiles[0]!.text
+      const bundleText = await browserBundle(
+        new URL('./pause-rtc-browser.ts', import.meta.url).pathname,
+        input.signal,
+      )
       assert.ok(Buffer.byteLength(bundleText) <= 1024 * 1024)
       await note('browser-bundle-in-memory-completed; no generated output file')
       const route = input.origin + '/__pause_authenticated_rtc_fixture__.js'

@@ -3,11 +3,12 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import {
   spawn,
-  spawnSync,
   type ChildProcessWithoutNullStreams,
 } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 import { chromium, type Browser } from '@playwright/test'
 import {
   RtcSessionBinding,
@@ -215,12 +216,17 @@ export async function runFiniteMediaPhase(
     phase === 'encode'
       ? './moving-h264-source.ts'
       : './browser-media-fixture.ts'
-  const built = spawnSync(
-    'bun',
-    ['build', new URL(entry, import.meta.url).pathname, '--target=browser'],
-    { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 },
-  )
-  assert.equal(built.status, 0, built.stderr)
+  // esbuild is declared by the workspace root; the harness reuses that copy.
+  const built = await build({
+    absWorkingDir: fileURLToPath(new URL('.', import.meta.url)),
+    entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    write: false,
+    legalComments: 'none',
+  })
+  const fixtureBundle = built.outputFiles[0]!.text
   const server = createServer((req, res) => {
     if (req.method !== 'GET') {
       res.writeHead(405)
@@ -229,7 +235,7 @@ export async function runFiniteMediaPhase(
     }
     if (req.url === '/fixture.js') {
       res.writeHead(200, { 'Content-Type': 'text/javascript' })
-      res.end(built.stdout)
+      res.end(fixtureBundle)
       return
     }
     if (req.url === '/') {

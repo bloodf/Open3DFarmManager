@@ -16,7 +16,9 @@ const external = ['node-datachannel']
 // optional `require('bufferutil')` inside a try/catch, so the bundle needs a
 // real Node require to keep that boundary honest.
 const banner = {
-  js: "import { createRequire } from 'node:module'\nconst require = createRequire(import.meta.url)\n",
+  js: `import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+`,
 }
 
 // A split build leaves orphaned chunks behind. The notices are regenerated

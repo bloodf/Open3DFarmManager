@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts && pnpm run test:interop",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:interop": "node --test ./interop.test.ts",
     "test:session": "vitest run ./session.test.ts --config vitest.config.ts"

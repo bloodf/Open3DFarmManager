@@ -74,6 +74,7 @@ export function useFarmView() {
     window.addEventListener('pageshow', revalidate)
     window.addEventListener('pagehide', hide)
     stopAuthListener = listenForAuthInvalidation(revalidate)
+    window.addEventListener('open3dfarmmanager:auth-invalidated', revalidate)
     document.addEventListener('visibilitychange', revalidate)
   })
   onBeforeRouteLeave(hide)
@@ -85,6 +86,7 @@ export function useFarmView() {
     window.removeEventListener('pageshow', revalidate)
     window.removeEventListener('pagehide', hide)
     stopAuthListener()
+    window.removeEventListener('open3dfarmmanager:auth-invalidated', revalidate)
     document.removeEventListener('visibilitychange', revalidate)
   })
   return {

@@ -6,16 +6,63 @@ trap 'rm -rf "$scratch"' EXIT
 mkdir "$scratch/bin"
 export LOCAL_CI_REAL_NODE
 LOCAL_CI_REAL_NODE=$(command -v node)
+workflow="$root/.github/workflows/ci.yml"
+cat > "$scratch/workflow-pins.mjs" <<'EOF'
+import { readFileSync } from 'node:fs';
+
+function pinValue(source, key) {
+  const found = [];
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(`${key}:`)) continue;
+    found.push(trimmed.slice(key.length + 1).trim());
+  }
+  if (found.length !== 1) throw new Error(`expected exactly one ${key} entry, found ${found.length}`);
+  const raw = found[0];
+  const quote = raw[0];
+  let value = raw;
+  if (quote === "'" || quote === '"') {
+    if (raw.length < 2 || raw[raw.length - 1] !== quote) throw new Error(`unsupported ${key} form: ${raw}`);
+    value = raw.slice(1, -1);
+  }
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(value)) throw new Error(`unsupported ${key} version form: ${raw}`);
+  return value;
+}
+
+try {
+  const source = readFileSync(process.argv[2], 'utf8');
+  process.stdout.write(`bun=${pinValue(source, 'bun-version')}\n`);
+  process.stdout.write(`node=${pinValue(source, 'node-version')}\n`);
+} catch (error) {
+  process.stderr.write(`FAILED: ${error.message}\n`);
+  process.exit(1);
+}
+EOF
+if ! workflow_pins=$("$LOCAL_CI_REAL_NODE" "$scratch/workflow-pins.mjs" "$workflow"); then
+  printf '%s\n' "FAILED: unable to read the toolchain pins from $workflow" >&2
+  exit 1
+fi
+export LOCAL_CI_WORKFLOW_BUN_VERSION=''
+export LOCAL_CI_WORKFLOW_NODE_VERSION=''
+while IFS='=' read -r label version; do
+  case "$label" in
+    bun) export LOCAL_CI_WORKFLOW_BUN_VERSION="$version" ;;
+    node) export LOCAL_CI_WORKFLOW_NODE_VERSION="$version" ;;
+    *) printf '%s\n' "FAILED: unexpected workflow pin label: $label" >&2; exit 1 ;;
+  esac
+done <<< "$workflow_pins"
+[[ $LOCAL_CI_WORKFLOW_BUN_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf '%s\n' 'FAILED: the workflow bun-version pin is not a digit x.y.z version' >&2; exit 1; }
+[[ $LOCAL_CI_WORKFLOW_NODE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf '%s\n' 'FAILED: the workflow node-version pin is not a digit x.y.z version' >&2; exit 1; }
 cat > "$scratch/bin/bun" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' 1.4.4; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf '%s\n' "${LOCAL_CI_WORKFLOW_BUN_VERSION:?LOCAL_CI_WORKFLOW_BUN_VERSION is unset}"; exit 0; fi
 printf '%s\n' "$*" >> "$TMPDIR/calls"
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == install ]]; then exit 0; fi
 exit 42
 EOF
 cat > "$scratch/bin/node" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' v24.20.0; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf 'v%s\n' "${LOCAL_CI_WORKFLOW_NODE_VERSION:?LOCAL_CI_WORKFLOW_NODE_VERSION is unset}"; exit 0; fi
 exec "$LOCAL_CI_REAL_NODE" "$@"
 EOF
 cat > "$scratch/bin/docker" <<'EOF'

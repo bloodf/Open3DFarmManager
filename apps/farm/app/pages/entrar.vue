@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { completeAuth } from '../utils/auth-invalidation.ts'
+
 const username = ref('')
 const password = ref('')
 const pending = ref(false)
@@ -10,12 +12,12 @@ async function login() {
   pending.value = true
   errorMessage.value = ''
   try {
-    await $fetch('/api/auth/login', {
+    await completeAuth(() => $fetch('/api/auth/login', {
       method: 'POST',
       body: { username: username.value, password: password.value },
       retry: 0,
       timeout: 15_000,
-    })
+    }))
     password.value = ''
     await navigateTo('/')
   } catch (error: unknown) {

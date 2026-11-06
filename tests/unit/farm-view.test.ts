@@ -1,3 +1,4 @@
+import { completeAuth, listenForAuthInvalidation } from '../../apps/farm/app/utils/auth-invalidation.ts'
 import { expect, test } from 'bun:test'
 import {
   createFarmView,
@@ -1245,4 +1246,46 @@ test('refresh rebuilds full scope and cannot replay the prior complete tuple cac
     row.printerKey,
   ])
   h.view.dispose()
+})
+
+
+test('successful auth invalidates another view and ignores stale work; failure and cleanup do not notify', async () => {
+  const originalWindow = globalThis.window
+  const originalChannel = globalThis.BroadcastChannel
+  const channels = new Set<FakeChannel>()
+  class FakeChannel {
+    onmessage: (() => void) | null = null
+    constructor(_name: string) { channels.add(this) }
+    postMessage(_value: null) {
+      for (const channel of channels) if (channel !== this) channel.onmessage?.()
+    }
+    close() { channels.delete(this) }
+  }
+  Object.assign(globalThis, { window: {}, BroadcastChannel: FakeChannel })
+  try {
+    const pending = deferred<readonly { thumbprint: string }[]>()
+    const h = setup()
+    const result: { state: FarmViewState } = { state: { kind: 'loading' } }
+    const view = createFarmView({ read: h.baseRead, listKeys: () => pending.promise,
+      clock: () => h.time, changed: (state) => { result.state = state } })
+    const loading = view.discover()
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    expect(result.state.kind).toBe('ready')
+    let notifications = 0
+    const stop = listenForAuthInvalidation(() => { notifications++; view.invalidate() })
+    await expect(completeAuth(async () => { throw new Error('auth failed') })).rejects.toThrow()
+    expect(notifications).toBe(0)
+    await completeAuth(async () => ({ ok: true }))
+    expect(result.state.kind).toBe('loading')
+    pending.resolve([{ thumbprint }])
+    await loading
+    expect(result.state.kind).toBe('loading')
+    stop()
+    expect(channels.size).toBe(0)
+    await completeAuth(async () => ({ ok: true }))
+    expect(notifications).toBe(1)
+    view.dispose()
+  } finally {
+    Object.assign(globalThis, { window: originalWindow, BroadcastChannel: originalChannel })
+  }
 })

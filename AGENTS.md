@@ -10,3 +10,5 @@
 - Do not use external chats or delegate development to agents.
 - Use Bun workspaces, Nuxt 4 and TypeScript. Run `bun run check:all` before publishing changes; report pending integration checks explicitly.
 - Commit one coherent subtask at a time using English conventional commit messages. User-facing copy is pt-BR and accessible.
+
+For repository AI tooling, version pinning, fallback commands and the current product HOLD, see [docs/ai-tooling.md](docs/ai-tooling.md).

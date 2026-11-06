@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { buildSync } from 'esbuild'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,23 +16,21 @@ let browserBundle: string
 test.beforeAll(async () => {
   bundleDirectory = await mkdtemp(join(tmpdir(), 'open3dfarm-browser-proof-'))
   const outfile = join(bundleDirectory, 'browser-device-proof.js')
-  execFileSync(
-    'bun',
-    [
-      'build',
+  buildSync({
+    entryPoints: [
       fileURLToPath(
         new URL(
           '../../packages/farm-protocol/src/browser-device-proof.ts',
           import.meta.url,
         ),
       ),
-      '--target=browser',
-      '--format=esm',
-      '--outfile',
-      outfile,
     ],
-    { timeout: 30_000, maxBuffer: 1024 * 1024 },
-  )
+    bundle: true,
+    target: 'browser',
+    format: 'esm',
+    outfile,
+    logLevel: 'silent',
+  })
   browserBundle = await readFile(outfile, 'utf8')
 })
 

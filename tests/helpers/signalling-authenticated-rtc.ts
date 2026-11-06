@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
-import { spawn, execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { appendFile, open, realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
-import { promisify } from 'node:util'
+import { build } from 'esbuild'
 import type { JSHandle } from '@playwright/test'
 import type {
   FixtureIdentityHandles,
@@ -324,29 +324,26 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
       await note(
         'source-baseline-required-parent-owned; no simulator or hardware resources',
       )
-      const bundle = await promisify(execFile)(
-        'bun',
-        [
-          'build',
+      const bundle = await build({
+        entryPoints: [
           new URL('./signalling-rtc-browser.ts', import.meta.url).pathname,
-          '--target=browser',
         ],
-        {
-          encoding: 'utf8',
-          timeout: 10_000,
-          maxBuffer: 1024 * 1024,
-          signal: input.signal,
-        },
-      ).catch(() => {
+        bundle: true,
+        target: 'browser',
+        write: false,
+        logLevel: 'silent',
+      }).catch(() => {
         throw Error('RTC browser bundle failed')
       })
+      const bundleText = bundle.outputFiles[0]!.text
+      assert.ok(Buffer.byteLength(bundleText) <= 1024 * 1024)
       await note('browser-bundle-in-memory-completed; no generated output file')
       const route = input.origin + '/__authenticated_rtc_fixture__.js'
       const serve: Parameters<typeof input.ownerPage.route>[1] = (route) =>
         route.fulfill({
           status: 200,
           contentType: 'text/javascript',
-          body: bundle.stdout,
+          body: bundleText,
         })
       let connector: Awaited<ReturnType<typeof connectorChild>> | undefined
       let actor: JSHandle<BrowserActor> | undefined

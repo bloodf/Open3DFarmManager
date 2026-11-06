@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import {
   createHash,
   createPublicKey,
@@ -20,7 +20,9 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ServerWebSocket } from 'bun'
+import { spawn, spawnSync } from 'node:child_process'
+import { serveWsTestServer, type WsTestSocket } from './ws-serve.ts'
+import { collectStream } from './streams.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
@@ -32,8 +34,8 @@ import {
 } from '../../packages/farm-protocol/src/telemetry-proof.ts'
 
 function resource(value: object) {
-  if (Bun.env.AGENT_TEST_LEDGER)
-    appendFileSync(Bun.env.AGENT_TEST_LEDGER, JSON.stringify(value) + '\n')
+  if (process.env.AGENT_TEST_LEDGER)
+    appendFileSync(process.env.AGENT_TEST_LEDGER, JSON.stringify(value) + '\n')
 }
 function temporary() {
   const path = mkdtempSync(join(tmpdir(), 'open3d-agent-'))
@@ -47,22 +49,23 @@ function temporary() {
   }
 }
 function job(args: string[], env = {}) {
-  const child = Bun.spawn(['node', ...args], {
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const child = spawn('node', args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...env },
   })
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
   const reading = (async () => {
-    for await (const bytes of child.stdout)
-      output += new TextDecoder().decode(bytes)
+    for await (const bytes of child.stdout!) output += bytes.toString('utf8')
   })()
-  const error = new Response(child.stderr).text()
+  const error = collectStream(child.stderr)
+  const exited = new Promise<number | null>((resolve) =>
+    child.on('exit', (code) => resolve(code)),
+  )
   const timer = setTimeout(() => child.kill('SIGKILL'), 10000)
   let recorded = false
   async function finish() {
-    const code = await child.exited
+    const code = await exited
     await reading
     clearTimeout(timer)
     if (!recorded) {
@@ -129,9 +132,9 @@ async function fixture(signalling = false) {
   const audience = 'agent-fixture'
   const cert = join(temp.path, 'cert.pem'),
     key = join(temp.path, 'key.pem')
-  const openssl = Bun.spawn(
+  const openssl = spawn(
+    'openssl',
     [
-      'openssl',
       'req',
       '-x509',
       '-newkey',
@@ -150,56 +153,54 @@ async function fixture(signalling = false) {
       '-addext',
       'subjectAltName=IP:127.0.0.1',
     ],
-    { stdout: 'ignore', stderr: 'pipe' },
+    { stdio: ['ignore', 'ignore', 'pipe'] },
   )
   resource({ kind: 'child', id: openssl.pid, state: 'created' })
   const certTimer = setTimeout(() => openssl.kill('SIGKILL'), 5000)
-  const certExit = await openssl.exited
-  const certError = await new Response(openssl.stderr).text()
+  const certExit = await new Promise<number | null>((resolve) =>
+    openssl.on('exit', (code) => resolve(code)),
+  )
+  const certError = await collectStream(openssl.stderr)
   clearTimeout(certTimer)
   resource({ kind: 'child', id: openssl.pid, state: 'reaped' })
   if (certExit !== 0) {
     temp.close()
     throw new Error(certError)
   }
-  const sockets = new Set<ServerWebSocket<undefined>>()
+  const sockets = new Set<WsTestSocket>()
   let moonRequests = 0
-  const moon = Bun.serve<undefined>({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request, server) {
+  const moon = serveWsTestServer({
+    http(request) {
       moonRequests++
-      if (new URL(request.url).pathname === '/websocket') {
-        if (server.upgrade(request, { data: undefined })) return
-        return new Response(null, { status: 400 })
-      }
       return Response.json({
         result: { klippy_connected: true, klippy_state: 'ready' },
       })
     },
-    websocket: {
-      open(socket) {
-        sockets.add(socket)
-      },
-      close(socket) {
-        sockets.delete(socket)
-      },
-      message(socket) {
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            result: {
-              eventtime: 10,
-              status: {
-                webhooks: { state: 'ready' },
-                print_stats: { state: 'printing' },
-                virtual_sdcard: { progress: 0.25 },
-              },
+    upgrade(request) {
+      moonRequests++
+      return new URL(request.url).pathname === '/websocket'
+    },
+    onOpen(socket) {
+      sockets.add(socket)
+    },
+    onClose(socket) {
+      sockets.delete(socket)
+    },
+    onMessage(socket) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            eventtime: 10,
+            status: {
+              webhooks: { state: 'ready' },
+              print_stats: { state: 'printing' },
+              virtual_sdcard: { progress: 0.25 },
             },
-          }),
-        )
-      },
+          },
+        }),
+      )
     },
   })
   resource({ kind: 'loopback', id: moon.port, state: 'created' })
@@ -216,11 +217,9 @@ async function fixture(signalling = false) {
   let signallingRequests = 0
   let holding = false
   const releases = new Set<() => void>()
-  const cloud = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
+  const cloud = serveWsTestServer({
     tls: { cert: readFileSync(cert), key: readFileSync(key) },
-    async fetch(request) {
+    http: async (request) => {
       cloudRequests++
       if (new URL(request.url).pathname === '/api/signalling/connector') {
         signallingRequests++
@@ -421,8 +420,8 @@ async function fixture(signalling = false) {
       for (const socket of sockets) socket.terminate()
       const moonPort = moon.port,
         cloudPort = cloud.port
-      await moon.stop(true)
-      await cloud.stop(true)
+      await moon.stop()
+      await cloud.stop()
       resource({ kind: 'loopback', id: moonPort, state: 'closed' })
       resource({ kind: 'loopback', id: cloudPort, state: 'closed' })
       temp.close()
@@ -858,17 +857,12 @@ test('expired or mismatched credentials fail before any queue or network', async
         unlinkSync(join(server.data, 'identity.json'))
       if (mode === 'fifo') {
         unlinkSync(server.credentialPath)
-        const make = Bun.spawn(['mkfifo', '-m', '600', server.credentialPath], {
-          stdout: 'ignore',
-          stderr: 'pipe',
+        const make = spawnSync('mkfifo', ['-m', '600', server.credentialPath], {
+          encoding: 'utf8',
         })
         resource({ kind: 'child', id: make.pid, state: 'created' })
-        const timer = setTimeout(() => make.kill('SIGKILL'), 2000)
-        const code = await make.exited
-        clearTimeout(timer)
-        await new Response(make.stderr).text()
         resource({ kind: 'child', id: make.pid, state: 'reaped' })
-        expect(code).toBe(0)
+        expect(make.status).toBe(0)
       }
       const running = server.launch()
       try {

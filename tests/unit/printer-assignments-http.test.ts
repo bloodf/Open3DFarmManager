@@ -1,4 +1,4 @@
-import { beforeAll, expect, test } from 'bun:test'
+import { beforeAll, expect, test } from 'vitest'
 import {
   printerAssignments,
   printerAssignmentBoundary,

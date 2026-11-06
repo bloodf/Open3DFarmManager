@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { simulatorUrl, probePrinter } from '@open3dfarmmanager/sim-tools'
 import { Effect } from 'effect'
+import { serveTestServer } from './serve.ts'
 
 test.each([
   'https://localhost',
@@ -14,14 +15,11 @@ test.each([
 })
 test('requires ready Klipper, not just a responding HTTP server', async () => {
   let state = 'startup'
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: () =>
-      Response.json({
-        result: { klippy_connected: true, klippy_state: state },
-      }),
-  })
+  const server = serveTestServer(() =>
+    Response.json({
+      result: { klippy_connected: true, klippy_state: state },
+    }),
+  )
   try {
     await expect(
       Effect.runPromise(probePrinter(server.url.origin)),
@@ -35,11 +33,7 @@ test('requires ready Klipper, not just a responding HTTP server', async () => {
   }
 })
 test('does not follow redirects out of the simulator boundary', async () => {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: () => Response.redirect('https://example.com'),
-  })
+  const server = serveTestServer(() => Response.redirect('https://example.com'))
   try {
     await expect(
       Effect.runPromise(probePrinter(server.url.origin)),
@@ -59,11 +53,7 @@ test.each([
 ])(
   'rejects disconnected, failed or malformed readiness: %j',
   async (result) => {
-    const server = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch: () => Response.json({ result }),
-    })
+    const server = serveTestServer(() => Response.json({ result }))
     try {
       await expect(
         Effect.runPromise(probePrinter(server.url.origin)),

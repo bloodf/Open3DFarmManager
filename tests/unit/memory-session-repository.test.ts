@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { MemorySessionRepository } from '../helpers/memory-session-repository.ts'
 const account = { id: 'account-one', sessionVersion: 2, disabled: false }
 const session = {

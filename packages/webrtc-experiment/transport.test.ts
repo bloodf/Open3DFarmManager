@@ -1,40 +1,64 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
+import { createServer } from 'node:http'
+import { build } from 'esbuild'
 import { chromium, type Browser } from '@playwright/test'
+import type { AddressInfo } from 'node:net'
 import type { Scenario } from './fixture'
 
 test('native encrypted DataChannel verifies synthetic identity and fails closed', async () => {
-  const bundle = await Bun.build({
-    entrypoints: [new URL('./fixture.ts', import.meta.url).pathname],
+  const bundle = await build({
+    entryPoints: [new URL('./fixture.ts', import.meta.url).pathname],
+    bundle: true,
     target: 'browser',
+    write: false,
   })
-  if (!bundle.success || !bundle.outputs[0])
-    throw Error('Browser bundle failed')
-  const script = await bundle.outputs[0].text()
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request) {
-      if (request.method !== 'GET')
-        return new Response('Somente leitura', { status: 405 })
-      const path = new URL(request.url).pathname
-      if (path !== '/' && path !== '/fixture.js')
-        return new Response('Não encontrado', { status: 404 })
-      return path === '/fixture.js'
-        ? new Response(script, {
-            headers: { 'Content-Type': 'text/javascript' },
-          })
-        : new Response(
-            '<!doctype html><html lang="pt-BR"><title>Experimento sintético WebRTC</title><body>Somente dados sintéticos.</body></html>',
-            { headers: { 'Content-Type': 'text/html' } },
-          )
-    },
+  const script = bundle.outputFiles[0]!.text
+  let received: (request: Request) => Response | Promise<Response> = () =>
+    new Response(null, { status: 404 })
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      void (async () => {
+        const request = new Request(
+          `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
+          {
+            method: req.method,
+            headers: req.headers as Record<string, string>,
+          },
+        )
+        const response = await received(request)
+        res.writeHead(
+          response.status,
+          Object.fromEntries(response.headers.entries()),
+        )
+        res.end(Buffer.from(await response.arrayBuffer()))
+      })()
+    })
   })
+  server.listen(0, '127.0.0.1')
+  const { port } = server.address() as AddressInfo
+  received = (request) => {
+    if (request.method !== 'GET')
+      return new Response('Somente leitura', { status: 405 })
+    const path = new URL(request.url).pathname
+    if (path !== '/' && path !== '/fixture.js')
+      return new Response('Não encontrado', { status: 404 })
+    return path === '/fixture.js'
+      ? new Response(script, {
+          headers: { 'Content-Type': 'text/javascript' },
+        })
+      : new Response(
+          '<!doctype html><html lang="pt-BR"><title>Experimento sintético WebRTC</title><body>Somente dados sintéticos.</body></html>',
+          { headers: { 'Content-Type': 'text/html' } },
+        )
+  }
   let browser: Browser | undefined
   try {
     browser = await chromium.launch({ headless: true })
     console.info(JSON.stringify({ chromium: browser.version() }))
     const page = await browser.newPage()
-    await page.goto(`http://127.0.0.1:${server.port}`)
+    await page.goto(`http://127.0.0.1:${port}`)
     for (const scenario of [
       'valid',
       'wrong-peer',
@@ -92,7 +116,9 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
     try {
       await browser?.close()
     } finally {
-      server.stop(true)
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      )
     }
   }
 }, 60000)

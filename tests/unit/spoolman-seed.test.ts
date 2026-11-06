@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { seedSpoolman } from '../../packages/sim-tools/src/spoolman.ts'
+import { serveTestServer } from './serve.ts'
 
 test('seed is repeatable, retains unrelated rows and uses returned foreign keys', async () => {
   const data: Record<string, Record<string, unknown>[]> = {
@@ -9,30 +10,26 @@ test('seed is repeatable, retains unrelated rows and uses returned foreign keys'
   }
   let nextId = 50
   let writes = 0
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      const kind = new URL(request.url).pathname.split('/').at(-1)!
-      const rows = data[kind]
-      if (!rows) return new Response(null, { status: 404 })
-      if (request.method === 'GET') return Response.json(rows)
-      const body = (await request.json()) as Record<string, unknown>
-      if (
-        kind === 'filament' &&
-        !data.vendor!.some((v) => v.id === body.vendor_id)
-      )
-        return new Response(null, { status: 422 })
-      if (
-        kind === 'spool' &&
-        !data.filament!.some((f) => f.id === body.filament_id)
-      )
-        return new Response(null, { status: 422 })
-      const entity = { ...body, id: nextId++ }
-      rows.push(entity)
-      writes++
-      return Response.json(entity)
-    },
+  const server = serveTestServer(async (request) => {
+    const kind = new URL(request.url).pathname.split('/').at(-1)!
+    const rows = data[kind]
+    if (!rows) return new Response(null, { status: 404 })
+    if (request.method === 'GET') return Response.json(rows)
+    const body = (await request.json()) as Record<string, unknown>
+    if (
+      kind === 'filament' &&
+      !data.vendor!.some((v) => v.id === body.vendor_id)
+    )
+      return new Response(null, { status: 422 })
+    if (
+      kind === 'spool' &&
+      !data.filament!.some((f) => f.id === body.filament_id)
+    )
+      return new Response(null, { status: 422 })
+    const entity = { ...body, id: nextId++ }
+    rows.push(entity)
+    writes++
+    return Response.json(entity)
   })
   try {
     expect(await seedSpoolman(server.url.origin)).toEqual({
@@ -56,13 +53,9 @@ test('seed refuses remote origins before issuing any request', async () => {
 })
 test('seed stops after an API failure', async () => {
   let calls = 0
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch() {
-      calls++
-      return new Response(null, { status: 503 })
-    },
+  const server = serveTestServer(() => {
+    calls++
+    return new Response(null, { status: 503 })
   })
   try {
     await expect(seedSpoolman(server.url.origin)).rejects.toThrow('503')

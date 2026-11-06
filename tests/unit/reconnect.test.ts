@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from 'bun:test'
+import { expect, test, spyOn } from 'vitest'
 import {
   SignallingBackoff,
   waitForReconnect,

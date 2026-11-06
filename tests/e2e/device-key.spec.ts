@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { buildSync } from 'esbuild'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,13 +11,13 @@ const otherId = '00000000-0000-4000-8000-000000000002'
 test.beforeAll(() => {
   directory = mkdtempSync(join(tmpdir(), 'open3d-device-key-'))
   const outfile = join(directory, 'browser.js')
-  execFileSync('bun', [
-    'build',
-    './tests/helpers/browser-device-entry.ts',
-    '--target=browser',
-    '--outfile',
+  buildSync({
+    entryPoints: ['./tests/helpers/browser-device-entry.ts'],
+    bundle: true,
+    target: 'browser',
     outfile,
-  ])
+    logLevel: 'silent',
+  })
   source = readFileSync(outfile, 'utf8')
 })
 test.afterAll(() => {

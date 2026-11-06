@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import {
   verifyFourTools,
   verifyWebcam,
   verifyCamera,
 } from '../../packages/sim-tools/src/verify.ts'
+import { serveTestServer } from './serve.ts'
 
 test('four-tool acceptance fails when even one expected tool macro is missing', async () => {
   const objects = [
@@ -17,11 +18,7 @@ test('four-tool acceptance fails when even one expected tool macro is missing', 
     'gcode_macro T3',
     'save_variables',
   ]
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: () => Response.json({ result: { objects } }),
-  })
+  const server = serveTestServer(() => Response.json({ result: { objects } }))
   try {
     expect(await verifyFourTools(server.url.origin)).toBe(9)
     objects.splice(objects.indexOf('gcode_macro T3'), 1)
@@ -33,11 +30,9 @@ test('four-tool acceptance fails when even one expected tool macro is missing', 
   }
 })
 test('webcam acceptance rejects an empty webcam list', async () => {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: () => Response.json({ result: { webcams: [] } }),
-  })
+  const server = serveTestServer(() =>
+    Response.json({ result: { webcams: [] } }),
+  )
   try {
     await expect(verifyWebcam(server.url.origin)).rejects.toThrow()
   } finally {
@@ -45,14 +40,12 @@ test('webcam acceptance rejects an empty webcam list', async () => {
   }
 })
 test('camera acceptance rejects HTML disguised as a snapshot', async () => {
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: () =>
+  const server = serveTestServer(
+    () =>
       new Response('<html>error</html>', {
         headers: { 'Content-Type': 'image/jpeg' },
       }),
-  })
+  )
   try {
     await expect(verifyCamera(server.url.origin)).rejects.toThrow('Invalid')
   } finally {

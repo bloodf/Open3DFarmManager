@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { buildSync } from 'esbuild'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,13 +14,13 @@ test('Chromium persisted nonextractable key survives reload and signs a command 
   const outfile = join(directory, 'protocol.js')
   let store: PersistentReplayStore | undefined
   try {
-    execFileSync('bun', [
-      'build',
-      './tests/helpers/browser-device-entry.ts',
-      '--target=browser',
-      '--outfile',
+    buildSync({
+      entryPoints: ['./tests/helpers/browser-device-entry.ts'],
+      bundle: true,
+      target: 'browser',
       outfile,
-    ])
+      logLevel: 'silent',
+    })
     await page.goto('/')
     const id = '00000000-0000-4000-8000-000000000001'
     const source = readFileSync(outfile, 'utf8')

@@ -3,8 +3,12 @@
   "extends": ["config:recommended"],
   "packageRules": [
     {
-      "description": "Vendored rtsp-ingest sources are immutable and provenance-audited; updates are manual.",
-      "matchFileNames": ["third_party/rtsp-ingest/**"],
+      "description": "Vendored rtsp-ingest sources and the audited rtsp-ingest module graph are immutable and provenance-audited; updates are manual.",
+      "matchFileNames": [
+        "third_party/rtsp-ingest/**",
+        "tools/rtsp-ingest/go.mod",
+        "tools/rtsp-ingest/go.sum"
+      ],
       "enabled": false
     }
   ]

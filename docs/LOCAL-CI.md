@@ -20,6 +20,29 @@ browser, operating system and resource scheduling may differ from GitHub.
 `check:all` itself runs lint again, as the workflow does. Missing prerequisites
 or failed tests do not produce a passing result.
 
+The code job leaves two paths out. The default Playwright run skips
+`tests/e2e/farm-view.spec.ts`, because the file calls `test.skip` unless
+`FARM_VIEW_E2E` is `true`, and the default configuration keeps the farm view
+flag off. The dedicated configuration `playwright.farm-view.config.ts` refuses
+to load without that variable, turns the flag on and serves the app on port 3101.
+Build the app first, then run these cases on their own:
+
+```sh
+FARM_VIEW_E2E=true bunx playwright test --config playwright.farm-view.config.ts
+```
+
+`packages/webrtc-experiment` has its own typecheck and test scripts, and neither
+`check:all` nor the workflow runs them. The root `tsc --noEmit` in `check:all`
+still typechecks the package sources. Run the package scripts yourself:
+
+```sh
+bun run --cwd packages/webrtc-experiment typecheck
+bun run --cwd packages/webrtc-experiment test
+```
+
+The transport and interop cases launch Playwright's Chromium. Neither path is a
+GitHub check, so a passing code job says nothing about them.
+
 Optional container jobs require explicit opt-in:
 
 ```sh

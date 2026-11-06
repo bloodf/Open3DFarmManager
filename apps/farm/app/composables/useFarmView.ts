@@ -1,3 +1,4 @@
+import { listenForAuthInvalidation } from '../utils/auth-invalidation.ts'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import {
@@ -39,6 +40,7 @@ export function useFarmView() {
       },
     },
   })
+  let stopAuthListener = () => {}
   let timer: ReturnType<typeof setInterval> | undefined
   const revalidate = () => {
     view.invalidate()
@@ -71,7 +73,7 @@ export function useFarmView() {
     window.addEventListener('focus', revalidate)
     window.addEventListener('pageshow', revalidate)
     window.addEventListener('pagehide', hide)
-    window.addEventListener('open3dfarmmanager:auth-invalidated', revalidate)
+    stopAuthListener = listenForAuthInvalidation(revalidate)
     document.addEventListener('visibilitychange', revalidate)
   })
   onBeforeRouteLeave(hide)
@@ -82,7 +84,7 @@ export function useFarmView() {
     window.removeEventListener('focus', revalidate)
     window.removeEventListener('pageshow', revalidate)
     window.removeEventListener('pagehide', hide)
-    window.removeEventListener('open3dfarmmanager:auth-invalidated', revalidate)
+    stopAuthListener()
     document.removeEventListener('visibilitychange', revalidate)
   })
   return {

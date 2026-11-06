@@ -5,10 +5,10 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "bun test ./transport.test.ts && bun run test:session && bun run test:interop",
+    "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:interop": "node --test ./interop.test.ts",
-    "test:session": "bun test ./session.test.ts"
+    "test:session": "vitest run ./session.test.ts --config vitest.config.ts"
   },
   "devDependencies": {
     "node-datachannel": "0.33.5"

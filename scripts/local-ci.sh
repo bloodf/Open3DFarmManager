@@ -92,24 +92,24 @@ if ((containers)); then
   if ((available < 10485760)); then printf '%s\n' 'Insufficient free disk for container jobs (10 GiB minimum).'; exit 2; fi
 fi
 code_job() {
-  if ! command -v bun >/dev/null || ! command -v node >/dev/null; then
-    printf '%s\n' 'UNSUPPORTED: Bun and Node are required.' >&2; return 2
+  if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
+    printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
   fi
-  [[ $(bun --version) == 1.4.2 && $(node --version) == v24.20.0 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Bun 1.4.2 and Node 24.20.0.' >&2; return 2; }
+  [[ $(pnpm --version) == 12.18.0 && $(node --version) == v24.22.2 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node 24.22.2.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
-  bun install --frozen-lockfile --ignore-scripts
-  bun run lint
-  bun run check:all
+  pnpm install --frozen-lockfile --ignore-scripts
+  pnpm run lint
+  pnpm run check:all
   node packages/connector/dist/cli.js --version
   # Browser and OS libraries must already be installed; never install system packages implicitly.
-  bun run test:e2e
+  pnpm run test:e2e
 }
 image_job() {
   if docker image inspect "$image_tag" >/dev/null 2>&1 || docker container inspect "$container_name" >/dev/null 2>&1; then
     printf '%s\n' 'Resource name collision; refusing to use pre-existing image or container.' >&2
     return 2
   fi
-  for base in oven/bun:1.4.2 node:24.20.0-alpine; do
+  for base in node:24.22.2-alpine; do
     local platform
     platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true)
     if [[ $platform == / ]]; then
@@ -143,10 +143,10 @@ image_job() {
   return 1
 }
 klipper_job() {
-  if ! command -v bun >/dev/null || ! command -v node >/dev/null; then
-    printf '%s\n' 'UNSUPPORTED: Bun and Node are required.' >&2; return 2
+  if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
+    printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
   fi
-  [[ $(bun --version) == 1.4.2 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: Bun 1.4.2 and existing workspace dependencies are required.' >&2; return 2; }
+  [[ $(pnpm --version) == 12.18.0 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: pnpm 12.18.0 and existing workspace dependencies are required.' >&2; return 2; }
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker volume ls -q --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker network ls -q --filter "label=com.docker.compose.project=$project_name") ]]; then
@@ -163,7 +163,7 @@ klipper_job() {
     return 2
   fi
   if ! docker image inspect "$sim_image" >/dev/null 2>&1; then sim_image_preexisting=0; fi
-  bun install --frozen-lockfile --ignore-scripts
+  pnpm install --frozen-lockfile --ignore-scripts
   docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper config --quiet
   sim_started=1
   local failure
@@ -172,7 +172,7 @@ klipper_job() {
     node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
     return "$failure"
   fi
-  if env -u SIM_SV06_URL -u SIM_U1_URL bun run sim:smoke; then :; else
+  if env -u SIM_SV06_URL -u SIM_U1_URL pnpm run sim:smoke; then :; else
     failure=$?
     node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
     return "$failure"

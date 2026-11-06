@@ -10,12 +10,14 @@ async function logout() {
   pending.value = true
   errorMessage.value = ''
   try {
-    await completeAuth(() => $fetch('/api/auth/logout', {
-      method: 'POST',
-      body: {},
-      retry: 0,
-      timeout: 15_000,
-    }))
+    await completeAuth(() =>
+      $fetch('/api/auth/logout', {
+        method: 'POST',
+        body: {},
+        retry: 0,
+        timeout: 15_000,
+      }),
+    )
     await navigateTo('/')
   } catch {
     errorMessage.value =

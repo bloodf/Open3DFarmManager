@@ -12,12 +12,14 @@ async function login() {
   pending.value = true
   errorMessage.value = ''
   try {
-    await completeAuth(() => $fetch('/api/auth/login', {
-      method: 'POST',
-      body: { username: username.value, password: password.value },
-      retry: 0,
-      timeout: 15_000,
-    }))
+    await completeAuth(() =>
+      $fetch('/api/auth/login', {
+        method: 'POST',
+        body: { username: username.value, password: password.value },
+        retry: 0,
+        timeout: 15_000,
+      }),
+    )
     password.value = ''
     await navigateTo('/')
   } catch (error: unknown) {

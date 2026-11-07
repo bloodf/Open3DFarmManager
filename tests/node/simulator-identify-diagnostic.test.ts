@@ -2662,6 +2662,7 @@ for (const mode of ['success', 'diagnostic-failure', 'cleanup-failure']) {
           for (let index = 0; index < args.length; index++) {
             if (args[index] !== '--label') continue
             const label = args[index + 1]
+            assert.ok(typeof label === 'string', '--label requires a value')
             const separator = label.indexOf('=')
             labels[label.slice(0, separator)] = label.slice(separator + 1)
           }

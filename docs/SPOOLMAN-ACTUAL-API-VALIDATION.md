@@ -18,7 +18,7 @@ With project dependencies available and Node >=24.22.2 <25, run on that Linux ho
 SPOOLMAN_SYNTHETIC_TEST_ORIGIN=http://127.0.0.1:<port> SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE=yes node scripts/test-spoolman-node.ts
 ```
 
-The reader validates the canonical loopback origin and performs GET requests only. Capture its bounded JSON output, exit status, Node version and image digest as the receipt. The parent owns setup, service lifecycle, isolation verification and cleanup. This opt-in is an operator assertion, not proof that the service is disposable. A passing receipt does not establish production or hardware acceptance.
+The qualification resolves each spool's expected filament and vendor names through `infra/sim/spoolman/seed.json`, independently of returned IDs. It also checks ID relationships, exact weights, archive position and pagination equality. The reader validates the canonical loopback origin and performs GET requests only. Capture its bounded JSON output, exit status, Node version and image digest as the receipt. The parent owns setup, service lifecycle, isolation verification and cleanup. This opt-in is an operator assertion, not proof that the service is disposable. A passing receipt does not establish production or hardware acceptance.
 
 ## Observed local result
 

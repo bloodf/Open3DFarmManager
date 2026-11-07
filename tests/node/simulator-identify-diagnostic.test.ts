@@ -210,7 +210,6 @@ const OBSERVER_MAX_EVENTS = 4096
 
 const ENTRYPOINT_SCRIPT = [
   '#!/bin/sh',
-  'set -e',
   'exec /usr/local/bin/supervisord -c /usr/local/etc/supervisord.conf',
   '',
 ].join('\n')
@@ -2137,6 +2136,7 @@ test('refuses ambiguous Supervisor default files before starting', async () => {
 })
 
 for (const entrypoint of [
+  'set -e\nexec /usr/local/bin/supervisord -c /usr/local/etc/supervisord.conf\n',
   '/usr/bin/supervisord --configuration-file=/etc/supervisord.conf\n',
   '/usr/bin/supervisord -c /etc/supervisord.conf; echo unsafe\n',
   '/usr/bin/supervisord\n/usr/bin/supervisord\n',

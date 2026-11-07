@@ -18,6 +18,10 @@ The application and test utilities in this repository are original MIT code. No 
 
 Exact package versions and integrity values are in `pnpm-lock.yaml`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
 
+## Playwright 1.65.0
+
+The [upstream package metadata](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-test/package.json) identifies `@playwright/test` 1.65.0 as Apache-2.0 and requires Node.js 20 or later. Its [browser manifest](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-core/browsers.json) pins Chromium revision 1254, Firefox 1572 and WebKit 2388 (macOS 14 uses WebKit 2251). Browser installation and execution have not been verified by this metadata review.
+
 ## Pinned Spoolman provenance
 
 Read-only registry and source review on 2026-11-04 verified the Compose reference `ghcr.io/donkie/spoolman@sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa`. The GHCR manifest and configuration blob were fetched with anonymous pull access and their SHA-256 hashes checked. No image layers were downloaded or upstream code executed.

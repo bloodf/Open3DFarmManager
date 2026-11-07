@@ -41,8 +41,7 @@ export async function testPostgresSessionClock(admin: Sql, runtime: Sql) {
       await gate
     })
     let reader:
-      | ReturnType<PostgresSessionRepository['authorizeAndTouch']>
-      | undefined
+      ReturnType<PostgresSessionRepository['authorizeAndTouch']> | undefined
     try {
       await Promise.race([
         locked,

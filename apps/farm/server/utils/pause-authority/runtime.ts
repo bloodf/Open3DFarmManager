@@ -42,8 +42,7 @@ let active:
   | undefined
 /** Internal publication only: configuration flags alone never provide a reader. */
 export function currentPauseNegotiationRuntime():
-  | PauseNegotiationRuntime
-  | undefined {
+  PauseNegotiationRuntime | undefined {
   return active?.negotiation
 }
 export function pauseAuthorityRuntime(): PauseAuthorityHttpRuntime {

@@ -260,15 +260,13 @@ for (const closure of ['disconnect', 'revocation']) {
         'Parent must supply an external resource baseline ledger',
       )
       const { spawn } = await import('node:child_process')
-      const { open, readFile, stat, appendFile } = await import(
-        'node:fs/promises'
-      )
+      const { open, readFile, stat, appendFile } =
+        await import('node:fs/promises')
       const driverPath = `${ledger}.${closure}.test-driver.jsonl`
       const driver = await open(driverPath, 'ax', 0o600)
       await driver.close()
-      const { waitFixtureClose } = await import(
-        '../helpers/signalling-https-process.ts'
-      )
+      const { waitFixtureClose } =
+        await import('../helpers/signalling-https-process.ts')
       const child = spawn(
         process.execPath,
         [

@@ -1,5 +1,5 @@
 {
-  "status": "proposed selection, not Go-confirmed helper graph",
+  "status": "complete retained require declarations; proposed selection; Go graph unobserved",
   "main_module": "open3dfarm.local/rtsp-ingest",
   "go": "1.27.1",
   "direct_require": {
@@ -527,11 +527,137 @@
       "version": "v3.0.5",
       "indirect": true,
       "line": 14
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "github.com/davecgh/go-spew",
+      "version": "v1.1.1",
+      "indirect": true,
+      "line": 6
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "github.com/google/uuid",
+      "version": "v1.1.2",
+      "indirect": false,
+      "line": 7
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "github.com/orcaman/writerseeker",
+      "version": "v0.0.0-20200621085525-1d3f536ff85e",
+      "indirect": false,
+      "line": 8
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "github.com/stretchr/testify",
+      "version": "v1.4.0",
+      "indirect": false,
+      "line": 9
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "github.com/sunfish-shogi/bufseekio",
+      "version": "v0.0.0-20210207115823-a4185644b365",
+      "indirect": false,
+      "line": 10
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "golang.org/x/term",
+      "version": "v0.0.0-20210927222741-03fcf44c2211",
+      "indirect": false,
+      "line": 11
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "gopkg.in/src-d/go-billy.v4",
+      "version": "v4.3.2",
+      "indirect": false,
+      "line": 12
+    },
+    {
+      "from_module": "github.com/abema/go-mp4",
+      "from_version": "v1.7.3",
+      "module": "gopkg.in/yaml.v2",
+      "version": "v2.2.8",
+      "indirect": false,
+      "line": 13
+    },
+    {
+      "from_module": "golang.org/x/crypto",
+      "from_version": "v0.57.0",
+      "module": "golang.org/x/sys",
+      "version": "v0.48.0",
+      "indirect": false,
+      "line": 7
+    },
+    {
+      "from_module": "golang.org/x/crypto",
+      "from_version": "v0.57.0",
+      "module": "golang.org/x/term",
+      "version": "v0.46.0",
+      "indirect": false,
+      "line": 8
+    },
+    {
+      "from_module": "golang.org/x/crypto",
+      "from_version": "v0.57.0",
+      "module": "golang.org/x/text",
+      "version": "v0.42.0",
+      "indirect": true,
+      "line": 11
+    },
+    {
+      "from_module": "golang.org/x/term",
+      "from_version": "v0.46.0",
+      "module": "golang.org/x/sys",
+      "version": "v0.48.0",
+      "indirect": false,
+      "line": 5
+    },
+    {
+      "from_module": "golang.org/x/text",
+      "from_version": "v0.42.0",
+      "module": "golang.org/x/sync",
+      "version": "v0.23.0",
+      "indirect": true,
+      "line": 9
+    },
+    {
+      "from_module": "gopkg.in/yaml.v2",
+      "from_version": "v2.2.2",
+      "module": "gopkg.in/check.v1",
+      "version": "v0.0.0-20161208181325-20d25e280405",
+      "indirect": false,
+      "line": 4
+    },
+    {
+      "from_module": "gopkg.in/yaml.v3",
+      "from_version": "v3.0.1",
+      "module": "gopkg.in/check.v1",
+      "version": "v0.0.0-20161208181325-20d25e280405",
+      "indirect": false,
+      "line": 4
     }
   ],
-  "new_external_modules": [],
+  "new_external_modules": [
+    "github.com/orcaman/writerseeker",
+    "github.com/sunfish-shogi/bufseekio",
+    "golang.org/x/sync",
+    "gopkg.in/check.v1",
+    "gopkg.in/src-d/go-billy.v4"
+  ],
   "replace_policy": "29 exact version-scoped repository-relative source replacements; preserve upstream go.mod without audit-machine absolute replaces",
-  "pending": "actual helper compile/test import closure and readonly graph under separately scheduled CPU",
+  "pending": "Admitted Linux Go 1.27.1 readonly list/graph/build/test must establish lazy graph traversal and actual offline closure; declared external modules are not presumed pruned.",
   "main_require_pins": {
     "github.com/bluenviron/mediacommon/v2": "v2.9.7",
     "github.com/google/uuid": "v1.6.0",
@@ -655,5 +781,191 @@
       "direct": true
     }
   ],
-  "selection_constraint": "Mirror audited gortsplib root requirements plus gortsplib itself; do not promote all 29 selected modules to main requirements, which could expand the lazy graph."
+  "selection_constraint": "Mirror audited gortsplib root requirements plus gortsplib itself; do not promote all 29 selected modules to main requirements, which could expand the lazy graph.",
+  "edge_semantics": {
+    "edges": "All 76 require declarations in the 29 retained go.mod files, including synthetic proxy go.mod files disclosed in manifest.json. Versions are declared minima, not selected versions or observed Go graph edges. Line numbers refer to retained source.",
+    "main_edges": "Helper requirement pins; direct is the historical helper classification, not Go-observed graph traversal.",
+    "selected_dependencies": "Proposed retained selections matched to manifest versions and local replacements; not an observed Go selection.",
+    "new_external_modules": "Module paths declared by retained modules but absent from the 29 retained selections. Their lazy graph relevance is UNKNOWN; this list does not authorize copying sources.",
+    "traversal_limit": "Static traversal stops at the 29 retained go.mod files. External module go.mod files are not retained or inspected. Package imports, lazy pruning, replacement selection and actual offline closure require admitted Linux Go metadata/build qualification."
+  },
+  "coverage": {
+    "retained_modules": 29,
+    "declared_requirements": 76,
+    "previously_recorded": 61,
+    "added_declarations": [
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/davecgh/go-spew",
+        "version": "v1.1.1",
+        "indirect": true,
+        "line": 6
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/google/uuid",
+        "version": "v1.1.2",
+        "indirect": false,
+        "line": 7
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/orcaman/writerseeker",
+        "version": "v0.0.0-20200621085525-1d3f536ff85e",
+        "indirect": false,
+        "line": 8
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/stretchr/testify",
+        "version": "v1.4.0",
+        "indirect": false,
+        "line": 9
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/sunfish-shogi/bufseekio",
+        "version": "v0.0.0-20210207115823-a4185644b365",
+        "indirect": false,
+        "line": 10
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "golang.org/x/term",
+        "version": "v0.0.0-20210927222741-03fcf44c2211",
+        "indirect": false,
+        "line": 11
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "gopkg.in/src-d/go-billy.v4",
+        "version": "v4.3.2",
+        "indirect": false,
+        "line": 12
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "gopkg.in/yaml.v2",
+        "version": "v2.2.8",
+        "indirect": false,
+        "line": 13
+      },
+      {
+        "from_module": "golang.org/x/crypto",
+        "from_version": "v0.57.0",
+        "module": "golang.org/x/sys",
+        "version": "v0.48.0",
+        "indirect": false,
+        "line": 7
+      },
+      {
+        "from_module": "golang.org/x/crypto",
+        "from_version": "v0.57.0",
+        "module": "golang.org/x/term",
+        "version": "v0.46.0",
+        "indirect": false,
+        "line": 8
+      },
+      {
+        "from_module": "golang.org/x/crypto",
+        "from_version": "v0.57.0",
+        "module": "golang.org/x/text",
+        "version": "v0.42.0",
+        "indirect": true,
+        "line": 11
+      },
+      {
+        "from_module": "golang.org/x/term",
+        "from_version": "v0.46.0",
+        "module": "golang.org/x/sys",
+        "version": "v0.48.0",
+        "indirect": false,
+        "line": 5
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/sync",
+        "version": "v0.23.0",
+        "indirect": true,
+        "line": 9
+      },
+      {
+        "from_module": "gopkg.in/yaml.v2",
+        "from_version": "v2.2.2",
+        "module": "gopkg.in/check.v1",
+        "version": "v0.0.0-20161208181325-20d25e280405",
+        "indirect": false,
+        "line": 4
+      },
+      {
+        "from_module": "gopkg.in/yaml.v3",
+        "from_version": "v3.0.1",
+        "module": "gopkg.in/check.v1",
+        "version": "v0.0.0-20161208181325-20d25e280405",
+        "indirect": false,
+        "line": 4
+      }
+    ],
+    "unretained_module_declarations": [
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/orcaman/writerseeker",
+        "version": "v0.0.0-20200621085525-1d3f536ff85e",
+        "indirect": false,
+        "line": 8
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "github.com/sunfish-shogi/bufseekio",
+        "version": "v0.0.0-20210207115823-a4185644b365",
+        "indirect": false,
+        "line": 10
+      },
+      {
+        "from_module": "github.com/abema/go-mp4",
+        "from_version": "v1.7.3",
+        "module": "gopkg.in/src-d/go-billy.v4",
+        "version": "v4.3.2",
+        "indirect": false,
+        "line": 12
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/sync",
+        "version": "v0.23.0",
+        "indirect": true,
+        "line": 9
+      },
+      {
+        "from_module": "gopkg.in/yaml.v2",
+        "from_version": "v2.2.2",
+        "module": "gopkg.in/check.v1",
+        "version": "v0.0.0-20161208181325-20d25e280405",
+        "indirect": false,
+        "line": 4
+      },
+      {
+        "from_module": "gopkg.in/yaml.v3",
+        "from_version": "v3.0.1",
+        "module": "gopkg.in/check.v1",
+        "version": "v0.0.0-20161208181325-20d25e280405",
+        "indirect": false,
+        "line": 4
+      }
+    ],
+    "observed_go_mod_graph": null,
+    "offline_closure": "UNKNOWN; no Go execution; missing external metadata and lazy traversal unresolved"
+  }
 }

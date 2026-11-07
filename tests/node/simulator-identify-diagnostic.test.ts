@@ -1023,6 +1023,55 @@ test('keeps the interpreter and the klippy arguments of the pinned command', () 
   assert.deepEqual(transformed.delta.klippyArguments, ['-I'])
 })
 
+test('preserves the exact pinned Python3 virtualenv invocation', () => {
+  const source =
+    '[program:klipper]\ncommand=/home/printer/python-env/bin/python /opt/fixture/klippy/klippy.py /tmp/sample.cfg -l /tmp/sample.log\nautorestart=true\n'
+  const transformed = diagnostic.transformSupervisorConfig(source, {
+    observerPath: diagnostic.OBSERVER_MOUNT_PATH,
+  })
+  assert.equal(
+    transformed.text,
+    `[program:klipper]\ncommand=/home/printer/python-env/bin/python ${diagnostic.OBSERVER_MOUNT_PATH} observe /opt/fixture -- /tmp/sample.cfg -l /tmp/sample.log\nautorestart=true\n`,
+  )
+  assert.equal(
+    transformed.delta.interpreter,
+    '/home/printer/python-env/bin/python',
+  )
+  assert.deepEqual(transformed.delta.klippyArguments, [
+    '/tmp/sample.cfg',
+    '-l',
+    '/tmp/sample.log',
+  ])
+})
+
+test('rejects unreviewed Python interpreter aliases and paths', () => {
+  for (const interpreter of [
+    'python',
+    'python2',
+    '/usr/bin/python',
+    '/usr/bin/python2',
+    'python-env/bin/python',
+    './python3',
+    '/opt/venv/bin/python',
+    '/home/printer/python-env/bin/python2',
+    '/home/printer/python-env/bin/python3',
+    '/home/printer/python-env/bin/../bin/python',
+    '/home/printer/python-env/bin/python-extra',
+  ]) {
+    assert.throws(
+      () =>
+        diagnostic.transformSupervisorConfig(
+          `[program:klipper]\ncommand=${interpreter} /opt/fixture/klippy/klippy.py\n`,
+          { observerPath: diagnostic.OBSERVER_MOUNT_PATH },
+        ),
+      (error: DiagnosticErrorShape) =>
+        error.phase === 'transform' &&
+        error.message ===
+          'unsupported interpreter invocation in klippy command',
+    )
+  }
+})
+
 test('refuses a multi-line klippy command instead of guessing', () => {
   const source = SUPERVISOR_CONFIG.replace(
     'command=python3 /home/printer/klipper/klippy/klippy.py',

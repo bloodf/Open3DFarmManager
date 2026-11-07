@@ -56,13 +56,17 @@ inline value comments and the RPC key fit the corrected parser grammar.
 There are no continuation lines. Only the Klippy command is tokenized by the
 transformer; commands in the other three program sections stay unchanged.
 
-A further transform blocker is visible in that exact file: the Klippy
-interpreter is `/home/printer/python-env/bin/python`. The current interpreter
-guard accepts only `python3` or `/usr/bin/python3` with an optional numeric
-suffix. This correction does not broaden that guard. Runtime CWD, MCU state,
-readiness and identification remain unknown. Do not attempt another heavy
-run until the full original configuration passes a separately reviewed
-transform preflight.
+The Klippy interpreter `/home/printer/python-env/bin/python` is now an exact
+allowlisted alias. The [pinned Dockerfile](https://github.com/mainsail-crew/virtual-klipper-printer/blob/e272bcd1060dad6cee1598d6debdaa5d5afae3c7/Dockerfile)
+declares Python 3.12 builder and runner base tags, creates `/build/python-env`
+with `virtualenv -p python3`, then copies it into `/home/printer/python-env`.
+The [pinned relocation script](https://github.com/mainsail-crew/virtual-klipper-printer/blob/e272bcd1060dad6cee1598d6debdaa5d5afae3c7/scripts/fix_venvs.sh)
+repairs shebang paths. This is a source build contract, not proof of the binary
+or symlink in the digest-pinned image. Before observation, obtain separately
+authorized read-only image evidence of that alias's target and Python major
+version. Arbitrary `python`, Python 2, relative paths and other virtualenv
+paths remain rejected. Runtime CWD, MCU state, readiness and identification
+remain unknown.
 
 On Cortex, with the parent's authorization and resource ledger, perform these
 cheap checks before any Docker or simulator attempt:
@@ -81,15 +85,57 @@ cheap checks before any Docker or simulator attempt:
    `program:moonraker`, `program:webcamd`. Assert the RPC field's value remains
    `supervisor.rpcinterface:make_main_rpcinterface` and the Klippy command
    matches the original bytes. No normalized or edited config is acceptable.
-4. Call `transformSupervisorConfig` on that original config with
-   `OBSERVER_MOUNT_PATH`. The expected current result is phase `transform`,
-   message `unsupported interpreter invocation in klippy command`.
-   Record this as a blocked transform gate, never as runtime acceptance.
-5. Run the focused Node suite on the candidate. Preserve all prior 80 cases
-   and assertions; the two new cases check parse-before-transform,
-   byte-preserving transformation of an independently authored synthetic
-   schema, invalid dotted fields and wrong sections. Run required full checks
-   and obtain fresh exact-head review before publication.
+4. RED on base `fff9595d1bc689b97158fc057d77aa8c18337a8a`: call
+   `transformSupervisorConfig` on that original config with
+   `OBSERVER_MOUNT_PATH`. Assert phase `transform` and exact message
+   `unsupported interpreter invocation in klippy command`.
+5. GREEN on the candidate: execute the original-config transform preflight
+   below. Stop on any assertion failure. This checks source transformation
+   only and never invokes Docker or the observer.
+6. Run the focused Node suite on the candidate. Preserve the prior 80 cases
+   and two RPC regressions; the two additional cases cover the exact virtualenv
+   invocation and rejected interpreter paths. Run required full checks and
+   obtain fresh exact-head review before publication. Obtain actual-image
+   Python3 alias proof before any observation.
+
+Set `RUNNER` to the absolute candidate script path and `CONFIG` to the external
+unmodified image configuration. On the authorized Cortex host, run:
+
+```sh
+node --input-type=module - "$RUNNER" "$CONFIG" <<'JS'
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+const runner = await import(pathToFileURL(process.argv[2]).href)
+const bytes = readFileSync(process.argv[3])
+assert.equal(createHash('sha256').update(bytes).digest('hex'),
+  '33d472433a78f681fc6b8b05c23d7f734caa0b19240fdd131cc867be6f8b3008')
+const source = bytes.toString('utf8')
+const parsed = runner.parseSupervisorConfig(source)
+assert.deepEqual(parsed.sections.map(s => s.type + (s.name ? ':' + s.name : '')),
+  ['supervisord', 'rpcinterface:supervisor', 'supervisorctl', 'unix_http_server',
+   'program:simulavr', 'program:klipper', 'program:moonraker', 'program:webcamd'])
+const { command } = runner.findKlipperProgram(parsed)
+const tokens = runner.parseSupervisorCommand(command.value).tokens
+assert.equal(tokens[0], '/home/printer/python-env/bin/python')
+assert.equal(tokens[1], '/home/printer/klipper/klippy/klippy.py')
+const result = runner.transformSupervisorConfig(source, {
+  observerPath: runner.OBSERVER_MOUNT_PATH,
+})
+const expected = parsed.lines.slice()
+const original = expected[command.line]
+expected[command.line] = original.slice(0, original.indexOf('=') + 1) +
+  [tokens[0], runner.OBSERVER_MOUNT_PATH, 'observe', '/home/printer/klipper',
+   '--', ...tokens.slice(2)].join(' ')
+assert.equal(result.text, expected.join('\n'))
+assert.equal(result.delta.interpreter, tokens[0])
+assert.equal(result.delta.klipperRoot, '/home/printer/klipper')
+assert.deepEqual(result.delta.klippyArguments, tokens.slice(2))
+assert.equal(result.delta.otherPrograms.length, 3)
+console.log('Original-config transform preflight PASS; runtime remains unproved')
+JS
+```
 
 The RED/GREEN steps above are instructions, not executed results. This Mac
 source-only correction runs no tests, builds, installations or Docker commands.

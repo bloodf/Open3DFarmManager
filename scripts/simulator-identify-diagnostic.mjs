@@ -370,7 +370,10 @@ export function transformSupervisorConfig(text, options) {
   if (interpreter.length === 0)
     throw diagnostic('klippy command has no interpreter', 'transform')
   for (const token of interpreter) {
-    const executable = /^(?:\/usr\/bin\/)?python3(?:\.\d+)?$/.test(token)
+    // The pinned Dockerfile declares this exact venv with `virtualenv -p python3`.
+    const executable =
+      /^(?:\/usr\/bin\/)?python3(?:\.\d+)?$/.test(token) ||
+      token === '/home/printer/python-env/bin/python'
     const flag = /^-[A-Za-z]+$/.test(token)
     if (!executable && !flag)
       throw diagnostic(

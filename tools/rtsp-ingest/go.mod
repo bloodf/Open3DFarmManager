@@ -4,11 +4,11 @@ go 1.27.1
 
 require (
 	github.com/bluenviron/gortsplib/v5 v5.6.7
-	github.com/bluenviron/mediacommon/v2 v2.9.6
+	github.com/bluenviron/mediacommon/v2 v2.9.7
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/pion/rtcp v1.2.19
-	github.com/pion/rtp v1.10.5
+	github.com/pion/rtcp v1.2.20
+	github.com/pion/rtp v1.10.6
 	github.com/pion/sdp/v3 v3.0.20
 	github.com/pion/srtp/v3 v3.1.3
 	github.com/stretchr/testify v1.12.1
@@ -30,14 +30,14 @@ replace (
 	github.com/asticode/go-astikit v0.30.0 => ../../third_party/rtsp-ingest/sources/github.com--asticode--go-astikit
 	github.com/asticode/go-astits v1.16.0 => ../../third_party/rtsp-ingest/sources/github.com--asticode--go-astits
 	github.com/bluenviron/gortsplib/v5 v5.6.7 => ../../third_party/rtsp-ingest/sources/github.com--bluenviron--gortsplib--v5
-	github.com/bluenviron/mediacommon/v2 v2.9.6 => ../../third_party/rtsp-ingest/sources/github.com--bluenviron--mediacommon--v2
+	github.com/bluenviron/mediacommon/v2 v2.9.7 => ../../third_party/rtsp-ingest/sources/github.com--bluenviron--mediacommon--v2
 	github.com/davecgh/go-spew v1.1.1 => ../../third_party/rtsp-ingest/sources/github.com--davecgh--go-spew
 	github.com/google/uuid v1.6.0 => ../../third_party/rtsp-ingest/sources/github.com--google--uuid
 	github.com/gorilla/websocket v1.5.3 => ../../third_party/rtsp-ingest/sources/github.com--gorilla--websocket
 	github.com/pion/logging v0.2.4 => ../../third_party/rtsp-ingest/sources/github.com--pion--logging
 	github.com/pion/randutil v0.1.0 => ../../third_party/rtsp-ingest/sources/github.com--pion--randutil
-	github.com/pion/rtcp v1.2.19 => ../../third_party/rtsp-ingest/sources/github.com--pion--rtcp
-	github.com/pion/rtp v1.10.5 => ../../third_party/rtsp-ingest/sources/github.com--pion--rtp
+	github.com/pion/rtcp v1.2.20 => ../../third_party/rtsp-ingest/sources/github.com--pion--rtcp
+	github.com/pion/rtp v1.10.6 => ../../third_party/rtsp-ingest/sources/github.com--pion--rtp
 	github.com/pion/sdp/v3 v3.0.20 => ../../third_party/rtsp-ingest/sources/github.com--pion--sdp--v3
 	github.com/pion/srtp/v3 v3.1.3 => ../../third_party/rtsp-ingest/sources/github.com--pion--srtp--v3
 	github.com/pion/transport/v5 v5.1.1 => ../../third_party/rtsp-ingest/sources/github.com--pion--transport--v5

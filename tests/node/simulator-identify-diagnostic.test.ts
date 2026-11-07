@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,8 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { createServer } from 'node:net'
 import { gunzipSync } from 'node:zlib'
 
 interface DiagnosticErrorShape {
@@ -2499,6 +2501,215 @@ for (const primary of [true, false]) {
       assert.equal(docker.calls.filter(({ args }) => args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1').length, 2)
     } finally {
       cleanupLedger(ledger)
+    }
+  })
+}
+
+for (const mode of ['success', 'diagnostic-failure', 'cleanup-failure']) {
+  test(`actual CLI exits and preserves evidence: ${mode}`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'o3dfm-cli-'))
+    const socketPath = join(directory, 'docker.sock')
+    const ledger = join(directory, 'ledger')
+    const labels: Record<string, string> = {}
+    const unknown: string[][] = []
+    const records =
+      OBSERVER_START(1) + OBSERVER_EVENT(1, 0) + OBSERVER_RESULT(1, false)
+    const docker = createFakeDocker({
+      labels,
+      capture: records,
+      ...(mode === 'success' ? {} : { klippyArgv: ['python3', 'klippy.py'] }),
+      fail: (args) => {
+        const command = args[0]
+        const exec = args[1] === '-i' ? args[3] : args[2]
+        const allowed =
+          ['create', 'start', 'cp', 'inspect', 'rm', 'logs'].includes(
+            command ?? '',
+          ) ||
+          (command === 'ps' && args.join(' ') === 'ps -a --no-trunc') ||
+          (command === 'images' &&
+            args.join(' ') === 'images --digests --no-trunc') ||
+          (command === 'volume' &&
+            ['ls', 'create', 'inspect', 'rm'].includes(args[1] ?? '')) ||
+          (command === 'network' && args.join(' ') === 'network ls') ||
+          (command === 'system' && args.join(' ') === 'system df') ||
+          (command === 'exec' &&
+            ['supervisorctl', 'cat', 'python3', 'ls', 'tail'].includes(
+              exec ?? '',
+            ))
+        if (!allowed) {
+          unknown.push(args)
+          return {
+            status: 97,
+            stdout: '',
+            stderr: 'unknown synthetic Docker invocation',
+          }
+        }
+        if (
+          mode === 'cleanup-failure' &&
+          command === 'rm' &&
+          !args.at(-1)?.endsWith('-inspect')
+        )
+          return { status: 1, stdout: '', stderr: 'synthetic removal refused' }
+        return null
+      },
+    })
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
+      let request = ''
+      socket.setEncoding('utf8')
+      socket.on('data', (chunk) => {
+        request += chunk
+      })
+      socket.on('end', () => {
+        void (async () => {
+          appendFileSync(join(directory, 'requests.jsonl'), request + '\n')
+          const { args, input } = JSON.parse(request)
+          assert.ok(
+            Array.isArray(args) && args.every((arg) => typeof arg === 'string'),
+          )
+          assert.equal(typeof input, 'string')
+          for (let index = 0; index < args.length; index++) {
+            if (args[index] !== '--label') continue
+            const label = args[index + 1]
+            const separator = label.indexOf('=')
+            labels[label.slice(0, separator)] = label.slice(separator + 1)
+          }
+          const result = await docker.run(args, { input })
+          socket.end(JSON.stringify(result))
+        })().catch((error) => {
+          socket.destroy(error)
+        })
+      })
+    })
+    try {
+      // PATH contains only task-owned executables. Git still sees this real worktree.
+      const git = spawnSync('which', ['git'], {
+        encoding: 'utf8',
+      }).stdout.trim()
+      assert.ok(git)
+      symlinkSync(git, join(directory, 'git'))
+      writeFileSync(
+        join(directory, 'docker'),
+        `#!${process.execPath}
+const { connect } = require('node:net');
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk });
+process.stdin.on('end', () => {
+  const socket = connect(process.env.SYNTHETIC_DOCKER_SOCKET);
+  let response = '';
+  socket.setEncoding('utf8');
+  socket.on('connect', () => socket.end(JSON.stringify({args: process.argv.slice(2), input})));
+  socket.on('data', chunk => { response += chunk });
+  socket.on('error', error => { process.stderr.write(error.message); process.exitCode = 98 });
+  socket.on('end', () => {
+    const result = JSON.parse(response);
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+    process.exitCode = result.status ?? 99;
+  });
+});
+`,
+        { mode: 0o700 },
+      )
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(socketPath, resolve)
+      })
+      const output = await new Promise<{
+        status: number | null
+        stdout: string
+        stderr: string
+      }>((resolve, reject) => {
+        const child = spawn(
+          process.execPath,
+          [
+            new URL(moduleUrl).pathname,
+            `--opt-in=${diagnostic.OPT_IN_TOKEN}`,
+            '--observation-ms=1',
+            `--ledger-dir=${ledger}`,
+          ],
+          {
+            cwd: diagnostic.REPOSITORY_ROOT,
+            env: {
+              ...process.env,
+              PATH: directory,
+              SYNTHETIC_DOCKER_SOCKET: socketPath,
+            },
+            timeout: 30000,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        )
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk
+        })
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk
+        })
+        child.once('error', reject)
+        child.once('close', (status) => resolve({ status, stdout, stderr }))
+      })
+      assert.deepEqual(unknown, [])
+      const requests = readFileSync(join(directory, 'requests.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).args)
+      assert.deepEqual(
+        requests,
+        docker.calls.map(({ args }) => args),
+      )
+      assert.equal(output.status, mode === 'success' ? 0 : 1, output.stderr)
+      const result = JSON.parse(output.stdout)
+      assert.equal(result.readiness, 'not-evaluated')
+      assert.equal(result.observation.budgetMs, diagnostic.READINESS_BUDGET_MS)
+      assert.equal(result.observation.windowMs, 1)
+      assert.equal(result.capture.limitBytes, diagnostic.CAPTURE_BYTE_LIMIT)
+      assert.equal(result.cleanup.completed, mode !== 'cleanup-failure')
+      assert.equal(existsSync(join(ledger, 'work')), mode === 'cleanup-failure')
+      assert.deepEqual(
+        JSON.parse(readFileSync(join(ledger, 'result.json'), 'utf8')),
+        result,
+      )
+      assert.ok(
+        readFileSync(join(ledger, 'NOTICE.txt'), 'utf8').includes('GPL-3.0'),
+      )
+      if (mode === 'success') {
+        assert.equal(output.stderr, '')
+        assert.equal(result.wrapperApplied, true)
+        assert.equal(result.capture.observerRecords, 3)
+      } else {
+        const error = JSON.parse(output.stderr)
+        assert.equal(
+          error.error,
+          'the observer wrapper is not in the running klippy process command line',
+        )
+        assert.equal(error.phase, 'verify')
+        assert.deepEqual(error.persistenceErrors, [])
+        assert.equal(
+          error.cleanupErrors.length,
+          mode === 'cleanup-failure' ? 2 : 0,
+        )
+        assert.equal(
+          error.firstCleanupErrors.length,
+          mode === 'cleanup-failure' ? 2 : 0,
+        )
+      }
+      assert.equal(
+        docker.calls.filter(({ args }) => args[0] === 'start').length,
+        1,
+      )
+      const creations = docker.calls.filter(({ args }) => args[0] === 'create')
+      assert.equal(creations.length, 2)
+      for (const { args } of creations) {
+        const name = args[args.indexOf('--name') + 1]
+        assert.ok(removalCalls(docker).some((call) => call.at(-1) === name))
+      }
+      assert.ok(removalCalls(docker).some((args) => args[0] === 'volume'))
+    } finally {
+      if (server.listening)
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      rmSync(directory, { recursive: true, force: true })
     }
   })
 }

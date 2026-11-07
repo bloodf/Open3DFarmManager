@@ -18,6 +18,14 @@ describe('password hash upgrade compatibility', () => {
     expect(await verifyPassword(legacyHash, 'password\0')).toBe(false)
   })
 
+  test.each(['\0password', 'pass\0word', 'password\0', 'password\0\0'])(
+    'rejects NUL input without hashing or authenticating: %j',
+    async (password) => {
+      await expect(hashPassword(password)).rejects.toBeInstanceOf(TypeError)
+      expect(await verifyPassword(legacyHash, password)).toBe(false)
+    },
+  )
+
   test('keeps explicit production cost, salt size and key length', async () => {
     const password = 'synthetic-upgrade-password-á'
     const first = await hashPassword(password)
@@ -28,6 +36,7 @@ describe('password hash upgrade compatibility', () => {
     expect(first).not.toBe(second)
     expect(await verifyPassword(first, password)).toBe(true)
     expect(await verifyPassword(first, password + 'x')).toBe(false)
+    expect(await verifyPassword(first, password + '\0')).toBe(false)
     expect(await verifyPassword(first, password.toUpperCase())).toBe(false)
   })
 

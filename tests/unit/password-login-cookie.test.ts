@@ -172,6 +172,31 @@ describe('maintained Nuxt sealed-cookie session request behavior', () => {
       expect(req.res.headers.getSetCookie()).toEqual([])
     }
   })
+  test.each([
+    '\0synthetic-test-password',
+    'synthetic\0-test-password',
+    'synthetic-test-password\0',
+  ])(
+    'NUL password never looks up credentials or issues a cookie: %j',
+    async (password) => {
+      const f = fixture()
+      let lookups = 0
+      const find = f.runtime.credentials.find
+      f.runtime.credentials.find = async (username) => {
+        lookups++
+        return find(username)
+      }
+      const req = event(
+        'POST',
+        { origin: f.runtime.origin, 'content-type': 'application/json' },
+        JSON.stringify({ username: 'fixture_user', password }),
+      )
+      await expect(login(req, f.runtime)).rejects.toMatchObject({ status: 400 })
+      expect(lookups).toBe(0)
+      expect(f.checks()).toBe(0)
+      expect(req.res.headers.getSetCookie()).toEqual([])
+    },
+  )
   test('missing Origin rejects login before issuing a session', async () => {
     const f = fixture()
     await expect(

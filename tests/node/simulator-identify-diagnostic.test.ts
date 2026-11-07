@@ -1937,7 +1937,7 @@ for (const [name, available, truncated] of [
         assert.ok(result.observerAnalysis.sessions.length > 0)
         assert.ok(
           result.observerAnalysis.sessions.every(
-            (session) =>
+            (session: ObserverSession) =>
               session.classification === 'inconclusive-incomplete-capture',
           ),
         )

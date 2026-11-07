@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { createPrivateKey, generateKeyPairSync, verify } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { signPairingProof } from '../../packages/connector/src/identity/pairing-proof.ts'

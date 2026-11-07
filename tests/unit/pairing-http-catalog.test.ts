@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { loadMigrationCatalog } from '../../scripts/db/migrations.ts'
 import { validatePairingHttpCatalog } from '../../scripts/db/pairing-http-catalog.ts'
 

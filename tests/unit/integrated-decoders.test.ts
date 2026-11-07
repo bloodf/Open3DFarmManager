@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import { parsePairingResponse } from '@open3dfarmmanager/farm-protocol'
 import {
   parseMoonrakerServerInfo,

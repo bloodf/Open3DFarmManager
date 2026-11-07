@@ -9,7 +9,7 @@
 - Work on feature branches and draft PRs. The owner authorizes the coordinator and authorized agents to merge ready PRs without another merge confirmation, after required checks pass for the current head, reviews/conflicts are resolved and repository protections are satisfied. This does not waive the pending publication authorization for the existing local payload. Do not deploy, change DNS/credentials or start production services without separate authorization.
 - Internal Codex agents managed by this session or T3 Code, Google agents available through configured Antigravity providers, and MiniMax M3.1 through configured T3 Code providers are authorized for development. Do not use external chats or other external AI agents without separate explicit approval.
 - The coordinator must delegate implementation and must not edit implementation code directly. Assign GPT Sol to large tasks, Terra to medium tasks, and Luna to simple tasks. Authorized Google and MiniMax agents follow the same complexity-based assignment. Use only the actual authorized model/provider instances available in the runtime; do not claim a model or capacity that is not exposed as available.
-- Use Bun workspaces, Nuxt 4 and TypeScript. Run `bun run check:all` before publishing changes; report pending integration checks explicitly.
+- Use pnpm workspaces, Nuxt 4 and TypeScript. Run `pnpm run check:all` before publishing changes; report pending integration checks explicitly.
 - Commit one coherent subtask at a time using English conventional commit messages. User-facing copy is pt-BR and accessible.
 
 ## Disk space and task cleanup

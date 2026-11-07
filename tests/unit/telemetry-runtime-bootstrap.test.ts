@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { createTelemetryRuntimeLifecycle } from '../../apps/farm/server/services/telemetry-runtime-bootstrap.ts'
 import { telemetryHttpRuntime } from '../../apps/farm/server/services/telemetry-http-runtime.ts'
 

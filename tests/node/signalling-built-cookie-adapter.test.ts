@@ -33,9 +33,8 @@ registerHooks({
     return next(specifier, context)
   },
 })
-const { sealedSessionRecordId } = await import(
-  '../../apps/farm/server/services/authenticated-session.ts'
-)
+const { sealedSessionRecordId } =
+  await import('../../apps/farm/server/services/authenticated-session.ts')
 const config = {
   name: SESSION_COOKIE_NAME,
   password: 'synthetic-test-password-with-at-least-32-characters',

@@ -6,8 +6,8 @@ available to a future relay and driver, and loads the trusted issuer keyring as 
 public keys.
 
 Nothing in this slice enables a pause. No command path is opened; existing `commandsEnabled`
-flags remain false. No new configuration endpoint, issuer issuance flow or signalling audience derivation
-is introduced.
+flags remain false. No issuer issuance flow or signalling audience derivation is introduced. Public pause metadata
+reports advisory availability only.
 
 ## Runtime configuration
 
@@ -21,6 +21,12 @@ The runtime JSON accepts one additional optional key:
 {
   "pause": {
     "version": 1,
+    "signalling": {
+      "endpoint": "wss://farm.example/api/signalling/pause-connector",
+      "origin": "https://farm.example",
+      "audience": "pause-audience",
+      "credentialAudience": "credential-audience"
+    },
     "issuers": [
       {
         "issuer": "farm:pause-issuer",
@@ -32,11 +38,24 @@ The runtime JSON accepts one additional optional key:
 }
 ```
 
+### Migrating an existing version 1 configuration
+
+This change is incompatible with the earlier keyring-only version 1 `pause` section.
+Keeping that old section causes strict configuration parsing to reject Connector startup,
+before telemetry starts. Before upgrading, either remove the entire optional `pause`
+section to continue read-only operation, or provision all four signalling values:
+`endpoint`, `origin`, `audience`, and `credentialAudience`. Provision the two audiences
+independently from their respective server owners; do not infer or copy one from the other.
+Adding these settings does not enable product pause or establish runtime acceptance.
+Private and external configurations have not been inspected for migration needs.
+
 An absent `pause` key means no authority. The read then performs no cryptographic work, opens no
 socket and starts no runtime task. A present `pause` key is parsed strictly by
 `packages/connector/src/config/pause.ts` and returned as a deeply immutable value. The parsed
-section carries the issuer, key id and public key encoding only. It never carries a private key, a
-token, a secret, an endpoint or a derived audience.
+section carries the issuer keyring and explicit signalling settings. It never carries a private key,
+token or secret. The canonical HTTPS origin and exact same-host WSS pause Connector endpoint are
+required. Pause and credential audiences are independently provisioned; neither defaults from
+readonly configuration, the other audience, a key, a frame or a token.
 
 The pause section is refused when it is not version 1, when the keyring is empty or larger than
 eight entries, when two entries share the same issuer and key id, when the issuer or key id does
@@ -100,7 +119,7 @@ configured issuer keyring proves trust in a signer, not the permission to pause 
 
 ## Validation boundary
 
-Ten focused Node tests in `tests/node/pause-runtime-config.test.ts` cover the consumer relevant
+Focused Node tests in `tests/node/pause-runtime-config.test.ts` cover the consumer relevant
 invariants with genuine cryptography and temporary private configuration files. They cover the
 optional default, the keyring bound, duplicate issuer and key id, wrong algorithm, private payload,
 malformed and noncanonical encodings, the immutability of the parsed configuration and of the
@@ -108,12 +127,19 @@ loaded issuer list, the handle identity and mapping equality of the local resolv
 unknown and foreign identifiers, the refusal to serialize a handle, and a real capability signed by
 an issuer key that verifies against the loaded verification key.
 
-The loader independently parses and copies the entire keyring before its first asynchronous
-import. Tests mutate the caller's entries and append another key during loading, and verify that
+The loader independently validates and copies the complete pause configuration and keyring before
+its first asynchronous import. Tests mutate the caller's entries and append another key during loading, and verify that
 the original issuer identities and key count survive. Invalid keyrings are rejected before any
 import, including when a caller bypasses the synchronous runtime parser.
 
-Focused strict TypeScript over the Connector sources and the new test, and the formatting check,
-passed at this commit. The complete repository gate, the Bun unit suite that consumes
+The complete repository gate, the Bun unit suite that consumes
 `readAgentRuntimeConfig`, and the integrated pause acceptance flow remain pending on the
 coordinator's head. No PostgreSQL, Docker, browser, native, simulator or physical printer was used.
+
+## Public pause metadata
+
+`GET /api/signalling/pause-metadata` returns only the existing three-field metadata shape, with
+`no-store` caching. It reports the pause facade's origin and pause audience only while the current
+live signalling runtime matches its origin, credential issuer, credential audience and database
+identity. Closed, aborted, missing or mismatched owners return disabled. This read does not admit
+a connection or create a pause coordinator, and it is neither authorization nor a readiness proof.

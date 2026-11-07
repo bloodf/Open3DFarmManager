@@ -190,9 +190,8 @@ function scopedRows(
 }
 
 async function localRecord(pair: CryptoKeyPair): Promise<LocalDeviceKey> {
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../../../packages/farm-protocol/src/browser-device-proof.ts')
   const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
   const canonical = await validateBrowserDevicePublicKey({
     kty: jwk.kty,

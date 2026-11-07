@@ -54,13 +54,9 @@ function job(args: string[], env = {}) {
   })
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
-  const timeline: Array<{ t: number; chunk: string }> = []
   const reading = (async () => {
-    for await (const bytes of child.stdout) {
-      const chunk = new TextDecoder().decode(bytes)
-      timeline.push({ t: Date.now(), chunk })
-      output += chunk
-    }
+    for await (const bytes of child.stdout)
+      output += new TextDecoder().decode(bytes)
   })()
   const error = new Response(child.stderr).text()
   const timer = setTimeout(() => child.kill('SIGKILL'), 10000)
@@ -79,7 +75,6 @@ function job(args: string[], env = {}) {
     get output() {
       return output
     },
-    timeline,
     get exited() {
       return child.exitCode !== null
     },
@@ -776,46 +771,27 @@ test('receiptless initialized queues reject before retention can discard old unb
 
 test('local credential expiry stops authentication attempts while bounded local collection continues', async () => {
   const server = await fixture()
-  server.credential.approval.expires_at =
-    Date.now() + Number(process.env.AGENT_EXPIRY_WINDOW_MS ?? 1500)
+  server.credential.approval.expires_at = Date.now() + 60000
   server.accept()
   server.save()
-  const t0 = Date.now()
-  const running = server.launch()
+  const running = server.launch({
+    NODE_OPTIONS: '--import ./tests/helpers/connector-queue-race-loader.mjs',
+    QUEUE_EXPIRE_ON_DELIVERY: '1',
+  })
   try {
-    await running.until(() =>
-      running.output.includes('"kind":"credential-expired"'),
+    await running.until(
+      () =>
+        lines(running.output, 'delivery') >= 1 &&
+        running.output.includes('"kind":"credential-expired"'),
     )
-    const expiredAt = Date.now()
     const count = server.cloudRequests
     server.delta()
     await running.until(() => lines(running.output, 'queued') >= 2)
-    const queuedAt = Date.now()
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(server.cloudRequests).toBe(count)
     expect((await running.stop()).code).toBe(0)
     const queue = new TelemetryQueue(join(server.data, 'telemetry'), Date.now())
-    let depth = -1
     try {
-      depth = queue.depth
-      if (process.env.AGENT_EXPIRY_TRACE)
-        console.log(
-          'EXPIRY_TRACE ' +
-            JSON.stringify({
-              t0,
-              expiredAt: expiredAt - t0,
-              queuedAt: queuedAt - t0,
-              depth,
-              cloudRequests: server.cloudRequests,
-              accepted: server.accepted.size,
-              issued: server.issued.length,
-              completed: server.completed.length,
-              timeline: running.timeline.map((entry) => ({
-                t: entry.t - t0,
-                chunk: entry.chunk.trim(),
-              })),
-            }),
-        )
       expect(queue.depth).toBe(1)
     } finally {
       queue.close()

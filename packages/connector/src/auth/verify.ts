@@ -18,11 +18,7 @@ const PublicKey = z.strictObject({
   alg: z.literal('ES256').optional(),
 })
 export type ClaimResult =
-  | 'accepted'
-  | 'replay'
-  | 'capacity'
-  | 'clock-regressed'
-  | 'rate-limited'
+  'accepted' | 'replay' | 'capacity' | 'clock-regressed' | 'rate-limited'
 export interface ReplayStore {
   claim(command: SignedCommand, now: number): ClaimResult
 }

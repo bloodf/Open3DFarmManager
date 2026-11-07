@@ -482,14 +482,18 @@ interface FakeOptions {
 function createFakeDocker(options: FakeOptions = {}): FakeDocker {
   const files = new Map<string, string>([
     ['/usr/local/bin/start.sh', options.entrypoint ?? ENTRYPOINT_SCRIPT],
-    [options.configPath ?? '/usr/local/etc/supervisord.conf', options.config ?? SUPERVISOR_CONFIG],
+    [
+      options.configPath ?? '/usr/local/etc/supervisord.conf',
+      options.config ?? SUPERVISOR_CONFIG,
+    ],
     [
       '/home/printer/klipper/klippy/serialhdl.py',
       options.badSource ? 'wrong source' : SERIALHDL,
     ],
     ['/home/printer/klipper/klippy/chelper/serialqueue.c', SERIALQUEUE],
   ])
-  for (const path of options.extraConfigPaths ?? []) files.set(path, SUPERVISOR_CONFIG)
+  for (const path of options.extraConfigPaths ?? [])
+    files.set(path, SUPERVISOR_CONFIG)
   for (const missing of options.missingFiles ?? []) files.delete(missing)
   const labels = options.labels ?? {
     'com.open3dfarmmanager.identify-diagnostic': 'run-1',
@@ -588,7 +592,11 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
           status: 0,
           stdout: JSON.stringify([
             {
-              Config: { Entrypoint: candidates, Cmd: [], WorkingDir: options.workingDir },
+              Config: {
+                Entrypoint: candidates,
+                Cmd: [],
+                WorkingDir: options.workingDir,
+              },
             },
           ]),
           stderr: '',
@@ -2093,8 +2101,14 @@ test('discovers a bare Supervisor launch through documented default candidates',
   try {
     const result = await diagnostic.runDiagnostic(options)
     assert.equal(result.readiness, 'not-evaluated')
-    assert.equal(docker.calls.some(({ args }) => args[0] === 'cp' &&
-      args[1]?.endsWith(':/etc/supervisor/supervisord.conf')), true)
+    assert.equal(
+      docker.calls.some(
+        ({ args }) =>
+          args[0] === 'cp' &&
+          args[1]?.endsWith(':/etc/supervisor/supervisord.conf'),
+      ),
+      true,
+    )
   } finally {
     cleanupLedger(options.ledgerDir as string)
   }
@@ -2109,9 +2123,14 @@ test('refuses ambiguous Supervisor default files before starting', async () => {
   })
   const options = runOptions(docker)
   try {
-    await assert.rejects(() => diagnostic.runDiagnostic(options),
-      /exactly one readable candidate/)
-    assert.equal(docker.calls.some(({ args }) => args[0] === 'start'), false)
+    await assert.rejects(
+      () => diagnostic.runDiagnostic(options),
+      /exactly one readable candidate/,
+    )
+    assert.equal(
+      docker.calls.some(({ args }) => args[0] === 'start'),
+      false,
+    )
   } finally {
     cleanupLedger(options.ledgerDir as string)
   }
@@ -2122,14 +2141,22 @@ for (const entrypoint of [
   '/usr/bin/supervisord -c /etc/supervisord.conf; echo unsafe\n',
   '/usr/bin/supervisord\n/usr/bin/supervisord\n',
   'cd /other\n/usr/bin/supervisord\n',
+  'if false; then\n/usr/bin/supervisord -c /etc/supervisord.conf\nfi\n',
+  'if false; then\n/usr/bin/supervisord --configuration /etc/supervisord.conf\nfi\n',
+  'if false; then\n/usr/bin/supervisord --configuration=/etc/supervisord.conf\nfi\n',
 ]) {
   test(`refuses unsupported Supervisor launch ${JSON.stringify(entrypoint)}`, async () => {
     const docker = createFakeDocker({ entrypoint, workingDir: '/home/printer' })
     const options = runOptions(docker)
     try {
-      await assert.rejects(() => diagnostic.runDiagnostic(options),
-        /absolute supervisor configuration path/)
-      assert.equal(docker.calls.some(({ args }) => args[0] === 'start'), false)
+      await assert.rejects(
+        () => diagnostic.runDiagnostic(options),
+        /absolute supervisor configuration path/,
+      )
+      assert.equal(
+        docker.calls.some(({ args }) => args[0] === 'start'),
+        false,
+      )
     } finally {
       cleanupLedger(options.ledgerDir as string)
     }

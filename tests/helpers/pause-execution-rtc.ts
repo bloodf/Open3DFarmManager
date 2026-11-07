@@ -65,9 +65,9 @@ export const PauseExecutionNativeObservation = z.strictObject({
   capabilityAccepted: z.boolean(),
   commandReceived: z.boolean(),
   commandsReceived: z.number().int().nonnegative(),
-  prepareCalls: z.number().int().nonnegative().default(0),
-  closeHeld: z.boolean().default(false),
-  ownerSettled: z.boolean().default(false),
+  prepareCalls: z.number().int().nonnegative(),
+  closeHeld: z.boolean(),
+  ownerSettled: z.boolean(),
   pausesObserved: z.number().int().nonnegative(),
   latestPrintState: z.string().nullable(),
   commandId: z.string().uuid().nullable(),
@@ -128,7 +128,11 @@ export function verifyPauseExecutionAcceptance(
   // Transport and admission assertions
   assert.equal(native.inboxReady, true, 'Native inbox must be ready')
   assert.equal(native.proofsReady, true, 'Native proofs must be ready')
-  assert.equal(native.capabilityAccepted, true, 'Native capability must be accepted')
+  assert.equal(
+    native.capabilityAccepted,
+    true,
+    'Native capability must be accepted',
+  )
   assert.equal(browser.proofsReady, true, 'Browser proofs must be ready')
   assert.equal(browser.admitted, true, 'Browser client must be admitted')
   assert.equal(browser.commandSent, true, 'Browser command must be sent')
@@ -150,15 +154,8 @@ export function verifyPauseExecutionAcceptance(
     'paused',
     'Simulator must observe fresh paused state',
   )
-  assert.equal(
-    browser.outcome,
-    'applied',
-    'Browser outcome must be applied',
-  )
-  assert.ok(
-    browser.commandReceipt,
-    'Browser receipt must be present',
-  )
+  assert.equal(browser.outcome, 'applied', 'Browser outcome must be applied')
+  assert.ok(browser.commandReceipt, 'Browser receipt must be present')
   assert.equal(
     browser.commandReceipt.outcome,
     'applied',
@@ -205,7 +202,11 @@ export function verifyPauseExecutionAcceptance(
     'Control certificate must match',
   )
   assert.equal(native.diagnostics.sentProofs, 1, 'Sent proofs must be 1')
-  assert.equal(native.diagnostics.receivedProofs, 1, 'Received proofs must be 1')
+  assert.equal(
+    native.diagnostics.receivedProofs,
+    1,
+    'Received proofs must be 1',
+  )
   assert.equal(
     native.diagnostics.commandsEnabled,
     true,
@@ -236,6 +237,21 @@ export function verifyPauseExecutionRevocation(
     'applied',
     'Revocation must prevent applied outcome',
   )
+  assert.notEqual(
+    native.commandOutcome,
+    'applied',
+    'Revocation must prevent applied native outcome',
+  )
+  assert.notEqual(
+    browser.commandReceipt?.outcome,
+    'applied',
+    'Revocation must prevent applied receipt',
+  )
+  assert.equal(
+    browser.commandHttpRequests,
+    0,
+    'Command HTTP requests must remain zero',
+  )
 }
 
 /** Negative row: disconnect results in read-only degradation with zero simulator commands. */
@@ -254,10 +270,17 @@ export function verifyPauseExecutionDegradation(
     'Zero simulator commands during degraded disconnect',
   )
   assert.equal(
-    httpCounts?.commands ?? browser.commandHttpRequests,
+    browser.commandHttpRequests,
     0,
     'Command bytes must travel exclusively via RTC, zero command HTTP requests',
   )
+  if (httpCounts !== undefined) {
+    assert.equal(
+      httpCounts.commands,
+      0,
+      'Command bytes must travel exclusively via RTC, zero command HTTP requests',
+    )
+  }
   assert.ok(
     native.terminal && browser.terminal,
     'Degraded teardown must be observed on disconnect',
@@ -266,6 +289,16 @@ export function verifyPauseExecutionDegradation(
     browser.outcome,
     'applied',
     'Disconnect must prevent applied outcome',
+  )
+  assert.notEqual(
+    native.commandOutcome,
+    'applied',
+    'Disconnect must prevent applied native outcome',
+  )
+  assert.notEqual(
+    browser.commandReceipt?.outcome,
+    'applied',
+    'Disconnect must prevent applied receipt',
   )
 }
 
@@ -322,7 +355,9 @@ async function resourceLedger(input: SignallingIdentityInput) {
   const parentLedger = process.env.SIGNALLING_HTTPS_LEDGER
   const path =
     process.env.PAUSE_EXECUTION_RTC_LEDGER ??
-    (parentLedger ? parentLedger + '.pause-execution-rtc-resources.jsonl' : undefined)
+    (parentLedger
+      ? parentLedger + '.pause-execution-rtc-resources.jsonl'
+      : undefined)
   const checkout = await realpath(new URL('../..', import.meta.url))
   if (!path || !isAbsolute(path))
     throw Error('Private execution RTC resource ledger required')
@@ -351,7 +386,10 @@ async function connectorChild(
 ) {
   const child = spawn(
     process.execPath,
-    [new URL('./pause-execution-rtc-connector-child.ts', import.meta.url).pathname],
+    [
+      new URL('./pause-execution-rtc-connector-child.ts', import.meta.url)
+        .pathname,
+    ],
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -502,7 +540,9 @@ async function connectorChild(
         child.pid,
       )
       if (forced || failure || receipt.code !== 0 || receipt.signal !== null)
-        throw Error('RTC execution child cleanup required forced or failed exit')
+        throw Error(
+          'RTC execution child cleanup required forced or failed exit',
+        )
     })()
     return disposing
   }
@@ -526,7 +566,14 @@ async function connectorChild(
 }
 
 export type PauseExecutionFixtureOptions = Readonly<{
-  closure?: 'standard' | 'revocation' | 'disconnect' | 'stale' | 'reassigned' | 'peer-closed' | 'late-close'
+  closure?:
+    | 'standard'
+    | 'revocation'
+    | 'disconnect'
+    | 'stale'
+    | 'reassigned'
+    | 'peer-closed'
+    | 'late-close'
   testReplay?: boolean
 }>
 
@@ -621,7 +668,9 @@ export function createPauseExecutionRtcFixtureExtension(
 
       const issuerKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
       if (!issuerKey) {
-        throw Error('SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY required for pause execution')
+        throw Error(
+          'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY required for pause execution',
+        )
       }
 
       const issuer = PauseExecutionRtcIssuer.parse({
@@ -766,7 +815,13 @@ export function createPauseExecutionRtcFixtureExtension(
 
         const started = await session.connector.request({
           kind: 'start',
-          barrier: closureMode === 'stale' || closureMode === 'reassigned' || closureMode === 'peer-closed' || closureMode === 'late-close' ? closureMode : 'none',
+          barrier:
+            closureMode === 'stale' ||
+            closureMode === 'reassigned' ||
+            closureMode === 'peer-closed' ||
+            closureMode === 'late-close'
+              ? closureMode
+              : 'none',
           origin: input.origin,
           credentialAudience: input.audience,
           issuer: session.issuer,
@@ -805,8 +860,18 @@ export function createPauseExecutionRtcFixtureExtension(
 
         // Authority issuance starts inside pause(); proofs precede that operation.
         await Promise.all([
-          until(observeNative, (v) => v.proofsReady && !v.terminal && !v.failed, input.signal, 10000),
-          until(observeBrowser, (v) => v.proofsReady && !v.terminal && !v.failed, input.signal, 10000),
+          until(
+            observeNative,
+            (v) => v.proofsReady && !v.terminal && !v.failed,
+            input.signal,
+            10000,
+          ),
+          until(
+            observeBrowser,
+            (v) => v.proofsReady && !v.terminal && !v.failed,
+            input.signal,
+            10000,
+          ),
         ])
 
         if (closureMode === 'revocation') {
@@ -816,8 +881,14 @@ export function createPauseExecutionRtcFixtureExtension(
             until(observeNative, (v) => v.terminal, input.signal, 8000),
             until(observeBrowser, (v) => v.terminal, input.signal, 8000),
           ])
-          assert.equal(await session.actor.evaluate((actor) => actor.pause()), 'rejected')
-          verifyPauseExecutionRevocation(await observeNative(), await observeBrowser())
+          assert.equal(
+            await session.actor.evaluate((actor) => actor.pause()),
+            'rejected',
+          )
+          verifyPauseExecutionRevocation(
+            await observeNative(),
+            await observeBrowser(),
+          )
           await session.note(
             'authenticated-pause-execution-revocation-verified; zero simulator commands',
           )
@@ -832,8 +903,14 @@ export function createPauseExecutionRtcFixtureExtension(
             until(observeNative, (v) => v.terminal, input.signal, 8000),
             until(observeBrowser, (v) => v.terminal, input.signal, 8000),
           ])
-          assert.equal(await session.actor.evaluate((actor) => actor.pause()), 'rejected')
-          verifyPauseExecutionDegradation(await observeNative(), await observeBrowser())
+          assert.equal(
+            await session.actor.evaluate((actor) => actor.pause()),
+            'rejected',
+          )
+          verifyPauseExecutionDegradation(
+            await observeNative(),
+            await observeBrowser(),
+          )
           await session.note(
             'authenticated-pause-execution-disconnect-degradation-verified; zero simulator commands',
           )
@@ -841,14 +918,32 @@ export function createPauseExecutionRtcFixtureExtension(
           return
         }
 
-        if (closureMode === 'stale' || closureMode === 'reassigned' || closureMode === 'peer-closed') {
+        if (
+          closureMode === 'stale' ||
+          closureMode === 'reassigned' ||
+          closureMode === 'peer-closed'
+        ) {
           // The signed command has crossed real RTC, but cannot enter the dispatcher yet.
           const outcome = session.actor.evaluate((actor) => actor.pause())
-          await until(observeNative, (v) => v.commandReceived, input.signal, 10000)
+          await until(
+            observeNative,
+            (v) => v.commandReceived,
+            input.signal,
+            10000,
+          )
           assert.equal((await observeNative()).pausesObserved, 0)
-          assert.equal((await session.connector.request({ kind: 'release' })).kind, 'released')
-          await until(observeNative, (v) => v.commandOutcome !== null, input.signal, 10000)
+          assert.equal(
+            (await session.connector.request({ kind: 'release' })).kind,
+            'released',
+          )
+          await until(
+            observeNative,
+            (v) => v.commandOutcome !== null,
+            input.signal,
+            10000,
+          )
           assert.notEqual(await outcome, 'applied')
+          assert.notEqual((await observeNative()).commandOutcome, 'applied')
           assert.equal((await observeNative()).pausesObserved, 0)
           assert.equal((await observeNative()).prepareCalls, 0)
           completed = true
@@ -871,13 +966,18 @@ export function createPauseExecutionRtcFixtureExtension(
         }
 
         // Standard execution path: Trigger browser pause command
-        const pauseOutcomePromise = session.actor.evaluate((actor) => actor.pause())
+        const pauseOutcomePromise = session.actor.evaluate((actor) =>
+          actor.pause(),
+        )
 
         // Wait for command delivery, execution and browser settlement
         const [nativeFinal, browserFinal] = await Promise.all([
           until(
             observeNative,
-            (v) => v.pausesObserved === 1 && v.latestPrintState === 'paused' && v.commandOutcome === 'applied',
+            (v) =>
+              v.pausesObserved === 1 &&
+              v.latestPrintState === 'paused' &&
+              v.commandOutcome === 'applied',
             input.signal,
             10000,
           ),
@@ -896,10 +996,15 @@ export function createPauseExecutionRtcFixtureExtension(
 
         if (options.testReplay) {
           // Verify replay produces no second simulator command
-          const replayOutcome = await session.actor.evaluate((actor) => actor.replay())
-          assert.equal(replayOutcome, false, 'Maintained transport refuses a second command')
+          const replayOutcome = await session.actor.evaluate((actor) =>
+            actor.replay(),
+          )
+          assert.equal(
+            replayOutcome,
+            false,
+            'Maintained transport refuses a second command',
+          )
           assert.equal((await observeNative()).pausesObserved, 1)
-
         }
 
         await session.note(

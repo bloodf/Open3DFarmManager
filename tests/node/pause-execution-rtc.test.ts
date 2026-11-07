@@ -57,6 +57,9 @@ function observations() {
     capabilityAccepted: true,
     commandReceived: true,
     commandsReceived: 1,
+    prepareCalls: 1,
+    closeHeld: false,
+    ownerSettled: false,
     pausesObserved: 1,
     latestPrintState: 'paused',
     commandId,
@@ -129,10 +132,7 @@ test('native capabilityAccepted alone must fail execution acceptance', () => {
   // Zero simulator pauses observed
   assert.throws(
     () =>
-      verifyPauseExecutionAcceptance(
-        { ...native, pausesObserved: 0 },
-        browser,
-      ),
+      verifyPauseExecutionAcceptance({ ...native, pausesObserved: 0 }, browser),
     /exactly one printer\.print\.pause/,
   )
 
@@ -159,10 +159,10 @@ test('native capabilityAccepted alone must fail execution acceptance', () => {
   // Browser not admitted or command not sent
   assert.throws(
     () =>
-      verifyPauseExecutionAcceptance(
-        native,
-        { ...browser, commandSent: false },
-      ),
+      verifyPauseExecutionAcceptance(native, {
+        ...browser,
+        commandSent: false,
+      }),
     /command must be sent/,
   )
 })
@@ -171,10 +171,7 @@ test('replaying or multiple simulator pauses must fail execution acceptance', ()
   const { native, browser } = observations()
   assert.throws(
     () =>
-      verifyPauseExecutionAcceptance(
-        { ...native, pausesObserved: 2 },
-        browser,
-      ),
+      verifyPauseExecutionAcceptance({ ...native, pausesObserved: 2 }, browser),
     /exactly one printer\.print\.pause/,
   )
 })
@@ -258,310 +255,342 @@ test('execution actor diagnostics must report commandsEnabled: true', () => {
   )
 })
 
-for (const row of ['fresh', 'revoked', 'stale', 'reassigned', 'peer-closed'] as const) {
-test(`signed relay composition: ${row}`, async (t) => {
-  const cleanup: Array<() => Promise<void> | void> = []
-  t.after(async () => {
-    for (const dispose of cleanup.reverse()) {
-      await dispose()
-    }
-  })
-
-  let wallOffset = 0
-  const peerAbort = new AbortController()
-  // 1. Keys and identities
-  const browserKey = await crypto.subtle.generateKey(
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign', 'verify'],
-  )
-  const issuerKey = await crypto.subtle.generateKey('Ed25519', false, [
-    'sign',
-    'verify',
-  ])
-  const connectorKey = await crypto.subtle.generateKey('Ed25519', false, [
-    'sign',
-    'verify',
-  ])
-
-  const jwk = await crypto.subtle.exportKey('jwk', browserKey.publicKey)
-  const { publicKey: browserPublicJwk, thumbprint } =
-    await validateBrowserDevicePublicKey({
-      kty: jwk.kty,
-      crv: jwk.crv,
-      x: jwk.x,
-      y: jwk.y,
+for (const row of [
+  'fresh',
+  'revoked',
+  'stale',
+  'reassigned',
+  'peer-closed',
+] as const) {
+  test(`signed relay composition: ${row}`, async (t) => {
+    const cleanup: Array<() => Promise<void> | void> = []
+    t.after(async () => {
+      for (const dispose of cleanup.reverse()) {
+        await dispose()
+      }
     })
 
-  const transportId = randomUUID()
-  const assignmentId = randomUUID()
-  const farmId = randomUUID()
-  const agentId = randomUUID()
-  const keyId = randomUUID()
-  const printerKey = 'test-exec-printer-key'
-  const origin = 'https://127.0.0.1:4443'
-  const audience = 'open3dfarmmanager:pause'
-  const now = Date.now()
+    let wallOffset = 0
+    const peerAbort = new AbortController()
+    // 1. Keys and identities
+    const browserKey = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify'],
+    )
+    const issuerKey = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
+    const connectorKey = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
 
-  const binding = {
-    v: 1 as const,
-    purpose: 'pause-rtc' as const,
-    transport_id: transportId,
-    farm_id: farmId,
-    agent_id: agentId,
-    account_id: 'user_exec_account',
-    key_id: keyId,
-    assignment_id: assignmentId,
-    origin,
-    audience,
-    browser_public_key: browserPublicJwk,
-    browser_thumbprint: thumbprint,
-    connector_public_key_spki: Buffer.from(await crypto.subtle.exportKey('spki', connectorKey.publicKey)).toString('base64url'),
-    connector_fingerprint: 'SHA256:' + createHash('sha256').update(Buffer.from(await crypto.subtle.exportKey('spki', connectorKey.publicKey))).digest('base64url'),
-    browser_nonce: randomBytes(32).toString('base64url'),
-    connector_nonce: randomBytes(32).toString('base64url'),
-    offer_sha256: randomBytes(32).toString('base64url'),
-    answer_sha256: randomBytes(32).toString('base64url'),
-    browser_dtls: Array(32).fill('AA').join(':'),
-    connector_dtls: Array(32).fill('BB').join(':'),
-    credential_jti: randomUUID(),
-    issued_at: now,
-    expires_at: now + 30000,
-  }
+    const jwk = await crypto.subtle.exportKey('jwk', browserKey.publicKey)
+    const { publicKey: browserPublicJwk, thumbprint } =
+      await validateBrowserDevicePublicKey({
+        kty: jwk.kty,
+        crv: jwk.crv,
+        x: jwk.x,
+        y: jwk.y,
+      })
 
-  // 2. Mock Moonraker loopback fixture
-  const remote = await pauseFixture()
-  cleanup.push(() => remote.close())
+    const transportId = randomUUID()
+    const assignmentId = randomUUID()
+    const farmId = randomUUID()
+    const agentId = randomUUID()
+    const keyId = randomUUID()
+    const printerKey = 'test-exec-printer-key'
+    const origin = 'https://127.0.0.1:4443'
+    const audience = 'open3dfarmmanager:pause'
+    const now = Date.now()
 
-  // 3. Command journal
-  const journalDir = mkdtempSync(join(tmpdir(), 'pause-exec-test-journal-'))
-  cleanup.push(() => rmSync(journalDir, { recursive: true, force: true }))
-  const journal = openCommandJournal({ directory: journalDir, clock: Date.now })
-  cleanup.push(() => closeCommandJournal(journal))
-
-  // 4. Printer binding and pause driver
-  const registry = createPrinterBindingRegistry({
-    allowedOrigins: [remote.origin],
-  })
-  const printerBinding = registry.provision({
-    assignment_id: assignmentId,
-    farm_id: farmId,
-    agent_id: agentId,
-    printer_key: printerKey,
-    moonraker_origin: remote.origin,
-  })
-
-  let dispatcherRef: ReturnType<typeof createPauseCommandRelay> | undefined
-  const driver = createPauseDriverRouter({
-    allowedOrigins: [remote.origin],
-    limits: {
-      maxMessageBytes: 4096,
-      connectTimeoutMs: 1000,
-      requestTimeoutMs: 1000,
-      staleAfterMs: 3000,
-      reconnectMinMs: 100,
-      reconnectMaxMs: 100,
-    },
-    clock: { monotonicNow: () => performance.now() },
-    observe: (binding, obs) => dispatcherRef?.observe(binding, obs) ?? false,
-  })
-
-  // 5. Compose relay
-  const relay = createPauseCommandRelay({
-    authority: {
-      issuers: [
-        {
-          issuer: 'farm:issuer',
-          kid: 'test-kid',
-          publicKey: issuerKey.publicKey,
-        },
-      ],
-    },
-    clock: { wallNow: () => Date.now() + wallOffset, monotonicNow: () => performance.now() },
-    journal,
-    driver,
-    bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
-  })
-  dispatcherRef = relay
-  cleanup.push(async () => {
-    relay.close()
-    await relay.settled
-  })
-
-
-  // 6. Generate control proofs and admit peer
-  const browserProofWire = encodeControlProof({
-    v: 1,
-    role: 'browser',
-    binding,
-    signature: await signControlSessionProof(binding, 'browser', browserKey.privateKey),
-  })
-  const connectorProofWire = encodeControlProof({
-    v: 1,
-    role: 'connector',
-    binding,
-    signature: await signControlSessionProof(binding, 'connector', connectorKey.privateKey),
-  })
-
-  let admissionNonce = ''
-  const opened = relay.openPeer({
-    binding,
-    browserProofWire,
-    connectorProofWire,
-    sendPhase: (m) => {
-      if (m.t === 'control.admission-nonce') {
-        admissionNonce = m.admission_nonce
-      }
-      return true
-    },
-    sendResult: () => true,
-    signal: peerAbort.signal,
-  })
-  assert.equal(opened, true)
-  assert.ok(admissionNonce.length > 0)
-
-  // 7. Sign capability and admission proof
-  const admittedAt = Date.now()
-  const capability = await signPauseCapability(
-    {
-      v: 1,
-      purpose: 'pause-authority',
-      capability_id: randomUUID(),
-      kid: 'test-kid',
-      issuer: 'farm:issuer',
-      audience,
-      origin,
-      issued_at: admittedAt,
-      expires_at: admittedAt + 20000,
-      account_id: binding.account_id,
-      role: 'operator',
+    const binding = {
+      v: 1 as const,
+      purpose: 'pause-rtc' as const,
+      transport_id: transportId,
       farm_id: farmId,
       agent_id: agentId,
+      account_id: 'user_exec_account',
       key_id: keyId,
       assignment_id: assignmentId,
-      transport_id: transportId,
+      origin,
+      audience,
       browser_public_key: browserPublicJwk,
       browser_thumbprint: thumbprint,
-      connector_fingerprint: binding.connector_fingerprint,
-      credential_jti: binding.credential_jti,
+      connector_public_key_spki: Buffer.from(
+        await crypto.subtle.exportKey('spki', connectorKey.publicKey),
+      ).toString('base64url'),
+      connector_fingerprint:
+        'SHA256:' +
+        createHash('sha256')
+          .update(
+            Buffer.from(
+              await crypto.subtle.exportKey('spki', connectorKey.publicKey),
+            ),
+          )
+          .digest('base64url'),
+      browser_nonce: randomBytes(32).toString('base64url'),
+      connector_nonce: randomBytes(32).toString('base64url'),
+      offer_sha256: randomBytes(32).toString('base64url'),
+      answer_sha256: randomBytes(32).toString('base64url'),
+      browser_dtls: Array(32).fill('AA').join(':'),
+      connector_dtls: Array(32).fill('BB').join(':'),
+      credential_jti: randomUUID(),
+      issued_at: now,
+      expires_at: now + 30000,
+    }
+
+    // 2. Mock Moonraker loopback fixture
+    const remote = await pauseFixture()
+    cleanup.push(() => remote.close())
+
+    // 3. Command journal
+    const journalDir = mkdtempSync(join(tmpdir(), 'pause-exec-test-journal-'))
+    cleanup.push(() => rmSync(journalDir, { recursive: true, force: true }))
+    const journal = openCommandJournal({
+      directory: journalDir,
+      clock: Date.now,
+    })
+    cleanup.push(() => closeCommandJournal(journal))
+
+    // 4. Printer binding and pause driver
+    const registry = createPrinterBindingRegistry({
+      allowedOrigins: [remote.origin],
+    })
+    const printerBinding = registry.provision({
+      assignment_id: assignmentId,
+      farm_id: farmId,
+      agent_id: agentId,
       printer_key: printerKey,
-      control_binding_sha256: await controlBindingHash(binding),
-      admission_nonce: admissionNonce,
-      actions: ['pause'],
-    },
-    issuerKey.privateKey,
-  )
+      moonraker_origin: remote.origin,
+    })
 
-  const admissionProof = await signPauseAdmissionProof(
-    {
+    let dispatcherRef: ReturnType<typeof createPauseCommandRelay> | undefined
+    const driver = createPauseDriverRouter({
+      allowedOrigins: [remote.origin],
+      limits: {
+        maxMessageBytes: 4096,
+        connectTimeoutMs: 1000,
+        requestTimeoutMs: 1000,
+        staleAfterMs: 3000,
+        reconnectMinMs: 100,
+        reconnectMaxMs: 100,
+      },
+      clock: { monotonicNow: () => performance.now() },
+      observe: (binding, obs) => dispatcherRef?.observe(binding, obs) ?? false,
+    })
+
+    // 5. Compose relay
+    const relay = createPauseCommandRelay({
+      authority: {
+        issuers: [
+          {
+            issuer: 'farm:issuer',
+            kid: 'test-kid',
+            publicKey: issuerKey.publicKey,
+          },
+        ],
+      },
+      clock: {
+        wallNow: () => Date.now() + wallOffset,
+        monotonicNow: () => performance.now(),
+      },
+      journal,
+      driver,
+      bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
+    })
+    dispatcherRef = relay
+    cleanup.push(async () => {
+      relay.close()
+      await relay.settled
+    })
+
+    // 6. Generate control proofs and admit peer
+    const browserProofWire = encodeControlProof({
       v: 1,
-      purpose: 'pause-admission',
-      challenge_id: randomUUID(),
-      farm_id: farmId,
-      agent_id: agentId,
-      key_id: keyId,
-      assignment_id: assignmentId,
-      transport_id: transportId,
-      account_id: binding.account_id,
-      browser_thumbprint: thumbprint,
-      origin,
-      audience,
-      control_binding_sha256: await controlBindingHash(binding),
-      admission_nonce: admissionNonce,
-      issued_at: admittedAt,
-      expires_at: admittedAt + 8000,
-    },
-    browserKey.privateKey,
-  )
+      role: 'browser',
+      binding,
+      signature: await signControlSessionProof(
+        binding,
+        'browser',
+        browserKey.privateKey,
+      ),
+    })
+    const connectorProofWire = encodeControlProof({
+      v: 1,
+      role: 'connector',
+      binding,
+      signature: await signControlSessionProof(
+        binding,
+        'connector',
+        connectorKey.privateKey,
+      ),
+    })
 
-  const admitted = await relay.admitPeer({
-    transportId,
-    capabilityWire: encodePauseCapability(capability),
-    admissionProofWire: encodePauseAdmissionProof(admissionProof),
+    let admissionNonce = ''
+    const opened = relay.openPeer({
+      binding,
+      browserProofWire,
+      connectorProofWire,
+      sendPhase: (m) => {
+        if (m.t === 'control.admission-nonce') {
+          admissionNonce = m.admission_nonce
+        }
+        return true
+      },
+      sendResult: () => true,
+      signal: peerAbort.signal,
+    })
+    assert.equal(opened, true)
+    assert.ok(admissionNonce.length > 0)
+
+    // 7. Sign capability and admission proof
+    const admittedAt = Date.now()
+    const capability = await signPauseCapability(
+      {
+        v: 1,
+        purpose: 'pause-authority',
+        capability_id: randomUUID(),
+        kid: 'test-kid',
+        issuer: 'farm:issuer',
+        audience,
+        origin,
+        issued_at: admittedAt,
+        expires_at: admittedAt + 20000,
+        account_id: binding.account_id,
+        role: 'operator',
+        farm_id: farmId,
+        agent_id: agentId,
+        key_id: keyId,
+        assignment_id: assignmentId,
+        transport_id: transportId,
+        browser_public_key: browserPublicJwk,
+        browser_thumbprint: thumbprint,
+        connector_fingerprint: binding.connector_fingerprint,
+        credential_jti: binding.credential_jti,
+        printer_key: printerKey,
+        control_binding_sha256: await controlBindingHash(binding),
+        admission_nonce: admissionNonce,
+        actions: ['pause'],
+      },
+      issuerKey.privateKey,
+    )
+
+    const admissionProof = await signPauseAdmissionProof(
+      {
+        v: 1,
+        purpose: 'pause-admission',
+        challenge_id: randomUUID(),
+        farm_id: farmId,
+        agent_id: agentId,
+        key_id: keyId,
+        assignment_id: assignmentId,
+        transport_id: transportId,
+        account_id: binding.account_id,
+        browser_thumbprint: thumbprint,
+        origin,
+        audience,
+        control_binding_sha256: await controlBindingHash(binding),
+        admission_nonce: admissionNonce,
+        issued_at: admittedAt,
+        expires_at: admittedAt + 8000,
+      },
+      browserKey.privateKey,
+    )
+
+    const admitted = await relay.admitPeer({
+      transportId,
+      capabilityWire: encodePauseCapability(capability),
+      admissionProofWire: encodePauseAdmissionProof(admissionProof),
+    })
+    assert.deepEqual(admitted, { ok: true })
+
+    // 8. Sign command v2
+    const cmdId = randomUUID()
+    const commandAt = Date.now()
+    const signedCommand = await signCommandV2(
+      {
+        v: 2,
+        purpose: 'printer-pause',
+        cmd_id: cmdId,
+        farm_id: farmId,
+        agent_id: agentId,
+        account_id: binding.account_id,
+        key_id: keyId,
+        transport_id: transportId,
+        capability_id: capability.capability_id,
+        assignment_id: assignmentId,
+        action: 'pause',
+        args: {},
+        issued_at: commandAt,
+        expires_at: commandAt + 5000,
+        nonce: randomBytes(16).toString('base64url'),
+      },
+      browserKey.privateKey,
+    )
+    const commandWire = encodeCommandV2(signedCommand)
+
+    // Mutations happen after real signatures/admission, before any preparation.
+    if (row === 'revoked') relay.closePeer(transportId)
+    if (row === 'stale') wallOffset = 60000
+    if (row === 'reassigned') registry.retire(printerBinding)
+    if (row === 'peer-closed') peerAbort.abort()
+    if (row !== 'fresh') {
+      assert.notEqual(
+        await relay.commandPeer({ transportId, wire: commandWire }),
+        'applied',
+      )
+      assert.equal(remote.counts().connections, 0)
+      assert.equal(remote.counts().queries, 0)
+      assert.equal(remote.counts().pauses, 0)
+      return
+    }
+
+    // 9. Dispatch command: should execute pause RPC and persist 'applied'
+    const firstOutcome = await relay.commandPeer({
+      transportId,
+      wire: commandWire,
+    })
+    assert.equal(firstOutcome, 'applied')
+    assert.equal(remote.counts().pauses, 1, 'Moonraker must observe 1 pause')
+    assert.equal(readCommandOutcome(journal, cmdId)?.status, 'applied')
+
+    // 10. Replay same command wire: must yield no second simulator request
+    const replayOutcome = await relay.commandPeer({
+      transportId,
+      wire: commandWire,
+    })
+    assert.equal(
+      replayOutcome,
+      'applied',
+      'Replaying on same peer returns cached outcome',
+    )
+    assert.equal(
+      remote.counts().pauses,
+      1,
+      'Replaying must not execute second Moonraker pause RPC',
+    )
+
+    // 11. Durable journal persistence verified after reopen
+    const reopened = openCommandJournal({
+      directory: journalDir,
+      clock: Date.now,
+    })
+    try {
+      assert.equal(readCommandOutcome(reopened, cmdId)?.status, 'applied')
+    } finally {
+      closeCommandJournal(reopened)
+    }
   })
-  assert.deepEqual(admitted, { ok: true })
-
-  // 8. Sign command v2
-  const cmdId = randomUUID()
-  const commandAt = Date.now()
-  const signedCommand = await signCommandV2(
-    {
-      v: 2,
-      purpose: 'printer-pause',
-      cmd_id: cmdId,
-      farm_id: farmId,
-      agent_id: agentId,
-      account_id: binding.account_id,
-      key_id: keyId,
-      transport_id: transportId,
-      capability_id: capability.capability_id,
-      assignment_id: assignmentId,
-      action: 'pause',
-      args: {},
-      issued_at: commandAt,
-      expires_at: commandAt + 5000,
-      nonce: randomBytes(16).toString('base64url'),
-    },
-    browserKey.privateKey,
-  )
-  const commandWire = encodeCommandV2(signedCommand)
-
-  // Mutations happen after real signatures/admission, before any preparation.
-  if (row === 'revoked') relay.closePeer(transportId)
-  if (row === 'stale') wallOffset = 60000
-  if (row === 'reassigned') registry.retire(printerBinding)
-  if (row === 'peer-closed') peerAbort.abort()
-  if (row !== 'fresh') {
-    assert.notEqual(await relay.commandPeer({ transportId, wire: commandWire }), 'applied')
-    assert.equal(remote.counts().connections, 0)
-    assert.equal(remote.counts().queries, 0)
-    assert.equal(remote.counts().pauses, 0)
-    return
-  }
-
-  // 9. Dispatch command: should execute pause RPC and persist 'applied'
-  const firstOutcome = await relay.commandPeer({
-    transportId,
-    wire: commandWire,
-  })
-  assert.equal(firstOutcome, 'applied')
-  assert.equal(remote.counts().pauses, 1, 'Moonraker must observe 1 pause')
-  assert.equal(readCommandOutcome(journal, cmdId)?.status, 'applied')
-
-  // 10. Replay same command wire: must yield no second simulator request
-  const replayOutcome = await relay.commandPeer({
-    transportId,
-    wire: commandWire,
-  })
-  assert.equal(
-    replayOutcome,
-    'applied',
-    'Replaying on same peer returns cached outcome',
-  )
-  assert.equal(
-    remote.counts().pauses,
-    1,
-    'Replaying must not execute second Moonraker pause RPC',
-  )
-
-  // 11. Durable journal persistence verified after reopen
-  const reopened = openCommandJournal({
-    directory: journalDir,
-    clock: Date.now,
-  })
-  try {
-    assert.equal(readCommandOutcome(reopened, cmdId)?.status, 'applied')
-  } finally {
-    closeCommandJournal(reopened)
-  }
-})
-
 }
 
 test('revocation verifier rejects unsafe synthetic observations', () => {
   const { native, browser } = observations()
   const revokedNative: PauseExecutionNativeObservation = {
     ...native,
+    prepareCalls: 0,
     pausesObserved: 0,
     terminal: true,
     latestPrintState: 'printing',
@@ -578,6 +607,27 @@ test('revocation verifier rejects unsafe synthetic observations', () => {
   assert.doesNotThrow(() =>
     verifyPauseExecutionRevocation(revokedNative, revokedBrowser),
   )
+  assert.throws(
+    () =>
+      verifyPauseExecutionRevocation(
+        { ...revokedNative, commandOutcome: 'applied' },
+        revokedBrowser,
+      ),
+    /applied native outcome/,
+  )
+  assert.throws(
+    () =>
+      verifyPauseExecutionRevocation(revokedNative, {
+        ...revokedBrowser,
+        commandReceipt: browser.commandReceipt,
+      }),
+    /applied receipt/,
+  )
+  for (const field of ['prepareCalls', 'closeHeld', 'ownerSettled']) {
+    const missing: Record<string, unknown> = { ...revokedNative }
+    delete missing[field]
+    assert.throws(() => verifyPauseExecutionRevocation(missing, revokedBrowser))
+  }
 
   // If simulator observed a pause, verification must throw
   assert.throws(
@@ -604,6 +654,7 @@ test('degradation verifier rejects unsafe synthetic observations', () => {
   const { native, browser } = observations()
   const degradedNative: PauseExecutionNativeObservation = {
     ...native,
+    prepareCalls: 0,
     pausesObserved: 0,
     terminal: true,
     latestPrintState: 'printing',
@@ -622,6 +673,31 @@ test('degradation verifier rejects unsafe synthetic observations', () => {
       commands: 0,
     }),
   )
+  assert.throws(
+    () =>
+      verifyPauseExecutionDegradation(
+        { ...degradedNative, commandOutcome: 'applied' },
+        degradedBrowser,
+      ),
+    /applied native outcome/,
+  )
+  assert.throws(
+    () =>
+      verifyPauseExecutionDegradation(degradedNative, {
+        ...degradedBrowser,
+        commandReceipt: browser.commandReceipt,
+      }),
+    /applied receipt/,
+  )
+  assert.throws(
+    () =>
+      verifyPauseExecutionDegradation(
+        degradedNative,
+        { ...degradedBrowser, commandHttpRequests: 1 },
+        { commands: 0 },
+      ),
+    /zero command HTTP requests/,
+  )
 
   // If any command HTTP request occurred, verification must throw
   assert.throws(
@@ -637,7 +713,9 @@ test('private execution child IPC protocol strictly validates commands and rejec
   assert.deepEqual(parsePauseExecutionRtcCommand('{"kind":"observe"}'), {
     kind: 'observe',
   })
-  assert.throws(() => parsePauseExecutionRtcCommand('{"kind":"replay","wire":"sample-wire"}'))
+  assert.throws(() =>
+    parsePauseExecutionRtcCommand('{"kind":"replay","wire":"sample-wire"}'),
+  )
 
   for (const command of [
     { kind: 'admit', binding: {} },
@@ -653,7 +731,9 @@ test('private execution child IPC protocol strictly validates commands and rejec
   }
 
   assert.throws(() =>
-    parsePauseExecutionRtcCommand(' '.repeat(PAUSE_EXECUTION_RTC_IPC_BYTES + 1)),
+    parsePauseExecutionRtcCommand(
+      ' '.repeat(PAUSE_EXECUTION_RTC_IPC_BYTES + 1),
+    ),
   )
 })
 
@@ -700,7 +780,9 @@ test('execution progress tracker advances through lifecycle and preserves first 
 // Native acceptance is supplied through runSignallingHttpsAcceptance.extension.
 // This factory check is source coverage, not an authenticated runtime gate.
 test('execution fixture exposes the maintained provisioning extension contract', () => {
-  const extension = createPauseExecutionRtcFixtureExtension({ testReplay: true })
+  const extension = createPauseExecutionRtcFixtureExtension({
+    testReplay: true,
+  })
   assert.equal(typeof extension.identityHandles, 'function')
   assert.equal(typeof extension.afterProvisioned, 'function')
 })

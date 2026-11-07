@@ -4,12 +4,48 @@
 package rtcp
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 var _ Packet = (*TransportLayerCC)(nil) // assert is a Packet
+
+func TestTransportLayerCC_MarshalInvalidDelta(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		delta RecvDelta
+	}{
+		{"small negative", RecvDelta{Type: TypeTCCPacketReceivedSmallDelta, Delta: -250}},
+		{"small overflow", RecvDelta{Type: TypeTCCPacketReceivedSmallDelta, Delta: 256 * 250}},
+		{"large underflow", RecvDelta{Type: TypeTCCPacketReceivedLargeDelta, Delta: -32769 * 250}},
+		{"large overflow", RecvDelta{Type: TypeTCCPacketReceivedLargeDelta, Delta: 32768 * 250}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			packet := TransportLayerCC{
+				Header:            Header{Count: FormatTCC, Type: TypeTransportSpecificFeedback, Length: 5},
+				PacketStatusCount: 2,
+				PacketChunks: []PacketStatusChunk{&StatusVectorChunk{
+					SymbolSize: TypeTCCSymbolSizeTwoBit,
+					SymbolList: []uint16{TypeTCCPacketReceivedSmallDelta, test.delta.Type},
+				}},
+				RecvDeltas: []*RecvDelta{
+					{Type: TypeTCCPacketReceivedSmallDelta, Delta: 250},
+					&test.delta,
+				},
+			}
+			if test.delta.Type == TypeTCCPacketReceivedLargeDelta {
+				packet.Header.Length = 6
+				packet.Header.Padding = true
+			}
+			data, err := packet.Marshal()
+			assert.ErrorIs(t, err, errDeltaExceedLimit)
+			assert.Nil(t, data)
+		})
+	}
+}
 
 func TestTransportLayerCC_RunLengthChunkUnmarshal(t *testing.T) {
 	for _, test := range []struct {
@@ -1177,5 +1213,67 @@ func TestTransportLayerCC_Marshal(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equalf(t, test.Want, bin, "Marshal %q", test.Name)
 		})
+	}
+}
+
+func TestTransportLayerCC_LengthOverflow(t *testing.T) {
+	packet := TransportLayerCC{
+		Header:            Header{Count: FormatTCC, Type: TypeTransportSpecificFeedback, Padding: true},
+		PacketStatusCount: 32761,
+	}
+	for remaining := packet.PacketStatusCount; remaining > 0; {
+		count := min(remaining, 8191)
+		packet.PacketChunks = append(packet.PacketChunks, &RunLengthChunk{
+			PacketStatusSymbol: TypeTCCPacketReceivedLargeDelta,
+			RunLength:          count,
+		})
+		remaining -= count
+	}
+	for range packet.PacketStatusCount {
+		packet.RecvDeltas = append(packet.RecvDeltas, &RecvDelta{
+			Type: TypeTCCPacketReceivedLargeDelta, Delta: -250,
+		})
+	}
+	packet.Header.Length = 16387
+	assert.Equal(t, 65552, packet.MarshalSize())
+	data, err := packet.Marshal()
+	assert.NoError(t, err)
+	assert.Len(t, data, 65552)
+	var decoded TransportLayerCC
+	assert.NoError(t, decoded.Unmarshal(data))
+	assert.Equal(t, packet.PacketStatusCount, decoded.PacketStatusCount)
+	assert.Equal(t, packet.RecvDeltas, decoded.RecvDeltas)
+
+	packet.PacketChunks = make([]PacketStatusChunk, (1<<18)/2)
+	data, err = packet.Marshal()
+	assert.ErrorIs(t, err, errBadLength)
+	assert.Nil(t, data)
+}
+
+func TestTransportLayerCC_UnmarshalUnusedVector(t *testing.T) {
+	for _, symbol := range []uint16{0xbfff, 0xeaaa} {
+		for _, missing := range []uint16{0, 65530} {
+			t.Run(fmt.Sprintf("%x/%d", symbol, missing), func(t *testing.T) {
+				header := [20]byte{0x8f, 205, 0, 5}
+				data := header[:]
+				binary.BigEndian.PutUint16(data[14:16], missing+1)
+				for remaining := missing; remaining > 0; {
+					count := min(remaining, 8191)
+					data = binary.BigEndian.AppendUint16(data, count)
+					remaining -= count
+				}
+				data = binary.BigEndian.AppendUint16(data, symbol)
+				data = append(data, 0, 0)
+				if missing > 0 {
+					data = append(data, 0, 0)
+					data[3] = 10
+				}
+
+				var packet TransportLayerCC
+				assert.NoError(t, packet.Unmarshal(data))
+				assert.Len(t, packet.RecvDeltas, 1)
+				assert.Equal(t, missing+1, packet.PacketStatusCount)
+			})
+		}
 	}
 }

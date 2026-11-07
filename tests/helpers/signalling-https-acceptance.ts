@@ -349,7 +349,8 @@ export async function runSignallingHttpsAcceptance(input: {
   password: string
   caPath?: string
   extension?: SignallingFixtureExtension
-  extensionKind?: 'rtc' | 'pause-authority' | 'pause-rtc'
+  extensionKind?:
+    'rtc' | 'pause-authority' | 'pause-rtc' | 'pause-execution-rtc'
   signal?: AbortSignal
   disconnectSignalling?: () => Promise<void>
 }) {
@@ -565,6 +566,12 @@ export async function runSignallingHttpsAcceptance(input: {
           syntheticControlProofs: true,
           rtcExecuted: false,
           commandsExecuted: false,
+        }
+      if (input.extensionKind === 'pause-execution-rtc')
+        return {
+          pauseExecutionRtcFixtureCompleted: true,
+          syntheticMoonraker: true,
+          realKlipperAccepted: false,
         }
       if (input.extensionKind === 'pause-rtc')
         return { pauseRtcFixtureCompleted: true, commandsExecuted: false }

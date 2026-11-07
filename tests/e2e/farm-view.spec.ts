@@ -95,21 +95,35 @@ test('explicit origin setup has no outbound probe and renders an external anchor
       outbound.push(request.url())
   })
   await page.goto('/farm')
-  await page
-    .getByRole('button', { name: 'Configurar interface local', exact: true })
-    .click()
+  const setup = page.getByRole('button', {
+    name: 'Configurar interface local',
+    exact: true,
+  })
+  await setup.focus()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByLabel('Origem da interface local', { exact: true }),
+  ).toBeFocused()
   await page
     .getByLabel('Origem da interface local', { exact: true })
     .fill('http://printer.invalid:8080/')
   await expect(page.getByRole('article')).toContainText(
     'Origem para conferir: http://printer.invalid:8080',
   )
-  await page
-    .getByLabel(
-      'Conferi que este endereço abre a interface local desta impressora.',
-    )
-    .check()
-  await page.getByRole('button', { name: 'Confirmar interface local' }).click()
+  await page.keyboard.press('Tab')
+  const confirmation = page.getByLabel(
+    'Conferi que este endereço abre a interface local desta impressora.',
+  )
+  await expect(confirmation).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(confirmation).toBeChecked()
+  await page.keyboard.press('Tab')
+  const confirm = page.getByRole('button', {
+    name: 'Confirmar interface local',
+  })
+  await expect(confirm).toBeFocused()
+  await page.keyboard.press('Enter')
   const link = page.getByRole('link', { name: /Abrir interface local de/ })
   await expect(link).toHaveAttribute('href', 'http://printer.invalid:8080')
   await expect(link).toHaveAttribute('target', '_blank')

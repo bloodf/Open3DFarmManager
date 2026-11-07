@@ -9,7 +9,7 @@
     "prepare": "nuxt prepare"
   },
   "dependencies": {
-    "@adonisjs/hash": "9.1.1",
+    "@adonisjs/hash": "10.1.1",
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
     "jose": "6.2.15",

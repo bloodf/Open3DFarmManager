@@ -84,6 +84,7 @@ export async function readLoginBody(
       typeof data.password !== 'string' ||
       !/^[a-z0-9_-]{3,64}$/.test(data.username) ||
       data.password.length < 1 ||
+      data.password.includes('\0') ||
       Buffer.byteLength(data.password) > 1024
     )
       throw new Error('Invalid credentials input')

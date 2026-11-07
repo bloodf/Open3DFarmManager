@@ -118,9 +118,8 @@ test('duplicate response closes the channel and rejects later requests', async (
 
 test('proxy drop waits for tracked stream close and rejects an empty set', async () => {
   const { PassThrough } = await import('node:stream')
-  const { disconnectFixtureUpgrades } = await import(
-    '../helpers/signalling-https-proxy.ts'
-  )
+  const { disconnectFixtureUpgrades } =
+    await import('../helpers/signalling-https-proxy.ts')
   const first = new PassThrough(),
     second = new PassThrough()
   const tracked = new Set([first, second])

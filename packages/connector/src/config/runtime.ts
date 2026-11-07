@@ -3,6 +3,7 @@ import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.t
 import {
   createPrinterBindingRegistry,
   readPrinterBinding,
+  type PrinterBinding,
 } from '../control/printer-binding.ts'
 import {
   LocalCollectorConfigSchema,
@@ -11,6 +12,7 @@ import {
 } from './local.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
+import { parsePauseRuntimeConfig } from './pause.ts'
 import { RuntimeSignalling } from './signalling.ts'
 
 const Runtime = z.strictObject({
@@ -28,6 +30,9 @@ const Runtime = z.strictObject({
       idleMs: z.number().int().min(100).max(5000).default(500),
     })
     .refine((value) => value.retryMinMs <= value.retryMaxMs),
+  // The pause section is optional and parsed strictly by its own module. An
+  // absent section carries no authority and causes no cryptographic work.
+  pause: z.unknown().optional(),
 })
 
 export function readAgentRuntimeConfig(
@@ -42,8 +47,12 @@ export function readAgentRuntimeConfig(
     allowedOrigins: collection.allowedOrigins,
   })
   const ids = new Set<string>()
+  // The exact provisioned handles are retained privately. They are the only
+  // source of a printer binding and are never reconstructed or serialized.
+  const provisioned = new Map<string, PrinterBinding>()
   const assignments = input.assignments.map((value) => {
-    const assignment = readPrinterBinding(registry.provision(value))
+    const binding = registry.provision(value)
+    const assignment = readPrinterBinding(binding)
     if (
       !assignment ||
       ids.has(assignment.assignment_id) ||
@@ -52,6 +61,7 @@ export function readAgentRuntimeConfig(
     )
       throw new Error('Runtime assignment does not match local credential')
     ids.add(assignment.assignment_id)
+    provisioned.set(assignment.assignment_id, binding)
     return assignment
   })
   if (assignments.length !== collection.printers.length)
@@ -73,11 +83,23 @@ export function readAgentRuntimeConfig(
         'Runtime assignment mapping does not match local collection',
       )
   }
+  const pause =
+    input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
   return {
     collection,
     telemetry: input.telemetry,
     assignments,
     signalling: input.signalling,
+    pause,
+    /**
+     * Local provisioned mapping resolver. It returns the exact handle that was
+     * provisioned during this read, and `undefined` for an unknown or foreign
+     * assignment id. A local mapping is a provisioning fact, never a statement
+     * about the current server assignment permission.
+     */
+    bindingFor(assignmentId: string): PrinterBinding | undefined {
+      return provisioned.get(assignmentId)
+    },
   }
 }
 export type AgentRuntimeConfig = ReturnType<typeof readAgentRuntimeConfig>

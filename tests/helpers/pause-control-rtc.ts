@@ -102,8 +102,7 @@ class ConnectorChild {
   readonly child: ChildProcessWithoutNullStreams
   readonly closed: Promise<void>
   #pending:
-    | { resolve(value: unknown): void; reject(error: Error): void }
-    | undefined
+    { resolve(value: unknown): void; reject(error: Error): void } | undefined
   #carry = Buffer.alloc(0)
   #stderr = 0
   #closed = false

@@ -240,14 +240,12 @@ export function openCommandJournal(input: {
       closeSync(openSync(path, 'wx', 0o600))
       created = true
     } catch (error) {
-      if (
-        !(
-          error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          error.code === 'EEXIST'
-        )
-      )
+      if (!(
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'EEXIST'
+      ))
         throw error
     }
   }

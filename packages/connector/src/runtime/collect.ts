@@ -22,11 +22,7 @@ export type Diagnostic =
   | {
       kind: 'unavailable'
       reason:
-        | 'connecting'
-        | 'offline'
-        | 'stale'
-        | 'not-ready'
-        | 'invalid-response'
+        'connecting' | 'offline' | 'stale' | 'not-ready' | 'invalid-response'
     }
   | {
       kind: 'summary'
@@ -76,9 +72,8 @@ export async function collectIntoQueue(input: {
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
   const { config, queue } = input
-  const { createMoonrakerSubscription } = await import(
-    '../moonraker/subscription.ts'
-  )
+  const { createMoonrakerSubscription } =
+    await import('../moonraker/subscription.ts')
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   const subscriptions: Array<{ done: Promise<void> }> = []

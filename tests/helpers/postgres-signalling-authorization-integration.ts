@@ -856,8 +856,7 @@ export async function testPostgresSignallingAuthorization(
         })
       void holding.catch(() => {})
       let reading:
-        | ReturnType<PostgresSignallingAuthorization['authorize']>
-        | undefined
+        ReturnType<PostgresSignallingAuthorization['authorize']> | undefined
       let writing: ReturnType<PostgresPrinterOwnership['register']> | undefined
       try {
         await gated

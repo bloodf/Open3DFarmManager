@@ -28,12 +28,8 @@ const completion:
     }
   | undefined = process.argv[6] ? JSON.parse(process.argv[6]) : undefined
 let completedBy:
-  | 'observation'
-  | 'snapshot'
-  | 'unavailable'
-  | 'deadline'
-  | 'duration'
-  | null = null
+  'observation' | 'snapshot' | 'unavailable' | 'deadline' | 'duration' | null =
+  null
 let snapshots = 0
 let unavailable = 0
 const timer = setTimeout(

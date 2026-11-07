@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import {
   verifyFourTools,
   verifyWebcam,
@@ -70,4 +70,33 @@ test('oversized simulator responses are cancelled while streaming', async () => 
   )
   await expect(readBytes(response, 150)).rejects.toThrow('size limit')
   expect(cancelled).toBe(true)
+})
+
+test('camera snapshot byte cap cancels a chunked JPEG and releases its reader', async () => {
+  let cancelled = false
+  const prefix = new Uint8Array(100_000)
+  prefix.set([255, 216])
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(prefix)
+      controller.enqueue(new Uint8Array([255, 217]))
+    },
+    cancel() {
+      cancelled = true
+    },
+  })
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(
+      new Response(body, { headers: { 'Content-Type': 'image/jpeg' } }),
+    )
+  try {
+    await expect(verifyCamera('http://127.0.0.1:8080')).rejects.toThrow(
+      'Simulator response exceeds size limit',
+    )
+    expect(cancelled).toBe(true)
+    expect(body.locked).toBe(false)
+  } finally {
+    fetchMock.mockRestore()
+  }
 })

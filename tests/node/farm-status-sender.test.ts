@@ -391,3 +391,59 @@ test('sender never opens a provider for v1, replaced assignment or changed diges
     }
   }
 })
+
+test('terminal owner during digest await never opens a snapshot provider', async () => {
+  const f = await fixture()
+  const subtle = crypto.subtle
+  const descriptor = Object.getOwnPropertyDescriptor(subtle, 'digest')
+  const originalDigest = subtle.digest
+  let gateActive = true
+  let enteredResolve: () => void = () => {}
+  const entered = new Promise<void>((resolve) => {
+    enteredResolve = resolve
+  })
+  let releaseGate: () => void = () => {}
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve
+  })
+  let settledResolve: () => void = () => {}
+  const settled = new Promise<void>((resolve) => {
+    settledResolve = resolve
+  })
+
+  Object.defineProperty(subtle, 'digest', {
+    configurable: true,
+    writable: true,
+    value: async function (...args: Parameters<typeof originalDigest>) {
+      const digestPromise = originalDigest.apply(subtle, args)
+      if (gateActive) {
+        gateActive = false
+        enteredResolve()
+        await gate
+        const result = await digestPromise
+        setImmediate(settledResolve)
+        return result
+      }
+      return digestPromise
+    },
+  })
+
+  try {
+    const admitting = f.admit()
+    await entered
+    f.terminate()
+    releaseGate()
+    await settled
+    await admitting
+
+    assert.equal(f.provider(), undefined)
+    assert.equal(f.providerClosed(), 0)
+    assert.equal(f.closed(), 1)
+    assert.deepEqual(f.sent, [])
+  } finally {
+    releaseGate()
+    if (descriptor) Object.defineProperty(subtle, 'digest', descriptor)
+    else Reflect.deleteProperty(subtle, 'digest')
+    f.sender.close()
+  }
+})

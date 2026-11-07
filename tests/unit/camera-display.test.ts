@@ -60,3 +60,18 @@ test('replacement/unmount cancels the old deadline and ignores late events', () 
   expect(next.detach).toHaveBeenCalledTimes(1)
   expect(vi.getTimerCount()).toBe(0)
 })
+
+test('reentrant close during failure detaches once and publishes closed once', () => {
+  vi.useFakeTimers()
+  const states: CameraDisplayState[] = []
+  const detach = vi.fn(() => session.close())
+  const session = createCameraDisplaySession({
+    changed: (state) => states.push(state),
+    detach,
+  })
+  session.fail()
+  session.ready()
+  expect(states).toEqual(['loading', 'closed'])
+  expect(detach).toHaveBeenCalledTimes(1)
+  expect(vi.getTimerCount()).toBe(0)
+})

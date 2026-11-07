@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import {
   createCameraDisplaySession,
   type CameraDisplayState,
@@ -30,19 +30,21 @@ watch(
     const fail = () => session.fail()
     element.addEventListener('playing', ready)
     element.addEventListener('error', fail)
-    element.srcObject = stream
-    void element.play().catch(fail)
     onCleanup(() => {
       element.removeEventListener('playing', ready)
       element.removeEventListener('error', fail)
       session.close()
     })
+    element.srcObject = stream
+    try {
+      void element.play().catch(fail)
+    } catch {
+      fail()
+    }
   },
-  { flush: 'post' },
+  // Revocation must detach before a queued playing event can publish ready.
+  { flush: 'sync' },
 )
-onBeforeUnmount(() => {
-  video.value?.pause()
-})
 </script>
 
 <template>

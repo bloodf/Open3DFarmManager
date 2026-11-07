@@ -19,7 +19,7 @@ export function createCameraDisplaySession(input: {
     clearTimeout(timer)
     state = 'error'
     detach()
-    input.changed(state)
+    if (state === 'error') input.changed(state)
   }
   const timer = setTimeout(fail, CAMERA_LOADING_TIMEOUT_MS)
   input.changed(state)

@@ -1,21 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:recommended"],
   "packageRules": [
     {
       "description": "Keep the qualified Node.js runtime and types on major 24 while allowing compatible updates.",
-      "matchManagers": [
-        "npm",
-        "nvm",
-        "dockerfile",
-        "github-actions"
-      ],
-      "matchDepNames": [
-        "node",
-        "@types/node"
-      ],
+      "matchManagers": ["npm", "nvm", "dockerfile", "github-actions"],
+      "matchDepNames": ["node", "@types/node"],
       "allowedVersions": "<25"
     },
     {

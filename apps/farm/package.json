@@ -14,12 +14,13 @@
     "@open3dfarmmanager/shared": "workspace:*",
     "jose": "6.2.15",
     "nuxt": "4.6.4",
-    "postgres": "3.4.9",
+    "postgres": "4.1.0",
     "vue": "3.5.45",
     "vue-router": "5.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "typescript": "5.9.3",
     "vue-tsc": "3.3.14"
   }
 }

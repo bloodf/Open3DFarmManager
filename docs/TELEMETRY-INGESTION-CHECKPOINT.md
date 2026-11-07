@@ -1,6 +1,6 @@
 # Internal telemetry ingestion checkpoint
 
-The E3.2 component flow now includes an internal server service in `apps/farm/server/services/telemetry.ts`. No HTTP route, account or credential is created. The service requires caller-provided agent context; its shape validation does not authenticate that context. Future middleware must establish current agent identity, farm ownership and printer membership independently of the body.
+The E3.2 component flow includes an internal library service in `apps/farm/server/services/telemetry.ts`. The maintained HTTP ingestion path does not call `ingestTelemetry` or `PostgresTelemetryStore`. The service requires caller-provided agent context; its shape validation does not authenticate that context. Future middleware must establish current agent identity, farm ownership and printer membership independently of the body.
 
 The shared strict batch schema accepts only printer-state events, at most 100 records. The bounded JSON reader rejects bodies above 64 KiB, excessive nesting, duplicate keys and ambiguous input before schema validation. Duplicate event IDs within a batch, unknown fields and command payloads are rejected. The service checks all printer keys against the supplied authorization snapshot before invoking storage. Farm and agent identity are taken only from that context.
 
@@ -22,6 +22,6 @@ The store in `tests/helpers/memory-telemetry-store.ts` is a test double. It stag
 
 ## Remaining work
 
-A dedicated database adapter and migrations, unique constraints, transaction/race/restart tests, bounded retention and a latest-state projection remain to be implemented. Real endpoints need authenticated agent middleware, current authorization, body-stream limits before buffering, timeouts, rate limiting and response limits. The service accepts a string already in memory; it cannot enforce network stream limits itself.
+The maintained routes `/api/connector/telemetry/challenge` and `/api/connector/telemetry` use `PostgresConnectorCredentialAcceptance` for proof validation and transactional ingestion. Migrations define the telemetry table and unique `(farm_id, agent_id, event_id)` key. The Connector agent schedules its authenticated drain. The library service above accepts a string already in memory; it cannot enforce network stream limits itself.
 
-No module is wired into a public endpoint or scheduled Connector loop. There is no server command forwarding, real device access, new dependency, container execution or change to offline authorization policy. Integration also required replacing a DOM-only type assertion in shared signing code with an equivalent structural type so Nitro can typecheck it; signature behavior is unchanged.
+The routes return 503 by default until runtime bootstrap is configured. The required LOWPRIV database role remains a deployment requirement. Authentication, TLS and deployed runtime acceptance are UNKNOWN. Bounded retention and a latest-state projection remain future work. There is no server command forwarding, real device access, new dependency, container execution or change to offline authorization policy. Integration also required replacing a DOM-only type assertion in shared signing code with an equivalent structural type so Nitro can typecheck it; signature behavior is unchanged.

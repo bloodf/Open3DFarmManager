@@ -359,11 +359,11 @@ Reviewed metadata and entry points on 2026-11-04. No skill installer, hook or th
 
 AGPL, BSL and FSL application sources are not copied into this MIT project. Future reuse requires inspecting the exact source revision and retaining all applicable notices.
 
-## Postgres.js 3.4.9
+## Postgres.js 4.1.0
 
-The application and isolated database harnesses use `postgres` version `3.4.9`, authored by Rasmus Porsager, under the **Unlicense**. It is not MIT-licensed; its permissive terms allow its use alongside this MIT project. The exact [registry package](https://registry.npmjs.org/postgres/3.4.9) and [upstream manifest](https://github.com/porsager/postgres/blob/v3.4.9/package.json) declare no runtime dependencies.
+The application and isolated database harnesses use `postgres` version `4.1.0`, authored by Rasmus Porsager, under the **Unlicense**. Its permissive terms allow use alongside this MIT project. The exact [registry package](https://registry.npmjs.org/postgres/4.1.0) and [upstream manifest](https://github.com/porsager/postgres/blob/v4.1.0/package.json) declare no runtime dependencies.
 
-On 2026-11-04 the registry tarball was fetched without executing package scripts and its SHA-512 verified against the registry integrity value recorded in `bun.lock`. The tarball omits the standalone license file. The complete [license at the pinned upstream tag](https://github.com/porsager/postgres/blob/v3.4.9/UNLICENSE) is retained below; preserve it when redistributing the dependency. This review does not claim an exhaustive advisory or source audit.
+On 2026-11-07 the registry tarball was fetched without executing package scripts and its SHA-512 verified against the registry integrity value recorded in `pnpm-lock.yaml`. The complete [license at the pinned upstream tag](https://github.com/porsager/postgres/blob/v4.1.0/UNLICENSE) is retained below; preserve it when redistributing the dependency. This review does not claim an exhaustive advisory or source audit.
 
 ```text
 This is free and unencumbered software released into the public domain.
@@ -1318,3 +1318,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## TypeScript compiler versions
+
+The root CLI uses `typescript@7.0.2`; `apps/farm` pins `typescript@5.9.3` for
+`vue-tsc@3.3.14` and Volar, which require the legacy compiler API and
+`typescript/lib/tsc`. TypeScript 7 removes that legacy API. See the
+[upstream compatibility guidance](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0).
+This split preserves the existing strict compiler settings.
+
+Both packages declare Apache-2.0. Exact license and third-party notice files
+from their versioned npm tarballs are retained under
+[`notices/typescript/7.0.2`](notices/typescript/7.0.2) and
+[`notices/typescript/5.9.3`](notices/typescript/5.9.3), including the vendored
+JSON-RPC license shipped in 7.0.2. Preserve these files when redistributing
+these compiler packages. These are development dependencies; this notice does
+not establish the contents of a runtime artifact.

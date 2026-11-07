@@ -16,7 +16,7 @@ jobs:
           bun-version: '1.4.2'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.20.0'
+          node-version: '24.22.2'
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:all
       - run: node packages/connector/dist/cli.js --version

@@ -68,6 +68,12 @@ version. Arbitrary `python`, Python 2, relative paths and other virtualenv
 paths remain rejected. Runtime CWD, MCU state, readiness and identification
 remain unknown.
 
+2026-11-07 isolated alias evidence: the pinned image base metadata says Python
+3.12.15, while the alias resolved to `/usr/bin/python3.11` and reported Python
+3.11.2. Source build tags do not attest the virtualenv minor version. The
+prerequisite is the target and Python major 3, not minor 3.12. This proves only
+the interpreter major, not observation, MCU state or readiness.
+
 On Cortex, with the parent's authorization and resource ledger, perform these
 cheap checks before any Docker or simulator attempt:
 

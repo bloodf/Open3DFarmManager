@@ -25,7 +25,7 @@ test(
     concurrency: false,
   },
   async () => {
-    assert.equal(process.version, 'v24.20.0', 'Pinned Node24 runtime required')
+    assert.equal(process.version, 'v24.22.2', 'Pinned Node24 runtime required')
     const { runPauseControlRtc } =
       await import('../helpers/pause-control-rtc.ts')
     // A rejected case stops this sequence; never automatically retry or continue.

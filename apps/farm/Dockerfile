@@ -11,7 +11,7 @@ RUN bun install --frozen-lockfile --ignore-scripts
 COPY . .
 RUN bun run --cwd apps/farm build
 
-FROM node:24.20.0-alpine AS runtime
+FROM node:24.22.2-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NITRO_HOST=0.0.0.0 NITRO_PORT=3000
 COPY --from=build --chown=10001:10001 /app/apps/farm/.output ./

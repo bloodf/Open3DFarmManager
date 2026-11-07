@@ -29,3 +29,22 @@ Private files are protected with OS ownership and permissions, not encryption. W
 ## Verification
 
 The source and built CLI are tested against disposable temporary directories: initialization, repeat invocation, read-only inspection, unchanged private bytes, argument rejection, corrupt-file preservation and use of the persisted identity in a synthetic server challenge. No production identity, account or real device is used.
+
+### Página de estado local
+
+A página fica desativada por padrão. Para habilitá-la no processo `run`, acrescente
+`--status-port 8080` aos argumentos existentes. Abra `http://127.0.0.1:8080/`.
+`GET /status` fornece os mesmos dados em JSON para consulta por CLI, por exemplo
+`curl --fail http://127.0.0.1:8080/status`.
+
+A porta aceita inteiros de 1 a 65535. O listener usa somente o endereço literal
+127.0.0.1, rejeita Host/Origin diferentes e métodos de mutação. Não exponha a porta
+por proxy ou túnel. A página não autentica usuários locais do sistema operacional.
+Ela mostra a profundidade real da fila, totais de envio/tentativas e expiração da
+credencial. Não contém identidade, credenciais, caminhos, endpoints nem dados de
+impressoras. Atualize a página para consultar novamente. Não há controle de
+impressoras nem fallback de estado ao vivo da fazenda por HTTP.
+
+O listener acompanha o `run`: falha ao ocupar a porta encerra o processo pelo fluxo
+normal de limpeza; SIGINT/SIGTERM e falhas do agente fecham conexões e liberam o
+listener antes de fechar a fila. `collect` não aceita a opção.

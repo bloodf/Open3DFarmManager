@@ -584,10 +584,7 @@ export class PostgresConnectorCredentialAcceptance {
 class AcceptanceDeadline extends Error {
   readonly observedAt: number
   readonly previousAt: number
-  constructor(
-    observedAt: number,
-    previousAt: number,
-  ) {
+  constructor(observedAt: number, previousAt: number) {
     super('Credential acceptance deadline passed')
     this.observedAt = observedAt
     this.previousAt = previousAt

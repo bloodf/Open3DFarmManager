@@ -25,10 +25,7 @@ export type ConnectorRevocationDecision =
 class RevocationAuthorizationExpired extends Error {
   readonly observedAt: number
   readonly sessionExpired: boolean
-  constructor(
-    observedAt: number,
-    sessionExpired: boolean,
-  ) {
+  constructor(observedAt: number, sessionExpired: boolean) {
     super('Revocation authorization is no longer current')
     this.observedAt = observedAt
     this.sessionExpired = sessionExpired
@@ -50,10 +47,7 @@ interface Tombstone {
 export class PostgresConnectorRevocation {
   private readonly sql: Sql
   private readonly clock: () => number
-  constructor(
-    sql: Sql,
-    clock: () => number = Date.now,
-  ) {
+  constructor(sql: Sql, clock: () => number = Date.now) {
     this.sql = sql
     this.clock = clock
   }

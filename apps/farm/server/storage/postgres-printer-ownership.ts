@@ -38,10 +38,7 @@ export type PrinterOwnershipDecision =
 class AuthorizationExpired extends Error {
   readonly observedAt: number
   readonly expired: boolean
-  constructor(
-    observedAt: number,
-    expired: boolean,
-  ) {
+  constructor(observedAt: number, expired: boolean) {
     super('Authorization expired')
     this.observedAt = observedAt
     this.expired = expired
@@ -52,10 +49,7 @@ export class PostgresPrinterOwnership {
   private inflight = 0
   private readonly sql: Sql
   private readonly clock: () => number
-  constructor(
-    sql: Sql,
-    clock: () => number = Date.now,
-  ) {
+  constructor(sql: Sql, clock: () => number = Date.now) {
     this.sql = sql
     this.clock = clock
   }

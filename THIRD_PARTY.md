@@ -18,6 +18,10 @@ The application and test utilities in this repository are original MIT code. No 
 
 Exact package versions and integrity values are in `pnpm-lock.yaml`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
 
+## Playwright 1.65.0
+
+The [upstream package metadata](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-test/package.json) identifies `@playwright/test` 1.65.0 as Apache-2.0 and requires Node.js 20 or later. Its [browser manifest](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-core/browsers.json) pins Chromium revision 1254, Firefox 1572 and WebKit 2388 (macOS 14 uses WebKit 2251). Browser installation and execution have not been verified by this metadata review.
+
 ## Pinned Spoolman provenance
 
 Read-only registry and source review on 2026-11-04 verified the Compose reference `ghcr.io/donkie/spoolman@sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa`. The GHCR manifest and configuration blob were fetched with anonymous pull access and their SHA-256 hashes checked. No image layers were downloaded or upstream code executed.
@@ -802,7 +806,9 @@ SOFTWARE.
 
 ## Experimental Connector WebRTC dependency
 
-The experimental Connector transport pins `node-datachannel@0.33.5` (MPL-2.0) with `detect-libc@2.1.2` (Apache-2.0). Platform-specific native packages are optional dependencies. The local macOS ARM64 package `@node-datachannel/darwin-arm64@0.33.5` contains only its manifest and native binary. Unsupported targets or unavailable prebuilds may fail to install or load; no source build has been validated. The complete notices included with this local review are in `packages/connector/notices/node-datachannel/`. The Connector CLI does not currently include this adapter and does not package these notices or native sources.
+The experimental Connector transport now pins `node-datachannel@0.33.6` (MPL-2.0). Its [registry-declared source revision](https://github.com/murat-dogan/node-datachannel/tree/6f5c0a2494c20ac9f1250d937856697843bde823) selects libdatachannel tag `v0.24.6`, which resolves to [commit `6b1e2e620f1e37f0eafeee702eaea0043cb305fd`](https://github.com/paullouisageneau/libdatachannel/tree/6b1e2e620f1e37f0eafeee702eaea0043cb305fd). The historical notices and binary observations below were reviewed for 0.33.5, not 0.33.6. The 0.33.6 binary, its embedded components and applicable notices have not been audited; audit them before redistribution.
+
+The following historical local review examined `node-datachannel@0.33.5` (MPL-2.0) with `detect-libc@2.1.2` (Apache-2.0). Platform-specific native packages are optional dependencies. The local macOS ARM64 package `@node-datachannel/darwin-arm64@0.33.5` contains only its manifest and native binary. Unsupported targets or unavailable prebuilds may fail to install or load; no source build has been validated. The complete notices included with this local review are in `packages/connector/notices/node-datachannel/`. The Connector CLI does not currently include this adapter and does not package these notices or native sources.
 
 The wrapper's [registry-declared source revision](https://github.com/murat-dogan/node-datachannel/tree/525cac9d70e79047497d07b1e633f0271127c780) fetches libdatachannel tag `v0.24.5`, which resolves to [commit `443f6934d9007eb7076ab7825ba330f355fcbead`](https://github.com/paullouisageneau/libdatachannel/tree/443f6934d9007eb7076ab7825ba330f355fcbead). That revision pins libjuice `3c40a3545b6b1b62c7adee7f8f2bd58aa290afd6`, usrsctp `fec583d54493f879d2ae44a743423bf8a04371ab`, plog `94899e0b926ac1b0f4750bfbd495167b4a6ae9ef`, libsrtp `24b3bf8f19b6f5ab4cd2bcceb4f4064efca86fd5` and nlohmann/json `55f93686c01528224f448c19128836e7df245f72`. Their upstream license texts are retained for reference. Actual binary inclusion and exact versions of all components are not verified.
 

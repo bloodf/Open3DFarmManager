@@ -11,6 +11,6 @@
     "test:session": "vitest run ./session.test.ts --config vitest.config.ts"
   },
   "devDependencies": {
-    "node-datachannel": "0.33.5"
+    "node-datachannel": "0.33.6"
   }
 }

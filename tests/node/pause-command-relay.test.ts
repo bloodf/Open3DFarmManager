@@ -23,7 +23,7 @@ import {
   createPrinterBindingRegistry,
   readPrinterBinding,
 } from '../../packages/connector/src/control/printer-binding.ts'
-import type { PauseDriver } from '../../packages/connector/src/control/pause-dispatcher.ts'
+import type { PreparedPauseDriver } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import {
   encodeCommandV2,
   decodeCommandV2,
@@ -149,7 +149,25 @@ async function relayFixture(
   const enteredRpc = new Promise<void>((resolve) => {
     entered = resolve
   })
-  const driver: PauseDriver = {
+  const driver: PreparedPauseDriver = {
+    prepare: async ({ binding }) => {
+      const mapping = readPrinterBinding(binding)
+      const now = performance.now()
+      if (mapping)
+        relay.observe(binding, {
+          assignmentId: mapping.assignment_id,
+          printerKey: mapping.printer_key,
+          connectionGeneration: 1,
+          sequence: 1,
+          ready: true,
+          printState: 'printing',
+          readyObservedMono: now,
+          printStateObservedMono: now,
+          receivedMono: now,
+        })
+      return { connectionGeneration: 1 }
+    },
+    closeAttempt: async () => {},
     async pauseOnce({ beforeSend }) {
       if (!beforeSend()) return { acknowledged: false }
       entered()
@@ -389,6 +407,7 @@ async function relayFixture(
     makePeer,
     issuerPublicKey: issuer.publicKey,
     enteredRpc,
+    releaseHold,
   }
 }
 
@@ -546,6 +565,8 @@ test('a peer without a local mapping is refused and never receives a nonce', asy
     clock: { wallNow: Date.now, monotonicNow: () => Date.now() },
     journal: f.journal,
     driver: {
+      prepare: async () => ({ connectionGeneration: 1 }),
+      closeAttempt: async () => {},
       pauseOnce: async () => ({ acknowledged: false }),
       waitForPaused: async () => null,
     },
@@ -719,7 +740,18 @@ test('aborting an in-flight dispatch settles as unknown and never sends a late r
     'outcome-unknown',
   )
   f.relay.close()
+  let settled = false
+  void f.relay.settled.then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  f.releaseHold()
   await f.relay.settled
+  assert.equal(
+    readCommandOutcome(f.journal, signed.cmd_id)?.status,
+    'outcome-unknown',
+  )
 })
 
 test('the peer map is bounded and a peer beyond the cap is refused', async (t) => {
@@ -789,6 +821,7 @@ test('the concurrent command bound refuses a command beyond the cap', async (t) 
     outcome: 'rejected',
   })
   f.relay.close()
+  f.releaseHold()
   await f.relay.settled
 })
 
@@ -866,7 +899,25 @@ async function transportFixture(t: test.TestContext) {
   cleanup.push(() => rmSync(directory, { recursive: true, force: true }))
   const journal = openCommandJournal({ directory, clock: Date.now })
   cleanup.push(() => closeCommandJournal(journal))
-  const driver: PauseDriver = {
+  const driver: PreparedPauseDriver = {
+    prepare: async ({ binding }) => {
+      const mapping = readPrinterBinding(binding)
+      const now = performance.now()
+      if (mapping)
+        relay.observe(binding, {
+          assignmentId: mapping.assignment_id,
+          printerKey: mapping.printer_key,
+          connectionGeneration: 1,
+          sequence: 1,
+          ready: true,
+          printState: 'printing',
+          readyObservedMono: now,
+          printStateObservedMono: now,
+          receivedMono: now,
+        })
+      return { connectionGeneration: 1 }
+    },
+    closeAttempt: async () => {},
     async pauseOnce({ beforeSend }) {
       if (!beforeSend()) return { acknowledged: false }
       return { acknowledged: true }

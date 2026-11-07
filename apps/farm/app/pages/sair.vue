@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { completeAuth } from '../utils/auth-invalidation.ts'
+
 const pending = ref(false)
 const errorMessage = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
@@ -8,12 +10,14 @@ async function logout() {
   pending.value = true
   errorMessage.value = ''
   try {
-    await $fetch('/api/auth/logout', {
-      method: 'POST',
-      body: {},
-      retry: 0,
-      timeout: 15_000,
-    })
+    await completeAuth(() =>
+      $fetch('/api/auth/logout', {
+        method: 'POST',
+        body: {},
+        retry: 0,
+        timeout: 15_000,
+      }),
+    )
     await navigateTo('/')
   } catch {
     errorMessage.value =

@@ -1,4 +1,8 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
+import {
+  completeAuth,
+  listenForAuthInvalidation,
+} from '../../apps/farm/app/utils/auth-invalidation.ts'
 import {
   createFarmView,
   FarmAssignmentPage,
@@ -1245,4 +1249,143 @@ test('refresh rebuilds full scope and cannot replay the prior complete tuple cac
     row.printerKey,
   ])
   h.view.dispose()
+})
+
+test('auth success notifies the same window and another tab before navigation; failure stays silent', async () => {
+  const channels = new Set<FakeChannel>()
+  const messages: unknown[] = []
+  class FakeChannel {
+    onmessage: ((event: { data: unknown }) => void) | null = null
+    constructor(readonly name: string) {
+      channels.add(this)
+    }
+    postMessage(data: unknown) {
+      messages.push(data)
+      for (const channel of channels)
+        if (channel !== this && channel.name === this.name)
+          channel.onmessage?.({ data })
+    }
+    close() {
+      channels.delete(this)
+    }
+  }
+  const localWindow = new EventTarget()
+  const remoteWindow = new EventTarget()
+  vi.stubGlobal('BroadcastChannel', FakeChannel)
+  vi.stubGlobal('window', remoteWindow)
+  const remote = vi.fn()
+  const stopRemote = listenForAuthInvalidation(remote)
+  vi.stubGlobal('window', localWindow)
+  const local = vi.fn()
+  const stopLocal = listenForAuthInvalidation(local)
+  try {
+    const request = deferred<unknown>()
+    const navigation = vi.fn()
+    const pending = completeAuth(() => request.promise).then(() => {
+      expect(local).toHaveBeenCalled()
+      expect(remote).toHaveBeenCalledOnce()
+      navigation()
+    })
+    expect(local).not.toHaveBeenCalled()
+    expect(remote).not.toHaveBeenCalled()
+    expect(navigation).not.toHaveBeenCalled()
+    request.resolve({ ok: true, accountId: 'private-account' })
+    await pending
+    expect(navigation).toHaveBeenCalledOnce()
+    expect(messages).toEqual([null])
+    const count = local.mock.calls.length
+    await expect(
+      completeAuth(async () => {
+        throw new Error('auth failed')
+      }),
+    ).rejects.toThrow('auth failed')
+    expect(local).toHaveBeenCalledTimes(count)
+    expect(remote).toHaveBeenCalledOnce()
+    localWindow.dispatchEvent(new Event('open3dfarmmanager:auth-invalidated'))
+    expect(local).toHaveBeenCalledTimes(count + 1)
+    stopLocal()
+    vi.stubGlobal('window', remoteWindow)
+    stopRemote()
+    expect(channels.size).toBe(0)
+    localWindow.dispatchEvent(new Event('open3dfarmmanager:auth-invalidated'))
+    remoteWindow.dispatchEvent(new Event('open3dfarmmanager:auth-invalidated'))
+    expect(local).toHaveBeenCalledTimes(count + 1)
+    expect(remote).toHaveBeenCalledOnce()
+  } finally {
+    vi.stubGlobal('window', localWindow)
+    stopLocal()
+    vi.stubGlobal('window', remoteWindow)
+    stopRemote()
+    vi.unstubAllGlobals()
+  }
+})
+
+test.each(['unavailable', 'constructor', 'post', 'close'] as const)(
+  'auth keeps local invalidation when BroadcastChannel fails at %s',
+  async (failure) => {
+    const closed = vi.fn()
+    class BrokenChannel {
+      onmessage = null
+      constructor() {
+        if (failure === 'constructor') throw new Error('unavailable')
+      }
+      postMessage() {
+        if (failure === 'post') throw new Error('cannot post')
+      }
+      close() {
+        closed()
+        if (failure === 'close') throw new Error('cannot close')
+      }
+    }
+    vi.stubGlobal('window', new EventTarget())
+    vi.stubGlobal(
+      'BroadcastChannel',
+      failure === 'unavailable' ? undefined : BrokenChannel,
+    )
+    const invalidate = vi.fn()
+    const stop = listenForAuthInvalidation(invalidate)
+    try {
+      await completeAuth(async () => ({}))
+      expect(invalidate).toHaveBeenCalledOnce()
+      stop()
+      stop()
+      await completeAuth(async () => ({}))
+      expect(invalidate).toHaveBeenCalledOnce()
+      if (failure === 'post' || failure === 'close')
+        expect(closed).toHaveBeenCalledTimes(3)
+    } finally {
+      stop()
+      vi.unstubAllGlobals()
+    }
+  },
+)
+
+test('auth invalidation aborts stale discovery while hidden and focus can rediscover', async () => {
+  vi.stubGlobal('window', new EventTarget())
+  vi.stubGlobal('BroadcastChannel', undefined)
+  const h = setup()
+  const stale = deferred<unknown>()
+  let hidden = true
+  h.hooks.read = () => stale.promise
+  const loading = h.view.discover()
+  const stop = listenForAuthInvalidation(() => {
+    h.view.invalidate()
+    if (!hidden) void h.view.discover()
+  })
+  try {
+    await completeAuth(async () => ({}))
+    expect(h.requests[0]?.signal.aborted).toBe(true)
+    expect(h.requests).toHaveLength(1)
+    stale.resolve({ accountId: 'stale-account' })
+    await loading
+    expect(h.result.state.kind).toBe('loading')
+    hidden = false
+    h.hooks.read = null
+    await h.view.discover()
+    expect(h.ready().accountId).toBe('account-one')
+  } finally {
+    stop()
+    h.view.dispose()
+    vi.unstubAllGlobals()
+  }
 })

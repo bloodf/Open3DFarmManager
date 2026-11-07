@@ -63,6 +63,13 @@ export interface PauseDriver {
     signal: AbortSignal
   }): Promise<ControlObservation | null>
 }
+export interface PreparedPauseDriver extends PauseDriver {
+  prepare(input: {
+    binding: PrinterBinding
+    signal: AbortSignal
+  }): Promise<{ connectionGeneration: number }>
+  closeAttempt(binding: PrinterBinding): Promise<void>
+}
 export type PauseDispatchReason =
   | 'invalid-command'
   | 'invalid-authority'
@@ -96,7 +103,7 @@ export function createPauseDispatcher(config: {
   authority: Omit<Parameters<typeof createPauseCapabilityVerifier>[0], 'clock'>
   clock: PauseAuthorityClock
   journal: CommandJournalHandle
-  driver: PauseDriver
+  driver: PreparedPauseDriver
   resultTimeoutMs?: number
 }) {
   const verifier = createPauseCapabilityVerifier({
@@ -114,6 +121,8 @@ export function createPauseDispatcher(config: {
     monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const journal = config.journal
   const driver = Object.freeze({
+    prepare: config.driver.prepare.bind(config.driver),
+    closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
     waitForPaused: config.driver.waitForPaused.bind(config.driver),
   })
@@ -125,6 +134,14 @@ export function createPauseDispatcher(config: {
   const observationGenerations = new WeakMap<PrinterBinding, number>()
   const slots = new Set<string>()
   const stopAttempts = new Set<() => void>()
+  const pending = new Set<Promise<void>>()
+  let resolveSettled: () => void = () => {}
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve
+  })
+  function maybeSettled() {
+    if (closed && pending.size === 0) resolveSettled()
+  }
   function sample(): Sample | null {
     if (clockBroken) return null
     try {
@@ -241,17 +258,30 @@ export function createPauseDispatcher(config: {
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
       const mapping = candidateMapping
-      const observationVersion = observationVersions.get(printerBinding)
+      let observationVersion: object | undefined
+      let generationInstalled = false
       if (slots.size >= 8 || slots.has(mapping.assignment_id))
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
       slots.add(mapping.assignment_id) // No wait list. Retained until underlying asynchronous work actually settles.
+      let settleWork: () => void = () => {}
+      const work = new Promise<void>((resolve) => {
+        settleWork = resolve
+      })
+      pending.add(work)
+      void work.then(() => {
+        pending.delete(work)
+        maybeSettled()
+      })
       const start = sample()
       if (!start) {
         slots.delete(mapping.assignment_id)
+        settleWork()
         return Promise.resolve({ kind: 'rejected', reason: 'expired' })
       }
       const controller = new AbortController()
       let receipt: CommandClaimHandle | undefined
+      let claiming = false
+      let claimInterrupted: 'closed' | 'aborted' | 'deadline' | undefined
       let terminal: PauseDispatchResult | undefined
       let boundaryClosed = false,
         guardCalled = false,
@@ -270,12 +300,14 @@ export function createPauseDispatcher(config: {
       const result = new Promise<PauseDispatchResult>((resolve) => {
         resolveResult = resolve
       })
+      let finishDetails:
+        | { journalReason: CommandJournalReason; observedWall?: number }
+        | undefined
       let cleaned = false
       function cleanup() {
         if (cleaned) return
         cleaned = true
         controller.abort()
-        clearTimeout(timer)
         stopAttempts.delete(onClose)
         signal?.removeEventListener('abort', onAbort)
       }
@@ -301,43 +333,33 @@ export function createPauseDispatcher(config: {
             }
           : { kind: 'rejected', reason }
         cleanup()
-        if (receipt) {
-          const outcome =
-            kind === 'applied'
-              ? 'applied'
-              : kind === 'outcome-unknown'
-                ? 'outcome-unknown'
-                : 'not-sent'
-          let persisted = false
-          try {
-            persisted =
-              observedWall === undefined
-                ? finishCommand(journal, receipt, outcome, journalReason)
-                : finishCommandAt(
-                    journal,
-                    receipt,
-                    outcome,
-                    journalReason,
-                    observedWall,
-                  )
-          } catch {
-            /* conservative unknown */
-          }
-          if (!persisted) {
-            kind = 'outcome-unknown'
-            reason = 'storage'
-          }
-          terminal = {
-            kind: kind === 'rejected' ? 'not-sent' : kind,
-            cmdId: command.cmd_id,
-            reason,
-          }
-        } else terminal = { kind: 'rejected', reason }
-        resolveResult(terminal)
+        finishDetails =
+          observedWall === undefined
+            ? { journalReason }
+            : { journalReason, observedWall }
         return terminal
       }
       function interrupted(reason: 'closed' | 'aborted' | 'deadline') {
-        return finalize(
+        if (claiming) {
+          claimInterrupted ??= reason
+          controller.abort()
+          return
+        }
+        if (terminal) {
+          if (receipt && permitted && terminal.kind === 'applied') {
+            terminal = {
+              kind: 'outcome-unknown',
+              cmdId: command.cmd_id,
+              reason,
+            }
+            finishDetails = {
+              journalReason: reason === 'closed' ? 'dispatcher-closed' : reason,
+            }
+          }
+          resolveResult(terminal)
+          return terminal
+        }
+        const interruptedResult = finalize(
           permitted || contractBroken
             ? 'outcome-unknown'
             : receipt
@@ -346,6 +368,8 @@ export function createPauseDispatcher(config: {
           reason,
           reason === 'closed' ? 'dispatcher-closed' : reason,
         )
+        resolveResult(interruptedResult)
+        return interruptedResult
       }
       function onClose() {
         interrupted('closed')
@@ -355,7 +379,10 @@ export function createPauseDispatcher(config: {
       }
       function liveAt(now: Sample | null): PauseDispatchReason | null {
         if (boundaryClosed || closed) return 'closed'
-        if (observationVersions.get(printerBinding) !== observationVersion)
+        if (
+          generationInstalled &&
+          observationVersions.get(printerBinding) !== observationVersion
+        )
           return 'state'
         if (controller.signal.aborted || signal?.aborted) return 'aborted'
         if (
@@ -474,7 +501,11 @@ export function createPauseDispatcher(config: {
       const timerSample = sample()
       timer = setTimeout(
         () => interrupted('deadline'),
-        Math.max(0, resultDeadline - (timerSample?.mono ?? resultDeadline)),
+        Math.max(
+          0,
+          Math.min(resultDeadline, commandDeadline) -
+            (timerSample?.mono ?? resultDeadline),
+        ),
       )
       // An unresolved crypto/driver promise keeps its slot even after the bounded result is returned.
       void (async () => {
@@ -484,12 +515,6 @@ export function createPauseDispatcher(config: {
             finalize('rejected', denial ?? 'invalid-authority', 'guard-denied')
             return
           }
-          const prepared = eligible()
-          if (!prepared) {
-            finalize('rejected', 'state', 'guard-denied')
-            return
-          }
-          connectionGeneration = prepared.connectionGeneration
           if (
             !(await verifyCommandV2(command, capability.browser_public_key))
           ) {
@@ -502,14 +527,9 @@ export function createPauseDispatcher(config: {
             finalize('rejected', denial, 'guard-denied')
             return
           }
-          const current = eligible()
-          if (!current) {
-            finalize('rejected', 'state', 'guard-denied')
-            return
-          }
-          connectionGeneration = current.connectionGeneration
           let claim: ReturnType<typeof claimCommand>
           try {
+            claiming = true
             claim = claimCommand(journal, {
               command,
               printerKey: mapping.printer_key,
@@ -518,10 +538,17 @@ export function createPauseDispatcher(config: {
                 .digest('hex'),
             })
           } catch {
-            finalize('rejected', 'storage', 'storage')
+            claiming = false
+            if (claimInterrupted) interrupted(claimInterrupted)
+            else finalize('rejected', 'storage', 'storage')
             return
           }
+          claiming = false
           if (!claim.ok) {
+            if (claimInterrupted) {
+              interrupted(claimInterrupted)
+              return
+            }
             finalize(
               'rejected',
               claim.reason === 'replay'
@@ -534,9 +561,36 @@ export function createPauseDispatcher(config: {
             return
           }
           receipt = claim.receipt
+          if (claimInterrupted) {
+            interrupted(claimInterrupted)
+            return
+          }
           denial = live()
-          if (denial || !eligible()) {
-            finalize('not-sent', denial ?? 'state', 'guard-denied')
+          if (denial) {
+            finalize('not-sent', denial, 'guard-denied')
+            return
+          }
+          observations.delete(printerBinding)
+          observationVersions.set(printerBinding, Object.freeze({}))
+          const prepared = await driver.prepare({
+            binding: printerBinding,
+            signal: controller.signal,
+          })
+          if (terminal) return
+          connectionGeneration = prepared.connectionGeneration
+          const current = eligible()
+          if (
+            !current ||
+            current.connectionGeneration !== connectionGeneration
+          ) {
+            finalize('not-sent', 'state', 'guard-denied')
+            return
+          }
+          observationVersion = observationVersions.get(printerBinding)
+          generationInstalled = true
+          denial = live()
+          if (denial) {
+            finalize('not-sent', denial, 'guard-denied')
             return
           }
           const beforeRpc = sample()
@@ -644,14 +698,62 @@ export function createPauseDispatcher(config: {
             )
         } finally {
           boundaryClosed = true
+          if (receipt) {
+            try {
+              await driver.closeAttempt(printerBinding)
+            } catch {
+              await new Promise<void>(() => {})
+            }
+            const details = finishDetails
+            if (terminal && details) {
+              const outcome =
+                terminal.kind === 'applied'
+                  ? 'applied'
+                  : terminal.kind === 'outcome-unknown'
+                    ? 'outcome-unknown'
+                    : 'not-sent'
+              let persisted = false
+              try {
+                persisted =
+                  details.observedWall === undefined
+                    ? finishCommand(
+                        journal,
+                        receipt,
+                        outcome,
+                        details.journalReason,
+                      )
+                    : finishCommandAt(
+                        journal,
+                        receipt,
+                        outcome,
+                        details.journalReason,
+                        details.observedWall,
+                      )
+              } catch {
+                /* conservative unknown */
+              }
+              if (!persisted)
+                terminal = {
+                  kind: 'outcome-unknown',
+                  cmdId: command.cmd_id,
+                  reason: 'storage',
+                }
+            }
+          }
           slots.delete(mapping.assignment_id)
+          clearTimeout(timer)
+          if (terminal) resolveResult(terminal)
         }
-      })()
+      })().then(settleWork, settleWork)
       return result
+    },
+    get settled(): Promise<void> {
+      return settled
     },
     close(): void {
       closed = true
       for (const stop of [...stopAttempts]) stop()
+      maybeSettled()
     },
   })
 }

@@ -25,7 +25,7 @@ import type { CommandJournalHandle } from './command-journal.ts'
 import {
   createPauseDispatcher,
   type PauseDispatchReason,
-  type PauseDriver,
+  type PreparedPauseDriver,
 } from './pause-dispatcher.ts'
 import { readPrinterBinding, type PrinterBinding } from './printer-binding.ts'
 
@@ -42,7 +42,7 @@ export type PauseRelayConfig = Readonly<{
   /** Durable journal used by the dispatcher this relay owns. */
   journal: CommandJournalHandle
   /** Fixed-operation driver. The relay never reaches Moonraker directly. */
-  driver: PauseDriver
+  driver: PreparedPauseDriver
   /**
    * Local provisioned mapping resolver, the only source of a printer binding.
    * It returns `undefined` when the assignment is not provisioned locally. No
@@ -734,8 +734,11 @@ export function createPauseCommandRelay(
       maybeSettled()
     },
     get settled(): Promise<void> {
-      if (closed && !pending.size) return Promise.resolve()
-      return new Promise<void>((resolve) => waiters.add(resolve))
+      const relaySettled =
+        closed && !pending.size
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => waiters.add(resolve))
+      return Promise.all([relaySettled, dispatcher.settled]).then(() => {})
     },
     diagnostics(): PauseRelayDiagnostics {
       return Object.freeze({

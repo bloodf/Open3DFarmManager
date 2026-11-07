@@ -6,9 +6,7 @@ import {
   BROWSER_DEVICE_HTTP_AUDIENCE,
 } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PauseBrowserSignallingClient } from '../../apps/farm/app/utils/webrtc/pause-signalling-client.ts'
-import {
-  createPauseCommandClient,
-} from '../../apps/farm/app/utils/webrtc/pause-command-client.ts'
+import { createPauseCommandClient } from '../../apps/farm/app/utils/webrtc/pause-command-client.ts'
 import { createPauseCommandIssuer } from '../../apps/farm/app/utils/webrtc/pause-command-issuer.ts'
 import { decodeCommandV2 } from '../../packages/farm-protocol/src/command-v2.ts'
 import type {
@@ -110,8 +108,16 @@ export async function createPauseExecutionRtcBrowserActor(
 
       const httpIssuer = createPauseCommandIssuer({
         fetch: (input, init) => {
-          const url = new URL(input instanceof Request ? input.url : String(input), scope.origin)
-          if (!['/api/pause-authority/challenges', '/api/pause-authority/capabilities'].includes(url.pathname)) {
+          const url = new URL(
+            input instanceof Request ? input.url : String(input),
+            scope.origin,
+          )
+          if (
+            ![
+              '/api/pause-authority/challenges',
+              '/api/pause-authority/capabilities',
+            ].includes(url.pathname)
+          ) {
             commandHttpRequests++
           }
           return window.fetch(input, init)

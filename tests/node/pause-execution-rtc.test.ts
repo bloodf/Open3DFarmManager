@@ -797,7 +797,6 @@ test('execution fixture exposes the maintained provisioning extension contract',
   assert.equal(typeof extension.afterProvisioned, 'function')
 })
 
-
 test('held close detects premature durable release independently of ownerSettled', () => {
   const { native } = observations()
   const assignmentId = randomUUID()
@@ -807,36 +806,64 @@ test('held close detects premature durable release independently of ownerSettled
     ...native,
     closeHeld: true,
     journal: {
-      commandId, assignmentId, status: 'write-started',
-      finishedAt: null, replayRecords: 1, activeReservations: 1,
+      commandId,
+      assignmentId,
+      status: 'write-started',
+      finishedAt: null,
+      replayRecords: 1,
+      activeReservations: 1,
     },
   }
-  const verifyHeld = (value: unknown) => verifyPauseExecutionCloseOwnership(
-    value, 'held', commandId, assignmentId,
-  )
+  const verifyHeld = (value: unknown) =>
+    verifyPauseExecutionCloseOwnership(value, 'held', commandId, assignmentId)
   assert.doesNotThrow(() => verifyHeld(held))
   for (const journal of [
     null,
     { ...held.journal, activeReservations: 0 },
     { ...held.journal, replayRecords: 0 },
     { ...held.journal, status: 'applied', finishedAt: 1 },
-  ]) assert.throws(() => verifyHeld({ ...held, journal }))
-  for (const field of ['activeReservations', 'replayRecords', 'status', 'finishedAt']) {
+  ])
+    assert.throws(() => verifyHeld({ ...held, journal }))
+  for (const field of [
+    'activeReservations',
+    'replayRecords',
+    'status',
+    'finishedAt',
+  ]) {
     const journal: Record<string, unknown> = { ...held.journal }
     delete journal[field]
     assert.throws(() => verifyHeld({ ...held, journal }))
   }
   const settled = {
-    ...held, closeHeld: false, ownerSettled: true,
-    journal: { ...held.journal, status: 'applied', finishedAt: 1, activeReservations: 0 },
+    ...held,
+    closeHeld: false,
+    ownerSettled: true,
+    journal: {
+      ...held.journal,
+      status: 'applied',
+      finishedAt: 1,
+      activeReservations: 0,
+    },
   }
-  const verifySettled = (value: unknown) => verifyPauseExecutionCloseOwnership(
-    value, 'settled', commandId, assignmentId,
-  )
+  const verifySettled = (value: unknown) =>
+    verifyPauseExecutionCloseOwnership(
+      value,
+      'settled',
+      commandId,
+      assignmentId,
+    )
   assert.doesNotThrow(() => verifySettled(settled))
   assert.throws(() => verifySettled({ ...settled, journal: null }))
-  assert.throws(() => verifySettled({ ...settled,
-    journal: { ...settled.journal, activeReservations: 1 } }))
-  assert.throws(() => verifySettled({ ...settled,
-    journal: { ...settled.journal, replayRecords: 0 } }))
+  assert.throws(() =>
+    verifySettled({
+      ...settled,
+      journal: { ...settled.journal, activeReservations: 1 },
+    }),
+  )
+  assert.throws(() =>
+    verifySettled({
+      ...settled,
+      journal: { ...settled.journal, replayRecords: 0 },
+    }),
+  )
 })

@@ -56,7 +56,9 @@ export const PauseExecutionRtcCommand = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('start'),
-    barrier: z.enum(['none', 'stale', 'reassigned', 'peer-closed', 'late-close']).default('none'),
+    barrier: z
+      .enum(['none', 'stale', 'reassigned', 'peer-closed', 'late-close'])
+      .default('none'),
     origin: PairingProofOrigin,
     credentialAudience: PairingProofAudience,
     issuer: PauseExecutionRtcIssuer,
@@ -263,7 +265,13 @@ const RelayDiagnosticsSchema = z.strictObject({
 export const PauseExecutionJournalObservation = z.strictObject({
   commandId: z.string().uuid(),
   assignmentId: z.string().uuid(),
-  status: z.enum(['claimed', 'write-started', 'not-sent', 'applied', 'outcome-unknown']),
+  status: z.enum([
+    'claimed',
+    'write-started',
+    'not-sent',
+    'applied',
+    'outcome-unknown',
+  ]),
   finishedAt: z.number().int().nonnegative().nullable(),
   replayRecords: z.number().int().nonnegative(),
   activeReservations: z.number().int().nonnegative(),
@@ -280,7 +288,10 @@ export const PauseExecutionRtcReply = z.discriminatedUnion('kind', [
     signature: PairingProofCompletion.shape.signature,
   }),
   z.strictObject({ kind: z.literal('started') }),
-  z.strictObject({ kind: z.literal('start-refused'), reason: z.literal('already-started') }),
+  z.strictObject({
+    kind: z.literal('start-refused'),
+    reason: z.literal('already-started'),
+  }),
   z.strictObject({ kind: z.literal('released') }),
   z.strictObject({
     kind: z.literal('replay-result'),
@@ -385,10 +396,7 @@ export async function run() {
   let releaseClose: (() => void) | undefined
   const aborted = new AbortController()
 
-  const fail = (
-    source: z.infer<typeof FailureSource>,
-    rejection?: unknown,
-  ) => {
+  const fail = (source: z.infer<typeof FailureSource>, rejection?: unknown) => {
     failed = true
     progress.fail(source, rejection)
   }
@@ -445,10 +453,7 @@ export async function run() {
           output({ kind: 'start-refused', reason: 'already-started' })
           return
         }
-        if (
-          !paired ||
-          input.claim.agent_id !== input.assignment.agentId
-        )
+        if (!paired || input.claim.agent_id !== input.assignment.agentId)
           throw Error('Invalid fixture start')
         started = true
 
@@ -494,9 +499,12 @@ export async function run() {
         })
 
         let release: () => void = () => {}
-        const deliveryBarrier = (input.barrier === 'none' || input.barrier === 'late-close')
-          ? Promise.resolve()
-          : new Promise<void>((resolve) => { release = resolve })
+        const deliveryBarrier =
+          input.barrier === 'none' || input.barrier === 'late-close'
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                release = resolve
+              })
         releaseCommand = () => {
           if (input.barrier === 'stale') wallOffset = 60000
           if (input.barrier === 'reassigned') registry.retire(printerBinding)
@@ -530,7 +538,10 @@ export async function run() {
               },
             ],
           },
-          clock: { wallNow: () => Date.now() + wallOffset, monotonicNow: () => performance.now() },
+          clock: {
+            wallNow: () => Date.now() + wallOffset,
+            monotonicNow: () => performance.now(),
+          },
           journal,
           driver: {
             ...router,
@@ -542,7 +553,9 @@ export async function run() {
               await router.closeAttempt(binding)
               if (input.barrier === 'late-close') {
                 closeHeld = true
-                await new Promise<void>((resolve) => { releaseClose = resolve })
+                await new Promise<void>((resolve) => {
+                  releaseClose = resolve
+                })
                 closeHeld = false
               }
             },
@@ -653,10 +666,13 @@ export async function run() {
                 }
                 const owner = relay
                 const peer = transportId
-                void deliveryBarrier.then(() => owner.commandPeer({
-                    transportId: peer,
-                    wire: frame.wire,
-                  }))
+                void deliveryBarrier
+                  .then(() =>
+                    owner.commandPeer({
+                      transportId: peer,
+                      wire: frame.wire,
+                    }),
+                  )
                   .then((outcome) => {
                     lastOutcome = outcome
                     progress.advance('command-settled')
@@ -685,7 +701,9 @@ export async function run() {
 
       case 'owner-close':
         relay?.close()
-        void relay?.settled.then(() => { ownerSettled = true })
+        void relay?.settled.then(() => {
+          ownerSettled = true
+        })
         output({ kind: 'released' })
         return
       case 'release-close':
@@ -702,14 +720,21 @@ export async function run() {
         if (client) progress.phase(client.snapshot().phase)
         const counts = moonrakerFixture?.counts()
         const relayDiag = relay?.diagnostics() ?? null
-        let journalObservation: z.infer<typeof PauseExecutionJournalObservation> | null = null
+        let journalObservation: z.infer<
+          typeof PauseExecutionJournalObservation
+        > | null = null
         if (journalDir && lastCommandId) {
-          const database = new DatabaseSync(join(journalDir, 'pause-commands.sqlite'), {
-            readOnly: true,
-            allowExtension: false,
-          })
+          const database = new DatabaseSync(
+            join(journalDir, 'pause-commands.sqlite'),
+            {
+              readOnly: true,
+              allowExtension: false,
+            },
+          )
           try {
-            const row = database.prepare(`
+            const row = database
+              .prepare(
+                `
               SELECT cmd_id AS commandId, assignment_id AS assignmentId, status,
                 finished_at AS finishedAt,
                 (SELECT count(*) FROM pause_commands WHERE cmd_id = ?) AS replayRecords,
@@ -718,8 +743,11 @@ export async function run() {
                   (assignment_id = p.assignment_id OR
                     (farm_id = p.farm_id AND printer_key = p.printer_key))) AS activeReservations
               FROM pause_commands p WHERE cmd_id = ?
-            `).get(lastCommandId, lastCommandId)
-            if (row !== undefined) journalObservation = PauseExecutionJournalObservation.parse(row)
+            `,
+              )
+              .get(lastCommandId, lastCommandId)
+            if (row !== undefined)
+              journalObservation = PauseExecutionJournalObservation.parse(row)
           } finally {
             database.close()
           }
@@ -821,7 +849,10 @@ export async function run() {
   process.on('SIGTERM', () => fail('sigterm'))
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   void run().catch(() => {
     process.exitCode = 1
   })

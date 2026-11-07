@@ -74,10 +74,20 @@ export function verifyPauseExecutionCloseOwnership(
   assert.ok(native.journal, 'Durable journal record must remain present')
   assert.equal(native.journal.commandId, commandId)
   assert.equal(native.journal.assignmentId, assignmentId)
-  assert.equal(native.journal.replayRecords, 1, 'Replay record must be preserved')
-  assert.equal(native.journal.activeReservations, phase === 'held' ? 1 : 0,
-    'Durable assignment reservation must follow actual closure')
-  assert.equal(native.journal.status, phase === 'held' ? 'write-started' : 'applied')
+  assert.equal(
+    native.journal.replayRecords,
+    1,
+    'Replay record must be preserved',
+  )
+  assert.equal(
+    native.journal.activeReservations,
+    phase === 'held' ? 1 : 0,
+    'Durable assignment reservation must follow actual closure',
+  )
+  assert.equal(
+    native.journal.status,
+    phase === 'held' ? 'write-started' : 'applied',
+  )
   if (phase === 'held') assert.equal(native.journal.finishedAt, null)
   else assert.notEqual(native.journal.finishedAt, null)
 }
@@ -996,16 +1006,39 @@ export function createPauseExecutionRtcFixtureExtension(
           await session.connector.request({ kind: 'owner-close' })
           const held = await observeNative()
           assert.ok(held.commandId)
-          verifyPauseExecutionCloseOwnership(held, 'held', held.commandId, assignment.assignmentId)
+          verifyPauseExecutionCloseOwnership(
+            held,
+            'held',
+            held.commandId,
+            assignment.assignmentId,
+          )
           const repeated = await session.connector.request(startCommand)
-          assert.deepEqual(repeated, { kind: 'start-refused', reason: 'already-started' })
+          assert.deepEqual(repeated, {
+            kind: 'start-refused',
+            reason: 'already-started',
+          })
           const afterRefusal = await observeNative()
-          verifyPauseExecutionCloseOwnership(afterRefusal, 'held', held.commandId, assignment.assignmentId)
+          verifyPauseExecutionCloseOwnership(
+            afterRefusal,
+            'held',
+            held.commandId,
+            assignment.assignmentId,
+          )
           assert.deepEqual(afterRefusal.journal, held.journal)
           assert.equal(afterRefusal.commandsReceived, held.commandsReceived)
           await session.connector.request({ kind: 'release-close' })
-          const settled = await until(observeNative, (v) => v.ownerSettled, input.signal, 10000)
-          verifyPauseExecutionCloseOwnership(settled, 'settled', held.commandId, assignment.assignmentId)
+          const settled = await until(
+            observeNative,
+            (v) => v.ownerSettled,
+            input.signal,
+            10000,
+          )
+          verifyPauseExecutionCloseOwnership(
+            settled,
+            'settled',
+            held.commandId,
+            assignment.assignmentId,
+          )
           await outcome
           completed = true
           return

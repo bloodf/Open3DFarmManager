@@ -16,7 +16,7 @@ The application and test utilities in this repository are original MIT code. No 
 | virtual-klipper-printer                     | Separate test container      | GPL-3.0                             |
 | Spoolman                                    | Separate inventory simulator | MIT                                 |
 
-Exact package versions and integrity values are in `bun.lock`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
+Exact package versions and integrity values are in `pnpm-lock.yaml`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
 
 ## Pinned Spoolman provenance
 
@@ -61,7 +61,7 @@ These licenses permit use alongside this MIT project while retaining their own c
 The following texts are copied only from the installed packages' license files; no implementation is copied. Identical full texts are grouped without altering their content.
 
 <details>
-<summary>@adonisjs/hash@9.1.1</summary>
+<summary>@adonisjs/hash@9.1.1 and @adonisjs/hash@10.1.1</summary>
 
 ```text
 # The MIT License
@@ -107,7 +107,7 @@ SOFTWARE.
 </details>
 
 <details>
-<summary>@poppinss/utils@6.10.1</summary>
+<summary>@poppinss/utils@6.10.1 and @poppinss/utils@7.1.2</summary>
 
 ```text
 # The MIT License
@@ -1261,6 +1261,27 @@ Source notice SHA-256: `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5
     SOFTWARE
 ```
 
+## Password hashing v10 upgrade notices
+
+The v10 lockfile resolves `@adonisjs/hash@10.1.1`, `@poppinss/utils@7.1.2` and newly added `@poppinss/types@1.2.1`. The upstream v10 hash license and exact utils package license match their complete notices retained above. The new types package declares MIT and its exact shipped notice follows. The dated v9 review above remains historical; runtime validation of this upgrade is recorded separately.
+
+<details>
+<summary>@poppinss/types@1.2.1</summary>
+
+```text
+# The MIT License
+
+Copyright (c) 2023
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the 'Software'), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+</details>
+
 ## Development and build tooling
 
 ### vitest@5.1.0
@@ -1318,3 +1339,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## TypeScript compiler versions
+
+The root CLI uses `typescript@7.0.2`; `apps/farm` pins `typescript@5.9.3` for
+`vue-tsc@3.3.14` and Volar, which require the legacy compiler API and
+`typescript/lib/tsc`. TypeScript 7 removes that legacy API. See the
+[upstream compatibility guidance](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0).
+This split preserves the existing strict compiler settings.
+
+Both packages declare Apache-2.0. Exact license and third-party notice files
+from their versioned npm tarballs are retained under
+[`notices/typescript/7.0.2`](notices/typescript/7.0.2) and
+[`notices/typescript/5.9.3`](notices/typescript/5.9.3), including the vendored
+JSON-RPC license shipped in 7.0.2. Preserve these files when redistributing
+these compiler packages. These are development dependencies; this notice does
+not establish the contents of a runtime artifact.

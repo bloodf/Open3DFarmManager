@@ -47,9 +47,8 @@ test('TLS proxy forwards raw upgrade bytes over the actual loopback socket', asy
   const { execFileSync } = await import('node:child_process')
   const { createServer } = await import('node:net')
   const { connect } = await import('node:tls')
-  const { signallingHttpsProxy } = await import(
-    '../helpers/signalling-https-proxy.ts'
-  )
+  const { signallingHttpsProxy } =
+    await import('../helpers/signalling-https-proxy.ts')
   const directory = await mkdtemp(join(tmpdir(), 'signalling-proxy-test-'))
   let proxy: ReturnType<typeof signallingHttpsProxy> | undefined
   const upstream = createServer()

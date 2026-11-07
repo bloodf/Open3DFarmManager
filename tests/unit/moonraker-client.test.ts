@@ -99,12 +99,7 @@ type RawEvidence = {
   raw: RawMoonrakerObservation[]
   rawUnavailable: RawMoonrakerUnavailable[]
   completedBy?:
-    | 'observation'
-    | 'snapshot'
-    | 'unavailable'
-    | 'deadline'
-    | 'duration'
-    | null
+    'observation' | 'snapshot' | 'unavailable' | 'deadline' | 'duration' | null
 }
 
 // A completion spec replaces the fixed abort duration. The duration used to

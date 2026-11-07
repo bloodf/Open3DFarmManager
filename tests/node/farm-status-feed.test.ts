@@ -78,8 +78,7 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     connector_dtls: Array(32).fill('BB').join(':'),
   }
   let callbacks:
-      | Parameters<NonNullable<Options['createClient']>>[0]
-      | undefined,
+      Parameters<NonNullable<Options['createClient']>>[0] | undefined,
     closes = 0
   const health: string[] = [],
     snapshots: unknown[] = []

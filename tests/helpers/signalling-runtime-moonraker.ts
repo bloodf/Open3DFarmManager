@@ -356,9 +356,8 @@ export async function createRuntimeMoonrakerFixture() {
         running = closed
         return
       }
-      const { runConnectorAgent } = await import(
-        '../../packages/connector/src/runtime/agent.ts'
-      )
+      const { runConnectorAgent } =
+        await import('../../packages/connector/src/runtime/agent.ts')
       running = runConnectorAgent({
         configPath,
         credentialPath,

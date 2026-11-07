@@ -31,11 +31,11 @@ export async function startBuiltTelemetryFixture(input: {
     !nodeIdentity ||
     typeof nodeIdentity !== 'object' ||
     !('version' in nodeIdentity) ||
-    nodeIdentity.version !== 'v24.20.0' ||
+    nodeIdentity.version !== 'v24.22.2' ||
     !('execPath' in nodeIdentity) ||
     typeof nodeIdentity.execPath !== 'string'
   )
-    throw new Error('Node 24.20.0 is required')
+    throw new Error('Node 24.22.2 is required')
   const nodePath = nodeIdentity.execPath
   await appendFile(
     input.ledgerPath,

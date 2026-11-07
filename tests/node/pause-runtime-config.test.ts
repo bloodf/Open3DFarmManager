@@ -20,6 +20,12 @@ import {
 const ORIGIN = 'http://127.0.0.1:7125'
 const ISSUER = 'farm:pause-issuer'
 const KID = 'issuer-1'
+const SIGNALLING = {
+  endpoint: 'wss://farm.example/api/signalling/pause-connector',
+  origin: 'https://farm.example',
+  audience: 'pause-audience',
+  credentialAudience: 'credential-audience',
+}
 
 function temporaryDirectory() {
   const path = mkdtempSync(join(tmpdir(), 'open3d-pause-config-'))
@@ -157,6 +163,7 @@ test('reading a runtime configuration never imports a key, even with a pause sec
     const fixture = runtimeFixture({
       pause: {
         version: 1,
+        signalling: { ...SIGNALLING },
         issuers: [{ issuer: ISSUER, kid: KID, publicKeySpki: spki }],
       },
     })
@@ -177,6 +184,7 @@ test('the pause section refuses an oversized, duplicated or malformed issuer key
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: Array.from(
         { length: MAX_PAUSE_ISSUER_KEYRING + 1 },
         (_, index) => ({ ...entry, kid: 'issuer-' + index }),
@@ -184,31 +192,51 @@ test('the pause section refuses an oversized, duplicated or malformed issuer key
     }),
   )
   assert.throws(() =>
-    parsePauseRuntimeConfig({ version: 1, issuers: [entry, entry] }),
+    parsePauseRuntimeConfig({
+      version: 1,
+      signalling: { ...SIGNALLING },
+      issuers: [entry, entry],
+    }),
   )
   // The same issuer with a different key id is a distinct trusted key.
   const distinct = parsePauseRuntimeConfig({
     version: 1,
+    signalling: { ...SIGNALLING },
     issuers: [entry, { ...entry, kid: 'issuer-2' }],
   })
   assert.equal(distinct.issuers.length, 2)
-  assert.throws(() => parsePauseRuntimeConfig({ version: 1, issuers: [] }))
-  assert.throws(() => parsePauseRuntimeConfig({ version: 2, issuers: [entry] }))
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
+      issuers: [],
+    }),
+  )
+  assert.throws(() =>
+    parsePauseRuntimeConfig({
+      version: 2,
+      signalling: { ...SIGNALLING },
+      issuers: [entry],
+    }),
+  )
+  assert.throws(() =>
+    parsePauseRuntimeConfig({
+      version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, issuer: 'not a valid issuer' }],
     }),
   )
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, kid: 'not a kid' }],
     }),
   )
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, privateKeyPkcs8: spki }],
     }),
   )
@@ -219,6 +247,7 @@ test('the loader snapshots the entire keyring before asynchronous imports', asyn
   const entry = { issuer: ISSUER, kid: KID, publicKeySpki: spki }
   const config = {
     version: 1 as const,
+    signalling: { ...SIGNALLING },
     issuers: [entry, { ...entry, kid: 'second' }],
   }
   const loading = loadPauseIssuerKeys(config)
@@ -260,7 +289,13 @@ test('the loader validates the whole keyring before importing any key', async ()
       [entry, { ...entry }],
       [entry, { ...entry, kid: 'invalid key' }],
     ])
-      await assert.rejects(loadPauseIssuerKeys({ version: 1, issuers }))
+      await assert.rejects(
+        loadPauseIssuerKeys({
+          version: 1,
+          signalling: { ...SIGNALLING },
+          issuers,
+        }),
+      )
   })
   assert.equal(counted.imports, 0)
 })
@@ -274,24 +309,28 @@ test('the pause section refuses a noncanonical, wrong algorithm or private publi
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: noncanonical }],
     }),
   )
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: spki.slice(0, -1) + '+' }],
     }),
   )
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: 'AAAA' }],
     }),
   )
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: 'A'.repeat(59) }],
     }),
   )
@@ -307,6 +346,7 @@ test('the pause section refuses a noncanonical, wrong algorithm or private publi
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: p256Spki }],
     }),
   )
@@ -315,6 +355,7 @@ test('the pause section refuses a noncanonical, wrong algorithm or private publi
   assert.throws(() =>
     parsePauseRuntimeConfig({
       version: 1,
+      signalling: { ...SIGNALLING },
       issuers: [{ ...entry, publicKeySpki: pkcs8 }],
     }),
   )
@@ -327,6 +368,7 @@ test('the parsed pause configuration and the loaded issuer list are deeply immut
     const fixture = runtimeFixture({
       pause: {
         version: 1,
+        signalling: { ...SIGNALLING },
         issuers: [{ issuer: ISSUER, kid: KID, publicKeySpki: spki }],
       },
     })
@@ -396,6 +438,7 @@ test('the loaded issuer verifies a genuine capability with a verification-only k
     const fixture = runtimeFixture({
       pause: {
         version: 1,
+        signalling: { ...SIGNALLING },
         issuers: [{ issuer: ISSUER, kid: KID, publicKeySpki: spki }],
       },
     })
@@ -462,6 +505,7 @@ test('the loaded issuer verifies a genuine capability with a verification-only k
     const otherIssuers = await loadPauseIssuerKeys(
       parsePauseRuntimeConfig({
         version: 1,
+        signalling: { ...SIGNALLING },
         issuers: [{ issuer: ISSUER, kid: KID, publicKeySpki: other.spki }],
       }),
     )
@@ -475,4 +519,82 @@ test('the loaded issuer verifies a genuine capability with a verification-only k
   } finally {
     directory.close()
   }
+})
+
+test('pause signalling requires explicit independent canonical fields', async () => {
+  const { spki } = await issuerFixture()
+  const base = {
+    version: 1,
+    issuers: [{ issuer: ISSUER, kid: KID, publicKeySpki: spki }],
+  }
+  const parsed = parsePauseRuntimeConfig({ ...base, signalling: SIGNALLING })
+  assert.deepEqual(parsed.signalling, SIGNALLING)
+  assert.notEqual(
+    parsed.signalling.audience,
+    parsed.signalling.credentialAudience,
+  )
+  assert.equal(Object.isFrozen(parsed.signalling), true)
+  for (const endpoint of [
+    {
+      origin: 'https://farm.example:8443',
+      endpoint: 'wss://farm.example:8443/api/signalling/pause-connector',
+    },
+    {
+      origin: 'https://[::1]:8443',
+      endpoint: 'wss://[::1]:8443/api/signalling/pause-connector',
+    },
+  ]) {
+    const signalling = {
+      ...SIGNALLING,
+      ...endpoint,
+    }
+    assert.deepEqual(
+      parsePauseRuntimeConfig({ ...base, signalling }).signalling,
+      signalling,
+    )
+  }
+  assert.throws(() => parsePauseRuntimeConfig(base))
+  const directory = temporaryDirectory()
+  try {
+    const fixture = runtimeFixture({ pause: base })
+    const counted = await countImports(async () => {
+      assert.throws(() =>
+        readAgentRuntimeConfig(
+          writeRuntime(directory.path, fixture.value),
+          fixture.credential,
+        ),
+      )
+    })
+    assert.equal(counted.imports, 0)
+  } finally {
+    directory.close()
+  }
+  for (const field of Object.keys(SIGNALLING)) {
+    const incomplete = { ...SIGNALLING }
+    Reflect.deleteProperty(incomplete, field)
+    assert.throws(() =>
+      parsePauseRuntimeConfig({ ...base, signalling: incomplete }),
+    )
+  }
+  for (const change of [
+    { origin: 'http://127.0.0.1' },
+    { origin: 'https://farm.example/' },
+    { endpoint: 'wss://other.example/api/signalling/pause-connector' },
+    { endpoint: 'wss://farm.example/api/signalling/connector' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector?x=1' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector?' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector#' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector#fragment' },
+    { endpoint: 'wss://user@farm.example/api/signalling/pause-connector' },
+    { endpoint: 'wss://farm.example:443/api/signalling/pause-connector' },
+    { audience: '' },
+    { credentialAudience: 'bad audience' },
+    { unexpected: true },
+  ])
+    assert.throws(() =>
+      parsePauseRuntimeConfig({
+        ...base,
+        signalling: { ...SIGNALLING, ...change },
+      }),
+    )
 })

@@ -105,10 +105,7 @@ export function createAuthenticatedFarmStatusFeed(
             Date.now() < session.expiresAt)
       const close = (
         reason:
-          | 'expired'
-          | 'revoked'
-          | 'disconnected'
-          | 'rejected' = 'disconnected',
+          'expired' | 'revoked' | 'disconnected' | 'rejected' = 'disconnected',
       ) => {
         if (terminal) return
         terminal = true

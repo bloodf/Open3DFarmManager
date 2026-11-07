@@ -521,9 +521,8 @@ export class AuthenticatedConnectorSignallingClient {
       const factory =
         this.#options.peerFactory ??
         (async (options) => {
-          const { ReadonlyConnectorPeer } = await import(
-            '../webrtc/readonly-peer.ts'
-          )
+          const { ReadonlyConnectorPeer } =
+            await import('../webrtc/readonly-peer.ts')
           return new ReadonlyConnectorPeer(options)
         })
       const loadingPeer = Promise.resolve()

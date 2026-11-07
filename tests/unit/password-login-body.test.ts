@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { readLoginBody } from '../../apps/farm/server/services/authenticated-session.ts'
 const request = (
   body: string | Uint8Array,

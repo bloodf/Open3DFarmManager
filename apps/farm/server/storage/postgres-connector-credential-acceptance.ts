@@ -118,11 +118,15 @@ const busy = (retryAfterMs: number): CredentialAcceptanceDecision => ({
 export class PostgresConnectorCredentialAcceptance {
   private readonly config: CredentialAcceptanceConfig
   private inflight = 0
+  private readonly sql: Sql
+  private readonly clock: () => number
   constructor(
-    private readonly sql: Sql,
+    sql: Sql,
     config: CredentialAcceptanceConfig,
-    private readonly clock: () => number = Date.now,
+    clock: () => number = Date.now,
   ) {
+    this.sql = sql
+    this.clock = clock
     if (
       !config.issuer ||
       config.issuer.length > 256 ||
@@ -578,10 +582,11 @@ export class PostgresConnectorCredentialAcceptance {
   }
 }
 class AcceptanceDeadline extends Error {
-  constructor(
-    readonly observedAt: number,
-    readonly previousAt: number,
-  ) {
+  readonly observedAt: number
+  readonly previousAt: number
+  constructor(observedAt: number, previousAt: number) {
     super('Credential acceptance deadline passed')
+    this.observedAt = observedAt
+    this.previousAt = previousAt
   }
 }

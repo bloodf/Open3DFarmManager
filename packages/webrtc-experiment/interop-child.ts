@@ -58,9 +58,8 @@ lines.on('line', (line) => {
       switch (message.kind) {
         case 'hello':
           output({
-            runtime: process.versions.bun ? 'bun' : 'node',
+            runtime: 'node',
             version: process.version,
-            bun: process.versions.bun,
             executable: process.execPath,
             pid: process.pid,
             libdatachannel: getLibraryVersion(),

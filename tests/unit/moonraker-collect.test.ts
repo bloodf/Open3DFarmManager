@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import {
   mkdtempSync,
   writeFileSync,
@@ -15,13 +15,18 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ServerWebSocket } from 'bun'
+import { spawn, spawnSync } from 'node:child_process'
+import { serveWsTestServer, type WsTestSocket } from './ws-serve.ts'
+import { collectStream } from './streams.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { main } from '../../packages/connector/src/cli.ts'
 
 function resource(value: object) {
-  if (Bun.env.MOONRAKER_TEST_LEDGER)
-    appendFileSync(Bun.env.MOONRAKER_TEST_LEDGER, JSON.stringify(value) + '\n')
+  if (process.env.MOONRAKER_TEST_LEDGER)
+    appendFileSync(
+      process.env.MOONRAKER_TEST_LEDGER,
+      JSON.stringify(value) + '\n',
+    )
 }
 function temporary() {
   const path = mkdtempSync(join(tmpdir(), 'open3d-collect-'))
@@ -53,41 +58,39 @@ const update = (eventtime: number, progress: number) =>
   })
 async function loopback(
   input: {
-    subscribe?: (socket: ServerWebSocket<undefined>) => void
+    subscribe?: (socket: WsTestSocket) => void
     hangUpgrade?: boolean
   } = {},
 ) {
-  const sockets = new Set<ServerWebSocket<undefined>>()
+  const sockets = new Set<WsTestSocket>()
   const requests: { path: string; extension: string | null }[] = []
-  const server = Bun.serve<undefined>({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request, server) {
+  const server = await serveWsTestServer({
+    http(request) {
+      requests.push({
+        path: new URL(request.url).pathname,
+        extension: request.headers.get('sec-websocket-extensions'),
+      })
+      return Response.json({
+        result: { klippy_connected: true, klippy_state: 'ready' },
+      })
+    },
+    upgrade(request) {
       const path = new URL(request.url).pathname
       requests.push({
         path,
         extension: request.headers.get('sec-websocket-extensions'),
       })
-      if (path === '/websocket') {
-        if (input.hangUpgrade) return new Promise<Response>(() => {})
-        if (server.upgrade(request, { data: undefined })) return
-        return new Response(null, { status: 400 })
-      }
-      return Response.json({
-        result: { klippy_connected: true, klippy_state: 'ready' },
-      })
+      if (path === '/websocket') return input.hangUpgrade ? 'hang' : true
+      return false
     },
-    websocket: {
-      perMessageDeflate: true,
-      open(socket) {
-        sockets.add(socket)
-      },
-      message(socket) {
-        input.subscribe ? input.subscribe(socket) : socket.send(snapshot())
-      },
-      close(socket) {
-        sockets.delete(socket)
-      },
+    onOpen(socket) {
+      sockets.add(socket)
+    },
+    onMessage(socket) {
+      input.subscribe ? input.subscribe(socket) : socket.send(snapshot())
+    },
+    onClose(socket) {
+      sockets.delete(socket)
     },
   })
   const port = server.port
@@ -98,7 +101,7 @@ async function loopback(
     requests,
     async close() {
       for (const socket of sockets) socket.terminate()
-      await server.stop(true)
+      await server.stop()
       resource({ kind: 'loopback', id: port, state: 'closed' })
     },
   }
@@ -128,17 +131,16 @@ function config(
   return file
 }
 function launch(args: string[], auditPath?: string) {
-  const child = Bun.spawn(
+  const child = spawn(
+    'node',
     [
-      'node',
       '--import',
       './tests/helpers/moonraker-collect-load-audit.ts',
       'packages/connector/src/cli.ts',
       ...args,
     ],
     {
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         // Prove the CLI sets policy itself, even when another test loaded ws.
@@ -151,16 +153,24 @@ function launch(args: string[], auditPath?: string) {
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
   const stdout = (async () => {
-    for await (const part of child.stdout)
-      output += new TextDecoder().decode(part)
+    for await (const part of child.stdout!) output += part.toString('utf8')
   })()
-  const stderr = new Response(child.stderr).text()
+  const stderr = collectStream(child.stderr)
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
   const timer = setTimeout(() => child.kill('SIGKILL'), 8000)
   let recorded = false
+  void exited.catch(() => {})
   async function finish() {
-    const code = await child.exited
-    await stdout
-    clearTimeout(timer)
+    let code: number | null
+    try {
+      code = await exited
+      await stdout
+    } finally {
+      clearTimeout(timer)
+    }
     if (!recorded) {
       resource({ kind: 'child', id: child.pid, state: 'reaped' })
       recorded = true
@@ -312,12 +322,11 @@ test('all configuration validates before networking or creating a queue', async 
 test('FIFO configuration is rejected without blocking the actual CLI', async () => {
   const temp = temporary()
   const fifo = join(temp.path, 'config-fifo')
-  const make = Bun.spawn(['mkfifo', '-m', '600', fifo], {
-    stdout: 'ignore',
-    stderr: 'pipe',
+  const make = spawnSync('mkfifo', ['-m', '600', fifo], {
+    encoding: 'utf8',
   })
   resource({ kind: 'child', id: make.pid, state: 'created' })
-  expect(await make.exited).toBe(0)
+  expect(make.status).toBe(0)
   resource({ kind: 'child', id: make.pid, state: 'reaped' })
   const data = join(temp.path, 'absent')
   const job = launch(['collect', '--config', fifo, '--data-dir', data])
@@ -464,18 +473,23 @@ test('identity main remains synchronous and help does not load ws', async () => 
 test('ws rejects oversized and excessively fragmented messages before any queue callback', async () => {
   for (const mode of ['oversized', 'fragmented']) {
     const temp = temporary()
-    const server = Bun.spawn(
-      ['node', 'packages/connector/test/moonraker-fragment-server.ts', mode],
-      { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+    const server = spawn(
+      'node',
+      ['packages/connector/test/moonraker-fragment-server.ts', mode],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
     )
     resource({ kind: 'child', id: server.pid, state: 'created' })
+    const serverError = collectStream(server.stderr)
+    const serverExited = new Promise<number | null>((resolve) =>
+      server.on('exit', (code) => resolve(code)),
+    )
     const timer = setTimeout(() => server.kill('SIGKILL'), 8000)
-    const reader = server.stdout.getReader()
+    const stdoutIter = server.stdout![Symbol.asyncIterator]()
     let origin: string | undefined
     let job: ReturnType<typeof launch> | undefined
     try {
-      const first = await reader.read()
-      origin = JSON.parse(new TextDecoder().decode(first.value)).origin
+      const first = await stdoutIter.next()
+      origin = JSON.parse(first.value!.toString('utf8')).origin
       if (!origin) throw new Error('Missing fixture origin')
       resource({ kind: 'loopback', id: origin, state: 'created' })
       const data = join(temp.path, 'data')
@@ -500,22 +514,21 @@ test('ws rejects oversized and excessively fragmented messages before any queue 
       await job?.close()
       if (server.exitCode === null) {
         try {
-          server.stdin.write('stop')
-          server.stdin.end()
+          server.stdin!.write('stop')
+          server.stdin!.end()
         } catch {
           server.kill('SIGKILL')
         }
       }
-      await server.exited
+      await serverExited
       clearTimeout(timer)
       let closeTrace = ''
-      while (true) {
-        const part = await reader.read()
+      for (;;) {
+        const part = await stdoutIter.next()
         if (part.done) break
-        closeTrace += new TextDecoder().decode(part.value)
+        closeTrace += part.value!.toString('utf8')
       }
-      reader.releaseLock()
-      const error = await new Response(server.stderr).text()
+      const error = await serverError
       resource({ kind: 'child', id: server.pid, state: 'reaped' })
       if (origin) resource({ kind: 'loopback', id: origin, state: 'closed' })
       temp.close()

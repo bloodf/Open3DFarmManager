@@ -162,7 +162,7 @@ export interface ParseFailure {
   error: string
 }
 
-export const USAGE = `Usage: bun scripts/audit-task-resources.ts --task-label <value> [--repo <path>] [--pretty]
+export const USAGE = `Usage: node scripts/audit-task-resources.ts --task-label <value> [--repo <path>] [--pretty]
 
 Reports disk capacity, Git worktree state and Docker containers, volumes and
 networks whose "${TASK_LABEL_KEY}" label equals <value> exactly.

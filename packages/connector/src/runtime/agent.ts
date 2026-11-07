@@ -1,3 +1,4 @@
+import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import { loadExistingIdentity } from '../identity/store.ts'
 import { readRuntimeCredential } from '../config/credential.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
@@ -56,6 +57,7 @@ export async function runConnectorAgent(input: {
   credentialPath: string
   dataDirectory: string
   signal: AbortSignal
+  onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
 }): Promise<void> {
   const identity = loadExistingIdentity(input.dataDirectory)
@@ -288,6 +290,7 @@ export async function runConnectorAgent(input: {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        ...(input.onInventory ? { onInventory: input.onInventory } : {}),
         queue,
         signal,
         onDiagnostic: diagnostic,

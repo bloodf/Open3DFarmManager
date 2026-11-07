@@ -43,6 +43,8 @@ export function readAgentRuntimeConfig(
     readPrivateJsonFile(path, { maxBytes: 64 * 1024 }),
   )
   const collection = parseLocalCollectorConfig(input.collection)
+  if (collection.spoolman && collection.spoolman.farmId !== credential.farm_id)
+    throw new Error('Spoolman scope does not match local credential')
   const registry = createPrinterBindingRegistry({
     allowedOrigins: collection.allowedOrigins,
   })

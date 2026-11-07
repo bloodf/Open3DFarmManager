@@ -1,3 +1,4 @@
+import { SpoolmanConfig } from '../spoolman/config.ts'
 import {
   constants,
   openSync,
@@ -49,6 +50,7 @@ export const LocalCollectorConfigSchema = z.strictObject({
     .min(1)
     .max(16),
   limits: Limits,
+  spoolman: SpoolmanConfig.optional(),
 })
 export type LocalCollectorConfig = z.infer<typeof LocalCollectorConfigSchema>
 

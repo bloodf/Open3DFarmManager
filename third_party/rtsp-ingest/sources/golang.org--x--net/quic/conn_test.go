@@ -69,7 +69,7 @@ func testConnTestConn(t *testing.T) {
 type testDatagram struct {
 	packets    []*testPacket
 	paddedSize int
-	addr       netip.AddrPort
+	path       pathAddrs
 }
 
 func (d testDatagram) String() string {
@@ -130,6 +130,7 @@ type testConn struct {
 	t        *testing.T
 	conn     *Conn
 	endpoint *testEndpoint
+	path     pathAddrs
 
 	// Keys are distinct from the conn's keys,
 	// because the test may know about keys before the conn does.
@@ -231,7 +232,14 @@ func newTestConn(t *testing.T, side connSide, opts ...any) *testConn {
 		}
 	}
 
+	var path pathAddrs
+	if side == serverSide {
+		path = pathAddrs{peer: testClientAddr, local: testServerAddr}
+	} else {
+		path = pathAddrs{peer: testServerAddr, local: testClientAddr}
+	}
 	endpoint := newTestEndpoint(t, config)
+	endpoint.localAddr = path.local
 	endpoint.configTransportParams = configTransportParams
 	endpoint.configTestConn = configTestConn
 	conn, err := endpoint.e.newConn(
@@ -240,7 +248,8 @@ func newTestConn(t *testing.T, side connSide, opts ...any) *testConn {
 		side,
 		cids,
 		"",
-		netip.MustParseAddrPort("127.0.0.1:443"))
+		path.peer,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +350,22 @@ func (tc *testConn) cleanup() {
 	<-tc.conn.donec
 }
 
+// newLocalPath returns path with the current peer address and a new, unique local address.
+func (tc *testConn) newLocalPath() pathAddrs {
+	return pathAddrs{
+		peer:  tc.path.peer,
+		local: netip.AddrPortFrom(tc.endpoint.newAddr(), tc.path.local.Port()),
+	}
+}
+
+// newPeerPath returns path with the current local address and a new, unique peer address.
+func (tc *testConn) newPeerPath() pathAddrs {
+	return pathAddrs{
+		peer:  netip.AddrPortFrom(tc.endpoint.newAddr(), tc.path.peer.Port()),
+		local: tc.path.local,
+	}
+}
+
 func (tc *testConn) acceptStream() *Stream {
 	tc.t.Helper()
 	s, err := tc.conn.AcceptStream(canceledContext())
@@ -362,11 +387,12 @@ func logDatagram(t *testing.T, text string, d *testDatagram) {
 		pad = fmt.Sprintf(" (padded to %v)", d.paddedSize)
 	}
 	t.Logf("%v datagram%v", text, pad)
+	t.Logf("  %v", d.path)
 	for _, p := range d.packets {
 		var s string
 		switch p.ptype {
 		case packetType1RTT:
-			s = fmt.Sprintf("  %v pnum=%v", p.ptype, p.num)
+			s = fmt.Sprintf("  %v pnum=%v dst={%x}", p.ptype, p.num, p.dstConnID)
 		default:
 			s = fmt.Sprintf("  %v pnum=%v ver=%v dst={%x} src={%x}", p.ptype, p.num, p.version, p.dstConnID, p.srcConnID)
 		}
@@ -374,7 +400,7 @@ func logDatagram(t *testing.T, text string, d *testDatagram) {
 			s += fmt.Sprintf(" token={%x}", p.token)
 		}
 		if p.keyPhaseBit {
-			s += fmt.Sprintf(" KeyPhase")
+			s += " KeyPhase"
 		}
 		if p.keyNumber != 0 {
 			s += fmt.Sprintf(" keynum=%v", p.keyNumber)
@@ -389,11 +415,23 @@ func logDatagram(t *testing.T, text string, d *testDatagram) {
 // write sends the Conn a datagram.
 func (tc *testConn) write(d *testDatagram) {
 	tc.t.Helper()
+	if d.path == (pathAddrs{}) {
+		d.path = tc.path
+	}
 	tc.endpoint.writeDatagram(d)
 }
 
 // writeFrames sends the Conn a datagram containing the given frames.
 func (tc *testConn) writeFrames(ptype packetType, frames ...debugFrame) {
+	tc.t.Helper()
+	tc.write(tc.newDatagramWithFrames(ptype, frames...))
+}
+
+func (tc *testConn) newDatagramWithFrames(ptype packetType, frames ...debugFrame) *testDatagram {
+	return tc.newDatagramWithPathAndFrames(ptype, tc.path, frames...)
+}
+
+func (tc *testConn) newDatagramWithPathAndFrames(ptype packetType, path pathAddrs, frames ...debugFrame) *testDatagram {
 	tc.t.Helper()
 	space := spaceForPacketType(ptype)
 	dstConnID := tc.conn.connIDState.local[0].cid
@@ -412,12 +450,12 @@ func (tc *testConn) writeFrames(ptype packetType, frames ...debugFrame) {
 			dstConnID:   dstConnID,
 			srcConnID:   tc.peerConnID,
 		}},
-		addr: tc.conn.peerAddr,
+		path: path,
 	}
 	if ptype == packetTypeInitial && tc.conn.side == serverSide {
 		d.paddedSize = 1200
 	}
-	tc.write(d)
+	return d
 }
 
 // writeAckForAll sends the Conn a datagram containing an ack for all packets up to the
@@ -456,11 +494,12 @@ func (tc *testConn) readDatagram() *testDatagram {
 	synctest.Wait()
 	tc.sentPackets = nil
 	tc.sentFrames = nil
-	buf := tc.endpoint.read()
-	if buf == nil {
+	dgram := tc.endpoint.readdgram()
+	if dgram == nil {
 		return nil
 	}
-	d := parseTestDatagram(tc.t, tc.endpoint, tc, buf)
+	d := parseTestDatagram(tc.t, tc.endpoint, tc, dgram.b)
+	d.path = dgram.path
 	// Log the datagram before removing ignored frames.
 	// When things go wrong, it's useful to see all the frames.
 	logDatagram(tc.t, "-> conn under test sends", d)
@@ -595,7 +634,7 @@ func datagramEqual(a, b *testDatagram) bool {
 		return false
 	}
 	if a.paddedSize != b.paddedSize ||
-		a.addr != b.addr ||
+		a.path != b.path ||
 		len(a.packets) != len(b.packets) {
 		return false
 	}

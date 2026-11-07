@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.2 AS build
+FROM oven/bun:1.4.4 AS build
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/farm/package.json apps/farm/package.json

@@ -890,6 +890,7 @@ export function createDockerRunner(options = {}) {
         let stdoutBytes = 0
         let stderrBytes = 0
         let settled = false
+        let failure = null
         const finish = (result) => {
           if (settled) return
           settled = true
@@ -898,12 +899,12 @@ export function createDockerRunner(options = {}) {
         }
         const timer = setTimeout(() => {
           child.kill('SIGKILL')
-          finish({
+          failure ??= {
             status: null,
-            stdout: Buffer.concat(stdout).toString('utf8'),
+            stdout: '',
             stderr: 'docker call exceeded its time limit',
             timedOut: true,
-          })
+          }
         }, timeoutMs)
         child.stdout.on('data', (chunk) => {
           if (stdoutBytes >= maxBuffer) return
@@ -916,15 +917,26 @@ export function createDockerRunner(options = {}) {
           stderr.push(chunk)
         })
         child.on('error', (error) => {
-          finish({
+          failure ??= {
             status: null,
             stdout: '',
             stderr: error.message,
             timedOut: false,
-          })
+          }
+        })
+        child.stdin.on('error', () => {
+          // Stream errors do not reach the ChildProcess error listener.
+          failure ??= {
+            status: null,
+            stdout: '',
+            stderr: 'docker stdin write failed',
+            timedOut: false,
+            stdinFailed: true,
+          }
+          child.kill('SIGKILL')
         })
         child.on('close', (status) => {
-          finish({
+          finish(failure ?? {
             status,
             stdout: Buffer.concat(stdout).toString('utf8'),
             stderr: Buffer.concat(stderr).toString('utf8'),
@@ -1487,6 +1499,11 @@ async function analyzeCapture(docker, container, capture) {
     ['exec', '-i', container, 'python3', OBSERVER_MOUNT_PATH, 'analyze'],
     { input: split.text },
   )
+  if (result.stdinFailed) {
+    const error = diagnostic('docker stdin write failed', 'analyze')
+    error.stdinFailed = true
+    throw error
+  }
   if (result.status !== 0)
     throw diagnostic('observer analysis failed inside the container', 'analyze')
   let parsed
@@ -1564,13 +1581,24 @@ async function removeOwned(docker, state) {
   return failures
 }
 
-function removeWorkDirectory(state) {
-  if (!state.workDir) return
+function removeWorkDirectory(state, removeDirectory) {
+  if (!state.workDir) return { errors: [], retained: null }
+  if (state.resources.some((resource) =>
+    resource.kind === 'container' && !state.removedResources.has(resource.name),
+  )) {
+    return {
+      errors: [],
+      retained: { path: state.workDir, reason: 'owned-container-may-remain' },
+    }
+  }
   try {
-    rmSync(state.workDir, { recursive: true, force: true })
+    removeDirectory(state.workDir, { recursive: true, force: true })
+    return { errors: [], retained: null }
   } catch {
-    // The external ledger keeps the diagnostic evidence; the temporary
-    // directory is disposable and its failure is reported by the caller.
+    return {
+      errors: [{ kind: 'work-directory', name: state.workDir, message: 'work directory removal failed' }],
+      retained: { path: state.workDir, reason: 'removal-failed' },
+    }
   }
 }
 
@@ -1876,11 +1904,12 @@ export async function runDiagnostic(options) {
     const deadline = startedAt + settings.observationMs
     while (clock.now() < deadline) {
       const remaining = Math.max(1, deadline - clock.now())
-      const status = await docker.run(
+      const status = await dockerRun(
+        docker,
         ['inspect', '--format', '{{.State.Status}}', containerName],
         { timeoutMs: remaining },
+        'observe',
       )
-      if (status.status !== 0) break
       if (status.stdout.trim() === 'exited') break
       await sleep(Math.min(1000, Math.max(0, deadline - clock.now())))
     }
@@ -1969,6 +1998,7 @@ export async function runDiagnostic(options) {
         invalidRecords = analyzed.invalidRecords
       } catch (error) {
         analysisError = error.message
+        if (error.stdinFailed) throw error
       }
     }
 
@@ -2086,17 +2116,30 @@ export async function runDiagnostic(options) {
         : retry.message,
     }
   })
-  removeWorkDirectory(state)
+  const workCleanup = removeWorkDirectory(state, options.removeDirectory ?? rmSync)
+  finalCleanupErrors.push(...workCleanup.errors)
   state.stages.cleanup = clock.now() - stageStart
   if (result) {
     result.cleanup = {
       errors: finalCleanupErrors,
       firstAttemptErrors: cleanupErrors,
+      retainedWorkDirectory: workCleanup.retained,
       completed: finalCleanupErrors.length === 0,
     }
     result.stages = state.stages
     result.totalElapsedMs = clock.now() - runStartedAt
-    writeLedgerFile(ledgerDir, 'result.json', JSON.stringify(result, null, 2))
+  }
+  const persistenceErrors = []
+  for (const [name, content] of [
+    ['result.json', result],
+    ['retained-work.json', workCleanup.retained],
+  ]) {
+    if (!content) continue
+    try {
+      writeLedgerFile(ledgerDir, name, JSON.stringify(content, null, 2))
+    } catch {
+      persistenceErrors.push({ name, message: 'exclusive ledger write failed' })
+    }
   }
   let failure = caughtError ?? pendingFailure
   if (!failure && finalCleanupErrors.length > 0)
@@ -2104,9 +2147,12 @@ export async function runDiagnostic(options) {
       phase: 'cleanup',
       cleanupErrors: finalCleanupErrors,
     })
+  if (!failure && persistenceErrors.length > 0)
+    failure = diagnostic('ledger persistence did not complete', 'report')
   if (failure) {
     if (failure instanceof DiagnosticError) {
       failure.cleanupErrors = finalCleanupErrors
+      failure.persistenceErrors = persistenceErrors
       failure.firstCleanupErrors = cleanupErrors
       if (result) failure.result = result
       throw failure
@@ -2116,6 +2162,7 @@ export async function runDiagnostic(options) {
       cause: failure,
       cleanupErrors: finalCleanupErrors,
     })
+    wrapped.persistenceErrors = persistenceErrors
     wrapped.firstCleanupErrors = cleanupErrors
     throw wrapped
   }
@@ -2159,6 +2206,7 @@ async function main(argv) {
         phase: error.phase ?? 'unknown',
         cleanupErrors: error.cleanupErrors ?? [],
         firstCleanupErrors: error.firstCleanupErrors ?? [],
+        persistenceErrors: error.persistenceErrors ?? [],
       })}\n`,
     )
     return 1

@@ -349,22 +349,34 @@ and the run continues, because the observation is still worth keeping.
 | baseline  |                                                                                                                                                 | a failed inventory call, with its exit status           |
 | discover  | the configuration path cannot be derived or extracted, no usable entrypoint candidate, a Klipper source hash differs                            |                                                         |
 | transform | not exactly one klippy command, unsupported interpreter, metacharacters, a changed policy                                                       |                                                         |
-| observe   | the container cannot be created or started, a Docker call times out                                                                             |                                                         |
+| observe   | the container cannot be created or started, an observation poll fails or times out                                                                             |                                                         |
 | verify    | the wrapper is verified absent from the running process command line                                                                            | an unreadable Supervisor or process command line        |
 | capture   |                                                                                                                                                 | an unusable routing or an unreadable capture source     |
-| analyze   |                                                                                                                                                 | a failing analyzer, recorded as `observerAnalysisError` |
+| analyze   | Docker stdin fails while sending analyzer input                                                                                                 | a failing analyzer, recorded as `observerAnalysisError` |
 | cleanup   | a removal still fails after the retry                                                                                                           |                                                         |
 
 The failure keeps the primary error and lists cleanup failures next to it.
 The report retains `cleanup.firstAttemptErrors` even when the bounded retry
 succeeds; a failure also includes `firstCleanupErrors`. A confirmed missing
 resource is treated as already removed; an inspection failure remains an error.
+A successful observation poll reporting `exited` ends observation normally.
+Docker stdin failures return a structured error after the child closes, run
+owned cleanup and exit 1 without including analyzer input in the error.
+They skip report inspection so a later report failure cannot replace the analyze error.
+Work directory removal failures also make cleanup incomplete and exit 1.
+If an owned container may remain, its mounted work directory is retained.
+The private external ledger records the retained path and reason in
+`retained-work.json` and, when available, `cleanup.retainedWorkDirectory`.
 
 ## Ledger isolation
 
 Ledger files are created exclusively with private permissions; an existing file
 or symlink cannot be overwritten. The ledger directory must be private and
 owned by the current user, and its work directory must be new.
+Failures to persist `result.json` or `retained-work.json` are reported as sanitized
+`persistenceErrors` entries with the file name and a generic message. They retain
+the primary error and cleanup receipts. If neither execution nor cleanup failed,
+a persistence failure exits 1 in the report phase. Existing files remain untouched.
 
 The evidence directory never lives inside the repository. The refusal covers
 the current worktree, the shared git directory and every linked worktree of

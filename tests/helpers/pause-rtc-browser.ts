@@ -70,8 +70,7 @@ export async function createPauseRtcBrowserActor(
   let client: PauseBrowserSignallingClient | undefined,
     proofs: PauseProofsReady | undefined
   let nonce:
-    | Extract<PausePhaseFrame, { t: 'control.admission-nonce' }>
-    | undefined
+    Extract<PausePhaseFrame, { t: 'control.admission-nonce' }> | undefined
   let receipt:
     | Readonly<{
         transportId: string

@@ -402,12 +402,10 @@ export async function runMovingRtspNativePhase(
   await attestExecutable(fixture)
   await attestExecutable(helper)
   const { runFiniteMediaPhase } = await import('./native-media-harness.ts')
-  const { writeMovingHeader, writeMovingAU, readMovingSummary } = await import(
-    '../../../tools/rtsp-ingest/integration/moving-fixture-input.ts'
-  )
-  const { openHelperSource } = await import(
-    '../../../tools/rtsp-ingest/supervisor/process.ts'
-  )
+  const { writeMovingHeader, writeMovingAU, readMovingSummary } =
+    await import('../../../tools/rtsp-ingest/integration/moving-fixture-input.ts')
+  const { openHelperSource } =
+    await import('../../../tools/rtsp-ingest/supervisor/process.ts')
   await runFiniteMediaPhase('native', {
     async prepare(encoded) {
       if (

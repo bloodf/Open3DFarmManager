@@ -31,10 +31,7 @@ export async function waitFixtureClose(
 }
 
 export type FixtureStream =
-  | 'nitro.stdout'
-  | 'nitro.stderr'
-  | 'acceptance.stdout'
-  | 'acceptance.stderr'
+  'nitro.stdout' | 'nitro.stderr' | 'acceptance.stdout' | 'acceptance.stderr'
 export function createFixtureCapture() {
   const logs = new Map<FixtureStream, string>()
   return {

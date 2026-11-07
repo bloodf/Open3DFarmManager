@@ -366,9 +366,8 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
 })
 
 test('adapter compares the complete trusted expected binding and role before any key import', async (t) => {
-  const { encodeRtcProof, verifyExpectedRtcProof } = await import(
-    '../../packages/farm-protocol/src/rtc-session-binding.ts'
-  )
+  const { encodeRtcProof, verifyExpectedRtcProof } =
+    await import('../../packages/farm-protocol/src/rtc-session-binding.ts')
   const f = await fixture(),
     other = await fixture()
   const signature = await signRtcSessionProof(

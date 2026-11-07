@@ -412,8 +412,7 @@ export async function testPauseConnectorRevocations(
       const blocker = await admin.reserve()
       let open = false
       let pending:
-        | ReturnType<typeof first.authority.issueCapability>
-        | undefined
+        ReturnType<typeof first.authority.issueCapability> | undefined
       try {
         await blocker`BEGIN`
         open = true

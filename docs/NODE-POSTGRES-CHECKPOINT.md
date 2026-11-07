@@ -4,7 +4,7 @@ The farm application uses Nitro's `node-server` preset. Its PostgreSQL repositor
 
 ## Preserved behavior
 
-Enrollment, telemetry and session repositories retain their SQL, transaction boundaries, row locks, statement/lock timeouts and restricted-role requirements. Session expiry remains terminal after observation. Postgres.js `begin` reserves one connection and waits for commit before resolving; commit failure cannot return successful authorization. Telemetry supplies JSONB values through `tx.json`. SQLSTATE assertions inspect the driver's `code` field.
+Enrollment, telemetry and session repositories retain their SQL, transaction boundaries, row locks, statement/lock timeouts and restricted-role requirements. Session expiry remains terminal after observation. Postgres.js `begin` reserves one connection and waits for commit before resolving; commit failure cannot return successful authorization. The library telemetry store supplies JSONB values through `tx.json`; maintained credential acceptance uses the transaction helper `save.json`. SQLSTATE assertions inspect the driver's `code` field.
 
 Migration and integration scripts use the same driver, explicit loopback fixture configuration and existing disposable-database opt-in. Async waits use `node:timers/promises`. Pool cleanup uses `end`, which permanently ends the pool; Postgres.js `close` can reconnect and would not establish the required closed-pool failure behavior. Connector queue `close` calls retain their original meaning.
 
@@ -16,6 +16,6 @@ The exact registry tarball's SHA-512 and package metadata were verified without 
 
 The coordinator executed the enrollment and session harnesses with Node 24.20.0 against isolated PostgreSQL 17.11, including each post-restart phase. Proof/revocation, restricted-role denials, telemetry JSONB conflicts and idempotence, session expiry/revocation races, COMMIT failure and closed-pool rejection passed. The migration helper also passed under Node with migrations 0001 through 0005, including concurrent runners and transactional DDL rollback.
 
-The compiled Nuxt Node application subsequently passed the independent-login HTTPS/Chromium harness using a restricted synthetic database role. That exercise verifies the selected runtime and pool integration for login, not every future endpoint or complete Phase 0 acceptance. The integrated `check:all` passed with 189 Bun tests, 95 Node tests and both builds; twelve existing browser tests also passed.
+The compiled Nuxt Node application subsequently passed the independent-login HTTPS/Chromium harness using a restricted synthetic database role. That exercise verifies the selected runtime and pool integration for login, not every future endpoint or complete Phase 0 acceptance. At that historical checkpoint, the integrated `check:all` passed with 189 Bun tests, 95 Node tests and both builds; twelve existing browser tests also passed.
 
 The implementation worker did not start resources. The coordinator owned the disposable database and application processes used for validation; no physical printer, production service or published change was involved. Production account provisioning and authenticated enrollment remain separate work.

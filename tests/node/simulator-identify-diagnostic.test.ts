@@ -909,6 +909,52 @@ test('parses the pinned supervisor configuration and finds one klippy command', 
   )
 })
 
+// Independently authored schema fixture; no upstream configuration is copied.
+test('parses the standard RPC factory before transforming and preserves its section', () => {
+  const rpc =
+    '[rpcinterface:supervisor]\nsupervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface\n\n'
+  const source = rpc + SUPERVISOR_CONFIG
+  const parsed = diagnostic.parseSupervisorConfig(source)
+  assert.equal(parsed.sections[0]?.type, 'rpcinterface')
+  assert.equal(parsed.sections[0]?.name, 'supervisor')
+  assert.equal(
+    parsed.sections[0]?.entries[0]?.key,
+    'supervisor.rpcinterface_factory',
+  )
+  assert.equal(
+    parsed.sections[0]?.entries[0]?.value,
+    'supervisor.rpcinterface:make_main_rpcinterface',
+  )
+  const transformed = diagnostic.transformSupervisorConfig(source, {
+    observerPath: diagnostic.OBSERVER_MOUNT_PATH,
+  })
+  assert.equal(
+    transformed.text,
+    source.replace(
+      'command=python3 /home/printer/klipper/klippy/klippy.py',
+      `command=python3 ${diagnostic.OBSERVER_MOUNT_PATH} observe /home/printer/klipper --`,
+    ),
+  )
+})
+
+test('rejects other dotted keys and the RPC factory outside its standard section', () => {
+  for (const source of [
+    '[rpcinterface:supervisor]\nsupervisor.invalid_factory=value',
+    '[rpcinterface:supervisor]\nsupervisor.rpcinterface_factory.extra=value',
+    '[rpcinterface:custom]\nsupervisor.rpcinterface_factory=value',
+    '[program:klipper]\nsupervisor.rpcinterface_factory=value',
+    '[supervisord]\nsupervisor.rpcinterface_factory=value',
+    'supervisor.rpcinterface_factory=value',
+  ]) {
+    assert.throws(
+      () => diagnostic.parseSupervisorConfig(source),
+      (error: DiagnosticErrorShape) =>
+        error.phase === 'parse' &&
+        error.message.includes('unsupported supervisor configuration key'),
+    )
+  }
+})
+
 test('rejects shell metacharacters in a supervisor command', () => {
   assert.throws(
     () =>

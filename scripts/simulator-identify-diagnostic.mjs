@@ -181,7 +181,11 @@ export function parseSupervisorConfig(text) {
         'parse',
       )
     const key = line.slice(0, separator).trim()
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+    const standardRpcFactory =
+      current?.type === 'rpcinterface' &&
+      current.name === 'supervisor' &&
+      key === 'supervisor.rpcinterface_factory'
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !standardRpcFactory)
       throw diagnostic(
         `unsupported supervisor configuration key at line ${index + 1}`,
         'parse',

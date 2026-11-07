@@ -35,6 +35,67 @@ installs anything and never resolves a binary from a repository path, so a
 host whose `PATH` points at another `docker` executes that binary. The
 programmatic seam accepts a different binary name for a controlled harness.
 
+## RPC parser correction and Cortex preflight
+
+The second Linux diagnostic at head `9d9cc234857c47c7e2fa860cfac24afcc76acea6`
+completed discovery, then failed before observation with
+`unsupported supervisor configuration key at line 12`. No live observation
+container or session started. The original failure evidence must be retained.
+The parser now accepts only `supervisor.rpcinterface_factory` in
+`[rpcinterface:supervisor]` as an exception to its ordinary key grammar.
+Its value and source text are preserved; no factory is executed by the parser.
+Other dotted keys and this field in other sections remain rejected.
+
+The complete 2,111-byte upstream configuration at
+[commit e272bcd](https://github.com/mainsail-crew/virtual-klipper-printer/blob/e272bcd1060dad6cee1598d6debdaa5d5afae3c7/config/supervisord.conf)
+was inspected statically. Its SHA256 is
+`33d472433a78f681fc6b8b05c23d7f734caa0b19240fdd131cc867be6f8b3008`,
+matching the separately reported image extraction. Keep the GPL file outside
+this MIT repository. All section headers, ordinary keys, spacing, blank lines,
+inline value comments and the RPC key fit the corrected parser grammar.
+There are no continuation lines. Only the Klippy command is tokenized by the
+transformer; commands in the other three program sections stay unchanged.
+
+A further transform blocker is visible in that exact file: the Klippy
+interpreter is `/home/printer/python-env/bin/python`. The current interpreter
+guard accepts only `python3` or `/usr/bin/python3` with an optional numeric
+suffix. This correction does not broaden that guard. Runtime CWD, MCU state,
+readiness and identification remain unknown. Do not attempt another heavy
+run until the full original configuration passes a separately reviewed
+transform preflight.
+
+On Cortex, with the parent's authorization and resource ledger, perform these
+cheap checks before any Docker or simulator attempt:
+
+1. Fetch the exact upstream file above into bounded external GPL evidence and
+   verify its SHA256 against the image extraction. Abort on any mismatch.
+2. RED: export the runner from base `9d9cc234857c47c7e2fa860cfac24afcc76acea6`
+   into an external `.mjs` file. Import it without invoking `runDiagnostic`.
+   Pass the entire unmodified config to `parseSupervisorConfig`; assert phase
+   `parse` and exact message
+   `unsupported supervisor configuration key at line 12`.
+3. GREEN: import the candidate runner without invoking `runDiagnostic` and
+   parse the same entire original config. Assert the section sequence is
+   `supervisord`, `rpcinterface:supervisor`, `supervisorctl`,
+   `unix_http_server`, `program:simulavr`, `program:klipper`,
+   `program:moonraker`, `program:webcamd`. Assert the RPC field's value remains
+   `supervisor.rpcinterface:make_main_rpcinterface` and the Klippy command
+   matches the original bytes. No normalized or edited config is acceptable.
+4. Call `transformSupervisorConfig` on that original config with
+   `OBSERVER_MOUNT_PATH`. The expected current result is phase `transform`,
+   message `unsupported interpreter invocation in klippy command`.
+   Record this as a blocked transform gate, never as runtime acceptance.
+5. Run the focused Node suite on the candidate. Preserve all prior 80 cases
+   and assertions; the two new cases check parse-before-transform,
+   byte-preserving transformation of an independently authored synthetic
+   schema, invalid dotted fields and wrong sections. Run required full checks
+   and obtain fresh exact-head review before publication.
+
+The RED/GREEN steps above are instructions, not executed results. This Mac
+source-only correction runs no tests, builds, installations or Docker commands.
+Remove disposable exported modules after verification; retain only bounded GPL
+source and diagnostic evidence outside the repository.
+
 ## Invocation
 
 ```sh

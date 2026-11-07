@@ -6,11 +6,18 @@ vi.mock('ws', () => ({
     ping() {}
   },
 }))
-import WebSocket from 'ws'
 import {
   createSpoolmanProvider,
   type SpoolmanSnapshot,
 } from '../../packages/connector/src/runtime/spoolman-provider.ts'
+type SocketFactory = NonNullable<
+  NonNullable<
+    Parameters<typeof createSpoolmanProvider>[0]['transport']
+  >['socket']
+>
+const { default: WebSocket } = await vi.importMock<{
+  default: new (url: string) => ReturnType<SocketFactory>
+}>('ws')
 const config = {
   origin: 'http://spoolman.local:8000',
   farmId: '00000000-0000-4000-8000-000000000001',

@@ -534,6 +534,25 @@ test('pause signalling requires explicit independent canonical fields', async ()
     parsed.signalling.credentialAudience,
   )
   assert.equal(Object.isFrozen(parsed.signalling), true)
+  for (const endpoint of [
+    {
+      origin: 'https://farm.example:8443',
+      endpoint: 'wss://farm.example:8443/api/signalling/pause-connector',
+    },
+    {
+      origin: 'https://[::1]:8443',
+      endpoint: 'wss://[::1]:8443/api/signalling/pause-connector',
+    },
+  ]) {
+    const signalling = {
+      ...SIGNALLING,
+      ...endpoint,
+    }
+    assert.deepEqual(
+      parsePauseRuntimeConfig({ ...base, signalling }).signalling,
+      signalling,
+    )
+  }
   assert.throws(() => parsePauseRuntimeConfig(base))
   const directory = temporaryDirectory()
   try {
@@ -563,6 +582,9 @@ test('pause signalling requires explicit independent canonical fields', async ()
     { endpoint: 'wss://other.example/api/signalling/pause-connector' },
     { endpoint: 'wss://farm.example/api/signalling/connector' },
     { endpoint: 'wss://farm.example/api/signalling/pause-connector?x=1' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector?' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector#' },
+    { endpoint: 'wss://farm.example/api/signalling/pause-connector#fragment' },
     { endpoint: 'wss://user@farm.example/api/signalling/pause-connector' },
     { endpoint: 'wss://farm.example:443/api/signalling/pause-connector' },
     { audience: '' },

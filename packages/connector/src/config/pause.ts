@@ -44,23 +44,13 @@ export const PauseRuntimeConfigSchema = z.strictObject({
       audience: PairingProofAudience,
       credentialAudience: PairingProofAudience,
     })
-    .refine((value) => {
-      try {
-        const target = new URL(value.endpoint)
-        return (
-          target.href === value.endpoint &&
-          target.protocol === 'wss:' &&
-          target.host === new URL(value.origin).host &&
-          target.pathname === '/api/signalling/pause-connector' &&
-          !target.search &&
-          !target.hash &&
-          !target.username &&
-          !target.password
-        )
-      } catch {
-        return false
-      }
-    }, 'Expected the exact configured WSS pause Connector endpoint'),
+    .refine(
+      (value) =>
+        value.endpoint ===
+        value.origin.replace(/^https:/, 'wss:') +
+          '/api/signalling/pause-connector',
+      'Expected the exact configured WSS pause Connector endpoint',
+    ),
 })
 
 export type PauseIssuerEntry = Readonly<{

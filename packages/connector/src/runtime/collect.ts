@@ -1,3 +1,7 @@
+import {
+  createSpoolmanProvider,
+  type SpoolmanSnapshot,
+} from './spoolman-provider.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -65,6 +69,7 @@ export async function collectLocalTelemetry(input: {
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
   config: LocalCollectorConfig
+  onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   queue: TelemetryQueue
@@ -103,6 +108,14 @@ export async function collectIntoQueue(input: {
   }
   try {
     loss(queue.recovery, 'recovery')
+    if (config.spoolman && !signal.aborted) {
+      const provider = createSpoolmanProvider({
+        config: config.spoolman,
+        signal,
+        ...(input.onInventory ? { onSnapshot: input.onInventory } : {}),
+      })
+      subscriptions.push({ done: provider.done.catch(fail) })
+    }
     for (const assignment of config.printers) {
       if (signal.aborted) break
       const subscription = createMoonrakerSubscription({

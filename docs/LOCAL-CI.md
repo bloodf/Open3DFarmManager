@@ -12,13 +12,21 @@ bash scripts/local-ci.sh code
 
 The code job requires pnpm 12.18.0, Node 24.22.2, existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
-separately; this runner never installs operating-system packages. It follows
-`.github/workflows/ci.yml`: frozen dependency install with scripts disabled,
-`lint`, `check:all`, the built Connector version command and Playwright. The
-workflow additionally runs Playwright's `install --with-deps` on Ubuntu. Local
-browser, operating system and resource scheduling may differ from GitHub.
-`check:all` itself runs lint again, as the workflow does. Missing prerequisites
+separately; this runner never installs operating-system packages. Like
+`.github/workflows/ci.yml`, it uses a frozen dependency install with scripts
+disabled, runs `check:all`, checks the built Connector version and runs
+Playwright. The local runner also runs `lint` before `check:all`, which runs
+lint again. The workflow runs lint only through `check:all` and additionally
+runs Playwright's `install --with-deps` on Ubuntu. Local browser, operating
+system and resource scheduling may differ from GitHub. Missing prerequisites
 or failed tests do not produce a passing result.
+
+`check:all` covers lint, typechecking, the root unit and Node test suites,
+and the build. It does not run the `packages/webrtc-experiment` package
+self-tests. Playwright runs separately from `check:all`; its default suite
+skips farm-view tests unless `FARM_VIEW_E2E=true`. Other browser or E2E
+experiments are separate from these checks and may be deferred; this does not
+waive any required hosted checks.
 
 Optional container jobs require explicit opt-in:
 

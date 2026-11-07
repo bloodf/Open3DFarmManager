@@ -12,6 +12,11 @@ import {
   type PauseSignallingServerFrame,
 } from '../../../../packages/farm-protocol/src/pause-signalling.ts'
 import { PauseSignallingCoordinator } from './pause-signalling-coordinator.ts'
+import {
+  DISABLED_SIGNALLING_METADATA,
+  validatedSignallingMetadata,
+  type SignallingMetadata,
+} from './signalling-metadata.ts'
 import type { PauseNegotiationRuntime } from '../utils/pause-authority/runtime.ts'
 import {
   openPauseNegotiation,
@@ -342,6 +347,19 @@ export class SignallingRuntime {
   get isClosed(): boolean {
     return this.#closed
   }
+  /** Advisory public fields only. This does not allocate or admit a peer. */
+  pauseMetadata(): SignallingMetadata {
+    try {
+      const facade = this.#matchingPauseFacade()
+      if (!facade) return DISABLED_SIGNALLING_METADATA
+      const metadata = validatedSignallingMetadata(facade)
+      return this.#matchingPauseFacade() === facade
+        ? metadata
+        : DISABLED_SIGNALLING_METADATA
+    } catch {
+      return DISABLED_SIGNALLING_METADATA
+    }
+  }
   close(): void {
     this.#closed = true
     this.#coordinator.dispose()
@@ -361,10 +379,11 @@ export class SignallingRuntime {
       return undefined
     }
   }
-  #pauseAdmission(): PauseOwner {
+  #matchingPauseFacade(): PauseNegotiationRuntime | undefined {
     const config = this.#pauseConfig,
       facade = config?.current()
     if (
+      this.#closed ||
       !config ||
       !facade ||
       facade.signal.aborted ||
@@ -375,7 +394,13 @@ export class SignallingRuntime {
       facade.databaseIdentity.address !== config.databaseIdentity.address ||
       facade.databaseIdentity.port !== config.databaseIdentity.port
     )
-      throw Error('Pause runtime unavailable')
+      return undefined
+    return facade
+  }
+  #pauseAdmission(): PauseOwner {
+    const facade = this.#matchingPauseFacade()
+    const config = this.#pauseConfig
+    if (!facade || !config) throw Error('Pause runtime unavailable')
     if (this.#pauseOwner?.facade === facade) return this.#pauseOwner
     if (this.#pauseOwner) this.#retirePause(this.#pauseOwner)
     const coordinator = new PauseSignallingCoordinator({

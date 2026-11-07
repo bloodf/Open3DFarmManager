@@ -1393,3 +1393,93 @@ Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
 
 ```
+
+## Separately admitted unprivileged diagnostic startup
+
+The original startup assessment and actual Linux failure at head
+`1c80f59ca9c35e0a45e4f44365a0f47c7766fd64` remain valid. The stock `/bin/start`
+cannot complete with `no-new-privileges`: it invokes `sudo` to replace
+`/bin/systemctl`, even when data ownership is already correct. The single
+observation exited after 67 ms with a sudo startup error, before observer
+capture. That failure establishes no MCU behavior or readiness result.
+
+The coordinator explicitly admitted a separate finite diagnostic contract.
+Select it with `--startup-variant=unprivileged-diagnostic-v1` in addition to
+the existing opt-in and private external ledger arguments. Omission retains
+the previous startup route; it does not silently retry with this variant.
+Unknown variant names are refused. The stock simulator, Compose and CI
+readiness flow are unchanged. Neither route establishes stock parity.
+
+The new route admits only the pinned image/platform, entrypoint `[/bin/start]`,
+empty/null Cmd, user `printer`, working directory `/home/printer`, and no
+conflicting HOME environment entry. It checks the full 3,492-byte startup
+SHA256 `4b2fac02b4c399495b2f908e11289635121286ead321e30cf297293f0ee651ee`
+and the complete stock config at `/etc/supervisor/supervisord.conf` against
+SHA256 `33d472433a78f681fc6b8b05c23d7f734caa0b19240fdd131cc867be6f8b3008`.
+Unknown scripts/configurations are rejected before observation creation. The
+existing full-script discovery and Klipper source guards remain in force.
+The upstream files retain their GPL license and stay outside this MIT project.
+
+The independently authored MIT helper
+`scripts/simulator-unprivileged-startup.py` is hash-pinned by the runner and
+mounted read-only. The only replacement entrypoint is `/usr/bin/python3`,
+with fixed argv `-I -B /opt/o3dfm/unprivileged_startup.py` followed by the
+runner-derived SHA256 of the transformed config. There is no user-provided
+shell, executable, setup command or helper-path option. Before setup, the
+helper checks UID/GID 1000, HOME, the original startup bytes and transformed
+config hash. It refuses a pre-existing `/bin/systemctl`.
+
+The initialization delta is explicit:
+
+- The data root is a fresh 128 MiB `noexec` tmpfs, UID/GID 1000, mode 0700.
+  Communications use a separate 16 MiB `noexec` tmpfs with the same ownership.
+  No persistent data volume or privileged ownership-repair process is created.
+  All data, including logs and Moonraker's database, is ephemeral.
+- The helper refuses an unexpected owner/type, nonempty data or communications
+  directory, symlink/special default entry, or existing timelapse target. It
+  creates the fixed data subdirectories as the printer user. It copies regular
+  example-config and image files from the immutable image, with a combined
+  1,024-entry and 16 MiB budget, and creates the two fixed timelapse links.
+  The diagnostic copies all regular image-directory entries, rather than a
+  shell JPG glob. A missing expected source or directory fails closed.
+- No `chown`, `sudo`, system-directory write, `systemctl` shim or service-control
+  invocation is performed by the launcher. Service management through
+  `systemctl` remains unavailable. Existing programs may encounter that absence;
+  the diagnostic makes no claim of equivalent Moonraker/service behavior.
+- The helper replaces itself with `/usr/bin/supervisord -c
+/etc/supervisor/supervisord.conf -j
+/home/printer/printer_data/comms/supervisord.pid`. Supervisor 4.2.5's reviewed
+  options source defines `-j` as its PID-file override. This server CLI delta is
+  recorded separately; the configuration bytes still change only the existing
+  Klippy observer command. All program arguments, section order, restart policy
+  and environment directives remain unchanged. An ownership or permission
+  failure stops startup instead of requesting privilege.
+
+Every observation specification now emits and requires `--cap-drop ALL` and
+`--security-opt no-new-privileges:true`; the previous cap-drop source gap is
+closed explicitly. Root-user overrides and added capabilities are rejected.
+No privileged mode, devices, external network, published ports, wider writable
+host paths, PTY or additional reader are added. CPU, memory, PID, source,
+capture and 90-second deadline guards are unchanged. The helper's filesystem
+and copy bounds are additional diagnostic limits, not readiness extensions.
+
+Results identify `startup.variant`, `stockEquivalent: false`, helper/startup
+hashes, initialization and tmpfs deltas, systemctl disposition and the exact
+Supervisor PID override. Isolation records explicitly report dropped
+capabilities and no-new-privileges. `readiness` remains `not-evaluated`.
+A captured identification session would still be diagnostic-only evidence.
+
+This change has source/static checks only on Mac. No new observation or tests
+ran here. The original 90 regression oracles remain; fixture defaults only add
+printer-user/empty-environment metadata, and the original isolation test gains
+required cap-drop/no-new-privileges assertions. Six new tests cover fixed argv
+and mounts, unknown variant and synthetic-provenance rejection, real finite
+filesystem initialization and rejection paths, exact external provenance and
+variant reporting without extra configuration edits. The two exact-artifact
+tests require `O3DFM_REVIEWED_STARTUP` and `O3DFM_REVIEWED_SUPERVISOR_CONFIG`
+to point to the retained external GPL files. They verify the pinned hashes and
+skip explicitly if those paths are absent; a run with those skips does not
+qualify this variant. Do not commit these upstream artifacts into the project.
+The parent must supply both paths for Linux source gates, run RED/GREEN and
+full checks, obtain a fresh independent review of the final head, then admit
+one separate observation. No runtime retry is authorized by this document.

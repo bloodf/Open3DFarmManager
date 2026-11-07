@@ -38,6 +38,14 @@ export const PINNED_PLATFORM = 'linux/amd64'
 export const OBSERVER_SOURCE_SHA256 =
   '791805817b88d1f365a49a2c968c028026a95d8b6fb500f2956af833e05033fb'
 export const OBSERVER_MOUNT_PATH = '/opt/o3dfm/serial_diagnostic.py'
+export const DIAGNOSTIC_STARTUP_VARIANT = 'unprivileged-diagnostic-v1'
+export const STARTUP_HELPER_MOUNT = '/opt/o3dfm/unprivileged_startup.py'
+export const STARTUP_HELPER_SHA256 =
+  '15e74179188f1d88d3a78987d794257e004f3539d767fa6fdd5db470fe734248'
+export const STOCK_STARTUP_SHA256 =
+  '4b2fac02b4c399495b2f908e11289635121286ead321e30cf297293f0ee651ee'
+export const STOCK_CONFIG_SHA256 =
+  '33d472433a78f681fc6b8b05c23d7f734caa0b19240fdd131cc867be6f8b3008'
 export const OBSERVER_PREFIX = 'O3DFM_SERIAL_DIAGNOSTIC '
 export const READINESS_BUDGET_MS = 90_000
 export const DOCKER_CALL_TIMEOUT_MS = 10_000
@@ -663,6 +671,8 @@ const FORBIDDEN_OPTION_NAMES = [
   '--publish',
   '--cap-add',
   '--cap-add-all',
+  '--user',
+  '-u',
   '--pid',
   '--ipc',
   '--userns',
@@ -692,6 +702,8 @@ export function buildContainerArguments(options) {
     options.memory,
     '--pids-limit',
     options.pidsLimit,
+    '--cap-drop',
+    'ALL',
     '--security-opt',
     'no-new-privileges:true',
     '--tmpfs',
@@ -701,7 +713,32 @@ export function buildContainerArguments(options) {
   ]
   for (const [key, value] of options.labels)
     arguments_.push('--label', `${key}=${value}`)
-  arguments_.push('--volume', `${options.volume}:/home/printer/printer_data`)
+  if (options.startup) {
+    if (
+      options.startup.variant !== DIAGNOSTIC_STARTUP_VARIANT ||
+      options.startup.helperPath !==
+        join(SCRIPT_DIRECTORY, 'simulator-unprivileged-startup.py') ||
+      options.configContainerPath !== '/etc/supervisor/supervisord.conf'
+    )
+      throw diagnostic(
+        'unsupported diagnostic startup specification',
+        'isolation',
+      )
+    arguments_.push(
+      '--tmpfs',
+      '/home/printer/printer_data:uid=1000,gid=1000,mode=0700,noexec,size=128m',
+      '--volume',
+      `${options.startup.helperPath}:${STARTUP_HELPER_MOUNT}:ro`,
+      '--entrypoint',
+      '/usr/bin/python3',
+    )
+    // The nested mount also needs printer ownership. No root setup container.
+    const comms = arguments_.indexOf('/home/printer/printer_data/comms:noexec')
+    arguments_[comms] =
+      '/home/printer/printer_data/comms:uid=1000,gid=1000,mode=0700,noexec,size=16m'
+  } else {
+    arguments_.push('--volume', `${options.volume}:/home/printer/printer_data`)
+  }
   arguments_.push(
     '--volume',
     `${options.observerHostPath}:${OBSERVER_MOUNT_PATH}:ro`,
@@ -711,6 +748,16 @@ export function buildContainerArguments(options) {
     `${options.configHostPath}:${options.configContainerPath}:ro`,
   )
   arguments_.push(options.image)
+  if (options.startup) {
+    if (!/^[0-9a-f]{64}$/.test(options.startup.configSha256))
+      throw diagnostic('invalid diagnostic configuration digest', 'isolation')
+    arguments_.push(
+      '-I',
+      '-B',
+      STARTUP_HELPER_MOUNT,
+      options.startup.configSha256,
+    )
+  }
   return arguments_
 }
 
@@ -744,6 +791,17 @@ export function assertContainerIsolation(arguments_) {
       )
     if (argument.startsWith('-p') && argument !== '--pull')
       throw diagnostic('container specification publishes a port', 'isolation')
+  }
+  for (const [flag, required] of [
+    ['--cap-drop', 'ALL'],
+    ['--security-opt', 'no-new-privileges:true'],
+  ]) {
+    const position = arguments_.indexOf(flag)
+    if (position === -1 || arguments_[position + 1] !== required)
+      throw diagnostic(
+        `container specification lacks required ${flag}`,
+        'isolation',
+      )
   }
   const network = arguments_.indexOf('--network')
   if (network === -1 || arguments_[network + 1] !== 'none')
@@ -800,6 +858,12 @@ const ENDPOINT_ARGUMENTS = [
  * unpinned container or observe longer than the readiness budget.
  */
 export function assertRunSettings(settings, phase = 'arguments') {
+  if (
+    settings.startupVariant !== undefined &&
+    settings.startupVariant !== 'stock' &&
+    settings.startupVariant !== DIAGNOSTIC_STARTUP_VARIANT
+  )
+    throw diagnostic('unknown diagnostic startup variant', phase)
   if (settings.image !== PINNED_IMAGE_REFERENCE)
     throw diagnostic(
       'image reference does not match the reviewed pinned amd64 image',
@@ -846,6 +910,10 @@ export function parseArguments(argv) {
     }
     if (argument.startsWith('--ledger-dir=')) {
       options.ledgerDir = argument.slice('--ledger-dir='.length)
+      continue
+    }
+    if (argument.startsWith('--startup-variant=')) {
+      options.startupVariant = argument.slice('--startup-variant='.length)
       continue
     }
     if (argument.startsWith('--image=')) {
@@ -1204,7 +1272,39 @@ async function discoverSupervisorConfig(docker, options, state) {
       `supervisor configuration ${configText.reason}`,
       'discover',
     )
-  return { configPath, configText: configText.text }
+  return { configPath, configText: configText.text, script, imageConfig }
+}
+
+/** Exact provenance gate for the separately admitted finite startup. */
+export function validateDiagnosticStartup(discovered) {
+  const config = discovered.imageConfig
+  if (
+    JSON.stringify(config.Entrypoint) !== JSON.stringify(['/bin/start']) ||
+    (config.Cmd !== null && JSON.stringify(config.Cmd) !== '[]') ||
+    config.WorkingDir !== '/home/printer' ||
+    config.User !== 'printer' ||
+    !Array.isArray(config.Env) ||
+    !config.Env.every((value) => typeof value === 'string') ||
+    config.Env.filter((value) => value.startsWith('HOME=')).length > 1 ||
+    config.Env.some(
+      (value) => value.startsWith('HOME=') && value !== 'HOME=/home/printer',
+    ) ||
+    Buffer.byteLength(discovered.script) !== 3492 ||
+    sha256(discovered.script) !== STOCK_STARTUP_SHA256 ||
+    discovered.configPath !== '/etc/supervisor/supervisord.conf' ||
+    sha256(discovered.configText) !== STOCK_CONFIG_SHA256
+  )
+    throw diagnostic(
+      'unprivileged diagnostic startup provenance rejected',
+      'transform',
+    )
+  const helperPath = join(SCRIPT_DIRECTORY, 'simulator-unprivileged-startup.py')
+  if (digestOfFile(helperPath) !== STARTUP_HELPER_SHA256)
+    throw diagnostic(
+      'diagnostic startup helper does not match reviewed hash',
+      'transform',
+    )
+  return { helperPath, variant: DIAGNOSTIC_STARTUP_VARIANT }
 }
 
 async function verifyKlipperSources(docker, state, root, pins) {
@@ -1855,6 +1955,7 @@ export async function runDiagnostic(options) {
     observerPath:
       options.observerPath ??
       join(REPOSITORY_ROOT, 'infra/sim/experiments/serial_diagnostic.py'),
+    startupVariant: options.startupVariant ?? 'stock',
     image: options.image ?? PINNED_IMAGE_REFERENCE,
     platform: options.platform ?? PINNED_PLATFORM,
     observationMs: options.observationMs ?? READINESS_BUDGET_MS,
@@ -1971,6 +2072,10 @@ export async function runDiagnostic(options) {
 
     // Phase: transform ---------------------------------------------------
     enterStage('transform')
+    const startup =
+      settings.startupVariant === DIAGNOSTIC_STARTUP_VARIANT
+        ? validateDiagnosticStartup(discovered)
+        : null
     const transformed = transformSupervisorConfig(discovered.configText, {
       observerPath: OBSERVER_MOUNT_PATH,
     })
@@ -1991,13 +2096,15 @@ export async function runDiagnostic(options) {
     // Phase: observe -----------------------------------------------------
     enterStage('observe')
     const volumeName = `${state.runName}-data`
-    state.resources.push({ kind: 'volume', name: volumeName })
-    await dockerRun(
-      docker,
-      ['volume', 'create', ...state.labelArguments, volumeName],
-      {},
-      'observe',
-    )
+    if (!startup) {
+      state.resources.push({ kind: 'volume', name: volumeName })
+      await dockerRun(
+        docker,
+        ['volume', 'create', ...state.labelArguments, volumeName],
+        {},
+        'observe',
+      )
+    }
     const containerName = state.runName
     const containerArguments = buildContainerArguments({
       name: containerName,
@@ -2014,6 +2121,9 @@ export async function runDiagnostic(options) {
       observerHostPath: settings.observerPath,
       configHostPath: transformedPath,
       configContainerPath: discovered.configPath,
+      startup: startup
+        ? { ...startup, configSha256: sha256(transformed.text) }
+        : null,
     })
     assertContainerIsolation(containerArguments)
     state.resources.push({ kind: 'container', name: containerName })
@@ -2151,6 +2261,30 @@ export async function runDiagnostic(options) {
         imageDigest: PINNED_AMD64_DIGEST,
       },
       sources: verifiedSources,
+      startup: {
+        variant: settings.startupVariant,
+        stockEquivalent: false,
+        ...(startup
+          ? {
+              helperSha256: STARTUP_HELPER_SHA256,
+              stockStartupSha256: STOCK_STARTUP_SHA256,
+              initialization:
+                'fresh-printer-owned-tmpfs-bounded-defaults-and-timelapse-links',
+              dataMount: 'tmpfs-uid1000-gid1000-mode0700-noexec-128m',
+              commsMount: 'tmpfs-uid1000-gid1000-mode0700-noexec-16m',
+              systemctl:
+                'must-remain-absent; service_control-not-invoked-by-launcher',
+              supervisorArgv: [
+                '/usr/bin/supervisord',
+                '-c',
+                discovered.configPath,
+                '-j',
+                '/home/printer/printer_data/comms/supervisord.pid',
+              ],
+              pidOverride: '/home/printer/printer_data/comms/supervisord.pid',
+            }
+          : {}),
+      },
       configuration: {
         pathDigest: sha256(discovered.configPath),
         originalSha256: sha256(discovered.configText),
@@ -2159,6 +2293,8 @@ export async function runDiagnostic(options) {
       },
       container: {
         isolation: {
+          capabilitiesDropped: 'ALL',
+          noNewPrivileges: true,
           network: 'none',
           publishedPorts: 0,
           privileged: false,

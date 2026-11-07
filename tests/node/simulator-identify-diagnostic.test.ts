@@ -28,6 +28,21 @@ interface DiagnosticErrorShape {
 }
 
 interface DiagnosticModule {
+  DIAGNOSTIC_STARTUP_VARIANT: string
+  STARTUP_HELPER_MOUNT: string
+  STARTUP_HELPER_SHA256: string
+  validateDiagnosticStartup(discovered: {
+    imageConfig: {
+      Entrypoint: string[]
+      Cmd: string[] | null
+      WorkingDir: string
+      User: string
+      Env: string[]
+    }
+    script: string
+    configPath: string
+    configText: string
+  }): { helperPath: string; variant: string }
   OPT_IN_TOKEN: string
   PINNED_IMAGE_REFERENCE: string
   PINNED_AMD64_DIGEST: string
@@ -153,6 +168,7 @@ interface DiagnosticModule {
     observerHostPath: string
     configHostPath: string
     configContainerPath: string
+    startup?: { variant: string; helperPath: string; configSha256: string }
   }): string[]
   assertContainerIsolation(args: string[]): void
   canonicalPath(path: string): string
@@ -192,6 +208,7 @@ interface RunOptions {
   clock?: { now: () => number }
   sleep?: (ms: number) => Promise<void>
   ledgerDir?: string
+  startupVariant?: string
   observationMs?: number
   image?: string
   platform?: string
@@ -459,6 +476,7 @@ interface FakeContainer {
 interface FakeOptions {
   config?: string
   entrypoint?: string
+  startupScriptPath?: string
   entrypointCandidates?: string[]
   workingDir?: string
   configPath?: string
@@ -483,7 +501,10 @@ interface FakeOptions {
 
 function createFakeDocker(options: FakeOptions = {}): FakeDocker {
   const files = new Map<string, string>([
-    ['/usr/local/bin/start.sh', options.entrypoint ?? ENTRYPOINT_SCRIPT],
+    [
+      options.startupScriptPath ?? '/usr/local/bin/start.sh',
+      options.entrypoint ?? ENTRYPOINT_SCRIPT,
+    ],
     [
       options.configPath ?? '/usr/local/etc/supervisord.conf',
       options.config ?? SUPERVISOR_CONFIG,
@@ -601,6 +622,8 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
                 Entrypoint: candidates,
                 Cmd: [],
                 WorkingDir: options.workingDir,
+                User: 'printer',
+                Env: [],
               },
             },
           ]),
@@ -1305,6 +1328,19 @@ test('builds an isolated container specification without published ports', () =>
   diagnostic.assertContainerIsolation(args)
   assert.ok(args.includes('--network'))
   assert.equal(args[args.indexOf('--network') + 1], 'none')
+  assert.equal(args[args.indexOf('--cap-drop') + 1], 'ALL')
+  assert.equal(
+    args[args.indexOf('--security-opt') + 1],
+    'no-new-privileges:true',
+  )
+  for (const flag of ['--cap-drop', '--security-opt']) {
+    const missing = args.slice()
+    missing.splice(missing.indexOf(flag), 2)
+    assert.throws(
+      () => diagnostic.assertContainerIsolation(missing),
+      /lacks required/,
+    )
+  }
   assert.equal(args[args.indexOf('--pull') + 1], 'never')
   assert.equal(args[args.indexOf('--cpus') + 1], '2.0')
   assert.equal(args[args.indexOf('--memory') + 1], '1g')
@@ -3108,3 +3144,285 @@ process.stdin.on('end', () => {
     }
   })
 }
+
+test('finite startup uses only its fixed launcher, private tmpfs and unchanged limits', () => {
+  const args = diagnostic.buildContainerArguments({
+    name: 'diagnostic-unit',
+    platform: diagnostic.PINNED_PLATFORM,
+    image: diagnostic.PINNED_IMAGE_REFERENCE,
+    cpus: '2.0',
+    memory: '1g',
+    pidsLimit: '256',
+    labels: [],
+    volume: 'unused',
+    observerHostPath: '/reviewed/observer.py',
+    configHostPath: '/private/config',
+    configContainerPath: '/etc/supervisor/supervisord.conf',
+    startup: {
+      variant: diagnostic.DIAGNOSTIC_STARTUP_VARIANT,
+      helperPath: join(
+        diagnostic.REPOSITORY_ROOT,
+        'scripts/simulator-unprivileged-startup.py',
+      ),
+      configSha256: 'a'.repeat(64),
+    },
+  })
+  diagnostic.assertContainerIsolation(args)
+  assert.deepEqual(args.slice(-5), [
+    diagnostic.PINNED_IMAGE_REFERENCE,
+    '-I',
+    '-B',
+    '/opt/o3dfm/unprivileged_startup.py',
+    'a'.repeat(64),
+  ])
+  assert.equal(args[args.indexOf('--entrypoint') + 1], '/usr/bin/python3')
+  assert.ok(
+    args.includes(
+      '/home/printer/printer_data:uid=1000,gid=1000,mode=0700,noexec,size=128m',
+    ),
+  )
+  assert.ok(
+    args.includes(
+      '/home/printer/printer_data/comms:uid=1000,gid=1000,mode=0700,noexec,size=16m',
+    ),
+  )
+  assert.equal(
+    args.some((arg) => arg.startsWith('unused:')),
+    false,
+  )
+  for (const forbidden of ['--user=root', '-u=0', '--cap-add=CHOWN'])
+    assert.throws(
+      () => diagnostic.assertContainerIsolation([...args, forbidden]),
+      /forbidden/,
+    )
+})
+
+test('finite startup rejects synthetic discovery before an observation can start', async () => {
+  const docker = createFakeDocker()
+  const options = {
+    ...runOptions(docker),
+    startupVariant: diagnostic.DIAGNOSTIC_STARTUP_VARIANT,
+  }
+  try {
+    await assert.rejects(
+      () => diagnostic.runDiagnostic(options),
+      /startup provenance rejected/,
+    )
+    assert.equal(
+      docker.calls.some(({ args }) => args[0] === 'start'),
+      false,
+    )
+    assert.equal(
+      docker.calls.filter(({ args }) => args[0] === 'create').length,
+      1,
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})
+
+test('finite startup refuses a caller-selected variant name', () => {
+  assert.throws(
+    () =>
+      diagnostic.parseArguments([
+        '--opt-in=' + diagnostic.OPT_IN_TOKEN,
+        '--startup-variant=custom-shell',
+      ]),
+    /unknown diagnostic startup variant/,
+  )
+})
+
+test('finite initializer copies bounded defaults, links components and rejects unsafe files', () => {
+  const helper = join(
+    diagnostic.REPOSITORY_ROOT,
+    'scripts/simulator-unprivileged-startup.py',
+  )
+  assert.equal(
+    createHash('sha256').update(readFileSync(helper)).digest('hex'),
+    diagnostic.STARTUP_HELPER_SHA256,
+  )
+  const result = spawnSync(
+    'python3',
+    [
+      '-I',
+      '-B',
+      '-c',
+      `
+import importlib.util, pathlib, tempfile, os, sys, stat
+from types import SimpleNamespace
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('startup', sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    m.HOME = root
+    m.DATA = root / 'printer_data'
+    (m.DATA / 'comms').mkdir(parents=True)
+    m.DATA.chmod(0o700)
+    (m.DATA / 'comms').chmod(0o700)
+    (root / 'example-configs/addons').mkdir(parents=True)
+    (root / 'example-configs/printer.cfg').write_text('independent config data')
+    (root / 'mjpg_streamer_images').mkdir()
+    (root / 'mjpg_streamer_images/example.jpg').write_bytes(b'image fixture')
+    (root / 'moonraker-timelapse/component').mkdir(parents=True)
+    (root / 'moonraker-timelapse/component/timelapse.py').write_text('fixture')
+    (root / 'moonraker-timelapse/klipper_macro').mkdir()
+    (root / 'moonraker-timelapse/klipper_macro/timelapse.cfg').write_text('fixture')
+    (root / 'moonraker/moonraker/components').mkdir(parents=True)
+    m.initialize()
+    assert (m.DATA / 'config/printer.cfg').read_text() == 'independent config data'
+    assert (m.DATA / 'config/addons/timelapse.cfg').is_symlink()
+    assert (m.DATA / 'webcam_images/example.jpg').read_bytes() == b'image fixture'
+    try:
+        m.initialize()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('nonfresh data accepted')
+    bad = root / 'unsafe'
+    bad.symlink_to(root / 'example-configs/printer.cfg')
+    try:
+        m.copy_defaults(bad, root / 'escape', [0, 0])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('symlink default accepted')
+    for budget in ([1024, 0], [0, 16 * 1024 * 1024]):
+        try:
+            m.copy_defaults(root / 'example-configs/printer.cfg', root / 'over-limit', budget)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('copy limit ignored')
+    # No chown is attempted. Independent wrong-owner metadata must be rejected.
+    with patch.object(pathlib.Path, 'lstat', return_value=SimpleNamespace(
+            st_mode=stat.S_IFDIR, st_uid=os.getuid() + 1, st_gid=os.getgid())):
+        try:
+            m.owned_directory(root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('foreign directory ownership accepted')
+    try:
+        m.link_component(root / 'moonraker-timelapse/klipper_macro/timelapse.cfg',
+                         m.DATA / 'config/addons/timelapse.cfg')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('existing component target overwritten')
+    wrong = root / 'wrong-type'
+    wrong.write_text('file')
+    try:
+        m.owned_directory(wrong)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('file accepted as owned directory')
+`,
+      helper,
+    ],
+    { encoding: 'utf8', timeout: 5000 },
+  )
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test('exact external GPL artifacts admit only the reviewed diagnostic contract', (t) => {
+  const startPath = process.env.O3DFM_REVIEWED_STARTUP
+  const configPath = process.env.O3DFM_REVIEWED_SUPERVISOR_CONFIG
+  if (!startPath || !configPath) {
+    t.skip(
+      'Parent must supply the external, hash-pinned GPL artifacts for Linux source gates',
+    )
+    return
+  }
+  const discovered = {
+    imageConfig: {
+      Entrypoint: ['/bin/start'],
+      Cmd: null,
+      WorkingDir: '/home/printer',
+      User: 'printer',
+      Env: [],
+    },
+    script: readFileSync(startPath, 'utf8'),
+    configPath: '/etc/supervisor/supervisord.conf',
+    configText: readFileSync(configPath, 'utf8'),
+  }
+  assert.equal(
+    diagnostic.validateDiagnosticStartup(discovered).variant,
+    'unprivileged-diagnostic-v1',
+  )
+  for (const changed of [
+    { ...discovered, script: discovered.script + '\n' },
+    { ...discovered, configText: discovered.configText + '\n' },
+    { ...discovered, configPath: '/tmp/other.conf' },
+    ...[
+      { Entrypoint: ['/bin/other'] },
+      { Cmd: ['custom'] },
+      { User: 'root' },
+      { WorkingDir: '/tmp' },
+      { Env: ['HOME=/root'] },
+    ].map((delta) => ({
+      ...discovered,
+      imageConfig: { ...discovered.imageConfig, ...delta },
+    })),
+  ])
+    assert.throws(
+      () => diagnostic.validateDiagnosticStartup(changed),
+      /provenance rejected/,
+    )
+})
+
+test('exact external artifacts drive the finite variant through observation reporting', async (t) => {
+  const startPath = process.env.O3DFM_REVIEWED_STARTUP
+  const configPath = process.env.O3DFM_REVIEWED_SUPERVISOR_CONFIG
+  if (!startPath || !configPath) {
+    t.skip(
+      'Parent must supply external GPL artifacts for the finite variant source gate',
+    )
+    return
+  }
+  const docker = createFakeDocker({
+    startupScriptPath: '/bin/start',
+    entrypointCandidates: ['/bin/start'],
+    entrypoint: readFileSync(startPath, 'utf8'),
+    config: readFileSync(configPath, 'utf8'),
+    workingDir: '/home/printer',
+    configPath: '/etc/supervisor/supervisord.conf',
+  })
+  const options = {
+    ...runOptions(docker),
+    startupVariant: diagnostic.DIAGNOSTIC_STARTUP_VARIANT,
+  }
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.startup.variant, 'unprivileged-diagnostic-v1')
+    assert.equal(result.startup.stockEquivalent, false)
+    assert.equal(
+      result.startup.pidOverride,
+      '/home/printer/printer_data/comms/supervisord.pid',
+    )
+    assert.equal(result.container.isolation.capabilitiesDropped, 'ALL')
+    assert.equal(result.container.isolation.noNewPrivileges, true)
+    assert.equal(result.readiness, 'not-evaluated')
+    assert.equal(
+      docker.calls.some(
+        ({ args }) => args[0] === 'volume' && args[1] === 'create',
+      ),
+      false,
+    )
+    const transformed = readFileSync(
+      join(options.ledgerDir as string, 'supervisord.transformed.conf'),
+      'utf8',
+    )
+    assert.equal(
+      transformed,
+      diagnostic.transformSupervisorConfig(readFileSync(configPath, 'utf8'), {
+        observerPath: diagnostic.OBSERVER_MOUNT_PATH,
+      }).text,
+      'PID override must not change configuration bytes or any additional program',
+    )
+  } finally {
+    cleanupLedger(options.ledgerDir as string)
+  }
+})

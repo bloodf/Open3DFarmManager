@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { get } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createCameraServer } from '../../packages/sim-cams/src/server.ts'

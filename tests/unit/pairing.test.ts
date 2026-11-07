@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
 import {
   acceptPairingStart,

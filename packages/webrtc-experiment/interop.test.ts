@@ -1,11 +1,8 @@
+import { browserBundle } from '../../tests/helpers/browser-bundle.ts'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import {
-  spawnSync,
-  spawn,
-  type ChildProcessWithoutNullStreams,
-} from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { expect, chromium, type Browser } from '@playwright/test'
 import { randomNonce } from '../connector/src/webrtc/synthetic-session.ts'
@@ -72,8 +69,10 @@ class FixtureProcess {
   stderr = ''
   #exited: Promise<void>
   constructor(runtime: string) {
+    if (runtime !== 'node' || process.versions.bun)
+      throw Error('Node runtime required')
     this.process = spawn(
-      runtime,
+      process.execPath,
       [new URL('./interop-child.ts', import.meta.url).pathname],
       { stdio: 'pipe' },
     )
@@ -110,6 +109,7 @@ class FixtureProcess {
         pending.reject(error instanceof Error ? error : Error('Fixture JSON'))
       }
     })
+    this.process.stdin.on('error', (error) => this.#pending?.reject(error))
     this.process.on('error', (error) => this.#pending?.reject(error))
     this.process.on('exit', (code) =>
       this.#pending?.reject(
@@ -169,24 +169,13 @@ test(
   'Chromium exchanges only synthetic RTC messages with actual Connector runtime',
   { timeout: 120000 },
   async () => {
-    if (process.versions.bun)
-      throw Error(
-        'Run this harness with node --test; Bun Connector is tested in its own child process',
-      )
+    if (process.versions.bun) throw Error('Run this harness with node --test')
     const started = performance.now()
     const probe = process.env.WEBRTC_INTEROP_PROBE
-    const built = spawnSync(
-      'bun',
-      [
-        'build',
-        new URL('./interop-browser.ts', import.meta.url).pathname,
-        '--target=browser',
-      ],
-      { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 },
+    if (process.versions.bun) throw Error('Node runtime required')
+    const script = await browserBundle(
+      new URL('./interop-browser.ts', import.meta.url).pathname,
     )
-    if (built.status !== 0 || !built.stdout)
-      throw Error('Interop browser bundle failed: ' + built.stderr)
-    const script = built.stdout
     const server = createServer((request, response) => {
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
       if (request.method !== 'GET') {
@@ -209,8 +198,14 @@ test(
       response.writeHead(404)
       response.end('Não encontrado')
     })
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
+    try {
+      server.listen(0, '127.0.0.1')
+      await once(server, 'listening')
+    } catch (error) {
+      server.closeAllConnections()
+      server.close()
+      throw error
+    }
     const address = server.address()
     if (!address || typeof address === 'string') {
       server.close()
@@ -230,7 +225,7 @@ test(
           elapsedMs: performance.now() - started,
         }),
       )
-      for (const runtime of ['node', 'bun']) {
+      for (const runtime of ['node']) {
         child = new FixtureProcess(runtime)
         const hello = await child.request({ kind: 'hello' })
         const connectorSpki = textField(hello, 'spki')

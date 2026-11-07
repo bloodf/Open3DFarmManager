@@ -4,10 +4,10 @@ A prova original deste pacote privado MIT comprova um RTCDataChannel real e crip
 
 ## Interoperabilidade real com o Connector
 
-A prova adicional em `interop.test.ts` conecta o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em processos Node e Bun reais com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
+A prova adicional em `interop.test.ts` conecta o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em um processo Node 24.22.2 com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
 
 ```sh
-bun test packages/webrtc-experiment/session.test.ts
+pnpm --dir packages/webrtc-experiment run test:session
 node --test packages/webrtc-experiment/interop.test.ts
 ```
 
@@ -20,8 +20,8 @@ O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPO
 Na raiz, com as dependências de desenvolvimento já instaladas pelo lockfile e o Chromium correspondente ao Playwright disponível:
 
 ```sh
-bun run --cwd packages/webrtc-experiment typecheck
-bun test packages/webrtc-experiment/transport.test.ts
+pnpm --dir packages/webrtc-experiment typecheck
+pnpm --dir packages/webrtc-experiment exec vitest run transport.test.ts --config vitest.config.ts
 ```
 
 O teste original usa o Playwright 1.64.1 do workspace e as APIs nativas WebRTC e Web Crypto. Não adiciona biblioteca de RTC, dependência de execução ou lockfile. Consulte [THIRD_PARTY.md](THIRD_PARTY.md) para licenças e avisos.
@@ -54,4 +54,4 @@ Uma integração posterior deve fornecer identidades aprovadas e chaves pública
 
 A sinalização autenticada deverá vincular o identificador de sessão, o papel, a identidade esperada, a origem/audiência e os nonces aos participantes autorizados, transportar oferta/resposta e candidatos com limites de tamanho e prazo e consumir os desafios uma única vez. Cada endpoint deverá reconstruir a transcrição com suas próprias descrições SDP e verificar o fingerprint do canal efetivo antes de liberar qualquer mensagem de aplicação. Troca de certificado, renegociação ou reconexão exige uma nova sessão autenticada.
 
-Somente depois dessa verificação uma integração poderá entregar envelopes aos verificadores existentes de autorização do Connector. As regras de segurança e o despacho devem permanecer no Connector, inclusive durante falhas do servidor. Este experimento não implementa autorização de comandos, políticas offline, câmera, integração Moonraker/Spoolman, leases, persistência antirreplay, revogação ou compatibilidade com o runtime Bun/Node do Connector. O sucesso local não prova conectividade entre redes ou NAT e não autoriza uso em produção. Ausência de P2P deve manter somente leitura, sem fallback de comandos por servidor.
+Somente depois dessa verificação uma integração poderá entregar envelopes aos verificadores existentes de autorização do Connector. As regras de segurança e o despacho devem permanecer no Connector, inclusive durante falhas do servidor. Este experimento não implementa autorização de comandos, políticas offline, câmera, integração Moonraker/Spoolman, leases, persistência antirreplay, revogação ou compatibilidade com o runtime de produção do Connector. O sucesso local não prova conectividade entre redes ou NAT e não autoriza uso em produção. Ausência de P2P deve manter somente leitura, sem fallback de comandos por servidor.

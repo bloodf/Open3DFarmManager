@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import {
-  spawn,
-  spawnSync,
-  type ChildProcessWithoutNullStreams,
-} from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
 import { chromium, type Browser } from '@playwright/test'
 import {
   RtcSessionBinding,
@@ -32,6 +30,8 @@ export class FixtureProcess {
   #closed: Promise<void>
   #ipcError: Error | undefined
   constructor(runtime: string) {
+    if (runtime !== process.execPath || process.versions.bun)
+      throw Error('Node runtime required')
     this.process = spawn(
       runtime,
       [new URL('./native-media-child.ts', import.meta.url).pathname],
@@ -215,12 +215,9 @@ export async function runFiniteMediaPhase(
     phase === 'encode'
       ? './moving-h264-source.ts'
       : './browser-media-fixture.ts'
-  const built = spawnSync(
-    'bun',
-    ['build', new URL(entry, import.meta.url).pathname, '--target=browser'],
-    { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 },
+  const fixtureBundle = await browserBundle(
+    fileURLToPath(new URL(entry, import.meta.url)),
   )
-  assert.equal(built.status, 0, built.stderr)
   const server = createServer((req, res) => {
     if (req.method !== 'GET') {
       res.writeHead(405)
@@ -229,7 +226,7 @@ export async function runFiniteMediaPhase(
     }
     if (req.url === '/fixture.js') {
       res.writeHead(200, { 'Content-Type': 'text/javascript' })
-      res.end(built.stdout)
+      res.end(fixtureBundle)
       return
     }
     if (req.url === '/') {

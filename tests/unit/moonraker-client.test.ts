@@ -1,16 +1,18 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import { appendFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import type { Duplex } from 'node:stream'
 
 // Opt-in resource diagnostics stay outside the checkout.
 function recordResource(value: object) {
-  const ledger = Bun.env.MOONRAKER_TEST_LEDGER
+  const ledger = process.env.MOONRAKER_TEST_LEDGER
   if (ledger) appendFileSync(ledger, JSON.stringify(value) + '\n')
 }
 import { createMoonrakerSubscription } from '../../packages/connector/src/moonraker/subscription.ts'
-import type { ServerWebSocket } from 'bun'
+import { serveWsTestServer, type WsTestSocket } from './ws-serve.ts'
+import { collectStream } from './streams.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -35,7 +37,7 @@ const delta = (eventtime: number, progress: number) =>
 async function fixture(input: {
   http?: (request: Request) => Response
   subscribe: (
-    socket: ServerWebSocket<undefined>,
+    socket: WsTestSocket,
     connection: number,
     later: (callback: () => void, ms: number) => void,
     request: { id: number; method: string },
@@ -44,7 +46,7 @@ async function fixture(input: {
   let connections = 0
   const requests: { path: string; method: string }[] = []
   const rpcs: unknown[] = []
-  const sockets = new Set<ServerWebSocket<undefined>>()
+  const sockets = new Set<WsTestSocket>()
   const timers = new Set<ReturnType<typeof setTimeout>>()
   function later(callback: () => void, ms: number) {
     const timer = setTimeout(() => {
@@ -53,30 +55,27 @@ async function fixture(input: {
     }, ms)
     timers.add(timer)
   }
-  const server = Bun.serve<undefined>({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request, server) {
+  const server = await serveWsTestServer({
+    async http(request) {
       const path = new URL(request.url).pathname
       requests.push({ path, method: request.method })
-      if (path === '/websocket') {
-        if (server.upgrade(request, { data: undefined })) return
-        return new Response(null, { status: 400 })
-      }
       return input.http?.(request) ?? Response.json(ready)
     },
-    websocket: {
-      open(socket) {
-        sockets.add(socket)
-        connections++
-      },
-      message(socket, message) {
-        rpcs.push(JSON.parse(String(message)))
-        input.subscribe(socket, connections, later, JSON.parse(String(message)))
-      },
-      close(socket) {
-        sockets.delete(socket)
-      },
+    upgrade(request) {
+      const path = new URL(request.url).pathname
+      requests.push({ path, method: request.method })
+      return path === '/websocket'
+    },
+    onOpen(socket) {
+      sockets.add(socket)
+      connections++
+    },
+    onMessage(socket, message) {
+      rpcs.push(JSON.parse(message))
+      input.subscribe(socket, connections, later, JSON.parse(message))
+    },
+    onClose(socket) {
+      sockets.delete(socket)
     },
   })
   recordResource({ kind: 'loopback', port: server.port, state: 'created' })
@@ -89,7 +88,7 @@ async function fixture(input: {
     async close() {
       for (const timer of timers) clearTimeout(timer)
       for (const socket of sockets) socket.terminate()
-      await server.stop(true)
+      await server.stop()
       recordResource({ kind: 'loopback', port, state: 'closed' })
     },
   }
@@ -121,9 +120,9 @@ async function run(
   evidence?: RawEvidence,
   completion?: Completion,
 ) {
-  const process = Bun.spawn(
+  const child = spawn(
+    'node',
     [
-      'node',
       'tests/helpers/moonraker-node-client.ts',
       origin,
       JSON.stringify(limits),
@@ -132,27 +131,31 @@ async function run(
       ...(completion ? [JSON.stringify(completion)] : []),
     ],
     {
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', resolve)
+  })
+  void exited.catch(() => {})
   recordResource({
     kind: 'node-child',
-    pid: process.pid,
+    pid: child.pid,
     origin,
     state: 'created',
   })
   // The hard child watchdog stays above the child deadline so a stalled child
   // reports its own bounded deadline instead of being killed without evidence.
   const timer = setTimeout(
-    () => process.kill(),
+    () => child.kill(),
     completion ? completion.deadlineMs + 3000 : 4000,
   )
   try {
     const [stdout, stderr, code] = await Promise.all([
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
-      process.exited,
+      collectStream(child.stdout),
+      collectStream(child.stderr),
+      exited,
     ])
     expect(stderr).toBe('')
     expect(code).toBe(0)
@@ -177,11 +180,11 @@ async function run(
     return events
   } finally {
     clearTimeout(timer)
-    if (process.exitCode === null) {
-      process.kill()
-      await process.exited
+    if (child.exitCode === null) {
+      child.kill()
+      await exited
     }
-    recordResource({ kind: 'node-child', pid: process.pid, state: 'reaped' })
+    recordResource({ kind: 'node-child', pid: child.pid, state: 'reaped' })
   }
 }
 

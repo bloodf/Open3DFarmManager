@@ -15,7 +15,7 @@ exit 42
 EOF
 cat > "$scratch/bin/node" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' v24.20.0; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf '%s\n' v24.22.2; exit 0; fi
 exec "$LOCAL_CI_REAL_NODE" "$@"
 EOF
 cat > "$scratch/bin/docker" <<'EOF'
@@ -25,7 +25,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.4|node:24\.20\.0-alpine)$ ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.4|node:24\.22\.2-alpine)$ ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;

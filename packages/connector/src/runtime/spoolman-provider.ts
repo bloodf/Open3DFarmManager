@@ -154,6 +154,7 @@ export function createSpoolmanProvider(input: {
     connected = false
     detach()
     invalidate()
+    if (closed) return
     failures = Math.min(5, failures + 1)
     timer = setTimeout(connect, Math.min(30_000, 1000 * 2 ** failures))
   }
@@ -176,6 +177,7 @@ export function createSpoolmanProvider(input: {
         connected = true
         pongAt = now()
         invalidate()
+        if (closed) return
         heartbeat = setInterval(() => {
           if (now() - pongAt >= 15_000) {
             disconnected()

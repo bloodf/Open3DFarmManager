@@ -173,13 +173,14 @@ interface FakeResult {
 interface FakeCall {
   args: string[]
   timeoutMs?: number
+  maxBuffer?: number
   input?: string
 }
 
 interface FakeDocker {
   run(
     args: string[],
-    options?: { input?: string; timeoutMs?: number },
+    options?: { input?: string; timeoutMs?: number; maxBuffer?: number },
   ): Promise<FakeResult>
   calls: FakeCall[]
   transientConsumed: boolean
@@ -463,6 +464,8 @@ interface FakeOptions {
   configPath?: string
   extraConfigPaths?: string[]
   capture?: string
+  startupStdout?: string
+  startupStderr?: string
   capturePaths?: Record<string, string>
   childLogFiles?: Record<string, string>
   labels?: Record<string, string>
@@ -505,7 +508,7 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
     transientConsumed: false,
     async run(
       args: string[],
-      runOptions?: { input?: string; timeoutMs?: number },
+      runOptions?: { input?: string; timeoutMs?: number; maxBuffer?: number },
     ): Promise<FakeResult> {
       fake.calls.push({
         args,
@@ -513,6 +516,9 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
           ? {}
           : { timeoutMs: runOptions.timeoutMs }),
         ...(runOptions?.input === undefined ? {} : { input: runOptions.input }),
+        ...(runOptions?.maxBuffer === undefined
+          ? {}
+          : { maxBuffer: runOptions.maxBuffer }),
       })
       for (const command of options.timedOutCommands ?? []) {
         if (args[0] === command)
@@ -637,6 +643,12 @@ function createFakeDocker(options: FakeOptions = {}): FakeDocker {
         return { status: 0, stdout: '', stderr: '' }
       }
       if (command === 'logs') {
+        if (runOptions?.timeoutMs === 2000)
+          return {
+            status: 0,
+            stdout: options.startupStdout ?? '',
+            stderr: options.startupStderr ?? '',
+          }
         const lines = (options.capture ?? '').split('\n')
         if (lines.at(-1) === '') lines.pop()
         const limit = Number(rest[rest.indexOf('--tail') + 1])
@@ -1757,8 +1769,8 @@ test('stops with a verified wrapper failure and keeps the report', async () => {
     assert.equal(retained.wrapperApplied, false)
     assert.equal(
       docker.calls.filter((call) => call.args[0] === 'logs').length,
-      0,
-      'a capture without the wrapper proves nothing and is not taken',
+      1,
+      'startup output remains separate from the skipped observer capture',
     )
   } finally {
     cleanupLedger(ledger)
@@ -2525,6 +2537,85 @@ test('successful exited observation remains normal', async () => {
     assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
   } finally {
     cleanupLedger(requiredLedger(options))
+  }
+})
+
+test('captures early exit startup streams without treating them as observer evidence', async () => {
+  const docker = createFakeDocker({
+    containerStatus: 'exited',
+    supervisorStatusAvailable: false,
+    startupStdout: 'startup stdout\n',
+    startupStderr: `startup error\n${OBSERVER_EVENT(1, 0)}`,
+  })
+  const options = runOptions(docker)
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.startupOutput.available, true)
+    assert.equal(result.startupOutput.truncated, false)
+    assert.equal(
+      readFileSync(join(requiredLedger(options), 'startup-stdout.log'), 'utf8'),
+      'startup stdout\n',
+    )
+    assert.match(
+      readFileSync(join(requiredLedger(options), 'startup-stderr.log'), 'utf8'),
+      /startup error/,
+    )
+    assert.equal(result.capture.observerRecords, 0)
+    assert.equal(result.observerAnalysis, null)
+    assert.equal(JSON.stringify(result).includes('startup error'), false)
+    const call = docker.calls.find(
+      (item) => item.args[0] === 'logs' && item.timeoutMs === 2000,
+    )
+    assert.deepEqual(call?.args, ['logs', '--tail', '5000', options.runName])
+    assert.equal(call?.maxBuffer, 65537)
+  } finally {
+    cleanupLedger(requiredLedger(options))
+  }
+})
+
+test('bounds startup output and reports log failures without hiding verification errors', async () => {
+  const oversized = 'x'.repeat(65537)
+  const options = runOptions(
+    createFakeDocker({ startupStdout: oversized, startupStderr: oversized }),
+  )
+  try {
+    const result = await diagnostic.runDiagnostic(options)
+    assert.equal(result.startupOutput.truncated, true)
+    assert.equal(result.startupOutput.stdoutBytes, 65536)
+    assert.equal(result.startupOutput.stderrBytes, 65536)
+    assert.equal(
+      readFileSync(join(requiredLedger(options), 'startup-stdout.log')).length,
+      65536,
+    )
+  } finally {
+    cleanupLedger(requiredLedger(options))
+  }
+  for (const failure of [
+    { status: 1, stdout: '', stderr: 'private error' },
+    { status: null, stdout: '', stderr: 'private timeout', timedOut: true },
+  ]) {
+    const docker = createFakeDocker({
+      klippyArgv: ['python3', '/home/printer/klipper/klippy/klippy.py'],
+      fail: (args) => (args[0] === 'logs' ? failure : null),
+    })
+    const failedOptions = runOptions(docker)
+    try {
+      await assert.rejects(
+        diagnostic.runDiagnostic(failedOptions),
+        (error: DiagnosticErrorShape) => {
+          assert.equal(error.phase, 'verify')
+          assert.equal(error.result?.startupOutput.available, false)
+          assert.equal(
+            error.result?.startupOutput.error,
+            failure.timedOut ? 'timeout' : 'docker-logs-failed',
+          )
+          assert.equal(JSON.stringify(error.result).includes('private'), false)
+          return true
+        },
+      )
+    } finally {
+      cleanupLedger(requiredLedger(failedOptions))
+    }
   }
 })
 

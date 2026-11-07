@@ -110,6 +110,8 @@ const LABEL_KEY = 'com.open3dfarmmanager.identify-diagnostic'
 const LABEL_RUN_KEY = 'com.open3dfarmmanager.identify-diagnostic-run'
 const DEFAULT_DOCKER_BINARY = 'docker'
 const CONTAINER_LOG_LINE_LIMIT = 5000
+const STARTUP_OUTPUT_LIMIT = 64 * 1024
+const STARTUP_OUTPUT_TIMEOUT_MS = 2000
 
 export class DiagnosticError extends Error {
   constructor(message, options = {}) {
@@ -915,13 +917,15 @@ export function createDockerRunner(options = {}) {
         }, timeoutMs)
         child.stdout.on('data', (chunk) => {
           if (stdoutBytes >= maxBuffer) return
-          stdoutBytes += chunk.length
-          stdout.push(chunk)
+          const bounded = chunk.subarray(0, maxBuffer - stdoutBytes)
+          stdoutBytes += bounded.length
+          stdout.push(bounded)
         })
         child.stderr.on('data', (chunk) => {
           if (stderrBytes >= maxBuffer) return
-          stderrBytes += chunk.length
-          stderr.push(chunk)
+          const bounded = chunk.subarray(0, maxBuffer - stderrBytes)
+          stderrBytes += bounded.length
+          stderr.push(bounded)
         })
         child.on('error', (error) => {
           failure ??= {
@@ -1495,6 +1499,50 @@ async function readRoutingSource(docker, container, candidate, limit) {
   return { available: true, text: bounded.text, truncated: bounded.truncated }
 }
 
+// Keep Docker's container streams separate from the observer's routed records.
+async function captureStartupOutput(docker, container, ledgerDir) {
+  const metadata = {
+    available: false,
+    error: null,
+    status: null,
+    limitBytesPerStream: STARTUP_OUTPUT_LIMIT,
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    truncated: false,
+  }
+  try {
+    const output = await docker.run(
+      ['logs', '--tail', String(CONTAINER_LOG_LINE_LIMIT), container],
+      {
+        timeoutMs: STARTUP_OUTPUT_TIMEOUT_MS,
+        maxBuffer: STARTUP_OUTPUT_LIMIT + 1,
+      },
+    )
+    metadata.status = output.status
+    if (output.timedOut || output.status !== 0) {
+      metadata.error = output.timedOut ? 'timeout' : 'docker-logs-failed'
+      return metadata
+    }
+    const stdout = Buffer.from(output.stdout, 'utf8')
+    const stderr = Buffer.from(output.stderr, 'utf8')
+    metadata.truncated =
+      stdout.length > STARTUP_OUTPUT_LIMIT ||
+      stderr.length > STARTUP_OUTPUT_LIMIT ||
+      (output.stdout + output.stderr).split('\n').length - 1 >=
+        CONTAINER_LOG_LINE_LIMIT
+    const boundedStdout = stdout.subarray(0, STARTUP_OUTPUT_LIMIT)
+    const boundedStderr = stderr.subarray(0, STARTUP_OUTPUT_LIMIT)
+    writeLedgerFile(ledgerDir, 'startup-stdout.log', boundedStdout)
+    writeLedgerFile(ledgerDir, 'startup-stderr.log', boundedStderr)
+    metadata.stdoutBytes = boundedStdout.length
+    metadata.stderrBytes = boundedStderr.length
+    metadata.available = true
+  } catch {
+    metadata.error = 'capture-or-ledger-failed'
+  }
+  return metadata
+}
+
 /**
  * Capture the child stderr from the routes the extracted configuration allows.
  *
@@ -1985,6 +2033,11 @@ export async function runDiagnostic(options) {
       await sleep(Math.min(1000, Math.max(0, deadline - clock.now())))
     }
     const observedFor = clock.now() - startedAt
+    const startupOutput = await captureStartupOutput(
+      docker,
+      containerName,
+      ledgerDir,
+    )
 
     // Phase: verification ------------------------------------------------
     enterStage('verify')
@@ -2155,6 +2208,7 @@ export async function runDiagnostic(options) {
         truncated: capture.truncated,
         source: capture.source,
       },
+      startupOutput,
       supervisorObservation: supervisor.available ? 'observed' : 'unavailable',
       wrapperApplied,
       wrapperReason,

@@ -76,11 +76,9 @@ export type PauseAuthorityFailure = {
     | 'storage-unavailable'
 }
 export type PauseChallengeDecision =
-  | { ok: true; challenge: PauseAdmissionChallenge }
-  | PauseAuthorityFailure
+  { ok: true; challenge: PauseAdmissionChallenge } | PauseAuthorityFailure
 export type PauseCapabilityDecision =
-  | { ok: true; capability: SignedPauseCapabilityV1 }
-  | PauseAuthorityFailure
+  { ok: true; capability: SignedPauseCapabilityV1 } | PauseAuthorityFailure
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
 type Current = {
   account: AccountSessionState

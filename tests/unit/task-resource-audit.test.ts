@@ -283,9 +283,8 @@ describe('report assembly', () => {
   }
 
   test('reports a complete audit with owned resources and a leftovers exit code', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const report = await buildReport(
       { taskLabel: TASK, repository: '/repo', pretty: false },
       environment(dockerRunner),
@@ -303,9 +302,8 @@ describe('report assembly', () => {
   })
 
   test('returns a partial report and a nonzero exit when docker is unavailable', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const failing: CommandRunner = async (file) => {
       if (file === 'docker')
         return {
@@ -337,9 +335,8 @@ describe('report assembly', () => {
   })
 
   test('returns a complete report and a clean exit code with no owned resources', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const empty: CommandRunner = async (file, args) => {
       if (file === 'docker' && args[0] === 'version')
         return {
@@ -378,9 +375,8 @@ describe('report assembly', () => {
   })
 
   test('never reports clean when an owned resource lies beyond the listing cap', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const foreignLine = containerLine.replace(
       JSON.stringify(TASK),
       JSON.stringify('foreign'),
@@ -410,9 +406,8 @@ describe('report assembly', () => {
   })
 
   test('invalid Docker rows make the audit incomplete without echoing their content', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const runner: CommandRunner = async (file, args, options) => {
       if (file === 'docker' && args[0] === 'ps')
         return {
@@ -435,9 +430,8 @@ describe('report assembly', () => {
   })
 
   test('reports each missing filesystem even when repository capacity succeeds', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const runner: CommandRunner = async (file, args, options) => {
       if (file === 'git' && args.includes('worktree'))
         return {
@@ -467,9 +461,8 @@ describe('report assembly', () => {
   })
 
   test('keeps other projects resource details out of non-owned buckets', async () => {
-    const { buildReport } = await import(
-      '../../scripts/audit-task-resources.ts'
-    )
+    const { buildReport } =
+      await import('../../scripts/audit-task-resources.ts')
     const foreignLine = [
       'aaa111bbb222',
       'other-project-app',

@@ -538,8 +538,7 @@ export function createPauseAuthenticatedRtcFixtureExtension(): SignallingFixture
         throw Error('Provisioned pause fixture scope mismatch')
       let completed = false
       let lastNative:
-        | Extract<PauseRtcReply, { kind: 'observation' }>
-        | undefined
+        Extract<PauseRtcReply, { kind: 'observation' }> | undefined
       let nativeFailureRecorded = false
       const retainNative = async () => {
         if (nativeFailureRecorded) return

@@ -111,11 +111,7 @@ export type FarmObservation = {
 export type FarmRow = {
   assignment: FarmAssignment
   connection:
-    | 'unavailable'
-    | 'connecting'
-    | 'verifying'
-    | 'authenticated'
-    | 'closed'
+    'unavailable' | 'connecting' | 'verifying' | 'authenticated' | 'closed'
   observation: FarmObservation | null
   localOrigin: string | null
 }

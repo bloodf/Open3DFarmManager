@@ -12,11 +12,7 @@ export type DrainResult =
   | {
       status: 'retained'
       reason:
-        | 'busy'
-        | 'cancelled'
-        | 'transport'
-        | 'acknowledgement'
-        | 'oversized'
+        'busy' | 'cancelled' | 'transport' | 'acknowledgement' | 'oversized'
       loss?: QueueLoss
     }
 

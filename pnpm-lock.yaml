@@ -180,8 +180,8 @@ importers:
         version: 4.1.0
     devDependencies:
       '@playwright/test':
-        specifier: 1.64.1
-        version: 1.64.1
+        specifier: 1.65.0
+        version: 1.65.0
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
@@ -250,8 +250,8 @@ importers:
         specifier: 4.1.2
         version: 4.1.2
       node-datachannel:
-        specifier: 0.33.5
-        version: 0.33.5
+        specifier: 0.33.6
+        version: 0.33.6
       ws:
         specifier: 8.22.1
         version: 8.22.1
@@ -288,8 +288,8 @@ importers:
   packages/webrtc-experiment:
     devDependencies:
       node-datachannel:
-        specifier: 0.33.5
-        version: 0.33.5
+        specifier: 0.33.6
+        version: 0.33.6
 
 packages:
 
@@ -651,52 +651,52 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@node-datachannel/android-arm64@0.33.5':
-    resolution: {integrity: sha512-OXD8JRmOUaxvfxJNN8skGrKudZefOishYGvf7hCxhw3kGVqHAE38U6js4dzngscz5WV7+Thk7u5a1EnimvB56g==}
+  '@node-datachannel/android-arm64@0.33.6':
+    resolution: {integrity: sha512-UzSnd1vSN//3pqyvuufbaIQemvRfIHn/7DAy7wjoYk9tzkJp4SMk1FrNhkhmev89SH/h7yTac6PlGxGe5oHcKw==}
     cpu: [arm64]
     os: [android]
 
-  '@node-datachannel/darwin-arm64@0.33.5':
-    resolution: {integrity: sha512-ACIT9BEQtVwa54iwnDkGjbckW/q/gkwBitbwut4O6RC4LgQYxKApfJDvnnNypn1UP3xWbgrKo488hINvCfX5qw==}
+  '@node-datachannel/darwin-arm64@0.33.6':
+    resolution: {integrity: sha512-vE2fN6D0BJJ3yZo5guJo2j1q7JeQbl+VyIs6vbkjEp654tQtTo3y7a4l3xB0bwDD27TOlkOlaSLJQRj6ZXqQdQ==}
     cpu: [arm64]
     os: [darwin]
 
-  '@node-datachannel/darwin-x64@0.33.5':
-    resolution: {integrity: sha512-UjxKpp64KA7Bh5A4eEunAtxz7MaFcn2vMlFyVACOcnGC0uJB+g6GAVXOLNtt9OwmGbgjoLJgP0PBclqaokK/qg==}
+  '@node-datachannel/darwin-x64@0.33.6':
+    resolution: {integrity: sha512-EtRB2THMR11XMzbNhMEwaZtipaUxFz+PgeVx7hE+er6Ai1Fzzv7XexrMWDG11ahdpEZ8fAxlxuyELs33/WH1Cg==}
     cpu: [x64]
     os: [darwin]
 
-  '@node-datachannel/linux-arm64-gnu@0.33.5':
-    resolution: {integrity: sha512-YLZfsKHJ1JzYKXptkPE+QCSO/xQoyGGQy/cthmkMWtNJ5ozjoP0x0Pch2Hw3tZZFbv3b/HdDKTNnvkmNhowZ7g==}
+  '@node-datachannel/linux-arm64-gnu@0.33.6':
+    resolution: {integrity: sha512-phMRjx8NEfW70i768LCQDEF2C6Q2vtYsS4DPXv/zbb2cJClaU5fjKFQfQ1XBCNIi1ClfpSd3Cl/rn/7SS+paTQ==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@node-datachannel/linux-arm64-musl@0.33.5':
-    resolution: {integrity: sha512-8wQ6EZJIfiKafCeAqOyMEmKS2CL3xTrM6F7wlIr74XdUsIqOhtVGL+QwCd1RpeyaiIyTADQU0NUjMluHWZDutg==}
+  '@node-datachannel/linux-arm64-musl@0.33.6':
+    resolution: {integrity: sha512-T9bqllJ9YkpgqgRFEfsPpfgfMDXdA7CIiJ4c1XXGPLSeqVFgDbf/WCewkE7q4xA+tKRLoOOtc2XgMGwVnlxXVQ==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@node-datachannel/linux-x64-gnu@0.33.5':
-    resolution: {integrity: sha512-CMoHDhirrXZkQzozvbJB2NQRWoPHuYHxJgVj0zkjZISAQVXhypAZBvtDv6DUNRaJJpPzYEL4B4aqjdCT6WtVtQ==}
+  '@node-datachannel/linux-x64-gnu@0.33.6':
+    resolution: {integrity: sha512-NUTbne64++ZxwEJ9uppAAmYnFAfJAggf7gboioPdhr13P17GTQRCUgmipYrh1V0D4333x6NCBZyQaNv0n4WmpQ==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@node-datachannel/linux-x64-musl@0.33.5':
-    resolution: {integrity: sha512-45BRlZqPS6P87RdZJnVfc3YpXw8BfNfpsb8/3yaKLZcpmFn6/mwGR+0vbfHuPeHrplpf3axnBS+DYxWEWJeuLQ==}
+  '@node-datachannel/linux-x64-musl@0.33.6':
+    resolution: {integrity: sha512-dlWP4ycOJrTAl9UvxGofq0zwPhl6iAr1b0ZcBUgDfb2CXmbcJWCvg6OsJ6u8BVSV41eNXALmaRpU0wttas/f1g==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@node-datachannel/win32-arm64-msvc@0.33.5':
-    resolution: {integrity: sha512-oYy4XDNwL0adn7K8m8r4PUwBJ7VmpdzuTe8RLSzhEJY7leF/Ni2wJ2FibZUQs+nbo/8R6oxvelpuGr+T030LVA==}
+  '@node-datachannel/win32-arm64-msvc@0.33.6':
+    resolution: {integrity: sha512-ttly7XRUrSOcOOGJvtm9gh2beAPUNOBOUc3Hk82LfMHHP7jJMkXNDns/ML+UVGommAcNyPhoZkRH62O7tSVQYw==}
     cpu: [arm64]
     os: [win32]
 
-  '@node-datachannel/win32-x64-msvc@0.33.5':
-    resolution: {integrity: sha512-XrfB3MWuzsEeqzaQh4BXhxl2JKPZ4qkXUZs4vhaM6P/fkaxhbp4Ubbwyvd0zDBHerVm/Zw7wZrTHGiYsfop4BA==}
+  '@node-datachannel/win32-x64-msvc@0.33.6':
+    resolution: {integrity: sha512-N5GW6XH11Iuu+kyHLTiCMcCHdwWwpKqvtYril0LzQm6xBgmGQN3JXxFmgi4g4usw1nLy6WhBWADjbhSXJiiEMA==}
     cpu: [x64]
     os: [win32]
 
@@ -856,8 +856,8 @@ packages:
     resolution: {integrity: sha512-m7X9U6BG2+J+R1lSOdCiITLLrxm+cWlNI3HUFA92oLO77ObGNzaKdh8pMLqdZcshtkKuV84olNNXDfMc4FezBQ==}
     engines: {node: '>=10'}
 
-  '@playwright/test@1.64.1':
-    resolution: {integrity: sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==}
+  '@playwright/test@1.65.0':
+    resolution: {integrity: sha512-iGURLGuKDLakSEl7Pgfv8h7f+XLT+V861Wfhz0zlEl5nyFuKUopdkFBPKqTllTUp06aOwPuH8iuUEb3yp3MpbQ==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -2495,8 +2495,8 @@ packages:
       xml2js:
         optional: true
 
-  node-datachannel@0.33.5:
-    resolution: {integrity: sha512-EbQEgpEalODneaK4AU78g4k4iXUvkSEI9htwP0wzgrawOIK/0MYT61xq5v/r+eRScmMZw4PVYC7RfyIW54NjZw==}
+  node-datachannel@0.33.6:
+    resolution: {integrity: sha512-n7RzImzysrOVFx/lXfkQQ4fL0wsuPXBFc8KM69V29iyIor/UX7Ej+edzNGWJm+3mApZG9nkLi7FsGAZhQCDA4w==}
     engines: {node: '>=18.20.0'}
 
   node-fetch-native@1.6.7:
@@ -2655,13 +2655,13 @@ packages:
   pkg-types@2.4.0:
     resolution: {integrity: sha512-07Fys7iVx0X6TcviMOgogM1Lk33ZyqOezMnU79S+kffWqwolG/5W9V8EgQSeYCIfFTYVgssRbnH630Oa2+soBA==}
 
-  playwright-core@1.64.1:
-    resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
+  playwright-core@1.65.0:
+    resolution: {integrity: sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA==}
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.64.1:
-    resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
+  playwright@1.65.0:
+    resolution: {integrity: sha512-F3AMWcR44qMBt4kq+6Kb6mX7bjGXshktKFOPULd7reED6ZJWevjbNRqysP7q+AATE9kdPEZBibex1BYsvpVoeA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -3896,31 +3896,31 @@ snapshots:
       - encoding
       - supports-color
 
-  '@node-datachannel/android-arm64@0.33.5':
+  '@node-datachannel/android-arm64@0.33.6':
     optional: true
 
-  '@node-datachannel/darwin-arm64@0.33.5':
+  '@node-datachannel/darwin-arm64@0.33.6':
     optional: true
 
-  '@node-datachannel/darwin-x64@0.33.5':
+  '@node-datachannel/darwin-x64@0.33.6':
     optional: true
 
-  '@node-datachannel/linux-arm64-gnu@0.33.5':
+  '@node-datachannel/linux-arm64-gnu@0.33.6':
     optional: true
 
-  '@node-datachannel/linux-arm64-musl@0.33.5':
+  '@node-datachannel/linux-arm64-musl@0.33.6':
     optional: true
 
-  '@node-datachannel/linux-x64-gnu@0.33.5':
+  '@node-datachannel/linux-x64-gnu@0.33.6':
     optional: true
 
-  '@node-datachannel/linux-x64-musl@0.33.5':
+  '@node-datachannel/linux-x64-musl@0.33.6':
     optional: true
 
-  '@node-datachannel/win32-arm64-msvc@0.33.5':
+  '@node-datachannel/win32-arm64-msvc@0.33.6':
     optional: true
 
-  '@node-datachannel/win32-x64-msvc@0.33.5':
+  '@node-datachannel/win32-x64-msvc@0.33.6':
     optional: true
 
   '@nodelib/fs.scandir@2.1.5':
@@ -4319,9 +4319,9 @@ snapshots:
 
   '@phc/format@1.0.0': {}
 
-  '@playwright/test@1.64.1':
+  '@playwright/test@1.65.0':
     dependencies:
-      playwright: 1.64.1
+      playwright: 1.65.0
 
   '@polka/url@1.0.0-next.29': {}
 
@@ -5848,19 +5848,19 @@ snapshots:
       - vite
       - webpack
 
-  node-datachannel@0.33.5:
+  node-datachannel@0.33.6:
     dependencies:
       detect-libc: 2.1.2
     optionalDependencies:
-      '@node-datachannel/android-arm64': 0.33.5
-      '@node-datachannel/darwin-arm64': 0.33.5
-      '@node-datachannel/darwin-x64': 0.33.5
-      '@node-datachannel/linux-arm64-gnu': 0.33.5
-      '@node-datachannel/linux-arm64-musl': 0.33.5
-      '@node-datachannel/linux-x64-gnu': 0.33.5
-      '@node-datachannel/linux-x64-musl': 0.33.5
-      '@node-datachannel/win32-arm64-msvc': 0.33.5
-      '@node-datachannel/win32-x64-msvc': 0.33.5
+      '@node-datachannel/android-arm64': 0.33.6
+      '@node-datachannel/darwin-arm64': 0.33.6
+      '@node-datachannel/darwin-x64': 0.33.6
+      '@node-datachannel/linux-arm64-gnu': 0.33.6
+      '@node-datachannel/linux-arm64-musl': 0.33.6
+      '@node-datachannel/linux-x64-gnu': 0.33.6
+      '@node-datachannel/linux-x64-musl': 0.33.6
+      '@node-datachannel/win32-arm64-msvc': 0.33.6
+      '@node-datachannel/win32-x64-msvc': 0.33.6
 
   node-fetch-native@1.6.7: {}
 
@@ -6123,11 +6123,11 @@ snapshots:
       exsolve: 1.2.0
       pathe: 2.0.3
 
-  playwright-core@1.64.1: {}
+  playwright-core@1.65.0: {}
 
-  playwright@1.64.1:
+  playwright@1.65.0:
     dependencies:
-      playwright-core: 1.64.1
+      playwright-core: 1.65.0
 
   pluralize@8.0.0: {}
 

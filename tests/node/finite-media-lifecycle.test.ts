@@ -28,7 +28,7 @@ test('cleanup attempts every resource even when earlier disposals fail', async (
 })
 
 test('stdin failure is handled and permanently denies further fixture IPC', async () => {
-  const child = new FixtureProcess('/usr/bin/true')
+  const child = new FixtureProcess(process.execPath)
   try {
     child.process.stdin.emit(
       'error',

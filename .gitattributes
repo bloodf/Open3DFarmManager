@@ -1,0 +1,2 @@
+# Preserve the exact bytes of upstream compiler licenses and notices.
+notices/typescript/** -text

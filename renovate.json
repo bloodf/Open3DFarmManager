@@ -9,6 +9,13 @@
       "allowedVersions": "<25"
     },
     {
+      "description": "Keep farm TypeScript below 7 while vue-tsc uses the legacy compiler entry point and Volar requires TypeScript <7.",
+      "matchManagers": ["npm"],
+      "matchDepNames": ["typescript"],
+      "matchFileNames": ["apps/farm/package.json"],
+      "allowedVersions": "<7"
+    },
+    {
       "description": "Vendored rtsp-ingest sources and the audited rtsp-ingest module graph are immutable and provenance-audited; updates are manual.",
       "matchFileNames": [
         "third_party/rtsp-ingest/**",

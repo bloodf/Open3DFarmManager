@@ -22,12 +22,16 @@ async function bounded<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 export function hashPassword(password: string): Promise<string> {
+  // HMAC zero-padding can alias short passwords with trailing NUL bytes.
+  if (password.includes('\0'))
+    return Promise.reject(new TypeError('Password must not contain NUL'))
   return bounded(() => scrypt.make(password))
 }
 export function verifyPassword(
   hash: string,
   password: string,
 ): Promise<boolean> {
+  if (password.includes('\0')) return Promise.resolve(false)
   return bounded(() => scrypt.verify(hash, password))
 }
 // A fixed syntactically valid synthetic hash makes unknown-user checks run scrypt too.

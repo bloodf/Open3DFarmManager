@@ -15,6 +15,7 @@ test.beforeAll(() => {
     entryPoints: ['./tests/helpers/browser-device-entry.ts'],
     bundle: true,
     platform: 'browser',
+    format: 'esm',
     outfile,
     logLevel: 'silent',
   })

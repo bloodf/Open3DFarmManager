@@ -156,7 +156,55 @@ async function authorityFixture() {
   }
 }
 
-async function fixture(shortCapability = false, resultTimeoutMs = 50) {
+type DriverWaiter = {
+  count: number
+  timer: ReturnType<typeof setTimeout> | undefined
+  settle: (error: Error | null) => void
+}
+
+// Driver entry follows asynchronous signature verification. Tests that stop
+// after entry must synchronize with the driver, not assume crypto finishes
+// within a small real-time budget under parallel test load.
+function releaseDriverWaiters(waiters: DriverWaiter[], reached: number): void {
+  for (const waiter of [...waiters]) {
+    if (reached < waiter.count) continue
+    waiters.splice(waiters.indexOf(waiter), 1)
+    waiter.settle(null)
+  }
+}
+
+function waitForDriverCount(
+  waiters: DriverWaiter[],
+  reached: () => number,
+  count: number,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  if (reached() >= count) return Promise.resolve()
+  return new Promise<void>((resolve, reject) => {
+    const waiter: DriverWaiter = {
+      count,
+      timer: undefined,
+      settle: (error) => {
+        if (waiter.timer !== undefined) clearTimeout(waiter.timer)
+        if (error) reject(error)
+        else resolve()
+      },
+    }
+    waiter.timer = setTimeout(() => {
+      const index = waiters.indexOf(waiter)
+      if (index >= 0) waiters.splice(index, 1)
+      waiter.settle(
+        new Error(
+          `${label}: the driver was not reached ${count} time(s) within ${timeoutMs}ms; the dispatch result deadline most likely preempted it`,
+        ),
+      )
+    }, timeoutMs)
+    waiters.push(waiter)
+  })
+}
+
+async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
   const f = await authorityFixture(),
     directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
@@ -208,6 +256,10 @@ async function fixture(shortCapability = false, resultTimeoutMs = 50) {
     | 'expire-after-send' = 'normal'
   const unblocks: Array<() => void> = []
   let lateGuard: (() => boolean) | undefined
+  let driverEntryCount = 0
+  let driverCompletionCount = 0
+  const driverEntryWaiters: DriverWaiter[] = []
+  const driverCompletionWaiters: DriverWaiter[] = []
   let postCommit: (() => void) | undefined
   let postCommitPhase: 'wall' | 'mono' = 'wall'
   let resultClock: (() => void) | undefined
@@ -220,27 +272,37 @@ async function fixture(shortCapability = false, resultTimeoutMs = 50) {
       signal: AbortSignal
     }) => {
       signal.addEventListener('abort', () => onDriverAbort?.(), { once: true })
-      if (mode === 'hang-before-send') {
-        lateGuard = beforeSend
-        await new Promise<void>((resolve) => {
-          unblocks.push(resolve)
-        })
+      if (mode === 'hang-before-send') lateGuard = beforeSend
+      // The driver was reached. This is the only deterministic proof that the
+      // send boundary exists, and it is published before any await so a test
+      // can order an explicit stop strictly after it.
+      driverEntryCount += 1
+      releaseDriverWaiters(driverEntryWaiters, driverEntryCount)
+      try {
+        if (mode === 'hang-before-send') {
+          await new Promise<void>((resolve) => {
+            unblocks.push(resolve)
+          })
+          if (beforeSend()) writes++
+          return { acknowledged: true }
+        }
+        if (mode === 'revoke-before-send' && result.ok)
+          dispatcher.revoke(result.handle)
+        if (mode === 'expire-before-send') {
+          wall += 5000
+          mono += 5000
+        }
         if (beforeSend()) writes++
+        if (mode === 'double-guard' && beforeSend()) writes++
+        if (mode === 'hang-after-send')
+          await new Promise<void>((resolve) => {
+            unblocks.push(resolve)
+          })
         return { acknowledged: true }
+      } finally {
+        driverCompletionCount += 1
+        releaseDriverWaiters(driverCompletionWaiters, driverCompletionCount)
       }
-      if (mode === 'revoke-before-send' && result.ok)
-        dispatcher.revoke(result.handle)
-      if (mode === 'expire-before-send') {
-        wall += 5000
-        mono += 5000
-      }
-      if (beforeSend()) writes++
-      if (mode === 'double-guard' && beforeSend()) writes++
-      if (mode === 'hang-after-send')
-        await new Promise<void>((resolve) => {
-          unblocks.push(resolve)
-        })
-      return { acknowledged: true }
     },
     waitForPaused: async () => {
       if (mode === 'finish-fail') {
@@ -462,7 +524,24 @@ async function fixture(shortCapability = false, resultTimeoutMs = 50) {
     printerBinding,
     driver,
     additional,
-    pendingDriverCount: () => unblocks.length,
+    driverEntryCount: () => driverEntryCount,
+    driverCompletionCount: () => driverCompletionCount,
+    waitForDriverEntry: (count = 1, timeoutMs = 5000) =>
+      waitForDriverCount(
+        driverEntryWaiters,
+        () => driverEntryCount,
+        count,
+        timeoutMs,
+        'driver entry',
+      ),
+    waitForDriverCompletion: (count = 1, timeoutMs = 5000) =>
+      waitForDriverCount(
+        driverCompletionWaiters,
+        () => driverCompletionCount,
+        count,
+        timeoutMs,
+        'driver completion',
+      ),
     wire: encodeCommandV2(signed),
     handle: result.handle,
     peer,
@@ -492,7 +571,6 @@ async function fixture(shortCapability = false, resultTimeoutMs = 50) {
       for (const release of unblocks) release()
     },
     lateGuard: () => lateGuard?.(),
-    hasLateGuard: () => lateGuard !== undefined,
     getWrites: () => writes,
     setState: (value: typeof state) => {
       state = value
@@ -631,7 +709,7 @@ test('late driver completion cannot rewrite unknown or invoke a late send guard'
       if (mode === 'hang-before-send') assert.equal(f.lateGuard(), false)
       const writes = f.getWrites()
       f.unblock()
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      await f.waitForDriverCompletion(1)
       assert.equal(f.getWrites(), writes)
       const stored = readCommandOutcome(f.journal, f.f.command.cmd_id)
       assert.equal(
@@ -696,7 +774,13 @@ test('deadline at send and failed result persistence never produce false success
 
 test('close or abort seals a delayed send boundary', async () => {
   for (const stop of ['close', 'abort'] as const) {
-    const f = await fixture()
+    // The dispatcher arms its result deadline with a real timer when the
+    // dispatch starts, while the driver is only reached after the threadpool
+    // backed signature verification completes. This scenario waits for the
+    // driver entry signal instead of polling a flag, so the stop below is
+    // provably applied after the driver was reached, and it runs with the
+    // production maximum budget to leave room for signature verification under test load.
+    const f = await fixture(false, 5000)
     f.setMode('hang-before-send')
     const abort = new AbortController()
     try {
@@ -706,23 +790,48 @@ test('close or abort seals a delayed send boundary', async () => {
         printerBinding: f.printerBinding,
         signal: abort.signal,
       })
-      const deadline = Date.now() + 1000
-      while (!f.hasLateGuard()) {
-        assert.ok(Date.now() < deadline)
-        await new Promise((resolve) => setTimeout(resolve, 1))
-      }
+      await f.waitForDriverEntry(1)
       if (stop === 'close') f.dispatcher.close()
       else abort.abort()
       assert.equal((await pending).kind, 'not-sent')
       assert.equal(f.lateGuard(), false)
       f.unblock()
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await f.waitForDriverCompletion(1)
       assert.equal(f.getWrites(), 0)
     } finally {
       f.cleanup()
     }
   }
 })
+
+test(
+  'a result deadline elapsed during signature verification never enters the driver',
+  { timeout: 5000 },
+  async () => {
+    const f = await fixture(false, 50)
+    f.setMode('hang-before-send')
+    try {
+      const pending = f.dispatcher.dispatch({
+        wire: f.wire,
+        capability: f.handle,
+        printerBinding: f.printerBinding,
+      })
+      // dispatch awaits WebCrypto before driver entry. Advance its trusted clock
+      // before that continuation, independent of real timer/poll phase ordering.
+      f.advance(51)
+      const result = await pending
+      // A timer before the durable claim rejects; the post-claim clock guard
+      // records not-sent. Both must stop before invoking the driver.
+      assert.equal(result.reason, 'deadline')
+      assert.ok(result.kind === 'rejected' || result.kind === 'not-sent')
+      assert.equal(f.driverEntryCount(), 0)
+      assert.equal(f.getWrites(), 0)
+    } finally {
+      f.unblock()
+      f.cleanup()
+    }
+  },
+)
 
 test('same assignment has no queue and timed-out work retains the global eight-slot bound', async () => {
   const f = await fixture(false, 1000)
@@ -749,14 +858,7 @@ test('same assignment has no queue and timed-out work retains the global eight-s
       kind: 'rejected',
       reason: 'busy',
     })
-    const driverDeadline = performance.now() + 1000
-    while (f.pendingDriverCount() !== 8) {
-      assert.ok(
-        performance.now() < driverDeadline,
-        'All eight operations must reach the hanging driver before timeout assertions',
-      )
-      await new Promise((resolve) => setTimeout(resolve, 1))
-    }
+    await f.waitForDriverEntry(8)
     const settled = await Promise.all(work)
     assert.equal(
       settled.every((result) => result.kind === 'not-sent'),
@@ -768,7 +870,7 @@ test('same assignment has no queue and timed-out work retains the global eight-s
       reason: 'busy',
     })
     f.unblock()
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await f.waitForDriverCompletion(8)
     assert.equal(f.getWrites(), 0)
   } finally {
     f.unblock()

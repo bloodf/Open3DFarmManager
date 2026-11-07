@@ -771,13 +771,18 @@ test('receiptless initialized queues reject before retention can discard old unb
 
 test('local credential expiry stops authentication attempts while bounded local collection continues', async () => {
   const server = await fixture()
-  server.credential.approval.expires_at = Date.now() + 1500
+  server.credential.approval.expires_at = Date.now() + 60000
   server.accept()
   server.save()
-  const running = server.launch()
+  const running = server.launch({
+    NODE_OPTIONS: '--import ./tests/helpers/connector-queue-race-loader.mjs',
+    QUEUE_EXPIRE_ON_DELIVERY: '1',
+  })
   try {
-    await running.until(() =>
-      running.output.includes('"kind":"credential-expired"'),
+    await running.until(
+      () =>
+        lines(running.output, 'delivery') >= 1 &&
+        running.output.includes('"kind":"credential-expired"'),
     )
     const count = server.cloudRequests
     server.delta()

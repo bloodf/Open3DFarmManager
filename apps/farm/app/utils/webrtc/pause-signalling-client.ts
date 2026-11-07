@@ -26,6 +26,8 @@ import {
   type PauseProofsReady,
   type PausePhaseFrame,
   type PausePhaseMessage,
+  type PauseDataFrame,
+  type PauseCommandMessage,
 } from '../../../../../packages/connector/src/webrtc/pause-control-session.ts'
 import { PauseBrowserPeer } from './pause-control-peer.ts'
 
@@ -101,13 +103,15 @@ type Peer = Pick<
   PauseBrowserPeer,
   'answer' | 'close' | 'closed' | 'sendPhase'
 > &
-  Partial<Pick<PauseBrowserPeer, 'diagnostics'>>
+  Partial<Pick<PauseBrowserPeer, 'diagnostics' | 'sendCommand'>>
 type Options = Readonly<{
   peerFactory?: (input: PeerOptions) => Peer
   clock?: ChannelClock
   signal?: AbortSignal
   onProofsReady?: (value: PauseProofsReady) => void
   onPhase?: (frame: Readonly<PausePhaseFrame>) => void
+  /** Optional result handler. Absent keeps the client metadata only. */
+  onData?: (frame: Readonly<PauseDataFrame>) => void
   onTerminal?: (reason: string) => void
 }>
 /** A new authenticated control transport, never a readonly peer upgrade or command dispatcher. */
@@ -279,6 +283,30 @@ export class PauseBrowserSignallingClient {
             this.close('phase-callback')
           }
         },
+        ...(this.#options.onData
+          ? {
+              onData: (value: Readonly<PauseDataFrame>) => {
+                if (!this.#channel.current() || !this.#proofsReady) return
+                if (value.transport_id !== this.#transport) {
+                  this.close('data-scope')
+                  return
+                }
+                if (value.t !== 'control.result') {
+                  this.close('data-direction')
+                  return
+                }
+                try {
+                  pauseSynchronous(() =>
+                    this.#options.onData?.(
+                      Object.freeze(structuredClone(value)),
+                    ),
+                  )
+                } catch {
+                  this.close('data-callback')
+                }
+              },
+            }
+          : {}),
         onTerminal: (reason) => this.close(reason),
       })
       this.#peer = peer
@@ -354,13 +382,30 @@ export class PauseBrowserSignallingClient {
       this.close('proof-callback')
     }
   }
-  /** Only admission/capability metadata supported by the maintained peer; never a command API. */
+  /** Admission/capability metadata only; the bounded command travels through sendCommand. */
   sendPhase(frame: PausePhaseMessage): boolean {
     if (!this.#channel.current() || !this.#proofsReady) return false
     try {
       return this.#peer?.sendPhase(frame) === true && this.#channel.current()
     } catch {
       this.close('phase-send')
+      return false
+    }
+  }
+  /** Browser only command. The client never emits a result. */
+  sendCommand(command: PauseCommandMessage): boolean {
+    if (!this.#options.onData) return false
+    if (!this.#channel.current() || !this.#proofsReady) return false
+    if (command.t !== 'control.command') {
+      this.close('invalid-data-send')
+      return false
+    }
+    try {
+      return (
+        this.#peer?.sendCommand?.(command) === true && this.#channel.current()
+      )
+    } catch {
+      this.close('command-send')
       return false
     }
   }

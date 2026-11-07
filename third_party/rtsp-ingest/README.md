@@ -6,4 +6,6 @@ This source-only package retains 29 audited module trees. `manifest.json` lists 
 
 Run `python3 third_party/rtsp-ingest/verify.py` for a source-only integrity check. It does not compile, execute Go, verify an upstream h1, or establish runtime acceptance.
 
+The repository Renovate configuration disables dependency updates for this path, because every retained byte is pinned by `manifest.json`. An upstream version bump needs a manual provenance re-audit and a manifest update before any vendored file changes.
+
 Binary fixture omissions can prevent upstream tests from running. The x/net public suffix tables remain as embedded data required by source, not executable binaries.

@@ -1318,3 +1318,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## TypeScript compiler versions
+
+The root CLI uses `typescript@7.0.2`; `apps/farm` pins `typescript@5.9.3` for
+`vue-tsc@3.3.14` and Volar, which require the legacy compiler API and
+`typescript/lib/tsc`. TypeScript 7 removes that legacy API. See the
+[upstream compatibility guidance](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0).
+This split preserves the existing strict compiler settings.
+
+Both packages declare Apache-2.0. Exact license and third-party notice files
+from their versioned npm tarballs are retained under
+[`notices/typescript/7.0.2`](notices/typescript/7.0.2) and
+[`notices/typescript/5.9.3`](notices/typescript/5.9.3), including the vendored
+JSON-RPC license shipped in 7.0.2. Preserve these files when redistributing
+these compiler packages. These are development dependencies; this notice does
+not establish the contents of a runtime artifact.

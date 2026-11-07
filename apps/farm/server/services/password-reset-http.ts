@@ -2,10 +2,7 @@ import { createError, getRequestIP, type RequestEvent } from 'nuxt/server'
 import { authResponse, readLoginBody } from './authenticated-session.ts'
 import { checkMutationOrigin } from '../utils/auth/boundary.ts'
 import { passwordResetRuntime } from '../utils/auth/password-reset-runtime.ts'
-import {
-  completePasswordReset,
-  requestPasswordReset,
-} from './password-reset.ts'
+import { completePasswordReset } from './password-reset.ts'
 
 type ResetEvent = Pick<RequestEvent, 'req' | 'res' | 'context'>
 export async function passwordResetHttp(event: ResetEvent, complete: boolean) {
@@ -59,12 +56,9 @@ export async function passwordResetHttp(event: ResetEvent, complete: boolean) {
         })
       return { message: 'Senha redefinida. Entre novamente.' }
     }
-    // Delivery errors and unknown accounts have the same public response.
-    await requestPasswordReset(
-      input.username,
-      runtime.store,
-      runtime.delivery,
-    ).catch(() => {})
+    // Identical admission for known, unknown and disabled accounts. Saturation
+    // also retains the generic response; no account-dependent work is awaited.
+    runtime.queue.enqueue(input.username)
     return {
       message:
         'Se a conta puder receber instruções, elas serão enviadas pelo canal cadastrado.',

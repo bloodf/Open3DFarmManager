@@ -11,7 +11,7 @@ export interface PasswordResetStore {
 }
 /** Trusted delivery resolves its destination independently; never accept a destination from the request. */
 export interface PasswordResetDelivery {
-  deliver(username: string, token: string): Promise<void>
+  deliver(username: string, token: string, signal: AbortSignal): Promise<void>
 }
 export function resetTokenDigest(token: string): string {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('Invalid reset token')
@@ -21,11 +21,14 @@ export async function requestPasswordReset(
   username: string,
   store: PasswordResetStore,
   delivery: PasswordResetDelivery,
+  signal: AbortSignal = new AbortController().signal,
 ): Promise<void> {
   if (!/^[a-z0-9_-]{3,64}$/.test(username)) throw new Error('Invalid username')
+  if (signal.aborted) return
   const token = randomBytes(32).toString('base64url')
-  if (await store.issue(username, resetTokenDigest(token)))
-    await delivery.deliver(username, token)
+  if (await store.issue(username, resetTokenDigest(token))) {
+    if (!signal.aborted) await delivery.deliver(username, token, signal)
+  }
 }
 export async function completePasswordReset(
   input: { username: string; token: string; password: string },

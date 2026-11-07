@@ -10,6 +10,7 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
     entryPoints: [new URL('./fixture.ts', import.meta.url).pathname],
     bundle: true,
     platform: 'browser',
+    format: 'esm',
     write: false,
   })
   const script = bundle.outputFiles[0]!.text
@@ -88,7 +89,11 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
     ] satisfies Scenario[]) {
       const result = await page.evaluate(async (scenario) => {
         const url = '/fixture.js'
-        const fixture: typeof import('./fixture') = await import(url)
+        // Keep this import in Chromium, outside Vitest's SSR transform.
+        const fixture: typeof import('./fixture') = await new Function(
+          'url',
+          'return import(url)',
+        )(url)
         return fixture.runScenario(scenario)
       }, scenario)
       console.info(JSON.stringify(result))

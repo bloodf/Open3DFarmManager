@@ -3,6 +3,12 @@
   "extends": ["config:recommended"],
   "packageRules": [
     {
+      "description": "Keep the qualified Node.js runtime and types on major 24 while allowing compatible updates.",
+      "matchManagers": ["npm", "nvm", "dockerfile", "github-actions"],
+      "matchDepNames": ["node", "@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
       "description": "Vendored rtsp-ingest sources are immutable and provenance-audited; updates are manual.",
       "matchFileNames": ["third_party/rtsp-ingest/**"],
       "enabled": false

@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@12.18.0",
   "engines": {
-    "node": ">=24.22.2 <27"
+    "node": ">=24.22.2 <25"
   },
   "workspaces": [
     "apps/*",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "typescript": "5.9.3",
-    "@types/node": "26.6.6",
+    "@types/node": "24.19.2",
     "@playwright/test": "1.64.1",
     "prettier": "3.9.10",
     "effect": "4.1.2",

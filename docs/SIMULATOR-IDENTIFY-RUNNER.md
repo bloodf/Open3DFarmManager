@@ -1483,3 +1483,28 @@ qualify this variant. Do not commit these upstream artifacts into the project.
 The parent must supply both paths for Linux source gates, run RED/GREEN and
 full checks, obtain a fresh independent review of the final head, then admit
 one separate observation. No runtime retry is authorized by this document.
+
+### AUTO producer capture source checkpoint
+
+The child-log reader now filters the configured producer before applying the
+existing file count limit. Supervisor 4.2.5
+[options.py](https://github.com/Supervisor/supervisor/blob/4.2.5/supervisor/options.py)
+defines the default process name as the program name, the default server
+identifier as `supervisor`, and AUTO names as
+`<process>-stdout---<identifier>-<temporary>.log` for redirected stderr.
+Its [loggers.py](https://github.com/Supervisor/supervisor/blob/4.2.5/supervisor/loggers.py)
+appends numeric rotation suffixes. The pinned startup uses no identifier override.
+Literal process names and the program-name expansion are supported; unresolved
+expansions or multiple configured processes leave this source unavailable.
+
+Unrelated directory entries no longer imply producer capture loss or consume
+the producer file budget. Matching rotations and multiple matching streams
+still mark capture truncated. A bounded, partial or warning-bearing directory
+listing also marks capture truncated. Byte bounds, partial record handling,
+record limits, incomplete capture and reused-session guards remain unchanged.
+Synthetic Node oracles cover producer selection and retained loss signals.
+This checkpoint is source/static only; these added tests have not run.
+
+The retained actual variant result reports 16 sessions with data and truncated
+capture. This source defect has not been established as its cause. Identification
+and readiness remain unproven; no observation was rerun.

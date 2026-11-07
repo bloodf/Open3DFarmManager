@@ -483,6 +483,23 @@ export function transformSupervisorConfig(text, options) {
   }
 }
 
+// Supervisor 4.2.5 options.py: process_name defaults to program_name;
+// get_autochildlog_name uses name-channel---identifier- plus mktemp and .log.
+function autoChildLogPrefix(programSection, serverSection) {
+  const processName = (
+    entryValue(programSection, 'process_name') ?? '%(program_name)s'
+  ).replaceAll('%(program_name)s', programSection.name)
+  const identifier = entryValue(serverSection, 'identifier') ?? 'supervisor'
+  // Unresolved expansions and multiple configured processes cannot be guessed.
+  if (
+    (entryValue(programSection, 'numprocs') ?? '1') !== '1' ||
+    !/^[a-zA-Z0-9_.-]+$/.test(processName) ||
+    !/^[a-zA-Z0-9_.-]+$/.test(identifier)
+  )
+    return null
+  return `${processName}-stdout---${identifier}-`
+}
+
 /**
  * Resolve where the child process stderr is routed, using only the extracted
  * configuration.
@@ -528,6 +545,7 @@ export function resolveStderrRouting(programSection, serverSection = null) {
         candidates.push({
           kind: 'child-log',
           path: null,
+          producerPrefix: autoChildLogPrefix(programSection, serverSection),
           childlogdir: isAbsoluteContainerPath(childlogdir ?? '')
             ? childlogdir
             : null,
@@ -1522,11 +1540,23 @@ async function readChildLog(docker, container, candidate, limit) {
   )
   if (listing.status !== 0)
     return { available: false, text: '', truncated: false }
-  const names = listing.stdout
+  if (!candidate.producerPrefix)
+    return { available: false, text: '', truncated: false }
+  const listingTruncated =
+    Boolean(listing.stderr) ||
+    Buffer.byteLength(listing.stdout, 'utf8') >= 64 * 1024 ||
+    (listing.stdout.length > 0 && !listing.stdout.endsWith('\n'))
+  const matchingNames = listing.stdout
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, CHILD_LOG_FILE_LIMIT)
+    .slice(0, -1)
+    .filter((name) =>
+      name.startsWith(candidate.producerPrefix) &&
+      /^[^/\s]+\.log(?:\.[1-9][0-9]*)?$/.test(
+        name.slice(candidate.producerPrefix.length),
+      ),
+    )
+  const names = matchingNames.slice(0, CHILD_LOG_FILE_LIMIT)
+  const sourceTruncated = listingTruncated || matchingNames.length > 1
   if (names.length === 0)
     return { available: false, text: '', truncated: false }
   let fallback = null
@@ -1547,7 +1577,7 @@ async function readChildLog(docker, container, candidate, limit) {
       return {
         available: true,
         text: bounded.text,
-        truncated: bounded.truncated || names.length > 1,
+        truncated: bounded.truncated || sourceTruncated,
       }
     if (!fallback)
       fallback = {

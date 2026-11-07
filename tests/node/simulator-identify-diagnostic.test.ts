@@ -1814,7 +1814,7 @@ test('stops with a verified wrapper failure and keeps the report', async () => {
 })
 
 test('captures the child stderr from the supervisor child log', async () => {
-  const childLog = '/tmp/supervisor/klipper-stdout---2026-01-01---.log'
+  const childLog = '/tmp/supervisor/klipper-stdout---supervisor-abcdefgh.log'
   const docker = createFakeDocker({
     config: CHILD_LOG_CONFIG,
     capture: '',
@@ -1834,6 +1834,83 @@ test('captures the child stderr from the supervisor child log', async () => {
     cleanupLedger(ledger)
   }
 })
+
+for (const scenario of [
+  { name: 'unrelated files before the producer exceed the file limit', extra: 'unrelated', truncated: false },
+  { name: 'matching rotation', extra: 'klipper-stdout---supervisor-abcdefgh.log.1', truncated: true },
+  { name: 'second matching stream', extra: 'klipper-stdout---supervisor-second.log', truncated: true },
+  { name: 'wrong channel', extra: 'klipper-stderr---supervisor-second.log', truncated: false },
+  { name: 'wrong identifier', extra: 'klipper-stdout---other-second.log', truncated: false },
+  { name: 'wrong process', extra: 'moonraker-stdout---supervisor-second.log', truncated: false },
+  { name: 'invalid suffix', extra: 'klipper-stdout---supervisor-second.log.backup', truncated: false },
+]) {
+  test(`AUTO producer capture handles ${scenario.name}`, async () => {
+    const content = OBSERVER_START(1) + OBSERVER_EVENT(1, 0)
+    const extras = scenario.extra === 'unrelated'
+      ? Object.fromEntries(Array.from({ length: diagnostic.CHILD_LOG_FILE_LIMIT + 1 },
+          (_, index) => [`/tmp/supervisor/unrelated-${index}.log`, content]))
+      : { [`/tmp/supervisor/${scenario.extra}`]: content }
+    const docker = createFakeDocker({
+      config: CHILD_LOG_CONFIG,
+      capture: '',
+      childLogFiles: {
+        ...extras,
+        '/tmp/supervisor/klipper-stdout---supervisor-abcdefgh.log': content,
+      },
+    })
+    const options = runOptions(docker)
+    try {
+      const result = await diagnostic.runDiagnostic(options)
+      assert.equal(result.capture.available, true)
+      assert.equal(result.capture.observerRecords, 2)
+      assert.equal(result.capture.truncated, scenario.truncated)
+      const tails = docker.calls.filter(({ args }) => args.includes('tail'))
+      assert.ok(tails.every(({ args }) =>
+        args.at(-1)?.startsWith('/tmp/supervisor/klipper-stdout---supervisor-')))
+    } finally {
+      cleanupLedger(options.ledgerDir as string)
+    }
+  })
+}
+
+for (const variant of ['unrelated-only', 'partial-listing', 'listing-stderr', 'partial-record', 'byte-limit']) {
+  test(`AUTO producer capture preserves ${variant} evidence`, async () => {
+    const path = '/tmp/supervisor/klipper-stdout---supervisor-abcdefgh.log'
+    const content = OBSERVER_START(1) + OBSERVER_EVENT(1, 0)
+    const docker = createFakeDocker({
+      config: CHILD_LOG_CONFIG,
+      capture: '',
+      childLogFiles: {
+        [variant === 'unrelated-only' ? '/tmp/supervisor/moonraker.log' : path]:
+          variant === 'partial-record' ? content + OBSERVER_PREFIX + '{"event":'
+          : variant === 'byte-limit' ? 'x'.repeat(diagnostic.CAPTURE_BYTE_LIMIT) + '\n' + content
+          : content,
+      },
+      fail: (args) => {
+        if (!args.includes('ls')) return null
+        if (variant === 'partial-listing')
+          return { status: 0, stdout: path.split('/').at(-1) + '\nunknown-partial', stderr: '' }
+        if (variant === 'listing-stderr')
+          return { status: 0, stdout: path.split('/').at(-1) + '\n', stderr: 'listing warning' }
+        return null
+      },
+    })
+    const options = runOptions(docker)
+    try {
+      const result = await diagnostic.runDiagnostic(options)
+      assert.equal(result.capture.available, variant !== 'unrelated-only')
+      if (variant !== 'unrelated-only') {
+        assert.equal(result.capture.truncated, true)
+        assert.equal(result.capture.truncationNotifiedToAnalyzer, true)
+        assert.ok(result.observerAnalysis.sessions.every(
+          (session: ObserverSession) => session.classification === 'inconclusive-incomplete-capture',
+        ))
+      }
+    } finally {
+      cleanupLedger(options.ledgerDir as string)
+    }
+  })
+}
 
 test('reports an unavailable routing instead of aborting the run', async () => {
   const relative = SUPERVISOR_CONFIG.replace(

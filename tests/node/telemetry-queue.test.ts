@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   mkdtempSync,
   rmSync,
+  renameSync,
   appendFileSync,
   readFileSync,
   writeFileSync,
@@ -309,6 +310,49 @@ test('recover one orphan compaction file but reject a symlink without touching i
     rmSync(dir, { recursive: true, force: true })
   }
 })
+test('missing committed log preserves its compaction candidate until explicit recovery', () => {
+  const dir = scratch()
+  try {
+    const queue = new TelemetryQueue(dir, 1000)
+    const first = queue.enqueue(state, 1000).eventId
+    const second = queue.enqueue({ ...state, state: 'printing' }, 1001).eventId
+    queue.close()
+    const log = join(dir, 'telemetry.jsonl')
+    const candidate = join(dir, 'telemetry.compact')
+    renameSync(log, candidate)
+    const before = readFileSync(candidate)
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      assert.throws(
+        () => new TelemetryQueue(dir, 1002),
+        /Missing queue log requires explicit recovery of compaction candidate/,
+      )
+      assert.equal(existsSync(log), false)
+      assert.deepEqual(readFileSync(candidate), before)
+      assert.equal(existsSync(join(dir, 'telemetry.lock')), false)
+    }
+
+    renameSync(candidate, log)
+    const recovered = new TelemetryQueue(dir, 1002)
+    try {
+      assert.deepEqual(recovered.recovery, {
+        expired: 0,
+        capacity: 0,
+        partialTail: false,
+      })
+      assert.deepEqual(
+        recovered.batch(1002).records.map((record) => record.eventId),
+        [first, second],
+      )
+      assert.deepEqual(readFileSync(log), before)
+    } finally {
+      recovered.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('oversized incomplete tail is preserved rather than silently truncated', () => {
   const dir = scratch()
   try {

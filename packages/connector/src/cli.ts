@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { projectVersion } from '@open3dfarmmanager/shared'
+import { parseStatusPort } from './status/local.ts'
 import { parseArgs } from 'node:util'
 import { loadExistingIdentity, loadOrCreateIdentity } from './identity/store.ts'
 
@@ -12,6 +13,7 @@ Uso:
   init-identity --data-dir <dir>     Criar ou reutilizar identidade local (JSON público)
   run --config <arquivo> --credential-file <segredo> --data-dir <dir>
                                     Coletar e enviar telemetria autenticada
+  run ... --status-port <porta>    Habilitar página local em 127.0.0.1
   collect --config <arquivo> --data-dir <dir>
                                     Coletar telemetria local somente para leitura
 
@@ -91,11 +93,13 @@ async function dispatch(args: string[]): Promise<number> {
         config: { type: 'string' },
         'data-dir': { type: 'string' },
         'credential-file': { type: 'string' },
+        'status-port': { type: 'string' },
       },
       allowPositionals: false,
     })
     if (
       positionals.length ||
+      (!running && values['status-port'] !== undefined) ||
       !values.config ||
       !values['data-dir'] ||
       (running
@@ -105,6 +109,10 @@ async function dispatch(args: string[]): Promise<number> {
       console.error('Argumentos inválidos. Use --help.')
       return 1
     }
+    const statusPort =
+      values['status-port'] === undefined
+        ? undefined
+        : parseStatusPort(values['status-port'])
     const common = {
       configPath: values.config,
       dataDirectory: values['data-dir'],
@@ -117,6 +125,7 @@ async function dispatch(args: string[]): Promise<number> {
       const { runConnectorAgent } = await import('./runtime/agent.ts')
       await runConnectorAgent({
         ...common,
+        ...(statusPort === undefined ? {} : { statusPort }),
         credentialPath: values['credential-file'],
       })
     } else {

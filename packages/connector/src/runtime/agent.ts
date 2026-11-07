@@ -1,3 +1,5 @@
+import { openLocalStatus } from '../status/local.ts'
+import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import { loadExistingIdentity } from '../identity/store.ts'
 import { readRuntimeCredential } from '../config/credential.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
@@ -52,10 +54,12 @@ function untilAbort(signal: AbortSignal): Promise<void> {
 
 /** One scoped queue, one maintained authenticated sender, one serial drain loop. */
 export async function runConnectorAgent(input: {
+  statusPort?: number
   configPath: string
   credentialPath: string
   dataDirectory: string
   signal: AbortSignal
+  onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
 }): Promise<void> {
   const identity = loadExistingIdentity(input.dataDirectory)
@@ -115,8 +119,23 @@ export async function runConnectorAgent(input: {
     agentId: assignment.agent_id,
     printerKey: assignment.printer_key,
   }))
+  let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
+    if (input.statusPort !== undefined) {
+      localStatus = await openLocalStatus({
+        port: input.statusPort,
+        read: () => ({
+          queueDepth: queue.depth,
+          delivered: totals.delivered,
+          retries: totals.retries,
+          credentialExpired:
+            totals.credentialExpired || Date.now() >= credential.expires_at,
+        }),
+        onError: fail,
+      })
+    }
+    if (signal.aborted) return
     snapshots = config.signalling
       ? createFarmSnapshotSource({ assignmentRefs: refs })
       : undefined
@@ -288,6 +307,7 @@ export async function runConnectorAgent(input: {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        ...(input.onInventory ? { onInventory: input.onInventory } : {}),
         queue,
         signal,
         onDiagnostic: diagnostic,
@@ -305,6 +325,11 @@ export async function runConnectorAgent(input: {
     fail(error)
   } finally {
     controller.abort()
+    try {
+      await localStatus?.close()
+    } catch (error) {
+      fail(error)
+    }
     snapshots?.close()
     await Promise.all(tasks)
     try {

@@ -53,6 +53,37 @@ test('missing identity and invalid arguments never initialize files', () => {
       ['pair'],
       ['--version', 'identity'],
       ['--unknown'],
+      [
+        'collect',
+        '--config',
+        'absent',
+        '--data-dir',
+        absent,
+        '--status-port',
+        '8080',
+      ],
+      [
+        'run',
+        '--config',
+        'absent',
+        '--data-dir',
+        absent,
+        '--credential-file',
+        'absent',
+        '--status-port',
+        '0',
+      ],
+      [
+        'run',
+        '--config',
+        'absent',
+        '--data-dir',
+        absent,
+        '--credential-file',
+        'absent',
+        '--status-port',
+        '65536',
+      ],
     ]) {
       const result = run(...args)
       assert.equal(result.status, 1)

@@ -162,11 +162,12 @@ async function fixture(signalling = false) {
     { stdio: ['ignore', 'ignore', 'pipe'] },
   )
   resource({ kind: 'child', id: openssl.pid, state: 'created' })
+  const certReading = collectStream(openssl.stderr)
   const certTimer = setTimeout(() => openssl.kill('SIGKILL'), 5000)
   const certExit = await new Promise<number | null>((resolve) =>
     openssl.on('exit', (code) => resolve(code)),
   )
-  const certError = await collectStream(openssl.stderr)
+  const certError = await certReading
   clearTimeout(certTimer)
   resource({ kind: 'child', id: openssl.pid, state: 'reaped' })
   if (certExit !== 0) {

@@ -236,6 +236,7 @@ test('body reader terminates a stalled stream', async () => {
   const request = new Request('https://farm.example.invalid', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    ...({ duplex: 'half' } satisfies { duplex: 'half' }),
     body,
   })
   await expect(readBrowserDeviceBody(request)).rejects.toMatchObject({

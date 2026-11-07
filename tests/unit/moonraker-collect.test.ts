@@ -479,6 +479,7 @@ test('ws rejects oversized and excessively fragmented messages before any queue 
       { stdio: ['pipe', 'pipe', 'pipe'] },
     )
     resource({ kind: 'child', id: server.pid, state: 'created' })
+    const serverError = collectStream(server.stderr)
     const serverExited = new Promise<number | null>((resolve) =>
       server.on('exit', (code) => resolve(code)),
     )
@@ -527,7 +528,7 @@ test('ws rejects oversized and excessively fragmented messages before any queue 
         if (part.done) break
         closeTrace += part.value!.toString('utf8')
       }
-      const error = await collectStream(server.stderr)
+      const error = await serverError
       resource({ kind: 'child', id: server.pid, state: 'reaped' })
       if (origin) resource({ kind: 'loopback', id: origin, state: 'closed' })
       temp.close()

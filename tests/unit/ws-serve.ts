@@ -2,7 +2,7 @@ import {
   createServer,
   type Server,
   type IncomingMessage,
-  type ServerResponse,
+  ServerResponse,
 } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { createHash } from 'node:crypto'
@@ -53,7 +53,7 @@ export async function serveWsTestServer(handlers: {
           }
           const hasBody = !['GET', 'HEAD'].includes(req.method ?? '')
           const request = new Request(
-            `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
+            `${handlers.tls ? 'https' : 'http'}://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`,
             {
               method: req.method ?? 'GET',
               headers,
@@ -77,9 +77,10 @@ export async function serveWsTestServer(handlers: {
   server.on('upgrade', (request, socket, head) => {
     sockets.add(socket)
     socket.on('error', () => {})
+    socket.on('end', () => socket.end())
     socket.once('close', () => sockets.delete(socket))
     const upgradeRequest = new Request(
-      `http://${request.headers.host ?? '127.0.0.1'}${request.url ?? '/'}`,
+      `${handlers.tls ? 'https' : 'http'}://${request.headers.host ?? '127.0.0.1'}${request.url ?? '/'}`,
       {
         method: request.method ?? 'GET',
         headers: Object.entries(request.headers).flatMap(([name, value]) =>
@@ -91,6 +92,20 @@ export async function serveWsTestServer(handlers: {
         ),
       },
     )
+    if (!handlers.upgrade) {
+      const response = new ServerResponse(request)
+      response.assignSocket(socket)
+      void Promise.resolve(handlers.http(upgradeRequest))
+        .then(async (result) => {
+          response.writeHead(result.status, {
+            ...Object.fromEntries(result.headers.entries()),
+            connection: 'close',
+          })
+          response.end(Buffer.from(await result.arrayBuffer()))
+        })
+        .catch(() => socket.destroy())
+      return
+    }
     const accept = handlers.upgrade?.(upgradeRequest) ?? false
     if (accept === 'hang') return
     if (!accept) {
@@ -177,6 +192,7 @@ export async function serveWsTestServer(handlers: {
         }
         buffer = buffer.subarray(offset + length)
         if (opcode === 0x8) {
+          socket.write(frame(0x8, payload))
           socket.end()
           return
         }

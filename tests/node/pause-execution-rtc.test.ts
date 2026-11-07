@@ -591,6 +591,10 @@ test('revocation verifier rejects unsafe synthetic observations', () => {
   const revokedNative: PauseExecutionNativeObservation = {
     ...native,
     prepareCalls: 0,
+    relayDiagnostics:
+      native.relayDiagnostics === null
+        ? null
+        : { ...native.relayDiagnostics, applied: 0 },
     pausesObserved: 0,
     terminal: true,
     latestPrintState: 'printing',
@@ -655,6 +659,10 @@ test('degradation verifier rejects unsafe synthetic observations', () => {
   const degradedNative: PauseExecutionNativeObservation = {
     ...native,
     prepareCalls: 0,
+    relayDiagnostics:
+      native.relayDiagnostics === null
+        ? null
+        : { ...native.relayDiagnostics, applied: 0 },
     pausesObserved: 0,
     terminal: true,
     latestPrintState: 'printing',

@@ -223,6 +223,13 @@ export function verifyPauseExecutionRevocation(
   const browser = PauseExecutionBrowserObservation.parse(browserValue)
 
   assert.equal(native.prepareCalls, 0)
+  if (native.relayDiagnostics !== null) {
+    assert.equal(
+      native.relayDiagnostics.applied,
+      0,
+      'Revocation must prevent applied relay evidence',
+    )
+  }
   assert.equal(
     native.pausesObserved,
     0,
@@ -264,6 +271,13 @@ export function verifyPauseExecutionDegradation(
   const browser = PauseExecutionBrowserObservation.parse(browserValue)
 
   assert.equal(native.prepareCalls, 0)
+  if (native.relayDiagnostics !== null) {
+    assert.equal(
+      native.relayDiagnostics.applied,
+      0,
+      'Disconnect must prevent applied relay evidence',
+    )
+  }
   assert.equal(
     native.pausesObserved,
     0,

@@ -1998,7 +1998,7 @@ export async function runDiagnostic(options) {
         invalidRecords = analyzed.invalidRecords
       } catch (error) {
         analysisError = error.message
-        if (error.stdinFailed) pendingFailure ??= error
+        if (error.stdinFailed) throw error
       }
     }
 
@@ -2128,19 +2128,31 @@ export async function runDiagnostic(options) {
     }
     result.stages = state.stages
     result.totalElapsedMs = clock.now() - runStartedAt
-    writeLedgerFile(ledgerDir, 'result.json', JSON.stringify(result, null, 2))
   }
-  if (workCleanup.retained)
-    writeLedgerFile(ledgerDir, 'retained-work.json', JSON.stringify(workCleanup.retained, null, 2))
+  const persistenceErrors = []
+  for (const [name, content] of [
+    ['result.json', result],
+    ['retained-work.json', workCleanup.retained],
+  ]) {
+    if (!content) continue
+    try {
+      writeLedgerFile(ledgerDir, name, JSON.stringify(content, null, 2))
+    } catch {
+      persistenceErrors.push({ name, message: 'exclusive ledger write failed' })
+    }
+  }
   let failure = caughtError ?? pendingFailure
   if (!failure && finalCleanupErrors.length > 0)
     failure = new DiagnosticError('cleanup did not complete', {
       phase: 'cleanup',
       cleanupErrors: finalCleanupErrors,
     })
+  if (!failure && persistenceErrors.length > 0)
+    failure = diagnostic('ledger persistence did not complete', 'report')
   if (failure) {
     if (failure instanceof DiagnosticError) {
       failure.cleanupErrors = finalCleanupErrors
+      failure.persistenceErrors = persistenceErrors
       failure.firstCleanupErrors = cleanupErrors
       if (result) failure.result = result
       throw failure
@@ -2150,6 +2162,7 @@ export async function runDiagnostic(options) {
       cause: failure,
       cleanupErrors: finalCleanupErrors,
     })
+    wrapped.persistenceErrors = persistenceErrors
     wrapped.firstCleanupErrors = cleanupErrors
     throw wrapped
   }
@@ -2193,6 +2206,7 @@ async function main(argv) {
         phase: error.phase ?? 'unknown',
         cleanupErrors: error.cleanupErrors ?? [],
         firstCleanupErrors: error.firstCleanupErrors ?? [],
+        persistenceErrors: error.persistenceErrors ?? [],
       })}\n`,
     )
     return 1

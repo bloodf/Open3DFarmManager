@@ -362,6 +362,7 @@ resource is treated as already removed; an inspection failure remains an error.
 A successful observation poll reporting `exited` ends observation normally.
 Docker stdin failures return a structured error after the child closes, run
 owned cleanup and exit 1 without including analyzer input in the error.
+They skip report inspection so a later report failure cannot replace the analyze error.
 Work directory removal failures also make cleanup incomplete and exit 1.
 If an owned container may remain, its mounted work directory is retained.
 The private external ledger records the retained path and reason in
@@ -372,6 +373,10 @@ The private external ledger records the retained path and reason in
 Ledger files are created exclusively with private permissions; an existing file
 or symlink cannot be overwritten. The ledger directory must be private and
 owned by the current user, and its work directory must be new.
+Failures to persist `result.json` or `retained-work.json` are reported as sanitized
+`persistenceErrors` entries with the file name and a generic message. They retain
+the primary error and cleanup receipts. If neither execution nor cleanup failed,
+a persistence failure exits 1 in the report phase. Existing files remain untouched.
 
 The evidence directory never lives inside the repository. The refusal covers
 the current worktree, the shared git directory and every linked worktree of

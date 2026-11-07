@@ -19,6 +19,8 @@ import { gunzipSync } from 'node:zlib'
 interface DiagnosticErrorShape {
   message: string
   phase: string
+  firstCleanupErrors: { kind: string; name: string; message: string }[]
+  persistenceErrors: { name: string; message: string }[]
   cleanupErrors: { kind: string; name: string; message: string }[]
   result?: Record<string, any>
 }
@@ -2430,4 +2432,73 @@ function requiredLedger(options: RunOptions): string {
   assert.equal(typeof options.ledgerDir, 'string')
   if (options.ledgerDir === undefined) throw new Error('fixture ledger missing')
   return options.ledgerDir
+}
+
+for (const reportFailure of ['status', 'timeout', 'invalid-json']) {
+  test(`stdin failure remains primary before report ${reportFailure}`, async () => {
+    const records = OBSERVER_START(1) + OBSERVER_EVENT(1, 0)
+    const docker = createFakeDocker({
+      capture: records,
+      capturePaths: { '/home/printer/printer_data/logs/klippy.log': records },
+      fail: (args) => {
+        if (args.includes('analyze'))
+          return { status: 1, stdout: '', stderr: 'docker stdin write failed', stdinFailed: true }
+        if (args.includes('{{json .State}}'))
+          return { status: reportFailure === 'status' ? 1 : 0, stdout: 'invalid', stderr: '', timedOut: reportFailure === 'timeout' }
+        return null
+      },
+    })
+    const options = runOptions(docker)
+    try {
+      await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
+        assert.equal(error.phase, 'analyze')
+        assert.equal(error.message, 'docker stdin write failed')
+        assert.deepEqual(error.cleanupErrors, [])
+        assert.deepEqual(error.firstCleanupErrors, [])
+        return true
+      })
+      assert.equal(docker.calls.some(({ args }) => args.includes('analyze')), true)
+      assert.equal(docker.calls.some(({ args }) => args.includes('{{json .State}}')), false)
+      assert.equal(removalCalls(docker).length, 3)
+      assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
+    } finally {
+      cleanupLedger(requiredLedger(options))
+    }
+  })
+}
+
+for (const primary of [true, false]) {
+  test(`ledger collisions preserve cleanup receipts with primary=${primary}`, async () => {
+    const docker = createFakeDocker({
+      fail: (args) => {
+        if (primary && args.includes('{{json .State}}'))
+          return { status: 1, stdout: '', stderr: 'PRIVATE_REPORT_MESSAGE' }
+        if (args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1')
+          return { status: 1, stdout: '', stderr: 'removal refused' }
+        return null
+      },
+    })
+    const options = runOptions(docker)
+    const ledger = requiredLedger(options)
+    for (const name of ['result.json', 'retained-work.json'])
+      writeFileSync(join(ledger, name), 'PRIVATE_EXISTING_CONTENT', { flag: 'wx' })
+    try {
+      await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
+        assert.equal(error.phase, primary ? 'report' : 'cleanup')
+        assert.equal(error.message, primary ? 'docker inspect failed with status 1' : 'cleanup did not complete')
+        assert.ok(error.cleanupErrors.length > 0)
+        assert.ok(error.firstCleanupErrors.length > 0)
+        assert.match(error.cleanupErrors[0]?.message ?? '', /retry:/)
+        assert.deepEqual(error.persistenceErrors, (primary ? ['retained-work.json'] : ['result.json', 'retained-work.json']).map((name) => ({ name, message: 'exclusive ledger write failed' })))
+        assert.equal(JSON.stringify(error).includes('PRIVATE_'), false)
+        return true
+      })
+      for (const name of ['result.json', 'retained-work.json'])
+        assert.equal(readFileSync(join(ledger, name), 'utf8'), 'PRIVATE_EXISTING_CONTENT')
+      assert.equal(existsSync(join(ledger, 'work')), true)
+      assert.equal(docker.calls.filter(({ args }) => args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1').length, 2)
+    } finally {
+      cleanupLedger(ledger)
+    }
+  })
 }

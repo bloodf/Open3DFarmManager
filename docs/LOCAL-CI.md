@@ -10,7 +10,7 @@ bash scripts/test-local-ci.sh
 bash scripts/local-ci.sh code
 ```
 
-The code job requires Bun 1.4.2, Node 24.22.2, existing workspace dependencies,
+The code job requires Bun 1.4.4, Node 24.22.2, existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
 separately; this runner never installs operating-system packages. It follows
 `.github/workflows/ci.yml`: frozen dependency install with scripts disabled,
@@ -19,6 +19,21 @@ workflow additionally runs Playwright's `install --with-deps` on Ubuntu. Local
 browser, operating system and resource scheduling may differ from GitHub.
 `check:all` itself runs lint again, as the workflow does. Missing prerequisites
 or failed tests do not produce a passing result.
+
+The Bun 1.4.4 upgrade still requires a native Linux qualification run. With
+Node 24.22.2, Bun 1.4.4 and the workflow's Chromium prerequisites available,
+run the workflow's code gate on the exact reviewed commit:
+
+```sh
+bun install --frozen-lockfile --ignore-scripts
+bun run check:all
+node packages/connector/dist/cli.js --version
+bunx playwright install --with-deps chromium
+bun run test:e2e
+```
+
+This gate has not been run for the upgrade. The image and simulator jobs remain
+separate required evidence when applicable.
 
 Optional container jobs require explicit opt-in:
 
@@ -31,7 +46,7 @@ bash scripts/local-ci.sh all --containers --simulator
 The image job builds the workflow Dockerfile for `linux/amd64`, starts a
 read-only, capability-dropped container on a dynamically allocated loopback
 port, and checks `/healthz`. Install the `linux/amd64` base images
-`oven/bun:1.4.2` and `node:24.22.2-alpine` separately first; the runner refuses to
+`oven/bun:1.4.4` and `node:24.22.2-alpine` separately first; the runner refuses to
 pull shared build bases implicitly. The GitHub job builds on Ubuntu amd64 and
 uses port 3100. The dynamic port avoids disturbing other local services.
 

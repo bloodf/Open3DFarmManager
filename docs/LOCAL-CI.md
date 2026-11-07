@@ -10,7 +10,7 @@ bash scripts/test-local-ci.sh
 bash scripts/local-ci.sh code
 ```
 
-The code job requires Bun 1.4.2, Node 24.20.0, existing workspace dependencies,
+The code job requires Bun 1.4.2, Node 24.22.2, existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
 separately; this runner never installs operating-system packages. It follows
 `.github/workflows/ci.yml`: frozen dependency install with scripts disabled,
@@ -31,7 +31,7 @@ bash scripts/local-ci.sh all --containers --simulator
 The image job builds the workflow Dockerfile for `linux/amd64`, starts a
 read-only, capability-dropped container on a dynamically allocated loopback
 port, and checks `/healthz`. Install the `linux/amd64` base images
-`oven/bun:1.4.2` and `node:24.20.0-alpine` separately first; the runner refuses to
+`oven/bun:1.4.2` and `node:24.22.2-alpine` separately first; the runner refuses to
 pull shared build bases implicitly. The GitHub job builds on Ubuntu amd64 and
 uses port 3100. The dynamic port avoids disturbing other local services.
 

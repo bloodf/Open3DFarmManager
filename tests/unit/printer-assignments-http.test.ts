@@ -1,4 +1,4 @@
-import { beforeAll, expect, test } from 'bun:test'
+import { beforeAll, expect, test } from 'vitest'
 import {
   printerAssignments,
   printerAssignmentBoundary,
@@ -424,6 +424,7 @@ test('streamed bodies are bounded, canceled and decoded as strict UTF-8', async 
   let canceled = false
   const oversized = new Request(origin, {
     method: 'POST',
+    ...({ duplex: 'half' } satisfies { duplex: 'half' }),
     body: new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new Uint8Array(4097))
@@ -450,6 +451,7 @@ test('a stalled body times out and releases its stream', async () => {
   let canceled = false
   const stalled = new Request(origin, {
     method: 'POST',
+    ...({ duplex: 'half' } satisfies { duplex: 'half' }),
     body: new ReadableStream<Uint8Array>({
       cancel() {
         canceled = true

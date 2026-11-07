@@ -50,8 +50,10 @@ interface PairingRow {
 }
 
 class CredentialWindowExpired extends Error {
-  constructor(readonly observedAt: number) {
+  readonly observedAt: number
+  constructor(observedAt: number) {
     super('Credential issuance window expired')
+    this.observedAt = observedAt
   }
 }
 
@@ -67,11 +69,15 @@ interface VerifiedProof {
 export class PostgresPairing {
   private readonly origin: string
   private readonly audience: string
+  private readonly sql: Sql
+  private readonly clock: () => number
   constructor(
-    private readonly sql: Sql,
+    sql: Sql,
     config: { origin: string; audience: string },
-    private readonly clock: () => number = Date.now,
+    clock: () => number = Date.now,
   ) {
+    this.sql = sql
+    this.clock = clock
     this.origin = PairingProofOrigin.parse(config.origin)
     this.audience = PairingProofAudience.parse(config.audience)
   }

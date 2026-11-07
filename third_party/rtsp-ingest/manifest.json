@@ -1361,8 +1361,8 @@
       "sha256": "719a8f94d23cc8af801d278735596ff32a1dd7f25757d4f4fec126922c10107c"
     },
     "sources/github.com--bluenviron--gortsplib--v5/go.sum": {
-      "bytes": 2682,
-      "sha256": "f199fd69f0674300c5d6d1d2ac8534c42be4054caa3931ceb480a6f9531676e0"
+      "bytes": 3193,
+      "sha256": "c9353ab3eb8beb674df0fda5de5a4f68c94b021e88fb82568d6dc9145b630581"
     },
     "sources/github.com--bluenviron--gortsplib--v5/internal/asyncprocessor/async_processor.go": {
       "bytes": 1332,
@@ -3744,9 +3744,13 @@
       "bytes": 206,
       "sha256": "c3b6540386c2c9a13b1a1065f0e0105f19e6e824fa5c6dae7a9f204aa8a2ab14"
     },
+    "sources/github.com--bluenviron--mediacommon--v2/.github/pull_request_template.md": {
+      "bytes": 298,
+      "sha256": "aa48df01c0e3def516e2ed3d217ecdef5c32d1c1dfcb95d299bd1a942c06f96a"
+    },
     "sources/github.com--bluenviron--mediacommon--v2/.github/workflows/lint.yml": {
       "bytes": 682,
-      "sha256": "effa16b1e15ff858cc7538e33489358433c5e3d5a43ed4fd255dd221f73a1dcf"
+      "sha256": "e75b3ae2181fab4af31d36136a2904baed56f9e4e54d84f122397a8127b46349"
     },
     "sources/github.com--bluenviron--mediacommon--v2/.github/workflows/test.yml": {
       "bytes": 706,
@@ -3757,8 +3761,8 @@
       "sha256": "320a71bb5153f930074bcf79d938738140640e1ac44e31a24eb209a82355b71c"
     },
     "sources/github.com--bluenviron--mediacommon--v2/.golangci.yml": {
-      "bytes": 2368,
-      "sha256": "53c8b7b4061bcdb0087e3762735d920204f698a1cd3c6c8fa4ee5ed3c5afa85b"
+      "bytes": 2382,
+      "sha256": "47833117efbe567756109b5fee3a87aa9f980f6683b4c3252502950e66961a19"
     },
     "sources/github.com--bluenviron--mediacommon--v2/LICENSE": {
       "bytes": 1062,
@@ -3766,7 +3770,7 @@
     },
     "sources/github.com--bluenviron--mediacommon--v2/Makefile": {
       "bytes": 464,
-      "sha256": "88d251e5f50215e7f67eaaa81a62a24a82fa15ecf09e227881a0a1dc59e5a411"
+      "sha256": "0500904597817be372e294d1fa5fdca7b42febe6b3b7f8d9aa42b439e05be737"
     },
     "sources/github.com--bluenviron--mediacommon--v2/README.md": {
       "bytes": 9426,
@@ -6301,8 +6305,8 @@
       "sha256": "c83543434f85ce8347a2b6ff6dd8c2177954695d095b82ef3028852f3932761f"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/buffered_reader_test.go": {
-      "bytes": 944,
-      "sha256": "e2626b4e00b5a4634db4db27b21be13fdce3667b803241c42ff282fab438b1cc"
+      "bytes": 1023,
+      "sha256": "e3935b632c54ac75c6186299088722a7510fa91f9260afdfc9cdccb85923e55d"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/codecs.go": {
       "bytes": 1560,
@@ -6349,8 +6353,8 @@
       "sha256": "df10b0f892a6619cf8d3f4dee168645c345ccb4acd86fc6133b1ae36f45d9a1a"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/codecs/mpeg4_audio_latm.go": {
-      "bytes": 416,
-      "sha256": "bc64e85c55baab275378ba2d628d14d77e7af655cdb2ad2703b39546381adc12"
+      "bytes": 422,
+      "sha256": "7cb8b76e3e8b69d401b9d285e368d658edc9b79e2a432da52bda7be634e171ee"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/codecs/mpeg4_video.go": {
       "bytes": 394,
@@ -6364,25 +6368,33 @@
       "bytes": 369,
       "sha256": "941b5475b4dc55f8ce7bf7d4166972d14b40738193105b83b7c6f5f329609a45"
     },
+    "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/error_wrapper.go": {
+      "bytes": 701,
+      "sha256": "63fffecf1de598e50ba75dd471ed563fd44ebc47f72b15470099f5c2701c9443"
+    },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/mpegts.go": {
       "bytes": 71,
       "sha256": "a2e53666cdb7e705cc9af47f7e2f062d40cc3fba59cc3915dc3e50e4c8facb8b"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/pre_demuxer.go": {
-      "bytes": 1690,
-      "sha256": "9cc86abdba2e446e40677a88febb6a33151233afcd7b4db51a811cd77887d01b"
+      "bytes": 1914,
+      "sha256": "c2173c6d53832ff59912e0ddf54591e1152191d369c944f46de4a46afd99a9b6"
+    },
+    "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/pts_interceptor.go": {
+      "bytes": 1797,
+      "sha256": "528a12f918e9626ce5e516841b3a5ec1d85281afda071f0b33695cfa4cd21c42"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/reader.go": {
-      "bytes": 15631,
-      "sha256": "13423fb5c500ace251197675a6601b3969ecced69cbdc6ebf61718184acf0dfb"
+      "bytes": 15272,
+      "sha256": "0ef9955c2277d0ae0145568bc7d3e1b3d65717ee0a6475174d9f669c7a3aaa6b"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/reader_test.go": {
-      "bytes": 68665,
-      "sha256": "dc2127f96a6589acefd4e8698dd9f1dab79f0d0b16402fa7e498d3bafdb947b3"
+      "bytes": 103039,
+      "sha256": "c166ea5c2e5b6643b140c217f7d45f02d6021cb4dc5fca2289551317d154d3ed"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/robust_demuxer.go": {
-      "bytes": 4057,
-      "sha256": "4d3df469b28cffd9759a77ecf18762da6aa68090962ff8606b80de5f0d4b7f2b"
+      "bytes": 1239,
+      "sha256": "d398d5e8243593e440c4afafb4b0da8502ee8be53cc577ca38d5c1b6631f8756"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/substructs/metadata_au_cell.go": {
       "bytes": 1818,
@@ -6661,32 +6673,28 @@
       "sha256": "0f7f009feb45764eb3d4bb998597f0e326e248824af57f0dab3fd3239c6259d8"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/time_decoder_test.go": {
-      "bytes": 1631,
-      "sha256": "8d293807263c267af1e7c183579675ad6542e2e4c30f41fd842a6e94b34d5c86"
+      "bytes": 1717,
+      "sha256": "e5cb00f66aeaab461393aeb099a39a45da4d819e52d2a82f539ee7ced034fc86"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/track.go": {
-      "bytes": 15248,
-      "sha256": "008984711441510deaa3bed19174f1943a2a2eed14851af6118fb9e22fd9b65c"
-    },
-    "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/track_test.go": {
-      "bytes": 33428,
-      "sha256": "e3acbbf173f14a7e20b0b5e5895bea900296c5fa911774fd5952455e9c5f20dc"
+      "bytes": 16105,
+      "sha256": "3cc53c7187620454641740984cb323ef7f9ba01ccc68268986c4850184e6b1d8"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/writer.go": {
       "bytes": 10254,
       "sha256": "955c901158910835b6766958dc937b02818cab04b6c4e223a4d81bf128cc778f"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/mpegts/writer_test.go": {
-      "bytes": 8635,
-      "sha256": "40176113e84ed5ec8da06aec6c0be305e0cac3db2cf8ecc47d20a3f5920c31ca"
+      "bytes": 8832,
+      "sha256": "5c014bb392c44346595f77166e6f0443d12617d9d3265fd83d1a1a7d56c7d20f"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/pmp4/presentation.go": {
       "bytes": 13584,
       "sha256": "6adf7627846546f103846e058ae380561dd071535a293c012ba7e553b0718ee7"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/pmp4/presentation_test.go": {
-      "bytes": 133035,
-      "sha256": "f75ad411024fb11b24ce0c60b6088440dfba359017ab30c02d64db51efe3f050"
+      "bytes": 133048,
+      "sha256": "145716a1a5b50df4387a314d7a193a19ca95ac85f342de788c576ba496983f63"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/formats/pmp4/sample.go": {
       "bytes": 245,
@@ -6857,8 +6865,8 @@
       "sha256": "30eef3a6f7a31115e0bcec58206438f016febab7859137d98c0d92551bd1cb35"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/rewindablereader/reader.go": {
-      "bytes": 1078,
-      "sha256": "aef528c9e916ea341d54164d480ceafae7c562b9346ae47c90441b4af414fe77"
+      "bytes": 1147,
+      "sha256": "a3d9efb9d2c7fd18df936bf93f3be2a9357ea3f9c7e2d8fc231722363a71b8d1"
     },
     "sources/github.com--bluenviron--mediacommon--v2/pkg/rewindablereader/reader_test.go": {
       "bytes": 2560,
@@ -7541,8 +7549,8 @@
       "sha256": "011a100136bf0bba1c4a4b7816bc12bf418b39ef0adbc896ca1333a35fc4254e"
     },
     "sources/github.com--pion--rtcp/.golangci.yml": {
-      "bytes": 8790,
-      "sha256": "ea257010aaa8f6b9f7baf68b1b64c7d7e0f6969c8e5569952b91f6dc932a0e6d"
+      "bytes": 8453,
+      "sha256": "009543ed3f0e81a5a89aa9f385a0df70731bb8ec045813ee9eaeee59f4a74522"
     },
     "sources/github.com--pion--rtcp/.goreleaser.yml": {
       "bytes": 121,
@@ -7593,8 +7601,8 @@
       "sha256": "175c14c4764be3d45b751ddf9ff5b78ecb010d169009ea0a50eafc8105d3906c"
     },
     "sources/github.com--pion--rtcp/errors.go": {
-      "bytes": 2662,
-      "sha256": "b0585c9e1b882d1a45224301db73a521d43f01edab547c94777d9074e7d104f1"
+      "bytes": 2761,
+      "sha256": "06e01f8b474158cb6fce3147706d8d95ff6f38c5f9513fb23e6577972c5ec378"
     },
     "sources/github.com--pion--rtcp/extended_report.go": {
       "bytes": 24451,
@@ -7713,12 +7721,12 @@
       "sha256": "cf1f3f0896bb8e416317ea6ff19716de11ba3ae2b3d19987c506eda1f0dd0703"
     },
     "sources/github.com--pion--rtcp/rfc8888.go": {
-      "bytes": 11333,
-      "sha256": "ca63873a263dc89e0e9a685b8e12d835eb5b729c06cd9f55037b152d2e9a20bc"
+      "bytes": 11455,
+      "sha256": "7dba94a829fe356c5f3990e6156b475319bbabf2f8ad8e70dc8c603a9db0599e"
     },
     "sources/github.com--pion--rtcp/rfc8888_test.go": {
-      "bytes": 11433,
-      "sha256": "5abb5a333ba5a050d2faf9272cdabdd6e38dbc3ae23ef2ad2da1310e8ef8e7db"
+      "bytes": 11891,
+      "sha256": "586a358d3f0419fba92e54822c18a69fb00397702c8f67b84cdd05fbdcd3eb1d"
     },
     "sources/github.com--pion--rtcp/sender_report.go": {
       "bytes": 12243,
@@ -7773,12 +7781,12 @@
       "sha256": "e1a48af9f8e7db71aff693011c0931babaaee9a2d077115bbd5a0095ba0d7665"
     },
     "sources/github.com--pion--rtcp/transport_layer_cc.go": {
-      "bytes": 17269,
-      "sha256": "859946d4081cbada0bd340019fec1269a2f4c6bd0929eca56f660d4052bbdfd3"
+      "bytes": 17555,
+      "sha256": "eb13648c67ea3fe8389cd8b2ced774da06a2a46ddf21f4dc32068299de755034"
     },
     "sources/github.com--pion--rtcp/transport_layer_cc_test.go": {
-      "bytes": 29767,
-      "sha256": "18879e138be4191b30f2c51e18172b8152958f8257a9df36ff5677c45726e3e1"
+      "bytes": 33062,
+      "sha256": "2d95a0e62708622d22a570c364e1e9017c6efae505d4b0f714f45c18d270bc1d"
     },
     "sources/github.com--pion--rtcp/transport_layer_nack.go": {
       "bytes": 4864,
@@ -7818,7 +7826,11 @@
     },
     "sources/github.com--pion--rtp/.github/workflows/fuzz.yaml": {
       "bytes": 734,
-      "sha256": "c3d73170521f169a2586d7276a7dac291c8af9357c42730f9e2622cbdc810cf6"
+      "sha256": "c1187463024cf5722b0acf69d49526d97a2205ea1252088a93125740901874c0"
+    },
+    "sources/github.com--pion--rtp/.github/workflows/goassets-automerge.yml": {
+      "bytes": 3668,
+      "sha256": "d83afb492c9f6de3f61d071896efb91cf112c617f829a79a285ce8ddb84a8a16"
     },
     "sources/github.com--pion--rtp/.github/workflows/lint.yaml": {
       "bytes": 634,
@@ -7826,7 +7838,7 @@
     },
     "sources/github.com--pion--rtp/.github/workflows/release.yml": {
       "bytes": 678,
-      "sha256": "6a9b05f462de71cc1297ad0296dbaaafff46d4fc8621d300bd9df1b959c19d31"
+      "sha256": "f71b463dfdda5cdea1d4fe6c02ce51e05271d5ebf03d7cb44f68df77374e5df8"
     },
     "sources/github.com--pion--rtp/.github/workflows/renovate-go-sum-fix.yaml": {
       "bytes": 693,
@@ -7838,19 +7850,19 @@
     },
     "sources/github.com--pion--rtp/.github/workflows/test.yaml": {
       "bytes": 1739,
-      "sha256": "454b034c5f39de7690caf3d1ddd993f2fde071c2b99a8f4ca589206827f5a6cd"
+      "sha256": "32240757da7356d6b1757f7119754b7870a57a8082a334c3ef7a67d814350aae"
     },
     "sources/github.com--pion--rtp/.github/workflows/tidy-check.yaml": {
       "bytes": 702,
-      "sha256": "6cb9dbfea1da5f9c7e407356a6e2c3ca49d1bbad68dd2391e5617b95e9dcf767"
+      "sha256": "0567c0a413e092f5f4e3b7565163503e1a68020ba0987b4135c30dd13f1b9a09"
     },
     "sources/github.com--pion--rtp/.gitignore": {
       "bytes": 410,
       "sha256": "011a100136bf0bba1c4a4b7816bc12bf418b39ef0adbc896ca1333a35fc4254e"
     },
     "sources/github.com--pion--rtp/.golangci.yml": {
-      "bytes": 8499,
-      "sha256": "eca8f274cde287bf76220e26cfc1ce02d21782888a33030cd2ddd68ec9699734"
+      "bytes": 8453,
+      "sha256": "009543ed3f0e81a5a89aa9f385a0df70731bb8ec045813ee9eaeee59f4a74522"
     },
     "sources/github.com--pion--rtp/.goreleaser.yml": {
       "bytes": 121,
@@ -7929,20 +7941,20 @@
       "sha256": "2906f641abc7b876cc1d8736522ddbd17ec11326b74606031577e3975ce74d7b"
     },
     "sources/github.com--pion--rtp/codecs/av1_depacketizer.go": {
-      "bytes": 5795,
-      "sha256": "5188a242545d37fb0c018968a461799ae7bb81bc3eca3070a35a5fb50c1d81d5"
+      "bytes": 5814,
+      "sha256": "a6c06e49b2317dc8e84eeeddc0457b68a361013d4ad7ec1702316412adb81b2c"
     },
     "sources/github.com--pion--rtp/codecs/av1_depacketizer_test.go": {
-      "bytes": 17290,
-      "sha256": "0c5614a0eb5748ba906b70d23a6bccbe8ce1ed0a1f0c965ba20b35f332d06125"
+      "bytes": 17817,
+      "sha256": "5ba50a821546b36ea7ec8f1953e43bcc938601e6abb79532c2337569cf50992c"
     },
     "sources/github.com--pion--rtp/codecs/av1_packet.go": {
-      "bytes": 12681,
-      "sha256": "b42ba615676644346389806efe338e795d4cfd2666395351786a667b60683d76"
+      "bytes": 12829,
+      "sha256": "dd0d6a047069384f08e300135ca78f12bdf9c38750ccce660c669d296f40490c"
     },
     "sources/github.com--pion--rtp/codecs/av1_packet_test.go": {
-      "bytes": 50811,
-      "sha256": "687332ddfce2f87fddc456e16356aa106882bffcc98988db4d8893788cd924b0"
+      "bytes": 51507,
+      "sha256": "643988c3f5f4ebd294b2c531cb1fe8cb54b360cce1a354399f1eac20993a1615"
     },
     "sources/github.com--pion--rtp/codecs/codecs.go": {
       "bytes": 188,
@@ -7977,12 +7989,12 @@
       "sha256": "13cb97fb9fc3347704482cc73de8a6ce247f1a3a182beb5fdeec7141fd0309d2"
     },
     "sources/github.com--pion--rtp/codecs/h264/spreader.go": {
-      "bytes": 14850,
-      "sha256": "fdd531aaeeb9f49c09731a3c47f36ae0df5c5c8d99a5ba17c11e7093e4ecef35"
+      "bytes": 15534,
+      "sha256": "f4c3c1585d1b89067a9252cfd8e1306dbabbd3bf82398381240562057a6d201e"
     },
     "sources/github.com--pion--rtp/codecs/h264/spreader_test.go": {
-      "bytes": 117436,
-      "sha256": "4667344a5a6b7713ee666be708fc1d5fcf778b01b5fde4bfce6e426734de4cdf"
+      "bytes": 120837,
+      "sha256": "9dbe998874e27892a1e91aef76e156adbcde92c49e7fb7ad2ecca4f76abba108"
     },
     "sources/github.com--pion--rtp/codecs/h264_packet.go": {
       "bytes": 8383,
@@ -8017,12 +8029,12 @@
       "sha256": "4168a737824f6f5d68f874e04551bc3d01dd1b227d5018001ed5e32d89e038e6"
     },
     "sources/github.com--pion--rtp/codecs/vp8_packet.go": {
-      "bytes": 6303,
-      "sha256": "c98c791542f4dfa17d3290288075ba441857126e662cf9d41b98efbefc012ae9"
+      "bytes": 6094,
+      "sha256": "d1fff93f820ff7c18008f2d89c96a4babb83714d2f90ecab3ee030fbbcd1ab78"
     },
     "sources/github.com--pion--rtp/codecs/vp8_packet_test.go": {
-      "bytes": 5306,
-      "sha256": "0df7d391d7975707e660c582de4c5cf4e7e859e3390647e0e9a90d05323e2b93"
+      "bytes": 5736,
+      "sha256": "09cc1801229922260f82b94e9d61e9e11a1cb01160f9e6455f798975312d38d1"
     },
     "sources/github.com--pion--rtp/codecs/vp9/bits.go": {
       "bytes": 1228,
@@ -8061,12 +8073,12 @@
       "sha256": "908a9674ef38fa5ce0a1e9e7a49600c9035d2170ae3cd5be5bda88b86bf67383"
     },
     "sources/github.com--pion--rtp/go.mod": {
-      "bytes": 268,
-      "sha256": "7f132f63de5e5ce3faee1a8dee62894d985e1ba81595b824f3a0140e48079fef"
+      "bytes": 168,
+      "sha256": "438115cd1f1b86735e24ac58d25b8df8b5afbf4a7d471feb36e789d7d5c4e00f"
     },
     "sources/github.com--pion--rtp/go.sum": {
-      "bytes": 1050,
-      "sha256": "47810289861b0be6c87fe7b15290c31bef35d09c33556d5e6e508c407ad8fa0f"
+      "bytes": 497,
+      "sha256": "49849c56d47c52b19c19c9fec711611c50cf02f78d766bd49f9f0b61db398119"
     },
     "sources/github.com--pion--rtp/header_extension.go": {
       "bytes": 10918,
@@ -8077,12 +8089,12 @@
       "sha256": "401c2d3380f47b9c12eda6e4049901fd9f398c092d05ed2b4a84c83dfe6d374f"
     },
     "sources/github.com--pion--rtp/packet.go": {
-      "bytes": 18424,
-      "sha256": "bb0f45d4e1d368ca5065f4f1c0695197641eefca0560922b2dfa0d9a923969a3"
+      "bytes": 18587,
+      "sha256": "c0a91f15e78182eb2aa9e1a8c31c3ddbd39c5a91fdfb9d4ccd005829216bc4f7"
     },
     "sources/github.com--pion--rtp/packet_test.go": {
-      "bytes": 48400,
-      "sha256": "3c3e0b20bb9b5fbb4aae6261ad2ca3b17062a1027412c668b2e263116dbd0242"
+      "bytes": 49626,
+      "sha256": "b08b12e5219d979f73a90538f5888b48afc24218e24bd86bf2f3b27f55c436d6"
     },
     "sources/github.com--pion--rtp/packetizer.go": {
       "bytes": 4800,
@@ -19239,6 +19251,15 @@
     {
       "go_mod_sha256": "719a8f94d23cc8af801d278735596ff32a1dd7f25757d4f4fec126922c10107c",
       "h1_reverification_exception": null,
+      "local_checksum_record_additions": {
+        "modules": [
+          "github.com/bluenviron/mediacommon/v2 v2.9.7",
+          "github.com/pion/rtcp v1.2.20",
+          "github.com/pion/rtp v1.10.6"
+        ],
+        "path": "sources/github.com--bluenviron--gortsplib--v5/go.sum",
+        "reason": "Mirror helper checksums as required by unchanged verify.py; upstream source version and upstream_h1 remain unchanged."
+      },
       "module": "github.com/bluenviron/gortsplib/v5",
       "source": "sources/github.com--bluenviron--gortsplib--v5",
       "synthetic_proxy_go_mod": false,
@@ -19247,14 +19268,16 @@
       "version": "v5.6.7"
     },
     {
+      "go_mod_h1": "h1:1J4QckclKIksdI9+7C+PJXVBkpO/JYWn7/h+wOYq+7E=",
       "go_mod_sha256": "32a0bb7819e5387d8aeb905f368225b3b673d8f835fdb3b0b93fe035af23a356",
       "h1_reverification_exception": null,
       "module": "github.com/bluenviron/mediacommon/v2",
+      "signed_authentication": "UNKNOWN",
       "source": "sources/github.com--bluenviron--mediacommon--v2",
       "synthetic_proxy_go_mod": false,
-      "upstream_h1": "h1:4DRWZyFZ4Xbkgu85c0UIiny0ohAFDr+ZgtdDK+iq/e8=",
-      "upstream_revision": "dc7c53097c6b405e31271357167578a38242509a",
-      "version": "v2.9.6"
+      "upstream_h1": "h1:BEexzVxSuh2X7rWKviZlYC0yneRG8w8SMxx34+7H7o4=",
+      "upstream_revision": "61b3b45f4c36f86e5d7de4d4b894931233617e1f",
+      "version": "v2.9.7"
     },
     {
       "go_mod_sha256": "bcb29393251237b79a17b6c19bf29134f43e8f438c3198988fcd461a1cdf05cc",
@@ -19310,21 +19333,24 @@
       "go_mod_sha256": "cec7fe4edc8809680dcef9e17c511d1eae0689c7e7e07b3cee2080af537658e7",
       "h1_reverification_exception": null,
       "module": "github.com/pion/rtcp",
+      "signed_authentication": "UNKNOWN",
       "source": "sources/github.com--pion--rtcp",
       "synthetic_proxy_go_mod": false,
-      "upstream_h1": "h1:T79lR2Tfd/7zj+41nsUrftrUEee+Z03NQr9GSPSQ/WU=",
-      "upstream_revision": "09df03af9612ef9ed56c073b9a8de82f2ee035d2",
-      "version": "v1.2.19"
+      "upstream_h1": "h1:ZxQpb1Z3st9W5Rts4PjGoC3ynDhUtQ9B/itKJho8h2I=",
+      "upstream_revision": "cd21e4757f92fce4a88ad7976baeec9b7690fb6a",
+      "version": "v1.2.20"
     },
     {
-      "go_mod_sha256": "7f132f63de5e5ce3faee1a8dee62894d985e1ba81595b824f3a0140e48079fef",
+      "go_mod_h1": "h1:qvV617FVkp5DBUfoHGxP8uOnTI4UaNDJK0z7Sildylk=",
+      "go_mod_sha256": "438115cd1f1b86735e24ac58d25b8df8b5afbf4a7d471feb36e789d7d5c4e00f",
       "h1_reverification_exception": null,
       "module": "github.com/pion/rtp",
+      "signed_authentication": "UNKNOWN",
       "source": "sources/github.com--pion--rtp",
       "synthetic_proxy_go_mod": false,
-      "upstream_h1": "h1:ip0HhO/wYZqQ4bKS+R99KnZh/GRCmIT0jDXikub7vlE=",
-      "upstream_revision": "e61bd16da5287b0ae211a8624aee62b03ff2306c",
-      "version": "v1.10.5"
+      "upstream_h1": "h1:1qs356bmniSc89gTF1KFdI0kej7qTdIUSnHOXu3P2EY=",
+      "upstream_revision": "9a8f93554133824676326b43f068167fef01a884",
+      "version": "v1.10.6"
     },
     {
       "go_mod_sha256": "d750f13e9c75ae01d8ab7b2c3d752b5bf9bd1f72dea9e587f752ef6d16ace080",

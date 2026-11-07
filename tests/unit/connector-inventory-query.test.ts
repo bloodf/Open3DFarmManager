@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { parseInventoryPage } from '../../apps/farm/server/services/connector-inventory.ts'
 
 const base = 'https://farm.example.invalid/api/farms'

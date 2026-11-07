@@ -8,7 +8,7 @@ export LOCAL_CI_REAL_NODE
 LOCAL_CI_REAL_NODE=$(command -v node)
 cat > "$scratch/bin/bun" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' 1.4.2; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf '%s\n' 1.4.4; exit 0; fi
 printf '%s\n' "$*" >> "$TMPDIR/calls"
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == install ]]; then exit 0; fi
 exit 42
@@ -25,7 +25,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.2|node:24\.20\.0-alpine)$ ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.4|node:24\.20\.0-alpine)$ ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;

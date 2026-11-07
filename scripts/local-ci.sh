@@ -95,7 +95,7 @@ code_job() {
   if ! command -v bun >/dev/null || ! command -v node >/dev/null; then
     printf '%s\n' 'UNSUPPORTED: Bun and Node are required.' >&2; return 2
   fi
-  [[ $(bun --version) == 1.4.2 && $(node --version) == v24.20.0 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Bun 1.4.2 and Node 24.20.0.' >&2; return 2; }
+  [[ $(bun --version) == 1.4.4 && $(node --version) == v24.20.0 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Bun 1.4.4 and Node 24.20.0.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
   bun install --frozen-lockfile --ignore-scripts
   bun run lint
@@ -109,7 +109,7 @@ image_job() {
     printf '%s\n' 'Resource name collision; refusing to use pre-existing image or container.' >&2
     return 2
   fi
-  for base in oven/bun:1.4.2 node:24.20.0-alpine; do
+  for base in oven/bun:1.4.4 node:24.20.0-alpine; do
     local platform
     platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true)
     if [[ $platform == / ]]; then
@@ -146,7 +146,7 @@ klipper_job() {
   if ! command -v bun >/dev/null || ! command -v node >/dev/null; then
     printf '%s\n' 'UNSUPPORTED: Bun and Node are required.' >&2; return 2
   fi
-  [[ $(bun --version) == 1.4.2 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: Bun 1.4.2 and existing workspace dependencies are required.' >&2; return 2; }
+  [[ $(bun --version) == 1.4.4 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: Bun 1.4.4 and existing workspace dependencies are required.' >&2; return 2; }
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker volume ls -q --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker network ls -q --filter "label=com.docker.compose.project=$project_name") ]]; then

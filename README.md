@@ -4,7 +4,7 @@ Open-source 3D print farm manager, licensed under MIT. Phase 0 builds an indepen
 
 ## Development
 
-Use Node 24.15+ (24.x), Bun 1.4.2 and Docker Compose for simulator integration.
+Use Node 24.15+ (24.x), Bun 1.4.4 and Docker Compose for simulator integration.
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts

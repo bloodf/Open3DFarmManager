@@ -2615,6 +2615,7 @@ process.stdin.on('end', () => {
         server.once('error', reject)
         server.listen(socketPath, resolve)
       })
+      const observationMs = 5000
       const output = await new Promise<{
         status: number | null
         stdout: string
@@ -2625,7 +2626,7 @@ process.stdin.on('end', () => {
           [
             new URL(moduleUrl).pathname,
             `--opt-in=${diagnostic.OPT_IN_TOKEN}`,
-            '--observation-ms=1',
+            `--observation-ms=${observationMs}`,
             `--ledger-dir=${ledger}`,
           ],
           {
@@ -2663,7 +2664,7 @@ process.stdin.on('end', () => {
       const result = JSON.parse(output.stdout)
       assert.equal(result.readiness, 'not-evaluated')
       assert.equal(result.observation.budgetMs, diagnostic.READINESS_BUDGET_MS)
-      assert.equal(result.observation.windowMs, 1)
+      assert.equal(result.observation.windowMs, observationMs)
       assert.equal(result.capture.limitBytes, diagnostic.CAPTURE_BYTE_LIMIT)
       assert.equal(result.cleanup.completed, mode !== 'cleanup-failure')
       assert.equal(existsSync(join(ledger, 'work')), mode === 'cleanup-failure')

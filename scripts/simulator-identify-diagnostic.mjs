@@ -1036,22 +1036,49 @@ function verifyObserverSource(observerPath) {
   return { digest, pins }
 }
 
-function supervisorConfigPathFromScript(script) {
-  for (const line of script.split('\n')) {
-    const match = /supervisord\b[^\n]*/.exec(line)
-    if (!match) continue
-    const segment = match[0]
-    const explicit = /(?:-c|--configuration-file(?:=|\s))\s*"?([^"\s]+)"?/.exec(
-      segment,
-    )
-    if (explicit) return explicit[1]
-    const candidate =
-      /"?'?([A-Za-z0-9_@%+=:,./-]*supervisord[A-Za-z0-9_@%+=:,./-]*\.conf)'?"?/.exec(
-        segment,
-      )
-    if (candidate) return candidate[1]
+function supervisorConfigPathsFromScript(script, imageConfig) {
+  const lines = script
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+  const launches = lines.filter((line) => /\bsupervisord\b/.test(line))
+  if (launches.length !== 1) return []
+  const launch = launches[0]
+  let tokens
+  try {
+    tokens = parseSupervisorCommand(launch).tokens
+  } catch {
+    return []
   }
-  return null
+  if (tokens[0] === 'exec') tokens.shift()
+  if (!/^(?:\/usr\/(?:local\/)?bin\/)?supervisord$/.test(tokens[0] ?? ''))
+    return []
+  if (tokens.length === 3 && tokens[1] === '-c') return [tokens[2]]
+  if (tokens.length === 2 && tokens[1].startsWith('--configuration='))
+    return [tokens[1].slice('--configuration='.length)]
+  if (tokens.length === 3 && tokens[1] === '--configuration')
+    return [tokens[2]]
+  // The reviewed script changes to ~, which equals this image's working directory.
+  const reviewedScript =
+    sha256(script) ===
+    '4b2fac02b4c399495b2f908e11289635121286ead321e30cf297293f0ee651ee'
+  if (
+    tokens.length !== 1 ||
+    tokens[0] !== '/usr/bin/supervisord' ||
+    imageConfig.WorkingDir !== '/home/printer' ||
+    (!reviewedScript && lines.length !== 1)
+  )
+    return []
+  // Supervisor 4.2.5 Options.searchpaths, with /usr/bin and /home/printer.
+  // Probe every bounded candidate and refuse multiple files rather than guessing.
+  return [
+    '/usr/etc/supervisord.conf',
+    '/usr/supervisord.conf',
+    '/home/printer/supervisord.conf',
+    '/home/printer/etc/supervisord.conf',
+    '/etc/supervisord.conf',
+    '/etc/supervisor/supervisord.conf',
+  ]
 }
 
 async function discoverSupervisorConfig(docker, options, state) {
@@ -1115,23 +1142,40 @@ async function discoverSupervisorConfig(docker, options, state) {
       })`,
       'discover',
     )
-  const configPath = supervisorConfigPathFromScript(script)
-  if (!configPath || !isAbsoluteContainerPath(configPath))
+  const configPaths = supervisorConfigPathsFromScript(script, imageConfig)
+  if (
+    configPaths.length === 0 ||
+    configPaths.some((path) => !isAbsoluteContainerPath(path))
+  )
     throw diagnostic(
       'absolute supervisor configuration path could not be derived from the image entrypoint',
       'discover',
     )
   const configDestination = join(state.workDir, 'supervisord.conf')
-  const copied = await docker.run([
-    'cp',
-    `${inspectionName}:${configPath}`,
-    configDestination,
-  ])
-  if (copied.status !== 0 || !existsSync(configDestination))
+  const found = []
+  for (const [index, path] of configPaths.entries()) {
+    const destination = join(state.workDir, `config-candidate-${index}`)
+    const copied = await docker.run([
+      'cp',
+      `${inspectionName}:${path}`,
+      destination,
+    ])
+    if (copied.status !== 0 && !/no such file|Could not find the file/i.test(copied.stderr ?? ''))
+      throw diagnostic('supervisor configuration candidate could not be inspected read-only', 'discover')
+    if (copied.status === 0 && existsSync(destination)) {
+      const bounded = readBoundedText(destination, SUPERVISOR_CONFIG_BYTE_LIMIT)
+      if (!bounded.ok)
+        throw diagnostic(`supervisor configuration ${bounded.reason}`, 'discover')
+      found.push({ path, text: bounded.text })
+    }
+  }
+  if (found.length !== 1)
     throw diagnostic(
-      'supervisor configuration could not be extracted read-only from the pinned image',
+      'supervisor configuration discovery requires exactly one readable candidate',
       'discover',
     )
+  const configPath = found[0].path
+  writeFileSync(configDestination, found[0].text, { mode: 0o600, flag: 'wx' })
   const configText = readBoundedText(
     configDestination,
     SUPERVISOR_CONFIG_BYTE_LIMIT,

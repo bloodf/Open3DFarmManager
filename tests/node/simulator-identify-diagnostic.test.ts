@@ -2573,6 +2573,37 @@ test('captures early exit startup streams without treating them as observer evid
   }
 })
 
+for (const { lines, truncated } of [
+  { lines: 4999, truncated: false },
+  { lines: 5000, truncated: true },
+]) {
+  for (const finalNewline of [false, true]) {
+    test(`reports startup tail truncation at ${lines} lines with finalNewline=${finalNewline}`, async () => {
+      const text = 'line\n'.repeat(lines)
+      const startupStdout = finalNewline ? text : text.slice(0, -1)
+      const options = runOptions(createFakeDocker({ startupStdout }))
+      try {
+        const result = await diagnostic.runDiagnostic(options)
+        assert.equal(result.startupOutput.available, true)
+        assert.equal(result.startupOutput.truncated, truncated)
+        assert.equal(
+          result.startupOutput.stdoutBytes,
+          Buffer.byteLength(startupStdout),
+        )
+        assert.equal(
+          readFileSync(
+            join(requiredLedger(options), 'startup-stdout.log'),
+            'utf8',
+          ),
+          startupStdout,
+        )
+      } finally {
+        cleanupLedger(requiredLedger(options))
+      }
+    })
+  }
+}
+
 test('bounds startup output and reports log failures without hiding verification errors', async () => {
   const oversized = 'x'.repeat(65537)
   const options = runOptions(

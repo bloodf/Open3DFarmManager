@@ -1528,7 +1528,8 @@ async function captureStartupOutput(docker, container, ledgerDir) {
     metadata.truncated =
       stdout.length > STARTUP_OUTPUT_LIMIT ||
       stderr.length > STARTUP_OUTPUT_LIMIT ||
-      (output.stdout + output.stderr).split('\n').length - 1 >=
+      (output.stdout + output.stderr).split('\n').length -
+        ((output.stdout + output.stderr).endsWith('\n') ? 1 : 0) >=
         CONTAINER_LOG_LINE_LIMIT
     const boundedStdout = stdout.subarray(0, STARTUP_OUTPUT_LIMIT)
     const boundedStderr = stderr.subarray(0, STARTUP_OUTPUT_LIMIT)

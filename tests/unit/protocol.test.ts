@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { flagEnabled } from '@open3dfarmmanager/shared'
 

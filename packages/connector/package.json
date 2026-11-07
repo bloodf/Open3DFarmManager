@@ -8,7 +8,7 @@
     "open3dfarmmanager-connector": "./dist/cli.js"
   },
   "scripts": {
-    "build": "bun build src/cli.ts --target=node --splitting --external node-datachannel --outdir=dist && cp ../../LICENSE ../../THIRD_PARTY.md dist/ && cp node_modules/zod/LICENSE dist/ZOD-LICENSE && cp node_modules/ws/LICENSE dist/WS-LICENSE"
+    "build": "node build.mjs"
   },
   "dependencies": {
     "effect": "4.1.2",

@@ -4,17 +4,17 @@
   "go": "1.27.1",
   "direct_require": {
     "github.com/bluenviron/gortsplib/v5": "v5.6.7",
-    "github.com/bluenviron/mediacommon/v2": "v2.9.6",
-    "github.com/pion/rtp": "v1.10.5",
+    "github.com/bluenviron/mediacommon/v2": "v2.9.7",
+    "github.com/pion/rtp": "v1.10.6",
     "github.com/pion/sdp/v3": "v3.0.20"
   },
   "selected_dependencies": {
     "github.com/bluenviron/gortsplib/v5": "v5.6.7",
-    "github.com/bluenviron/mediacommon/v2": "v2.9.6",
+    "github.com/bluenviron/mediacommon/v2": "v2.9.7",
     "github.com/google/uuid": "v1.6.0",
     "github.com/gorilla/websocket": "v1.5.3",
-    "github.com/pion/rtcp": "v1.2.19",
-    "github.com/pion/rtp": "v1.10.5",
+    "github.com/pion/rtcp": "v1.2.20",
+    "github.com/pion/rtp": "v1.10.6",
     "github.com/pion/sdp/v3": "v3.0.20",
     "github.com/pion/srtp/v3": "v3.1.3",
     "github.com/stretchr/testify": "v1.12.1",
@@ -170,7 +170,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "github.com/abema/go-mp4",
       "version": "v1.7.3",
       "indirect": false,
@@ -178,7 +178,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "github.com/asticode/go-astits",
       "version": "v1.16.0",
       "indirect": false,
@@ -186,7 +186,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "github.com/stretchr/testify",
       "version": "v1.12.1",
       "indirect": false,
@@ -194,7 +194,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "github.com/asticode/go-astikit",
       "version": "v0.30.0",
       "indirect": true,
@@ -202,7 +202,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "github.com/google/uuid",
       "version": "v1.3.0",
       "indirect": true,
@@ -210,7 +210,7 @@
     },
     {
       "from_module": "github.com/bluenviron/mediacommon/v2",
-      "from_version": "v2.9.6",
+      "from_version": "v2.9.7",
       "module": "go.yaml.in/yaml/v3",
       "version": "v3.0.5",
       "indirect": true,
@@ -218,7 +218,7 @@
     },
     {
       "from_module": "github.com/pion/rtcp",
-      "from_version": "v1.2.19",
+      "from_version": "v1.2.20",
       "module": "github.com/stretchr/testify",
       "version": "v1.12.1",
       "indirect": false,
@@ -226,7 +226,7 @@
     },
     {
       "from_module": "github.com/pion/rtcp",
-      "from_version": "v1.2.19",
+      "from_version": "v1.2.20",
       "module": "go.yaml.in/yaml/v3",
       "version": "v3.0.5",
       "indirect": true,
@@ -234,7 +234,7 @@
     },
     {
       "from_module": "github.com/pion/rtp",
-      "from_version": "v1.10.5",
+      "from_version": "v1.10.6",
       "module": "github.com/pion/randutil",
       "version": "v0.1.0",
       "indirect": false,
@@ -242,35 +242,19 @@
     },
     {
       "from_module": "github.com/pion/rtp",
-      "from_version": "v1.10.5",
+      "from_version": "v1.10.6",
       "module": "github.com/stretchr/testify",
-      "version": "v1.11.1",
+      "version": "v1.12.1",
       "indirect": false,
       "line": 7
     },
     {
       "from_module": "github.com/pion/rtp",
-      "from_version": "v1.10.5",
-      "module": "github.com/davecgh/go-spew",
-      "version": "v1.1.1",
+      "from_version": "v1.10.6",
+      "module": "go.yaml.in/yaml/v3",
+      "version": "v3.0.5",
       "indirect": true,
-      "line": 11
-    },
-    {
-      "from_module": "github.com/pion/rtp",
-      "from_version": "v1.10.5",
-      "module": "github.com/pmezard/go-difflib",
-      "version": "v1.0.0",
-      "indirect": true,
-      "line": 12
-    },
-    {
-      "from_module": "github.com/pion/rtp",
-      "from_version": "v1.10.5",
-      "module": "gopkg.in/yaml.v3",
-      "version": "v3.0.1",
-      "indirect": true,
-      "line": 13
+      "line": 10
     },
     {
       "from_module": "github.com/pion/sdp/v3",
@@ -549,11 +533,11 @@
   "replace_policy": "29 exact version-scoped repository-relative source replacements; preserve upstream go.mod without audit-machine absolute replaces",
   "pending": "actual helper compile/test import closure and readonly graph under separately scheduled CPU",
   "main_require_pins": {
-    "github.com/bluenviron/mediacommon/v2": "v2.9.6",
+    "github.com/bluenviron/mediacommon/v2": "v2.9.7",
     "github.com/google/uuid": "v1.6.0",
     "github.com/gorilla/websocket": "v1.5.3",
-    "github.com/pion/rtcp": "v1.2.19",
-    "github.com/pion/rtp": "v1.10.5",
+    "github.com/pion/rtcp": "v1.2.20",
+    "github.com/pion/rtp": "v1.10.6",
     "github.com/pion/sdp/v3": "v3.0.20",
     "github.com/pion/srtp/v3": "v3.1.3",
     "github.com/stretchr/testify": "v1.12.1",
@@ -571,7 +555,7 @@
     {
       "from_module": "open3dfarm.local/rtsp-ingest",
       "module": "github.com/bluenviron/mediacommon/v2",
-      "version": "v2.9.6",
+      "version": "v2.9.7",
       "direct": true
     },
     {
@@ -589,13 +573,13 @@
     {
       "from_module": "open3dfarm.local/rtsp-ingest",
       "module": "github.com/pion/rtcp",
-      "version": "v1.2.19",
+      "version": "v1.2.20",
       "direct": false
     },
     {
       "from_module": "open3dfarm.local/rtsp-ingest",
       "module": "github.com/pion/rtp",
-      "version": "v1.10.5",
+      "version": "v1.10.6",
       "direct": true
     },
     {

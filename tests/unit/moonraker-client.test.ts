@@ -95,15 +95,36 @@ async function fixture(input: {
   }
 }
 
+type RawEvidence = {
+  raw: RawMoonrakerObservation[]
+  rawUnavailable: RawMoonrakerUnavailable[]
+  completedBy?:
+    | 'observation'
+    | 'snapshot'
+    | 'unavailable'
+    | 'deadline'
+    | 'duration'
+    | null
+}
+
+// A completion spec replaces the fixed abort duration. The duration used to
+// start before the subscription existed, so the node start up, the readiness
+// probe and the handshake were charged against the window that the
+// production one second query period also needs.
+type Completion = {
+  deadlineMs: number
+  rawObservations?: number
+  snapshots?: number
+  unavailable?: number
+}
+
 async function run(
   origin: string,
   limits = {},
   mode = 'normal',
   durationMs = 800,
-  evidence?: {
-    raw: RawMoonrakerObservation[]
-    rawUnavailable: RawMoonrakerUnavailable[]
-  },
+  evidence?: RawEvidence,
+  completion?: Completion,
 ) {
   const process = Bun.spawn(
     [
@@ -112,7 +133,8 @@ async function run(
       origin,
       JSON.stringify(limits),
       mode,
-      String(durationMs),
+      String(completion ? completion.deadlineMs : durationMs),
+      ...(completion ? [JSON.stringify(completion)] : []),
     ],
     {
       stdout: 'pipe',
@@ -125,7 +147,12 @@ async function run(
     origin,
     state: 'created',
   })
-  const timer = setTimeout(() => process.kill(), 4000)
+  // The hard child watchdog stays above the child deadline so a stalled child
+  // reports its own bounded deadline instead of being killed without evidence.
+  const timer = setTimeout(
+    () => process.kill(),
+    completion ? completion.deadlineMs + 3000 : 4000,
+  )
   try {
     const [stdout, stderr, code] = await Promise.all([
       new Response(process.stdout).text(),
@@ -151,6 +178,7 @@ async function run(
     }>
     evidence?.raw.push(...output.raw)
     evidence?.rawUnavailable.push(...output.rawUnavailable)
+    if (evidence) evidence.completedBy = output.completedBy
     return events
   } finally {
     clearTimeout(timer)
@@ -163,6 +191,7 @@ async function run(
 }
 
 test('Node client uses fixed read-only paths and subscription, merges and deduplicates deltas', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, _connection, later) {
       socket.send(snapshot())
@@ -187,7 +216,15 @@ test('Node client uses fixed read-only paths and subscription, merges and dedupl
     },
   })
   try {
-    const events = await run(service.origin, { staleAfterMs: 2000 })
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 2000 },
+      'normal',
+      undefined,
+      evidence,
+      { snapshots: 3, deadlineMs: 5000 },
+    )
+    expect(evidence.completedBy).toBe('snapshot')
     expect(
       events
         .filter((event) => event.kind === 'snapshot')
@@ -219,9 +256,10 @@ test('Node client uses fixed read-only paths and subscription, merges and dedupl
   } finally {
     await service.close()
   }
-}, 5000)
+}, 15000)
 
 test('disconnect resubscribes with a fresh baseline and reset source clock', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, connection, later) {
       socket.send(snapshot(connection === 1 ? 100 : 1))
@@ -229,7 +267,15 @@ test('disconnect resubscribes with a fresh baseline and reset source clock', asy
     },
   })
   try {
-    const events = await run(service.origin, { staleAfterMs: 2000 })
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 2000 },
+      'normal',
+      undefined,
+      evidence,
+      { snapshots: 2, deadlineMs: 5000 },
+    )
+    expect(evidence.completedBy).toBe('snapshot')
     expect(
       events
         .filter((event) => event.kind === 'snapshot')
@@ -241,9 +287,10 @@ test('disconnect resubscribes with a fresh baseline and reset source clock', asy
   } finally {
     await service.close()
   }
-}, 5000)
+}, 15000)
 
 test('stale data fails closed and old updates cannot extend freshness', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, _connection, later) {
       socket.send(snapshot())
@@ -251,7 +298,15 @@ test('stale data fails closed and old updates cannot extend freshness', async ()
     },
   })
   try {
-    const events = await run(service.origin)
+    const events = await run(
+      service.origin,
+      {},
+      'normal',
+      undefined,
+      evidence,
+      { snapshots: 2, deadlineMs: 5000 },
+    )
+    expect(evidence.completedBy).toBe('snapshot')
     expect(events.some((event) => event.reason === 'stale')).toBe(true)
     expect(service.rpcs.length).toBeGreaterThan(1)
     expect(
@@ -262,7 +317,7 @@ test('stale data fails closed and old updates cannot extend freshness', async ()
   } finally {
     await service.close()
   }
-}, 5000)
+}, 15000)
 
 test('invalid origins reject synchronously without any network request', async () => {
   const service = await fixture({ subscribe() {} })
@@ -422,13 +477,22 @@ test('Node rejects malformed, oversized, unmatched and premature status messages
       result: { eventtime: 10, status: {} },
     }),
   ]) {
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
     const service = await fixture({
       subscribe(socket) {
         socket.send(wire)
       },
     })
     try {
-      const events = await run(service.origin)
+      const events = await run(
+        service.origin,
+        {},
+        'normal',
+        undefined,
+        evidence,
+        { unavailable: 2, deadlineMs: 5000 },
+      )
+      expect(evidence.completedBy).toBe('unavailable')
       expect(events.some((event) => event.reason === 'invalid-response')).toBe(
         true,
       )
@@ -437,7 +501,7 @@ test('Node rejects malformed, oversized, unmatched and premature status messages
       await service.close()
     }
   }
-}, 12000)
+}, 20000)
 
 test('equal-time conflicts and duplicate replies invalidate an established baseline', async () => {
   for (const wire of [
@@ -446,6 +510,7 @@ test('equal-time conflicts and duplicate replies invalidate an established basel
     delta(11, 2),
     Buffer.from('binary'),
   ]) {
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
     const service = await fixture({
       subscribe(socket, _connection, later) {
         socket.send(snapshot())
@@ -453,7 +518,15 @@ test('equal-time conflicts and duplicate replies invalidate an established basel
       },
     })
     try {
-      const events = await run(service.origin, { staleAfterMs: 2000 })
+      const events = await run(
+        service.origin,
+        { staleAfterMs: 2000 },
+        'normal',
+        undefined,
+        evidence,
+        { unavailable: 2, deadlineMs: 5000 },
+      )
+      expect(evidence.completedBy).toBe('unavailable')
       expect(events.some((event) => event.reason === 'invalid-response')).toBe(
         true,
       )
@@ -466,7 +539,7 @@ test('equal-time conflicts and duplicate replies invalidate an established basel
       await service.close()
     }
   }
-}, 10000)
+}, 20000)
 
 test('HTTP not-ready, redirects, body overflow and subscription timeout fail closed', async () => {
   for (const mode of [
@@ -516,8 +589,17 @@ test('HTTP not-ready, redirects, body overflow and subscription timeout fail clo
       },
       subscribe() {},
     })
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
     try {
-      const events = await run(service.origin, { requestTimeoutMs: 100 })
+      const events = await run(
+        service.origin,
+        { requestTimeoutMs: 100 },
+        'normal',
+        undefined,
+        evidence,
+        { unavailable: 2, deadlineMs: 5000 },
+      )
+      expect(evidence.completedBy).toBe('unavailable')
       expect(events.some((event) => event.kind === 'snapshot')).toBe(false)
       expect(
         events.some(
@@ -578,12 +660,16 @@ test('coalesced subscription reply and delta preserve the baseline and update wi
   const address = server.address()
   if (!address || typeof address === 'string') throw Error('No fixture port')
   try {
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
     const events = await run(
       `http://127.0.0.1:${address.port}`,
       { staleAfterMs: 2000 },
       'normal',
-      250,
+      undefined,
+      evidence,
+      { snapshots: 2, deadlineMs: 5000 },
     )
+    expect(evidence.completedBy).toBe('snapshot')
     expect(
       events
         .filter((event) => event.kind === 'snapshot')
@@ -599,13 +685,10 @@ test('coalesced subscription reply and delta preserve the baseline and update wi
       server.close((error) => (error ? reject(error) : resolve())),
     )
   }
-})
+}, 15000)
 
-test('raw complete query refreshes unchanged fields before telemetry dedup; fixed read-only request only', async () => {
-  const evidence: {
-    raw: RawMoonrakerObservation[]
-    rawUnavailable: RawMoonrakerUnavailable[]
-  } = { raw: [], rawUnavailable: [] }
+test('raw complete query refreshes unchanged fields before telemetry dedup; delta observation precedes the fixed query', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, _connection, later, request) {
       socket.send(
@@ -619,14 +702,18 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
     },
   })
   try {
-    // Stop before the first full query to inspect independent delta stamps.
+    // Stop on the second raw observation instead of on a duration measured
+    // before the subscription exists, so the delta observation is always
+    // inspected and the fixed query is never scheduled.
     const events = await run(
       service.origin,
       { staleAfterMs: 3000 },
       'raw',
-      700,
+      undefined,
       evidence,
+      { rawObservations: 2, deadlineMs: 5000 },
     )
+    expect(evidence.completedBy).toBe('observation')
     expect(evidence.raw.length).toBe(2)
     const baseline = evidence.raw[0]!,
       changed = evidence.raw[1]!
@@ -640,11 +727,21 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
       baseline.fieldObservedAtMonoMs.progress,
     )
     expect(evidence.rawUnavailable.length).toBe(1)
+    // The delta observation landed before the fixed one second query, so the
+    // subscription only carries the subscribe request.
+    expect(service.rpcs.length).toBe(1)
+    expect(
+      events
+        .filter((event) => event.kind === 'snapshot')
+        .map((event) => event.printer?.progress),
+    ).toEqual([0.25, 0.5])
   } finally {
     await service.close()
   }
-  evidence.raw.length = 0
-  evidence.rawUnavailable.length = 0
+}, 15000)
+
+test('raw complete query refreshes unchanged fields before telemetry dedup; fixed read-only request only', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const unchanged = await fixture({
     subscribe(socket, _connection, _later, request) {
       socket.send(
@@ -657,13 +754,18 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
     },
   })
   try {
+    // Stop on the query observation itself. The one second query period runs
+    // from the subscribe request, so a fixed duration measured from process
+    // start can expire before the query answer arrives.
     const events = await run(
       unchanged.origin,
       { staleAfterMs: 3000 },
       'raw',
-      1300,
+      undefined,
       evidence,
+      { rawObservations: 2, deadlineMs: 5000 },
     )
+    expect(evidence.completedBy).toBe('observation')
     expect(events.filter((event) => event.kind === 'snapshot').length).toBe(1)
     expect(evidence.raw.length).toBe(2)
     expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBeGreaterThan(
@@ -698,14 +800,11 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
   } finally {
     await unchanged.close()
   }
-})
+}, 15000)
 
 test('raw stale query response and missing complete field invalidate socket epoch', async () => {
   for (const partial of [false, true]) {
-    const evidence: {
-      raw: RawMoonrakerObservation[]
-      rawUnavailable: RawMoonrakerUnavailable[]
-    } = { raw: [], rawUnavailable: [] }
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
     const service = await fixture({
       subscribe(socket, _connection, later, request) {
         if (request.id === 1) {
@@ -729,9 +828,11 @@ test('raw stale query response and missing complete field invalidate socket epoc
         service.origin,
         { staleAfterMs: 3000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
         'raw',
-        1400,
+        undefined,
         evidence,
+        { unavailable: 2, deadlineMs: 6000 },
       )
+      expect(evidence.completedBy).toBe('unavailable')
       expect(evidence.raw.length).toBe(2)
       expect(events.some((event) => event.reason === 'invalid-response')).toBe(
         true,
@@ -742,13 +843,10 @@ test('raw stale query response and missing complete field invalidate socket epoc
       await service.close()
     }
   }
-})
+}, 20000)
 
 test('raw complete query has one pending request and <=1s timeout before epoch invalidation', async () => {
-  const evidence: {
-    raw: RawMoonrakerObservation[]
-    rawUnavailable: RawMoonrakerUnavailable[]
-  } = { raw: [], rawUnavailable: [] }
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, _connection, _later, request) {
       if (request.id === 1) socket.send(snapshot())
@@ -764,9 +862,11 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
         reconnectMaxMs: 3000,
       },
       'raw',
-      2400,
+      undefined,
       evidence,
+      { unavailable: 2, deadlineMs: 6000 },
     )
+    expect(evidence.completedBy).toBe('unavailable')
     expect(service.rpcs.length).toBe(2)
     expect(evidence.raw.length).toBe(1)
     expect(evidence.rawUnavailable.length).toBe(1)
@@ -774,13 +874,10 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
   } finally {
     await service.close()
   }
-})
+}, 20000)
 
 test('overlapping complete query is discarded without regressing fields or stopping collection', async () => {
-  const evidence: {
-    raw: RawMoonrakerObservation[]
-    rawUnavailable: RawMoonrakerUnavailable[]
-  } = { raw: [], rawUnavailable: [] }
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
   const service = await fixture({
     subscribe(socket, _connection, later, request) {
       const reply = (eventtime: number, progress: number) =>
@@ -806,9 +903,11 @@ test('overlapping complete query is discarded without regressing fields or stopp
       service.origin,
       { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
       'raw',
-      2400,
+      undefined,
       evidence,
+      { rawObservations: 3, deadlineMs: 6000 },
     )
+    expect(evidence.completedBy).toBe('observation')
     expect(service.rpcs.length).toBe(3)
     expect(
       events
@@ -834,4 +933,4 @@ test('overlapping complete query is discarded without regressing fields or stopp
   } finally {
     await service.close()
   }
-})
+}, 20000)

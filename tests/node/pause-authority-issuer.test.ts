@@ -11,9 +11,8 @@ async function commandFixture() {
     'jwk',
     pair.publicKey,
   )
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { publicKey } = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   const command = {
     v: 2 as const,
@@ -37,9 +36,8 @@ async function commandFixture() {
 
 async function authorityFixture() {
   const { pair, publicKey, command } = await commandFixture()
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { thumbprint } = await validateBrowserDevicePublicKey(publicKey)
   const issuer = await crypto.subtle.generateKey('Ed25519', false, [
     'sign',
@@ -80,9 +78,8 @@ async function authorityFixture() {
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
   }
-  const { controlBindingHash } = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
+  const { controlBindingHash } =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const bindingHash = await controlBindingHash(binding),
     admissionNonce = digest()
   const capability = {
@@ -143,9 +140,8 @@ async function authorityFixture() {
 
 async function inputs() {
   const f = await authorityFixture()
-  const control = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
+  const control =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const browserSignature = await control.signControlSessionProof(
     f.binding,
     'browser',
@@ -187,12 +183,10 @@ async function inputs() {
 
 test('issuer service rejects noncanonical, wrong role, extra command and identity fields before storage', async () => {
   const f = await inputs()
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
-  const { createPauseAuthorityService } = await import(
-    '../../apps/farm/server/services/pause-authority.ts'
-  )
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
+  const { createPauseAuthorityService } =
+    await import('../../apps/farm/server/services/pause-authority.ts')
   const postgres = (await import('postgres')).default
   const sql = postgres({
     host: '127.0.0.1',
@@ -209,9 +203,8 @@ test('issuer service rejects noncanonical, wrong role, extra command and identit
   }
   try {
     const service = createPauseAuthorityService(sql, f.config)
-    const control = await import(
-      '../../packages/farm-protocol/src/control-session-binding.ts'
-    )
+    const control =
+      await import('../../packages/farm-protocol/src/control-session-binding.ts')
     const otherBinding = { ...f.f.binding, transport_id: randomUUID() }
     const mismatched = control.encodeControlProof({
       v: 1,
@@ -273,12 +266,10 @@ test('issuer service rejects noncanonical, wrong role, extra command and identit
 
 test('eight in-flight operations retain capacity across service instances and close preserves settled result', async () => {
   const f = await inputs()
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
-  const { createPauseAuthorityService } = await import(
-    '../../apps/farm/server/services/pause-authority.ts'
-  )
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
+  const { createPauseAuthorityService } =
+    await import('../../apps/farm/server/services/pause-authority.ts')
   const postgres = (await import('postgres')).default
   const sql = postgres({
     host: '127.0.0.1',
@@ -333,15 +324,12 @@ test('eight in-flight operations retain capacity across service instances and cl
 
 test('issuer boundary accepts canonical native proofs and only returns fixed signed metadata', async () => {
   const f = await inputs()
-  const caps = await import(
-    '../../packages/farm-protocol/src/pause-capability.ts'
-  )
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
-  const { createPauseAuthorityService } = await import(
-    '../../apps/farm/server/services/pause-authority.ts'
-  )
+  const caps =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
+  const { createPauseAuthorityService } =
+    await import('../../apps/farm/server/services/pause-authority.ts')
   const postgres = (await import('postgres')).default
   const sql = postgres({
     host: '127.0.0.1',
@@ -407,12 +395,10 @@ test('issuer boundary accepts canonical native proofs and only returns fixed sig
 
 test('caller mutation after invocation cannot alter stored request and thrown errors are sanitized', async () => {
   const f = await inputs()
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
-  const { createPauseAuthorityService } = await import(
-    '../../apps/farm/server/services/pause-authority.ts'
-  )
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
+  const { createPauseAuthorityService } =
+    await import('../../apps/farm/server/services/pause-authority.ts')
   const postgres = (await import('postgres')).default
   const sql = postgres({
     host: '127.0.0.1',
@@ -463,9 +449,8 @@ test('caller mutation after invocation cannot alter stored request and thrown er
 
 test('issuer key mismatch, extractability and policy bounds fail before any database transaction', async () => {
   const f = await inputs()
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
   const postgres = (await import('postgres')).default
   const sql = postgres({
     host: '127.0.0.1',
@@ -530,12 +515,10 @@ test('issuer key mismatch, extractability and policy bounds fail before any data
 
 test('postcommit delayed clock response cannot extend an earlier admission deadline', async () => {
   const f = await inputs()
-  const caps = await import(
-    '../../packages/farm-protocol/src/pause-capability.ts'
-  )
-  const { PostgresPauseAuthority } = await import(
-    '../../apps/farm/server/storage/postgres-pause-authority.ts'
-  )
+  const caps =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
+  const { PostgresPauseAuthority } =
+    await import('../../apps/farm/server/storage/postgres-pause-authority.ts')
   const postgres = (await import('postgres')).default
   const backing = postgres({
     host: '127.0.0.1',

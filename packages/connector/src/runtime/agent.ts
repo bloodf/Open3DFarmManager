@@ -70,9 +70,8 @@ export async function runConnectorAgent(input: {
     : undefined
   if (input.signal.aborted) return
   bootstrapNetworking()
-  const { createAuthenticatedTelemetrySender } = await import(
-    '../cloud/authenticated-http-telemetry.ts'
-  )
+  const { createAuthenticatedTelemetrySender } =
+    await import('../cloud/authenticated-http-telemetry.ts')
   const send = createAuthenticatedTelemetrySender({
     endpoint: config.telemetry.endpoint,
     audience: config.telemetry.audience,
@@ -124,12 +123,10 @@ export async function runConnectorAgent(input: {
     const { collectIntoQueue } = await import('./collect.ts')
     const { drainTelemetryOnce } = await import('../cloud/drain.ts')
     if (config.signalling && lookupId && snapshots) {
-      const { AuthenticatedConnectorSignallingClient } = await import(
-        '../cloud/authenticated-signalling-client.ts'
-      )
-      const { FarmStatusSender } = await import(
-        '../webrtc/farm-status-sender.ts'
-      )
+      const { AuthenticatedConnectorSignallingClient } =
+        await import('../cloud/authenticated-signalling-client.ts')
+      const { FarmStatusSender } =
+        await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
       const signalling = config.signalling
       const source = snapshots

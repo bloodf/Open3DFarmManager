@@ -28,6 +28,9 @@ export function signallingMetadata(): SignallingMetadata {
     ? active.metadata
     : DISABLED_SIGNALLING_METADATA
 }
+export function pauseSignallingMetadata(): SignallingMetadata {
+  return signallingRuntime()?.pauseMetadata() ?? DISABLED_SIGNALLING_METADATA
+}
 async function role(
   sql: Sql,
   required: 'farm_signalling_reader' | 'farm_connector_credential_acceptor',
@@ -91,9 +94,8 @@ export function createSignallingRuntimeLifecycle() {
             readerIdentity.port !== proofIdentity.port
           )
             throw new Error('Mismatched signalling database endpoints')
-          const { PostgresConnectorCredentialAcceptance } = await import(
-            '../storage/postgres-connector-credential-acceptance.ts'
-          )
+          const { PostgresConnectorCredentialAcceptance } =
+            await import('../storage/postgres-connector-credential-acceptance.ts')
           if (closed || active) throw new Error('Signalling startup cancelled')
           const reader = new PostgresSignallingAuthorization(readerPool, {
             issuer: config.issuer,

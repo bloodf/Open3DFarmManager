@@ -90,9 +90,7 @@ export type SignallingReadDecision =
 /** No bearer/session-cookie parsing or network authority is supplied by this adapter.
  * The expiry-only function owns session locks and uses DB time; callers supply neither clock nor policy.
  * Denial is a normal committed transaction so observed session expiry remains terminal. */
-export class PostgresSignallingAuthorization
-  implements SignallingAuthoritySource
-{
+export class PostgresSignallingAuthorization implements SignallingAuthoritySource {
   private sql: Sql
   private config: SignallingReaderConfig
   private readonly clock: SignallingClock

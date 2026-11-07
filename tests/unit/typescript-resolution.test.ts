@@ -17,8 +17,8 @@ test('root retains TypeScript 7 and rejects the removed legacy compiler entry', 
 
 test('vue-tsc resolves the farm legacy compiler through its actual peer context', () => {
   const vueRequire = createRequire(farmRequire.resolve('vue-tsc'))
-  expect(farmRequire('typescript/package.json').version).toBe('5.9.3')
-  expect(vueRequire('typescript/package.json').version).toBe('5.9.3')
+  expect(farmRequire('typescript/package.json').version).toBe('6.0.3')
+  expect(vueRequire('typescript/package.json').version).toBe('6.0.3')
   expect(vueRequire.resolve('typescript/lib/tsc')).toBe(
     farmRequire.resolve('typescript/lib/tsc'),
   )

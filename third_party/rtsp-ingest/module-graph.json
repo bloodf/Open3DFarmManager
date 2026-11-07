@@ -809,7 +809,7 @@
   ],
   "selection_constraint": "Mirror audited gortsplib root requirements plus gortsplib itself; do not promote all 29 selected modules to main requirements, which could expand the lazy graph.",
   "edge_semantics": {
-    "edges": "All 76 require declarations in the 29 retained go.mod files, including synthetic proxy go.mod files disclosed in manifest.json. Versions are declared minima, not selected versions or observed Go graph edges. Line numbers refer to retained source.",
+    "edges": "All 79 require declarations in the 29 retained go.mod files, including synthetic proxy go.mod files disclosed in manifest.json. Versions are declared minima, not selected versions or observed Go graph edges. Line numbers refer to retained source.",
     "main_edges": "Helper requirement pins; direct is the historical helper classification, not Go-observed graph traversal.",
     "selected_dependencies": "Proposed retained selections matched to manifest versions and local replacements; not an observed Go selection.",
     "new_external_modules": "Module paths declared by retained modules but absent from the 29 retained selections. Their lazy graph relevance is UNKNOWN; this list does not authorize copying sources.",

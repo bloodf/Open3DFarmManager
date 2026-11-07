@@ -1,7 +1,9 @@
 import { createRequire } from 'node:module'
 import { expect, test } from 'vitest'
 
-const rootRequire = createRequire(new URL('../../package.json', import.meta.url))
+const rootRequire = createRequire(
+  new URL('../../package.json', import.meta.url),
+)
 const farmRequire = createRequire(
   new URL('../../apps/farm/package.json', import.meta.url),
 )

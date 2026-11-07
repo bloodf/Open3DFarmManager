@@ -3,8 +3,8 @@ import {
   BrowserDeviceProofChallenge,
   signBrowserDeviceProof,
   validateBrowserDevicePublicKey,
-  BROWSER_DEVICE_HTTP_AUDIENCE,
 } from '../../packages/farm-protocol/src/browser-device-proof.ts'
+import { BROWSER_DEVICE_HTTP_AUDIENCE } from '../../packages/farm-protocol/src/browser-device-http.ts'
 import { PauseBrowserSignallingClient } from '../../apps/farm/app/utils/webrtc/pause-signalling-client.ts'
 import { createPauseCommandClient } from '../../apps/farm/app/utils/webrtc/pause-command-client.ts'
 import { createPauseCommandIssuer } from '../../apps/farm/app/utils/webrtc/pause-command-issuer.ts'

@@ -310,11 +310,11 @@ test(
   },
 )
 
-test(
-  'reentrant close during pool creation, role denial and pool-end error never publish',
-  { timeout: 10000 },
-  async (t) => {
-    for (const mode of ['reentrant', 'denied', 'end-error'] as const) {
+for (const mode of ['reentrant', 'denied', 'end-error'] as const) {
+  test(
+    `startup ${mode} never publishes and closes its pool`,
+    { timeout: 10000 },
+    async (t) => {
       resetDb()
       const f = await provision(t),
         auth = (await browserDeviceFixture()).runtime.auth
@@ -339,6 +339,6 @@ test(
       assert.throws(pauseAuthorityRuntime, { status: 503 })
       assert.equal(created, 1)
       assert.equal(ended, 1)
-    }
-  },
-)
+    },
+  )
+}

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { readJson } from '../../packages/sim-tools/src/body.ts'
 
 const prefix = new TextEncoder().encode('{"label":"')

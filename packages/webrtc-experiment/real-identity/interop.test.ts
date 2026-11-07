@@ -1,12 +1,9 @@
+import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import {
-  spawn,
-  spawnSync,
-  type ChildProcessWithoutNullStreams,
-} from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chromium, type Browser, type Page } from '@playwright/test'
@@ -32,8 +29,10 @@ class FixtureProcess {
   #exited: Promise<void>
   #closed: Promise<void>
   constructor(runtime: string) {
+    if (runtime !== 'node' || process.versions.bun)
+      throw Error('Node runtime required')
     this.process = spawn(
-      runtime,
+      process.execPath,
       [new URL('./child.ts', import.meta.url).pathname],
       { stdio: 'pipe' },
     )
@@ -85,6 +84,7 @@ class FixtureProcess {
         pending.reject(error instanceof Error ? error : Error('Fixture JSON'))
       }
     })
+    this.process.stdin.on('error', (error) => this.#pending?.reject(error))
     this.process.on('error', (error) => this.#pending?.reject(error))
     this.process.on('exit', (code) =>
       this.#pending?.reject(
@@ -201,16 +201,10 @@ test(
   'real P256 browser and encapsulated Ed25519 Connector prove the exact readonly RTC binding',
   { timeout: 120000 },
   async () => {
-    const built = spawnSync(
-      'bun',
-      [
-        'build',
-        new URL('./browser-fixture.ts', import.meta.url).pathname,
-        '--target=browser',
-      ],
-      { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 },
+    if (process.versions.bun) throw Error('Node runtime required')
+    const script = await browserBundle(
+      new URL('./browser-fixture.ts', import.meta.url).pathname,
     )
-    assert.equal(built.status, 0, built.stderr)
     const server = createServer((req, res) => {
       if (req.method !== 'GET') {
         res.writeHead(405)
@@ -219,7 +213,7 @@ test(
       }
       if (req.url === '/fixture.js') {
         res.writeHead(200, { 'Content-Type': 'text/javascript' })
-        res.end(built.stdout)
+        res.end(script)
         return
       }
       if (req.url === '/') {
@@ -232,8 +226,14 @@ test(
       res.writeHead(404)
       res.end()
     })
-    server.listen(0, '127.0.0.1')
-    await once(server, 'listening')
+    try {
+      server.listen(0, '127.0.0.1')
+      await once(server, 'listening')
+    } catch (error) {
+      server.closeAllConnections()
+      server.close()
+      throw error
+    }
     const address = server.address()
     if (!address || typeof address === 'string') throw Error('No server port')
     let browser: Browser | undefined, child: FixtureProcess | undefined
@@ -246,10 +246,12 @@ test(
           staticPort: address.port,
         }),
       )
-      for (const runtime of process.env.REAL_RTC_RUNTIME === 'node' ||
-      process.env.REAL_RTC_RUNTIME === 'bun'
-        ? [process.env.REAL_RTC_RUNTIME]
-        : ['node', 'bun']) {
+      if (
+        process.env.REAL_RTC_RUNTIME &&
+        process.env.REAL_RTC_RUNTIME !== 'node'
+      )
+        throw Error('Only REAL_RTC_RUNTIME=node is supported')
+      for (const runtime of ['node']) {
         child = new FixtureProcess(runtime)
         const hello = await child.request({ kind: 'hello' })
         console.info(JSON.stringify({ runtime, hello }))

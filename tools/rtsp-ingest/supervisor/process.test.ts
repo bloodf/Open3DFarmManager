@@ -375,33 +375,40 @@ for (const [mode, expected] of [
 for (const mode of ['/stderr', '/premature', '/unsolicited']) {
   test(`startup/idle fault ${mode} cannot become authorized output`, async (t) => {
     const f = await fixture(t, mode)
-    // Fault may arrive either during open or before the first consumer demand.
+    const expectedFault = (error: unknown) =>
+      error instanceof HelperFailure &&
+      [
+        'HELPER_STDERR',
+        'HELPER_EXIT',
+        'HELPER_EOF',
+        'HELPER_PRESSURE',
+      ].includes(error.code)
+    let source: HelperSource
     try {
-      const source = await f.open()
-      await new Promise<void>((resolve) => setTimeout(resolve, 100))
-      await assert.rejects(
-        source[Symbol.asyncIterator]().next(),
-        (error: unknown) =>
-          error instanceof HelperFailure &&
-          [
-            'HELPER_STDERR',
-            'HELPER_EXIT',
-            'HELPER_EOF',
-            'HELPER_PRESSURE',
-          ].includes(error.code),
-      )
-      await source.closed
+      source = await f.open()
     } catch (error: unknown) {
-      assert.ok(error instanceof HelperFailure)
-      assert.ok(
-        [
-          'HELPER_STDERR',
-          'HELPER_EXIT',
-          'HELPER_EOF',
-          'HELPER_PRESSURE',
-        ].includes(error.code),
-      )
+      assert.ok(expectedFault(error))
+      return
     }
+    // Do not grant credit until the idle fault has closed the child. A fixed
+    // sleep can end before child startup and turn unsolicited output into a
+    // response to the consumer's newly granted credit.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        source.closed,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(new Error('Idle fixture did not terminate before credit')),
+            2000,
+          )
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+    await assert.rejects(source[Symbol.asyncIterator]().next(), expectedFault)
   })
 }
 

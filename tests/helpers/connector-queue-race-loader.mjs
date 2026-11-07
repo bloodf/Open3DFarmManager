@@ -39,6 +39,22 @@ ${enqueue}`,
           ),
       }
     }
+    if (
+      url.endsWith('/runtime/agent.ts') &&
+      process.env.QUEUE_EXPIRE_ON_DELIVERY
+    ) {
+      const source = String(result.source)
+      const needle = "if (result.status === 'delivered') {"
+      if (!source.includes(needle))
+        throw new Error('Expire on delivery hook missing')
+      return {
+        ...result,
+        source: source.replace(
+          needle,
+          `${needle}\n          credential.expires_at = 0`,
+        ),
+      }
+    }
     return result
   },
 })

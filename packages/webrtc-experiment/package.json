@@ -11,6 +11,6 @@
     "test:session": "bun test ./session.test.ts"
   },
   "devDependencies": {
-    "node-datachannel": "0.33.5"
+    "node-datachannel": "0.33.6"
   }
 }

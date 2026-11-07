@@ -416,9 +416,8 @@ async function run() {
           printer_key: input.assignment.printerKey,
           moonraker_origin: 'http://127.0.0.1:1',
         })
-        const { PauseConnectorSignallingClient: Client } = await import(
-          '../../packages/connector/src/cloud/pause-signalling-client.ts'
-        )
+        const { PauseConnectorSignallingClient: Client } =
+          await import('../../packages/connector/src/cloud/pause-signalling-client.ts')
         url.protocol = 'wss:'
         url.pathname = '/api/signalling/pause-connector'
         client = new Client(

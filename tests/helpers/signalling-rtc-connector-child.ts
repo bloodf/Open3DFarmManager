@@ -128,9 +128,8 @@ async function run() {
   )
     throw Error('Explicit isolated child startup required')
   const { generateKeyPairSync } = await import('node:crypto')
-  const { ConnectorIdentity } = await import(
-    '../../packages/connector/src/identity/store.ts'
-  )
+  const { ConnectorIdentity } =
+    await import('../../packages/connector/src/identity/store.ts')
   const runtimeFixture =
     process.env.SIGNALLING_HTTPS_RTC_RUNTIME === 'yes'
       ? await (
@@ -222,9 +221,8 @@ async function run() {
         const target = new URL(input.origin)
         if (target.protocol !== 'https:' || target.hostname !== '127.0.0.1')
           throw Error('Isolated HTTPS loopback required')
-        const { snapshotAssignmentRefs } = await import(
-          '../../packages/connector/src/webrtc/readonly-session.ts'
-        )
+        const { snapshotAssignmentRefs } =
+          await import('../../packages/connector/src/webrtc/readonly-session.ts')
         const refs = snapshotAssignmentRefs(
           input.assignmentRefs,
           input.claim.agent_id,
@@ -239,12 +237,10 @@ async function run() {
           { maxBytes: 8192, maxDepth: 4, maxValues: 64, maxStringChars: 4096 },
         )
         const { jti } = z.object({ jti: BrowserDeviceUuid }).parse(payload)
-        const { AuthenticatedConnectorSignallingClient } = await import(
-          '../../packages/connector/src/cloud/authenticated-signalling-client.ts'
-        )
-        const { FarmStatusSender } = await import(
-          '../../packages/connector/src/webrtc/farm-status-sender.ts'
-        )
+        const { AuthenticatedConnectorSignallingClient } =
+          await import('../../packages/connector/src/cloud/authenticated-signalling-client.ts')
+        const { FarmStatusSender } =
+          await import('../../packages/connector/src/webrtc/farm-status-sender.ts')
         const { createRequire } = await import('node:module')
         if (closing) return
         if (

@@ -32,9 +32,8 @@ async function commandFixture() {
     'jwk',
     pair.publicKey,
   )
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { publicKey } = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   const command = {
     v: 2 as const,
@@ -59,9 +58,8 @@ async function commandFixture() {
 async function authorityFixture() {
   const { pair, publicKey, command } = await commandFixture()
   const now = command.issued_at
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { thumbprint } = await validateBrowserDevicePublicKey(publicKey)
   const issuer = await crypto.subtle.generateKey('Ed25519', false, [
     'sign',
@@ -102,9 +100,8 @@ async function authorityFixture() {
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
   }
-  const { controlBindingHash } = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
+  const { controlBindingHash } =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const bindingHash = await controlBindingHash(binding),
     admissionNonce = digest()
   const capability = {
@@ -237,12 +234,10 @@ async function fixture(
   const active = dispatcher
   cleanup.push(() => active.close())
   await driver.prepare()
-  const controls = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
-  const caps = await import(
-    '../../packages/farm-protocol/src/pause-capability.ts'
-  )
+  const controls =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
+  const caps =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
   const admission = active.beginAdmission({
     binding: f.binding,
     printerBinding,

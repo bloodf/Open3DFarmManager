@@ -409,9 +409,8 @@ export class PauseConnectorSignallingClient {
       const factory =
         this.#options.peerFactory ??
         (async (options: PeerOptions) => {
-          const { PauseConnectorPeer } = await import(
-            '../webrtc/pause-control-peer.ts'
-          )
+          const { PauseConnectorPeer } =
+            await import('../webrtc/pause-control-peer.ts')
           return new PauseConnectorPeer(options)
         })
       const loading = Promise.resolve()

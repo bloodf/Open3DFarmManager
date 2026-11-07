@@ -26,9 +26,8 @@ test(
   },
   async () => {
     assert.equal(process.version, 'v24.20.0', 'Pinned Node24 runtime required')
-    const { runPauseControlRtc } = await import(
-      '../helpers/pause-control-rtc.ts'
-    )
+    const { runPauseControlRtc } =
+      await import('../helpers/pause-control-rtc.ts')
     // A rejected case stops this sequence; never automatically retry or continue.
     for (const scenario of scenarios) {
       if (!selected || selected === scenario) await runPauseControlRtc(scenario)
@@ -47,9 +46,7 @@ test('fixture IPC enforces byte capacity including final newline', () => {
   const exact = '"' + 'a'.repeat(65533) + '"\n'
   assert.equal(bytes(exact).byteLength, 65536)
   assert.equal(typeof parsePauseFixtureResponse(bytes(exact)), 'string')
-  assert.throws(() =>
-    parsePauseFixtureResponse(bytes(exact.replace('a', '☃'))),
-  )
+  assert.throws(() => parsePauseFixtureResponse(bytes(exact.replace('a', '☃'))))
   assert.throws(() =>
     parsePauseFixtureResponse(bytes('"' + 'a'.repeat(65534) + '"\n')),
   )

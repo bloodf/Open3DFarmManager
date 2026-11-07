@@ -114,9 +114,9 @@ SOFTWARE.
 
 
 ========================================================================
-github.com/bluenviron/mediacommon/v2 v2.9.6 / LICENSE
+github.com/bluenviron/mediacommon/v2 v2.9.7 / LICENSE
 SHA256 76215646305d291d1555379a5bf42eb69e68c4de4edbf456d70d5772f6a411ae
-Source https://github.com/bluenviron/mediacommon/blob/dc7c53097c6b405e31271357167578a38242509a/LICENSE#L1
+Source https://github.com/bluenviron/mediacommon/blob/61b3b45f4c36f86e5d7de4d4b894931233617e1f/LICENSE#L1
 ========================================================================
 MIT License
 
@@ -303,9 +303,9 @@ SOFTWARE.
 
 
 ========================================================================
-github.com/pion/rtcp v1.2.19 / LICENSE
+github.com/pion/rtcp v1.2.20 / LICENSE
 SHA256 6483daf6c8aa2c8192528e60be098aa82dd18f6d7b96dc8246f4f7c3333fbf3f
-Source https://github.com/pion/rtcp/blob/09df03af9612ef9ed56c073b9a8de82f2ee035d2/LICENSE#L1
+Source https://github.com/pion/rtcp/blob/cd21e4757f92fce4a88ad7976baeec9b7690fb6a/LICENSE#L1
 ========================================================================
 MIT License
 
@@ -319,9 +319,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 ========================================================================
-github.com/pion/rtp v1.10.5 / LICENSE
+github.com/pion/rtp v1.10.6 / LICENSE
 SHA256 b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0
-Source https://github.com/pion/rtp/blob/e61bd16da5287b0ae211a8624aee62b03ff2306c/LICENSE#L1
+Source https://github.com/pion/rtp/blob/9a8f93554133824676326b43f068167fef01a884/LICENSE#L1
 ========================================================================
 MIT License
 

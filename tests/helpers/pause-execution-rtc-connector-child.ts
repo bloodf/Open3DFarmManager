@@ -1,4 +1,5 @@
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { DatabaseSync } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -258,6 +259,16 @@ const RelayDiagnosticsSchema = z.strictObject({
   lastReason: z.string().optional(),
 })
 
+// Only the fixed, locally generated journal is queried. No path enters IPC.
+export const PauseExecutionJournalObservation = z.strictObject({
+  commandId: z.string().uuid(),
+  assignmentId: z.string().uuid(),
+  status: z.enum(['claimed', 'write-started', 'not-sent', 'applied', 'outcome-unknown']),
+  finishedAt: z.number().int().nonnegative().nullable(),
+  replayRecords: z.number().int().nonnegative(),
+  activeReservations: z.number().int().nonnegative(),
+})
+
 export const PauseExecutionRtcReply = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('identity'),
@@ -269,6 +280,7 @@ export const PauseExecutionRtcReply = z.discriminatedUnion('kind', [
     signature: PairingProofCompletion.shape.signature,
   }),
   z.strictObject({ kind: z.literal('started') }),
+  z.strictObject({ kind: z.literal('start-refused'), reason: z.literal('already-started') }),
   z.strictObject({ kind: z.literal('released') }),
   z.strictObject({
     kind: z.literal('replay-result'),
@@ -286,6 +298,7 @@ export const PauseExecutionRtcReply = z.discriminatedUnion('kind', [
     prepareCalls: z.number().int().nonnegative().default(0),
     closeHeld: z.boolean().default(false),
     ownerSettled: z.boolean().default(false),
+    journal: PauseExecutionJournalObservation.nullable(),
     pausesObserved: z.number().int().nonnegative(),
     latestPrintState: z.string().nullable(),
     commandId: z.string().uuid().nullable(),
@@ -428,9 +441,12 @@ export async function run() {
         return
 
       case 'start': {
+        if (started) {
+          output({ kind: 'start-refused', reason: 'already-started' })
+          return
+        }
         if (
           !paired ||
-          started ||
           input.claim.agent_id !== input.assignment.agentId
         )
           throw Error('Invalid fixture start')
@@ -686,8 +702,31 @@ export async function run() {
         if (client) progress.phase(client.snapshot().phase)
         const counts = moonrakerFixture?.counts()
         const relayDiag = relay?.diagnostics() ?? null
+        let journalObservation: z.infer<typeof PauseExecutionJournalObservation> | null = null
+        if (journalDir && lastCommandId) {
+          const database = new DatabaseSync(join(journalDir, 'pause-commands.sqlite'), {
+            readOnly: true,
+            allowExtension: false,
+          })
+          try {
+            const row = database.prepare(`
+              SELECT cmd_id AS commandId, assignment_id AS assignmentId, status,
+                finished_at AS finishedAt,
+                (SELECT count(*) FROM pause_commands WHERE cmd_id = ?) AS replayRecords,
+                (SELECT count(*) FROM pause_commands WHERE
+                  status IN ('claimed','write-started','outcome-unknown') AND
+                  (assignment_id = p.assignment_id OR
+                    (farm_id = p.farm_id AND printer_key = p.printer_key))) AS activeReservations
+              FROM pause_commands p WHERE cmd_id = ?
+            `).get(lastCommandId, lastCommandId)
+            if (row !== undefined) journalObservation = PauseExecutionJournalObservation.parse(row)
+          } finally {
+            database.close()
+          }
+        }
         output({
           kind: 'observation',
+          journal: journalObservation,
           inboxReady,
           proofsReady: !!ready,
           capabilityAccepted:

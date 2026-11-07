@@ -18,6 +18,7 @@ import {
   PauseExecutionRtcReply,
   PauseExecutionRtcIssuer,
   PauseExecutionRtcProgress,
+  PauseExecutionJournalObservation,
 } from './pause-execution-rtc-connector-child.ts'
 import { waitFixtureClose } from './signalling-https-process.ts'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
@@ -58,6 +59,29 @@ export type PauseExecutionBrowserObservation = z.infer<
   typeof PauseExecutionBrowserObservation
 >
 
+export function verifyPauseExecutionCloseOwnership(
+  observation: unknown,
+  phase: 'held' | 'settled',
+  commandId: string,
+  assignmentId: string,
+) {
+  const native = PauseExecutionNativeObservation.parse(observation)
+  assert.equal(native.ownerSettled, phase === 'settled')
+  assert.equal(native.closeHeld, phase === 'held')
+  assert.equal(native.failed, false)
+  assert.equal(native.prepareCalls, 1)
+  assert.equal(native.pausesObserved, 1)
+  assert.ok(native.journal, 'Durable journal record must remain present')
+  assert.equal(native.journal.commandId, commandId)
+  assert.equal(native.journal.assignmentId, assignmentId)
+  assert.equal(native.journal.replayRecords, 1, 'Replay record must be preserved')
+  assert.equal(native.journal.activeReservations, phase === 'held' ? 1 : 0,
+    'Durable assignment reservation must follow actual closure')
+  assert.equal(native.journal.status, phase === 'held' ? 'write-started' : 'applied')
+  if (phase === 'held') assert.equal(native.journal.finishedAt, null)
+  else assert.notEqual(native.journal.finishedAt, null)
+}
+
 export const PauseExecutionNativeObservation = z.strictObject({
   kind: z.literal('observation'),
   inboxReady: z.boolean(),
@@ -68,6 +92,7 @@ export const PauseExecutionNativeObservation = z.strictObject({
   prepareCalls: z.number().int().nonnegative(),
   closeHeld: z.boolean(),
   ownerSettled: z.boolean(),
+  journal: PauseExecutionJournalObservation.nullable(),
   pausesObserved: z.number().int().nonnegative(),
   latestPrintState: z.string().nullable(),
   commandId: z.string().uuid().nullable(),
@@ -827,7 +852,7 @@ export function createPauseExecutionRtcFixtureExtension(
         )
         assert.equal(identity.thumbprint, input.browserThumbprint)
 
-        const started = await session.connector.request({
+        const startCommand = PauseExecutionRtcCommand.parse({
           kind: 'start',
           barrier:
             closureMode === 'stale' ||
@@ -844,6 +869,7 @@ export function createPauseExecutionRtcFixtureExtension(
           browserKeyId: input.browserKeyId,
           assignment: { ...assignment },
         })
+        const started = await session.connector.request(startCommand)
         assert.equal(started.kind, 'started')
 
         const observeNative = async () => {
@@ -969,11 +995,17 @@ export function createPauseExecutionRtcFixtureExtension(
           await until(observeNative, (v) => v.closeHeld, input.signal, 10000)
           await session.connector.request({ kind: 'owner-close' })
           const held = await observeNative()
-          assert.equal(held.ownerSettled, false)
-          assert.equal(held.prepareCalls, 1)
-          assert.equal(held.pausesObserved, 1)
+          assert.ok(held.commandId)
+          verifyPauseExecutionCloseOwnership(held, 'held', held.commandId, assignment.assignmentId)
+          const repeated = await session.connector.request(startCommand)
+          assert.deepEqual(repeated, { kind: 'start-refused', reason: 'already-started' })
+          const afterRefusal = await observeNative()
+          verifyPauseExecutionCloseOwnership(afterRefusal, 'held', held.commandId, assignment.assignmentId)
+          assert.deepEqual(afterRefusal.journal, held.journal)
+          assert.equal(afterRefusal.commandsReceived, held.commandsReceived)
           await session.connector.request({ kind: 'release-close' })
-          await until(observeNative, (v) => v.ownerSettled, input.signal, 10000)
+          const settled = await until(observeNative, (v) => v.ownerSettled, input.signal, 10000)
+          verifyPauseExecutionCloseOwnership(settled, 'settled', held.commandId, assignment.assignmentId)
           await outcome
           completed = true
           return

@@ -119,7 +119,9 @@ test('explicit origin setup has no outbound probe and renders an external anchor
   await page.keyboard.press('Space')
   await expect(confirmation).toBeChecked()
   await page.keyboard.press('Tab')
-  const confirm = page.getByRole('button', { name: 'Confirmar interface local' })
+  const confirm = page.getByRole('button', {
+    name: 'Confirmar interface local',
+  })
   await expect(confirm).toBeFocused()
   await page.keyboard.press('Enter')
   const link = page.getByRole('link', { name: /Abrir interface local de/ })

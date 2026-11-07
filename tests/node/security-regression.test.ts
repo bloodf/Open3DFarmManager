@@ -200,7 +200,7 @@ test('SQLite claims serialize across separate OS processes', async () => {
     const results = await Promise.all(
       Array.from(
         { length: 4 },
-        () =>
+        (_, worker) =>
           new Promise<string>((resolve, reject) => {
             const child = spawn(
               process.execPath,
@@ -214,14 +214,25 @@ test('SQLite claims serialize across separate OS processes', async () => {
               { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 },
             )
             let output = ''
+            let stderr = Buffer.alloc(0)
+            child.stderr.on('data', (chunk: Buffer) => {
+              stderr = Buffer.concat([
+                stderr,
+                chunk.subarray(0, 4096 - stderr.length),
+              ])
+            })
             child.stdout.on('data', (chunk) => {
               output += chunk
             })
             child.on('error', reject)
-            child.on('close', (status) =>
+            child.on('close', (status, signal) =>
               status === 0
                 ? resolve(output)
-                : reject(new Error('Replay worker failed')),
+                : reject(
+                    new Error(
+                      `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,
+                    ),
+                  ),
             )
           }),
       ),

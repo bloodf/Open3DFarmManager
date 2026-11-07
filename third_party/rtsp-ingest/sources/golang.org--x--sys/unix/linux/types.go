@@ -153,6 +153,7 @@ struct termios2 {
 #include <linux/nexthop.h>
 #include <linux/nfc.h>
 #include <linux/nl80211.h>
+#include <linux/nsfs.h>
 #include <linux/openat2.h>
 #include <linux/perf_event.h>
 #include <linux/pps.h>
@@ -216,6 +217,34 @@ typedef struct {
 	unsigned int		st_pad4;
 
 	long			st_blocks;
+} my_stat;
+#elif defined(__sparc__) && defined(__arch64__)
+
+// The glibc and kernel stat do not agree on sparc64 either: glibc puts st_ino
+// at offset 16 and st_nlink at 28, the kernel at 8 and 16. The raw syscalls
+// fill the kernel's struct stat64, so use that, with the same adjustments as
+// above.
+typedef struct {
+	unsigned long		st_dev;
+	unsigned long		st_ino;
+	unsigned long		st_nlink;
+
+	unsigned int		st_mode;
+	unsigned int		st_uid;
+	unsigned int		st_gid;
+	unsigned int		__pad0;
+
+	unsigned long		st_rdev;
+	long			st_size;
+	long			st_blksize;
+	long			st_blocks;
+
+	// Declared as six separate longs in the kernel.
+	struct timespec		st_atim;
+	struct timespec		st_mtim;
+	struct timespec		st_ctim;
+
+	long			__unused[3];
 } my_stat;
 #else
 typedef struct stat my_stat;
@@ -540,6 +569,16 @@ struct my_ptp_perout_request {
 	unsigned int flags;
 	struct ptp_clock_time on;
 };
+
+// the one defined in linux/nsfs.h has anonymous nested struct
+struct my_ns_id_req {
+	__u32 size;
+	__u32 spare;
+	__u64 ns_id;
+	__u32 ns_type;
+	__u32 spare2;
+	__u64 user_ns_id;
+};
 */
 import "C"
 
@@ -777,6 +816,8 @@ type PacketMreq C.struct_packet_mreq
 
 type Msghdr C.struct_msghdr
 
+type Mmsghdr C.struct_mmsghdr
+
 type Cmsghdr C.struct_cmsghdr
 
 type Inet4Pktinfo C.struct_in_pktinfo
@@ -831,6 +872,7 @@ const (
 	SizeofIPv6Mreq          = C.sizeof_struct_ipv6_mreq
 	SizeofPacketMreq        = C.sizeof_struct_packet_mreq
 	SizeofMsghdr            = C.sizeof_struct_msghdr
+	SizeofMmsghdr           = C.sizeof_struct_mmsghdr
 	SizeofCmsghdr           = C.sizeof_struct_cmsghdr
 	SizeofInet4Pktinfo      = C.sizeof_struct_in_pktinfo
 	SizeofInet6Pktinfo      = C.sizeof_struct_in6_pktinfo
@@ -1092,6 +1134,22 @@ const (
 type OpenHow C.struct_open_how
 
 const SizeofOpenHow = C.sizeof_struct_open_how
+
+type NsIdReq C.struct_my_ns_id_req
+
+const (
+	NS_ID_REQ_SIZE_VER0 = C.NS_ID_REQ_SIZE_VER0
+	LISTNS_CURRENT_USER = C.LISTNS_CURRENT_USER
+
+	TIME_NS   = C.TIME_NS
+	MNT_NS    = C.MNT_NS
+	CGROUP_NS = C.CGROUP_NS
+	UTS_NS    = C.UTS_NS
+	IPC_NS    = C.IPC_NS
+	USER_NS   = C.USER_NS
+	PID_NS    = C.PID_NS
+	NET_NS    = C.NET_NS
+)
 
 const (
 	RESOLVE_BENEATH       = C.RESOLVE_BENEATH

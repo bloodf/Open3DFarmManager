@@ -178,7 +178,17 @@ function auditPort(channel: ChildProcess | NodeJS.Process): PauseAuditPort {
     },
   }
 }
+function pauseExecutionClosure(): 'standard' | 'revocation' | 'disconnect' | 'stale' | 'reassigned' | 'peer-closed' | 'late-close' {
+  const row = process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_ROW ?? 'standard'
+  if (row !== 'standard' && row !== 'revocation' && row !== 'disconnect' && row !== 'stale' && row !== 'reassigned' && row !== 'peer-closed' && row !== 'late-close')
+    throw new Error('Unknown pause execution row')
+  return row
+}
 function fixtureMode() {
+  const execution = process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE
+  if (execution !== undefined &&
+      (execution !== 'yes' || process.env.SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE !== 'yes'))
+    throw new Error('Execution fixture requires the maintained pause RTC opt-in')
   const flags = [
     process.env.SIGNALLING_HTTPS_RTC_FIXTURE,
     process.env.SIGNALLING_HTTPS_PAUSE_FIXTURE,
@@ -288,7 +298,10 @@ if (mode === '--prepare-layer') {
   const extensionModule:
     | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
     | undefined = rtcFixture ? await import(extensionPath) : undefined
-  const pauseRtcModule = pauseRtcFixture
+  const executionModule = process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE === 'yes'
+    ? await import('../tests/helpers/pause-execution-rtc.ts')
+    : undefined
+  const pauseRtcModule = pauseRtcFixture && !executionModule
     ? await import('../tests/helpers/pause-authenticated-rtc.ts')
     : undefined
   const pauseAudit = pauseFixture
@@ -323,6 +336,17 @@ if (mode === '--prepare-layer') {
                 disconnectSignalling: async () => {
                   throw new Error('Pause fixture must not use signalling')
                 },
+              }
+            : {}),
+          ...(executionModule
+            ? {
+                extension: executionModule.createPauseExecutionRtcFixtureExtension({
+                  closure: pauseExecutionClosure(),
+                  testReplay: true,
+                }),
+                extensionKind: 'pause-execution-rtc' as const,
+                caPath: ca,
+                disconnectSignalling: requestProxyDisconnect,
               }
             : {}),
           ...(pauseRtcModule
@@ -790,7 +814,10 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_PASSWORD: password,
           ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
           ...(pauseRtcFixture
-            ? { SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE: 'yes' }
+            ? { SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE: 'yes',
+                ...(process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE === 'yes'
+                  ? { SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE: 'yes',
+                      SIGNALLING_HTTPS_PAUSE_EXECUTION_ROW: pauseExecutionClosure() } : {}) }
             : {}),
           ...(pauseIssuer
             ? {

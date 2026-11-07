@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import fixture from '../fixtures/moonraker/printing.json'
 import {
   parseMoonrakerSnapshot,

@@ -94,7 +94,7 @@ export async function serveWsTestServer(handlers: {
     )
     if (!handlers.upgrade) {
       const response = new ServerResponse(request)
-      response.assignSocket(socket)
+      response.assignSocket(request.socket)
       void Promise.resolve(handlers.http(upgradeRequest))
         .then(async (result) => {
           response.writeHead(result.status, {

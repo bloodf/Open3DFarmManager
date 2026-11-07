@@ -1,6 +1,8 @@
 # WebRTC experiment dependency review
 
-Reviewed 2026-11-04 against the root `bun.lock` and the installed packages. The original browser-only fixture uses native Chromium WebRTC and Web Crypto through Playwright, with a synthetic Connector peer running in Chromium. The interop fixture also uses a separate native Connector peer through `node-datachannel@0.33.5`. The [root dependency review](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency) records its licenses, native source and prebuild provenance limits. See the experiment README and test output for the runtime evidence. Neither fixture establishes hardware, camera, production network compatibility or distribution readiness.
+Historical review, 2026-11-04, against the root `bun.lock` and the installed packages. The original browser-only fixture uses native Chromium WebRTC and Web Crypto through Playwright, with a synthetic Connector peer running in Chromium. The interop fixture also uses a separate native Connector peer through `node-datachannel@0.33.5`. The [root dependency review](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency) records its licenses, native source and prebuild provenance limits. See the experiment README and test output for the runtime evidence. Neither fixture establishes hardware, camera, production network compatibility or distribution readiness.
+
+Current manifests and lock select `node-datachannel@0.33.6`. The 0.33.5 observations below remain historical evidence; renewed native and platform acceptance for 0.33.6 is pending. See the [current root provenance](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency).
 
 | Package            | Version | Declared license | Declared runtime dependencies |
 | ------------------ | ------- | ---------------- | ----------------------------- |

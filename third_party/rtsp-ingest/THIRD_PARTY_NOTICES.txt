@@ -680,9 +680,9 @@ limitations under the License.
 
 
 ========================================================================
-golang.org/x/crypto v0.57.0 / LICENSE
+golang.org/x/crypto v0.58.0 / LICENSE
 SHA256 911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
-Source https://go.googlesource.com/crypto/+/3f62bf119e84c6e35e8518a2958089ade622d1a3/LICENSE#1
+Source https://go.googlesource.com/crypto/+/8fdf07b3114278fb3b78c1cf1814e08bd851eb4c/LICENSE#1
 ========================================================================
 Copyright 2009 The Go Authors.
 
@@ -714,9 +714,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-golang.org/x/crypto v0.57.0 / PATENTS
+golang.org/x/crypto v0.58.0 / PATENTS
 SHA256 96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
-Source https://go.googlesource.com/crypto/+/3f62bf119e84c6e35e8518a2958089ade622d1a3/PATENTS#1
+Source https://go.googlesource.com/crypto/+/8fdf07b3114278fb3b78c1cf1814e08bd851eb4c/PATENTS#1
 ========================================================================
 Additional IP Rights Grant (Patents)
 
@@ -743,9 +743,9 @@ shall terminate as of the date such litigation is filed.
 
 
 ========================================================================
-golang.org/x/net v0.59.0 / LICENSE
+golang.org/x/net v0.62.0 / LICENSE
 SHA256 911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
-Source https://go.googlesource.com/net/+/540d04cfe5028e2655754591a4d3e08c586809f2/LICENSE#1
+Source https://go.googlesource.com/net/+/3de643db506517b3e652a13cc0b56034cea6b8e6/LICENSE#1
 ========================================================================
 Copyright 2009 The Go Authors.
 
@@ -777,9 +777,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-golang.org/x/net v0.59.0 / PATENTS
+golang.org/x/net v0.62.0 / PATENTS
 SHA256 96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
-Source https://go.googlesource.com/net/+/540d04cfe5028e2655754591a4d3e08c586809f2/PATENTS#1
+Source https://go.googlesource.com/net/+/3de643db506517b3e652a13cc0b56034cea6b8e6/PATENTS#1
 ========================================================================
 Additional IP Rights Grant (Patents)
 
@@ -806,9 +806,9 @@ shall terminate as of the date such litigation is filed.
 
 
 ========================================================================
-golang.org/x/sys v0.48.0 / LICENSE
+golang.org/x/sys v0.49.0 / LICENSE
 SHA256 911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
-Source https://go.googlesource.com/sys/+/613e2570718ecde85c04e69ebd5585c3881c442c/LICENSE#1
+Source https://go.googlesource.com/sys/+/b6b8557e8e2974925aec7a136ba0e323eedc5f43/LICENSE#1
 ========================================================================
 Copyright 2009 The Go Authors.
 
@@ -840,9 +840,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-golang.org/x/sys v0.48.0 / PATENTS
+golang.org/x/sys v0.49.0 / PATENTS
 SHA256 96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
-Source https://go.googlesource.com/sys/+/613e2570718ecde85c04e69ebd5585c3881c442c/PATENTS#1
+Source https://go.googlesource.com/sys/+/b6b8557e8e2974925aec7a136ba0e323eedc5f43/PATENTS#1
 ========================================================================
 Additional IP Rights Grant (Patents)
 
@@ -869,9 +869,9 @@ shall terminate as of the date such litigation is filed.
 
 
 ========================================================================
-golang.org/x/term v0.46.0 / LICENSE
+golang.org/x/term v0.47.0 / LICENSE
 SHA256 911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
-Source https://go.googlesource.com/term/+/6226200ed12cba417a9d9e799c2a7179d3fc0e27/LICENSE#1
+Source https://go.googlesource.com/term/+/0851034afad912733699827b3bb94436f059797f/LICENSE#1
 ========================================================================
 Copyright 2009 The Go Authors.
 
@@ -903,9 +903,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-golang.org/x/term v0.46.0 / PATENTS
+golang.org/x/term v0.47.0 / PATENTS
 SHA256 96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
-Source https://go.googlesource.com/term/+/6226200ed12cba417a9d9e799c2a7179d3fc0e27/PATENTS#1
+Source https://go.googlesource.com/term/+/0851034afad912733699827b3bb94436f059797f/PATENTS#1
 ========================================================================
 Additional IP Rights Grant (Patents)
 
@@ -932,9 +932,9 @@ shall terminate as of the date such litigation is filed.
 
 
 ========================================================================
-golang.org/x/text v0.42.0 / LICENSE
+golang.org/x/text v0.43.0 / LICENSE
 SHA256 911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
-Source https://go.googlesource.com/text/+/fafe4a06967e06550e69ee42787d9902845d2a3f/LICENSE#1
+Source https://go.googlesource.com/text/+/ac40b0f06c159afb5bfca4d1860f8b4b60dbc160/LICENSE#1
 ========================================================================
 Copyright 2009 The Go Authors.
 
@@ -966,9 +966,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-golang.org/x/text v0.42.0 / PATENTS
+golang.org/x/text v0.43.0 / PATENTS
 SHA256 96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc
-Source https://go.googlesource.com/text/+/fafe4a06967e06550e69ee42787d9902845d2a3f/PATENTS#1
+Source https://go.googlesource.com/text/+/ac40b0f06c159afb5bfca4d1860f8b4b60dbc160/PATENTS#1
 ========================================================================
 Additional IP Rights Grant (Patents)
 

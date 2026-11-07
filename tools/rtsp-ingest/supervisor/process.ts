@@ -192,9 +192,11 @@ export async function openHelperSource(
     try {
       process.kill(-child.pid, which)
     } catch (error: unknown) {
-      if (
-        !(error instanceof Error && 'code' in error && error.code === 'ESRCH')
-      ) {
+      if (!(
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ESRCH'
+      )) {
         failure ??= new HelperFailure('HELPER_REAP', child.pid)
       }
     }

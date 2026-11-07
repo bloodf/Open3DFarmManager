@@ -24,9 +24,8 @@ async function commandFixture() {
     'jwk',
     pair.publicKey,
   )
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { publicKey } = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   const command = {
     v: 2 as const,
@@ -164,9 +163,8 @@ test('policy permits lower safe values and rejects zero, overflow and raised lim
 })
 
 test('local printer assignment is immutable, allowlisted, opaque and terminal when retired', async () => {
-  const { createPrinterBindingRegistry, readPrinterBinding } = await import(
-    '../../packages/connector/src/control/printer-binding.ts'
-  )
+  const { createPrinterBindingRegistry, readPrinterBinding } =
+    await import('../../packages/connector/src/control/printer-binding.ts')
   const registry = createPrinterBindingRegistry({
     allowedOrigins: ['http://127.0.0.1:7125', 'http://127.0.0.1:7126'],
   })
@@ -200,9 +198,8 @@ test('local printer assignment is immutable, allowlisted, opaque and terminal wh
 
 async function authorityFixture() {
   const { pair, publicKey, command } = await commandFixture()
-  const { validateBrowserDevicePublicKey } = await import(
-    '../../packages/farm-protocol/src/browser-device-proof.ts'
-  )
+  const { validateBrowserDevicePublicKey } =
+    await import('../../packages/farm-protocol/src/browser-device-proof.ts')
   const { thumbprint } = await validateBrowserDevicePublicKey(publicKey)
   const issuer = await crypto.subtle.generateKey('Ed25519', false, [
     'sign',
@@ -243,9 +240,8 @@ async function authorityFixture() {
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
   }
-  const { controlBindingHash } = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
+  const { controlBindingHash } =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const bindingHash = await controlBindingHash(binding),
     admissionNonce = digest()
   const capability = {
@@ -306,12 +302,10 @@ async function authorityFixture() {
 
 test('issuer and browser admission use independent domains and canonical UTF-8 wire', async () => {
   const f = await authorityFixture()
-  const cap = await import(
-    '../../packages/farm-protocol/src/pause-capability.ts'
-  )
-  const control = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
+  const cap =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
+  const control =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const maximal = { ...f.capability, printer_key: '\u0001'.repeat(128) }
   const maximalSigned = await cap.signPauseCapability(
     maximal,
@@ -405,18 +399,14 @@ test('issuer and browser admission use independent domains and canonical UTF-8 w
 
 async function verifierFixture(expireOnRead = 0) {
   const f = await authorityFixture()
-  const { createPrinterBindingRegistry } = await import(
-    '../../packages/connector/src/control/printer-binding.ts'
-  )
-  const { createPauseCapabilityVerifier } = await import(
-    '../../packages/connector/src/auth/pause-capability.ts'
-  )
-  const controls = await import(
-    '../../packages/farm-protocol/src/control-session-binding.ts'
-  )
-  const caps = await import(
-    '../../packages/farm-protocol/src/pause-capability.ts'
-  )
+  const { createPrinterBindingRegistry } =
+    await import('../../packages/connector/src/control/printer-binding.ts')
+  const { createPauseCapabilityVerifier } =
+    await import('../../packages/connector/src/auth/pause-capability.ts')
+  const controls =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
+  const caps =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
   const bindings = createPrinterBindingRegistry({
     allowedOrigins: ['http://127.0.0.1:7125'],
   })

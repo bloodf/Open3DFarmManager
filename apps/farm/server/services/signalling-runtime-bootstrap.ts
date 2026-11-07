@@ -94,9 +94,8 @@ export function createSignallingRuntimeLifecycle() {
             readerIdentity.port !== proofIdentity.port
           )
             throw new Error('Mismatched signalling database endpoints')
-          const { PostgresConnectorCredentialAcceptance } = await import(
-            '../storage/postgres-connector-credential-acceptance.ts'
-          )
+          const { PostgresConnectorCredentialAcceptance } =
+            await import('../storage/postgres-connector-credential-acceptance.ts')
           if (closed || active) throw new Error('Signalling startup cancelled')
           const reader = new PostgresSignallingAuthorization(readerPool, {
             issuer: config.issuer,

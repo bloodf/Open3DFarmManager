@@ -13,10 +13,7 @@ process.env.WS_NO_UTF_8_VALIDATE = '1'
 const { default: WebSocket } = await import('ws')
 
 export type MoonrakerFailureReason =
-  | 'offline'
-  | 'stale'
-  | 'not-ready'
-  | 'invalid-response'
+  'offline' | 'stale' | 'not-ready' | 'invalid-response'
 
 export class MoonrakerClientError extends Error {
   readonly reason: MoonrakerFailureReason

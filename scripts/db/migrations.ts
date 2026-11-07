@@ -85,8 +85,7 @@ export function validateMigrationHistory(
 }
 
 export type MigrationAction =
-  | { kind: 'up' }
-  | { kind: 'down'; expectedLastId: string }
+  { kind: 'up' } | { kind: 'down'; expectedLastId: string }
 
 /** Trusted, reviewed local SQL only; not a SQL sandbox or production startup hook. */
 export async function runMigrations(

@@ -151,14 +151,12 @@ async function stop(child: ChildProcess | undefined, group: boolean) {
       else if (child.exitCode === null && child.signalCode === null)
         child.kill(name)
     } catch (error) {
-      if (
-        !(
-          error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          error.code === 'ESRCH'
-        )
-      )
+      if (!(
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'ESRCH'
+      ))
         throw error
     }
   }

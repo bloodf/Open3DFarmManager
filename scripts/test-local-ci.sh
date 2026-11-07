@@ -2,13 +2,18 @@
 set -Eeuo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/open3d-local-ci-test.XXXXXXXX")
-trap 'rm -rf "$scratch"' EXIT
+fake_modules=0
+if [[ ! -d "$root/node_modules" ]]; then
+  mkdir -p "$root/node_modules"
+  fake_modules=1
+fi
+trap 'rm -rf "$scratch"; if ((fake_modules)); then rm -rf "$root/node_modules"; fi' EXIT
 mkdir "$scratch/bin"
 export LOCAL_CI_REAL_NODE
 LOCAL_CI_REAL_NODE=$(command -v node)
-cat > "$scratch/bin/bun" <<'EOF'
+cat > "$scratch/bin/pnpm" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' 1.4.2; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf '%s\n' 12.18.0; exit 0; fi
 printf '%s\n' "$*" >> "$TMPDIR/calls"
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == install ]]; then exit 0; fi
 exit 42
@@ -25,7 +30,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(oven/bun:1\.4\.2|node:24\.22\.2-alpine)$ ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(node:24\.22\.2-alpine)$ ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;
@@ -55,7 +60,7 @@ fi
 if [[ ( $1 == image || $1 == container ) && ${2:-} == inspect ]]; then exit 1; fi
 exit 0
 EOF
-chmod +x "$scratch/bin/bun" "$scratch/bin/node" "$scratch/bin/docker"
+chmod +x "$scratch/bin/pnpm" "$scratch/bin/node" "$scratch/bin/docker"
 expect_status() {
   local expected=$1 actual
   shift
@@ -78,7 +83,7 @@ for mode in direct index; do
   expect_status 43 image --containers --allow-emulation
   grep -q '^build --platform linux/amd64 ' "$scratch/docker-calls"
   if [[ $mode == index ]]; then
-    [[ $(grep -c '^image inspect --platform linux/amd64 ' "$scratch/docker-calls") == 2 ]]
+    [[ $(grep -c '^image inspect --platform linux/amd64 ' "$scratch/docker-calls") == 1 ]]
   elif grep -q '^image inspect --platform ' "$scratch/docker-calls"; then exit 1; fi
 done
 for mode in explicit-error explicit-empty explicit-mismatch default-mismatch default-empty; do

@@ -5,6 +5,7 @@ import {
   type FarmStatusFeed,
   type FarmViewState,
 } from '../utils/farm-view.ts'
+import { listenForAuthInvalidation } from '../utils/auth-invalidation.ts'
 import { listDeviceKeys } from '../utils/device-key.ts'
 import { createAuthenticatedFarmStatusFeed } from '../utils/webrtc/farm-status-feed.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
@@ -40,6 +41,7 @@ export function useFarmView() {
     },
   })
   let timer: ReturnType<typeof setInterval> | undefined
+  let stopAuthInvalidation: (() => void) | undefined
   const revalidate = () => {
     view.invalidate()
     if (document.visibilityState !== 'hidden') void view.discover()
@@ -71,7 +73,7 @@ export function useFarmView() {
     window.addEventListener('focus', revalidate)
     window.addEventListener('pageshow', revalidate)
     window.addEventListener('pagehide', hide)
-    window.addEventListener('open3dfarmmanager:auth-invalidated', revalidate)
+    stopAuthInvalidation = listenForAuthInvalidation(revalidate)
     document.addEventListener('visibilitychange', revalidate)
   })
   onBeforeRouteLeave(hide)
@@ -82,7 +84,7 @@ export function useFarmView() {
     window.removeEventListener('focus', revalidate)
     window.removeEventListener('pageshow', revalidate)
     window.removeEventListener('pagehide', hide)
-    window.removeEventListener('open3dfarmmanager:auth-invalidated', revalidate)
+    stopAuthInvalidation?.()
     document.removeEventListener('visibilitychange', revalidate)
   })
   return {

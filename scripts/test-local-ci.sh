@@ -4,23 +4,53 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/open3d-local-ci-test.XXXXXXXX")
 fake_modules=0
 if [[ ! -d "$root/node_modules" ]]; then
-  mkdir -p "$root/node_modules"
-  fake_modules=1
+  if mkdir "$root/node_modules"; then fake_modules=1; fi
 fi
-trap 'rm -rf "$scratch"; if ((fake_modules)); then rm -rf "$root/node_modules"; fi' EXIT
+cleanup() {
+  local result=$?
+  rm -rf "$scratch"
+  if ((fake_modules)); then
+    if ! rmdir "$root/node_modules" 2>/dev/null; then
+      printf '%s\n' 'Retained node_modules: fixture is no longer an empty directory; no recursive cleanup attempted.' >&2
+    fi
+  fi
+  return "$result"
+}
+trap cleanup EXIT
 mkdir "$scratch/bin"
 export LOCAL_CI_REAL_NODE
 LOCAL_CI_REAL_NODE=$(command -v node)
+pins=$("$LOCAL_CI_REAL_NODE" --input-type=module - "$root" <<'EOF'
+import { readFileSync } from 'node:fs';
+const root = process.argv[2];
+const read = path => readFileSync(`${root}/${path}`, 'utf8');
+const workflow = read('.github/workflows/ci.yml');
+const one = (pattern, text, label) => {
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length !== 1) throw new Error(`Expected one exact ${label} pin`);
+  return matches[0][1];
+};
+const pnpm = one(/^          version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow pnpm');
+const node = one(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow Node');
+const manager = JSON.parse(read('package.json')).packageManager;
+if (manager !== `pnpm@${pnpm}` || read('.nvmrc').trim() !== node) {
+  throw new Error('Workflow pins disagree with packageManager or .nvmrc');
+}
+console.log(pnpm, node);
+EOF
+)
+read -r LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE <<< "$pins"
+export LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE
 cat > "$scratch/bin/pnpm" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' 12.18.0; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf '%s\n' "$LOCAL_CI_PIN_PNPM"; exit 0; fi
 printf '%s\n' "$*" >> "$TMPDIR/calls"
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == install ]]; then exit 0; fi
 exit 42
 EOF
 cat > "$scratch/bin/node" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' v24.22.2; exit 0; fi
+if [[ ${1:-} == --version ]]; then printf 'v%s\n' "$LOCAL_CI_PIN_NODE"; exit 0; fi
 exec "$LOCAL_CI_REAL_NODE" "$@"
 EOF
 cat > "$scratch/bin/docker" <<'EOF'
@@ -30,7 +60,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} =~ ^(node:24\.22\.2-alpine)$ ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} == "node:${LOCAL_CI_PIN_NODE}-alpine" ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;

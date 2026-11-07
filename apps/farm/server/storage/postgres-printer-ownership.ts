@@ -36,20 +36,29 @@ export type PrinterOwnershipDecision =
       reason: 'invalid-input' | 'denied' | 'conflict' | 'storage-unavailable'
     }
 class AuthorizationExpired extends Error {
+  readonly observedAt: number
+  readonly expired: boolean
   constructor(
-    readonly observedAt: number,
-    readonly expired: boolean,
+    observedAt: number,
+    expired: boolean,
   ) {
     super('Authorization expired')
+    this.observedAt = observedAt
+    this.expired = expired
   }
 }
 /** Explicit owner/admin provisioning; not a transport authorization or printer discovery API. */
 export class PostgresPrinterOwnership {
   private inflight = 0
+  private readonly sql: Sql
+  private readonly clock: () => number
   constructor(
-    private readonly sql: Sql,
-    private readonly clock: () => number = Date.now,
-  ) {}
+    sql: Sql,
+    clock: () => number = Date.now,
+  ) {
+    this.sql = sql
+    this.clock = clock
+  }
   private now(): number {
     const now = this.clock()
     if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid clock')

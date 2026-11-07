@@ -23,11 +23,15 @@ export type ConnectorRevocationDecision =
     }
   | { ok: false; reason: 'invalid-input' | 'denied' | 'storage-unavailable' }
 class RevocationAuthorizationExpired extends Error {
+  readonly observedAt: number
+  readonly sessionExpired: boolean
   constructor(
-    readonly observedAt: number,
-    readonly sessionExpired: boolean,
+    observedAt: number,
+    sessionExpired: boolean,
   ) {
     super('Revocation authorization is no longer current')
+    this.observedAt = observedAt
+    this.sessionExpired = sessionExpired
   }
 }
 interface Credential {
@@ -44,10 +48,15 @@ interface Tombstone {
 
 /** Authorized terminal cleanup only. No JWT redelivery, pairing reset, networking or printer command. */
 export class PostgresConnectorRevocation {
+  private readonly sql: Sql
+  private readonly clock: () => number
   constructor(
-    private readonly sql: Sql,
-    private readonly clock: () => number = Date.now,
-  ) {}
+    sql: Sql,
+    clock: () => number = Date.now,
+  ) {
+    this.sql = sql
+    this.clock = clock
+  }
   private now(): number {
     const now = this.clock()
     if (!Number.isSafeInteger(now) || now < 0)

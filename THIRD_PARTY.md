@@ -11,10 +11,16 @@ The application and test utilities in this repository are original MIT code. No 
 | Bun type definitions, Node type definitions | Development                  | MIT                                 |
 | Playwright                                  | Browser tests                | Apache-2.0                          |
 | Prettier                                    | Formatting                   | MIT                                 |
+| Vitest                                      | Test runner                  | MIT                                 |
+| esbuild                                     | Connector/helper bundler     | MIT                                 |
 | virtual-klipper-printer                     | Separate test container      | GPL-3.0                             |
 | Spoolman                                    | Separate inventory simulator | MIT                                 |
 
-Exact package versions and integrity values are in `bun.lock`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
+Exact package versions and integrity values are recorded in `pnpm-lock.yaml` after lockfile generation. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
+
+## Playwright 1.65.0
+
+The [upstream package metadata](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-test/package.json) identifies `@playwright/test` 1.65.0 as Apache-2.0 and requires Node.js 20 or later. Its [browser manifest](https://github.com/microsoft/playwright/blob/v1.65.0/packages/playwright-core/browsers.json) pins Chromium revision 1254, Firefox 1572 and WebKit 2388 (macOS 14 uses WebKit 2251). Browser installation and execution have not been verified by this metadata review.
 
 ## Pinned Spoolman provenance
 
@@ -1257,4 +1263,62 @@ Source notice SHA-256: `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
+```
+
+## Development and build tooling
+
+### vitest@5.1.0
+
+The test runner `vitest@5.1.0` is licensed under MIT.
+
+```text
+MIT License
+
+Copyright (c) 2021-Present Anthony Fu and Vitest contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### esbuild@0.28.2
+
+The bundler `esbuild@0.28.2` is licensed under MIT.
+
+```text
+MIT License
+
+Copyright (c) 2020 Evan Wallace
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

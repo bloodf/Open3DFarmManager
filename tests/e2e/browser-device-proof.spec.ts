@@ -1,42 +1,23 @@
 import { expect, test } from '@playwright/test'
-import { buildSync } from 'esbuild'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { browserBundle as buildBrowserBundle } from '../helpers/browser-bundle.ts'
 import {
   browserDeviceProofPayload,
   validateBrowserDevicePublicKey,
   verifyBrowserDeviceProof,
 } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 
-let bundleDirectory: string | undefined
 let browserBundle: string
 
 test.beforeAll(async () => {
-  bundleDirectory = await mkdtemp(join(tmpdir(), 'open3dfarm-browser-proof-'))
-  const outfile = join(bundleDirectory, 'browser-device-proof.js')
-  buildSync({
-    entryPoints: [
-      fileURLToPath(
-        new URL(
-          '../../packages/farm-protocol/src/browser-device-proof.ts',
-          import.meta.url,
-        ),
+  browserBundle = await buildBrowserBundle(
+    fileURLToPath(
+      new URL(
+        '../../packages/farm-protocol/src/browser-device-proof.ts',
+        import.meta.url,
       ),
-    ],
-    bundle: true,
-    platform: 'browser',
-    format: 'esm',
-    outfile,
-    logLevel: 'silent',
-  })
-  browserBundle = await readFile(outfile, 'utf8')
-})
-
-test.afterAll(async () => {
-  if (bundleDirectory)
-    await rm(bundleDirectory, { recursive: true, force: true })
+    ),
+  )
 })
 
 test('bundled browser protocol validates keys and signs canonical proofs verified by the server', async ({

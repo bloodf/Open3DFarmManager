@@ -40,6 +40,16 @@ describe('real Request login body boundary', () => {
       ),
     ).toEqual({ username: 'fixture_user', password: 'pass' })
   })
+  test.each(['\0pass', 'pa\0ss', 'pass\0'])(
+    'rejects JSON-escaped NUL in password: %j',
+    async (password) => {
+      await expect(
+        readLoginBody(
+          request(JSON.stringify({ username: 'fixture_user', password })),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+    },
+  )
   for (const body of [
     '{"username":"fixture_user","username":"other","password":"pass"}',
     '{"username":"fixture_user","password":"pass","accountId":"chosen"}',

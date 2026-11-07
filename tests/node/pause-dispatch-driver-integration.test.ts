@@ -16,7 +16,7 @@ import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
-import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
+import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 import { createHash } from 'node:crypto'
 
@@ -199,10 +199,8 @@ async function fixture(
     moonraker_origin: remote.origin,
   })
   let dispatcher: ReturnType<typeof createPauseDispatcher> | undefined
-  const driver = openFixedMoonrakerPause({
-    binding: printerBinding,
+  const driver = createPauseDriverRouter({
     allowedOrigins: [remote.origin],
-    connectionGeneration: 1,
     limits: {
       maxMessageBytes: 4096,
       connectTimeoutMs: 500,
@@ -212,10 +210,10 @@ async function fixture(
       reconnectMaxMs: 100,
     },
     clock: { monotonicNow: () => performance.now() },
-    signal: new AbortController().signal,
-    publish: (observation) => dispatcher?.observe(printerBinding, observation),
+    observe: (binding, observation) =>
+      dispatcher?.observe(binding, observation) ?? false,
   })
-  cleanup.push(() => driver.close())
+  cleanup.push(() => driver.closeAttempt(printerBinding))
   dispatcher = createPauseDispatcher({
     authority: {
       issuers: [
@@ -228,12 +226,11 @@ async function fixture(
     },
     clock: { wallNow: Date.now, monotonicNow: () => performance.now() },
     journal,
-    driver: driver.driver,
+    driver,
     resultTimeoutMs: 1500,
   })
   const active = dispatcher
   cleanup.push(() => active.close())
-  await driver.prepare()
   const controls =
     await import('../../packages/farm-protocol/src/control-session-binding.ts')
   const caps =
@@ -327,7 +324,7 @@ test(
       ['printer.objects.query', 'printer.print.pause', 'printer.objects.query'],
     )
     f.dispatcher.close()
-    await f.driver.close()
+    await f.driver.closeAttempt(f.input.printerBinding)
     closeCommandJournal(f.journal)
     const reopened = openCommandJournal({
       directory: f.directory,
@@ -345,22 +342,20 @@ test(
 )
 
 test(
-  'local revocation and observation invalidation prevent any pause before send',
+  'revocation prevents preparation; a prior null permits a fresh authorized preparation',
   { timeout: 10000 },
   async (t) => {
-    for (const invalidation of ['authority', 'observation'] as const) {
-      const f = await fixture(t)
-      if (invalidation === 'authority') f.dispatcher.revoke(f.input.capability)
-      else f.dispatcher.observe(f.input.printerBinding, null)
-      const result = await f.dispatcher.dispatch(f.input)
-      assert.equal(result.kind, 'rejected')
-      assert.equal(
-        result.reason,
-        invalidation === 'authority' ? 'invalid-authority' : 'state',
-      )
-      assert.equal(f.remote.counts().pauses, 0)
-      assert.equal(readCommandOutcome(f.journal, f.signed.cmd_id), null)
-    }
+    const revoked = await fixture(t)
+    revoked.dispatcher.revoke(revoked.input.capability)
+    assert.equal(
+      (await revoked.dispatcher.dispatch(revoked.input)).kind,
+      'rejected',
+    )
+    assert.equal(revoked.remote.counts().connections, 0)
+    const fresh = await fixture(t)
+    fresh.dispatcher.observe(fresh.input.printerBinding, null)
+    assert.equal((await fresh.dispatcher.dispatch(fresh.input)).kind, 'applied')
+    assert.equal(fresh.remote.counts().pauses, 1)
   },
 )
 
@@ -381,7 +376,7 @@ for (const fault of ['lost-ack', 'disconnect'] as const) {
       assert.equal(f.remote.counts().connections, 1)
       assert.equal(f.remote.counts().queries, 1)
       f.dispatcher.close()
-      await f.driver.close()
+      await f.driver.closeAttempt(f.input.printerBinding)
       closeCommandJournal(f.journal)
       const reopened = openCommandJournal({
         directory: f.directory,

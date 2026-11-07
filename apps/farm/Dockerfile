@@ -1,7 +1,7 @@
 FROM node:24.22.2-alpine AS build
 RUN npm install -g pnpm@12.18.0
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/farm/package.json apps/farm/package.json
 COPY packages/connector/package.json packages/connector/package.json
 COPY packages/farm-protocol/package.json packages/farm-protocol/package.json

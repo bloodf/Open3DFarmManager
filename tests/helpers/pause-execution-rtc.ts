@@ -897,13 +897,9 @@ export function createPauseExecutionRtcFixtureExtension(
         if (options.testReplay) {
           // Verify replay produces no second simulator command
           const replayOutcome = await session.actor.evaluate((actor) => actor.replay())
-          assert.equal(replayOutcome, true, 'Replay must resend the original signed wire over RTC')
-          const replayNative = await until(observeNative, (v) => v.commandsReceived >= 2 && (v.relayDiagnostics?.pending ?? 1) === 0, input.signal, 5000)
-          assert.equal(
-            replayNative.pausesObserved,
-            1,
-            'Replaying must not produce a second simulator pause request',
-          )
+          assert.equal(replayOutcome, false, 'Maintained transport refuses a second command')
+          assert.equal((await observeNative()).pausesObserved, 1)
+
         }
 
         await session.note(

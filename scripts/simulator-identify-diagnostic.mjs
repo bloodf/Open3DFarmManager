@@ -1549,14 +1549,18 @@ async function readChildLog(docker, container, candidate, limit) {
   const matchingNames = listing.stdout
     .split('\n')
     .slice(0, -1)
-    .filter((name) =>
-      name.startsWith(candidate.producerPrefix) &&
-      /^[^/\s]+\.log(?:\.[1-9][0-9]*)?$/.test(
-        name.slice(candidate.producerPrefix.length),
-      ),
+    .filter(
+      (name) =>
+        name.startsWith(candidate.producerPrefix) &&
+        /^[a-z0-9_]{8}\.log(?:\.[1-9][0-9]*)?$/.test(
+          name.slice(candidate.producerPrefix.length),
+        ),
     )
   const names = matchingNames.slice(0, CHILD_LOG_FILE_LIMIT)
-  const sourceTruncated = listingTruncated || matchingNames.length > 1
+  const sourceTruncated =
+    listingTruncated ||
+    matchingNames.length > 1 ||
+    matchingNames.some((name) => /\.log\.[1-9][0-9]*$/.test(name))
   if (names.length === 0)
     return { available: false, text: '', truncated: false }
   let fallback = null

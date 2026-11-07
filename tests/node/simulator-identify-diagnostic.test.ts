@@ -1836,20 +1836,58 @@ test('captures the child stderr from the supervisor child log', async () => {
 })
 
 for (const scenario of [
-  { name: 'unrelated files before the producer exceed the file limit', extra: 'unrelated', truncated: false },
-  { name: 'matching rotation', extra: 'klipper-stdout---supervisor-abcdefgh.log.1', truncated: true },
-  { name: 'second matching stream', extra: 'klipper-stdout---supervisor-second.log', truncated: true },
-  { name: 'wrong channel', extra: 'klipper-stderr---supervisor-second.log', truncated: false },
-  { name: 'wrong identifier', extra: 'klipper-stdout---other-second.log', truncated: false },
-  { name: 'wrong process', extra: 'moonraker-stdout---supervisor-second.log', truncated: false },
-  { name: 'invalid suffix', extra: 'klipper-stdout---supervisor-second.log.backup', truncated: false },
+  {
+    name: 'unrelated files before the producer exceed the file limit',
+    extra: 'unrelated',
+    truncated: false,
+  },
+  {
+    name: 'matching rotation',
+    extra: 'klipper-stdout---supervisor-abcdefgh.log.1',
+    truncated: true,
+  },
+  {
+    name: 'second matching stream',
+    extra: 'klipper-stdout---supervisor-ijklmnop.log',
+    truncated: true,
+  },
+  {
+    name: 'wrong channel',
+    extra: 'klipper-stderr---supervisor-ijklmnop.log',
+    truncated: false,
+  },
+  {
+    name: 'identifier extension',
+    extra: 'klipper-stdout---supervisor-other-abcdefgh.log',
+    truncated: false,
+  },
+  {
+    name: 'wrong identifier',
+    extra: 'klipper-stdout---other-second.log',
+    truncated: false,
+  },
+  {
+    name: 'wrong process',
+    extra: 'moonraker-stdout---supervisor-ijklmnop.log',
+    truncated: false,
+  },
+  {
+    name: 'invalid suffix',
+    extra: 'klipper-stdout---supervisor-ijklmnop.log.backup',
+    truncated: false,
+  },
 ]) {
   test(`AUTO producer capture handles ${scenario.name}`, async () => {
     const content = OBSERVER_START(1) + OBSERVER_EVENT(1, 0)
-    const extras = scenario.extra === 'unrelated'
-      ? Object.fromEntries(Array.from({ length: diagnostic.CHILD_LOG_FILE_LIMIT + 1 },
-          (_, index) => [`/tmp/supervisor/unrelated-${index}.log`, content]))
-      : { [`/tmp/supervisor/${scenario.extra}`]: content }
+    const extras =
+      scenario.extra === 'unrelated'
+        ? Object.fromEntries(
+            Array.from(
+              { length: diagnostic.CHILD_LOG_FILE_LIMIT + 1 },
+              (_, index) => [`/tmp/supervisor/unrelated-${index}.log`, content],
+            ),
+          )
+        : { [`/tmp/supervisor/${scenario.extra}`]: content }
     const docker = createFakeDocker({
       config: CHILD_LOG_CONFIG,
       capture: '',
@@ -1865,15 +1903,58 @@ for (const scenario of [
       assert.equal(result.capture.observerRecords, 2)
       assert.equal(result.capture.truncated, scenario.truncated)
       const tails = docker.calls.filter(({ args }) => args.includes('tail'))
-      assert.ok(tails.every(({ args }) =>
-        args.at(-1)?.startsWith('/tmp/supervisor/klipper-stdout---supervisor-')))
+      assert.ok(
+        tails.every(({ args }) =>
+          args
+            .at(-1)
+            ?.startsWith('/tmp/supervisor/klipper-stdout---supervisor-'),
+        ),
+      )
     } finally {
       cleanupLedger(options.ledgerDir as string)
     }
   })
 }
 
-for (const variant of ['unrelated-only', 'partial-listing', 'listing-stderr', 'partial-record', 'byte-limit']) {
+for (const [name, available, truncated] of [
+  ['klipper-stdout---supervisor-abcdefgh.log.1', true, true],
+  ['klipper-stdout---supervisor-other-abcdefgh.log', false, false],
+] as const) {
+  test(`AUTO producer alone handles ${name}`, async () => {
+    const docker = createFakeDocker({
+      config: CHILD_LOG_CONFIG,
+      capture: '',
+      childLogFiles: {
+        [`/tmp/supervisor/${name}`]: OBSERVER_START(1) + OBSERVER_EVENT(1, 0),
+      },
+    })
+    const options = runOptions(docker)
+    try {
+      const result = await diagnostic.runDiagnostic(options)
+      assert.equal(result.capture.available, available)
+      if (available) {
+        assert.equal(result.capture.truncated, truncated)
+        assert.ok(result.observerAnalysis.sessions.length > 0)
+        assert.ok(
+          result.observerAnalysis.sessions.every(
+            (session) =>
+              session.classification === 'inconclusive-incomplete-capture',
+          ),
+        )
+      }
+    } finally {
+      cleanupLedger(options.ledgerDir as string)
+    }
+  })
+}
+
+for (const variant of [
+  'unrelated-only',
+  'partial-listing',
+  'listing-stderr',
+  'partial-record',
+  'byte-limit',
+]) {
   test(`AUTO producer capture preserves ${variant} evidence`, async () => {
     const path = '/tmp/supervisor/klipper-stdout---supervisor-abcdefgh.log'
     const content = OBSERVER_START(1) + OBSERVER_EVENT(1, 0)
@@ -1882,16 +1963,26 @@ for (const variant of ['unrelated-only', 'partial-listing', 'listing-stderr', 'p
       capture: '',
       childLogFiles: {
         [variant === 'unrelated-only' ? '/tmp/supervisor/moonraker.log' : path]:
-          variant === 'partial-record' ? content + OBSERVER_PREFIX + '{"event":'
-          : variant === 'byte-limit' ? 'x'.repeat(diagnostic.CAPTURE_BYTE_LIMIT) + '\n' + content
-          : content,
+          variant === 'partial-record'
+            ? content + OBSERVER_PREFIX + '{"event":'
+            : variant === 'byte-limit'
+              ? 'x'.repeat(diagnostic.CAPTURE_BYTE_LIMIT) + '\n' + content
+              : content,
       },
       fail: (args) => {
         if (!args.includes('ls')) return null
         if (variant === 'partial-listing')
-          return { status: 0, stdout: path.split('/').at(-1) + '\nunknown-partial', stderr: '' }
+          return {
+            status: 0,
+            stdout: path.split('/').at(-1) + '\nunknown-partial',
+            stderr: '',
+          }
         if (variant === 'listing-stderr')
-          return { status: 0, stdout: path.split('/').at(-1) + '\n', stderr: 'listing warning' }
+          return {
+            status: 0,
+            stdout: path.split('/').at(-1) + '\n',
+            stderr: 'listing warning',
+          }
         return null
       },
     })
@@ -1902,9 +1993,12 @@ for (const variant of ['unrelated-only', 'partial-listing', 'listing-stderr', 'p
       if (variant !== 'unrelated-only') {
         assert.equal(result.capture.truncated, true)
         assert.equal(result.capture.truncationNotifiedToAnalyzer, true)
-        assert.ok(result.observerAnalysis.sessions.every(
-          (session: ObserverSession) => session.classification === 'inconclusive-incomplete-capture',
-        ))
+        assert.ok(
+          result.observerAnalysis.sessions.every(
+            (session: ObserverSession) =>
+              session.classification === 'inconclusive-incomplete-capture',
+          ),
+        )
       }
     } finally {
       cleanupLedger(options.ledgerDir as string)

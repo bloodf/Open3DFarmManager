@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, test } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import {
   BrowserDeviceProofChallenge,

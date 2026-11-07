@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect } from 'vitest'
 import {
   SESSION_COOKIE_NAME,
   SESSION_COOKIE_ATTRIBUTES,

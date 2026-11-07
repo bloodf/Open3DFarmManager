@@ -8,6 +8,18 @@ Coverage includes an initially empty inventory, two idempotent seed executions, 
 
 Compatibility with one pinned Spoolman version does not validate authentication, production deployment, persistent mirroring, concurrent upstream edits, UI integration, or the full Klipper simulator gate. No physical printer is involved.
 
+## Node 24 read-only qualification
+
+This qualification has not been run. On an authorized isolated Linux slot, the parent owns a fresh disposable Spoolman service, its dedicated volume and network, and a loopback-only published port. Verify ownership and an initially empty inventory before setup. Use the pinned image digest recorded below. The parent can run the existing `scripts/test-spoolman-reader.ts` setup with the historical Bun environment and the same two opt-in variables; it checks empty inventory, seeds twice and archives the first spool. That script performs writes and must never target real inventory. Confirm the six synthetic spools have weights 1000, 900, 800, 700, 600 and 500 in ascending ID order, with only the first archived. Keep the fixture unchanged during qualification.
+
+With project dependencies available and Node >=24.22.2 <25, run on that Linux host:
+
+```sh
+SPOOLMAN_SYNTHETIC_TEST_ORIGIN=http://127.0.0.1:<port> SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE=yes node scripts/test-spoolman-node.ts
+```
+
+The reader validates the canonical loopback origin and performs GET requests only. Capture its bounded JSON output, exit status, Node version and image digest as the receipt. The parent owns setup, service lifecycle, isolation verification and cleanup. This opt-in is an operator assertion, not proof that the service is disposable. A passing receipt does not establish production or hardware acceptance.
+
 ## Observed local result
 
 On 2026-11-04 the test passed using OrbStack and the existing harness's linux/amd64 Spoolman image pinned to `sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa`. The health endpoint became ready in 26.59 seconds after inspection; the integration script exited 0 with all assertions passing. No reader changes were necessary.

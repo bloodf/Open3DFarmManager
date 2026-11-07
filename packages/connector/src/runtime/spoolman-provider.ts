@@ -225,6 +225,7 @@ export function createSpoolmanProvider(input: {
     detach()
     clearTimeout(refreshTimer)
     input.signal.removeEventListener('abort', close)
+    if (inventory !== null) publish()
     void (active ?? Promise.resolve()).finally(finish)
   }
   input.signal.addEventListener('abort', close, { once: true })

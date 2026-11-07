@@ -7,7 +7,10 @@ vi.mock('ws', () => ({
   },
 }))
 import WebSocket from 'ws'
-import { createSpoolmanProvider } from '../../packages/connector/src/runtime/spoolman-provider.ts'
+import {
+  createSpoolmanProvider,
+  type SpoolmanSnapshot,
+} from '../../packages/connector/src/runtime/spoolman-provider.ts'
 const config = {
   origin: 'http://spoolman.local:8000',
   farmId: '00000000-0000-4000-8000-000000000001',
@@ -76,6 +79,54 @@ test('coalesces updates, rejects an invalidated traversal, refetches and closes 
   await vi.advanceTimersByTimeAsync(60_000)
   expect(request).toHaveBeenCalledTimes(2)
 })
+test.each(['close', 'abort'])(
+  '%s publishes a final stale callback and prevents later observations',
+  async (method) => {
+    vi.useFakeTimers()
+    const socket = new WebSocket('ws://unused')
+    let resolve!: (value: Response) => void
+    const first = new Promise<Response>((done) => {
+      resolve = done
+    })
+    const request = vi.fn<typeof fetch>().mockReturnValue(first)
+    const abort = new AbortController()
+    const snapshots: SpoolmanSnapshot['kind'][] = []
+    const provider = createSpoolmanProvider({
+      config,
+      signal: abort.signal,
+      transport: {
+        fetch: request,
+        socket: () => socket,
+        now: () => Date.now(),
+      },
+      onSnapshot(value) {
+        snapshots.push(value.kind)
+        if (value.kind === 'stale') {
+          provider.close()
+          throw new Error('observer failed')
+        }
+      },
+    })
+    socket.emit('open')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(snapshots).toEqual([])
+    resolve(response(1))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(snapshots).toEqual(['observed'])
+    if (method === 'abort') abort.abort()
+    else provider.close()
+    await provider.done
+    provider.close()
+    abort.abort()
+    socket.emit('message', event, false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(snapshots).toEqual(['observed', 'stale'])
+    expect(provider.snapshot().kind).toBe('stale')
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(socket.listenerCount('message')).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  },
+)
 test('aborted startup makes no network transport and config rejects remote authority tricks', async () => {
   const abort = new AbortController()
   abort.abort()

@@ -138,8 +138,7 @@ export function createMoonrakerSubscription(input: {
       const currentEpoch = epoch
       let invalidated = false
       let fieldTimes:
-        | RawMoonrakerObservation['fieldObservedAtMonoMs']
-        | undefined
+        RawMoonrakerObservation['fieldObservedAtMonoMs'] | undefined
       function invalidate() {
         if (invalidated) return
         invalidated = true

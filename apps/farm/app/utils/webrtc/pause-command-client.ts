@@ -181,8 +181,7 @@ export function createPauseCommandClient(
   /** Monotonic session deadline. It is only ever tightened. */
   let sessionDeadline = Infinity
   let command:
-    | { id: string; settle: (outcome: PauseCommandOutcome) => void }
-    | undefined
+    { id: string; settle: (outcome: PauseCommandOutcome) => void } | undefined
   function track<T>(work: Promise<T>): Promise<T> {
     pending.add(work)
     const drop = () => {

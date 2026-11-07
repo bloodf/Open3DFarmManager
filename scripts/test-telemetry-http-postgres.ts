@@ -121,8 +121,7 @@ try {
   const agentKey = generateKeyPairSync('ed25519').privateKey
   const agent = new ConnectorIdentity(agentKey)
   let handler:
-    | Awaited<ReturnType<typeof createTelemetryHttpRuntime>>
-    | undefined
+    Awaited<ReturnType<typeof createTelemetryHttpRuntime>> | undefined
   let origin: string
   const audience = 'open3dfarmmanager:connector'
   if (builtMode) {

@@ -14,12 +14,7 @@ import {
 
 type Event = Pick<RequestEvent, 'req' | 'res'>
 export type PairingOperation =
-  | 'start'
-  | 'challenge'
-  | 'proof'
-  | 'claim'
-  | 'approve'
-  | 'revoke'
+  'start' | 'challenge' | 'proof' | 'claim' | 'approve' | 'revoke'
 const revokeBody = z.strictObject({
   expected_fingerprint: PairingApprovalRequest.shape.expected_fingerprint,
 })

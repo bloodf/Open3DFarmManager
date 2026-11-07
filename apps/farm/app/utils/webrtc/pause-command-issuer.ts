@@ -68,12 +68,7 @@ const TIMEOUT_MESSAGE =
 const REQUEST_MESSAGE = 'Pause issuer request failed.'
 
 export type PauseCommandIssuerFailure =
-  | 'aborted'
-  | 'timeout'
-  | 'origin'
-  | 'request'
-  | 'response'
-  | 'status'
+  'aborted' | 'timeout' | 'origin' | 'request' | 'response' | 'status'
 
 /** Every failure of this adapter is closed and carries its reason. */
 export class PauseCommandIssuerError extends Error {

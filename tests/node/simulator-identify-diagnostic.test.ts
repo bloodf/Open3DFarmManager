@@ -2304,23 +2304,29 @@ for (const creation of ['inspection', 'volume', 'container']) {
   })
 }
 
-
 for (const timedOut of [true, false]) {
   test(`rejects failed observation poll with timedOut=${timedOut}`, async () => {
     const docker = createFakeDocker({
-      fail: (args) => args.includes('{{.State.Status}}')
-        ? { status: timedOut ? null : 1, stdout: '', stderr: '', timedOut }
-        : null,
+      fail: (args) =>
+        args.includes('{{.State.Status}}')
+          ? { status: timedOut ? null : 1, stdout: '', stderr: '', timedOut }
+          : null,
     })
     const options = runOptions(docker)
     try {
-      await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-        assert.equal(error.phase, 'observe')
-        assert.match(error.message, timedOut ? /timed out/ : /status 1/)
-        assert.deepEqual(error.cleanupErrors, [])
-        return true
-      })
-      assert.equal(docker.calls.filter((call) => call.args[0] === 'start').length, 1)
+      await assert.rejects(
+        diagnostic.runDiagnostic(options),
+        (error: DiagnosticErrorShape) => {
+          assert.equal(error.phase, 'observe')
+          assert.match(error.message, timedOut ? /timed out/ : /status 1/)
+          assert.deepEqual(error.cleanupErrors, [])
+          return true
+        },
+      )
+      assert.equal(
+        docker.calls.filter((call) => call.args[0] === 'start').length,
+        1,
+      )
       assert.equal(removalCalls(docker).length, 3)
       assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
     } finally {
@@ -2345,16 +2351,24 @@ test('successful exited observation remains normal', async () => {
 
 test('filesystem removal failure prevents completed cleanup', async () => {
   const options = runOptions(createFakeDocker(), {
-    removeDirectory() { throw new Error('private injected filesystem failure') },
+    removeDirectory() {
+      throw new Error('private injected filesystem failure')
+    },
   })
   try {
-    await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-      assert.equal(error.phase, 'cleanup')
-      assert.equal(error.result?.cleanup.completed, false)
-      assert.equal(error.cleanupErrors[0]?.kind, 'work-directory')
-      assert.equal(error.result?.cleanup.retainedWorkDirectory.reason, 'removal-failed')
-      return true
-    })
+    await assert.rejects(
+      diagnostic.runDiagnostic(options),
+      (error: DiagnosticErrorShape) => {
+        assert.equal(error.phase, 'cleanup')
+        assert.equal(error.result?.cleanup.completed, false)
+        assert.equal(error.cleanupErrors[0]?.kind, 'work-directory')
+        assert.equal(
+          error.result?.cleanup.retainedWorkDirectory.reason,
+          'removal-failed',
+        )
+        return true
+      },
+    )
     assert.equal(existsSync(join(requiredLedger(options), 'work')), true)
   } finally {
     cleanupLedger(requiredLedger(options))
@@ -2363,72 +2377,103 @@ test('filesystem removal failure prevents completed cleanup', async () => {
 
 test('retains mounted work files after both container removal attempts fail', async () => {
   const docker = createFakeDocker({
-    fail: (args) => args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1'
-      ? { status: 1, stdout: '', stderr: 'removal refused' }
-      : null,
+    fail: (args) =>
+      args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1'
+        ? { status: 1, stdout: '', stderr: 'removal refused' }
+        : null,
   })
   const options = runOptions(docker)
   try {
-    await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-      assert.equal(error.result?.cleanup.completed, false)
-      assert.equal(error.result?.cleanup.retainedWorkDirectory.reason, 'owned-container-may-remain')
-      assert.match(error.cleanupErrors[0]?.message ?? '', /retry:/)
-      return true
-    })
-    assert.equal(removalCalls(docker).filter((args) => args.at(-1) === options.runName).length, 2)
-    assert.equal(existsSync(join(requiredLedger(options), 'work', 'supervisord.transformed.conf')), true)
-    const retained = JSON.parse(readFileSync(join(requiredLedger(options), 'retained-work.json'), 'utf8'))
+    await assert.rejects(
+      diagnostic.runDiagnostic(options),
+      (error: DiagnosticErrorShape) => {
+        assert.equal(error.result?.cleanup.completed, false)
+        assert.equal(
+          error.result?.cleanup.retainedWorkDirectory.reason,
+          'owned-container-may-remain',
+        )
+        assert.match(error.cleanupErrors[0]?.message ?? '', /retry:/)
+        return true
+      },
+    )
+    assert.equal(
+      removalCalls(docker).filter((args) => args.at(-1) === options.runName)
+        .length,
+      2,
+    )
+    assert.equal(
+      existsSync(
+        join(requiredLedger(options), 'work', 'supervisord.transformed.conf'),
+      ),
+      true,
+    )
+    const retained = JSON.parse(
+      readFileSync(join(requiredLedger(options), 'retained-work.json'), 'utf8'),
+    )
     assert.equal(retained.path, join(requiredLedger(options), 'work'))
   } finally {
     cleanupLedger(requiredLedger(options))
   }
 })
 
-test('closed Docker stdin is structured, reaped and followed by owned cleanup', { timeout: 10000 }, async () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'open3dfm-stdin-'))
-  const binary = join(scratch, 'docker')
-  const pidFile = join(scratch, 'pid')
-  writeFileSync(binary, `#!/bin/sh\necho $$ > '${pidFile}'\nexec 0<&-\nexec sleep 30\n`, { mode: 0o700 })
-  const runner = diagnostic.createDockerRunner({ binary })
-  const event = OBSERVER_EVENT(1, 0).replace(
-    '"elapsed"',
-    `"padding":"${'x'.repeat(120)}","elapsed"`,
-  )
-  const records = OBSERVER_START(1) + event.repeat(3500)
-  const docker = createFakeDocker({
-    capture: records,
-    capturePaths: { '/home/printer/printer_data/logs/klippy.log': records },
-  })
-  const original = docker.run.bind(docker)
-  docker.run = async (args, options) => {
-    if (args.includes('analyze')) {
-      assert.ok((options?.input?.length ?? 0) > diagnostic.CAPTURE_BYTE_LIMIT * 0.8)
-      const result = await runner.run(args, { ...options, timeoutMs: 3000 })
-      assert.equal(result.stdinFailed, true)
-      assert.equal(result.stderr, 'docker stdin write failed')
-      assert.equal(result.stdout, '')
-      const pid = Number(readFileSync(pidFile, 'utf8').trim())
-      assert.ok(pid > 0)
-      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
-      return result
-    }
-    return original(args, options)
-  }
-  const options = runOptions(docker)
-  try {
-    await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-      assert.equal(error.phase, 'analyze')
-      assert.equal(error.message, 'docker stdin write failed')
-      assert.deepEqual(error.cleanupErrors, [])
-      return true
+test(
+  'closed Docker stdin is structured, reaped and followed by owned cleanup',
+  { timeout: 10000 },
+  async () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'open3dfm-stdin-'))
+    const binary = join(scratch, 'docker')
+    const pidFile = join(scratch, 'pid')
+    writeFileSync(
+      binary,
+      `#!/bin/sh\necho $$ > '${pidFile}'\nexec 0<&-\nexec sleep 30\n`,
+      { mode: 0o700 },
+    )
+    const runner = diagnostic.createDockerRunner({ binary })
+    const event = OBSERVER_EVENT(1, 0).replace(
+      '"elapsed"',
+      `"padding":"${'x'.repeat(120)}","elapsed"`,
+    )
+    const records = OBSERVER_START(1) + event.repeat(3500)
+    const docker = createFakeDocker({
+      capture: records,
+      capturePaths: { '/home/printer/printer_data/logs/klippy.log': records },
     })
-    assert.equal(removalCalls(docker).length, 3)
-    assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
-  } finally {
-    cleanupLedger(requiredLedger(options))
-    rmSync(scratch, { recursive: true, force: true })
-  }
-})
+    const original = docker.run.bind(docker)
+    docker.run = async (args, options) => {
+      if (args.includes('analyze')) {
+        assert.ok(
+          (options?.input?.length ?? 0) > diagnostic.CAPTURE_BYTE_LIMIT * 0.8,
+        )
+        const result = await runner.run(args, { ...options, timeoutMs: 3000 })
+        assert.equal(result.stdinFailed, true)
+        assert.equal(result.stderr, 'docker stdin write failed')
+        assert.equal(result.stdout, '')
+        const pid = Number(readFileSync(pidFile, 'utf8').trim())
+        assert.ok(pid > 0)
+        assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+        return result
+      }
+      return original(args, options)
+    }
+    const options = runOptions(docker)
+    try {
+      await assert.rejects(
+        diagnostic.runDiagnostic(options),
+        (error: DiagnosticErrorShape) => {
+          assert.equal(error.phase, 'analyze')
+          assert.equal(error.message, 'docker stdin write failed')
+          assert.deepEqual(error.cleanupErrors, [])
+          return true
+        },
+      )
+      assert.equal(removalCalls(docker).length, 3)
+      assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
+    } finally {
+      cleanupLedger(requiredLedger(options))
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  },
+)
 
 function requiredLedger(options: RunOptions): string {
   assert.equal(typeof options.ledgerDir, 'string')
@@ -2444,23 +2489,42 @@ for (const reportFailure of ['status', 'timeout', 'invalid-json']) {
       capturePaths: { '/home/printer/printer_data/logs/klippy.log': records },
       fail: (args) => {
         if (args.includes('analyze'))
-          return { status: 1, stdout: '', stderr: 'docker stdin write failed', stdinFailed: true }
+          return {
+            status: 1,
+            stdout: '',
+            stderr: 'docker stdin write failed',
+            stdinFailed: true,
+          }
         if (args.includes('{{json .State}}'))
-          return { status: reportFailure === 'status' ? 1 : 0, stdout: 'invalid', stderr: '', timedOut: reportFailure === 'timeout' }
+          return {
+            status: reportFailure === 'status' ? 1 : 0,
+            stdout: 'invalid',
+            stderr: '',
+            timedOut: reportFailure === 'timeout',
+          }
         return null
       },
     })
     const options = runOptions(docker)
     try {
-      await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-        assert.equal(error.phase, 'analyze')
-        assert.equal(error.message, 'docker stdin write failed')
-        assert.deepEqual(error.cleanupErrors, [])
-        assert.deepEqual(error.firstCleanupErrors, [])
-        return true
-      })
-      assert.equal(docker.calls.some(({ args }) => args.includes('analyze')), true)
-      assert.equal(docker.calls.some(({ args }) => args.includes('{{json .State}}')), false)
+      await assert.rejects(
+        diagnostic.runDiagnostic(options),
+        (error: DiagnosticErrorShape) => {
+          assert.equal(error.phase, 'analyze')
+          assert.equal(error.message, 'docker stdin write failed')
+          assert.deepEqual(error.cleanupErrors, [])
+          assert.deepEqual(error.firstCleanupErrors, [])
+          return true
+        },
+      )
+      assert.equal(
+        docker.calls.some(({ args }) => args.includes('analyze')),
+        true,
+      )
+      assert.equal(
+        docker.calls.some(({ args }) => args.includes('{{json .State}}')),
+        false,
+      )
       assert.equal(removalCalls(docker).length, 3)
       assert.equal(existsSync(join(requiredLedger(options), 'work')), false)
     } finally {
@@ -2483,22 +2547,50 @@ for (const primary of [true, false]) {
     const options = runOptions(docker)
     const ledger = requiredLedger(options)
     for (const name of ['result.json', 'retained-work.json'])
-      writeFileSync(join(ledger, name), 'PRIVATE_EXISTING_CONTENT', { flag: 'wx' })
-    try {
-      await assert.rejects(diagnostic.runDiagnostic(options), (error: DiagnosticErrorShape) => {
-        assert.equal(error.phase, primary ? 'report' : 'cleanup')
-        assert.equal(error.message, primary ? 'docker inspect failed with status 1' : 'cleanup did not complete')
-        assert.ok(error.cleanupErrors.length > 0)
-        assert.ok(error.firstCleanupErrors.length > 0)
-        assert.match(error.cleanupErrors[0]?.message ?? '', /retry:/)
-        assert.deepEqual(error.persistenceErrors, (primary ? ['retained-work.json'] : ['result.json', 'retained-work.json']).map((name) => ({ name, message: 'exclusive ledger write failed' })))
-        assert.equal(JSON.stringify(error).includes('PRIVATE_'), false)
-        return true
+      writeFileSync(join(ledger, name), 'PRIVATE_EXISTING_CONTENT', {
+        flag: 'wx',
       })
+    try {
+      await assert.rejects(
+        diagnostic.runDiagnostic(options),
+        (error: DiagnosticErrorShape) => {
+          assert.equal(error.phase, primary ? 'report' : 'cleanup')
+          assert.equal(
+            error.message,
+            primary
+              ? 'docker inspect failed with status 1'
+              : 'cleanup did not complete',
+          )
+          assert.ok(error.cleanupErrors.length > 0)
+          assert.ok(error.firstCleanupErrors.length > 0)
+          assert.match(error.cleanupErrors[0]?.message ?? '', /retry:/)
+          assert.deepEqual(
+            error.persistenceErrors,
+            (primary
+              ? ['retained-work.json']
+              : ['result.json', 'retained-work.json']
+            ).map((name) => ({
+              name,
+              message: 'exclusive ledger write failed',
+            })),
+          )
+          assert.equal(JSON.stringify(error).includes('PRIVATE_'), false)
+          return true
+        },
+      )
       for (const name of ['result.json', 'retained-work.json'])
-        assert.equal(readFileSync(join(ledger, name), 'utf8'), 'PRIVATE_EXISTING_CONTENT')
+        assert.equal(
+          readFileSync(join(ledger, name), 'utf8'),
+          'PRIVATE_EXISTING_CONTENT',
+        )
       assert.equal(existsSync(join(ledger, 'work')), true)
-      assert.equal(docker.calls.filter(({ args }) => args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1').length, 2)
+      assert.equal(
+        docker.calls.filter(
+          ({ args }) =>
+            args[0] === 'rm' && args.at(-1) === 'open3dfm-identify-run-1',
+        ).length,
+        2,
+      )
     } finally {
       cleanupLedger(ledger)
     }

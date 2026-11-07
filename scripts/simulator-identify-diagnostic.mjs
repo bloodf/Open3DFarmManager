@@ -936,12 +936,14 @@ export function createDockerRunner(options = {}) {
           child.kill('SIGKILL')
         })
         child.on('close', (status) => {
-          finish(failure ?? {
-            status,
-            stdout: Buffer.concat(stdout).toString('utf8'),
-            stderr: Buffer.concat(stderr).toString('utf8'),
-            timedOut: false,
-          })
+          finish(
+            failure ?? {
+              status,
+              stdout: Buffer.concat(stdout).toString('utf8'),
+              stderr: Buffer.concat(stderr).toString('utf8'),
+              timedOut: false,
+            },
+          )
         })
         if (runOptions.input !== undefined) child.stdin.end(runOptions.input)
         else child.stdin.end()
@@ -1583,9 +1585,13 @@ async function removeOwned(docker, state) {
 
 function removeWorkDirectory(state, removeDirectory) {
   if (!state.workDir) return { errors: [], retained: null }
-  if (state.resources.some((resource) =>
-    resource.kind === 'container' && !state.removedResources.has(resource.name),
-  )) {
+  if (
+    state.resources.some(
+      (resource) =>
+        resource.kind === 'container' &&
+        !state.removedResources.has(resource.name),
+    )
+  ) {
     return {
       errors: [],
       retained: { path: state.workDir, reason: 'owned-container-may-remain' },
@@ -1596,7 +1602,13 @@ function removeWorkDirectory(state, removeDirectory) {
     return { errors: [], retained: null }
   } catch {
     return {
-      errors: [{ kind: 'work-directory', name: state.workDir, message: 'work directory removal failed' }],
+      errors: [
+        {
+          kind: 'work-directory',
+          name: state.workDir,
+          message: 'work directory removal failed',
+        },
+      ],
       retained: { path: state.workDir, reason: 'removal-failed' },
     }
   }
@@ -2116,7 +2128,10 @@ export async function runDiagnostic(options) {
         : retry.message,
     }
   })
-  const workCleanup = removeWorkDirectory(state, options.removeDirectory ?? rmSync)
+  const workCleanup = removeWorkDirectory(
+    state,
+    options.removeDirectory ?? rmSync,
+  )
   finalCleanupErrors.push(...workCleanup.errors)
   state.stages.cleanup = clock.now() - stageStart
   if (result) {

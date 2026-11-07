@@ -647,6 +647,30 @@
       "version": "v0.0.0-20161208181325-20d25e280405",
       "indirect": false,
       "line": 4
+    },
+    {
+      "from_module": "golang.org/x/crypto",
+      "from_version": "v0.57.0",
+      "module": "golang.org/x/net",
+      "version": "v0.58.0",
+      "indirect": false,
+      "line": 6
+    },
+    {
+      "from_module": "golang.org/x/text",
+      "from_version": "v0.42.0",
+      "module": "golang.org/x/tools",
+      "version": "v0.49.0",
+      "indirect": false,
+      "line": 5
+    },
+    {
+      "from_module": "golang.org/x/text",
+      "from_version": "v0.42.0",
+      "module": "golang.org/x/mod",
+      "version": "v0.41.0",
+      "indirect": true,
+      "line": 8
     }
   ],
   "new_external_modules": [
@@ -654,7 +678,9 @@
     "github.com/sunfish-shogi/bufseekio",
     "golang.org/x/sync",
     "gopkg.in/check.v1",
-    "gopkg.in/src-d/go-billy.v4"
+    "gopkg.in/src-d/go-billy.v4",
+    "golang.org/x/tools",
+    "golang.org/x/mod"
   ],
   "replace_policy": "29 exact version-scoped repository-relative source replacements; preserve upstream go.mod without audit-machine absolute replaces",
   "pending": "Admitted Linux Go 1.27.1 readonly list/graph/build/test must establish lazy graph traversal and actual offline closure; declared external modules are not presumed pruned.",
@@ -791,7 +817,7 @@
   },
   "coverage": {
     "retained_modules": 29,
-    "declared_requirements": 76,
+    "declared_requirements": 79,
     "previously_recorded": 61,
     "added_declarations": [
       {
@@ -913,6 +939,30 @@
         "version": "v0.0.0-20161208181325-20d25e280405",
         "indirect": false,
         "line": 4
+      },
+      {
+        "from_module": "golang.org/x/crypto",
+        "from_version": "v0.57.0",
+        "module": "golang.org/x/net",
+        "version": "v0.58.0",
+        "indirect": false,
+        "line": 6
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/tools",
+        "version": "v0.49.0",
+        "indirect": false,
+        "line": 5
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/mod",
+        "version": "v0.41.0",
+        "indirect": true,
+        "line": 8
       }
     ],
     "unretained_module_declarations": [
@@ -963,6 +1013,22 @@
         "version": "v0.0.0-20161208181325-20d25e280405",
         "indirect": false,
         "line": 4
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/tools",
+        "version": "v0.49.0",
+        "indirect": false,
+        "line": 5
+      },
+      {
+        "from_module": "golang.org/x/text",
+        "from_version": "v0.42.0",
+        "module": "golang.org/x/mod",
+        "version": "v0.41.0",
+        "indirect": true,
+        "line": 8
       }
     ],
     "observed_go_mod_graph": null,

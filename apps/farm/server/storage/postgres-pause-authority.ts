@@ -1,3 +1,4 @@
+import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
@@ -288,8 +289,11 @@ export class PostgresPauseAuthority {
       enrollment.fingerprint !== binding.connector_fingerprint
     )
       return null
-    const credentials =
-      await tx`SELECT jti,farm_id,fingerprint,thumbprint,issuer,audience,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE jti=${binding.credential_jti}::uuid AND agent_id=${binding.agent_id}::uuid FOR UPDATE`
+    const credentials = await readPauseAuthorityCredentialRecords(
+      tx,
+      binding.agent_id,
+      binding.credential_jti,
+    )
     const credential = credentials[0]
     if (
       !credential ||

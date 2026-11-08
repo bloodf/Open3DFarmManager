@@ -1,3 +1,4 @@
+import { readPauseNegotiationCredentialRecords } from './postgres-connector-credential-record.ts'
 import { z } from 'zod'
 import type { Sql, TransactionSql } from 'postgres'
 import {
@@ -238,8 +239,10 @@ export class PostgresPauseNegotiation {
     if (!enrollment.success || enrollment.data.farm_id !== scope.farmId)
       return null
     // Unique agent_id in 0010. Parent UPDATE also serializes an initially absent 0014 slot.
-    const credentials =
-      await tx`SELECT jti,farm_id,fingerprint,thumbprint,issuer,audience,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id=${scope.agentId}::uuid FOR UPDATE`
+    const credentials = await readPauseNegotiationCredentialRecords(
+      tx,
+      scope.agentId,
+    )
     const credential = Credential.safeParse(credentials[0])
     if (
       !credential.success ||

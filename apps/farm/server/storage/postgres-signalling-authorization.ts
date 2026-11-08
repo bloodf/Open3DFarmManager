@@ -1,3 +1,4 @@
+import { readSignallingCredentialRecords } from './postgres-connector-credential-record.ts'
 import {
   assignmentSetDigest,
   RtcAssignmentRef,
@@ -344,8 +345,7 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
       enrollment.status !== 'approved'
     )
       return null
-    const issued =
-      await tx`SELECT jti, farm_id, fingerprint, thumbprint, issuer, audience, issued_at::float8 AS issued_at, expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id = ${agentId}::uuid FOR SHARE`
+    const issued = await readSignallingCredentialRecords(tx, agentId)
     const parsed = Credential.safeParse(issued[0])
     if (!parsed.success) return null
     const credential = parsed.data

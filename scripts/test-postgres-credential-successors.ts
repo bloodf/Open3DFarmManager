@@ -16,10 +16,10 @@ if (
   process.argv.length !== 2 ||
   process.env.SUCCESSOR_TEST_ADMITTED !== 'yes' ||
   !image ||
-  !/^postgres:18(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(image)
+  !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(image)
 )
   throw new Error(
-    'Fresh test admission and locally available digest-pinned PostgreSQL 18 image required',
+    'Fresh test admission and locally available digest-pinned PostgreSQL 17 image required',
   )
 const id = randomUUID()
 const name = 'o3dfm-successors-' + id
@@ -73,7 +73,7 @@ assert.ok(
   imageVolumes === null ||
     (typeof imageVolumes === 'object' &&
       Object.keys(imageVolumes).every(
-        (path) => path === '/var/lib/postgresql',
+        (path) => path === '/var/lib/postgresql/data',
       )),
   'Image volumes must be covered by the task-owned tmpfs; no anonymous volumes allowed',
 )
@@ -114,7 +114,7 @@ try {
     '--user',
     'postgres',
     '--tmpfs',
-    '/var/lib/postgresql:rw,mode=1777',
+    '/var/lib/postgresql/data:rw,mode=1777',
     '--tmpfs',
     '/var/run/postgresql:rw,mode=1777',
     '--tmpfs',
@@ -128,7 +128,9 @@ try {
     '-e',
     'POSTGRES_HOST_AUTH_METHOD=trust',
     '-e',
-    'PGDATA=/var/lib/postgresql/data',
+    // A child directory lets the image's postgres UID own PGDATA without
+    // assuming Debian/Alpine UID values or chmodding a root-owned tmpfs.
+    'PGDATA=/var/lib/postgresql/data/pgdata',
     image,
   )
   container = await docker('inspect', '--format', '{{.Id}}', name)

@@ -300,6 +300,7 @@ export class PostgresConnectorCredentialAcceptance {
             agentId: request.agentId,
           }
           let candidateCheckedAt: number | undefined
+          let candidateClockRegressed = false
           let admitted = false
           const hint =
             this.config.purpose === 'telemetry-ingestion'
@@ -343,14 +344,18 @@ export class PostgresConnectorCredentialAcceptance {
                   audience: this.config.audience,
                   publicKeys: new Map([[candidate.kid, key]]),
                   ttlSeconds: this.config.ttlSeconds,
-                  nowSeconds: Math.floor(candidateAt / 1000),
+                  // Authenticate immutable signed identity independently of
+                  // eligibility now. The selected slot below must durably see
+                  // real expiry even when jwtVerify would reject at entry.
+                  nowSeconds: candidate.issued_at,
                   agentId: request.agentId,
                   farmId: request.farmId,
                   publicKeySpki: enrollment.public_key_spki,
                 })
                 if (matchesCredential(claims, candidate)) {
-                  candidateCheckedAt = readNow()
-                  if (candidateCheckedAt < candidateAt) return deny
+                  const checkedAt = readNow()
+                  candidateCheckedAt = Math.max(candidateAt, checkedAt)
+                  candidateClockRegressed = checkedAt < candidateAt
                   credential = candidate
                   identity = {
                     kind: 'successor',
@@ -383,8 +388,6 @@ export class PostgresConnectorCredentialAcceptance {
             return result
           }
           const firstNow = readNow()
-          if (candidateCheckedAt !== undefined && firstNow < candidateCheckedAt)
-            return deny
           if (identity.kind === 'root') {
             await tx`INSERT INTO farm.connector_credential_proofs (jti,observed_at,next_attempt_at) VALUES (${credential.jti}::uuid,${firstNow},${firstNow}) ON CONFLICT (jti) DO NOTHING`
           } else {
@@ -397,7 +400,12 @@ export class PostgresConnectorCredentialAcceptance {
           )[0]
           if (!slot) throw new Error('Missing credential proof slot')
           const now = readNow()
-          const observedAt = Math.max(firstNow, now, slot.observed_at)
+          const observedAt = Math.max(
+            firstNow,
+            now,
+            slot.observed_at,
+            candidateCheckedAt ?? 0,
+          )
           await tx`UPDATE ${table} SET observed_at=${observedAt} WHERE ${proofWhere}`
           const expireCredential = async (observedAt: number) => {
             await tx`UPDATE ${table} SET observed_at=${observedAt},credential_expired_at=coalesce(credential_expired_at,${observedAt}),status=CASE WHEN status='pending' THEN 'expired' ELSE status END,consumed_at=CASE WHEN status='pending' THEN ${observedAt} ELSE consumed_at END WHERE ${proofWhere}`
@@ -410,6 +418,11 @@ export class PostgresConnectorCredentialAcceptance {
               await expireCredential(observedAt)
             return deny
           }
+          if (
+            candidateClockRegressed ||
+            (candidateCheckedAt !== undefined && firstNow < candidateCheckedAt)
+          )
+            return deny
           if (now < firstNow || now < slot.observed_at) return deny
           if (now < slot.next_attempt_at)
             return busy(slot.next_attempt_at - now)

@@ -1034,6 +1034,7 @@ export async function testPostgresAtomicTelemetry(
       item: typeof successor,
       body: Uint8Array,
       proof?: ReturnType<typeof signed>,
+      store = service(),
     ) {
       const req = new IncomingMessage(new Socket())
       req.method = 'POST'
@@ -1063,7 +1064,7 @@ export async function testPostgresAtomicTelemetry(
       req.push(null)
       try {
         return await createTelemetryHttpHandler(
-          service(),
+          store,
           1000,
         )({ '~app': { node: { req } } })
       } finally {
@@ -1247,9 +1248,12 @@ export async function testPostgresAtomicTelemetry(
       ok: false,
       reason: 'denied',
     })
-    assert.deepEqual(await successorSlot(), beforeInvalidClaims)
+    assert.deepEqual(await successorSlot(), {
+      ...beforeInvalidClaims,
+      observed_at: String(now),
+    })
     checks.push(
-      'successor-exact-claims-agent-farm-and-preverification-clock-regression-deny-without-proof-writes',
+      'successor-invalid-claims-never-observe-slot-authenticated-clock-regression-denies-authority',
     )
 
     const failureChallenge = await challenge(successor, lateBody)
@@ -1412,6 +1416,237 @@ export async function testPostgresAtomicTelemetry(
     checks.push(
       'concurrent-revocation-waits-for-successor-acceptance-and-root-tombstone-denies-later-use',
     )
+
+    // Regression: authentic expiry must become terminal before any fallback.
+    // Use independent credentials for v1/v2 so one terminal marker cannot hide
+    // a failure in the other path. No real clock waiting or process is needed.
+    for (const version of ['v1', 'v2']) {
+      const epoch = Number(
+        (
+          await admin`SELECT floor(extract(epoch FROM clock_timestamp()))::float8 AS n`
+        )[0]?.n,
+      )
+      now = epoch * 1000
+      const cohort = await prepare(),
+        anchorJti = randomUUID(),
+        exactJti = randomUUID()
+      await admin`INSERT INTO farm.connector_credentials(jti,agent_id,farm_id,fingerprint,thumbprint,kid,issuer,audience,issued_at,expires_at)
+        VALUES(${anchorJti}::uuid,${cohort.agentId}::uuid,${cohort.farmId}::uuid,${binding.fingerprint},${binding.thumbprint},${issuer.kid},${issuer.issuer},${issuer.audience},${epoch},${epoch + 60})`
+      const token = await issueConnectorCredential({
+        ...issuer,
+        agentId: cohort.agentId,
+        farmId: cohort.farmId,
+        publicKeySpki: identity.publicKeySpki,
+        nowSeconds: epoch,
+        jti: exactJti,
+      })
+      await admin`INSERT INTO farm.connector_credential_successors(jti,root_jti,predecessor_jti,ordinal,kid,issuer,audience,issued_at,expires_at)
+        VALUES(${exactJti}::uuid,${anchorJti}::uuid,${anchorJti}::uuid,1,${issuer.kid},${issuer.issuer},${issuer.audience},${epoch},${epoch + issuer.ttlSeconds})`
+      const item = {
+        ...cohort,
+        request: {
+          token,
+          agentId: cohort.agentId,
+          farmId: cohort.farmId,
+          connectionId: randomUUID(),
+        },
+        credential: { jti: exactJti, expires_at: epoch + issuer.ttlSeconds },
+      }
+      assert.equal(
+        (await ownership.register(ownRequest(item, 'expiry-regression'))).ok,
+        true,
+      )
+      const sibling = await prepare()
+      const siblingToken = await issueConnectorCredential({
+        ...issuer,
+        agentId: sibling.agentId,
+        farmId: sibling.farmId,
+        publicKeySpki: identity.publicKeySpki,
+        nowSeconds: epoch,
+        jti: exactJti,
+      })
+      await admin`INSERT INTO farm.connector_credentials(jti,agent_id,farm_id,fingerprint,thumbprint,kid,issuer,audience,issued_at,expires_at)
+        VALUES(${exactJti}::uuid,${sibling.agentId}::uuid,${sibling.farmId}::uuid,${binding.fingerprint},${binding.thumbprint},${issuer.kid},${issuer.issuer},${issuer.audience},${epoch},${epoch + issuer.ttlSeconds})`
+      const expires = (epoch + issuer.ttlSeconds) * 1000
+      now = expires - 10000
+      assert.equal(
+        (
+          await service().issue({
+            token: siblingToken,
+            agentId: sibling.agentId,
+            farmId: sibling.farmId,
+            connectionId: randomUUID(),
+          })
+        ).ok,
+        true,
+      )
+      const rootSnapshot = [
+        ...(await admin`SELECT * FROM farm.connector_credentials WHERE jti IN (${anchorJti}::uuid,${exactJti}::uuid) ORDER BY jti`),
+      ]
+      const rootSlotSnapshot = [
+        ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti IN (${anchorJti}::uuid,${exactJti}::uuid) ORDER BY jti`),
+      ]
+      const exactSlot = async () =>
+        (
+          await admin`SELECT * FROM farm.connector_successor_proofs WHERE jti=${exactJti}::uuid AND root_jti=${anchorJti}::uuid`
+        )[0]
+      const expiryBody = bytes([event('expiry-regression')])
+      let completeOriginal: (
+        store: PostgresConnectorCredentialAcceptance,
+      ) => Promise<void>
+      if (version === 'v1') {
+        const issued = await service().issue(item.request)
+        assert.ok(issued.ok && issued.kind === 'challenge')
+        assert.equal(issued.challenge.expires_at, expires)
+        const original = {
+          ...item.request,
+          challenge: issued.challenge,
+          signature: identity.signCredentialProof({
+            challenge: issued.challenge,
+            token,
+            expectedOrigin: config.origin,
+            expectedAudience: issuer.audience,
+            expectedPurpose: 'telemetry-ingestion',
+            expectedConnectionId: item.request.connectionId,
+            now,
+          }),
+        }
+        completeOriginal = async (store) => {
+          assert.deepEqual(await store.accept(original), {
+            ok: false,
+            reason: 'denied',
+          })
+        }
+      } else {
+        const issued = await http(item, expiryBody)
+        assert.equal(issued.status, 200)
+        assert.ok('challenge' in issued.body)
+        const challenge = TelemetryProofChallenge.parse(issued.body.challenge)
+        assert.equal(challenge.expires_at, expires)
+        const originalItem = {
+          ...item,
+          request: { ...item.request, connectionId: challenge.connection_id },
+        }
+        const original = signed(originalItem, expiryBody, challenge)
+        completeOriginal = async (store) => {
+          assert.equal(
+            (await http(originalItem, expiryBody, original, store)).status,
+            403,
+          )
+        }
+      }
+      const pendingSlot = await exactSlot()
+      assert.ok(pendingSlot)
+      assert.equal(pendingSlot.status, 'pending')
+      assert.equal(pendingSlot.credential_expired_at, null)
+      // Neither a forged signature nor signed metadata mismatch may observe
+      // this successor, even at the apparent credential expiry.
+      now = expires
+      const segments = token.split('.'),
+        signature = segments[2]
+      assert.ok(signature)
+      const badSignature = [
+        segments[0],
+        segments[1],
+        (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1),
+      ].join('.')
+      const badMetadata = await issueConnectorCredential({
+        ...issuer,
+        ttlSeconds: issuer.ttlSeconds - 1,
+        agentId: item.agentId,
+        farmId: item.farmId,
+        publicKeySpki: identity.publicKeySpki,
+        nowSeconds: epoch,
+        jti: exactJti,
+      })
+      for (const invalidToken of [badSignature, badMetadata]) {
+        assert.deepEqual(
+          await service().issue({ ...item.request, token: invalidToken }),
+          { ok: false, reason: 'denied' },
+        )
+        assert.deepEqual(await exactSlot(), pendingSlot)
+      }
+      // v1 also regresses while async identity authentication is in flight:
+      // the real pre-verification E sample must still be persisted, not lost.
+      let samples = 0
+      const expiredEntry = new PostgresConnectorCredentialAcceptance(
+        sql,
+        acceptanceConfig,
+        () => (version === 'v1' && ++samples > 1 ? expires - 5000 : expires),
+      )
+      if (version === 'v1')
+        assert.deepEqual(await expiredEntry.issue(item.request), {
+          ok: false,
+          reason: 'denied',
+        })
+      else
+        assert.equal(
+          (await http(item, expiryBody, undefined, expiredEntry)).status,
+          403,
+        )
+      const terminal = await exactSlot()
+      assert.ok(terminal)
+      assert.deepEqual(
+        {
+          observed: Number(terminal.observed_at),
+          marker: Number(terminal.credential_expired_at),
+          status: terminal.status,
+          consumed: Number(terminal.consumed_at),
+        },
+        {
+          observed: expires,
+          marker: expires,
+          status: 'expired',
+          consumed: expires,
+        },
+      )
+      now = expires - 5000
+      assert.ok(now > Number(pendingSlot.observed_at))
+      assert.ok(
+        now > Number(pendingSlot.next_attempt_at),
+        'Throttle must not mask the regression',
+      )
+      const restartedPool = connect(prefix)
+      try {
+        const restarted = new PostgresConnectorCredentialAcceptance(
+          restartedPool,
+          acceptanceConfig,
+          () => now,
+        )
+        if (version === 'v1')
+          assert.deepEqual(await restarted.issue(item.request), {
+            ok: false,
+            reason: 'denied',
+          })
+        else
+          assert.equal(
+            (await http(item, expiryBody, undefined, restarted)).status,
+            403,
+          )
+        await completeOriginal(restarted)
+      } finally {
+        await restartedPool.end({ timeout: 3 })
+      }
+      assert.deepEqual(await exactSlot(), terminal)
+      assert.equal(await count(item), 0)
+      assert.deepEqual(
+        [
+          ...(await admin`SELECT * FROM farm.connector_credentials WHERE jti IN (${anchorJti}::uuid,${exactJti}::uuid) ORDER BY jti`),
+        ],
+        rootSnapshot,
+      )
+      assert.deepEqual(
+        [
+          ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti IN (${anchorJti}::uuid,${exactJti}::uuid) ORDER BY jti`),
+        ],
+        rootSlotSnapshot,
+      )
+      checks.push(
+        'authenticated-successor-' +
+          version +
+          '-expiry-entry-is-terminal-after-repository-restart-and-clock-regression',
+      )
+    }
 
     if (restartFixturePath) {
       const lost = await assigned(),

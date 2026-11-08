@@ -1,3 +1,4 @@
+import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import type { Sql } from 'postgres'
 import {
@@ -69,18 +70,6 @@ type InternalDecision =
     >
 class TelemetryConflict extends Error {}
 class ForbiddenPrinter extends Error {}
-interface Credential {
-  jti: string
-  agent_id: string
-  farm_id: string
-  fingerprint: string
-  thumbprint: string
-  kid: string
-  issuer: string
-  audience: string
-  issued_at: number
-  expires_at: number
-}
 interface Slot {
   jti: string
   proof_version: 1 | 2
@@ -232,9 +221,7 @@ export class PostgresConnectorCredentialAcceptance {
           )[0]
           if (!enrollment || enrollment.status !== 'approved') return deny
           const credential = (
-            await tx<
-              Credential[]
-            >`SELECT jti,agent_id,farm_id,fingerprint,thumbprint,kid,issuer,audience,issued_at::float8,expires_at::float8 FROM farm.connector_credentials WHERE agent_id=${request.agentId}::uuid FOR SHARE`
+            await readAcceptanceCredentialRecords(tx, request.agentId)
           )[0]
           if (
             !credential ||

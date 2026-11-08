@@ -1,3 +1,4 @@
+import { readRevocationCredentialRecords } from './postgres-connector-credential-record.ts'
 import type { Sql } from 'postgres'
 import { PairingApprovalRequest } from '@open3dfarmmanager/farm-protocol'
 import {
@@ -30,11 +31,6 @@ class RevocationAuthorizationExpired extends Error {
     this.observedAt = observedAt
     this.sessionExpired = sessionExpired
   }
-}
-interface Credential {
-  jti: string
-  farm_id: string
-  fingerprint: string
 }
 interface Tombstone {
   farm_id: string
@@ -118,9 +114,7 @@ export class PostgresConnectorRevocation {
           const enrollments =
             await tx`SELECT status FROM farm.connector_enrollments WHERE agent_id = ${agentId}::uuid AND farm_id = ${farmId}::uuid AND fingerprint = ${expectedFingerprint} FOR UPDATE`
           if (!enrollments[0]) return { ok: false, reason: 'denied' }
-          const credentials = await tx<
-            Credential[]
-          >`SELECT jti, farm_id, fingerprint FROM farm.connector_credentials WHERE agent_id = ${agentId}::uuid FOR SHARE`
+          const credentials = await readRevocationCredentialRecords(tx, agentId)
           const tombstones = await tx<
             Tombstone[]
           >`SELECT farm_id, fingerprint, credential_jti, revoked_at::float8 FROM farm.connector_revocations WHERE agent_id = ${agentId}::uuid`

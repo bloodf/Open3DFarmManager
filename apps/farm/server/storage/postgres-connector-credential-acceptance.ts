@@ -1,15 +1,20 @@
 import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
-import type { Sql } from 'postgres'
+import type { Sql, TransactionSql } from 'postgres'
+import type { ConnectorCredentialRecord } from './connector-credential-record.ts'
 import {
   CredentialProofChallenge,
+  CredentialProofId,
   CredentialProofCompletion,
   CredentialProofPurpose,
   CredentialProofRequest,
   credentialProofPayload,
 } from '../../../../packages/farm-protocol/src/credential-proof.ts'
 import { PairingProofOrigin } from '../../../../packages/farm-protocol/src/pairing-proof.ts'
-import { canonicalize } from '@open3dfarmmanager/farm-protocol'
+import {
+  canonicalize,
+  parseBoundedJson,
+} from '@open3dfarmmanager/farm-protocol'
 import { verifyConnectorCredential } from '../utils/connector-credentials.ts'
 import {
   TelemetryProofChallenge,
@@ -68,6 +73,59 @@ type InternalDecision =
       CredentialAcceptanceDecision | TelemetryCommitDecision,
       { kind: 'challenge' }
     >
+type ProofIdentity =
+  | { kind: 'root'; rootJti: string; jti: string; agentId: string }
+  | { kind: 'successor'; rootJti: string; jti: string; agentId: string }
+function proofTable(tx: TransactionSql, identity: ProofIdentity) {
+  return identity.kind === 'root'
+    ? tx`farm.connector_credential_proofs`
+    : tx`farm.connector_successor_proofs`
+}
+// A bounded routing hint, never an authentication decision or write authority.
+function tokenJtiHint(token: string): string | null {
+  try {
+    if (token.length > 8192) return null
+    const parts = token.split('.')
+    if (
+      parts.length !== 3 ||
+      parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))
+    )
+      return null
+    const body = parts[1]
+    if (!body) return null
+    const bytes = Buffer.from(body, 'base64url')
+    if (bytes.toString('base64url') !== body) return null
+    const value = parseBoundedJson(
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      {
+        maxBytes: 8192,
+        maxDepth: 4,
+        maxValues: 32,
+        maxStringChars: 1024,
+      },
+    )
+    if (typeof value !== 'object' || value === null || !('jti' in value))
+      return null
+    const parsed = CredentialProofId.safeParse(value.jti)
+    return parsed.success ? parsed.data : null
+  } catch {
+    return null
+  }
+}
+function matchesCredential(
+  claims: Awaited<ReturnType<typeof verifyConnectorCredential>>,
+  credential: ConnectorCredentialRecord,
+): boolean {
+  return (
+    claims.jti === credential.jti &&
+    claims.agentId === credential.agent_id &&
+    claims.farmId === credential.farm_id &&
+    claims.fingerprint === credential.fingerprint &&
+    claims.thumbprint === credential.thumbprint &&
+    claims.issuedAt === credential.issued_at &&
+    claims.expiresAt === credential.expires_at
+  )
+}
 class TelemetryConflict extends Error {}
 class ForbiddenPrinter extends Error {}
 interface Slot {
@@ -204,6 +262,7 @@ export class PostgresConnectorCredentialAcceptance {
     const request = parsed.data
     if (this.inflight >= 32) return busy(1000)
     this.inflight++
+    const committed: { identity?: ProofIdentity } = {}
     let lastCheckedAt = 0
     const readNow = () => {
       const value = this.now()
@@ -220,35 +279,136 @@ export class PostgresConnectorCredentialAcceptance {
             await tx`SELECT agent_id,farm_id,status,public_key_spki,fingerprint FROM farm.connector_enrollments WHERE agent_id=${request.agentId}::uuid AND farm_id=${request.farmId}::uuid FOR SHARE`
           )[0]
           if (!enrollment || enrollment.status !== 'approved') return deny
-          const credential = (
+          const root = (
             await readAcceptanceCredentialRecords(tx, request.agentId)
           )[0]
           if (
-            !credential ||
-            credential.farm_id !== request.farmId ||
-            credential.fingerprint !== enrollment.fingerprint ||
+            !root ||
+            root.agent_id !== request.agentId ||
+            root.farm_id !== request.farmId ||
+            root.fingerprint !== enrollment.fingerprint
+          )
+            return deny
+          const revoked =
+            await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id=${request.agentId}::uuid`
+          if (revoked.length) return deny
+          let credential = root
+          let identity: ProofIdentity = {
+            kind: 'root',
+            rootJti: root.jti,
+            jti: root.jti,
+            agentId: request.agentId,
+          }
+          let candidateCheckedAt: number | undefined
+          let candidateClockRegressed = false
+          let admitted = false
+          const hint =
+            this.config.purpose === 'telemetry-ingestion'
+              ? tokenJtiHint(request.token)
+              : null
+          // A legacy root-only acceptor may also be configured for generic
+          // telemetry proofs. Invalid hints must not require new table grants.
+          const mayReadSuccessors =
+            hint !== null &&
+            hint !== root.jti &&
+            (
+              await tx`SELECT pg_has_role(current_user,'farm_connector_telemetry_writer','USAGE') AS allowed`
+            )[0]?.allowed === true
+          if (mayReadSuccessors) {
+            const candidate = (
+              await tx<
+                ConnectorCredentialRecord[]
+              >`SELECT s.jti,r.agent_id,r.farm_id,r.fingerprint,r.thumbprint,s.kid,s.issuer,s.audience,s.issued_at::float8,s.expires_at::float8
+              FROM farm.connector_credential_successors s JOIN farm.connector_credentials r ON r.jti=s.root_jti
+              WHERE s.jti=${hint}::uuid AND s.root_jti=${root.jti}::uuid AND r.agent_id=${request.agentId}::uuid AND r.farm_id=${request.farmId}::uuid FOR SHARE OF s`
+            )[0]
+            if (
+              candidate &&
+              candidate.issuer === this.config.issuer &&
+              candidate.audience === this.config.audience &&
+              candidate.expires_at - candidate.issued_at ===
+                this.config.ttlSeconds &&
+              this.config.publicKeys.has(candidate.kid)
+            ) {
+              const admission =
+                await tx`SELECT n FROM generate_series(0,31) n WHERE pg_try_advisory_xact_lock(1870014,n) LIMIT 1`
+              if (!admission.length) return busy(1000)
+              admitted = true
+              const candidateAt = readNow()
+              const key = this.config.publicKeys.get(candidate.kid)
+              if (!key) throw new Error('Missing candidate verification key')
+              try {
+                const claims = await verifyConnectorCredential({
+                  token: request.token,
+                  issuer: this.config.issuer,
+                  audience: this.config.audience,
+                  publicKeys: new Map([[candidate.kid, key]]),
+                  ttlSeconds: this.config.ttlSeconds,
+                  // Authenticate immutable signed identity independently of
+                  // eligibility now. The selected slot below must durably see
+                  // real expiry even when jwtVerify would reject at entry.
+                  nowSeconds: candidate.issued_at,
+                  agentId: request.agentId,
+                  farmId: request.farmId,
+                  publicKeySpki: enrollment.public_key_spki,
+                })
+                if (matchesCredential(claims, candidate)) {
+                  const checkedAt = readNow()
+                  candidateCheckedAt = Math.max(candidateAt, checkedAt)
+                  candidateClockRegressed = checkedAt < candidateAt
+                  credential = candidate
+                  identity = {
+                    kind: 'successor',
+                    rootJti: root.jti,
+                    jti: candidate.jti,
+                    agentId: request.agentId,
+                  }
+                }
+              } catch {
+                // Invalid hints retain the historical root denial/observation path.
+              }
+            }
+          }
+          if (
             credential.issuer !== this.config.issuer ||
             credential.audience !== this.config.audience ||
             credential.expires_at - credential.issued_at !==
               this.config.ttlSeconds
           )
             return deny
-          const revoked =
-            await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id=${request.agentId}::uuid`
-          if (revoked.length) return deny
+          const table = proofTable(tx, identity)
+          const proofWhere =
+            identity.kind === 'root'
+              ? tx`jti=${identity.jti}::uuid`
+              : tx`jti=${identity.jti}::uuid AND root_jti=${identity.rootJti}::uuid`
+          const retainIdentity = (
+            result: InternalDecision,
+          ): InternalDecision => {
+            if (result.ok) committed.identity = identity
+            return result
+          }
           const firstNow = readNow()
-          await tx`INSERT INTO farm.connector_credential_proofs (jti,observed_at,next_attempt_at) VALUES (${credential.jti}::uuid,${firstNow},${firstNow}) ON CONFLICT (jti) DO NOTHING`
+          if (identity.kind === 'root') {
+            await tx`INSERT INTO farm.connector_credential_proofs (jti,observed_at,next_attempt_at) VALUES (${credential.jti}::uuid,${firstNow},${firstNow}) ON CONFLICT (jti) DO NOTHING`
+          } else {
+            await tx`INSERT INTO farm.connector_successor_proofs (jti,root_jti,observed_at,next_attempt_at) VALUES (${identity.jti}::uuid,${identity.rootJti}::uuid,${firstNow},${firstNow}) ON CONFLICT (jti) DO NOTHING`
+          }
           const slot = (
             await tx<
               Slot[]
-            >`SELECT jti,proof_version,operation_method,operation_path,body_sha256,body_bytes,observed_at::float8,credential_expired_at::float8,generation::float8,status,nonce,connection_id,token_hash,origin,audience,purpose,issued_at::float8,expires_at::float8,next_attempt_at::float8,failures,consumed_at::float8 FROM farm.connector_credential_proofs WHERE jti=${credential.jti}::uuid FOR UPDATE`
+            >`SELECT jti,proof_version,operation_method,operation_path,body_sha256,body_bytes,observed_at::float8,credential_expired_at::float8,generation::float8,status,nonce,connection_id,token_hash,origin,audience,purpose,issued_at::float8,expires_at::float8,next_attempt_at::float8,failures,consumed_at::float8 FROM ${table} WHERE ${proofWhere} FOR UPDATE`
           )[0]
           if (!slot) throw new Error('Missing credential proof slot')
           const now = readNow()
-          const observedAt = Math.max(firstNow, now, slot.observed_at)
-          await tx`UPDATE farm.connector_credential_proofs SET observed_at=${observedAt} WHERE jti=${credential.jti}::uuid`
+          const observedAt = Math.max(
+            firstNow,
+            now,
+            slot.observed_at,
+            candidateCheckedAt ?? 0,
+          )
+          await tx`UPDATE ${table} SET observed_at=${observedAt} WHERE ${proofWhere}`
           const expireCredential = async (observedAt: number) => {
-            await tx`UPDATE farm.connector_credential_proofs SET observed_at=${observedAt},credential_expired_at=coalesce(credential_expired_at,${observedAt}),status=CASE WHEN status='pending' THEN 'expired' ELSE status END,consumed_at=CASE WHEN status='pending' THEN ${observedAt} ELSE consumed_at END WHERE jti=${credential.jti}::uuid`
+            await tx`UPDATE ${table} SET observed_at=${observedAt},credential_expired_at=coalesce(credential_expired_at,${observedAt}),status=CASE WHEN status='pending' THEN 'expired' ELSE status END,consumed_at=CASE WHEN status='pending' THEN ${observedAt} ELSE consumed_at END WHERE ${proofWhere}`
           }
           if (
             slot.credential_expired_at !== null ||
@@ -258,13 +418,20 @@ export class PostgresConnectorCredentialAcceptance {
               await expireCredential(observedAt)
             return deny
           }
+          if (
+            candidateClockRegressed ||
+            (candidateCheckedAt !== undefined && firstNow < candidateCheckedAt)
+          )
+            return deny
           if (now < firstNow || now < slot.observed_at) return deny
           if (now < slot.next_attempt_at)
             return busy(slot.next_attempt_at - now)
           // Bound active cryptographic transactions across processes in this database, without per-request rows.
-          const admission =
-            await tx`SELECT n FROM generate_series(0,31) n WHERE pg_try_advisory_xact_lock(1870014,n) LIMIT 1`
-          if (!admission.length) return busy(1000)
+          if (!admitted) {
+            const admission =
+              await tx`SELECT n FROM generate_series(0,31) n WHERE pg_try_advisory_xact_lock(1870014,n) LIMIT 1`
+            if (!admission.length) return busy(1000)
+          }
           const publicKey = this.config.publicKeys.get(credential.kid)
           if (!publicKey) return deny
           let claims: Awaited<ReturnType<typeof verifyConnectorCredential>>
@@ -289,17 +456,8 @@ export class PostgresConnectorCredentialAcceptance {
             await expireCredential(verifiedAt)
             return deny
           }
-          await tx`UPDATE farm.connector_credential_proofs SET observed_at=${verifiedAt},next_attempt_at=${verifiedAt + 1000} WHERE jti=${credential.jti}::uuid`
-          if (
-            claims.jti !== credential.jti ||
-            claims.agentId !== credential.agent_id ||
-            claims.farmId !== credential.farm_id ||
-            claims.fingerprint !== credential.fingerprint ||
-            claims.thumbprint !== credential.thumbprint ||
-            claims.issuedAt !== credential.issued_at ||
-            claims.expiresAt !== credential.expires_at
-          )
-            return deny
+          await tx`UPDATE ${table} SET observed_at=${verifiedAt},next_attempt_at=${verifiedAt + 1000} WHERE ${proofWhere}`
+          if (!matchesCredential(claims, credential)) return deny
           const tokenHash = createHash('sha256')
             .update(request.token)
             .digest('base64url')
@@ -347,7 +505,7 @@ export class PostgresConnectorCredentialAcceptance {
             slot.audience === this.config.audience &&
             slot.purpose === this.config.purpose
           const expireProof = async (observedAt: number) => {
-            await tx`UPDATE farm.connector_credential_proofs SET observed_at=${observedAt},status='expired',consumed_at=${observedAt} WHERE jti=${credential.jti}::uuid AND status='pending'`
+            await tx`UPDATE ${table} SET observed_at=${observedAt},status='expired',consumed_at=${observedAt} WHERE ${proofWhere} AND status='pending'`
           }
           if (!completion) {
             if (
@@ -356,7 +514,11 @@ export class PostgresConnectorCredentialAcceptance {
               verifiedAt < slot.expires_at
             )
               return sameContext
-                ? { ok: true, kind: 'challenge', challenge: challengeFor(slot) }
+                ? retainIdentity({
+                    ok: true,
+                    kind: 'challenge',
+                    challenge: challengeFor(slot),
+                  })
                 : busy(slot.expires_at - verifiedAt)
             if (slot.generation >= Number.MAX_SAFE_INTEGER) return deny
             const expiresAt = Math.min(
@@ -364,7 +526,7 @@ export class PostgresConnectorCredentialAcceptance {
               credential.expires_at * 1000,
             )
             const nonce = randomBytes(32).toString('base64url')
-            await tx`UPDATE farm.connector_credential_proofs SET proof_version=${operation.kind === 'telemetry' ? 2 : 1},operation_method=${operation.kind === 'telemetry' ? operation.method : null},operation_path=${operation.kind === 'telemetry' ? operation.path : null},body_sha256=${operation.kind === 'telemetry' ? operation.bodyHash : null},body_bytes=${operation.kind === 'telemetry' ? operation.bodyBytes : null},generation=generation+1,status='pending',nonce=${nonce},connection_id=${request.connectionId}::uuid,token_hash=${tokenHash},origin=${this.config.origin},audience=${this.config.audience},purpose=${this.config.purpose},issued_at=${verifiedAt},expires_at=${expiresAt},failures=0,consumed_at=NULL WHERE jti=${credential.jti}::uuid`
+            await tx`UPDATE ${table} SET proof_version=${operation.kind === 'telemetry' ? 2 : 1},operation_method=${operation.kind === 'telemetry' ? operation.method : null},operation_path=${operation.kind === 'telemetry' ? operation.path : null},body_sha256=${operation.kind === 'telemetry' ? operation.bodyHash : null},body_bytes=${operation.kind === 'telemetry' ? operation.bodyBytes : null},generation=generation+1,status='pending',nonce=${nonce},connection_id=${request.connectionId}::uuid,token_hash=${tokenHash},origin=${this.config.origin},audience=${this.config.audience},purpose=${this.config.purpose},issued_at=${verifiedAt},expires_at=${expiresAt},failures=0,consumed_at=NULL WHERE ${proofWhere}`
             const challenge = challengeFor({
               ...slot,
               proof_version: operation.kind === 'telemetry' ? 2 : 1,
@@ -397,8 +559,8 @@ export class PostgresConnectorCredentialAcceptance {
               await expireProof(writtenAt)
               return deny
             }
-            await tx`UPDATE farm.connector_credential_proofs SET observed_at=${writtenAt} WHERE jti=${credential.jti}::uuid`
-            return { ok: true, kind: 'challenge', challenge }
+            await tx`UPDATE ${table} SET observed_at=${writtenAt} WHERE ${proofWhere}`
+            return retainIdentity({ ok: true, kind: 'challenge', challenge })
           }
           if (
             slot.status !== 'pending' ||
@@ -434,10 +596,10 @@ export class PostgresConnectorCredentialAcceptance {
             await expireProof(proofAt)
             return deny
           }
-          await tx`UPDATE farm.connector_credential_proofs SET observed_at=${proofAt} WHERE jti=${credential.jti}::uuid`
+          await tx`UPDATE ${table} SET observed_at=${proofAt} WHERE ${proofWhere}`
           const proofExpiresAt = slot.expires_at
           if (!valid) {
-            await tx`UPDATE farm.connector_credential_proofs SET observed_at=${proofAt},failures=failures+1,status=CASE WHEN failures=2 THEN 'rejected' ELSE status END,consumed_at=CASE WHEN failures=2 THEN ${proofAt} ELSE consumed_at END WHERE jti=${credential.jti}::uuid`
+            await tx`UPDATE ${table} SET observed_at=${proofAt},failures=failures+1,status=CASE WHEN failures=2 THEN 'rejected' ELSE status END,consumed_at=CASE WHEN failures=2 THEN ${proofAt} ELSE consumed_at END WHERE ${proofWhere}`
             return deny
           }
           // A savepoint permits durable expiry observation after a write that waited in SQL.
@@ -464,7 +626,7 @@ export class PostgresConnectorCredentialAcceptance {
                   throw new AcceptanceDeadline(ownershipAt, proofAt)
                 consumptionAt = ownershipAt
               }
-              await save`UPDATE farm.connector_credential_proofs SET observed_at=${consumptionAt},status='consumed',consumed_at=${consumptionAt} WHERE jti=${credential.jti}::uuid`
+              await save`UPDATE ${table} SET observed_at=${consumptionAt},status='consumed',consumed_at=${consumptionAt} WHERE ${proofWhere}`
               if (operation.kind === 'telemetry') {
                 const sorted = [...operation.records].sort((a, b) =>
                   a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0,
@@ -484,7 +646,7 @@ export class PostgresConnectorCredentialAcceptance {
                 writtenAt >= credential.expires_at * 1000
               )
                 throw new AcceptanceDeadline(writtenAt, consumptionAt)
-              await save`UPDATE farm.connector_credential_proofs SET observed_at=${writtenAt} WHERE jti=${credential.jti}::uuid`
+              await save`UPDATE ${table} SET observed_at=${writtenAt} WHERE ${proofWhere}`
               if (operation.kind === 'telemetry')
                 return {
                   ok: true,
@@ -527,7 +689,7 @@ export class PostgresConnectorCredentialAcceptance {
                 } satisfies TelemetryCommitDecision
               if (!(error instanceof AcceptanceDeadline)) throw error
               if (error.observedAt < error.previousAt) {
-                await tx`UPDATE farm.connector_credential_proofs SET observed_at=greatest(observed_at,${error.previousAt}) WHERE jti=${credential.jti}::uuid`
+                await tx`UPDATE ${table} SET observed_at=greatest(observed_at,${error.previousAt}) WHERE ${proofWhere}`
                 return deny
               }
               if (error.observedAt >= credential.expires_at * 1000)
@@ -535,7 +697,7 @@ export class PostgresConnectorCredentialAcceptance {
               else await expireProof(error.observedAt)
               return deny
             })
-          return result
+          return retainIdentity(result)
         },
       )
       if (decision.ok) {
@@ -551,11 +713,14 @@ export class PostgresConnectorCredentialAcceptance {
           await this.sql.begin(async (tx) => {
             await tx`SET LOCAL statement_timeout='2000ms'`
             await tx`SET LOCAL lock_timeout='1000ms'`
-            const jti =
-              decision.kind === 'challenge'
-                ? decision.challenge.jti
-                : decision.jti
-            await tx`UPDATE farm.connector_credential_proofs p SET observed_at=greatest(p.observed_at,${committedAt}),credential_expired_at=CASE WHEN c.expires_at*1000<=${committedAt} THEN coalesce(p.credential_expired_at,${committedAt}) ELSE p.credential_expired_at END,status=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN 'expired' ELSE p.status END,consumed_at=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN ${committedAt} ELSE p.consumed_at END FROM farm.connector_credentials c WHERE p.jti=${jti}::uuid AND c.jti=p.jti`
+            const selected = committed.identity
+            if (!selected) throw new Error('Missing committed proof identity')
+            if (selected.kind === 'successor') {
+              await tx`UPDATE farm.connector_successor_proofs p SET observed_at=greatest(p.observed_at,${committedAt}),credential_expired_at=CASE WHEN c.expires_at*1000<=${committedAt} THEN coalesce(p.credential_expired_at,${committedAt}) ELSE p.credential_expired_at END,status=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN 'expired' ELSE p.status END,consumed_at=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN ${committedAt} ELSE p.consumed_at END FROM farm.connector_credential_successors c JOIN farm.connector_credentials r ON r.jti=c.root_jti WHERE p.jti=${selected.jti}::uuid AND p.root_jti=${selected.rootJti}::uuid AND c.jti=p.jti AND c.root_jti=p.root_jti AND r.agent_id=${selected.agentId}::uuid`
+            } else {
+              const jti = selected.jti
+              await tx`UPDATE farm.connector_credential_proofs p SET observed_at=greatest(p.observed_at,${committedAt}),credential_expired_at=CASE WHEN c.expires_at*1000<=${committedAt} THEN coalesce(p.credential_expired_at,${committedAt}) ELSE p.credential_expired_at END,status=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN 'expired' ELSE p.status END,consumed_at=CASE WHEN p.status='pending' AND p.expires_at<=${committedAt} THEN ${committedAt} ELSE p.consumed_at END FROM farm.connector_credentials c WHERE p.jti=${jti}::uuid AND c.jti=p.jti`
+            }
           })
           return deny
         }

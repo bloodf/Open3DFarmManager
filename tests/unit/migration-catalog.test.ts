@@ -11,7 +11,9 @@ const pair = [
 ]
 describe('migration catalog', () => {
   test('loads repository pairs and hashes both directions deterministically', async () => {
-    expect((await loadMigrationCatalog()).length).toBeGreaterThanOrEqual(3)
+    const repository = await loadMigrationCatalog()
+    expect(repository).toHaveLength(21)
+    expect(repository.at(-1)?.id).toBe('0021_connector_credential_successors')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )

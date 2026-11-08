@@ -4,6 +4,13 @@ import assert from 'node:assert/strict'
 import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto'
 import { createAuthenticatedFarmStatusFeed } from '../../apps/farm/app/utils/webrtc/farm-status-feed.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
+import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
+import { FarmStatusSender } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
+import {
+  immutableAdmission,
+  type VerifiedRtcAdmission,
+} from '../../packages/connector/src/webrtc/readonly-session.ts'
+import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 
 type Options = Parameters<typeof createAuthenticatedFarmStatusFeed>[0]
@@ -78,7 +85,8 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     connector_dtls: Array(32).fill('BB').join(':'),
   }
   let callbacks:
-      Parameters<NonNullable<Options['createClient']>>[0] | undefined,
+      | Parameters<NonNullable<Options['createClient']>>[0]
+      | undefined,
     closes = 0
   const health: string[] = [],
     snapshots: unknown[] = []
@@ -467,3 +475,98 @@ test('asynchronous authenticated health and snapshot callbacks fail closed', asy
     }
   }
 })
+
+test(
+  'actual provider and sender deliver finite display temperature fields through admitted feed',
+  { timeout: 2000 },
+  async () => {
+    const f = await fixture()
+    const refs = f.refs.map(({ assignmentId, agentId, printerKey }) => ({
+      assignmentId,
+      agentId,
+      printerKey,
+    }))
+    const source = createFarmSnapshotSource({ assignmentRefs: refs })
+    const admissions = new Set<(value: VerifiedRtcAdmission) => void>()
+    let delivered: (() => void) | undefined
+    const sent = new Promise<void>((resolve) => {
+      delivered = resolve
+    })
+    const sender = new FarmStatusSender({
+      assignmentRefs: refs,
+      openSnapshots: source.open,
+      signal: f.controller.signal,
+      client: {
+        start: async () => {},
+        subscribeVerifiedAdmission(listener) {
+          admissions.add(listener)
+          return () => {
+            admissions.delete(listener)
+          }
+        },
+        subscribeTerminal() {
+          return () => {}
+        },
+        sendStatus(message) {
+          f.callbacks.onStatus(message)
+          delivered?.()
+          return true
+        },
+        close() {},
+      },
+    })
+    try {
+      const stamp = performance.now()
+      source.observe({
+        printerKey: 'printer-a',
+        epoch: 1,
+        printer: {
+          printerKey: 'printer-a',
+          state: 'idle',
+          progress: 0,
+          observedAt: Date.now(),
+        },
+        status: {
+          webhooks: { state: 'ready' },
+          print_stats: { state: 'standby' },
+          virtual_sdcard: { progress: 0 },
+        },
+        fieldObservedAtMonoMs: {
+          webhooks: stamp,
+          printState: stamp,
+          progress: stamp,
+        },
+        receivedAtMonoMs: stamp,
+        temperatureObservation: {
+          fields: {
+            tool: { kind: 'reading', celsius: 0 },
+            bed: { kind: 'reading', celsius: -10 },
+          },
+          observedAtMonoMs: stamp,
+        },
+      })
+      const deadlineMonoMs = performance.now() + 4000
+      f.callbacks.onVerifiedAdmission({ binding: f.binding, deadlineMonoMs })
+      await sender.start()
+      for (const admit of admissions)
+        admit(immutableAdmission(f.binding, deadlineMonoMs))
+      await sent
+      assert.equal(f.snapshots.length, 1)
+      const snapshot = f.snapshots[0]
+      assert.ok(
+        snapshot && typeof snapshot === 'object' && 'message' in snapshot,
+      )
+      const message = StatusMessage.parse(snapshot.message)
+      assert.equal(message.t, 'snapshot')
+      assert.equal(message.printers.length, 1)
+      assert.equal(message.printers[0]?.printerKey, 'printer-a')
+      assert.equal(message.printers[0]?.toolTemperatureCelsius, 0)
+      assert.equal(message.printers[0]?.bedTemperatureCelsius, -10)
+      assert.deepEqual(f.health, ['connecting', 'verifying', 'authenticated'])
+    } finally {
+      sender.close()
+      source.close()
+      f.handle.close()
+    }
+  },
+)

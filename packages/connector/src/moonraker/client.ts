@@ -13,7 +13,10 @@ process.env.WS_NO_UTF_8_VALIDATE = '1'
 const { default: WebSocket } = await import('ws')
 
 export type MoonrakerFailureReason =
-  'offline' | 'stale' | 'not-ready' | 'invalid-response'
+  | 'offline'
+  | 'stale'
+  | 'not-ready'
+  | 'invalid-response'
 
 export class MoonrakerClientError extends Error {
   readonly reason: MoonrakerFailureReason
@@ -97,6 +100,11 @@ const selectedObjects = {
   webhooks: ['state'],
   print_stats: ['state'],
   virtual_sdcard: ['progress'],
+}
+const completeObjects = {
+  ...selectedObjects,
+  extruder: ['temperature'],
+  heater_bed: ['temperature'],
 }
 
 // The ws receiver enforces payload/fragment/chunk bounds before message dispatch.
@@ -224,7 +232,7 @@ export function openMoonrakerClient(input: {
               jsonrpc: '2.0',
               id: nextId,
               method: 'printer.objects.query',
-              params: { objects: selectedObjects },
+              params: { objects: completeObjects },
             }),
           )
         } catch {

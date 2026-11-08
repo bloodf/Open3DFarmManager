@@ -11,6 +11,11 @@ import {
 definePageMeta({ middleware: 'farm-flag' })
 const { state, ready, now, discover, selectFarm, selectKey, confirmOrigin } =
   useFarmView()
+function temperatureLabel(value: number | undefined): string {
+  return value === undefined
+    ? 'Indisponível'
+    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+}
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -348,6 +353,28 @@ function dateLabel(time: number) {
                       Dados desatualizados. A impressora pode ter mudado de
                       estado.
                     </p>
+                    <dl aria-label="Temperaturas observadas">
+                      <div>
+                        <dt>Bico</dt>
+                        <dd>
+                          {{
+                            temperatureLabel(
+                              row.observation.state.toolTemperatureCelsius,
+                            )
+                          }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Mesa</dt>
+                        <dd>
+                          {{
+                            temperatureLabel(
+                              row.observation.state.bedTemperatureCelsius,
+                            )
+                          }}
+                        </dd>
+                      </div>
+                    </dl>
                     <p v-if="row.observation.state.state === 'printing'">
                       <progress
                         :value="row.observation.state.progress"

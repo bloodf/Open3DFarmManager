@@ -98,7 +98,12 @@ type RawEvidence = {
   raw: RawMoonrakerObservation[]
   rawUnavailable: RawMoonrakerUnavailable[]
   completedBy?:
-    'observation' | 'snapshot' | 'unavailable' | 'deadline' | 'duration' | null
+    | 'observation'
+    | 'snapshot'
+    | 'unavailable'
+    | 'deadline'
+    | 'duration'
+    | null
 }
 
 // A completion spec replaces the fixed abort duration. The duration used to
@@ -715,6 +720,7 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; delt
     expect(evidence.raw.length).toBe(2)
     const baseline = evidence.raw[0]!,
       changed = evidence.raw[1]!
+    expect(changed.temperatureObservation).toBeUndefined()
     expect(changed.fieldObservedAtMonoMs.webhooks).toBe(
       baseline.fieldObservedAtMonoMs.webhooks,
     )
@@ -791,6 +797,8 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
             webhooks: ['state'],
             print_stats: ['state'],
             virtual_sdcard: ['progress'],
+            extruder: ['temperature'],
+            heater_bed: ['temperature'],
           },
         },
       },
@@ -815,7 +823,9 @@ test('raw stale query response and missing complete field invalidate socket epoc
               id: request.id,
               result: {
                 eventtime: 10,
-                status: partial ? { webhooks: { state: 'ready' } } : status,
+                status: partial
+                  ? { webhooks: { state: 'ready' } }
+                  : { ...status, extruder: { temperature: 999 } },
               },
             }),
           )
@@ -837,6 +847,12 @@ test('raw stale query response and missing complete field invalidate socket epoc
       )
       expect(evidence.rawUnavailable.length).toBe(1)
       expect(evidence.raw.every((value) => value.epoch === 1)).toBe(true)
+      expect(
+        evidence.raw.map((value) => value.temperatureObservation?.fields),
+      ).toEqual([
+        { tool: { kind: 'absent' }, bed: { kind: 'absent' } },
+        undefined,
+      ])
     } finally {
       await service.close()
     }
@@ -932,3 +948,88 @@ test('overlapping complete query is discarded without regressing fields or stopp
     await service.close()
   }
 }, 20000)
+
+test('complete temperature responses reach raw display evidence but never normalized queue snapshots', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            eventtime: request.id + 10,
+            status: {
+              ...status,
+              ...(request.id > 1
+                ? {
+                    extruder: { temperature: request.id === 2 ? 0 : 'invalid' },
+                    heater_bed: request.id === 2 ? { temperature: -12.5 } : {},
+                  }
+                : {}),
+            },
+          },
+        }),
+      )
+      if (request.id === 2)
+        later(
+          () =>
+            socket.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'notify_status_update',
+                params: [{ extruder: { temperature: 777 } }, 13],
+              }),
+            ),
+          20,
+        )
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 3000 },
+      'raw',
+      undefined,
+      evidence,
+      { rawObservations: 3, deadlineMs: 6000 },
+    )
+    expect(evidence.completedBy).toBe('observation')
+    expect(evidence.raw[0]?.temperatureObservation?.fields).toEqual({
+      tool: { kind: 'absent' },
+      bed: { kind: 'absent' },
+    })
+    expect(evidence.raw[1]?.temperatureObservation?.fields).toEqual({
+      tool: { kind: 'reading', celsius: 0 },
+      bed: { kind: 'reading', celsius: -12.5 },
+    })
+    expect(evidence.raw[2]?.temperatureObservation?.fields).toEqual({
+      tool: { kind: 'invalid' },
+      bed: { kind: 'absent' },
+    })
+    for (const observation of evidence.raw) {
+      expect(observation.temperatureObservation?.observedAtMonoMs).toBe(
+        observation.fieldObservedAtMonoMs.webhooks,
+      )
+      expect(observation.printer).toEqual({
+        printerKey: 'fixture-printer',
+        state: 'printing',
+        progress: 0.25,
+        observedAt: observation.printer.observedAt,
+      })
+      expect(Object.keys(observation.status).sort()).toEqual([
+        'print_stats',
+        'virtual_sdcard',
+        'webhooks',
+      ])
+    }
+    expect(
+      events
+        .filter((event) => event.kind === 'snapshot')
+        .map((event) => event.printer && Object.keys(event.printer).sort()),
+    ).toEqual([['observedAt', 'printerKey', 'progress', 'state']])
+    expect(service.rpcs).toHaveLength(3)
+  } finally {
+    await service.close()
+  }
+}, 15000)

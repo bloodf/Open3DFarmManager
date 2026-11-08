@@ -7,7 +7,7 @@ import {
 } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
-import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
+import { canonicalize } from '../../../../packages/farm-protocol/src/canonical.ts'
 import {
   RenewalRequest,
   RenewalCompletion,
@@ -17,7 +17,7 @@ import {
   renewalProofPayload,
   type RenewalIdentity,
   type RenewalDecision,
-} from '../../../../../packages/farm-protocol/src/credential-renewal.ts'
+} from '../../../../packages/farm-protocol/src/credential-renewal.ts'
 import {
   connectorKeyBinding,
   issueConnectorCredential,
@@ -171,9 +171,10 @@ export class PostgresConnectorCredentialRenewal {
       const m = clock.max
       if (child) {
         if (childExpires === undefined) throw new Error('Missing exact child')
+        const expiry = childExpires
         await clock.wait(
           () =>
-            tx`UPDATE farm.connector_credential_renewals SET child_observed_at=greatest(child_observed_at,${m}),child_expired_at=CASE WHEN ${m}>=${childExpires} THEN coalesce(child_expired_at,${m}) ELSE child_expired_at END WHERE root_jti=${id.rootJti}::uuid AND predecessor_kind=${id.kind} AND predecessor_jti=${id.jti}::uuid AND EXISTS(SELECT 1 FROM farm.connector_credentials identity_root WHERE identity_root.jti=${id.rootJti}::uuid AND identity_root.agent_id=${id.agentId}::uuid) AND state='COMMITTED'`,
+            tx`UPDATE farm.connector_credential_renewals SET child_observed_at=greatest(child_observed_at,${m}),child_expired_at=CASE WHEN ${m}>=${expiry} THEN coalesce(child_expired_at,${m}) ELSE child_expired_at END WHERE root_jti=${id.rootJti}::uuid AND predecessor_kind=${id.kind} AND predecessor_jti=${id.jti}::uuid AND EXISTS(SELECT 1 FROM farm.connector_credentials identity_root WHERE identity_root.jti=${id.rootJti}::uuid AND identity_root.agent_id=${id.agentId}::uuid) AND state='COMMITTED'`,
         )
       } else
         await clock.wait(

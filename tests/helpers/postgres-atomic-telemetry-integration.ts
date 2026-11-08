@@ -999,7 +999,7 @@ export async function testPostgresAtomicTelemetry(
     const genericChallenge = await service().issue(successor.request)
     assert.ok(genericChallenge.ok && genericChallenge.kind === 'challenge')
     assert.equal(genericChallenge.challenge.jti, successorJti)
-    const genericProof = {
+    const successorGenericProof = {
       ...successor.request,
       challenge: genericChallenge.challenge,
       signature: identity.signCredentialProof({
@@ -1013,10 +1013,10 @@ export async function testPostgresAtomicTelemetry(
       }),
     }
     now += 1000
-    assert.equal((await service().accept(genericProof)).ok, true)
+    assert.equal((await service().accept(successorGenericProof)).ok, true)
     assert.equal((await successorSlot())?.status, 'consumed')
     now += 1000
-    assert.deepEqual(await service().accept(genericProof), {
+    assert.deepEqual(await service().accept(successorGenericProof), {
       ok: false,
       reason: 'denied',
     })
@@ -1125,11 +1125,11 @@ export async function testPostgresAtomicTelemetry(
     assert.ok(conflictedEvent)
     await admin`INSERT INTO farm.telemetry_events(farm_id,agent_id,event_id,payload) VALUES(${successor.farmId}::uuid,${successor.agentId}::uuid,${conflictedEvent.eventId}::uuid,${admin.json({ conflict: true })})`
     const conflictBytes = bytes(conflictedEvents),
-      conflictChallenge = await challenge(successor, conflictBytes)
+      successorConflictChallenge = await challenge(successor, conflictBytes)
     now += 1000
     assert.deepEqual(
       await service().commitTelemetryWithProof(
-        signed(successor, conflictBytes, conflictChallenge),
+        signed(successor, conflictBytes, successorConflictChallenge),
         conflictBytes,
       ),
       { ok: false, reason: 'conflict' },
@@ -1170,11 +1170,11 @@ export async function testPostgresAtomicTelemetry(
     const oldRootSnapshot = [
       ...(await admin`SELECT * FROM farm.connector_credentials WHERE jti=${rootJti}::uuid`),
     ]
-    now = conflictChallenge.expires_at
+    now = successorConflictChallenge.expires_at
     const lateBody = bytes([event('successor-printer')]),
       lateChallenge = await challenge(successor, lateBody)
     now += 1000
-    const normal = now,
+    const successorNormal = now,
       selectedSlot = await successorSlot()
     assert.ok(selectedSlot)
     // Successor routing adds two clock reads before the legacy seven reads.
@@ -1182,7 +1182,7 @@ export async function testPostgresAtomicTelemetry(
     const lateSuccessor = new PostgresConnectorCredentialAcceptance(
       sql,
       acceptanceConfig,
-      () => (++clockReads >= 9 ? lateChallenge.expires_at : normal),
+      () => (++clockReads >= 9 ? lateChallenge.expires_at : successorNormal),
     )
     assert.deepEqual(
       await lateSuccessor.commitTelemetryWithProof(
@@ -1256,13 +1256,13 @@ export async function testPostgresAtomicTelemetry(
       'successor-invalid-claims-never-observe-slot-authenticated-clock-regression-denies-authority',
     )
 
-    const failureChallenge = await challenge(successor, lateBody)
+    const successorFailureChallenge = await challenge(successor, lateBody)
     for (let attempt = 0; attempt < 3; attempt++) {
       now += 1000
       assert.deepEqual(
         await service().commitTelemetryWithProof(
           {
-            ...signed(successor, lateBody, failureChallenge),
+            ...signed(successor, lateBody, successorFailureChallenge),
             signature: randomBytes(64).toString('base64url'),
           },
           lateBody,
@@ -1368,7 +1368,7 @@ export async function testPostgresAtomicTelemetry(
           reopened,
           acceptanceConfig,
           () => now,
-        ).accept(genericProof),
+        ).accept(successorGenericProof),
         { ok: false, reason: 'denied' },
       )
     } finally {

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
+import { IncomingMessage } from 'node:http'
+import { Socket } from 'node:net'
 import { writeFile } from 'node:fs/promises'
 import postgres, { type Sql } from 'postgres'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -11,9 +13,18 @@ import {
   PostgresConnectorCredentialAcceptance,
   type TelemetryCommitDecision,
 } from '../../apps/farm/server/storage/postgres-connector-credential-acceptance.ts'
-import { type TelemetryProofChallenge } from '../../packages/farm-protocol/src/telemetry-proof.ts'
+import {
+  connectorKeyBinding,
+  issueConnectorCredential,
+} from '../../apps/farm/server/utils/connector-credentials.ts'
+import { createTelemetryHttpHandler } from '../../apps/farm/server/services/telemetry-http.ts'
+import {
+  loadMigrationCatalog,
+  runMigrations,
+} from '../../scripts/db/migrations.ts'
+import { TelemetryProofChallenge } from '../../packages/farm-protocol/src/telemetry-proof.ts'
 
-/** Caller-owned disposable synthetic fixture, official journal through0016. No hardware or token logs. */
+/** Caller-owned disposable synthetic fixture, official journal through0022. No hardware or token logs. */
 export async function testPostgresAtomicTelemetry(
   admin: Sql,
   port: number,
@@ -735,6 +746,671 @@ export async function testPostgresAtomicTelemetry(
     )
     checks.push(
       'least-privileged-role-generic-cannot-create-v2-or-write-telemetry-binding-and-assignment-identity-immutable',
+    )
+
+    // The A2 trigger uses the actual database clock. Construct only this new
+    // cohort at wall time; later advance the injected acceptance clock, not SQL.
+    now =
+      Number(
+        (
+          await admin`SELECT floor(extract(epoch FROM clock_timestamp()))::float8 AS n`
+        )[0]?.n,
+      ) * 1000
+    const generation = await prepare()
+    const binding = await connectorKeyBinding(identity.publicKeySpki)
+    const rootJti = randomUUID(),
+      successorJti = randomUUID()
+    const issuedAt = Math.floor(now / 1000)
+    const rootToken = await issueConnectorCredential({
+      ...issuer,
+      ttlSeconds: 60,
+      agentId: generation.agentId,
+      farmId: generation.farmId,
+      publicKeySpki: identity.publicKeySpki,
+      nowSeconds: issuedAt,
+      jti: rootJti,
+    })
+    await admin`INSERT INTO farm.connector_credentials(jti,agent_id,farm_id,fingerprint,thumbprint,kid,issuer,audience,issued_at,expires_at)
+      VALUES(${rootJti}::uuid,${generation.agentId}::uuid,${generation.farmId}::uuid,${binding.fingerprint},${binding.thumbprint},${issuer.kid},${issuer.issuer},${issuer.audience},${issuedAt},${issuedAt + 60})`
+    const successorToken = await issueConnectorCredential({
+      ...issuer,
+      agentId: generation.agentId,
+      farmId: generation.farmId,
+      publicKeySpki: identity.publicKeySpki,
+      nowSeconds: issuedAt,
+      jti: successorJti,
+    })
+    await admin`INSERT INTO farm.connector_credential_successors(jti,root_jti,predecessor_jti,ordinal,kid,issuer,audience,issued_at,expires_at)
+      VALUES(${successorJti}::uuid,${rootJti}::uuid,${rootJti}::uuid,1,${issuer.kid},${issuer.issuer},${issuer.audience},${issuedAt},${issuedAt + issuer.ttlSeconds})`
+    const successor = {
+      ...generation,
+      request: {
+        token: successorToken,
+        agentId: generation.agentId,
+        farmId: generation.farmId,
+        connectionId: randomUUID(),
+      },
+      credential: {
+        jti: successorJti,
+        expires_at: issuedAt + issuer.ttlSeconds,
+      },
+    }
+    assert.equal(
+      (await ownership.register(ownRequest(successor, 'successor-printer'))).ok,
+      true,
+    )
+    const successorSlot = async () =>
+      (
+        await admin`SELECT * FROM farm.connector_successor_proofs WHERE jti=${successorJti}::uuid AND root_jti=${rootJti}::uuid`
+      )[0]
+    const rootRows = [
+      ...(await admin`SELECT * FROM farm.connector_credentials ORDER BY jti`),
+    ]
+    const rootProofs = [
+      ...(await admin`SELECT * FROM farm.connector_credential_proofs ORDER BY jti`),
+    ]
+    const pauses = [
+      ...(await admin`SELECT * FROM farm.pause_authority_challenges ORDER BY challenge_id`),
+    ]
+    const catalog = await loadMigrationCatalog()
+    // Even an empty down cannot destroy downstream dependent objects.
+    await admin`CREATE VIEW public.atomic_successor_dependency AS SELECT jti FROM farm.connector_successor_proofs`
+    await assert.rejects(
+      runMigrations(admin, catalog, {
+        kind: 'down',
+        expectedLastId: '0022_connector_successor_proofs',
+      }),
+      { code: '2BP01' },
+    )
+    await admin`DROP VIEW public.atomic_successor_dependency`
+    // Only valid for this fresh fixture before any successor proof exists.
+    assert.equal(
+      Number(
+        (
+          await admin`SELECT count(*)::int AS n FROM farm.connector_successor_proofs`
+        )[0]?.n,
+      ),
+      0,
+    )
+    await runMigrations(admin, catalog, {
+      kind: 'down',
+      expectedLastId: '0022_connector_successor_proofs',
+    })
+    await runMigrations(admin, catalog, { kind: 'up' })
+    assert.deepEqual(
+      [...(await admin`SELECT * FROM farm.connector_credentials ORDER BY jti`)],
+      rootRows,
+    )
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.connector_credential_proofs ORDER BY jti`),
+      ],
+      rootProofs,
+    )
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.pause_authority_challenges ORDER BY challenge_id`),
+      ],
+      pauses,
+    )
+    checks.push(
+      'successor-proof-expand-and-empty-down-preserve-root-and-pause-data',
+    )
+
+    // Frozen-clock literal legacy slot effects, including a failed candidate
+    // preverification. These assertions cover every persisted root-slot field.
+    for (const kind of [
+      'malformed',
+      'unknown-kid',
+      'different-jti',
+      'bad-successor-signature',
+    ]) {
+      const legacy = await issued()
+      const hintedJti = randomUUID()
+      let token = 'malformed'
+      if (kind !== 'malformed')
+        token = await issueConnectorCredential({
+          ...issuer,
+          kid: kind === 'unknown-kid' ? 'missing-key' : issuer.kid,
+          agentId: legacy.agentId,
+          farmId: legacy.farmId,
+          publicKeySpki: identity.publicKeySpki,
+          nowSeconds: issuedAt,
+          jti: kind === 'unknown-kid' ? legacy.credential.jti : hintedJti,
+        })
+      if (kind === 'bad-successor-signature') {
+        await admin`INSERT INTO farm.connector_credential_successors(jti,root_jti,predecessor_jti,ordinal,kid,issuer,audience,issued_at,expires_at)
+          VALUES(${hintedJti}::uuid,${legacy.credential.jti}::uuid,${legacy.credential.jti}::uuid,1,${issuer.kid},${issuer.issuer},${issuer.audience},${issuedAt},${issuedAt + issuer.ttlSeconds})`
+        const segments = token.split('.'),
+          signature = segments[2]
+        assert.ok(signature)
+        token = [
+          segments[0],
+          segments[1],
+          (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1),
+        ].join('.')
+      }
+      assert.deepEqual(await service().issue({ ...legacy.request, token }), {
+        ok: false,
+        reason: 'denied',
+      })
+      const state = (
+        await admin`SELECT to_jsonb(p) AS data FROM farm.connector_credential_proofs p WHERE jti=${legacy.credential.jti}::uuid`
+      )[0]?.data
+      assert.deepEqual(state, {
+        jti: legacy.credential.jti,
+        observed_at: now,
+        next_attempt_at: now + (kind === 'different-jti' ? 1000 : 0),
+        credential_expired_at: null,
+        generation: 0,
+        status: 'idle',
+        nonce: null,
+        connection_id: null,
+        token_hash: null,
+        origin: null,
+        audience: null,
+        purpose: null,
+        issued_at: null,
+        expires_at: null,
+        failures: 0,
+        consumed_at: null,
+        proof_version: 1,
+        operation_method: null,
+        operation_path: null,
+        body_sha256: null,
+        body_bytes: null,
+      })
+      assert.equal(
+        Number(
+          (
+            await admin`SELECT count(*)::int AS n FROM farm.connector_successor_proofs WHERE root_jti=${legacy.credential.jti}::uuid`
+          )[0]?.n,
+        ),
+        0,
+      )
+    }
+    const legacyRole = await issued()
+    const legacyRoleToken = await issueConnectorCredential({
+      ...issuer,
+      agentId: legacyRole.agentId,
+      farmId: legacyRole.farmId,
+      publicKeySpki: identity.publicKeySpki,
+      nowSeconds: issuedAt,
+      jti: randomUUID(),
+    })
+    assert.deepEqual(
+      await generic().issue({ ...legacyRole.request, token: legacyRoleToken }),
+      { ok: false, reason: 'denied' },
+    )
+    assert.equal((await slot(legacyRole.credential.jti))?.generation, 0)
+    checks.push(
+      'frozen-clock-invalid-root-and-candidate-tokens-retain-all-legacy-slot-fields',
+    )
+
+    // Route hints must never create a successor slot without full JWT auth.
+    const parts = successorToken.split('.')
+    const signature = parts[2]
+    assert.ok(signature)
+    const invalidSignature = [
+      parts[0],
+      parts[1],
+      (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1),
+    ].join('.')
+    for (const token of [invalidSignature, 'malformed', rootToken]) {
+      assert.equal(
+        (await service().issue({ ...successor.request, token })).ok,
+        false,
+      )
+      assert.equal(await successorSlot(), undefined)
+    }
+    // Root has TTL60 while the telemetry consumer expects TTL300: failed hint
+    // authentication must retain the historical no-slot config denial.
+    assert.equal(await slot(rootJti), undefined)
+    // Different purpose must not even query successor metadata under root-only role.
+    const signalling = new PostgresConnectorCredentialAcceptance(
+      genericSql,
+      { ...acceptanceConfig, purpose: 'signalling' },
+      () => now,
+    )
+    assert.deepEqual(await signalling.issue(successor.request), {
+      ok: false,
+      reason: 'denied',
+    })
+    assert.equal(await successorSlot(), undefined)
+    checks.push(
+      'unverified-successor-hints-cannot-create-slot-signalling-remains-root-only',
+    )
+
+    now = (issuedAt + 61) * 1000
+    const expiredRootStore = new PostgresConnectorCredentialAcceptance(
+      sql,
+      { ...acceptanceConfig, ttlSeconds: 60 },
+      () => now,
+    )
+    assert.deepEqual(
+      await expiredRootStore.issue({ ...successor.request, token: rootToken }),
+      { ok: false, reason: 'denied' },
+    )
+    const expiredRootSlot = [
+      ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti=${rootJti}::uuid`),
+    ]
+    assert.equal(Number(expiredRootSlot[0]?.credential_expired_at), now)
+    // A live successor authenticates even though root time, TTL and expiry differ.
+    const genericChallenge = await service().issue(successor.request)
+    assert.ok(genericChallenge.ok && genericChallenge.kind === 'challenge')
+    assert.equal(genericChallenge.challenge.jti, successorJti)
+    const genericProof = {
+      ...successor.request,
+      challenge: genericChallenge.challenge,
+      signature: identity.signCredentialProof({
+        challenge: genericChallenge.challenge,
+        token: successorToken,
+        expectedOrigin: config.origin,
+        expectedAudience: issuer.audience,
+        expectedPurpose: 'telemetry-ingestion',
+        expectedConnectionId: successor.request.connectionId,
+        now,
+      }),
+    }
+    now += 1000
+    assert.equal((await service().accept(genericProof)).ok, true)
+    assert.equal((await successorSlot())?.status, 'consumed')
+    now += 1000
+    assert.deepEqual(await service().accept(genericProof), {
+      ok: false,
+      reason: 'denied',
+    })
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti=${rootJti}::uuid`),
+      ],
+      expiredRootSlot,
+    )
+    checks.push(
+      'generic-telemetry-successor-proof-with-expired-root-consumes-once',
+    )
+
+    async function http(
+      item: typeof successor,
+      body: Uint8Array,
+      proof?: ReturnType<typeof signed>,
+    ) {
+      const req = new IncomingMessage(new Socket())
+      req.method = 'POST'
+      req.url = proof
+        ? '/api/connector/telemetry'
+        : '/api/connector/telemetry/challenge'
+      req.rawHeaders = [
+        'authorization',
+        'Bearer ' + item.request.token,
+        'x-connector-agent',
+        item.agentId,
+        'x-connector-farm',
+        item.farmId,
+        'content-type',
+        'application/json',
+        'content-length',
+        String(body.byteLength),
+      ]
+      if (proof)
+        req.rawHeaders.push(
+          'x-telemetry-challenge',
+          Buffer.from(JSON.stringify(proof.challenge)).toString('base64url'),
+          'x-telemetry-signature',
+          proof.signature,
+        )
+      req.push(body)
+      req.push(null)
+      try {
+        return await createTelemetryHttpHandler(
+          service(),
+          1000,
+        )({ '~app': { node: { req } } })
+      } finally {
+        req.destroy()
+      }
+    }
+    const successorBody = bytes([event('successor-printer')])
+    now += 1000
+    const httpChallenge = await http(successor, successorBody)
+    assert.equal(httpChallenge.status, 200)
+    assert.ok('challenge' in httpChallenge.body)
+    const parsedChallenge = TelemetryProofChallenge.parse(
+      httpChallenge.body.challenge,
+    )
+    const httpItem = {
+      ...successor,
+      request: {
+        ...successor.request,
+        connectionId: parsedChallenge.connection_id,
+      },
+    }
+    const httpProof = signed(httpItem, successorBody, parsedChallenge)
+    now += 1000
+    const response = await http(httpItem, successorBody, httpProof)
+    assert.equal(response.status, 200)
+    assert.equal(await count(successor), 1)
+    assert.equal((await successorSlot())?.status, 'consumed')
+    now += 1000
+    assert.equal((await http(httpItem, successorBody, httpProof)).status, 403)
+    assert.equal(await count(successor), 1)
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti=${rootJti}::uuid`),
+      ],
+      expiredRootSlot,
+    )
+    checks.push(
+      'real-http-handler-successor-challenge-signature-atomic-commit-and-replay',
+    )
+
+    // Existing telemetry savepoint cases also run with the successor identity.
+    now += 1000
+    const deniedBody = bytes([event('unassigned-successor-printer')])
+    const deniedChallenge = await challenge(successor, deniedBody)
+    now += 1000
+    assert.deepEqual(
+      await service().commitTelemetryWithProof(
+        signed(successor, deniedBody, deniedChallenge),
+        deniedBody,
+      ),
+      { ok: false, reason: 'forbidden-printer' },
+    )
+    assert.equal((await successorSlot())?.status, 'pending')
+    assert.equal(await count(successor), 1)
+    now = deniedChallenge.expires_at
+    const conflictedEvents = [event('successor-printer')]
+    const conflictedEvent = conflictedEvents[0]
+    assert.ok(conflictedEvent)
+    await admin`INSERT INTO farm.telemetry_events(farm_id,agent_id,event_id,payload) VALUES(${successor.farmId}::uuid,${successor.agentId}::uuid,${conflictedEvent.eventId}::uuid,${admin.json({ conflict: true })})`
+    const conflictBytes = bytes(conflictedEvents),
+      conflictChallenge = await challenge(successor, conflictBytes)
+    now += 1000
+    assert.deepEqual(
+      await service().commitTelemetryWithProof(
+        signed(successor, conflictBytes, conflictChallenge),
+        conflictBytes,
+      ),
+      { ok: false, reason: 'conflict' },
+    )
+    assert.equal((await successorSlot())?.status, 'pending')
+    checks.push(
+      'successor-savepoint-rolls-back-proof-on-forbidden-printer-and-event-conflict',
+    )
+
+    // A later root for another agent may legally share a successor's JTI.
+    // Both root and successor writers and late cleanup must remain disjoint.
+    const other = await prepare()
+    const collisionToken = await issueConnectorCredential({
+      ...issuer,
+      agentId: other.agentId,
+      farmId: other.farmId,
+      publicKeySpki: identity.publicKeySpki,
+      nowSeconds: Math.floor(now / 1000),
+      jti: successorJti,
+    })
+    await admin`INSERT INTO farm.connector_credentials(jti,agent_id,farm_id,fingerprint,thumbprint,kid,issuer,audience,issued_at,expires_at)
+      VALUES(${successorJti}::uuid,${other.agentId}::uuid,${other.farmId}::uuid,${binding.fingerprint},${binding.thumbprint},${issuer.kid},${issuer.issuer},${issuer.audience},${Math.floor(now / 1000)},${Math.floor(now / 1000) + issuer.ttlSeconds})`
+    const collision = {
+      ...other,
+      request: {
+        token: collisionToken,
+        agentId: other.agentId,
+        farmId: other.farmId,
+        connectionId: randomUUID(),
+      },
+      credential: {
+        jti: successorJti,
+        expires_at: Math.floor(now / 1000) + issuer.ttlSeconds,
+      },
+    }
+    assert.equal((await service().issue(collision.request)).ok, true)
+    const collisionSlot = await slot(successorJti)
+    const oldRootSnapshot = [
+      ...(await admin`SELECT * FROM farm.connector_credentials WHERE jti=${rootJti}::uuid`),
+    ]
+    now = conflictChallenge.expires_at
+    const lateBody = bytes([event('successor-printer')]),
+      lateChallenge = await challenge(successor, lateBody)
+    now += 1000
+    const normal = now,
+      selectedSlot = await successorSlot()
+    assert.ok(selectedSlot)
+    // Successor routing adds two clock reads before the legacy seven reads.
+    let clockReads = 0
+    const lateSuccessor = new PostgresConnectorCredentialAcceptance(
+      sql,
+      acceptanceConfig,
+      () => (++clockReads >= 9 ? lateChallenge.expires_at : normal),
+    )
+    assert.deepEqual(
+      await lateSuccessor.commitTelemetryWithProof(
+        signed(successor, lateBody, lateChallenge),
+        lateBody,
+      ),
+      { ok: false, reason: 'denied' },
+    )
+    assert.equal(await count(successor), 3)
+    assert.equal((await successorSlot())?.status, 'consumed')
+    assert.equal((await successorSlot())?.credential_expired_at, null)
+    assert.deepEqual(await slot(successorJti), collisionSlot)
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.connector_credentials WHERE jti=${rootJti}::uuid`),
+      ],
+      oldRootSnapshot,
+    )
+    checks.push(
+      'cross-table-jti-collision-postcommit-cleanup-keeps-root-and-successor-disjoint',
+    )
+
+    now = lateChallenge.expires_at + 1000
+    const beforeInvalidClaims = await successorSlot()
+    for (const changes of [
+      { farmId: randomUUID() },
+      { kid: 'unknown-successor-key' },
+      { nowSeconds: issuedAt + 1 },
+      { ttlSeconds: issuer.ttlSeconds - 1 },
+    ]) {
+      const token = await issueConnectorCredential({
+        ...issuer,
+        agentId: successor.agentId,
+        farmId: successor.farmId,
+        publicKeySpki: identity.publicKeySpki,
+        nowSeconds: issuedAt,
+        jti: successorJti,
+        ...changes,
+      })
+      assert.deepEqual(await service().issue({ ...successor.request, token }), {
+        ok: false,
+        reason: 'denied',
+      })
+      assert.deepEqual(await successorSlot(), beforeInvalidClaims)
+    }
+    for (const changes of [
+      { agentId: randomUUID() },
+      { farmId: randomUUID() },
+    ]) {
+      assert.deepEqual(
+        await service().issue({ ...successor.request, ...changes }),
+        { ok: false, reason: 'denied' },
+      )
+      assert.deepEqual(await successorSlot(), beforeInvalidClaims)
+    }
+    let regressedReads = 0
+    const regressed = new PostgresConnectorCredentialAcceptance(
+      sql,
+      acceptanceConfig,
+      () => (++regressedReads === 1 ? now : now - 1),
+    )
+    assert.deepEqual(await regressed.issue(successor.request), {
+      ok: false,
+      reason: 'denied',
+    })
+    assert.deepEqual(await successorSlot(), beforeInvalidClaims)
+    checks.push(
+      'successor-exact-claims-agent-farm-and-preverification-clock-regression-deny-without-proof-writes',
+    )
+
+    const failureChallenge = await challenge(successor, lateBody)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      now += 1000
+      assert.deepEqual(
+        await service().commitTelemetryWithProof(
+          {
+            ...signed(successor, lateBody, failureChallenge),
+            signature: randomBytes(64).toString('base64url'),
+          },
+          lateBody,
+        ),
+        { ok: false, reason: 'denied' },
+      )
+    }
+    assert.equal((await successorSlot())?.status, 'rejected')
+    assert.equal((await successorSlot())?.failures, 3)
+    now += 1000
+    const concurrentChallenge = await challenge(successor, lateBody)
+    now += 1000
+    const concurrentProof = signed(successor, lateBody, concurrentChallenge)
+    const successorGate = await admin.reserve()
+    await successorGate`BEGIN`
+    await successorGate`SELECT jti FROM farm.connector_successor_proofs WHERE jti=${successorJti}::uuid AND root_jti=${rootJti}::uuid FOR UPDATE`
+    const successorContenders = [
+      service().commitTelemetryWithProof(concurrentProof, lateBody),
+      service().commitTelemetryWithProof(concurrentProof, lateBody),
+    ]
+    try {
+      await waiting('FROM farm.connector_successor_proofs', prefix, 2)
+    } finally {
+      await successorGate`ROLLBACK`
+      successorGate.release()
+    }
+    const successorDecisions = await Promise.all(successorContenders)
+    assert.equal(successorDecisions.filter(committed).length, 1)
+    assert.equal(
+      successorDecisions.filter((decision) => !decision.ok).length,
+      1,
+    )
+    assert.equal((await successorSlot())?.status, 'consumed')
+    assert.equal(await count(successor), 3)
+    assert.deepEqual(await slot(successorJti), collisionSlot)
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM farm.connector_credential_proofs WHERE jti=${rootJti}::uuid`),
+      ],
+      expiredRootSlot,
+    )
+    checks.push(
+      'successor-signature-budget-and-concurrent-consumption-route-only-exact-proof',
+    )
+
+    const retainedProof = await successorSlot()
+    assert.ok(retainedProof)
+    for (const query of [
+      sql`UPDATE farm.connector_successor_proofs SET root_jti=${randomUUID()}::uuid WHERE jti=${successorJti}::uuid`,
+      sql`UPDATE farm.connector_successor_proofs SET observed_at=0 WHERE jti=${successorJti}::uuid`,
+      sql`UPDATE farm.connector_successor_proofs SET generation=9007199254740992 WHERE jti=${successorJti}::uuid`,
+      sql`UPDATE farm.connector_successor_proofs SET body_bytes=body_bytes+1 WHERE jti=${successorJti}::uuid`,
+      sql`DELETE FROM farm.connector_successor_proofs WHERE jti=${successorJti}::uuid`,
+      sql`TRUNCATE farm.connector_successor_proofs`,
+      sql`UPDATE farm.connector_credential_successors SET jti=jti WHERE jti=${successorJti}::uuid`,
+      genericSql`SELECT * FROM farm.connector_successor_proofs`,
+      genericSql`SELECT * FROM farm.connector_credential_successors`,
+    ])
+      await assert.rejects(query)
+    for (const role of [
+      'farm_connector_credential_acceptor',
+      'farm_signalling_reader',
+      'farm_pause_authority',
+    ]) {
+      assert.equal(
+        (
+          await admin`SELECT has_table_privilege(${role},'farm.connector_successor_proofs','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') AS allowed`
+        )[0]?.allowed,
+        false,
+      )
+      assert.equal(
+        (
+          await admin`SELECT has_table_privilege(${role},'farm.connector_credential_successors','SELECT,INSERT,UPDATE') AS allowed`
+        )[0]?.allowed,
+        false,
+      )
+    }
+    await assert.rejects(
+      admin`INSERT INTO farm.connector_successor_proofs(jti,root_jti,observed_at,next_attempt_at) VALUES(${successorJti}::uuid,${collision.credential.jti}::uuid,${now},${now})`,
+      /exact root binding/,
+    )
+    const journal = [
+      ...(await admin`SELECT * FROM public.open3dfarm_migrations ORDER BY position`),
+    ]
+    await assert.rejects(
+      runMigrations(admin, catalog, {
+        kind: 'down',
+        expectedLastId: '0022_connector_successor_proofs',
+      }),
+      /Cannot remove retained successor proofs/,
+    )
+    assert.deepEqual(
+      [
+        ...(await admin`SELECT * FROM public.open3dfarm_migrations ORDER BY position`),
+      ],
+      journal,
+    )
+    assert.deepEqual(await successorSlot(), retainedProof)
+    const reopened = connect(prefix)
+    try {
+      assert.deepEqual(
+        await new PostgresConnectorCredentialAcceptance(
+          reopened,
+          acceptanceConfig,
+          () => now,
+        ).accept(genericProof),
+        { ok: false, reason: 'denied' },
+      )
+    } finally {
+      await reopened.end({ timeout: 3 })
+    }
+    assert.equal((await successorSlot())?.status, retainedProof.status)
+    checks.push(
+      'successor-role-denials-binding-and-watermark-immutability-retained-down-and-reconnect',
+    )
+    now += 1000
+    const revocationBody = bytes([event('successor-printer')])
+    const revocationChallenge = await challenge(successor, revocationBody)
+    now += 1000
+    const revocationGate = await admin.reserve()
+    await revocationGate`BEGIN`
+    await revocationGate`SELECT jti FROM farm.connector_successor_proofs WHERE jti=${successorJti}::uuid AND root_jti=${rootJti}::uuid FOR UPDATE`
+    const finishing = service().commitTelemetryWithProof(
+      signed(successor, revocationBody, revocationChallenge),
+      revocationBody,
+    )
+    let revoking: ReturnType<typeof revoke.revoke> | undefined
+    try {
+      await waiting('FROM farm.connector_successor_proofs')
+      revoking = revoke.revoke({
+        ...generation.subject,
+        agentId: generation.agentId,
+        farmId: generation.farmId,
+        expectedFingerprint: identity.fingerprint,
+      })
+      await waiting('FROM farm.connector_enrollments', prefix + '_revoke')
+    } finally {
+      await revocationGate`ROLLBACK`
+      revocationGate.release()
+    }
+    assert.equal(committed(await finishing), true)
+    assert.ok(revoking)
+    const revokedGeneration = await revoking
+    assert.equal(revokedGeneration.ok, true)
+    const beforeRevoked = await successorSlot()
+    assert.deepEqual(await service().issue(successor.request), {
+      ok: false,
+      reason: 'denied',
+    })
+    assert.deepEqual(await successorSlot(), beforeRevoked)
+    checks.push(
+      'concurrent-revocation-waits-for-successor-acceptance-and-root-tombstone-denies-later-use',
     )
 
     if (restartFixturePath) {

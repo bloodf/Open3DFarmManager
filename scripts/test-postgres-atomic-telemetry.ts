@@ -44,11 +44,11 @@ try {
   )[0]
   assert.equal(identity?.database, 'fixture')
   assert.equal(identity?.user, 'fixture')
-  const catalog = (await loadMigrationCatalog()).slice(0, 16)
-  assert.equal(catalog.length, 16, 'Migrations0001–0016 are required')
+  const catalog = await loadMigrationCatalog()
+  assert.equal(catalog.length, 22, 'Migrations0001–0022 are required')
   const rows =
-    await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations WHERE position<=16 ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...rows]), 16)
+    await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
+  assert.equal(validateMigrationHistory(catalog, [...rows]), 22)
   assert.equal(
     (
       await sql`SELECT to_regclass('farm.connector_credential_proofs')::text AS name`

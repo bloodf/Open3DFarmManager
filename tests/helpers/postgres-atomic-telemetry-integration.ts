@@ -1361,6 +1361,7 @@ export async function testPostgresAtomicTelemetry(
       journal,
     )
     assert.deepEqual(await successorSlot(), retainedProof)
+    now += 1000
     const reopened = connect(prefix)
     try {
       assert.deepEqual(

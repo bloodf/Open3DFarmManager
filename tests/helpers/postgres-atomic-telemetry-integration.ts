@@ -23,6 +23,7 @@ import {
   runMigrations,
 } from '../../scripts/db/migrations.ts'
 import { TelemetryProofChallenge } from '../../packages/farm-protocol/src/telemetry-proof.ts'
+import type { CredentialProofRequest } from '../../packages/farm-protocol/src/credential-proof.ts'
 
 /** Caller-owned disposable synthetic fixture, official journal through0022. No hardware or token logs. */
 export async function testPostgresAtomicTelemetry(
@@ -211,7 +212,7 @@ export async function testPostgresAtomicTelemetry(
     return result.challenge
   }
   function signed(
-    item: Awaited<ReturnType<typeof issued>>,
+    item: { request: CredentialProofRequest },
     body: Uint8Array,
     challenge: TelemetryProofChallenge,
   ) {
@@ -1031,7 +1032,9 @@ export async function testPostgresAtomicTelemetry(
     )
 
     async function http(
-      item: typeof successor,
+      item: Pick<CredentialProofRequest, 'agentId' | 'farmId'> & {
+        request: Pick<CredentialProofRequest, 'token'>
+      },
       body: Uint8Array,
       proof?: ReturnType<typeof signed>,
       store = service(),

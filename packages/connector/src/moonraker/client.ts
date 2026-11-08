@@ -98,6 +98,11 @@ const selectedObjects = {
   print_stats: ['state'],
   virtual_sdcard: ['progress'],
 }
+const completeObjects = {
+  ...selectedObjects,
+  extruder: ['temperature'],
+  heater_bed: ['temperature'],
+}
 
 // The ws receiver enforces payload/fragment/chunk bounds before message dispatch.
 // Compression, redirects and optional native addons are disabled.
@@ -224,7 +229,7 @@ export function openMoonrakerClient(input: {
               jsonrpc: '2.0',
               id: nextId,
               method: 'printer.objects.query',
-              params: { objects: selectedObjects },
+              params: { objects: completeObjects },
             }),
           )
         } catch {

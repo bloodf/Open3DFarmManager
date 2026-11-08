@@ -64,7 +64,25 @@ export function createFarmSnapshotSource(input: {
       const times = Object.values(entry.fieldObservedAtMonoMs)
       captured = Math.min(captured, ...times)
       until = Math.min(until, ...times.map((time) => time + 5000))
-      printers.push(entry.printer)
+      const temperature = entry.temperatureObservation
+      const tool = temperature?.fields.tool,
+        bed = temperature?.fields.bed
+      const hasReading = tool?.kind === 'reading' || bed?.kind === 'reading'
+      if (temperature && hasReading) {
+        captured = Math.min(captured, temperature.observedAtMonoMs)
+        until = Math.min(until, temperature.observedAtMonoMs + 5000)
+      }
+      printers.push(
+        PrinterState.parse({
+          ...entry.printer,
+          ...(tool?.kind === 'reading'
+            ? { toolTemperatureCelsius: tool.celsius }
+            : {}),
+          ...(bed?.kind === 'reading'
+            ? { bedTemperatureCelsius: bed.celsius }
+            : {}),
+        }),
+      )
     }
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
@@ -135,12 +153,36 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid observation time')
     }
+    const temperature =
+      value.temperatureObservation ??
+      (previous?.epoch === value.epoch
+        ? previous.temperatureObservation
+        : undefined)
+    if (
+      temperature &&
+      (!Number.isFinite(temperature.observedAtMonoMs) ||
+        temperature.observedAtMonoMs < 0 ||
+        temperature.observedAtMonoMs > value.receivedAtMonoMs ||
+        (previous?.epoch === value.epoch &&
+          previous.temperatureObservation &&
+          temperature.observedAtMonoMs <
+            previous.temperatureObservation.observedAtMonoMs))
+    ) {
+      invalidate({ printerKey: value.printerKey, epoch: value.epoch })
+      throw Error('Invalid temperature observation time')
+    }
     const parsedPrinter = PrinterState.safeParse(value.printer)
     if (!parsedPrinter.success) {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid printer snapshot')
     }
-    const printer = parsedPrinter.data
+    // Only separately stamped complete evidence can add display temperatures.
+    const printer = PrinterState.parse({
+      printerKey: parsedPrinter.data.printerKey,
+      state: parsedPrinter.data.state,
+      progress: parsedPrinter.data.progress,
+      observedAt: parsedPrinter.data.observedAt,
+    })
     if (printer.printerKey !== value.printerKey) {
       close()
       throw Error('Printer mismatch')
@@ -151,6 +193,17 @@ export function createFarmSnapshotSource(input: {
         ...value,
         printer: Object.freeze(printer),
         fieldObservedAtMonoMs: Object.freeze({ ...times }),
+        ...(temperature
+          ? {
+              temperatureObservation: Object.freeze({
+                observedAtMonoMs: temperature.observedAtMonoMs,
+                fields: Object.freeze({
+                  tool: Object.freeze({ ...temperature.fields.tool }),
+                  bed: Object.freeze({ ...temperature.fields.bed }),
+                }),
+              }),
+            }
+          : {}),
       }),
     )
     epochs.set(value.printerKey, value.epoch)

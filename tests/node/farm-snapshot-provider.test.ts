@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import type { RawMoonrakerObservation } from '../../packages/connector/src/moonraker/subscription.ts'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import type {
   FarmSnapshotProvider,
@@ -65,6 +66,7 @@ function fixture(keys = ['a', 'b']) {
     key: string,
     epoch = 1,
     times = { webhooks: now, printState: now, progress: now },
+    temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
   ) {
     source.observe({
       printerKey: key,
@@ -82,6 +84,7 @@ function fixture(keys = ['a', 'b']) {
       },
       fieldObservedAtMonoMs: times,
       receivedAtMonoMs: now,
+      ...(temperatureObservation ? { temperatureObservation } : {}),
     })
   }
   return {
@@ -255,5 +258,119 @@ test('expiry timer retires complete source without another update', (t) => {
   } finally {
     f.source.close()
     t.mock.timers.reset()
+  }
+})
+
+test('complete temperature evidence projects zero and negative values and core deltas never rejuvenate it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = fixture(['a'])
+  const temperature: NonNullable<
+    RawMoonrakerObservation['temperatureObservation']
+  > = {
+    fields: {
+      tool: { kind: 'reading', celsius: 0 },
+      bed: { kind: 'reading', celsius: -10.5 },
+    },
+    observedAtMonoMs: 100,
+  }
+  try {
+    f.observe('a', 1, undefined, temperature)
+    f.open()
+    assert.deepEqual(f.received[0]?.printers, [
+      {
+        printerKey: 'a',
+        state: 'printing',
+        progress: 0.2,
+        observedAt: 10,
+        toolTemperatureCelsius: 0,
+        bedTemperatureCelsius: -10.5,
+      },
+    ])
+    temperature.fields.tool = { kind: 'reading', celsius: 99 }
+    f.setNow(4100)
+    f.observe('a')
+    assert.equal(f.received.at(-1)?.printers[0]?.toolTemperatureCelsius, 0)
+    assert.equal(f.received.at(-1)?.capturedAtMonoMs, 100)
+    assert.equal(f.received.at(-1)?.validUntilMonoMs, 5100)
+    f.setNow(5100)
+    t.mock.timers.tick(5000)
+    assert.equal(f.unavailable(), 1)
+    assert.equal(f.received.length, 2)
+  } finally {
+    f.source.close()
+    t.mock.timers.reset()
+  }
+})
+
+test('complete invalid/absent evidence clears readings; new epoch cannot borrow a retired reading', () => {
+  const f = fixture(['a'])
+  try {
+    f.observe('a', 1, undefined, {
+      fields: {
+        tool: { kind: 'reading', celsius: 200 },
+        bed: { kind: 'absent' },
+      },
+      observedAtMonoMs: 100,
+    })
+    f.open()
+    f.setNow(200)
+    f.observe('a', 1, undefined, {
+      fields: { tool: { kind: 'invalid' }, bed: { kind: 'absent' } },
+      observedAtMonoMs: 200,
+    })
+    assert.deepEqual(f.received.at(-1)?.printers, [
+      { printerKey: 'a', state: 'printing', progress: 0.2, observedAt: 10 },
+    ])
+    f.setNow(300)
+    f.observe('a', 1, undefined, {
+      fields: {
+        tool: { kind: 'absent' },
+        bed: { kind: 'reading', celsius: 60 },
+      },
+      observedAtMonoMs: 300,
+    })
+    assert.equal(f.received.at(-1)?.printers[0]?.bedTemperatureCelsius, 60)
+    f.source.invalidate({ printerKey: 'a', epoch: 1 })
+    f.setNow(400)
+    f.observe('a', 2)
+    const handle = f.open()
+    assert.deepEqual(f.received.at(-1)?.printers, [
+      { printerKey: 'a', state: 'printing', progress: 0.2, observedAt: 10 },
+    ])
+    handle.close()
+  } finally {
+    f.source.close()
+  }
+})
+
+test('future/regressive temperature stamps invalidate evidence without publishing a fabricated value', () => {
+  for (const bad of [-1, NaN, 301, 99]) {
+    const f = fixture(['a'])
+    try {
+      f.observe('a', 1, undefined, {
+        fields: {
+          tool: { kind: 'reading', celsius: 0 },
+          bed: { kind: 'absent' },
+        },
+        observedAtMonoMs: 100,
+      })
+      f.open()
+      f.setNow(300)
+      assert.throws(
+        () =>
+          f.observe('a', 1, undefined, {
+            fields: {
+              tool: { kind: 'reading', celsius: 999 },
+              bed: { kind: 'absent' },
+            },
+            observedAtMonoMs: bad,
+          }),
+        /Invalid temperature observation time/,
+      )
+      assert.equal(f.unavailable(), 1)
+      assert.equal(f.received.length, 1)
+    } finally {
+      f.source.close()
+    }
   }
 })

@@ -447,3 +447,58 @@ test('terminal owner during digest await never opens a snapshot provider', async
     f.sender.close()
   }
 })
+
+test('sender copies optional finite temperatures without making a command or changing assignment scope', async () => {
+  const f = await fixture()
+  try {
+    await f.sender.start()
+    await f.admit()
+    const printer: CompleteFarmSnapshot['printers'][number] = {
+      printerKey: 'printer-a',
+      state: 'idle',
+      progress: 0,
+      observedAt: 77,
+      toolTemperatureCelsius: 0,
+      bedTemperatureCelsius: -2.5,
+    }
+    f.complete({ printers: [printer] })
+    assert.deepEqual(f.sent, [
+      {
+        t: 'snapshot',
+        seq: 0,
+        printers: [
+          {
+            printerKey: 'printer-a',
+            state: 'idle',
+            progress: 0,
+            observedAt: 77,
+            toolTemperatureCelsius: 0,
+            bedTemperatureCelsius: -2.5,
+          },
+        ],
+      },
+    ])
+    printer.toolTemperatureCelsius = 300
+    assert.deepEqual(f.sent, [
+      {
+        t: 'snapshot',
+        seq: 0,
+        printers: [
+          {
+            printerKey: 'printer-a',
+            state: 'idle',
+            progress: 0,
+            observedAt: 77,
+            toolTemperatureCelsius: 0,
+            bedTemperatureCelsius: -2.5,
+          },
+        ],
+      },
+    ])
+    f.complete({ printers: [{ ...printer, bedTemperatureCelsius: Infinity }] })
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.sender.close()
+  }
+})

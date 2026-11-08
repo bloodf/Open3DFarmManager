@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  parseTemperatureFields,
+  type TemperatureFields,
+} from './temperature-observation.ts'
 import { parseMoonrakerSnapshot } from './parse.ts'
 import {
   MoonrakerClientError,
@@ -27,6 +31,10 @@ export type RawMoonrakerObservation = Readonly<{
     progress: number
   }>
   receivedAtMonoMs: number
+  temperatureObservation?: Readonly<{
+    fields: TemperatureFields
+    observedAtMonoMs: number
+  }>
 }>
 export type RawMoonrakerUnavailable = Readonly<{
   printerKey: string
@@ -59,6 +67,12 @@ const Status = z.object({
 const Snapshot = z.object({
   eventtime: z.number().finite().nonnegative(),
   status: Status,
+})
+const TemperatureSnapshot = Snapshot.extend({
+  status: Status.extend({
+    extruder: z.unknown().optional(),
+    heater_bed: z.unknown().optional(),
+  }),
 })
 const Delta = z.tuple([
   z.object({
@@ -153,7 +167,10 @@ export function createMoonrakerSubscription(input: {
       let stale = false
       let baseline: z.infer<typeof Snapshot> | undefined
       let fingerprint: string | undefined
-      function publish(value: z.infer<typeof Snapshot>) {
+      function publish(
+        value: z.infer<typeof Snapshot>,
+        temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+      ) {
         if (signal.aborted) return
         baseline = value
         clearTimeout(staleTimer)
@@ -185,6 +202,22 @@ export function createMoonrakerSubscription(input: {
                 }),
                 fieldObservedAtMonoMs: Object.freeze({ ...observedTimes }),
                 receivedAtMonoMs: performance.now(),
+                ...(temperatureObservation
+                  ? {
+                      temperatureObservation: Object.freeze({
+                        observedAtMonoMs:
+                          temperatureObservation.observedAtMonoMs,
+                        fields: Object.freeze({
+                          tool: Object.freeze({
+                            ...temperatureObservation.fields.tool,
+                          }),
+                          bed: Object.freeze({
+                            ...temperatureObservation.fields.bed,
+                          }),
+                        }),
+                      }),
+                    }
+                  : {}),
               }),
             ),
           )
@@ -210,7 +243,8 @@ export function createMoonrakerSubscription(input: {
                 onComplete(
                   observation: import('./client.ts').MoonrakerCompleteObservation,
                 ) {
-                  const value = Snapshot.parse(observation.result)
+                  const complete = TemperatureSnapshot.parse(observation.result)
+                  const value = Snapshot.parse(complete)
                   if (
                     baseline &&
                     (value.eventtime < baseline.eventtime ||
@@ -234,7 +268,10 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
-                  publish(value)
+                  publish(value, {
+                    fields: parseTemperatureFields(complete.status),
+                    observedAtMonoMs: stamp,
+                  })
                 },
               }
             : {}),

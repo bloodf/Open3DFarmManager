@@ -1389,3 +1389,39 @@ test('auth invalidation aborts stale discovery while hidden and focus can redisc
     vi.unstubAllGlobals()
   }
 })
+
+test('admitted temperature readings reach farm rows, and missing readings remain unavailable', async () => {
+  const h = setup(true)
+  try {
+    await h.view.discover()
+    h.authenticate()
+    h.frame(0, [
+      {
+        printerKey: row.printerKey,
+        state: 'idle',
+        progress: 0,
+        observedAt: h.time.wall,
+        toolTemperatureCelsius: 0,
+        bedTemperatureCelsius: -3.5,
+      },
+    ])
+    expect(h.first().observation?.state.toolTemperatureCelsius).toBe(0)
+    expect(h.first().observation?.state.bedTemperatureCelsius).toBe(-3.5)
+    expect(h.first().connection).toBe('authenticated')
+    h.time.wall += 1
+    h.time.mono += 1
+    h.frame(1, [
+      {
+        printerKey: row.printerKey,
+        state: 'idle',
+        progress: 0,
+        observedAt: h.time.wall,
+      },
+    ])
+    expect(h.first().observation?.state.toolTemperatureCelsius).toBeUndefined()
+    expect(h.first().observation?.state.bedTemperatureCelsius).toBeUndefined()
+    expect(h.first().connection).toBe('authenticated')
+  } finally {
+    h.view.dispose()
+  }
+})

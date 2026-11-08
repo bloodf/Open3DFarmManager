@@ -36,3 +36,36 @@ describe('printer state', () => {
     )
   })
 })
+
+test('temperature readings are optional finite display primitives, including zero and negatives', () => {
+  const core = {
+    printerKey: 'bedless',
+    state: 'idle',
+    progress: 0,
+    observedAt: 100,
+  }
+  expect(PrinterState.parse(core)).toEqual(core)
+  expect(
+    PrinterState.parse({
+      ...core,
+      toolTemperatureCelsius: 0,
+      bedTemperatureCelsius: -12.5,
+    }),
+  ).toEqual({
+    ...core,
+    toolTemperatureCelsius: 0,
+    bedTemperatureCelsius: -12.5,
+  })
+  for (const value of [NaN, Infinity, -Infinity, '20', null]) {
+    expect(
+      PrinterState.safeParse({ ...core, toolTemperatureCelsius: value })
+        .success,
+    ).toBe(false)
+    expect(
+      PrinterState.safeParse({ ...core, bedTemperatureCelsius: value }).success,
+    ).toBe(false)
+  }
+  expect(
+    PrinterState.safeParse({ ...core, targetTemperatureCelsius: 200 }).success,
+  ).toBe(false)
+})

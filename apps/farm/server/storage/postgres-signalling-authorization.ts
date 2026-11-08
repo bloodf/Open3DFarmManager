@@ -345,8 +345,7 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
       enrollment.status !== 'approved'
     )
       return null
-    const issued =
-      await readSignallingCredentialRecords(tx, agentId)
+    const issued = await readSignallingCredentialRecords(tx, agentId)
     const parsed = Credential.safeParse(issued[0])
     if (!parsed.success) return null
     const credential = parsed.data

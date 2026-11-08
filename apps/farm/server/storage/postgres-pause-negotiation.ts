@@ -239,8 +239,10 @@ export class PostgresPauseNegotiation {
     if (!enrollment.success || enrollment.data.farm_id !== scope.farmId)
       return null
     // Unique agent_id in 0010. Parent UPDATE also serializes an initially absent 0014 slot.
-    const credentials =
-      await readPauseNegotiationCredentialRecords(tx, scope.agentId)
+    const credentials = await readPauseNegotiationCredentialRecords(
+      tx,
+      scope.agentId,
+    )
     const credential = Credential.safeParse(credentials[0])
     if (
       !credential.success ||

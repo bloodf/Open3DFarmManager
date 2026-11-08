@@ -48,8 +48,7 @@ const cases = [
   },
   {
     name: 'signalling retains the eight-column agent SHARE lookup',
-    read: (tx: TransactionSql) =>
-      readSignallingCredentialRecords(tx, agentId),
+    read: (tx: TransactionSql) => readSignallingCredentialRecords(tx, agentId),
     row: identity,
     text: 'SELECT jti, farm_id, fingerprint, thumbprint, issuer, audience, issued_at::float8 AS issued_at, expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id = ?::uuid FOR SHARE',
     values: [agentId],
@@ -104,7 +103,9 @@ test('metadata lookup does not introduce parsing, normalization or live-authorit
     expires_at: 1,
   }
   const f = transaction([stored])
-  assert.deepEqual(await readAcceptanceCredentialRecords(f.tx, agentId), [stored])
+  assert.deepEqual(await readAcceptanceCredentialRecords(f.tx, agentId), [
+    stored,
+  ])
   assert.equal(f.calls.length, 1)
 })
 

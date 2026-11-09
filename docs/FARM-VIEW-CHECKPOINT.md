@@ -134,3 +134,5 @@ The final complete source check passed 326 Bun tests, 383 Node tests and two
 runtime skips, lint, TypeScript and both builds. This checkpoint update changed
 only documentation after those checks; its formatting and whitespace checks
 passed separately. No publication or complete Phase 0 acceptance is claimed.
+
+Cross-tab authentication changes use a payload-free BroadcastChannel notification. A mounted farm view clears its state and revalidates through the existing authorized discovery path. This notification is advisory; focus and visibility revalidation remain the fallback when the channel is unavailable. It does not guarantee remote revocation or atomic session rotation.

@@ -1,9 +1,9 @@
 # Open3DFarmManager Connector
 
-Local Phase 0 CLI for Node.js 24.15–24.x. No package has been published. Build from this checkout with the project's installed Bun dependencies:
+Local Phase 0 CLI for Node.js >=24.22.2 <25. No package has been published. Build from this checkout with the project's installed pnpm dependencies:
 
 ```sh
-bun run --cwd packages/connector build
+pnpm --dir packages/connector build
 node packages/connector/dist/cli.js --help
 ```
 

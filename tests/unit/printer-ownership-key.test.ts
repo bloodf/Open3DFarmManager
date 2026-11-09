@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { validPrinterOwnershipKey } from '../../apps/farm/server/storage/postgres-printer-ownership.ts'
 
 describe('printer ownership key', () => {

@@ -4,19 +4,19 @@ Open-source 3D print farm manager, licensed under MIT. Phase 0 builds an indepen
 
 ## Development
 
-Use Node 24.15+ (24.x), Bun 1.4.2 and Docker Compose for simulator integration.
+Use Node 24.22.2 (24.x), pnpm 12.18.0 and Docker Compose for simulator integration.
 
 ```sh
-bun install --frozen-lockfile --ignore-scripts
-bun run dev
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run dev
 ```
 
 The app opens on `http://127.0.0.1:3000`. This initial skeleton has a Portuguese home page, process liveness at `/healthz` and a hidden `/farm` route. Login, printer connections and controls are not implemented yet. The Connector currently supports `--help` and `--version` only.
 
 ```sh
-bun run check:all
-bunx playwright install chromium
-bun run test:e2e
+pnpm run check:all
+pnpm exec playwright install chromium
+pnpm run test:e2e
 node packages/connector/dist/cli.js --version
 ```
 

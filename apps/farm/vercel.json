@@ -1,0 +1,5 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": { "deploymentEnabled": { "**": false, "main": true } },
+  "ignoreCommand": "if test -f ../../scripts/vercel-ignore.mjs; then node ../../scripts/vercel-ignore.mjs; else echo 'HOLD: missing build gate'; fi"
+}

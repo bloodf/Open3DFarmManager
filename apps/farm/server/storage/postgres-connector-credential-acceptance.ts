@@ -634,13 +634,23 @@ export class PostgresConnectorCredentialAcceptance {
                 const sorted = [...operation.records].sort((a, b) =>
                   a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0,
                 )
-                for (const record of sorted) {
-                  await save`INSERT INTO farm.telemetry_events (farm_id,agent_id,event_id,payload) VALUES (${request.farmId}::uuid,${request.agentId}::uuid,${record.eventId}::uuid,${save.json(record)}::jsonb) ON CONFLICT (farm_id,agent_id,event_id) DO NOTHING`
-                  const stored =
-                    await save`SELECT payload=${save.json(record)}::jsonb AS matches FROM farm.telemetry_events WHERE farm_id=${request.farmId}::uuid AND agent_id=${request.agentId}::uuid AND event_id=${record.eventId}::uuid FOR SHARE`
-                  if (stored.length !== 1 || stored[0]?.matches !== true)
-                    throw new TelemetryConflict()
-                }
+                // Set-based: one insert and one locked comparison for the whole batch.
+                // INSERT … SELECT … ORDER BY does not guarantee insertion order; the
+                // locked SELECT below (FOR SHARE above its sort) sets the event-ID lock order.
+                const batch = save.json(
+                  sorted.map((record) => ({
+                    id: record.eventId,
+                    payload: record,
+                  })),
+                )
+                await save`INSERT INTO farm.telemetry_events (farm_id,agent_id,event_id,payload) SELECT ${request.farmId}::uuid,${request.agentId}::uuid,(e->>'id')::uuid,e->'payload' FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) ORDER BY n ON CONFLICT (farm_id,agent_id,event_id) DO NOTHING`
+                const stored =
+                  await save`SELECT s.payload=e->'payload' AS matches FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) JOIN farm.telemetry_events s ON s.farm_id=${request.farmId}::uuid AND s.agent_id=${request.agentId}::uuid AND s.event_id=(e->>'id')::uuid ORDER BY n FOR SHARE OF s`
+                if (
+                  stored.length !== sorted.length ||
+                  stored.some((row) => row.matches !== true)
+                )
+                  throw new TelemetryConflict()
               }
               const writtenAt = readNow()
               if (

@@ -1734,6 +1734,36 @@ export async function testPostgresAtomicTelemetry(
       )
     }
 
+    {
+      // Throughput: full 100-record batches through challenge + proof + commit.
+      const bench = await assigned()
+      const batches = 20
+      let commitMs = 0
+      for (let index = 0; index < batches; index++) {
+        const batch = Array.from({ length: 100 }, () => event(bench.printerKey))
+        const body = bytes(batch)
+        now += 1000
+        const proof = signed(bench, body, await challenge(bench, body))
+        now += 1000
+        const start = performance.now()
+        const result = await service().commitTelemetryWithProof(proof, body)
+        commitMs += performance.now() - start
+        assert.ok(committed(result), JSON.stringify(result))
+      }
+      assert.equal(await count(bench), batches * 100)
+      checks.push(
+        'benchmark:' +
+          JSON.stringify({
+            batches,
+            recordsPerBatch: 100,
+            meanCommitMs: Math.round(commitMs / batches),
+            commitRecordsPerSecond: Math.round(
+              (batches * 100 * 1000) / commitMs,
+            ),
+          }),
+      )
+    }
+
     if (restartFixturePath) {
       const lost = await assigned(),
         body = bytes([event(lost.printerKey)]),

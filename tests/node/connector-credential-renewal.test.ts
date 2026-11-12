@@ -30,6 +30,8 @@ import { parseMoonrakerSnapshot } from '../../packages/connector/src/moonraker/p
 import { runConnectorAgent } from '../../packages/connector/src/runtime/agent.ts'
 import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
 import {
+  CredentialRepairRequired,
+  readOrRecoverRuntimeCredential,
   renewCredentialOnce,
   runCredentialRenewal,
   writeCredentialFileAtomically,
@@ -52,6 +54,8 @@ const readCredentialEnvelope = (path: string) =>
   JSON.parse(readFileSync(path, 'utf8')) as {
     approval: Record<string, unknown>
   }
+const readOrRecoverEnvelope = (path: string) =>
+  readCredentialEnvelope(path).approval.device_token
 const b64 = (value: object) =>
   Buffer.from(JSON.stringify(value)).toString('base64url')
 function token(claims: Record<string, unknown>) {
@@ -82,6 +86,7 @@ function fixture(
     unavailable: 0 as number,
     tamper: false,
     lastIdentity: undefined as RenewalIdentity | undefined,
+    modes: [] as string[],
   }
   const claims = (jti: string, exp: number) => ({
     sub: agentId,
@@ -128,6 +133,7 @@ function fixture(
         return { status: 403, body: { error: 'x' } }
       }
       const request = RenewalRequest.parse(body)
+      server.modes.push(request.mode)
       const id =
         request.mode === 'issue' ? request.identity : request.intent.identity
       if (request.mode === 'issue') {
@@ -162,7 +168,10 @@ function fixture(
           kid: 'k',
           issuer: ORIGIN,
           audience: 'open3dfarmmanager:connector',
-          issuedAt,
+          // Readback returns the stored reservation, not a fresh one.
+          issuedAt: committed.has(id.jti)
+            ? committed.get(id.jti)!.expiresAt / 1000 - TTL
+            : issuedAt,
           expiresAt: committed.has(id.jti)
             ? committed.get(id.jti)!.expiresAt / 1000
             : issuedAt + TTL,
@@ -570,4 +579,81 @@ test('agent restarts after renewal and its telemetry sender uses the successor',
   assert.ok(kinds.includes('credential-renewed'))
   // One summary per agent run: the original and the restarted one.
   assert.equal(kinds.filter((k) => k === 'agent-summary').length, 2)
+})
+
+test('startup recovers an expired credential by readback only, never by issue', async (t) => {
+  const f = fixture()
+  t.after(f.cleanup)
+  const root = f.read()
+  // Server committed a successor whose reply was lost: simulate with a failed local write.
+  chmodSync(f.directory, 0o500)
+  await assert.rejects(f.once())
+  chmodSync(f.directory, 0o700)
+  assert.deepEqual(f.read(), root)
+  f.clock.now = root.expires_at + 1000
+  f.server.modes.length = 0
+  const kinds: string[] = []
+  const recovered = await readOrRecoverRuntimeCredential({
+    credentialPath: f.credentialPath,
+    identity: f.identity,
+    now: () => f.clock.now,
+    onDiagnostic: (d) => kinds.push(d.kind),
+    recovery: {
+      transport: f.transport,
+      origin: ORIGIN,
+      audience: AUDIENCE,
+      signal: new AbortController().signal,
+    },
+  })
+  assert.deepEqual(f.server.modes, ['readback'])
+  assert.equal(f.server.issued, 1)
+  assert.ok(recovered.expires_at > f.clock.now)
+  assert.equal(recovered.root_jti, f.rootJti)
+  assert.deepEqual(f.read(), recovered)
+  assert.deepEqual(kinds, ['credential-recovered'])
+})
+
+test('startup fails closed when an expired credential has no committed successor', async (t) => {
+  const f = fixture()
+  t.after(f.cleanup)
+  const root = f.read()
+  const kinds: string[] = []
+  const recover = (
+    recovery?: Parameters<typeof readOrRecoverRuntimeCredential>[0]['recovery'],
+  ) =>
+    readOrRecoverRuntimeCredential({
+      credentialPath: f.credentialPath,
+      identity: f.identity,
+      now: () => f.clock.now,
+      onDiagnostic: (d) => kinds.push(d.kind),
+      ...(recovery ? { recovery } : {}),
+    })
+  // A current credential is returned without any network call.
+  assert.deepEqual(await recover(), root)
+  assert.deepEqual(f.server.modes, [])
+  f.clock.now = root.expires_at
+  const recovery = {
+    transport: f.transport,
+    origin: ORIGIN,
+    audience: AUDIENCE,
+    signal: new AbortController().signal,
+    sleep: async () => {},
+  }
+  // Denied readback: one attempt, then re-pair.
+  await assert.rejects(recover(recovery), CredentialRepairRequired)
+  assert.deepEqual(f.server.modes, ['readback'])
+  // Transient unavailability: bounded attempts, then re-pair.
+  f.server.modes.length = 0
+  f.server.unavailable = 10
+  await assert.rejects(recover(recovery), CredentialRepairRequired)
+  assert.equal(f.server.unavailable, 7)
+  // No renewal configuration: no network at all.
+  await assert.rejects(recover(), CredentialRepairRequired)
+  assert.deepEqual(kinds, [
+    'credential-repair-required',
+    'credential-repair-required',
+    'credential-repair-required',
+  ])
+  assert.deepEqual(readOrRecoverEnvelope(f.credentialPath), root.device_token)
+  assert.deepEqual(readdirSync(f.directory), ['credential.json'])
 })

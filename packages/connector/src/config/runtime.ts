@@ -101,6 +101,8 @@ export function readAgentRuntimeConfig(
   }
   const pause =
     input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
+  if (pause?.control && !provisioned.has(pause.control.assignmentId))
+    throw new Error('Pause control assignment is not provisioned locally')
   const camera =
     input.camera === undefined
       ? null

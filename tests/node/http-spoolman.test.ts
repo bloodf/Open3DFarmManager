@@ -156,7 +156,12 @@ test('rejects malformed, ambiguous, oversized and wrong-type responses', async (
 test(
   'deadline spans pagination and hanging response body',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
+    // The 150 ms deadline elapses only on the virtual clock, after the second
+    // page started its hanging body, whatever the host load.
+    let now = 0
+    t.mock.method(performance, 'now', () => now)
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     let requests = 0
     const fixture = await server((_req, res) => {
       requests++
@@ -164,16 +169,20 @@ test(
       if (requests === 1) res.end(JSON.stringify([spool(1), spool(2)]))
       else {
         res.write('[')
+        setImmediate(() => {
+          now += 150
+          t.mock.timers.tick(150)
+        })
       }
     })
     try {
-      const started = performance.now()
+      const started = Date.now()
       await assert.rejects(
         reader(fixture.origin, 150)(),
         /Local Spoolman read failed/,
       )
       assert.equal(requests, 2)
-      assert.ok(performance.now() - started < 2000)
+      assert.ok(Date.now() - started < 2000)
     } finally {
       await fixture.close()
     }
@@ -210,17 +219,20 @@ test(
 test(
   'one deadline covers multiple individually fast pages',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
+    // Each page takes 200 virtual ms against one 350 ms deadline. The clock
+    // only moves inside the server, so CPU contention cannot change the result.
+    let now = 0
+    t.mock.method(performance, 'now', () => now)
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     let requests = 0
-    const timers: ReturnType<typeof setTimeout>[] = []
     const fixture = await server((_req, res) => {
       const current = ++requests
-      timers.push(
-        setTimeout(() => {
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(current === 1 ? [spool(1), spool(2)] : []))
-        }, 200),
-      )
+      now += 200
+      t.mock.timers.tick(200)
+      if (current !== 1) return
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify([spool(1), spool(2)]))
     })
     try {
       await assert.rejects(
@@ -229,7 +241,6 @@ test(
       )
       assert.equal(requests, 2)
     } finally {
-      for (const timer of timers) clearTimeout(timer)
       await fixture.close()
     }
   },

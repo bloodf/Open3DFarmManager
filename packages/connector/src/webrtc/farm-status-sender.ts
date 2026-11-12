@@ -5,6 +5,7 @@ import {
   snapshotAssignmentRefs,
   validatedStatusMessage,
   type AssignmentRef,
+  type ReadonlyStatusMessage,
   type VerifiedRtcAdmission,
 } from './readonly-session.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
@@ -17,6 +18,7 @@ export type CompleteFarmSnapshot = Readonly<{
   assignmentRefs: readonly AssignmentRef[]
   complete: true
   printers: readonly PrinterState[]
+  inventory?: ReadonlyStatusMessage['inventory']
   capturedAtMonoMs: number
   validUntilMonoMs: number
 }>
@@ -210,7 +212,12 @@ export class FarmStatusSender {
       )
         throw Error('Incomplete or stale source')
       const message = validatedStatusMessage(
-        { t: 'snapshot', seq: this.#seq, printers: input.printers },
+        {
+          t: 'snapshot',
+          seq: this.#seq,
+          printers: input.printers,
+          ...(input.inventory ? { inventory: input.inventory } : {}),
+        },
         this.#refs,
       )
       // Parsed copies precede the external send callback; no caller array survives.

@@ -11,6 +11,7 @@ import {
 } from './browser-device-proof.ts'
 import { PairingPublicKey } from './pairing.ts'
 import { PairingProofOrigin, PairingProofAudience } from './pairing-proof.ts'
+import { RtcSessionBindingV2 } from './rtc-session-binding.ts'
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const digest = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)
 const fingerprint = z.string().regex(/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/)
@@ -89,7 +90,7 @@ export function cameraPurposeProofPayload(
   if (role !== 'browser' && role !== 'connector')
     throw new Error('Invalid camera proof role')
   return new TextEncoder().encode(
-    'Open3DFarmManager/rtc-session-proof/v3\0' +
+    'Open3DFarmManager/camera-purpose-proof/v1\0' +
       role +
       '\0' +
       canonicalize(CameraPurposeStatement.parse(input)),
@@ -169,4 +170,55 @@ export async function verifyExpectedCameraPurposeProof(input: {
   } catch {
     return null
   }
+}
+export type CameraPurposeFields = Readonly<{
+  camera_id: string
+  printer_id: string
+  video_mid: string
+  lease_ref: string
+}>
+/** Derives the only accepted camera statement from an admitted assignment (v2)
+ * RTC binding. Transport, identities, assignment set and lifetime are copied. */
+export function cameraStatementFromBinding(
+  input: unknown,
+  fields: CameraPurposeFields,
+): CameraPurposeStatement {
+  const binding = RtcSessionBindingV2.parse(input)
+  return CameraPurposeStatement.parse({
+    ...binding,
+    v: 3,
+    purpose: 'camera-rtc',
+    camera_id: fields.camera_id,
+    printer_id: fields.printer_id,
+    video_mid: fields.video_mid,
+    lease_ref: fields.lease_ref,
+  })
+}
+/** Portable signer; the key must be the non-extractable private key of its role. */
+export async function signCameraPurposeProof(
+  input: unknown,
+  role: CameraPurposeProof['role'],
+  key: CryptoKey,
+): Promise<string> {
+  const statement = CameraPurposeStatement.parse(input)
+  if (
+    key.type !== 'private' ||
+    key.extractable ||
+    (role === 'browser'
+      ? key.algorithm.name !== 'ECDSA' ||
+        !('namedCurve' in key.algorithm) ||
+        key.algorithm.namedCurve !== 'P-256'
+      : key.algorithm.name !== 'Ed25519')
+  )
+    throw new Error('Wrong camera proof role key')
+  const signature = base64url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        role === 'browser' ? { name: 'ECDSA', hash: 'SHA-256' } : 'Ed25519',
+        key,
+        cameraPurposeProofPayload(statement, role),
+      ),
+    ),
+  )
+  return encodeCameraPurposeProof({ v: 3, role, binding: statement, signature })
 }

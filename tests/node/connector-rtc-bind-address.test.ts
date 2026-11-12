@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   DEFAULT_RTC_BIND_ADDRESS,
+  isLoopbackBindAddress,
   parseRtcRuntimeConfig,
   rtcBindAddress,
 } from '../../packages/connector/src/config/rtc.ts'
@@ -47,6 +48,17 @@ test('the RTC bind address accepts only literal IPv4/IPv6 addresses and defaults
     '256.1.1.1',
     '1.2.3',
     '01.2.3.4',
+    // All interfaces only through the exact literals 0.0.0.0 and ::.
+    '0:0:0:0:0:0:0:0',
+    '0::',
+    '::0',
+    '::0.0.0.0',
+    '0000::',
+    // IPv4-mapped forms: use the IPv4 literal.
+    '::ffff:127.0.0.1',
+    '::ffff:10.0.0.5',
+    '::FFFF:7f00:1',
+    '0:0:0:0:0:ffff:a00:5',
     'http://10.0.0.5',
     7,
     null,
@@ -59,6 +71,10 @@ test('the RTC bind address accepts only literal IPv4/IPv6 addresses and defaults
   assert.throws(() => parseRtcRuntimeConfig({ bind: '0.0.0.0' }))
   assert.throws(() => parseRtcRuntimeConfig('0.0.0.0'))
   assert.equal(rtcBindAddress(undefined), '127.0.0.1')
+  for (const value of ['127.0.0.1', '127.1.2.3', '::1', '0:0:0:0:0:0:0:1'])
+    assert.equal(isLoopbackBindAddress(value), true, value)
+  for (const value of ['0.0.0.0', '::', '192.168.1.20', 'fd00::12'])
+    assert.equal(isLoopbackBindAddress(value), false, value)
   assert.throws(() => rtcBindAddress('localhost'))
 })
 
@@ -127,9 +143,16 @@ const CONFIGURED = '::1'
 const identity = () =>
   new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
 
+const ipv6Loopback = Object.values(networkInterfaces()).some((entries) =>
+  entries?.some((entry) => entry.family === 'IPv6' && entry.address === '::1'),
+)
 for (const bindAddress of [undefined, CONFIGURED]) {
   const expected = bindAddress ?? '127.0.0.1'
-  test(`readonly peer gathers only on ${expected}`, async () => {
+  const skip =
+    bindAddress === CONFIGURED && !ipv6Loopback
+      ? 'IPv6 loopback (::1) is not configured on this host'
+      : false
+  test(`readonly peer gathers only on ${expected}`, { skip }, async () => {
     const peer = new ReadonlyConnectorPeer({
       ...(bindAddress ? { bindAddress } : {}),
       identity: identity(),
@@ -144,7 +167,7 @@ for (const bindAddress of [undefined, CONFIGURED]) {
       peer.close()
     }
   })
-  test(`pause control peer gathers only on ${expected}`, async () => {
+  test(`pause control peer gathers only on ${expected}`, { skip }, async () => {
     const peer = new PauseConnectorPeer({
       ...(bindAddress ? { bindAddress } : {}),
       identity: identity(),
@@ -164,7 +187,7 @@ for (const bindAddress of [undefined, CONFIGURED]) {
       peer.close()
     }
   })
-  test(`synthetic peer gathers only on ${expected}`, async () => {
+  test(`synthetic peer gathers only on ${expected}`, { skip }, async () => {
     const keys = await crypto.subtle.generateKey('Ed25519', false, [
       'sign',
       'verify',

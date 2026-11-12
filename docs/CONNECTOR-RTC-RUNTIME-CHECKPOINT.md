@@ -52,8 +52,12 @@ optional section to change it:
 "rtc": { "bindAddress": "192.168.1.20" }
 ```
 
-- Only a literal IPv4 or IPv6 address is accepted. `0.0.0.0` and `::` bind all
-  interfaces and must be written explicitly.
+- Only a literal IPv4 or IPv6 address is accepted. All interfaces must be
+  written exactly as `0.0.0.0` or `::`; other spellings of the unspecified
+  address (`0:0:0:0:0:0:0:0`, `::0.0.0.0`) and IPv4-mapped forms
+  (`::ffff:10.0.0.5`) are refused. Use the IPv4 literal instead.
+- A non-loopback address is reported once at startup as
+  `{"kind":"rtc-bind-non-loopback","address":…}` on the diagnostics output.
 - Host names, ports, brackets, zone IDs (`%eth0`), surrounding spaces and
   unknown keys are refused. An invalid value stops startup before any task runs,
   with the strict configuration error.
@@ -70,7 +74,11 @@ channels still require the authenticated signalling binding and the DTLS
 fingerprint and proof checks, but the attack surface widens. Enable it only on a
 trusted LAN, prefer one specific LAN address over all interfaces, and restrict
 inbound UDP to the farm's LAN with the host firewall. Never use it on an
-interface reachable from the internet.
+interface reachable from the internet. Binding to all interfaces also places
+every interface address of the host in the SDP offer, which travels through the
+signalling server and reaches the browser: the server and the browser learn the
+host's addresses on every network it is attached to. A specific LAN address
+discloses only that address.
 
 Focused validation passed seven Node lifecycle/configuration tests and thirteen
 actual Node CLI groups driven by Bun, with 131 assertions. The CLI fixture

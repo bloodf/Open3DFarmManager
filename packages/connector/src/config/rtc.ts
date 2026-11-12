@@ -10,13 +10,32 @@ export const DEFAULT_RTC_BIND_ADDRESS = '127.0.0.1'
  * interfaces). Host names, zone IDs, brackets, ports and whitespace are refused,
  * so a configured value can never depend on name resolution.
  */
+function allowedBindAddress(value: string): boolean {
+  const family = isIP(value)
+  if (family === 4) return true
+  if (family !== 6 || value.includes('%')) return false
+  // WHATWG URL parsing gives the canonical compressed IPv6 form.
+  const canonical = new URL(`http://[${value}]`).hostname.slice(1, -1)
+  // All interfaces only through the exact literal `::`, never `0:0:…:0`,
+  // `::0.0.0.0` or another spelling. IPv4-mapped addresses are refused: use the
+  // IPv4 literal itself.
+  if (canonical === '::') return value === '::'
+  return !canonical.startsWith('::ffff:')
+}
 export const RtcBindAddress = z
   .string()
   .max(45)
   .refine(
-    (value) => isIP(value) !== 0 && !value.includes('%'),
-    'Expected a literal IPv4 or IPv6 address',
+    allowedBindAddress,
+    'Expected a literal IPv4 or IPv6 address (all interfaces: exactly 0.0.0.0 or ::)',
   )
+
+/** 127.0.0.0/8 or ::1. Anything else widens exposure beyond this host. */
+export function isLoopbackBindAddress(value: string): boolean {
+  return isIP(value) === 4
+    ? value.startsWith('127.')
+    : new URL(`http://[${value}]`).hostname === '[::1]'
+}
 
 export const RtcRuntimeConfigSchema = z.strictObject({
   bindAddress: RtcBindAddress.optional(),

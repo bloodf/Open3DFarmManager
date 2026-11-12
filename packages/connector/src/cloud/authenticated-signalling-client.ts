@@ -194,7 +194,8 @@ type Options = {
 }
 /** Detached client. Server 0014 PoP/current-authority checks remain mandatory.
  * JWT/lookup IDs and challenge generation grant no transport or command authority.
- * Native RTC currently binds127.0.0.1 only; this client does not broaden networking.
+ * Native RTC binds the configured ICE address (`rtc.bindAddress`, loopback by
+ * default); this client passes it through and does not broaden networking itself.
  */
 export class AuthenticatedConnectorSignallingClient {
   #scope: Readonly<Scope>

@@ -1,4 +1,5 @@
-import { test, expect } from 'vitest'
+import { test, expect, vi } from 'vitest'
+import { logUnhandledError } from '../../apps/farm/server/utils/log-unhandled-error.ts'
 import { createLogger, redact } from '../../packages/shared/src/log.ts'
 
 function capture() {
@@ -76,7 +77,7 @@ test('redacts secrets in error objects and causes', () => {
   const parsed = JSON.parse(out)
   expect(parsed.error.name).toBe('Error')
   expect(parsed.error.message).toContain('[REDACTED]')
-  expect(parsed.error.token).toBe('[REDACTED]')
+  expect(parsed.error.token).toBeUndefined()
 })
 
 test('scrubs PEM private keys in free text', () => {
@@ -96,7 +97,7 @@ test('bounds string size, depth, fan-out and survives cycles', () => {
     (redact(Array.from({ length: 500 }, (_, i) => i)) as number[]).length,
   ).toBe(50)
   let deep: unknown = 'leaf'
-  for (let i = 0; i < 20; i++) deep = { d: deep }
+  for (let i = 0; i < 20; i++) deep = { next: deep }
   expect(JSON.stringify(redact(deep))).toContain('[MaxDepth]')
 })
 
@@ -106,4 +107,196 @@ test('caller fields cannot spoof level or msg', () => {
   const parsed = JSON.parse(lines[0]!)
   expect(parsed.level).toBe('info')
   expect(parsed.msg).toBe('real')
+})
+
+test('scrubs URL userinfo, query params, free text, JWTs; keeps Bearer/PEM scrubbing', () => {
+  const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.c2ln'
+  const out = redact({
+    one: 'connect postgres://user:pass@db:5432/x failed',
+    two: 'GET /cb?state=ok&access_token=abc123&user_code=WXYZ&x=1',
+    three: 'password=hunter2 and secret: "top secret" end',
+    four: `jwt ${jwt}`,
+    five: 'Authorization: Basic setup',
+    six: 'Basic dXNlcjpwYXNzd29yZA==',
+  }) as Record<string, string>
+  expect(out.one).toBe('connect postgres://[REDACTED]@db:5432/x failed')
+  expect(out.two).toBe(
+    'GET /cb?state=ok&access_token=[REDACTED]&user_code=[REDACTED]&x=1',
+  )
+  expect(out.three).toBe('password=[REDACTED] and secret: [REDACTED] end')
+  expect(out.four).toBe('jwt [REDACTED]')
+  expect(out.five).toBe('Authorization: [REDACTED] setup')
+  expect(out.six).toBe('[REDACTED]')
+  expect(redact('Basic setup')).toBe('Basic setup')
+})
+
+test('bounds input before regex and truncates after', () => {
+  const out = redact('x'.repeat(5_000_000)) as string
+  expect(out.length).toBeLessThan(600)
+})
+
+test('redacts the repo real field names and private JWK members', () => {
+  const out = redact({
+    user_code: 'ABCD-1234',
+    admission_nonce: 'n',
+    challenge_id: 'public-id',
+    sessionRecordId: 's',
+    signingKeyId: 'k1',
+    sig: 'x',
+    jwk: { kty: 'EC', crv: 'P-256', x: 'pub', d: 'priv', k: 'sym', qi: 'q' },
+    salt: 's',
+    verifier: 'v',
+    otp: '1',
+    pwd: 'p',
+    csrf: 'c',
+    hmac: 'h',
+    jwt: 'j',
+    databaseUrl: 'postgres://u:p@h/db',
+    DATABASE_URL: 'u',
+    dsn: 'd',
+    connectionString: 'c',
+    seed: 'x',
+    mnemonic: 'm',
+    footprint: 'keep',
+  }) as Record<string, any>
+  const redacted = Object.entries(out)
+    .filter(([, v]) => v === '[REDACTED]')
+    .map(([k]) => k)
+  expect(
+    Object.keys(out)
+      .filter((k) => !redacted.includes(k))
+      .sort(),
+  ).toEqual(['challenge_id', 'footprint', 'jwk'])
+  expect(out.jwk).toEqual({
+    kty: 'EC',
+    crv: 'P-256',
+    x: 'pub',
+    d: '[REDACTED]',
+    k: '[REDACTED]',
+    qi: '[REDACTED]',
+  })
+})
+
+test('errors log an allowlist only and never spread own props', () => {
+  const err = Object.assign(new Error('bad'), {
+    code: 'E_X',
+    statusCode: 500,
+    detail: 'password',
+    where: 'w',
+    query: 'q',
+    parameters: ['p'],
+    data: 'd',
+    response: { x: 1 },
+    request: { x: 1 },
+    config: { x: 1 },
+    body: 'b',
+    other: 'o',
+  })
+  const out = redact(err) as Record<string, unknown>
+  expect(Object.keys(out).sort()).toEqual([
+    'code',
+    'message',
+    'name',
+    'stack',
+    'statusCode',
+  ])
+  const agg = redact(
+    new AggregateError(
+      Array.from({ length: 30 }, () => new Error('e')),
+      'a',
+    ),
+  ) as {
+    errors: unknown[]
+  }
+  expect(agg.errors).toHaveLength(10)
+})
+
+test('global node budget bounds huge object graphs', () => {
+  const wide = Array.from({ length: 50 }, () =>
+    Array.from({ length: 50 }, () =>
+      Array.from({ length: 50 }, () => ({ a: { b: 1 } })),
+    ),
+  )
+  expect(JSON.stringify(redact(wide))).toContain('[Budget]')
+  const huge: Record<string, number> = {}
+  for (let i = 0; i < 100_000; i++) huge[`k${i}`] = i
+  expect(Object.keys(redact(huge) as object)).toHaveLength(50)
+})
+
+test('binary, dates, maps, sets, getters, toJSON, proxies and null-proto output', () => {
+  let called = false
+  const evil = {
+    get secretish() {
+      called = true
+      return 'x'
+    },
+    toJSON() {
+      called = true
+      return 'boom'
+    },
+    ok: 1,
+  }
+  const proxy = new Proxy(
+    {},
+    {
+      ownKeys() {
+        throw new Error('trap')
+      },
+    },
+  )
+  const out = redact({
+    buf: Buffer.from('abc'),
+    ab: new ArrayBuffer(8),
+    ta: new Uint8Array(4),
+    date: new Date('2026-01-01T00:00:00Z'),
+    map: new Map([[1, 2]]),
+    set: new Set([1, 2]),
+    evil,
+    proxy,
+    ['__proto__']: 'x',
+  }) as Record<string, unknown>
+  expect(out).toMatchObject({
+    buf: '[Binary 3B]',
+    ab: '[Binary 8B]',
+    ta: '[Binary 4B]',
+    date: '2026-01-01T00:00:00.000Z',
+    map: '[Map 1]',
+    set: '[Set 2]',
+    proxy: '[Unreadable]',
+  })
+  expect((out.evil as Record<string, unknown>).secretish).toBe('[REDACTED]')
+  expect(called).toBe(false)
+  expect(Object.getPrototypeOf(out)).toBeNull()
+})
+
+test('logger never throws, even when write or fields blow up', () => {
+  const lines: string[] = []
+  let n = 0
+  const log = createLogger('x', (l) => {
+    if (n++ === 0) throw new Error('disk')
+    lines.push(l)
+  })
+  expect(() => log.error('m', { a: 1 })).not.toThrow()
+  expect(lines.map((l) => JSON.parse(l).msg)).toEqual(['log-failed'])
+  const quiet = createLogger('x', () => {
+    throw new Error('always')
+  })
+  expect(() => quiet.info('m')).not.toThrow()
+})
+
+test('unhandled-error hook logs 5xx path only and never throws', () => {
+  const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+  logUnhandledError(Object.assign(new Error('x'), { statusCode: 500 }), {
+    path: '/api/x?token=abc',
+  })
+  logUnhandledError(Object.assign(new Error('x'), { statusCode: 404 }), {
+    path: '/n',
+  })
+  logUnhandledError(new Error('no status'), undefined)
+  const out = spy.mock.calls.map((c) => String(c[0]))
+  spy.mockRestore()
+  expect(out).toHaveLength(2)
+  expect(out[0]).toContain('"path":"/api/x"')
+  expect(out.join('')).not.toContain('abc')
+  expect(() => logUnhandledError(null, null as never)).not.toThrow()
 })

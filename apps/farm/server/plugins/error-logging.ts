@@ -1,10 +1,8 @@
-import { createLogger } from '@open3dfarmmanager/shared'
-
-const log = createLogger('farm-server')
+import { logUnhandledError } from '../utils/log-unhandled-error.ts'
 
 /** Structured, redacted logging of unhandled server errors. */
 export default defineNitroPlugin((nitro) => {
-  nitro.hooks.hook('error', (error, context) => {
-    log.error('unhandled-error', { error, path: context.event?.path })
-  })
+  nitro.hooks.hook('error', (error, context) =>
+    logUnhandledError(error, context?.event),
+  )
 })

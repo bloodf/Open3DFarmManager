@@ -2,21 +2,23 @@
 
 The application and test utilities in this repository are original MIT code. No application code was imported from another print-farm project or private repository. Dependencies retain their own licenses; the root MIT license does not replace them.
 
-| Component                                   | Use                          | License reported by package/project |
-| ------------------------------------------- | ---------------------------- | ----------------------------------- |
-| Nuxt, Vue, Vue Router                       | App runtime                  | MIT                                 |
-| Zod                                         | Protocol validation          | MIT                                 |
-| Effect                                      | Typed simulator I/O failures | MIT                                 |
-| TypeScript                                  | Development                  | Apache-2.0                          |
-| Bun type definitions, Node type definitions | Development                  | MIT                                 |
-| Playwright                                  | Browser tests                | Apache-2.0                          |
-| Prettier                                    | Formatting                   | MIT                                 |
-| Vitest                                      | Test runner                  | MIT                                 |
-| esbuild                                     | Connector/helper bundler     | MIT                                 |
-| virtual-klipper-printer                     | Separate test container      | GPL-3.0                             |
-| Spoolman                                    | Separate inventory simulator | MIT                                 |
+| Component                                    | Use                             | License reported by package/project      |
+| -------------------------------------------- | ------------------------------- | ---------------------------------------- |
+| Nuxt, Vue, Vue Router                        | App runtime                     | MIT                                      |
+| Zod                                          | Protocol validation             | MIT                                      |
+| Effect                                       | Typed simulator I/O failures    | MIT                                      |
+| TypeScript                                   | Development                     | Apache-2.0                               |
+| Bun type definitions, Node type definitions  | Development                     | MIT                                      |
+| Playwright                                   | Browser tests                   | Apache-2.0                               |
+| Prettier                                     | Formatting                      | MIT                                      |
+| Vitest                                       | Test runner                     | MIT                                      |
+| esbuild                                      | Connector/helper bundler        | MIT                                      |
+| virtual-klipper-printer                      | Separate test container         | GPL-3.0                                  |
+| Spoolman                                     | Separate inventory simulator    | MIT                                      |
+| MediaMTX                                     | Separate RTSP test container    | MIT                                      |
+| FFmpeg 6.1.2 (bundled in the MediaMTX image) | Separate test-pattern publisher | GPL (build with `--enable-gpl`, libx264) |
 
-Exact package versions and integrity values are in `pnpm-lock.yaml`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. Runtime Docker bases also retain their upstream notices.
+Exact package versions and integrity values are in `pnpm-lock.yaml`. The simulator image is digest-pinned in Compose. Its software stays inside the external container; no upstream source/configuration is vendored. Follow upstream licensing if redistributing that image. The pinned MediaMTX image (`bluenviron/mediamtx@sha256:2356620b…92aa3`, tag 1.18.1-ffmpeg) also bundles a GPL FFmpeg build; it is a separate container, nothing is vendored, and redistributing it must follow those terms. Runtime Docker bases also retain their upstream notices.
 
 ## Playwright 1.65.0
 

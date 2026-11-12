@@ -40,11 +40,13 @@ async function fixture(
     onAuthorityConfirm?: (serverSeq: number) => void
     onAuthorityRevoked?: (serverSeq: number) => void
   } = {},
+  bindAddress?: string,
 ) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
   )
   const scope = {
+    ...(bindAddress ? { bindAddress } : {}),
     url: 'wss://farm.example/api/signalling/connector',
     origin: 'https://farm.example',
     audience: 'farm-test',
@@ -728,4 +730,28 @@ test('authority confirmations are accepted only after inbox admission and only f
   await confirm(f, { server_seq: 13, credential_jti: randomUUID() })
   await assert.rejects(f.pending)
   assert.deepEqual(confirms, [11])
+})
+
+test('the configured RTC bind address reaches the read-only peer; absent keeps the peer default', async () => {
+  for (const bindAddress of ['0.0.0.0', undefined]) {
+    const f = await fixture(false, undefined, false, {}, bindAddress)
+    try {
+      await f.inbox()
+      await f.push({
+        v: 1,
+        t: 'connector.context-challenge',
+        challenge: f.context,
+      })
+      await f.push({
+        v: 1,
+        t: 'rtc.ready',
+        transport_id: f.context.connection_id,
+        ...f.lease(),
+      })
+      assert.equal(f.input()?.bindAddress, bindAddress)
+    } finally {
+      f.client.close()
+      await assert.rejects(f.pending)
+    }
+  }
 })

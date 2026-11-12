@@ -15,6 +15,7 @@ import type { RuntimeCredential } from './credential.ts'
 import { parsePauseRuntimeConfig } from './pause.ts'
 import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
+import { parseRtcRuntimeConfig } from './rtc.ts'
 
 const Runtime = z.strictObject({
   version: z.literal(1),
@@ -47,6 +48,8 @@ const Runtime = z.strictObject({
   pause: z.unknown().optional(),
   // Opt-in camera media; absent means no track, channel or ingest helper.
   camera: z.unknown().optional(),
+  // Optional ICE bind address; absent keeps loopback (config/rtc.ts).
+  rtc: z.unknown().optional(),
 })
 
 export function readAgentRuntimeConfig(
@@ -110,8 +113,11 @@ export function readAgentRuntimeConfig(
           input.camera,
           assignments.map((assignment) => assignment.assignment_id),
         )
+  // Strict: an invalid address fails startup before any task starts.
+  const rtc = parseRtcRuntimeConfig(input.rtc)
   return {
     camera,
+    rtc,
     collection,
     telemetry: input.telemetry,
     renewal: input.renewal,

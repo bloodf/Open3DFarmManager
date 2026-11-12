@@ -167,6 +167,8 @@ type Scope = {
   jti: string
   token: string
   identity: ConnectorIdentity
+  /** Validated local ICE bind address; default loopback. */
+  bindAddress?: string
 }
 type Options = {
   /** Server-confirmed inbox availability only, never RTC or printer authority. */
@@ -192,7 +194,8 @@ type Options = {
 }
 /** Detached client. Server 0014 PoP/current-authority checks remain mandatory.
  * JWT/lookup IDs and challenge generation grant no transport or command authority.
- * Native RTC currently binds127.0.0.1 only; this client does not broaden networking.
+ * Native RTC binds the configured ICE address (`rtc.bindAddress`, loopback by
+ * default); this client passes it through and does not broaden networking itself.
  */
 export class AuthenticatedConnectorSignallingClient {
   #scope: Readonly<Scope>
@@ -514,6 +517,9 @@ export class AuthenticatedConnectorSignallingClient {
       if (!this.#channel.current()) return
       const caps = this.#channel.deadlines()
       const input: PeerOptions = {
+        ...(this.#scope.bindAddress === undefined
+          ? {}
+          : { bindAddress: this.#scope.bindAddress }),
         identity: this.#scope.identity,
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,

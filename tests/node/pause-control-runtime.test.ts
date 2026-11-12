@@ -534,6 +534,8 @@ test('an admitted signed pause reaches the fake Moonraker once, is journaled and
   assert.equal(session.scope.credentialAudience, SIGNALLING.credentialAudience)
   assert.equal(session.scope.assignmentId, f.assignmentId)
   assert.equal(session.scope.jti, f.jti)
+  // Absent `rtc` config: the loopback default is passed explicitly.
+  assert.equal(session.scope.bindAddress, '127.0.0.1')
   await waitFor(t.signal, () => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'applied')
   assert.equal(f.moonraker.counts().pauses, 1)

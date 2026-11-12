@@ -85,4 +85,69 @@ describe('telemetry runtime lifecycle', () => {
     expect(await started).toBe('unavailable')
     expect(telemetryHttpRuntime()).toBeUndefined()
   })
+
+  const enabledConfig = {
+    enabled: true,
+    databaseUrl: 'postgres://fixture:synthetic@127.0.0.1:1/fixture',
+    origin: 'https://farm.example',
+    issuer: 'https://farm.example',
+    audience: 'open3dfarmmanager:connector',
+    publicKeyRegistryPath: '/tmp/synthetic-keys.json',
+    tokenTtlSeconds: 300,
+    proofTtlMs: 30000,
+    bodyTimeoutMs: 5000,
+  }
+  const refused = () =>
+    Object.assign(new Error('connect'), { code: 'ECONNREFUSED' })
+
+  test('transient failures retry until activation succeeds, reported once', async () => {
+    let attempts = 0
+    const failures: string[] = []
+    const lifecycle = createTelemetryRuntimeLifecycle({
+      activate: async () => {
+        if (++attempts < 3) throw refused()
+      },
+      onFailure: (reason) => failures.push(reason),
+    })
+    try {
+      expect(
+        await lifecycle.startUntilAvailable(enabledConfig, {
+          minMs: 5,
+          maxMs: 10,
+        }),
+      ).toBe('enabled')
+      expect(attempts).toBe(3)
+      expect(failures).toEqual(['database-unreachable'])
+    } finally {
+      await lifecycle.close()
+    }
+  })
+
+  test('rejected configuration slows to the maximum delay and reports reason changes', async () => {
+    const at: number[] = []
+    const failures: string[] = []
+    let attempts = 0
+    const lifecycle = createTelemetryRuntimeLifecycle({
+      activate: async () => {
+        at.push(performance.now())
+        attempts++
+        if (attempts === 1) throw refused()
+        if (attempts < 4) throw new Error('Invalid telemetry database role')
+      },
+      onFailure: (reason) => failures.push(reason),
+    })
+    try {
+      expect(
+        await lifecycle.startUntilAvailable(enabledConfig, {
+          minMs: 5,
+          maxMs: 120,
+        }),
+      ).toBe('enabled')
+      expect(failures).toEqual(['database-unreachable', 'rejected'])
+      // After a rejection the next attempt waits the maximum delay, not the minimum.
+      expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(100)
+    } finally {
+      await lifecycle.close()
+    }
+  })
 })

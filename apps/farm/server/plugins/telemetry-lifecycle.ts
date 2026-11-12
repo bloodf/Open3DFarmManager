@@ -3,7 +3,13 @@ import { createTelemetryRuntimeLifecycle } from '../services/telemetry-runtime-b
 
 /** Disabled unless a future explicit runtime configuration supplies all values. */
 export default defineNitroPlugin((nitro) => {
-  const lifecycle = createTelemetryRuntimeLifecycle()
+  const lifecycle = createTelemetryRuntimeLifecycle({
+    // Fixed text per class, logged on the first failure and on each change.
+    onFailure: (reason) =>
+      nitro.captureError(new Error(`Telemetry startup failed: ${reason}`), {
+        tags: ['telemetry-startup'],
+      }),
+  })
   nitro.hooks.hook('close', () => lifecycle.close())
   const config: unknown = useRuntimeConfig()
   const telemetry =

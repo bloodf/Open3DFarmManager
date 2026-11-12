@@ -442,9 +442,10 @@ classification.
 | Observer input     | 16 MiB, 4 097 events, 65 536 byte lines | existing observer               |
 | Observer events    | 4 096 plus one truncation record        | existing observer               |
 
-The observation window is a bound on the observation phase. Each polling call
-receives the time that is left as its own timeout, so a Docker call that does
-not answer cannot push the phase past the deadline. The run as a whole has no
+The observation window is a bound on the observation phase. No poll starts
+after the window ends. Each polling call has the regular Docker call bound, so
+the phase can exceed the window by at most one Docker call; a poll near the end
+of the window is not failed for lack of remaining time. The run as a whole has no
 fixed deadline: the baseline, the discovery, the creation, the capture, the
 analysis and the cleanup are bounded per call. The report carries the elapsed
 time of every stage in `stages` and the elapsed time of the whole run in

@@ -2167,11 +2167,12 @@ export async function runDiagnostic(options) {
     const startedAt = clock.now()
     const deadline = startedAt + settings.observationMs
     while (clock.now() < deadline) {
-      const remaining = Math.max(1, deadline - clock.now())
+      // Each poll has the regular Docker call bound. Handing it only the time
+      // left in the window failed healthy polls near the end of the window.
       const status = await dockerRun(
         docker,
         ['inspect', '--format', '{{.State.Status}}', containerName],
-        { timeoutMs: remaining },
+        {},
         'observe',
       )
       if (status.stdout.trim() === 'exited') break

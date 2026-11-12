@@ -73,8 +73,9 @@ export async function testAuthenticatedFarmPage(input: {
       '0.75',
       { timeout: 3000 },
     )
-    const closureWait = input.closure === 'revocation' ? 7500 : 3000
-    assert.ok(performance.now() - input.startedAt + closureWait + 2500 < 28000)
+    // Issue #8: read-only within 10 s of losing the direct connection.
+    const closureWait = 10000
+    const closedAt = performance.now()
     await (input.closure === 'disconnect'
       ? fixture.disconnectSignalling()
       : fixture.revokeConnector())
@@ -92,7 +93,31 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toHaveCount(0)
-    assert.ok(performance.now() - input.startedAt < 28000)
+    assert.ok(performance.now() - closedAt < closureWait + 1000)
+    if (input.closure === 'disconnect') {
+      // #121: the view re-checks authority and reopens with bounded backoff while
+      // the Connector reconnects its signalling session; live status returns.
+      const lostAt = performance.now()
+      await expect(
+        row.getByText('Conexão direta autenticada', { exact: true }),
+      ).toBeVisible({ timeout: 30000 })
+      await expect(row.getByRole('progressbar')).toHaveAttribute(
+        'value',
+        '0.75',
+      )
+      await expect(
+        row.getByRole('button', { name: 'Pausar impressão', exact: true }),
+      ).toBeDisabled()
+      await input.note(
+        `farm-page-recovered-after-ms:${Math.round(performance.now() - lostAt)}`,
+      )
+    } else {
+      // Revocation stops: no reopen restores the live connection.
+      await page.waitForTimeout(5000)
+      await expect(
+        row.getByText('Conexão direta autenticada', { exact: true }),
+      ).toHaveCount(0)
+    }
     fixture.signal.throwIfAborted()
   } catch (error) {
     const text = await page

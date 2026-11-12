@@ -121,9 +121,11 @@ try {
   assert.match(container, /^[a-f0-9]{64}$/)
   ledger({ resource: 'container-id', id: container })
   await docker('start', container)
+  // TCP readiness: the image's init-time server listens only on the Unix socket and
+  // restarts afterwards, so socket readiness can reset the first host connection.
   await docker(
     ...['exec', container, 'sh', '-c'],
-    'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
+    'n=0; until pg_isready -h 127.0.0.1 -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
   )
   sql = postgres({
     host: '127.0.0.1',

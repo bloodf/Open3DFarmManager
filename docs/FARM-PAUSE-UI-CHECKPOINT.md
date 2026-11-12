@@ -4,7 +4,7 @@ The farm page (`apps/farm/app/pages/farm.vue`) can now send one confirmed, signe
 
 ## When the button is enabled
 
-`pauseAvailability` (`apps/farm/app/utils/farm-pause.ts`) enables **Pausar impressão** only when all of these hold, and otherwise shows the first failing reason in pt-BR, linked with `aria-describedby`:
+`pauseAvailability` (`apps/farm/app/utils/farm-pause.ts`) enables **Pausar impressão** only when all of these hold, and otherwise shows the first failing reason in pt-BR, linked with `aria-describedby`. The unavailable button uses `aria-disabled` (not `disabled`), so it stays focusable and its reason is announced; a click opens nothing:
 
 1. `/api/signalling/pause-metadata` reports pause enabled for this exact origin.
 2. The assignment is active and its Connector approved.
@@ -21,6 +21,8 @@ The button opens a native modal `<dialog>` (background inert, focus trapped, `Es
 - `PauseBrowserSignallingClient` opens the authenticated pause RTC session; `createPauseCommandClient` runs the admission with the HTTP issuer and signs the command with the nonextractable local key.
 - **Confirmar pausa** is enabled only after the browser sent its capability and admission proof, and only while the signed capability has at least 3 s of validity left. The dialog shows the remaining seconds.
 - Confirming sends exactly one command. The dialog reports the outcome: applied, rejected by the Connector, not sent, or unknown (with an instruction to check the printer). Nothing is retried; a new pause needs a new dialog and a new session.
+- If no fresh capability is ready within 15 s, or the capability is already expired by this device's clock, the dialog fails closed and suggests checking the device date and time.
+- A rejected command is reported neutrally ("Comando recusado"), because a rejection can come from the Connector or from a local check before sending; in both cases the printer was not paused.
 - The session fails closed with an explicit reason when the key or metadata cannot be resolved, the capability expires before confirmation, the transport ends, or the row stops being live while the dialog is open. Cancel or `Esc` close it. A command in flight cannot be cancelled; the dialog waits for its outcome.
 
 ## Validation boundary

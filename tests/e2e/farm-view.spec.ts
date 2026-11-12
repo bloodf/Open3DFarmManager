@@ -355,6 +355,11 @@ test('pause stays disabled with a pt-BR reason when control is not enabled or no
     'Pausa indisponível. O controle seguro não está habilitado.',
   )
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  // aria-disabled keeps the button focusable so its reason is announced; a click opens nothing.
+  await pause.focus()
+  await expect(pause).toBeFocused()
+  await pause.click({ force: true })
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await page.unroute('**/api/signalling/pause-metadata')
   await page.route('**/api/signalling/pause-metadata', (route) =>
@@ -373,6 +378,7 @@ test('pause stays disabled with a pt-BR reason when control is not enabled or no
     'Pausa indisponível. Selecione um dispositivo aprovado deste navegador.',
   )
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
 
 test('camera region is named, unavailable without an authorized stream, silent and axe-clean', async ({
   page,

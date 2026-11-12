@@ -18,7 +18,14 @@ export type FarmPauseControlState =
   | { kind: 'ready'; expiresAt: number }
   | { kind: 'sending' }
   | { kind: 'settled'; outcome: PauseCommandOutcome }
-  | { kind: 'failed'; reason: 'unavailable' | 'expired' | 'closed' }
+  | { kind: 'failed'; reason: FarmPauseFailure }
+
+/** `not-ready`: no fresh capability in time, often a wrong device clock. */
+export type FarmPauseFailure =
+  'unavailable' | 'not-ready' | 'expired' | 'closed'
+
+/** A session that is not ready by then fails closed. */
+export const PAUSE_READY_DEADLINE_MS = 15_000
 
 export type FarmPauseKey = Readonly<{
   publicKey: unknown
@@ -79,12 +86,16 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
       // Rendering never changes the command path.
     }
   }
-  function fail(reason: 'unavailable' | 'expired' | 'closed') {
+  function fail(reason: FarmPauseFailure) {
     if (state.kind === 'sending') return
     set({ kind: 'failed', reason })
     close()
   }
+  const readyDeadline = setTimeout(() => {
+    if (state.kind === 'connecting') fail('not-ready')
+  }, PAUSE_READY_DEADLINE_MS)
   function close() {
+    clearTimeout(readyDeadline)
     clearTimeout(expiry)
     controller.abort()
     command?.abort()
@@ -160,12 +171,14 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
         ? 0
         : expiresAt - PAUSE_CAPABILITY_MARGIN_MS - now()
     if (remaining <= 0) {
-      fail('expired')
+      // A capability already expired by this device's clock was never usable.
+      fail('not-ready')
       return
     }
     // Defer: this runs inside the transport callback of the command client.
     queueMicrotask(() => {
       if (state.kind !== 'connecting') return
+      clearTimeout(readyDeadline)
       set({ kind: 'ready', expiresAt: expiresAt! })
       expiry = setTimeout(() => {
         if (state.kind === 'ready') fail('expired')

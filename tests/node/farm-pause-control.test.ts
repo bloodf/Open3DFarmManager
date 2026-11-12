@@ -6,7 +6,10 @@ import {
   PAUSE_CAPABILITY_MARGIN_MS,
   type FarmPauseControlState,
 } from '../../apps/farm/app/utils/webrtc/farm-pause-control.ts'
-import { pauseAvailability } from '../../apps/farm/app/utils/farm-pause.ts'
+import {
+  pauseAvailability,
+  pauseStatusText,
+} from '../../apps/farm/app/utils/farm-pause.ts'
 import type { FarmRow } from '../../apps/farm/app/utils/farm-view.ts'
 import {
   controlBindingHash,
@@ -276,11 +279,11 @@ test('confirmation is offered only after admission with a fresh capability and s
   assert.equal(f.commands.length, 1)
 })
 
-test('a capability without enough remaining validity is never offered', async (t) => {
+test('a capability without enough remaining validity is never offered and hints at the device clock', async (t) => {
   const f = await fixture(t, { capabilityMs: PAUSE_CAPABILITY_MARGIN_MS - 500 })
   await f.admit()
   await waitFor(() => f.states.at(-1)?.kind === 'failed')
-  assert.deepEqual(f.states.at(-1), { kind: 'failed', reason: 'expired' })
+  assert.deepEqual(f.states.at(-1), { kind: 'failed', reason: 'not-ready' })
   assert.equal(await f.control.pause(), undefined)
   assert.equal(f.commands.length, 0)
 })
@@ -365,4 +368,19 @@ test('pause availability requires a live printing row, an approved key and enabl
   const revoked = live()
   revoked.assignment = { ...revoked.assignment, connectorStatus: 'revoked' }
   assert.match(reason(revoked), /não está ativo/)
+})
+
+test('outcome copy stays neutral about where a rejection happened and never claims a retry', () => {
+  assert.match(
+    pauseStatusText({ kind: 'settled', outcome: 'rejected' }, 0),
+    /^Comando recusado\. A impressora não foi pausada/,
+  )
+  assert.match(
+    pauseStatusText({ kind: 'failed', reason: 'not-ready' }, 0),
+    /data e a hora deste dispositivo/,
+  )
+  assert.match(
+    pauseStatusText({ kind: 'settled', outcome: 'outcome-unknown' }, 0),
+    /Verifique a impressora/,
+  )
 })

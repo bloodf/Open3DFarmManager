@@ -685,7 +685,7 @@ function dateLabel(time: number) {
                   </p>
                   <button
                     type="button"
-                    :disabled="!availability(row).available"
+                    :aria-disabled="!availability(row).available"
                     :aria-describedby="`pause-help-${row.assignment.assignmentId}`"
                     @click="openPause(row, $event)"
                   >
@@ -779,7 +779,8 @@ a {
 button {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   cursor: not-allowed;
 }
 label {

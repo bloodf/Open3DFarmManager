@@ -63,7 +63,7 @@ export function pauseAvailability(
 const outcomeText: Record<PauseCommandOutcome, string> = {
   applied: 'Impressão pausada. O Connector confirmou a pausa.',
   rejected:
-    'Comando recusado pelo Connector. A impressora não foi pausada. Nada será repetido automaticamente.',
+    'Comando recusado. A impressora não foi pausada e nada será repetido automaticamente.',
   'not-sent':
     'O comando não foi enviado à impressora. A impressora não foi pausada.',
   'outcome-unknown':
@@ -88,6 +88,8 @@ export function pauseStatusText(
       switch (state.reason) {
         case 'unavailable':
           return 'Não foi possível obter uma autorização segura. Nenhum comando foi enviado.'
+        case 'not-ready':
+          return 'A autorização não ficou pronta. Nenhum comando foi enviado. Confira se a data e a hora deste dispositivo estão corretas e tente novamente.'
         case 'expired':
           return 'A autorização expirou antes da confirmação. Nenhum comando foi enviado.'
         case 'closed':

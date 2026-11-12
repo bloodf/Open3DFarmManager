@@ -351,6 +351,12 @@ export function createAuthenticatedFarmStatusFeed(
                   const message = parsed.data
                   for (const printer of message.printers) Object.freeze(printer)
                   Object.freeze(message.printers)
+                  if (message.inventory) {
+                    for (const spool of message.inventory.spools)
+                      Object.freeze(spool)
+                    Object.freeze(message.inventory.spools)
+                    Object.freeze(message.inventory)
+                  }
                   Object.freeze(message)
                   requireSync(() =>
                     onSnapshot(

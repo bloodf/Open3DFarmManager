@@ -6,6 +6,7 @@ import {
 import { BrowserDeviceUuid } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 import { StatusMessage } from '../../../../packages/farm-protocol/src/channel.ts'
+import type { SpoolInventory } from '../../../../packages/farm-protocol/src/inventory.ts'
 
 const exactKey = PrinterState.shape.printerKey.refine(
   (value) =>
@@ -108,6 +109,22 @@ export type FarmObservation = {
   sourceClockComparable: boolean
   historical: boolean
 }
+/** Read-only Spoolman mirror per Connector. Null inventory means unavailable. */
+export type FarmSpoolObservation = {
+  agentId: string
+  inventory: SpoolInventory | null
+  received: Clock
+}
+export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
+  const elapsed = now.mono - item.received.mono
+  return (
+    !item.inventory ||
+    item.inventory.stale ||
+    !Number.isFinite(elapsed) ||
+    elapsed < 0 ||
+    elapsed >= 30_000
+  )
+}
 export type FarmRow = {
   assignment: FarmAssignment
   connection:
@@ -142,6 +159,7 @@ type Ready = {
   inventory: 'loading' | 'ready'
   feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
+  spools: readonly FarmSpoolObservation[]
   nextPrinter: string | null
   printerAfter: string | null
   canManage: boolean
@@ -335,6 +353,7 @@ export function createFarmView(deps: Dependencies) {
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         rows: [],
+        spools: [],
         nextPrinter: null,
         printerAfter: null,
         canManage: false,
@@ -362,6 +381,7 @@ export function createFarmView(deps: Dependencies) {
         ...previous,
         scope: null,
         rows: [],
+        spools: [],
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
@@ -382,6 +402,7 @@ export function createFarmView(deps: Dependencies) {
       inventory: 'loading',
       feedScope: deps.feed ? 'idle' : 'disabled',
       rows: [],
+      spools: [],
       nextPrinter: null,
       printerAfter: after,
       canManage: false,
@@ -860,6 +881,21 @@ export function createFarmView(deps: Dependencies) {
             }
             if (message.seq <= seq) return
             seq = message.seq
+            if (state.kind === 'ready')
+              publish({
+                ...state,
+                spools: [
+                  ...state.spools.filter((item) => item.agentId !== agentId),
+                  {
+                    agentId,
+                    inventory: message.inventory ?? null,
+                    received: {
+                      wall: snapshot.receivedAtWallMs,
+                      mono: snapshot.receivedAtMonoMs,
+                    },
+                  },
+                ].sort((a, b) => a.agentId.localeCompare(b.agentId)),
+              })
             update((row) => {
               const printer = message.printers.find(
                 (item) => item.printerKey === row.assignment.printerKey,

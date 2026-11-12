@@ -9,6 +9,7 @@ import {
   FarmDiscoveryPage,
   localInterfaceOrigin,
   observationAge,
+  spoolInventoryStale,
   type FarmAdmittedSession,
   type FarmAssignment,
   type FarmSnapshot,
@@ -1424,4 +1425,90 @@ test('admitted temperature readings reach farm rows, and missing readings remain
   } finally {
     h.view.dispose()
   }
+})
+
+test('spool inventory is kept per Connector, replaced by each snapshot and unavailable when omitted', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  expect(h.ready().spools).toEqual([])
+  const inventory = {
+    observedAt: h.time.wall,
+    stale: false,
+    total: 1,
+    spools: [
+      {
+        name: 'PLA <b>',
+        material: 'PLA',
+        colorHex: 'ffffff',
+        remainingGrams: 400,
+        location: null,
+        archived: false,
+      },
+    ],
+  }
+  const send = (seq: number, withInventory: boolean) =>
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        ...(withInventory ? { inventory } : {}),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  send(0, true)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.agentId).toBe(agent)
+  expect(h.ready().spools[0]?.inventory?.spools[0]?.remainingGrams).toBe(400)
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(false)
+  expect(
+    spoolInventoryStale(h.ready().spools[0]!, {
+      wall: h.time.wall,
+      mono: h.time.mono + 30_000,
+    }),
+  ).toBe(true)
+  send(1, false)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
+})
+
+test('an invalid inventory ends the feed without publishing spools', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: { observedAt: 1, stale: false, total: 1, spools: [{}] },
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.ready().spools).toEqual([])
+  expect(h.first().connection).toBe('closed')
 })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
   localInterfaceOrigin,
@@ -244,6 +245,13 @@ function dateLabel(time: number) {
             >Gerenciar dispositivos do navegador</NuxtLink
           >
         </section>
+        <SpoolInventory
+          :items="ready.spools"
+          :now="now"
+          :connected="
+            ready.rows.some((row) => row.connection === 'authenticated')
+          "
+        />
         <section
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"

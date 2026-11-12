@@ -54,8 +54,30 @@ export function createTelemetryRuntimeLifecycle() {
       pending = undefined
     }
   }
+  let wake: (() => void) | undefined
+  /** A database that is unreachable at boot must not disable telemetry until a restart. */
+  async function startUntilAvailable(
+    input: unknown,
+    delays = { minMs: 1000, maxMs: 30000 },
+  ): Promise<Awaited<ReturnType<typeof start>>> {
+    let delay = delays.minMs
+    for (;;) {
+      const result = await start(input)
+      if (result !== 'unavailable' || closing) return result
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay)
+        wake = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+      wake = undefined
+      delay = Math.min(delay * 2, delays.maxMs)
+    }
+  }
   async function close(): Promise<void> {
     closing = true
+    wake?.()
     await pending
     if (installed) {
       deactivateTelemetryHttpRuntime()
@@ -65,5 +87,5 @@ export function createTelemetryRuntimeLifecycle() {
     pool = undefined
     if (sql) await sql.end({ timeout: 3 })
   }
-  return { start, close }
+  return { start, startUntilAvailable, close }
 }

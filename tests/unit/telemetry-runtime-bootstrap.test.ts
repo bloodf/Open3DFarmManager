@@ -55,4 +55,34 @@ describe('telemetry runtime lifecycle', () => {
     ).toBe('unavailable')
     expect(telemetryHttpRuntime()).toBeUndefined()
   })
+
+  test('unreachable database keeps retrying activation until closed', async () => {
+    const lifecycle = createTelemetryRuntimeLifecycle()
+    let settled = false
+    const started = lifecycle
+      .startUntilAvailable(
+        {
+          enabled: true,
+          // Reserved port 1 on loopback: refused immediately, never a real server.
+          databaseUrl: 'postgres://fixture:synthetic@127.0.0.1:1/fixture',
+          origin: 'https://farm.example',
+          issuer: 'https://farm.example',
+          audience: 'open3dfarmmanager:connector',
+          publicKeyRegistryPath: '/tmp/synthetic-keys.json',
+          tokenTtlSeconds: 300,
+          proofTtlMs: 30000,
+          bodyTimeoutMs: 5000,
+        },
+        { minMs: 20, maxMs: 40 },
+      )
+      .finally(() => {
+        settled = true
+      })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(settled).toBe(false)
+    expect(telemetryHttpRuntime()).toBeUndefined()
+    await lifecycle.close()
+    expect(await started).toBe('unavailable')
+    expect(telemetryHttpRuntime()).toBeUndefined()
+  })
 })

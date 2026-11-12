@@ -2,7 +2,7 @@ import { useRuntimeConfig } from 'nuxt/server'
 import { createTelemetryRuntimeLifecycle } from '../services/telemetry-runtime-bootstrap.ts'
 
 /** Disabled unless a future explicit runtime configuration supplies all values. */
-export default defineNitroPlugin(async (nitro) => {
+export default defineNitroPlugin((nitro) => {
   const lifecycle = createTelemetryRuntimeLifecycle()
   nitro.hooks.hook('close', () => lifecycle.close())
   const config: unknown = useRuntimeConfig()
@@ -10,5 +10,10 @@ export default defineNitroPlugin(async (nitro) => {
     config && typeof config === 'object' && 'connectorTelemetry' in config
       ? config.connectorTelemetry
       : undefined
-  await lifecycle.start(telemetry)
+  // Never blocks startup; retries while the database is still unreachable.
+  void lifecycle.startUntilAvailable(telemetry).catch(() => {
+    nitro.captureError(new Error('Telemetry startup unavailable'), {
+      tags: ['telemetry-startup'],
+    })
+  })
 })

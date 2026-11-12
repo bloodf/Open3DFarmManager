@@ -128,7 +128,7 @@ export async function runPauseControl(input: {
       credentialExpiresAt: credential.expires_at,
       retryMinMs: RETRY_MIN_MS,
       retryMaxMs: RETRY_MAX_MS,
-      createSession(onTerminal) {
+      createSession(onTerminal, onAdmitted) {
         const peerSignal = new AbortController()
         let transportId: string | undefined
         let ended = false
@@ -146,7 +146,10 @@ export async function runPauseControl(input: {
             identity: input.identity,
           },
           {
-            onInboxReady: () => diagnostic({ kind: 'pause-listening' }),
+            onInboxReady() {
+              onAdmitted()
+              diagnostic({ kind: 'pause-listening' })
+            },
             onProofsReady(value) {
               if (transportId || ended) throw new Error('Unexpected proofs')
               transportId = value.binding.transport_id

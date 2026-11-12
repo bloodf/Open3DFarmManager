@@ -174,6 +174,14 @@ type Options = {
   genuineStatus?: GenuineStatusOptions
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onTerminal?: (reason: string) => void
+  /**
+   * Server reread current enrollment, credential and revocation state for this
+   * credential-authenticated inbox. The only source for the offline authority
+   * tracker's confirm(); never fed by RTC or browser frames.
+   */
+  onAuthorityConfirm?: (serverSeq: number) => void
+  /** Server reread failed: cached authority must go stale immediately. */
+  onAuthorityRevoked?: (serverSeq: number) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   clock?: ChannelClock
@@ -373,6 +381,32 @@ export class AuthenticatedConnectorSignallingClient {
   }
   private async frame(frame: SignallingServerFrame) {
     if (!this.#channel.current()) return
+    if (
+      frame.t === 'connector.authority-confirm' ||
+      frame.t === 'connector.authority-revoked'
+    ) {
+      // Accepted only after the server admitted this inbox's credential proof.
+      if (
+        this.#phase === 'open' ||
+        this.#phase === 'inbox-challenge' ||
+        this.#phase === 'inbox-ready'
+      )
+        throw Error('Unexpected authority frame')
+      if (frame.t === 'connector.authority-revoked') {
+        runSynchronous(() =>
+          this.#options.onAuthorityRevoked?.(frame.server_seq),
+        )
+        return
+      }
+      if (
+        frame.farm_id !== this.#scope.farmId ||
+        frame.agent_id !== this.#scope.agentId ||
+        frame.credential_jti !== this.#scope.jti
+      )
+        throw Error('Authority confirmation scope mismatch')
+      runSynchronous(() => this.#options.onAuthorityConfirm?.(frame.server_seq))
+      return
+    }
     if (frame.t === 'retry') {
       const expected =
         this.#phase === 'inbox-challenge'

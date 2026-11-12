@@ -23,7 +23,12 @@ export async function runSignallingLifecycle(input: {
   credentialExpiresAt: number
   retryMinMs: number
   retryMaxMs: number
-  createSession(onTerminal: () => void): Session
+  /**
+   * `onAdmitted` reports that the server admitted this session's credential
+   * proof. The next reconnect then waits only retryMinMs, so a long-lived
+   * Connector keeps its reconnect gap below the offline authority lifetime.
+   */
+  createSession(onTerminal: () => void, onAdmitted: () => void): Session
 }): Promise<void> {
   let backoff = input.retryMinMs
   let expired = false
@@ -66,7 +71,10 @@ export async function runSignallingLifecycle(input: {
     )
     input.signal.addEventListener('abort', stop, { once: true })
     try {
-      session = input.createSession(endedSession)
+      session = input.createSession(endedSession, () => {
+        // A late callback from an ended session never resets backoff.
+        if (!ended) backoff = input.retryMinMs
+      })
       if (ended || input.signal.aborted || remaining() <= 0) stop()
       else {
         // start resolves on admission. Keep the slot until terminal AND disposal.

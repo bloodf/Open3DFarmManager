@@ -36,6 +36,10 @@ async function fixture(
   holdPeer = false,
   onAdmission?: () => void,
   observedClose = false,
+  authority: {
+    onAuthorityConfirm?: (serverSeq: number) => void
+    onAuthorityRevoked?: (serverSeq: number) => void
+  } = {},
 ) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -90,6 +94,7 @@ async function fixture(
       listening++
     },
     ...(onAdmission ? { onVerifiedAdmission: onAdmission } : {}),
+    ...authority,
     clock: { now: () => now, wallNow: () => wall },
     socketFactory: () => socket,
     peerFactory: async (options) => {
@@ -680,4 +685,47 @@ test('client disposal rejects when peer factory remains unsettled', async () => 
     f.releasePeer()
     f.client.close()
   }
+})
+
+test('authority confirmations are accepted only after inbox admission and only for the exact credential scope', async () => {
+  const confirms: number[] = []
+  const revocations: number[] = []
+  const early = await fixture(false, undefined, false, {
+    onAuthorityConfirm: (seq) => {
+      confirms.push(seq)
+    },
+  })
+  const confirm = (f: typeof early, overrides: Record<string, unknown> = {}) =>
+    f.push({
+      v: 1,
+      t: 'connector.authority-confirm',
+      server_seq: 10,
+      farm_id: f.scope.farmId,
+      agent_id: f.scope.agentId,
+      credential_jti: f.scope.jti,
+      ...overrides,
+    })
+  // Before the credential proof is admitted the frame is terminal.
+  await confirm(early)
+  await assert.rejects(early.pending)
+  assert.equal(confirms.length, 0)
+
+  const f = await fixture(false, undefined, false, {
+    onAuthorityConfirm: (seq) => {
+      confirms.push(seq)
+    },
+    onAuthorityRevoked: (seq) => {
+      revocations.push(seq)
+    },
+  })
+  void f.pending.catch(() => {})
+  await f.inbox()
+  await confirm(f, { server_seq: 11 })
+  await f.push({ v: 1, t: 'connector.authority-revoked', server_seq: 12 })
+  assert.deepEqual(confirms, [11])
+  assert.deepEqual(revocations, [12])
+  // A confirmation for another credential closes the session unconfirmed.
+  await confirm(f, { server_seq: 13, credential_jti: randomUUID() })
+  await assert.rejects(f.pending)
+  assert.deepEqual(confirms, [11])
 })

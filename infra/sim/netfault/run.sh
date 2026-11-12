@@ -34,7 +34,7 @@ cp -rL "$(dirname "$ndc")/." "$NETFAULT_NDC/node_modules/"
 printf '{"private":true}\n' > "$NETFAULT_NDC/package.json"
 chmod -R a+rX "$NETFAULT_NDC"
 cleanup() { dc --profile probe down --volumes --remove-orphans >/dev/null 2>&1 || true; }
-trap 'cleanup; rm -rf "$NETFAULT_NDC"' EXIT
+trap 'cleanup; dc --profile probe down --rmi local >/dev/null 2>&1 || true; rm -rf "$NETFAULT_NDC"' EXIT
 
 router() { dc exec -T router sh -euc "$1"; }
 apply_fault() {

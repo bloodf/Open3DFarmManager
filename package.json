@@ -21,6 +21,7 @@
     "test:e2e:auth-session": "node scripts/test-auth-session-e2e.ts",
     "test:rtc-farm": "node scripts/test-rtc-farm-acceptance.ts",
     "test:connector-outage": "node scripts/test-connector-outage-recovery.ts",
+    "test:sim-farm": "node scripts/test-sim-farm-acceptance.ts",
     "check:all": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:node && pnpm run test:rtsp-supervisor && pnpm run test:rtsp-framing && pnpm run build",
     "sim:smoke": "node packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",

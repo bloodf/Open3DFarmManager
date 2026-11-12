@@ -7,9 +7,18 @@ import {
 
 export default defineNitroPlugin(async (nitro) => {
   nitro.hooks.hook('close', closeDatabaseRuntime)
-  const config = parseDatabaseRuntimeConfig(
-    Reflect.get(useRuntimeConfig(), 'database'),
-  )
-  // Awaited and not caught: a failure here aborts startup so the server never serves.
-  if (config) await startDatabaseRuntime(config)
+  // Fail closed: an invalid config, unreachable database or schema mismatch
+  // must stop the process; a rejected plugin alone would still let Nitro listen.
+  try {
+    const config = parseDatabaseRuntimeConfig(
+      Reflect.get(useRuntimeConfig(), 'database'),
+    )
+    if (config) await startDatabaseRuntime(config)
+  } catch (error) {
+    console.error(
+      'Database startup failed; refusing to serve:',
+      error instanceof Error ? error.message : 'unknown error',
+    )
+    process.exit(1)
+  }
 })

@@ -51,11 +51,13 @@ type Active = {
   catalog: ReturnType<typeof migrationCatalog>
 }
 let active: Active | undefined
+let expected = false
 
 /** Rejects (so the server refuses to serve) on unreachable DB or schema mismatch. */
 export async function startDatabaseRuntime(
   config: DatabaseRuntimeConfig,
 ): Promise<void> {
+  expected = true
   const catalog = await loadMigrationCatalog(
     pathToFileURL(config.migrationsDir.replace(/\/?$/, '/')),
   )
@@ -74,9 +76,10 @@ export async function startDatabaseRuntime(
   active = { sql, catalog }
 }
 
-/** null: database runtime disabled, so readiness has nothing to report. */
+/** null: database runtime disabled. Enabled but not started reports unavailable. */
 export function currentDatabaseReadiness(): Promise<Readiness> | null {
-  return active ? databaseReadiness(active.sql, active.catalog) : null
+  if (active) return databaseReadiness(active.sql, active.catalog)
+  return expected ? Promise.resolve('unavailable') : null
 }
 
 export async function closeDatabaseRuntime(): Promise<void> {

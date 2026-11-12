@@ -86,8 +86,10 @@ function git(args: string[]) {
   }).toString('utf8')
 }
 async function sourceSnapshot() {
-  if (git(['status', '--porcelain=v1', '--untracked-files=normal']).length)
-    throw new Error('Source checkout must be clean')
+  const dirty = git(['status', '--porcelain=v1', '--untracked-files=normal'])
+  if (dirty.length)
+    // Repository-relative paths only; bounded for the ledger.
+    throw new Error('Source checkout must be clean: ' + dirty.slice(0, 600))
   const head = git(['rev-parse', 'HEAD']).trim()
   const names = git(['ls-files', '-z']).split('\0').filter(Boolean).sort()
   if (!names.length || names.length > 10000)
@@ -902,8 +904,18 @@ if (mode === '--prepare-layer') {
     const cleanup = async (name: string, action: () => Promise<void>) => {
       try {
         await action()
-      } catch {
+      } catch (error) {
         failures.push(name)
+        // Fixed harness messages, git paths or a child-process error code; no
+        // secrets reach this point. Recorded so an intermittent failure is
+        // diagnosable instead of a bare name.
+        const reason =
+          error instanceof Error
+            ? ('code' in error && typeof error.code === 'string'
+                ? error.code + ': '
+                : '') + error.message.split('\n').slice(0, 8).join(' | ')
+            : 'non-error'
+        await note(`Cleanup step ${name} failed: ${reason.slice(0, 800)}`)
       }
     }
     await cleanup('source and artifact manifest', () =>

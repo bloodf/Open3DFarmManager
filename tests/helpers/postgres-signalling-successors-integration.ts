@@ -29,6 +29,7 @@ import {
   SIGNALLING_IDLE_TIMEOUT_MS,
 } from '../../apps/farm/server/storage/postgres-signalling-authorization.ts'
 import { createCredentialRenewalHttpHandler } from '../../apps/farm/server/services/credential-renewal-http.ts'
+import { acceptSignallingProof } from '../../apps/farm/server/services/signalling-proof-acceptance.ts'
 
 const ORIGIN = 'https://farm.example'
 const AUDIENCE = 'open3dfarmmanager:connector'
@@ -347,18 +348,31 @@ export async function testPostgresSignallingSuccessors(
       const request = { token, ...scope, connectionId: randomUUID() }
       const issued = await acceptor.issue(request)
       if (!issued.ok || issued.kind !== 'challenge') return issued
-      return acceptor.accept({
-        ...request,
-        challenge: issued.challenge,
-        signature: fixture.identity.signCredentialProof({
+      // Completion goes through the runtime's own bounded busy retry.
+      return acceptSignallingProof({
+        credentials: acceptor,
+        request: {
+          ...request,
           challenge: issued.challenge,
-          token,
-          expectedOrigin: ORIGIN,
-          expectedAudience: AUDIENCE,
-          expectedPurpose: 'signalling',
-          expectedConnectionId: request.connectionId,
-          now: Date.now(),
-        }),
+          signature: fixture.identity.signCredentialProof({
+            challenge: issued.challenge,
+            token,
+            expectedOrigin: ORIGIN,
+            expectedAudience: AUDIENCE,
+            expectedPurpose: 'signalling',
+            expectedConnectionId: request.connectionId,
+            now: Date.now(),
+          }),
+        },
+        clock: { monotonic: () => performance.now() },
+        timers: {
+          after(ms, callback) {
+            const timer = setTimeout(callback, ms)
+            return () => clearTimeout(timer)
+          },
+        },
+        deadline: performance.now() + 8000,
+        signal: AbortSignal.timeout(10000),
       })
     }
     const acceptedJti = (result: Awaited<ReturnType<typeof prove>>) => {

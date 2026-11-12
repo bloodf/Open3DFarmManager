@@ -323,6 +323,8 @@ export async function testRenewalHttps(
       ).map((row) => row.jti as string)
 
     const root = await credential()
+    // A successor issued in the root's own second would not outlive it.
+    await sleep(1100)
     assert.deepEqual(await connector('renew'), { result: 'renewed' })
     const first = await credential()
     assert.notEqual(first.approval.device_token, root.approval.device_token)

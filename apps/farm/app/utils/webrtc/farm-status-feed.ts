@@ -10,7 +10,7 @@ import {
   BrowserDeviceTextId,
   validateBrowserDevicePublicKey,
 } from '../../../../../packages/farm-protocol/src/browser-device-proof.ts'
-import { StatusMessage } from '../../../../../packages/farm-protocol/src/channel.ts'
+import { parseStatusMessageTolerant } from '../../../../../packages/farm-protocol/src/channel.ts'
 import { RtcSessionBinding } from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
 import { AuthenticatedBrowserSignallingClient } from './authenticated-signalling-client.ts'
 
@@ -336,7 +336,9 @@ export function createAuthenticatedFarmStatusFeed(
               if (!session) return close('rejected')
               if (!current()) return stale()
               try {
-                const parsed = StatusMessage.safeParse(structuredClone(value))
+                const parsed = parseStatusMessageTolerant(
+                  structuredClone(value),
+                )
                 if (
                   !parsed.success ||
                   !Number.isSafeInteger(parsed.data.seq) ||
@@ -363,6 +365,12 @@ export function createAuthenticatedFarmStatusFeed(
                   const message = parsed.data
                   for (const printer of message.printers) Object.freeze(printer)
                   Object.freeze(message.printers)
+                  if (message.inventory) {
+                    for (const spool of message.inventory.spools)
+                      Object.freeze(spool)
+                    Object.freeze(message.inventory.spools)
+                    Object.freeze(message.inventory)
+                  }
                   Object.freeze(message)
                   requireSync(() =>
                     onSnapshot(

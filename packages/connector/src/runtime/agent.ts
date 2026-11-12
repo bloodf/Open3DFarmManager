@@ -350,7 +350,14 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
-        ...(input.onInventory ? { onInventory: input.onInventory } : {}),
+        ...(input.onInventory || snapshots
+          ? {
+              onInventory(value: SpoolmanSnapshot) {
+                snapshots?.setInventory(value)
+                input.onInventory?.(value)
+              },
+            }
+          : {}),
         queue,
         signal,
         onDiagnostic: diagnostic,

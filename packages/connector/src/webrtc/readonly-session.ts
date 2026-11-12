@@ -2,7 +2,11 @@ import {
   assignmentSetDigest,
   RtcAssignmentRef,
 } from '../../../farm-protocol/src/rtc-assignment-set.ts'
-import { StatusMessage } from '../../../farm-protocol/src/channel.ts'
+import type { SpoolInventory } from '../../../farm-protocol/src/inventory.ts'
+import {
+  StatusMessage,
+  parseStatusMessageTolerant,
+} from '../../../farm-protocol/src/channel.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import {
   RtcSessionBinding,
@@ -38,6 +42,13 @@ export type ReadonlyStatusMessage = Readonly<{
   printers: readonly Readonly<
     ReturnType<typeof StatusMessage.parse>['printers'][number]
   >[]
+  inventory?:
+    | Readonly<
+        Omit<SpoolInventory, 'spools'> & {
+          spools: readonly Readonly<SpoolInventory['spools'][number]>[]
+        }
+      >
+    | undefined
 }>
 type ImmutableBinding<B = RtcSessionBinding> = B extends RtcSessionBinding
   ? Readonly<
@@ -103,6 +114,8 @@ export function snapshotAssignmentRefs(
 export function validatedStatusMessage(
   input: unknown,
   refs: readonly AssignmentRef[],
+  /** Receiving side only: drop an invalid inventory instead of failing the frame. */
+  tolerantInventory = false,
 ): ReadonlyStatusMessage {
   if (
     typeof input !== 'object' ||
@@ -112,7 +125,11 @@ export function validatedStatusMessage(
     input.printers.length > 100
   )
     throw Error('Status printer limit')
-  const parsed = StatusMessage.parse(input)
+  const result = tolerantInventory
+    ? parseStatusMessageTolerant(input)
+    : StatusMessage.safeParse(input)
+  if (!result.success) throw result.error
+  const parsed = result.data
   if (
     parsed.printers.length !== refs.length ||
     new Set(parsed.printers.map((p) => p.printerKey)).size !== refs.length ||
@@ -125,6 +142,16 @@ export function validatedStatusMessage(
   return Object.freeze({
     ...parsed,
     printers: Object.freeze(parsed.printers.map((p) => Object.freeze(p))),
+    ...(parsed.inventory
+      ? {
+          inventory: Object.freeze({
+            ...parsed.inventory,
+            spools: Object.freeze(
+              parsed.inventory.spools.map((s) => Object.freeze(s)),
+            ),
+          }),
+        }
+      : {}),
   })
 }
 export type GenuineStatusOptions = Readonly<{
@@ -343,6 +370,7 @@ export class ReadonlyRtcSession {
         const message = validatedStatusMessage(
           JSON.parse(wire),
           this.#genuine.assignmentRefs,
+          true,
         )
         if (
           !Number.isSafeInteger(message.seq) ||

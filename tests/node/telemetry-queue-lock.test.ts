@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
+  readdirSync,
+  symlinkSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -260,18 +262,77 @@ test('collection reports a recovered lock as a diagnostic', async () => {
   }
 })
 
-test('a recovery mutex left by a crashed recoverer is itself recovered', () => {
+test('a recovery mutex left by a crashed recoverer fails closed for an operator', () => {
   withLock(owner, (path) => {
     const crashed = { ...owner, pid: 5151, instance: randomUUID() }
     writeFileSync(path + '.recover', JSON.stringify(crashed), { mode: 0o600 })
-    const orphan = `${path}.${randomUUID()}`
-    writeFileSync(orphan, '{}', { mode: 0o600 })
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      (error: NodeJS.ErrnoException & { dest?: string }) =>
+        error.code === 'EEXIST' && error.dest === path,
+    )
+    assert.equal(lockOwner(path).instance, owner.instance)
+    assert.equal(lockOwner(path + '.recover').pid, 5151)
+  })
+})
+
+test('takeover sweeps candidates left by crashed writers and releases its mutex', () => {
+  withLock(owner, (path) => {
+    const orphans = [
+      `${path}.${randomUUID()}`,
+      `${path}.recover.${randomUUID()}`,
+    ]
+    for (const orphan of orphans) writeFileSync(orphan, '', { mode: 0o600 })
     assert.deepEqual(acquireQueueLock(path, probe({ alive: () => false })), {
       recovered: true,
     })
+    for (const orphan of orphans) assert.equal(existsSync(orphan), false)
     assert.equal(existsSync(path + '.recover'), false)
-    assert.equal(existsSync(orphan), false, 'orphan candidate swept')
     assert.notEqual(lockOwner(path).instance, owner.instance)
+  })
+})
+
+test('a crashed writer leaves only a candidate, never an empty lock', () => {
+  const dir = scratch()
+  try {
+    const path = join(dir, 'telemetry.lock')
+    // A crash between candidate write and link leaves this file only.
+    writeFileSync(`${path}.${randomUUID()}`, '', { mode: 0o600 })
+    assert.deepEqual(acquireQueueLock(path, probe()), { recovered: false })
+    assert.equal(lockOwner(path).pid, process.pid)
+    assert.deepEqual(
+      readdirSync(dir).filter((name) => name.startsWith('telemetry.lock'))
+        .length,
+      2,
+      'own candidate removed after linking',
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('symlinked locks and mutexes are never followed or taken over', () => {
+  withLock(owner, (path) => {
+    const target = path + '-target'
+    writeFileSync(target, JSON.stringify(owner), { mode: 0o600 })
+    rmSync(path)
+    symlinkSync(target, path)
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      /EEXIST/,
+    )
+    assert.equal(lockOwner(target).instance, owner.instance)
+  })
+  withLock(owner, (path) => {
+    const target = path + '-target'
+    writeFileSync(target, '', { mode: 0o600 })
+    symlinkSync(target, path + '.recover')
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      /EEXIST/,
+    )
+    assert.equal(lockOwner(path).instance, owner.instance)
+    assert.equal(readFileSync(target, 'utf8'), '')
   })
 })
 
@@ -281,8 +342,8 @@ test('a live recovery mutex keeps the original lock error', () => {
     writeFileSync(path + '.recover', JSON.stringify(live), { mode: 0o600 })
     assert.throws(
       () => acquireQueueLock(path, probe({ alive: (pid) => pid === 5151 })),
-      (error: NodeJS.ErrnoException) =>
-        error.code === 'EEXIST' && error.path === path,
+      (error: NodeJS.ErrnoException & { dest?: string }) =>
+        error.code === 'EEXIST' && error.dest === path,
     )
     assert.equal(lockOwner(path).instance, owner.instance)
     assert.equal(lockOwner(path + '.recover').pid, 5151)

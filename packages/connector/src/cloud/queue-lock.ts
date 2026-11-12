@@ -166,55 +166,57 @@ function syncDirectory(path: string) {
     closeSync(fd)
   }
 }
-function writeNew(path: string, owner: Owner) {
-  const fd = openSync(path, 'wx', 0o600)
+function writeCandidate(path: string, owner: Owner) {
+  const candidate = `${path}.${owner.instance}`
+  const fd = openSync(candidate, 'wx', 0o600)
   try {
     writeFileSync(fd, JSON.stringify(owner))
     fsyncSync(fd)
   } finally {
     closeSync(fd)
   }
+  return candidate
+}
+/**
+ * Publishes a complete owner record without replacing anything: write and fsync
+ * a unique candidate, then hard-link it into place (EEXIST if present). A crash
+ * can leave only a candidate, never an empty lock.
+ */
+function writeNew(path: string, owner: Owner) {
+  const candidate = writeCandidate(path, owner)
+  try {
+    linkSync(candidate, path)
+  } finally {
+    unlinkSync(candidate)
+  }
+  syncDirectory(path)
 }
 const ignore = (action: () => void) => {
   try {
     action()
   } catch {
-    // Best-effort removal of task-owned leftovers.
+    // Best-effort removal of leftovers.
   }
 }
-
-/**
- * Takes the recovery mutex. A mutex left by a crashed recoverer is itself taken
- * over under the same rules: it is renamed aside, and only removed if the moved
- * file is still the stale record that was judged.
- */
-function acquireMutex(mutex: string, owner: Owner, probe: LockProbe) {
-  try {
-    writeNew(mutex, owner)
-    return
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const seen = readPrivate(mutex)
-    if (seen === undefined || !stale(parse(seen), probe)) throw error
-    const aside = `${mutex}.${owner.instance}.stale`
-    renameSync(mutex, aside)
-    if (readPrivate(aside) !== seen) {
-      // Raced with another recoverer: put its mutex back and give up.
-      ignore(() => linkSync(aside, mutex))
-      ignore(() => unlinkSync(aside))
-      throw error
-    }
-    unlinkSync(aside)
-    syncDirectory(mutex)
-    writeNew(mutex, owner)
-  }
+const ours = (path: string, owner: Owner) =>
+  parse(readPrivate(path))?.instance === owner.instance
+/** Removes a lock or mutex only while it still holds this instance's record. */
+function release(path: string, owner: Owner) {
+  if (!ours(path, owner)) return
+  unlinkSync(path)
+  syncDirectory(path)
 }
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Exclusive queue ownership. A lock left by a crashed owner is taken over only
  * when that owner certainly cannot be running; a live owner is never displaced.
  * Throws the original EEXIST error whenever ownership is refused. The queue
  * directory must be on a local filesystem.
+ *
+ * Takeover holds `<lock>.recover`. A leftover recovery mutex is never taken
+ * over automatically: it fails closed for operator review.
  */
 export function acquireQueueLock(
   path: string,
@@ -230,28 +232,31 @@ export function acquireQueueLock(
     if (seen === undefined || !stale(parse(seen), probe)) throw error
     const mutex = path + '.recover'
     try {
-      acquireMutex(mutex, owner, probe)
+      writeNew(mutex, owner)
     } catch {
       throw error
     }
     try {
       // Re-read under the mutex so a concurrent winner is kept.
       if (readPrivate(path) !== seen) throw error
-      // Sweep candidates and set-aside mutexes left by crashed recoverers.
-      const name = basename(path)
+      // Candidates left by crashed writers (`<lock>.<uuid>`, `<lock>.recover.<uuid>`).
       const leftover = new RegExp(
-        `^${name.replace('.', '\\.')}\\.(recover\\.)?[0-9a-f-]{36}(\\.stale)?$`,
+        `^${escapeRegExp(basename(path))}(\\.recover)?\\.[0-9a-f-]{36}$`,
       )
       for (const entry of readdirSync(dirname(path)))
         if (leftover.test(entry))
           ignore(() => unlinkSync(join(dirname(path), entry)))
-      const candidate = `${path}.${owner.instance}`
-      writeNew(candidate, owner)
+      const candidate = writeCandidate(path, owner)
       renameSync(candidate, path)
-      syncDirectory(path)
+      try {
+        syncDirectory(path)
+      } catch (syncError) {
+        // Not durably ours: give the lock back rather than hold it unreported.
+        ignore(() => release(path, owner))
+        throw syncError
+      }
     } finally {
-      unlinkSync(mutex)
-      syncDirectory(mutex)
+      release(mutex, owner)
     }
     return { recovered: true }
   }

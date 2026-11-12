@@ -8,7 +8,8 @@ export function logUnhandledError(
   event?: { path?: unknown },
 ): void {
   try {
-    const status = (error as { statusCode?: unknown } | null)?.statusCode
+    const e = error as { statusCode?: unknown; status?: unknown } | null
+    const status = e?.statusCode ?? e?.status
     if (typeof status === 'number' && status < 500) return
     log.error('unhandled-error', {
       error,

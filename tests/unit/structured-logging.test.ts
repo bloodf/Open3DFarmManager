@@ -125,7 +125,7 @@ test('scrubs URL userinfo, query params, free text, JWTs; keeps Bearer/PEM scrub
   )
   expect(out.three).toBe('password=[REDACTED] and secret: [REDACTED] end')
   expect(out.four).toBe('jwt [REDACTED]')
-  expect(out.five).toBe('Authorization: [REDACTED] setup')
+  expect(out.five).toBe('Authorization: [REDACTED]')
   expect(out.six).toBe('[REDACTED]')
   expect(redact('Basic setup')).toBe('Basic setup')
 })
@@ -299,4 +299,93 @@ test('unhandled-error hook logs 5xx path only and never throws', () => {
   expect(out[0]).toContain('"path":"/api/x"')
   expect(out.join('')).not.toContain('abc')
   expect(() => logUnhandledError(null, null as never)).not.toThrow()
+})
+
+test('Authorization/Proxy-Authorization schemes are redacted as one value', () => {
+  const s = (v: string) => redact(v) as string
+  for (const text of [
+    'Authorization: Bearer tok123.abc',
+    'Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==',
+    'authorization=Bearer tok123',
+    'Authorization: Basic setup',
+  ]) {
+    expect(s(text)).toMatch(/^[A-Za-z-]+[:=] ?\[REDACTED\]$/)
+  }
+  expect(s('Authorization: Bearer tok123')).not.toContain('tok123')
+})
+
+test('quoted JSON/JS object text is scrubbed', () => {
+  const s = (v: string) => redact(v) as string
+  expect(s('{"password":"hunter2"}')).not.toContain('hunter2')
+  expect(s('{"apiKey":"K1"}')).not.toContain('K1')
+  expect(s("{'token':'abc'}")).not.toContain('abc')
+  expect(s('{"password": "a b c", "ok": "yes"}')).toBe(
+    '{"password": [REDACTED], "ok": "yes"}',
+  )
+  expect(s('{"pw":"x1","sid":"x2"}')).not.toMatch(/x1|x2/)
+  expect(s('side: left')).toBe('side: left')
+})
+
+test('Cookie and Set-Cookie redact the whole header value', () => {
+  const out = redact(
+    'Cookie: a=1; b=2; c=3\nSet-Cookie: sid=zz; HttpOnly\nnext: line',
+  ) as string
+  expect(out).toBe('Cookie: [REDACTED]\nSet-Cookie: [REDACTED]\nnext: line')
+})
+
+test('extra query keys and userinfo with raw @', () => {
+  const out = redact('/x?sid=1&pw=2&otp=3&jwt=4&auth=5&keep=6') as string
+  expect(out).toBe(
+    '/x?sid=[REDACTED]&pw=[REDACTED]&otp=[REDACTED]&jwt=[REDACTED]&auth=[REDACTED]&keep=6',
+  )
+  expect(redact('postgres://u:p@ss@host:5432/db')).toBe(
+    'postgres://[REDACTED]@host:5432/db',
+  )
+})
+
+test('extra object keys are redacted', () => {
+  const out = redact({
+    auth: 'a',
+    bearer: 'b',
+    credential: 'c',
+    creds: 'c',
+    sid: 's',
+    accessKey: 'x',
+    encryptionKey: 'x',
+    masterKey: 'x',
+    pin: '1',
+    key: 'k',
+    api_key: 'k',
+    author: 'keep',
+    pinned: 'keep',
+  }) as Record<string, string>
+  expect(Object.keys(out).filter((k) => out[k] !== '[REDACTED]')).toEqual([
+    'author',
+    'pinned',
+  ])
+})
+
+test('1 MB hostile inputs scrub in linear time', () => {
+  const inputs = [
+    'x'.repeat(1_000_000),
+    'a.'.repeat(500_000),
+    '"'.repeat(1_000_000),
+    'password'.repeat(125_000),
+    'Bearer '.repeat(140_000),
+    '://@'.repeat(250_000),
+    '?a='.repeat(333_333),
+  ]
+  const start = Date.now()
+  for (const input of inputs) redact(input)
+  expect(Date.now() - start).toBeLessThan(2000)
+})
+
+test('hook honors status as well as statusCode', () => {
+  const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+  logUnhandledError(Object.assign(new Error('x'), { status: 400 }), {
+    path: '/n',
+  })
+  const n = spy.mock.calls.length
+  spy.mockRestore()
+  expect(n).toBe(0)
 })

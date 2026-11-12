@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 
 export const Receipt = z.strictObject({
@@ -15,6 +15,12 @@ export async function outputSnapshot(root: string) {
   const entries: { path: string; size: number; sha256: string }[] = []
   let total = 0
   const realRoot = await realpath(root)
+  // Empty means the root itself, which a package link never needs.
+  const escapes = (inside: string) =>
+    inside === '' ||
+    inside === '..' ||
+    inside.startsWith('..' + sep) ||
+    isAbsolute(inside)
   async function walk(directory: string) {
     for (const entry of (
       await readdir(directory, { withFileTypes: true })
@@ -39,19 +45,19 @@ export async function outputSnapshot(root: string) {
             .digest('hex'),
         })
       } else if (entry.isSymbolicLink()) {
-        // pnpm-traced Nitro output links duplicate packages inside the bundle.
-        // A link is sealed by its exact target and must stay inside the output.
+        // Current Nitro output links deduplicated packages inside server/node_modules.
+        // Only relative links that stay inside the sealed output are accepted.
+        if (entries.length >= 10000)
+          throw new Error('Output exceeds fixture bounds')
         const target = await readlink(path)
-        const resolved = await realpath(path)
-        const inside = relative(realRoot, resolved)
-        if (
-          !inside ||
-          inside === '..' ||
-          inside.startsWith('..' + sep) ||
-          isAbsolute(inside) ||
-          entries.length >= 10000
+        // Lexical check first, then the fully resolved chain (links to links).
+        const lexical = relative(root, resolve(dirname(path), target))
+        const real = await realpath(path).then(
+          (value) => relative(realRoot, value),
+          () => '..',
         )
-          throw new Error('Output link escapes fixture output')
+        if (isAbsolute(target) || escapes(lexical) || escapes(real))
+          throw new Error('Output link escapes the sealed output')
         entries.push({
           path: relative(root, path),
           size: 0,
@@ -61,7 +67,7 @@ export async function outputSnapshot(root: string) {
         })
       } else
         throw new Error(
-          'Output must contain regular files, directories and contained links only',
+          'Output must contain regular files, directories and internal links only',
         )
     }
   }

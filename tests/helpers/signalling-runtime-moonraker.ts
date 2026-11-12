@@ -20,6 +20,9 @@ const Request = z.strictObject({
       webhooks: z.tuple([z.literal('state')]),
       print_stats: z.tuple([z.literal('state')]),
       virtual_sdcard: z.tuple([z.literal('progress')]),
+      // The complete-observation query also asks for temperatures (#74).
+      extruder: z.tuple([z.literal('temperature')]).optional(),
+      heater_bed: z.tuple([z.literal('temperature')]).optional(),
     }),
   }),
 })
@@ -155,6 +158,12 @@ export async function createRuntimeMoonrakerFixture() {
                     webhooks: { state: 'ready' },
                     print_stats: { state: 'printing' },
                     virtual_sdcard: { progress },
+                    ...(request.params.objects.extruder
+                      ? { extruder: { temperature: 210 } }
+                      : {}),
+                    ...(request.params.objects.heater_bed
+                      ? { heater_bed: { temperature: 60 } }
+                      : {}),
                   },
                 },
               }),

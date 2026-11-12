@@ -1,8 +1,11 @@
 import {
   closeSync,
+  constants,
+  fstatSync,
   fsyncSync,
-  lstatSync,
+  linkSync,
   openSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   renameSync,
@@ -10,12 +13,17 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { hostname } from 'node:os'
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+
+// POSIX only. Automatic takeover needs Linux identities (/proc, machine and boot
+// IDs); elsewhere every leftover lock fails closed for operator review.
 
 /** Host facts used to decide whether a lock owner can still be running. */
 export interface LockProbe {
   hostname(): string
+  /** Stable machine identity (/etc/machine-id); undefined when unavailable. */
+  machineId(): string | undefined
   /** Kernel boot identity; undefined when the platform cannot provide one. */
   boot(): string | undefined
   /** PID namespace of this process; undefined when unknown. */
@@ -33,12 +41,13 @@ function optional<T>(read: () => T): T | undefined {
     return undefined
   }
 }
+const firstLine = (path: string) =>
+  optional(() => readFileSync(path, 'utf8').trim() || undefined)
 export const systemLockProbe: LockProbe = {
   hostname,
-  boot: () =>
-    optional(() =>
-      readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
-    ),
+  machineId: () =>
+    firstLine('/etc/machine-id') ?? firstLine('/var/lib/dbus/machine-id'),
+  boot: () => firstLine('/proc/sys/kernel/random/boot_id'),
   pidNamespace: () => optional(() => readlinkSync('/proc/self/ns/pid')),
   startTime(pid) {
     // Field 22 of /proc/<pid>/stat, counted after the parenthesized command name.
@@ -59,6 +68,7 @@ type Owner = {
   version: 2
   pid: number
   host: string
+  machine: string | null
   boot: string | null
   ns: string | null
   start: string | null
@@ -69,13 +79,15 @@ function describe(probe: LockProbe): Owner {
     version: 2,
     pid: process.pid,
     host: probe.hostname(),
+    machine: probe.machineId() ?? null,
     boot: probe.boot() ?? null,
     ns: probe.pidNamespace() ?? null,
     start: probe.startTime(process.pid) ?? null,
     instance: randomUUID(),
   }
 }
-function parse(text: string): Owner | undefined {
+function parse(text: string | undefined): Owner | undefined {
+  if (text === undefined) return undefined
   let value: unknown
   try {
     value = JSON.parse(text)
@@ -84,40 +96,67 @@ function parse(text: string): Owner | undefined {
   }
   if (!value || typeof value !== 'object') return undefined
   const v = value as Record<string, unknown>
-  const text_ = (x: unknown) => x === null || typeof x === 'string'
+  const nullable = (x: unknown) => x === null || typeof x === 'string'
   if (
     Object.keys(v).sort().join(',') !==
-      'boot,host,instance,ns,pid,start,version' ||
+      'boot,host,instance,machine,ns,pid,start,version' ||
     v.version !== 2 ||
     !Number.isSafeInteger(v.pid) ||
     (v.pid as number) < 1 ||
     typeof v.host !== 'string' ||
     typeof v.instance !== 'string' ||
-    !text_(v.boot) ||
-    !text_(v.ns) ||
-    !text_(v.start)
+    !nullable(v.machine) ||
+    !nullable(v.boot) ||
+    !nullable(v.ns) ||
+    !nullable(v.start)
   )
     return undefined
   return v as Owner
 }
 /**
- * True only when the recorded owner certainly cannot be running: same host and
- * PID namespace, and either a different boot, a missing PID or a reused PID.
- * Legacy PID-only locks and every ambiguous case stay locked.
+ * True only when the recorded owner certainly cannot be running: same host,
+ * machine and PID namespace with known identities, and either a different boot,
+ * a missing PID or a reused PID. Legacy and ambiguous owners stay locked.
  */
 function stale(owner: Owner | undefined, probe: LockProbe): boolean {
   if (!owner || owner.host !== probe.hostname()) return false
+  const machine = probe.machineId() ?? null
+  if (owner.machine === null || machine === null || owner.machine !== machine)
+    return false
   const boot = probe.boot() ?? null
-  if (owner.boot !== boot) return owner.boot !== null && boot !== null
-  if (owner.ns !== (probe.pidNamespace() ?? null)) return false
+  if (owner.boot === null || boot === null) return false
+  if (owner.boot !== boot) return true
+  if (owner.ns === null || owner.ns !== (probe.pidNamespace() ?? null))
+    return false
   if (!probe.alive(owner.pid)) return true
   const start = probe.startTime(owner.pid)
   return owner.start !== null && start !== undefined && start !== owner.start
 }
-function readLock(path: string): string | undefined {
-  const stat = lstatSync(path, { throwIfNoEntry: false })
-  if (!stat?.isFile() || stat.nlink !== 1 || stat.size > 4096) return undefined
-  return readFileSync(path, 'utf8')
+/** Private regular single-link file read through a no-follow descriptor. */
+function readPrivate(path: string): string | undefined {
+  let fd: number
+  try {
+    fd = openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )
+  } catch {
+    return undefined
+  }
+  try {
+    const stat = fstatSync(fd)
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      stat.size > 4096 ||
+      (stat.mode & 0o077) !== 0 ||
+      stat.uid !== process.getuid?.()
+    )
+      return undefined
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 function syncDirectory(path: string) {
   const fd = openSync(dirname(path), 'r')
@@ -136,11 +175,46 @@ function writeNew(path: string, owner: Owner) {
     closeSync(fd)
   }
 }
+const ignore = (action: () => void) => {
+  try {
+    action()
+  } catch {
+    // Best-effort removal of task-owned leftovers.
+  }
+}
+
+/**
+ * Takes the recovery mutex. A mutex left by a crashed recoverer is itself taken
+ * over under the same rules: it is renamed aside, and only removed if the moved
+ * file is still the stale record that was judged.
+ */
+function acquireMutex(mutex: string, owner: Owner, probe: LockProbe) {
+  try {
+    writeNew(mutex, owner)
+    return
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    const seen = readPrivate(mutex)
+    if (seen === undefined || !stale(parse(seen), probe)) throw error
+    const aside = `${mutex}.${owner.instance}.stale`
+    renameSync(mutex, aside)
+    if (readPrivate(aside) !== seen) {
+      // Raced with another recoverer: put its mutex back and give up.
+      ignore(() => linkSync(aside, mutex))
+      ignore(() => unlinkSync(aside))
+      throw error
+    }
+    unlinkSync(aside)
+    syncDirectory(mutex)
+    writeNew(mutex, owner)
+  }
+}
 
 /**
  * Exclusive queue ownership. A lock left by a crashed owner is taken over only
  * when that owner certainly cannot be running; a live owner is never displaced.
- * Throws the original EEXIST error whenever ownership is refused.
+ * Throws the original EEXIST error whenever ownership is refused. The queue
+ * directory must be on a local filesystem.
  */
 export function acquireQueueLock(
   path: string,
@@ -152,19 +226,32 @@ export function acquireQueueLock(
     return { recovered: false }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const seen = readLock(path)
+    const seen = readPrivate(path)
     if (seen === undefined || !stale(parse(seen), probe)) throw error
-    // One recoverer at a time; it re-reads the lock so a concurrent winner is kept.
-    const mutex = openSync(path + '.recover', 'wx', 0o600)
+    const mutex = path + '.recover'
     try {
-      if (readLock(path) !== seen) throw error
+      acquireMutex(mutex, owner, probe)
+    } catch {
+      throw error
+    }
+    try {
+      // Re-read under the mutex so a concurrent winner is kept.
+      if (readPrivate(path) !== seen) throw error
+      // Sweep candidates and set-aside mutexes left by crashed recoverers.
+      const name = basename(path)
+      const leftover = new RegExp(
+        `^${name.replace('.', '\\.')}\\.(recover\\.)?[0-9a-f-]{36}(\\.stale)?$`,
+      )
+      for (const entry of readdirSync(dirname(path)))
+        if (leftover.test(entry))
+          ignore(() => unlinkSync(join(dirname(path), entry)))
       const candidate = `${path}.${owner.instance}`
       writeNew(candidate, owner)
       renameSync(candidate, path)
       syncDirectory(path)
     } finally {
-      closeSync(mutex)
-      unlinkSync(path + '.recover')
+      unlinkSync(mutex)
+      syncDirectory(mutex)
     }
     return { recovered: true }
   }

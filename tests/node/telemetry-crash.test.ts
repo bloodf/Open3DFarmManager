@@ -10,6 +10,7 @@ import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { drainTelemetryOnce } from '../../packages/connector/src/cloud/drain.ts'
 import { ingestTelemetry } from '../../apps/farm/server/services/telemetry.ts'
 import { MemoryTelemetryStore } from '../helpers/memory-telemetry-store.ts'
+import { reopenAfterCrash } from '../helpers/queue-lock-platform.ts'
 
 const queueModule = new URL(
   '../../packages/connector/src/cloud/queue.ts',
@@ -61,8 +62,7 @@ test(
       const [, signal] = await exited
       assert.equal(signal, 'SIGKILL')
       // The killed owner cannot be running, so the restart takes over its lock.
-      queue = new TelemetryQueue(directory, 1001)
-      assert.equal(queue.recoveredStaleLock, true)
+      queue = reopenAfterCrash(directory, 1001)
       assert.deepEqual(
         queue.batch(1001).records.map((record) => record.eventId),
         records.map((record) => record.eventId),

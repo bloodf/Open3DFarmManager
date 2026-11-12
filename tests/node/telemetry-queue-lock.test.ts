@@ -2,7 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -17,6 +19,10 @@ import {
   type LockProbe,
 } from '../../packages/connector/src/cloud/queue-lock.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
+import {
+  automaticLockRecovery,
+  reopenAfterCrash,
+} from '../helpers/queue-lock-platform.ts'
 
 const queueModule = new URL(
   '../../packages/connector/src/cloud/queue.ts',
@@ -27,6 +33,7 @@ function scratch() {
 }
 const probe = (over: Partial<LockProbe> = {}): LockProbe => ({
   hostname: () => 'host-a',
+  machineId: () => 'machine-a',
   boot: () => 'boot-1',
   pidNamespace: () => 'pid:[1]',
   startTime: () => 'start-1',
@@ -37,6 +44,7 @@ const owner = {
   version: 2,
   pid: 4242,
   host: 'host-a',
+  machine: 'machine-a',
   boot: 'boot-1',
   ns: 'pid:[1]',
   start: 'start-1',
@@ -76,15 +84,14 @@ async function holdInChild(directory: string) {
   return child
 }
 
-test('a SIGKILLed owner is recovered automatically on restart', async () => {
+test('a SIGKILLed owner is recovered automatically where supported', async () => {
   const dir = scratch()
   const child = await holdInChild(dir)
   try {
     const exited = once(child, 'exit')
     child.kill('SIGKILL')
     await exited
-    const queue = new TelemetryQueue(dir, 1001)
-    assert.equal(queue.recoveredStaleLock, true)
+    const queue = reopenAfterCrash(dir, 1001)
     assert.equal(lockOwner(join(dir, 'telemetry.lock')).pid, process.pid)
     queue.close()
     const clean = new TelemetryQueue(dir, 1002)
@@ -157,7 +164,46 @@ test('ambiguous owners fail closed and leave the lock untouched', () => {
       owner,
       { pidNamespace: () => 'pid:[2]', alive: () => false },
     ],
-    ['boot identity unknown', owner, { boot: () => undefined }],
+    ['boot identity unknown here', owner, { boot: () => undefined }],
+    [
+      'boot identity unknown on both sides',
+      { ...owner, boot: null },
+      {
+        boot: () => undefined,
+        alive: () => false,
+      },
+    ],
+    [
+      'machine identity unknown here',
+      owner,
+      {
+        machineId: () => undefined,
+        alive: () => false,
+      },
+    ],
+    [
+      'lock without machine identity',
+      { ...owner, machine: null },
+      {
+        alive: () => false,
+      },
+    ],
+    [
+      'other machine with the same hostname',
+      owner,
+      {
+        machineId: () => 'machine-b',
+        alive: () => false,
+      },
+    ],
+    [
+      'PID namespace unknown',
+      { ...owner, ns: null },
+      {
+        pidNamespace: () => undefined,
+        alive: () => false,
+      },
+    ],
     ['legacy PID-only lock', { pid: 4242 }, { alive: () => false }],
     ['unparseable lock', 'not json', { alive: () => false }],
   ]
@@ -193,7 +239,7 @@ test('collection reports a recovered lock as a diagnostic', async () => {
     const exited = once(child, 'exit')
     child.kill('SIGKILL')
     await exited
-    queue = new TelemetryQueue(dir, 1001)
+    queue = reopenAfterCrash(dir, 1001)
     const diagnostics: { kind: string }[] = []
     const { collectIntoQueue } =
       await import('../../packages/connector/src/runtime/collect.ts')
@@ -203,10 +249,52 @@ test('collection reports a recovered lock as a diagnostic', async () => {
       signal: AbortSignal.abort(),
       onDiagnostic: (value) => diagnostics.push(value),
     })
-    assert.equal(diagnostics[0]?.kind, 'queue-lock-recovered')
+    assert.equal(
+      diagnostics[0]?.kind,
+      automaticLockRecovery ? 'queue-lock-recovered' : 'summary',
+    )
   } finally {
     queue?.close()
     child.kill('SIGKILL')
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a recovery mutex left by a crashed recoverer is itself recovered', () => {
+  withLock(owner, (path) => {
+    const crashed = { ...owner, pid: 5151, instance: randomUUID() }
+    writeFileSync(path + '.recover', JSON.stringify(crashed), { mode: 0o600 })
+    const orphan = `${path}.${randomUUID()}`
+    writeFileSync(orphan, '{}', { mode: 0o600 })
+    assert.deepEqual(acquireQueueLock(path, probe({ alive: () => false })), {
+      recovered: true,
+    })
+    assert.equal(existsSync(path + '.recover'), false)
+    assert.equal(existsSync(orphan), false, 'orphan candidate swept')
+    assert.notEqual(lockOwner(path).instance, owner.instance)
+  })
+})
+
+test('a live recovery mutex keeps the original lock error', () => {
+  withLock(owner, (path) => {
+    const live = { ...owner, pid: 5151 }
+    writeFileSync(path + '.recover', JSON.stringify(live), { mode: 0o600 })
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: (pid) => pid === 5151 })),
+      (error: NodeJS.ErrnoException) =>
+        error.code === 'EEXIST' && error.path === path,
+    )
+    assert.equal(lockOwner(path).instance, owner.instance)
+    assert.equal(lockOwner(path + '.recover').pid, 5151)
+  })
+})
+
+test('a lock that is not a private regular file is never taken over', () => {
+  withLock(owner, (path) => {
+    chmodSync(path, 0o644)
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      /EEXIST/,
+    )
+  })
 })

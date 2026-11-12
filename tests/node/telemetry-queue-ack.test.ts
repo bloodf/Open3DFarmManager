@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
+import { reopenAfterCrash } from '../helpers/queue-lock-platform.ts'
 
 const state = {
   printerKey: 'sim-1',
@@ -213,9 +214,8 @@ test('SIGKILL at arbitrary points of the ack path never loses or resurrects reco
       child.kill('SIGKILL')
       await exited
       const reported = output.split('\n').filter(Boolean)
-      const queue = new TelemetryQueue(dir, 3000)
+      const queue = reopenAfterCrash(dir, 3000)
       try {
-        assert.equal(queue.recoveredStaleLock, true)
         const remaining = queue.batch(3000, 1000).records.map((r) => r.eventId)
         // Remaining records are an exact suffix of the original FIFO, and every
         // reported acknowledgement is gone; at most one in-flight ack is replayed.
@@ -229,5 +229,26 @@ test('SIGKILL at arbitrary points of the ack path never loses or resurrects reco
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  }
+})
+
+test('reopening compacts an acknowledged prefix already over the threshold', () => {
+  const { dir, ids, log, bytes } = seeded()
+  const lineBytes = bytes.length / 3
+  try {
+    writeFileSync(cursor(dir), JSON.stringify({ lastAcked: ids[1] }), {
+      mode: 0o600,
+    })
+    const queue = new TelemetryQueue(dir, 2000, {
+      compactAfterBytes: Math.ceil(lineBytes * 1.5),
+    })
+    try {
+      assert.equal(statSync(log).size, lineBytes)
+      assert.deepEqual(live(queue), [ids[2]])
+    } finally {
+      queue.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

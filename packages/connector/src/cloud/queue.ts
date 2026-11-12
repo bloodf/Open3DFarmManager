@@ -209,7 +209,7 @@ export class TelemetryQueue {
       try {
         const stat = fstatSync(readFd)
         privateStat(stat)
-        if (stat.size > MAX_BYTES + COMPACT_BYTES + MAX_RECORD)
+        if (stat.size > MAX_BYTES + COMPACT_BYTES + 2 * MAX_RECORD)
           throw new Error('Queue file exceeds recovery limit')
         data = readFileSync(readFd)
       } finally {
@@ -279,7 +279,10 @@ export class TelemetryQueue {
       const bounded = this.bound(this.records, now)
       Object.assign(this.recovery, bounded.loss)
       this.recovery.partialTail = end !== data.length
-      if (bounded.records.length !== this.records.length)
+      if (
+        bounded.records.length !== this.records.length ||
+        this.ackedBytes >= this.compactAfterBytes
+      )
         this.replace(bounded.records)
     } catch (error) {
       unlinkSync(this.lock)
@@ -289,11 +292,23 @@ export class TelemetryQueue {
   private readCursor(): string | undefined {
     if (!lstatSync(this.cursor, { throwIfNoEntry: false })) return undefined
     privateEntry(this.cursor)
-    if (lstatSync(this.cursor).size > 256)
-      throw new Error('Invalid queue acknowledgement cursor')
+    const fd = openSync(
+      this.cursor,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )
+    let text: string
+    try {
+      const stat = fstatSync(fd)
+      privateStat(stat)
+      if (stat.size > 256)
+        throw new Error('Invalid queue acknowledgement cursor')
+      text = readFileSync(fd, 'utf8')
+    } finally {
+      closeSync(fd)
+    }
     let value: unknown
     try {
-      value = JSON.parse(readFileSync(this.cursor, 'utf8'))
+      value = JSON.parse(text)
     } catch {
       throw new Error('Invalid queue acknowledgement cursor')
     }

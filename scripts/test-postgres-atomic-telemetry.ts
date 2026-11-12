@@ -46,11 +46,21 @@ try {
   )[0]
   assert.equal(identity?.database, 'fixture')
   assert.equal(identity?.user, 'fixture')
-  const catalog = catalogThrough(
-    await loadMigrationCatalog(),
-    '0022_connector_successor_proofs',
+  const full = await loadMigrationCatalog()
+  const catalog = catalogThrough(full, '0022_connector_successor_proofs')
+  const existing = Number(
+    (
+      await sql`SELECT count(*)::int AS n FROM public.open3dfarm_migrations`.catch(
+        () => [{ n: 0 }],
+      )
+    )[0]?.n,
   )
-  // Later migrations are not applied: this fixture rolls 0022 back and forward.
+  if (existing > catalog.length)
+    throw new Error(
+      'Atomic telemetry runner requires a fresh fixture DB; it applies 0001–0022 itself and found ' +
+        existing +
+        ' migrations',
+    )
   await runMigrations(sql, catalog, { kind: 'up' })
   const rows =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`

@@ -190,8 +190,15 @@ export async function testPostgresAtomicTelemetry(
       state: { printerKey, state: 'idle', progress: 0, observedAt: now },
     }
   }
-  const bytes = (events: ReturnType<typeof event>[]) =>
-    Buffer.from(JSON.stringify(events))
+  function transition(printerKey: string, eventId = randomUUID()) {
+    return {
+      eventId,
+      queuedAt: now,
+      kind: 'printer-transition',
+      transition: { printerKey, from: 'idle', to: 'error', observedAt: now },
+    }
+  }
+  const bytes = (events: object[]) => Buffer.from(JSON.stringify(events))
   const ownRequest = (
     item: Awaited<ReturnType<typeof issued>>,
     printerKey: string,
@@ -503,10 +510,81 @@ export async function testPostgresAtomicTelemetry(
     checks.push(
       'conflicting-reused-id-rolls-back-entire-batch-and-proof-consumption-after-earlier-insert',
     )
+    const mixed = await assigned()
+    const mixedRecords = [
+        event(mixed.printerKey),
+        transition(mixed.printerKey),
+      ],
+      mixedBody = bytes(mixedRecords)
+    const mixedChallenge = await challenge(mixed, mixedBody)
+    now += 1000
+    assert.equal(
+      committed(
+        await service().commitTelemetryWithProof(
+          signed(mixed, mixedBody, mixedChallenge),
+          mixedBody,
+        ),
+      ),
+      true,
+    )
+    assert.equal(await count(mixed), 2)
+    now += 1000
+    const retryChallenge = await challenge(mixed, mixedBody)
+    now += 1000
+    const retried = await service().commitTelemetryWithProof(
+      signed(mixed, mixedBody, retryChallenge),
+      mixedBody,
+    )
+    assert.ok(retried.ok && retried.kind === 'telemetry-committed')
+    assert.deepEqual(
+      retried.acceptedEventIds,
+      mixedRecords.map((record) => record.eventId),
+    )
+    assert.equal(await count(mixed), 2)
+    now += 1000
+    const stray = bytes([event(mixed.printerKey), transition('not-assigned')]),
+      strayChallenge = await challenge(mixed, stray)
+    now += 1000
+    assert.deepEqual(
+      await service().commitTelemetryWithProof(
+        signed(mixed, stray, strayChallenge),
+        stray,
+      ),
+      { ok: false, reason: 'forbidden-printer' },
+    )
+    assert.equal(await count(mixed), 2)
+    now = strayChallenge.expires_at
+    const reused = bytes([
+        event(mixed.printerKey),
+        {
+          ...mixedRecords[1],
+          transition: {
+            ...transition('x').transition,
+            printerKey: mixed.printerKey,
+            to: 'offline',
+          },
+        },
+      ]),
+      reusedChallenge = await challenge(mixed, reused)
+    now += 1000
+    assert.deepEqual(
+      await service().commitTelemetryWithProof(
+        signed(mixed, reused, reusedChallenge),
+        reused,
+      ),
+      { ok: false, reason: 'conflict' },
+    )
+    assert.equal(await count(mixed), 2)
+    checks.push(
+      'printer-transition-events-batch-with-state-idempotently-deduplicate-and-roll-back-on-unauthorized-printer-or-conflicting-id',
+    )
     for (const mutation of ['connector', 'ownership'])
       for (const order of ['mutation-first', 'ingest-first']) {
         const race = await assigned()
-        const body = bytes([event(race.printerKey)]),
+        const body = bytes([
+            event(race.printerKey),
+            transition(race.printerKey),
+          ]),
           pending = await challenge(race, body)
         now += 1000
         const proof = signed(race, body, pending)
@@ -571,7 +649,7 @@ export async function testPostgresAtomicTelemetry(
               ok: false,
               reason: mutation === 'connector' ? 'denied' : 'forbidden-printer',
             })
-          assert.equal(await count(race), order === 'ingest-first' ? 1 : 0)
+          assert.equal(await count(race), order === 'ingest-first' ? 2 : 0)
           now += 1000
           if (mutation === 'connector')
             assert.deepEqual(

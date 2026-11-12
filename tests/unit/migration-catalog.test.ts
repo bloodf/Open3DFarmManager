@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   migrationCatalog,
   validateMigrationHistory,
@@ -65,5 +66,20 @@ describe('migration catalog', () => {
       [{ ...row, unexpected: true }],
     ])
       expect(() => validateMigrationHistory(catalog, rows)).toThrow()
+  })
+
+  test('catalogThrough returns the prefix ending at the id and rejects unknown ids', () => {
+    const catalog = migrationCatalog([
+      ...pair,
+      { name: '0002_next.up.sql', sql: 'SELECT 1;' },
+      { name: '0002_next.down.sql', sql: 'SELECT 2;' },
+    ])
+    const first = catalogThrough(catalog, '0001_example')
+    expect(first).toEqual(catalog.slice(0, 1))
+    expect(first.at(-1)?.id).toBe('0001_example')
+    expect(catalogThrough(catalog, '0002_next')).toEqual(catalog)
+    expect(() => catalogThrough(catalog, '0003_missing')).toThrow(
+      /not in the catalog/,
+    )
   })
 })

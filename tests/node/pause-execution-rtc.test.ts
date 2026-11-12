@@ -387,6 +387,8 @@ for (const row of [
     // 5. Compose relay
     const relay = createPauseCommandRelay({
       authority: {
+        // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+        freshness: { freshAt: () => true },
         issuers: [
           {
             issuer: 'farm:issuer',

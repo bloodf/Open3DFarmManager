@@ -112,9 +112,12 @@ export async function runMigrations(
     ]),
   )
   return sql.begin(async (tx) => {
-    await tx`SET LOCAL lock_timeout = '5000ms'`
+    // Concurrent runners queue on the advisory lock (bounded by statement_timeout);
+    // DDL lock waits keep the short limit.
+    await tx`SET LOCAL lock_timeout = 0`
     await tx`SET LOCAL statement_timeout = '30000ms'`
     await tx`SELECT pg_advisory_xact_lock(1870033, 1)`
+    await tx`SET LOCAL lock_timeout = '5000ms'`
     await tx`CREATE TABLE IF NOT EXISTS public.open3dfarm_migrations (
       position integer PRIMARY KEY CHECK (position > 0),
       id text UNIQUE NOT NULL,

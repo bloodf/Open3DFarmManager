@@ -195,6 +195,8 @@ async function relayFixture(
   const mappings = new Map<string, ReturnType<typeof registry.provision>>()
   const relay = createPauseCommandRelay({
     authority: {
+      // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+      freshness: { freshAt: () => true },
       issuers: [
         { issuer: 'farm:issuer', kid: 'issuer-1', publicKey: issuer.publicKey },
       ],
@@ -554,6 +556,8 @@ test('a peer without a local mapping is refused and never receives a nonce', asy
   const f = await relayFixture(t)
   const refused = createPauseCommandRelay({
     authority: {
+      // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+      freshness: { freshAt: () => true },
       issuers: [
         {
           issuer: 'farm:issuer',
@@ -940,6 +944,8 @@ async function transportFixture(t: test.TestContext) {
   }
   const relay = createPauseCommandRelay({
     authority: {
+      // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+      freshness: { freshAt: () => true },
       issuers: [
         { issuer: 'farm:issuer', kid: 'issuer-1', publicKey: issuer.publicKey },
       ],

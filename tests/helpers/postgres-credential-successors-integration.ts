@@ -24,7 +24,6 @@ export async function testPostgresCredentialSuccessors(
     await loadMigrationCatalog(),
     '0021_connector_credential_successors',
   )
-  assert.equal(catalog.at(-1)?.id, '0021_connector_credential_successors')
   assert.equal((await admin`SELECT current_database() AS db`)[0]?.db, 'fixture')
   assert.equal(
     (await admin`SELECT to_regnamespace('farm') AS schema`)[0]?.schema,

@@ -1,6 +1,11 @@
 import { z } from 'zod'
-import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
-import { MoonrakerClientError, type MoonrakerLimits } from './client.ts'
+import {
+  MoonrakerClientError,
+  validateMoonrakerInput,
+  type MoonrakerLimits,
+} from './client.ts'
+import { Reply, decodeMoonrakerFrame } from './frame.ts'
+import { createMoonrakerSocket } from './socket.ts'
 import {
   parseIdentifyResult,
   parseServerInfoResult,
@@ -13,20 +18,12 @@ import {
   type MoonrakerWebcam,
 } from './discovery-parse.ts'
 
-process.env.WS_NO_BUFFER_UTIL = '1'
-process.env.WS_NO_UTF_8_VALIDATE = '1'
-const { default: WebSocket } = await import('ws')
-
-const Reply = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int().positive(),
-  result: z.unknown(),
-})
 const Failure = z.looseObject({
   jsonrpc: z.literal('2.0'),
   id: z.number(),
   error: z.unknown(),
 })
+const REQUESTS = 5
 
 export type MoonrakerDiscovery = Readonly<{
   identity: MoonrakerIdentity
@@ -35,37 +32,69 @@ export type MoonrakerDiscovery = Readonly<{
   webcams: readonly MoonrakerWebcam[]
 }>
 
+class RemoteError extends Error {}
+
+// Reuses validateMoonrakerInput so discovery enforces the same origin and limit rules.
+function checkedOrigin(origin: string, limits: MoonrakerLimits): string {
+  return validateMoonrakerInput({
+    assignment: { printerKey: 'discovery', origin },
+    allowedOrigins: [origin],
+    limits,
+  }).origin
+}
+
 /**
  * One-shot read-only discovery: identify, server.info, tool objects, webcams.
- * Sequential requests, one outstanding at a time, each bounded by requestTimeoutMs.
- * Any malformed reply rejects with invalid-response; webcam failure is non-fatal.
+ * Sequential requests, one outstanding at a time, each bounded by requestTimeoutMs,
+ * all bounded by an overall deadline. Rejects `not-ready` (without querying Klipper
+ * objects) when Klippy is not ready; `invalid-response` on any malformed reply.
+ * A remote error on server.webcams.list means no webcams and is non-fatal.
+ *
+ * `webcamOrigin` is the host serving the camera paths (Mainsail/Fluidd frontend,
+ * typically port 80), which differs from the Moonraker origin. Without it webcam
+ * URLs stay null and only the raw relative paths are returned.
+ * Note: identify registers a visible client connection on Moonraker; it changes no printer state.
  */
 export async function discoverMoonraker(input: {
   origin: string
+  webcamOrigin?: string
   limits: MoonrakerLimits
   signal: AbortSignal
   client: { name: string; version: string; url: string }
 }): Promise<MoonrakerDiscovery> {
-  const url = new URL('/websocket', input.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  const socket = new WebSocket(url, {
-    maxPayload: input.limits.maxMessageBytes,
-    maxFragments: 128,
-    maxBufferedChunks: 128,
-    perMessageDeflate: false,
-    followRedirects: false,
-    handshakeTimeout: input.limits.connectTimeoutMs,
-    skipUTF8Validation: false,
-  })
+  const origin = checkedOrigin(input.origin, input.limits)
+  const webcamOrigin = input.webcamOrigin
+    ? checkedOrigin(input.webcamOrigin, input.limits)
+    : null
+  const signal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(
+      input.limits.connectTimeoutMs + REQUESTS * input.limits.requestTimeoutMs,
+    ),
+  ])
+  const socket = createMoonrakerSocket(origin, input.limits)
   let fail: (error: MoonrakerClientError) => void = () => {}
   const dead = new Promise<never>((_, reject) => (fail = reject))
   dead.catch(() => {})
   const onAbort = () => fail(new MoonrakerClientError('offline'))
-  input.signal.addEventListener('abort', onAbort, { once: true })
-  socket.on('error', () => fail(new MoonrakerClientError('offline')))
-  socket.on('close', () => fail(new MoonrakerClientError('offline')))
+  const onSocketEnd = () => fail(new MoonrakerClientError('offline'))
+  // ws protocol violations (oversized or over-fragmented frames) are invalid responses.
+  const onSocketError = (cause: Error) =>
+    fail(
+      new MoonrakerClientError(
+        'code' in cause &&
+          typeof cause.code === 'string' &&
+          cause.code.startsWith('WS_ERR_')
+          ? 'invalid-response'
+          : 'offline',
+      ),
+    )
+  signal.addEventListener('abort', onAbort, { once: true })
+  socket.on('error', onSocketError)
+  socket.on('close', onSocketEnd)
   const opened = new Promise<void>((resolve) => socket.once('open', resolve))
   let nextId = 0
+  let cancelInFlight: () => void = () => {}
 
   function rpc(method: string, params?: object): Promise<unknown> {
     const id = ++nextId
@@ -75,20 +104,22 @@ export async function discoverMoonraker(input: {
         input.limits.requestTimeoutMs,
       )
       function done(settle: () => void) {
+        cancelInFlight()
+        settle()
+      }
+      cancelInFlight = () => {
         clearTimeout(timer)
         socket.off('message', onMessage)
-        settle()
+        cancelInFlight = () => {}
       }
       function onMessage(data: import('ws').RawData, isBinary: boolean) {
         let value: unknown
         try {
-          if (isBinary || !Buffer.isBuffer(data)) throw new Error('frame')
-          value = parseBoundedJson(data.toString('utf8'), {
-            maxBytes: input.limits.maxMessageBytes,
-            maxDepth: 16,
-            maxValues: 8192,
-            maxStringChars: 16384,
-          })
+          value = decodeMoonrakerFrame(
+            data,
+            isBinary,
+            input.limits.maxMessageBytes,
+          )
         } catch {
           return done(() =>
             reject(new MoonrakerClientError('invalid-response')),
@@ -118,6 +149,7 @@ export async function discoverMoonraker(input: {
       throw new MoonrakerClientError('invalid-response')
     }
   }
+
   async function run(): Promise<MoonrakerDiscovery> {
     await opened
     const identity = parse(
@@ -130,8 +162,9 @@ export async function discoverMoonraker(input: {
       }),
     )
     const server = parse(parseServerInfoResult, await rpc('server.info'))
-    const list = await rpc('printer.objects.list')
-    const names = parse(selectToolObjects, list)
+    // Klipper objects answer 503 while Klippy is down; do not ask for them.
+    if (!server.ready) throw new MoonrakerClientError('not-ready')
+    const names = parse(selectToolObjects, await rpc('printer.objects.list'))
     const query = (await rpc('printer.objects.query', {
       objects: Object.fromEntries([
         ['toolhead', ['extruder']],
@@ -141,17 +174,18 @@ export async function discoverMoonraker(input: {
     const tools = parse(parseToolStatus, query?.status)
     let webcams: readonly MoonrakerWebcam[] = []
     try {
-      const result = await rpc('server.webcams.list')
-      webcams = parse((r) => parseWebcamsResult(r, input.origin), result)
+      webcams = parse(
+        (r) => parseWebcamsResult(r, webcamOrigin),
+        await rpc('server.webcams.list'),
+      )
     } catch (error) {
-      // Webcam support is optional; a remote error means none configured.
       if (!(error instanceof RemoteError)) throw error
     }
     return { identity, server, tools, webcams }
   }
 
   try {
-    if (input.signal.aborted) throw new MoonrakerClientError('offline')
+    if (signal.aborted) throw new MoonrakerClientError('offline')
     const work = run()
     work.catch(() => {})
     return await Promise.race([dead, work])
@@ -160,9 +194,11 @@ export async function discoverMoonraker(input: {
       throw new MoonrakerClientError('invalid-response')
     throw error
   } finally {
-    input.signal.removeEventListener('abort', onAbort)
+    cancelInFlight()
+    signal.removeEventListener('abort', onAbort)
+    socket.off('error', onSocketError)
+    socket.off('close', onSocketEnd)
+    socket.on('error', () => {}) // terminate() during handshake emits an error
     socket.terminate()
   }
 }
-
-class RemoteError extends Error {}

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { klippyReady, klippyState } from './parse.ts'
 
 // Strict, bounded projections of Moonraker discovery results. Unknown upstream
 // fields are ignored; malformed entries are dropped, never repaired.
@@ -18,7 +19,7 @@ export function parseIdentifyResult(result: unknown): MoonrakerIdentity {
 
 export type MoonrakerServerInfo = Readonly<{
   klippyConnected: boolean
-  klippyState: 'ready' | 'startup' | 'shutdown' | 'error' | 'disconnected'
+  klippyState: z.infer<typeof klippyState>
   ready: boolean
   moonrakerVersion: string | null
   apiVersion: readonly [number, number, number] | null
@@ -32,13 +33,7 @@ export function parseServerInfoResult(result: unknown): MoonrakerServerInfo {
   const info = z
     .object({
       klippy_connected: z.boolean(),
-      klippy_state: z.enum([
-        'ready',
-        'startup',
-        'shutdown',
-        'error',
-        'disconnected',
-      ]),
+      klippy_state: klippyState,
       moonraker_version: z.string().max(128).optional().catch(undefined),
       api_version: Version.optional().catch(undefined),
     })
@@ -46,7 +41,7 @@ export function parseServerInfoResult(result: unknown): MoonrakerServerInfo {
   return {
     klippyConnected: info.klippy_connected,
     klippyState: info.klippy_state,
-    ready: info.klippy_connected && info.klippy_state === 'ready',
+    ready: klippyReady(info.klippy_connected, info.klippy_state),
     moonrakerVersion: info.moonraker_version ?? null,
     apiVersion: info.api_version ?? null,
   }
@@ -60,9 +55,7 @@ export function extruderIndex(object: string): number | undefined {
 }
 
 export function selectToolObjects(list: unknown): string[] {
-  const parsed = z
-    .object({ objects: z.array(z.unknown()).max(1024) })
-    .safeParse(list)
+  const parsed = z.object({ objects: z.array(z.unknown()) }).safeParse(list)
   if (!parsed.success) throw new TypeError('Invalid object list')
   const found = new Map<number, string>()
   for (const object of parsed.data.objects) {
@@ -129,7 +122,14 @@ export type MoonrakerWebcam = Readonly<{
   name: string
   enabled: boolean
   service: string
-  /** Same-origin absolute URLs only; null when absent, foreign or malformed. */
+  /**
+   * Raw root-relative path as reported (e.g. `/webcam/?action=snapshot`), or
+   * null when the value is absolute, malformed or unsafe. Mainsail/Fluidd
+   * resolve these against the frontend host, not the Moonraker port.
+   */
+  streamPath: string | null
+  snapshotPath: string | null
+  /** Resolved only against an explicit webcamOrigin; null otherwise or when foreign. */
   streamUrl: string | null
   snapshotUrl: string | null
   targetFps: number | null
@@ -138,16 +138,32 @@ export type MoonrakerWebcam = Readonly<{
   flipVertical: boolean
 }>
 
-function sameOriginUrl(value: unknown, origin: string): string | null {
-  if (typeof value !== 'string' || value.length > MAX_URL_CHARS) return null
-  if (value === '' || /[\u0000- \u007F\\]/u.test(value)) return null
+function webcamLocation(
+  value: unknown,
+  webcamOrigin: string | null,
+): { path: string | null; url: string | null } {
+  const none = { path: null, url: null }
+  if (typeof value !== 'string' || value.length > MAX_URL_CHARS) return none
+  if (value === '' || /[\u0000-\u0020\u007F\\]/u.test(value)) return none
   try {
-    const url = new URL(value, origin)
-    if (url.origin !== new URL(origin).origin || url.username || url.password)
-      return null
-    return url.href
+    if (value.startsWith('/') && !value.startsWith('//'))
+      return {
+        path: value,
+        url: webcamOrigin ? new URL(value, webcamOrigin).href : null,
+      }
+    // Absolute URLs are accepted only for exactly the configured webcam origin.
+    const url = new URL(value)
+    if (
+      !webcamOrigin ||
+      !/^https?:$/.test(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.origin !== webcamOrigin
+    )
+      return none
+    return { path: null, url: url.href }
   } catch {
-    return null
+    return none
   }
 }
 
@@ -169,7 +185,7 @@ const Webcam = z.object({
 
 export function parseWebcamsResult(
   result: unknown,
-  origin: string,
+  webcamOrigin: string | null,
 ): readonly MoonrakerWebcam[] {
   const list = z
     .object({ webcams: z.array(z.unknown()).max(256) })
@@ -180,13 +196,17 @@ export function parseWebcamsResult(
     const cam = Webcam.safeParse(item)
     if (!cam.success) continue
     const d = cam.data
+    const stream = webcamLocation(d.stream_url, webcamOrigin)
+    const snapshot = webcamLocation(d.snapshot_url, webcamOrigin)
     out.push({
       uid: d.uid ?? null,
       name: d.name,
       enabled: d.enabled ?? true,
       service: d.service ?? 'unknown',
-      streamUrl: sameOriginUrl(d.stream_url, origin),
-      snapshotUrl: sameOriginUrl(d.snapshot_url, origin),
+      streamPath: stream.path,
+      snapshotPath: snapshot.path,
+      streamUrl: stream.url,
+      snapshotUrl: snapshot.url,
       targetFps: d.target_fps ?? null,
       rotation: d.rotation ?? 0,
       flipHorizontal: d.flip_horizontal ?? false,

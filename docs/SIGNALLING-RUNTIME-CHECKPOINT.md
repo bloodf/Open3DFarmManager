@@ -53,3 +53,27 @@ The maintained boundary tests separately exercise the actual pinned h3/CrossWS N
 The subsequent review correction adds a global-path regression using the pinned adapter with Nitro's uncaught upgrade-listener shape. Unknown paths, missing hooks, and failed admission produce no native peers and leave no sockets. A separate contention barrier holds two genuine cryptographic proof acceptances with 15 existing inboxes; after release exactly one admission succeeds and the other closes. Capacity is rechecked synchronously after all proof/current-authority awaits immediately before insertion. Both regressions fail against the preceding implementations (unexpected upgrade; two winners) and pass with the corrections. These are adapter and synthetic-storage runtime tests, not generated Nitro, PostgreSQL, or production WSS acceptance.
 
 Pending: independent source review; official fresh PostgreSQL runtime-role/read-clock/revocation acceptance for the changed reader and coordinator; shutdown while SQL validation is pending; rejection on the actual generated Nitro listener; built WSS plus real account/browser-registry/credential/proof flow; then browser-to-native read-only RTC with client-owned original deadlines. Historical 0017 SQL acceptance predates this timed reader/runtime extension. No new PG, full build, full `check:all`, publication, deployment, or physical hardware validation is claimed for this source checkpoint. The current native peer remains loopback-bound for fixtures until its owner provides a separately reviewed networking change.
+
+## Renewed Connector credentials
+
+A Connector that renews (#117, #132) restarts with a successor credential. Signalling previously resolved only the root credential, so the successor was refused and the farm view lost its live connection after the first renewal. Telemetry already adopted successors (0022).
+
+- **Connector side:** `readConnectorCurrent` resolves the exact presented jti, root or successor, of the same root binding (`farm_id`, fingerprint and thumbprint come from the root row). The credential must be inside its own issued/expiry window; revocation is checked for the agent, the root jti and the presented jti.
+- **Browser side:** `authorize` has no presented jti and selects the newest successor whose own lifetime contains the current database time, otherwise the root. The Connector switches to a new successor right after renewal, so until it reconnects a browser binding to the new jti is refused (fail closed) and the farm view's reopen backoff (#121) retries.
+- **Proofs:** the signalling acceptor takes the successor proof path (`farm.connector_successor_proofs`) when its role has the 0026 grants. A database before 0026, or a role without those grants, keeps the root-only path instead of failing.
+- **Semantics:** each credential stays valid until its own expiry; renewal does not revoke the predecessor. Revocation-on-first-use of a successor is an open owner option, not implemented.
+
+`SIGNALLING_SUCCESSOR_TEST_ADMITTED=yes SIGNALLING_SUCCESSOR_TEST_IMAGE='postgres:17@sha256:<digest>' node scripts/test-postgres-signalling-successors.ts` runs it on a fresh task-owned container (never pulled, removed by ID and label). A real Connector client renews twice through the real renewal HTTP handler, then the real reader, the signalling proof acceptor and the runtime's proof-completion retry run under least-privilege logins. It checks:
+
+1. the exact 0026 grants;
+2. the root before renewal;
+3. (a) the successor resolved, selected by the browser authority and accepted, with the predecessor still valid;
+4. a second-generation successor;
+5. (d) a successor from another Connector or farm refused;
+6. (b) root and first successor refused once their own expiry passes, while the live successor stays accepted;
+7. (c) the whole chain refused after revocation;
+8. 0026 down/up.
+
+With the reader and acceptor changes reverted, the run fails at the first renewed-successor check.
+
+Not covered: pause negotiation and pause authority still resolve only the root credential, so pause on a renewed Connector is refused (fail closed) until they adopt successors too.

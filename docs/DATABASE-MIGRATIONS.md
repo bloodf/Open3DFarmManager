@@ -50,6 +50,15 @@ PostgreSQL roles are cluster-wide, so run one Open3DFarm database per PostgreSQL
 
 Startup failures map SQLSTATE to fixed messages: `42501` is `database permission denied`, class `28` is `database authentication failed`, `3D000` (missing database) is `invalid database configuration`, and anything else while reading the journal is `database unreachable`.
 
+### Signalling successor credentials (0026)
+
+Migration `0026_signalling_successor_credentials` lets signalling accept renewed Connector credentials. It adds grants only:
+
+- `farm_signalling_reader`: `SELECT` on `farm.connector_credential_successors`. Successor rows are immutable (0021 trigger), so the reader resolves them without row locks.
+- `farm_connector_credential_acceptor`: the same successor grants the telemetry writer received in 0022, namely `SELECT` and `UPDATE (jti)` (row locks only; the trigger rejects updates) on `farm.connector_credential_successors`, plus `SELECT`, `INSERT` and the proof-state column `UPDATE`s on `farm.connector_successor_proofs`.
+
+Each credential, root or successor, stays valid until its own expiry; renewal revokes nothing. The down migration revokes exactly these grants and keeps signalling proof rows. The telemetry writer keeps its own 0022 grants, which also makes `farm_connector_telemetry_writer` (a member of the acceptor role) unaffected by a rollback. `scripts/test-postgres-signalling-successors.ts` exercises it (see [SIGNALLING-RUNTIME-CHECKPOINT.md](SIGNALLING-RUNTIME-CHECKPOINT.md#renewed-connector-credentials)).
+
 ### Database service and tests
 
 `infra/app/docker-compose.yml` defines the dedicated application PostgreSQL 17 service (digest-pinned image, own network and named volume, port published on `127.0.0.1` only, `no-new-privileges`, 30 s stop grace, 256 MB shm). `O3DFM_DB_PASSWORD` is required and nothing secret is committed; `O3DFM_DB_NAME`, `O3DFM_DB_USER`, `O3DFM_DB_PORT` and `COMPOSE_PROJECT_NAME` are optional. Unit tests (`tests/unit/database-readiness.test.ts`) cover schema states, gating, phases, config and the startup lifecycle with a stubbed client. `scripts/test-postgres-startup-gating.ts` runs against a real fresh disposable PostgreSQL and requires `STARTUP_GATING_DISPOSABLE=yes`, a loopback `STARTUP_GATING_DATABASE_URL` and a database named `fixture` without an existing journal.

@@ -13,7 +13,11 @@ import type {
   PauseControlDiagnostic,
   PauseFailureReason,
 } from './pause-control.ts'
-import type { OfflineAuthorityStaleReason } from '../auth/offline-authority.ts'
+import { recordAuthorityStale } from './pause-authority-audit.ts'
+import {
+  createOfflineAuthority,
+  type OfflineAuthorityStaleReason,
+} from '../auth/offline-authority.ts'
 
 type AgentDiagnostic =
   | CollectionDiagnostic
@@ -21,6 +25,8 @@ type AgentDiagnostic =
   | PauseControlDiagnostic
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
   | { kind: 'pause-failed'; reason: PauseFailureReason }
+  | { kind: 'pause-audit-failed' }
+  | { kind: 'pause-authority-confirm-refused' }
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
@@ -184,6 +190,48 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')
     const { drainTelemetryOnce } = await import('../cloud/drain.ts')
+    // Own budget: pause traffic never starves read-only diagnostics.
+    let pauseBudget = 256
+    const pauseDiagnostic = (value: AgentDiagnostic) => {
+      if (pauseBudget-- <= 0) return
+      try {
+        input.onDiagnostic(value)
+      } catch {
+        // A throwing sink never rejects the pause task or stops the agent.
+      }
+    }
+    // Repeating faults bypass the pause budget but are reported once a minute.
+    const rareAt = new Map<string, number>()
+    const pauseRareDiagnostic = (value: AgentDiagnostic) => {
+      const at = performance.now(),
+        last = rareAt.get(value.kind)
+      if (last !== undefined && at - last < 60_000) return
+      rareAt.set(value.kind, at)
+      try {
+        input.onDiagnostic(value)
+      } catch {
+        // A throwing sink never rejects the pause task or stops the agent.
+      }
+    }
+    // Offline authority for the pause path. Only the credential-authenticated
+    // read-only inbox confirms it; without `signalling` it stays stale and
+    // every pause command is rejected. Never stub it as fresh.
+    const offline = config.pause?.control
+      ? createOfflineAuthority({
+          onStale(reason) {
+            pauseDiagnostic({ kind: 'pause-authority-stale', reason })
+            // The fsynced write runs on a later turn, never inside the caller's
+            // freshness check or its microtask queue.
+            setImmediate(() =>
+              recordAuthorityStale(
+                input.dataDirectory,
+                reason,
+                pauseRareDiagnostic,
+              ),
+            )
+          },
+        })
+      : undefined
     if (config.signalling && lookupId && snapshots) {
       const { AuthenticatedConnectorSignallingClient } =
         await import('../cloud/authenticated-signalling-client.ts')
@@ -192,13 +240,24 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       const { runSignallingLifecycle } = await import('./signalling.ts')
       const signalling = config.signalling
       const source = snapshots
+      const cameraMedia = config.camera
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
       tasks.push(
         runSignallingLifecycle({
           signal,
           credentialExpiresAt: credential.expires_at,
           retryMinMs: signalling.retryMinMs,
           retryMaxMs: signalling.retryMaxMs,
-          createSession(onTerminal) {
+          createSession(onTerminal, onAdmitted) {
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
@@ -212,7 +271,27 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
               },
               {
                 genuineStatus: { assignmentRefs: refs },
-                onInboxReady: () => diagnostic({ kind: 'readonly-listening' }),
+                ...(cameraMedia ? { cameraMedia } : {}),
+                onInboxReady() {
+                  onAdmitted()
+                  diagnostic({ kind: 'readonly-listening' })
+                },
+                // Callbacks must return nothing; a refused confirm stays stale.
+                onAuthorityConfirm(serverSeq) {
+                  if (
+                    offline &&
+                    !offline.confirm(
+                      { wall: Date.now(), mono: performance.now() },
+                      serverSeq,
+                    )
+                  )
+                    pauseRareDiagnostic({
+                      kind: 'pause-authority-confirm-refused',
+                    })
+                },
+                onAuthorityRevoked(serverSeq) {
+                  offline?.revoke(serverSeq)
+                },
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),
                 onTerminal(reason) {
@@ -283,28 +362,10 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
         }).catch(fail),
       )
     }
-    if (config.pause?.control) {
+    if (offline) {
       // Explicit opt-in only. Absent `pause.control` creates no pause resource.
       const { runPauseControl, pauseFailureReason } =
         await import('./pause-control.ts')
-      const { createOfflineAuthority } =
-        await import('../auth/offline-authority.ts')
-      // Own budget: pause traffic never starves read-only diagnostics.
-      let pauseBudget = 256
-      const pauseDiagnostic = (value: AgentDiagnostic) => {
-        if (pauseBudget-- <= 0) return
-        try {
-          input.onDiagnostic(value)
-        } catch {
-          // A throwing sink never rejects the pause task or stops the agent.
-        }
-      }
-      // No authenticated confirm() source exists yet, so authority stays
-      // stale and every pause command is rejected. Never stub it as fresh.
-      const offline = createOfflineAuthority({
-        onStale: (reason) =>
-          pauseDiagnostic({ kind: 'pause-authority-stale', reason }),
-      })
       tasks.push(
         runPauseControl({
           config,

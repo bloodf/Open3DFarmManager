@@ -1,5 +1,5 @@
 import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto'
 import { createAuthenticatedFarmStatusFeed } from '../../apps/farm/app/utils/webrtc/farm-status-feed.ts'
@@ -632,6 +632,25 @@ test('local slot capacity is reported as disconnected, not rejected', async () =
     assert.deepEqual(reasons, ['disconnected'])
     for (const handle of opened) handle.close()
   } finally {
+    f.handle.close()
+  }
+})
+
+test('an admission arriving after the auth deadline, before the timer fires, closes as expired', async () => {
+  const f = await fixture()
+  const now = performance.now.bind(performance)
+  // Jump monotonic time past the 8 s auth deadline without running timers.
+  const clock = mock.method(performance, 'now', () => now() + 8_001)
+  try {
+    f.callbacks.onVerifiedAdmission({
+      binding: f.binding,
+      deadlineMonoMs: now() + 20_000,
+    })
+    assert.equal(f.health.at(-1), 'closed')
+    assert.deepEqual(f.reasons, ['expired'])
+    assert.equal(f.closes(), 1)
+  } finally {
+    clock.mock.restore()
     f.handle.close()
   }
 })

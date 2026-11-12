@@ -195,7 +195,7 @@ func run(parent context.Context, cfg Config, output *os.File, control *os.File, 
 	}
 	media := desc.Medias[0]
 	codec, ok := media.Formats[0].(*format.H264)
-	if !ok || codec.PacketizationMode != 1 || len(codec.SPS) != 0 || len(codec.PPS) != 0 {
+	if !ok || codec.PacketizationMode != 1 {
 		return ErrPolicy
 	}
 	trackURL, err := media.URL(desc.BaseURL)

@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
+import CameraDisplay from '../components/CameraDisplay.vue'
 import {
   farmConnectionNotice,
   localInterfaceOrigin,
@@ -9,10 +18,26 @@ import {
   printerStateLabel,
   type FarmRow,
 } from '../utils/farm-view.ts'
+import { pauseAvailability, pauseStatusText } from '../utils/farm-pause.ts'
+import {
+  openFarmPauseControl,
+  PAUSE_CAPABILITY_MARGIN_MS,
+  type FarmPauseControl,
+  type FarmPauseControlState,
+} from '../utils/webrtc/farm-pause-control.ts'
+import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
 definePageMeta({ middleware: 'farm-flag' })
-const { state, ready, now, discover, selectFarm, selectKey, confirmOrigin } =
-  useFarmView()
+const {
+  state,
+  ready,
+  now,
+  discover,
+  selectFarm,
+  selectKey,
+  confirmOrigin,
+  cameraFor,
+} = useFarmView()
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
@@ -132,6 +157,164 @@ function receiptAge(row: FarmRow) {
       ? 'Atualização recebida há mais de 24 h'
       : `Atualização recebida há ${seconds} s`
 }
+// Pause control: one confirmed, signed command per session over WebRTC only.
+const pauseEnabled = ref(false)
+onMounted(async () => {
+  try {
+    const metadata = await $fetch<unknown>('/api/signalling/pause-metadata', {
+      retry: 0,
+      timeout: 10_000,
+      cache: 'no-store',
+    })
+    pauseEnabled.value =
+      !!metadata &&
+      typeof metadata === 'object' &&
+      'enabled' in metadata &&
+      metadata.enabled === true &&
+      'origin' in metadata &&
+      metadata.origin === location.origin
+  } catch {
+    pauseEnabled.value = false
+  }
+})
+function availability(row: FarmRow) {
+  const current = ready.value
+  return current
+    ? pauseAvailability(row, current.keys, pauseEnabled.value, now.value)
+    : { available: false as const, reason: '' }
+}
+const pauseDialog = ref<HTMLDialogElement | null>(null)
+const pauseCancel = ref<HTMLButtonElement | null>(null)
+const pauseTarget = shallowRef<{
+  assignmentId: string
+  printerKey: string
+} | null>(null)
+const pauseState = shallowRef<FarmPauseControlState>({ kind: 'connecting' })
+const pauseLost = ref(false)
+let pauseControl: FarmPauseControl | undefined
+let pauseTrigger: HTMLElement | null = null
+const pauseRemaining = computed(() =>
+  pauseState.value.kind === 'ready'
+    ? Math.floor(
+        (pauseState.value.expiresAt -
+          PAUSE_CAPABILITY_MARGIN_MS -
+          now.value.wall) /
+          1000,
+      )
+    : 0,
+)
+const pauseStatus = computed(() =>
+  pauseLost.value &&
+  (pauseState.value.kind === 'failed' || pauseState.value.kind === 'connecting')
+    ? 'O estado da impressora deixou de estar ao vivo. Nenhum comando foi enviado.'
+    : pauseStatusText(pauseState.value, pauseRemaining.value),
+)
+const pauseResolver = createFarmStatusKeyResolver({
+  readMetadata: async (signal) =>
+    await $fetch<unknown>('/api/signalling/pause-metadata', {
+      signal,
+      retry: 0,
+      timeout: 10_000,
+      cache: 'no-store',
+    }),
+  isCurrent(scope, keyId) {
+    const current = ready.value
+    return (
+      !!current &&
+      current.accountId === scope.accountId &&
+      current.scope?.accountId === scope.accountId &&
+      current.scope.farmId === scope.farmId &&
+      current.scope.viewEpoch === scope.viewEpoch &&
+      current.keys.kind === 'available' &&
+      current.keys.selected === keyId
+    )
+  },
+})
+async function openPause(row: FarmRow, event: Event) {
+  const current = ready.value
+  if (
+    !current?.scope ||
+    current.keys.kind !== 'available' ||
+    !availability(row).available ||
+    pauseControl
+  )
+    return
+  const scope = current.scope,
+    keyId = current.keys.selected
+  pauseTrigger =
+    event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  pauseLost.value = false
+  pauseState.value = { kind: 'connecting' }
+  pauseTarget.value = {
+    assignmentId: row.assignment.assignmentId,
+    printerKey: row.assignment.printerKey,
+  }
+  pauseControl = openFarmPauseControl({
+    accountId: scope.accountId,
+    farmId: scope.farmId,
+    keyId,
+    agentId: row.assignment.agentId,
+    assignmentId: row.assignment.assignmentId,
+    async resolveKey(signal) {
+      const resolved = await pauseResolver({
+        scope,
+        browserKeyId: keyId,
+        signal,
+      })
+      return {
+        publicKey: resolved.localKey.publicKey,
+        privateKey: resolved.localKey.keyPair.privateKey,
+        origin: resolved.origin,
+        audience: resolved.audience,
+      }
+    },
+    onState(state) {
+      pauseState.value = state
+    },
+  })
+  await nextTick()
+  pauseDialog.value?.showModal()
+  pauseCancel.value?.focus()
+}
+function confirmPause() {
+  if (pauseState.value.kind === 'ready') void pauseControl?.pause()
+}
+function closePause() {
+  // A command in flight keeps its session until its outcome settles.
+  if (pauseState.value.kind === 'sending') return
+  const control = pauseControl
+  pauseControl = undefined
+  control?.close()
+  void control?.dispose()
+  pauseDialog.value?.close()
+  pauseTarget.value = null
+  pauseTrigger?.focus()
+  pauseTrigger = null
+}
+function cancelPause(event: Event) {
+  // Esc closes the dialog, but never interrupts a command in flight.
+  event.preventDefault()
+  closePause()
+}
+watch([() => ready.value?.rows, now], () => {
+  const target = pauseTarget.value
+  if (!target || !pauseControl) return
+  const kind = pauseState.value.kind
+  if (kind !== 'connecting' && kind !== 'ready') return
+  const row = ready.value?.rows.find(
+    (item) => item.assignment.assignmentId === target.assignmentId,
+  )
+  if (!row || !availability(row).available) {
+    pauseLost.value = true
+    pauseControl.close()
+  }
+})
+onBeforeUnmount(() => {
+  const control = pauseControl
+  pauseControl = undefined
+  control?.close()
+  void control?.dispose()
+})
 function dateLabel(time: number) {
   return time <= 8_640_000_000_000_000
     ? new Date(time).toLocaleString('pt-BR')
@@ -149,7 +332,10 @@ function dateLabel(time: number) {
       <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
-    <p>Os controles desta página estão em modo somente leitura.</p>
+    <p>
+      Os controles desta página são somente leitura, exceto a pausa, que exige
+      confirmação e uma conexão direta segura.
+    </p>
     <p v-if="state.kind === 'loading'" role="status" aria-busy="true">
       Carregando suas farms…
     </p>
@@ -393,6 +579,14 @@ function dateLabel(time: number) {
                       >
                     </p>
                   </template>
+                  <CameraDisplay
+                    v-if="
+                      row.assignment.status === 'active' &&
+                      row.assignment.connectorStatus === 'approved'
+                    "
+                    :stream="cameraFor(row.assignment.assignmentId)"
+                    :printer-name="row.assignment.printerKey"
+                  />
                   <template
                     v-if="
                       row.assignment.status === 'active' &&
@@ -479,14 +673,21 @@ function dateLabel(time: number) {
                       novamente após recarregar.
                     </p>
                   </template>
-                  <p :id="`pause-help-${row.assignment.assignmentId}`">
-                    Pausa indisponível. O controle seguro ainda não foi
-                    habilitado.
+                  <p
+                    v-if="!availability(row).available"
+                    :id="`pause-help-${row.assignment.assignmentId}`"
+                  >
+                    {{ (availability(row) as { reason: string }).reason }}
+                  </p>
+                  <p v-else :id="`pause-help-${row.assignment.assignmentId}`">
+                    Abre uma confirmação. Nada é enviado antes de você
+                    confirmar.
                   </p>
                   <button
                     type="button"
-                    disabled
+                    :aria-disabled="!availability(row).available"
                     :aria-describedby="`pause-help-${row.assignment.assignmentId}`"
+                    @click="openPause(row, $event)"
                   >
                     Pausar impressão
                   </button>
@@ -497,6 +698,46 @@ function dateLabel(time: number) {
         </section>
       </template>
     </template>
+    <dialog
+      ref="pauseDialog"
+      aria-labelledby="pause-dialog-title"
+      aria-describedby="pause-dialog-description"
+      @cancel="cancelPause"
+    >
+      <template v-if="pauseTarget">
+        <h2 id="pause-dialog-title">
+          Pausar impressão de
+          <span class="opaque">{{ pauseTarget.printerKey }}</span>
+        </h2>
+        <p id="pause-dialog-description">
+          A impressora vai pausar a impressão atual. O comando é assinado neste
+          navegador, enviado diretamente ao Connector por uma conexão segura e
+          nunca é repetido automaticamente.
+        </p>
+        <p role="status" aria-live="polite">{{ pauseStatus }}</p>
+        <div class="actions">
+          <button
+            type="button"
+            :disabled="pauseState.kind !== 'ready' || pauseRemaining <= 0"
+            @click="confirmPause"
+          >
+            Confirmar pausa
+          </button>
+          <button
+            ref="pauseCancel"
+            type="button"
+            :disabled="pauseState.kind === 'sending'"
+            @click="closePause"
+          >
+            {{
+              pauseState.kind === 'settled' || pauseState.kind === 'failed'
+                ? 'Fechar'
+                : 'Cancelar'
+            }}
+          </button>
+        </div>
+      </template>
+    </dialog>
   </main>
 </template>
 
@@ -538,7 +779,8 @@ a {
 button {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   cursor: not-allowed;
 }
 label {
@@ -585,6 +827,14 @@ input[type='checkbox'] {
   flex: 0 0 auto;
   width: 1.25rem;
   height: 1.25rem;
+}
+dialog {
+  max-width: min(36rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+  border: 2px solid currentColor;
+}
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
 }
 progress {
   display: block;

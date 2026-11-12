@@ -36,6 +36,11 @@ import {
   rtcSessionProofPayload,
 } from '../../../farm-protocol/src/rtc-session-binding.ts'
 import {
+  CameraPurposeStatement,
+  cameraPurposeProofPayload,
+  encodeCameraPurposeProof,
+} from '../../../farm-protocol/src/camera-purpose-statement.ts'
+import {
   ControlSessionBinding,
   ConnectorControlProof,
   validateControlSessionBinding,
@@ -45,6 +50,10 @@ import {
 
 const RtcProofInput = z.strictObject({
   binding: RtcSessionBinding,
+  expectedAgentId: BrowserDeviceUuid,
+})
+const CameraProofInput = z.strictObject({
+  statement: CameraPurposeStatement,
   expectedAgentId: BrowserDeviceUuid,
 })
 const ControlProofInput = z.strictObject({
@@ -158,6 +167,37 @@ export class ConnectorIdentity {
       signature: sign(
         null,
         rtcSessionProofPayload(binding, 'connector'),
+        this.#key,
+      ).toString('base64url'),
+    })
+  }
+  /** Connector camera-purpose proof wire. Possession only; the caller derives the
+   * statement from its admitted binding and local camera configuration. */
+  signCameraPurposeProof(input: {
+    statement: unknown
+    expectedAgentId: string
+  }): string {
+    const { statement, expectedAgentId } = CameraProofInput.parse(input)
+    const publicDer = createPublicKey(this.#key).export({
+      format: 'der',
+      type: 'spki',
+    })
+    if (
+      statement.agent_id !== expectedAgentId ||
+      statement.connector_public_key_spki !== publicDer.toString('base64url') ||
+      statement.connector_fingerprint !==
+        'SHA256:' + createHash('sha256').update(publicDer).digest('base64url')
+    )
+      throw new Error(
+        'Camera statement does not match trusted Connector identity',
+      )
+    return encodeCameraPurposeProof({
+      v: 3,
+      role: 'connector',
+      binding: statement,
+      signature: sign(
+        null,
+        cameraPurposeProofPayload(statement, 'connector'),
         this.#key,
       ).toString('base64url'),
     })

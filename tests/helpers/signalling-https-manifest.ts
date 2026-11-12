@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 
 export const Receipt = z.strictObject({
@@ -14,6 +14,7 @@ export const Receipt = z.strictObject({
 export async function outputSnapshot(root: string) {
   const entries: { path: string; size: number; sha256: string }[] = []
   let total = 0
+  const realRoot = await realpath(root)
   async function walk(directory: string) {
     for (const entry of (
       await readdir(directory, { withFileTypes: true })
@@ -37,9 +38,30 @@ export async function outputSnapshot(root: string) {
             .update(await readFile(path))
             .digest('hex'),
         })
+      } else if (entry.isSymbolicLink()) {
+        // pnpm-traced Nitro output links duplicate packages inside the bundle.
+        // A link is sealed by its exact target and must stay inside the output.
+        const target = await readlink(path)
+        const resolved = await realpath(path)
+        const inside = relative(realRoot, resolved)
+        if (
+          !inside ||
+          inside === '..' ||
+          inside.startsWith('..' + sep) ||
+          isAbsolute(inside) ||
+          entries.length >= 10000
+        )
+          throw new Error('Output link escapes fixture output')
+        entries.push({
+          path: relative(root, path),
+          size: 0,
+          sha256: createHash('sha256')
+            .update('symlink\0' + target)
+            .digest('hex'),
+        })
       } else
         throw new Error(
-          'Output must contain regular files and directories only',
+          'Output must contain regular files, directories and contained links only',
         )
     }
   }

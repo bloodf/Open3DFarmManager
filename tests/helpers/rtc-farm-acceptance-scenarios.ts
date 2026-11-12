@@ -62,6 +62,7 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         'farm-page-pause-applied-after-ms:',
         'farm-page-pause-revoked-disabled-after-ms:',
         'farm-page-pause-exactly-one-applied',
+        'farm-page-pause-server-frames-without-command:',
       ],
     },
     // live status → camera video plays (frames decode), stop/show toggle →

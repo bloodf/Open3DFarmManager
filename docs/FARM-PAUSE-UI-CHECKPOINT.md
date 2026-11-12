@@ -25,6 +25,10 @@ The button opens a native modal `<dialog>` (background inert, focus trapped, `Es
 - A rejected command is reported neutrally ("Comando recusado"), because a rejection can come from the Connector or from a local check before sending; in both cases the printer was not paused.
 - The session fails closed with an explicit reason when the key or metadata cannot be resolved, the capability expires before confirmation, the transport ends, or the row stops being live while the dialog is open. Cancel or `Esc` close it. A command in flight cannot be cancelled; the dialog waits for its outcome.
 
+## Known UX gap
+
+Just after the direct connection recovers, **Pausar impressão** can be enabled before the Connector has re-admitted its separate pause inbox. A dialog opened in that window fails closed ("A conexão segura foi encerrada…" or "Não foi possível obter uma autorização segura…"), and no command is sent. Opening it again a few seconds later works. The page does not yet know the Connector's pause readiness; exposing it would need a server-side readiness signal.
+
 ## Validation boundary
 
 - `tests/node/farm-pause-control.test.ts`: real keys and signatures with issuer and signalling doubles. Covers one command after admission, no offer without enough capability validity, transport end before confirmation, unresolved key, cancel while ready, and every availability reason.

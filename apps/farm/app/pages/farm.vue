@@ -18,7 +18,7 @@ import {
   printerStateLabel,
   type FarmRow,
 } from '../utils/farm-view.ts'
-import { pauseAvailability, pauseStatusText } from '../utils/farm-pause.ts'
+import { livePauseAvailability, pauseStatusText } from '../utils/farm-pause.ts'
 import {
   openFarmPauseControl,
   PAUSE_CAPABILITY_MARGIN_MS,
@@ -148,9 +148,15 @@ function connectionText(row: FarmRow) {
       return 'Conexão direta indisponível'
   }
 }
+// Reads the once-a-second tick for reactivity, but measures against a fresh
+// sample so a frame received after the last tick never shows a negative age.
+function liveNow() {
+  void now.value
+  return { wall: Date.now(), mono: performance.now() }
+}
 function receiptAge(row: FarmRow) {
   if (!row.observation) return ''
-  const seconds = observationAge(row.observation, now.value).seconds
+  const seconds = observationAge(row.observation, liveNow()).seconds
   return seconds === null
     ? 'Horário de recebimento não confirmado'
     : seconds >= 86_400
@@ -179,15 +185,9 @@ onMounted(async () => {
 })
 function availability(row: FarmRow) {
   const current = ready.value
-  // `now` only ticks once a second, so a frame received after the last tick
-  // would look like a negative (stale) age. Read the tick for reactivity, but
-  // judge freshness against a clock sampled now.
   void now.value
   return current
-    ? pauseAvailability(row, current.keys, pauseEnabled.value, {
-        wall: Date.now(),
-        mono: performance.now(),
-      })
+    ? livePauseAvailability(row, current.keys, pauseEnabled.value)
     : { available: false as const, reason: '' }
 }
 const pauseDialog = ref<HTMLDialogElement | null>(null)
@@ -538,7 +538,8 @@ function dateLabel(time: number) {
                     </p>
                     <p
                       v-if="
-                        observationAge(row.observation, now).sourceConfirmed
+                        observationAge(row.observation, liveNow())
+                          .sourceConfirmed
                       "
                     >
                       Observado pelo Connector em
@@ -546,7 +547,7 @@ function dateLabel(time: number) {
                       da observação estimada a partir do relógio do Connector.
                     </p>
                     <p v-else>Horário da observação não confirmado</p>
-                    <p v-if="observationAge(row.observation, now).stale">
+                    <p v-if="observationAge(row.observation, liveNow()).stale">
                       Dados desatualizados. A impressora pode ter mudado de
                       estado.
                     </p>

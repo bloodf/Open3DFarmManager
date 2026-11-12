@@ -222,18 +222,92 @@ async function testFarmPagePause(input: {
 }) {
   const { page, row, pauseButton } = input
   await expect(pauseButton).toBeEnabled()
-  // After the drop the Connector re-admits its pause inbox with bounded backoff.
-  // A dialog opened before that fails closed by design; wait for readiness.
-  await expect.poll(input.pauseInboxReady, { timeout: 10000 }).toBe(true)
-  assert.equal(await input.pauses(), 0)
-  const commandRequests: string[] = []
-  page.on('request', (request) => {
+  const dialog = page.getByRole('dialog', { name: /^Pausar impressão de/ })
+  const closeButton = dialog.getByRole('button', {
+    name: 'Fechar',
+    exact: true,
+  })
+  // Every HTTP post and every frame the page sends to the server is recorded:
+  // the command must reach the Connector only over the WebRTC data channel.
+  const posts: string[] = []
+  const serverFrameTypes: string[] = []
+  const onRequest = (request: import('@playwright/test').Request) => {
     const url = new URL(request.url())
     if (url.pathname.startsWith('/api/') && request.method() !== 'GET')
-      commandRequests.push(url.pathname)
-  })
+      posts.push(url.pathname)
+  }
+  const onSocket = (socket: import('@playwright/test').WebSocket) =>
+    socket.on('framesent', ({ payload }) => {
+      let type = 'unparsed'
+      try {
+        const value: unknown = JSON.parse(String(payload))
+        if (value && typeof value === 'object' && 't' in value)
+          type = String(value.t)
+      } catch {
+        // Recorded as unparsed; a binary or non-JSON frame is also suspicious.
+      }
+      serverFrameTypes.push(type)
+    })
+  page.on('request', onRequest)
+  page.on('websocket', onSocket)
+  try {
+    // Known UX gap: just after recovery the button is enabled while the
+    // Connector may not yet have re-admitted its pause inbox. A dialog opened
+    // then must fail closed with no pause, never retry or send.
+    if (!(await input.pauseInboxReady())) {
+      await pauseButton.click()
+      await expect(dialog).toBeVisible()
+      await expect(dialog.getByRole('status')).toHaveText(
+        /Nenhum comando foi enviado\.|^Autorização pronta\./,
+        { timeout: 20000 },
+      )
+      const early = await dialog.getByRole('status').innerText()
+      if (early.startsWith('Autorização pronta')) {
+        // The Connector became ready in time; cancel without confirming.
+        await dialog
+          .getByRole('button', { name: 'Cancelar', exact: true })
+          .click()
+        await input.note('farm-page-pause-early-open-became-ready-cancelled')
+      } else {
+        await closeButton.click()
+        await input.note('farm-page-pause-early-open-failed-closed')
+      }
+      await expect(dialog).toBeHidden()
+      assert.equal(await input.pauses(), 0)
+    } else await input.note('farm-page-pause-early-open-not-exercised')
+    await expect.poll(input.pauseInboxReady, { timeout: 10000 }).toBe(true)
+    assert.equal(await input.pauses(), 0)
+    posts.length = 0
+    await testConfirmedPause({ ...input, dialog, closeButton, posts })
+  } finally {
+    page.off('request', onRequest)
+    page.off('websocket', onSocket)
+  }
+  assert.ok(
+    serverFrameTypes.every(
+      (type) => !type.startsWith('control.') && type !== 'unparsed',
+    ),
+    'No command or control frame is sent to the server: ' +
+      [...new Set(serverFrameTypes)].join(','),
+  )
+  await input.note(
+    `farm-page-pause-server-frames-without-command:${serverFrameTypes.length}`,
+  )
+}
+
+async function testConfirmedPause(input: {
+  fixture: ProvisionedSignallingFixture
+  page: import('@playwright/test').Page
+  row: import('@playwright/test').Locator
+  pauseButton: import('@playwright/test').Locator
+  dialog: import('@playwright/test').Locator
+  closeButton: import('@playwright/test').Locator
+  posts: string[]
+  note(value: string): Promise<void>
+  pauses(): Promise<number>
+}) {
+  const { row, pauseButton, dialog } = input
   await pauseButton.click()
-  const dialog = page.getByRole('dialog', { name: /^Pausar impressão de/ })
   await expect(dialog).toBeVisible()
   const confirm = dialog.getByRole('button', {
     name: 'Confirmar pausa',
@@ -255,12 +329,12 @@ async function testFarmPagePause(input: {
     `farm-page-pause-applied-after-ms:${Math.round(performance.now() - confirmedAt)}`,
   )
   assert.equal(await input.pauses(), 1, 'Exactly one synthetic pause')
-  // Only the issuer routes are posted; the command itself never uses HTTP.
-  assert.deepEqual([...new Set(commandRequests)].sort(), [
+  // Exactly one challenge and one capability post; the command never uses HTTP.
+  assert.deepEqual([...input.posts].sort(), [
     '/api/pause-authority/capabilities',
     '/api/pause-authority/challenges',
   ])
-  await dialog.getByRole('button', { name: 'Fechar', exact: true }).click()
+  await input.closeButton.click()
   await expect(dialog).toBeHidden()
   await expect(pauseButton).toBeFocused()
   await expect(row.getByText('Pausada', { exact: true })).toBeVisible({
@@ -289,5 +363,8 @@ async function testFarmPagePause(input: {
     `farm-page-pause-revoked-disabled-after-ms:${Math.round(performance.now() - revokedAt)}`,
   )
   assert.equal(await input.pauses(), 1, 'No pause after revocation')
+  // Recheck after the Connector had time to act on anything late.
+  await input.page.waitForTimeout(2000)
+  assert.equal(await input.pauses(), 1, 'No late pause after revocation')
   await input.note('farm-page-pause-exactly-one-applied')
 }

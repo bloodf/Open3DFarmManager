@@ -61,6 +61,13 @@ export function recordAuthorityStale(
       closeSync(fd)
       fd = undefined
       renameSync(path, path + '.1')
+      // Persist the rename before the new file is created.
+      const directoryFd = openSync(directory, constants.O_RDONLY)
+      try {
+        fsyncSync(directoryFd)
+      } finally {
+        closeSync(directoryFd)
+      }
       fd = open()
       stat = fstatSync(fd)
       if (!stat.isFile() || stat.nlink !== 1 || !privateOwned(stat))

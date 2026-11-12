@@ -717,8 +717,12 @@ for (const mode of ['status', 'abort', 'timeout'] as const) {
   )
 }
 
-test('empty chunks cannot evade the response work bound', async () => {
+test('empty chunks cannot evade the response work bound', async (t) => {
   const { challenge } = await issuerFixture()
+  // ~16k reads are CPU-bound work; stop the request clock so only the chunk
+  // bound, not the 2 s deadline under host contention, can end this read.
+  t.mock.method(performance, 'now', () => 0)
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   let pulls = 0,
     cancelled = false
   const body = new ReadableStream<Uint8Array>({

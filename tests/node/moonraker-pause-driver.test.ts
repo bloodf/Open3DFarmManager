@@ -1,4 +1,7 @@
-import test from 'node:test'
+import test, { mock } from 'node:test'
+// Driver timers fire only when a test advances them, so a descheduled process
+// cannot turn a loopback reply into a request timeout.
+mock.timers.enable({ apis: ['setTimeout'] })
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
@@ -204,6 +207,9 @@ test('lost, malformed and disconnected pause acknowledgements never retry or cla
         if (fault === 'wrong')
           socket.send(JSON.stringify({ jsonrpc: '2.0', id, result: true }))
         if (fault === 'closed') socket.terminate()
+        // The lost acknowledgement is detected by the request timeout.
+        if (fault === 'lost')
+          setImmediate(() => mock.timers.tick(limits.requestTimeoutMs))
         return true
       },
     })

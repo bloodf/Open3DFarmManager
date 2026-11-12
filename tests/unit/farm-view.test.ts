@@ -10,6 +10,7 @@ import {
   FarmDiscoveryPage,
   localInterfaceOrigin,
   observationAge,
+  spoolInventoryStale,
   type FarmAdmittedSession,
   type FarmAssignment,
   type FarmSnapshot,
@@ -1456,6 +1457,7 @@ function send(
   session: FarmAdmittedSession,
   seq: number,
   printerKey = row.printerKey,
+  inventory?: unknown,
 ) {
   h.peer(index).input.onSnapshot({
     session: { ...session },
@@ -1470,7 +1472,8 @@ function send(
           observedAt: h.time.wall,
         },
       ],
-    },
+      ...(inventory ? { inventory } : {}),
+    } as never,
     receivedAtWallMs: h.time.wall,
     receivedAtMonoMs: h.time.mono,
     sourceClockComparable: true,
@@ -1837,5 +1840,211 @@ test('429 on the re-check honours Retry-After and does not spend the reopen budg
     expect(limited).toBe(10)
     expect(elapsed).toBe(1000 + 10 * 5000)
     expect(h.peers).toHaveLength(2)
+  })
+})
+
+test('spool inventory is kept per Connector, replaced by each snapshot and unavailable when omitted', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  expect(h.ready().spools).toEqual([])
+  const inventory = {
+    observedAt: h.time.wall,
+    stale: false,
+    total: 1,
+    spools: [
+      {
+        name: 'PLA <b>',
+        material: 'PLA',
+        colorHex: 'ffffff',
+        remainingGrams: 400,
+        location: null,
+        archived: false,
+      },
+    ],
+  }
+  const send = (seq: number, withInventory: boolean) =>
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        ...(withInventory ? { inventory } : {}),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  send(0, true)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.agentId).toBe(agent)
+  expect(h.ready().spools[0]?.inventory?.spools[0]?.remainingGrams).toBe(400)
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(false)
+  expect(
+    spoolInventoryStale(h.ready().spools[0]!, {
+      wall: h.time.wall,
+      mono: h.time.mono + 30_000,
+    }),
+  ).toBe(true)
+  send(1, false)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
+})
+
+test('an invalid inventory is dropped without interrupting printer status', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: { observedAt: 1, stale: false, total: 1, spools: [{}] },
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.first().connection).toBe('authenticated')
+  expect(h.first().observation?.state.state).toBe('idle')
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+})
+
+test('an invalid printer field still ends the feed', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        { printerKey: row.printerKey, state: 'exploded', progress: 0 },
+      ],
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.first().connection).toBe('closed')
+  expect(h.ready().spools).toEqual([])
+})
+
+test('unchanged inventory content keeps the same object across snapshots', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  const inventory = { observedAt: 1, stale: false, total: 0, spools: [] }
+  for (const seq of [0, 1])
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        inventory: structuredClone(inventory),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  const first = h.ready().spools[0]?.inventory
+  expect(first).toEqual(inventory)
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 2,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: structuredClone(inventory),
+    },
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.ready().spools[0]?.inventory).toBe(first)
+})
+
+const spoolInventory = { observedAt: 1, stale: false, total: 0, spools: [] }
+
+test('spools stay live through seamless renewal, then follow printer rows on loss and reopen', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    let seq = 0
+    while (h.peers.length === 1) {
+      send(h, 0, session, seq++, row.printerKey, spoolInventory)
+      expect(h.ready().spools[0]?.historical).toBe(false)
+      await second()
+    }
+    // Renewal in flight: inventory is retained and not flagged historical.
+    expect(h.ready().spools).toHaveLength(1)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    const renewed = admit(h, 1)
+    send(h, 1, renewed, 0, row.printerKey, spoolInventory)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    // Loss: last inventory is kept but immediately stale.
+    h.peer(1).input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(h.first().connection).toBe('closed')
+    expect(h.ready().spools[0]?.historical).toBe(true)
+    expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
+    // A fresh frame on the reopened feed makes it current again.
+    while (h.peers.length < 3) await second()
+    const reopened = admit(h, 2)
+    send(h, 2, reopened, 0, row.printerKey, spoolInventory)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(false)
+  })
+})
+
+test('a revoked or rejected feed flags spools historical and a new farm clears them', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    send(h, 0, session, 0, row.printerKey, spoolInventory)
+    h.peer(0).input.onHealth({ kind: 'closed', reason: 'revoked' })
+    expect(h.ready().spools[0]?.historical).toBe(true)
+    await h.view.selectFarm(farm)
+    expect(h.ready().spools).toEqual([])
   })
 })

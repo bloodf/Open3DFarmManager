@@ -5,7 +5,11 @@ import {
 } from '../../../../packages/farm-protocol/src/browser-device-http.ts'
 import { BrowserDeviceUuid } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
-import { StatusMessage } from '../../../../packages/farm-protocol/src/channel.ts'
+import {
+  StatusMessage,
+  parseStatusMessageTolerant,
+} from '../../../../packages/farm-protocol/src/channel.ts'
+import type { SpoolInventory } from '../../../../packages/farm-protocol/src/inventory.ts'
 
 const exactKey = PrinterState.shape.printerKey.refine(
   (value) =>
@@ -108,6 +112,31 @@ export type FarmObservation = {
   sourceClockComparable: boolean
   historical: boolean
 }
+/** Read-only Spoolman mirror per Connector. Null inventory means unavailable. */
+export type FarmSpoolObservation = {
+  agentId: string
+  inventory: SpoolInventory | null
+  received: Clock
+  /** Feed closed: last observation only, never current. */
+  historical: boolean
+}
+function sameInventory(
+  a: SpoolInventory | null | undefined,
+  b: SpoolInventory | undefined,
+) {
+  return !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
+}
+export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
+  const elapsed = now.mono - item.received.mono
+  return (
+    item.historical ||
+    !item.inventory ||
+    item.inventory.stale ||
+    !Number.isFinite(elapsed) ||
+    elapsed < 0 ||
+    elapsed >= 30_000
+  )
+}
 export type FarmRow = {
   assignment: FarmAssignment
   connection:
@@ -142,6 +171,7 @@ type Ready = {
   inventory: 'loading' | 'ready'
   feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
+  spools: readonly FarmSpoolObservation[]
   nextPrinter: string | null
   printerAfter: string | null
   canManage: boolean
@@ -423,6 +453,7 @@ export function createFarmView(deps: Dependencies) {
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         rows: [],
+        spools: [],
         nextPrinter: null,
         printerAfter: null,
         canManage: false,
@@ -450,6 +481,7 @@ export function createFarmView(deps: Dependencies) {
         ...previous,
         scope: null,
         rows: [],
+        spools: [],
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
@@ -470,6 +502,7 @@ export function createFarmView(deps: Dependencies) {
       inventory: 'loading',
       feedScope: deps.feed ? 'idle' : 'disabled',
       rows: [],
+      spools: [],
       nextPrinter: null,
       printerAfter: after,
       canManage: false,
@@ -917,6 +950,18 @@ export function createFarmView(deps: Dependencies) {
             ? { ...row.observation, historical: true }
             : null,
         }))
+        // Spool inventory follows printer rows: last data stays, flagged stale.
+        if (
+          run.current() &&
+          state.kind === 'ready' &&
+          state.scope?.viewEpoch === scope.viewEpoch
+        )
+          publish({
+            ...state,
+            spools: state.spools.map((item) =>
+              item.agentId === agentId ? { ...item, historical: true } : item,
+            ),
+          })
         // Revocation and rejected (invalid/tampered) feeds stop; logout and
         // auth invalidation retire the run instead.
         if (reason === 'revoked' || reason === 'rejected') return
@@ -996,7 +1041,7 @@ export function createFarmView(deps: Dependencies) {
             expire(now)
             if (!current() || !session) return
             const parsedSession = AdmittedSession.safeParse(snapshot.session)
-            const parsed = StatusMessage.safeParse(snapshot.message)
+            const parsed = parseStatusMessageTolerant(snapshot.message)
             if (
               !parsedSession.success ||
               !sameSession(session, parsedSession.data) ||
@@ -1045,6 +1090,30 @@ export function createFarmView(deps: Dependencies) {
             seq = message.seq
             lastSign = now.mono
             if (firstSign < 0) firstSign = now.mono
+            if (state.kind === 'ready') {
+              const before = state.spools.find(
+                (item) => item.agentId === agentId,
+              )?.inventory
+              // Keep the previous object when content is unchanged.
+              const inventory = sameInventory(before, message.inventory)
+                ? (before ?? null)
+                : (message.inventory ?? null)
+              publish({
+                ...state,
+                spools: [
+                  ...state.spools.filter((item) => item.agentId !== agentId),
+                  {
+                    agentId,
+                    inventory,
+                    historical: false,
+                    received: {
+                      wall: snapshot.receivedAtWallMs,
+                      mono: snapshot.receivedAtMonoMs,
+                    },
+                  },
+                ].sort((a, b) => a.agentId.localeCompare(b.agentId)),
+              })
+            }
             update((row) => {
               const printer = message.printers.find(
                 (item) => item.printerKey === row.assignment.printerKey,

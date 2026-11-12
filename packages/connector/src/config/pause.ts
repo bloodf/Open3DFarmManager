@@ -5,6 +5,7 @@ import {
   PairingProofAudience,
   PairingProofOrigin,
 } from '../../../farm-protocol/src/pairing-proof.ts'
+import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import type { PauseIssuer } from '../auth/pause-capability.ts'
 
 /**
@@ -35,6 +36,12 @@ const IssuerEntry = z.strictObject({
 export const PauseRuntimeConfigSchema = z.strictObject({
   version: z.literal(1),
   issuers: z.array(IssuerEntry).min(1).max(MAX_PAUSE_ISSUER_KEYRING),
+  /**
+   * Explicit opt-in for the pause control path. Absent keeps pause disabled:
+   * no journal, socket or driver is created. The single named assignment is
+   * the only one this Connector will accept a pause for.
+   */
+  control: z.strictObject({ assignmentId: BrowserDeviceUuid }).optional(),
   signalling: z
     .strictObject({
       endpoint: z.string().max(2048),
@@ -62,6 +69,7 @@ export type PauseIssuerEntry = Readonly<{
 export type PauseRuntimeConfig = Readonly<{
   version: 1
   issuers: readonly PauseIssuerEntry[]
+  control?: Readonly<{ assignmentId: string }> | undefined
   signalling: Readonly<z.infer<typeof PauseRuntimeConfigSchema>['signalling']>
 }>
 

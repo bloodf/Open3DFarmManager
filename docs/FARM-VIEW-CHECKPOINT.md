@@ -136,3 +136,38 @@ The final complete source check passed 326 Bun tests, 383 Node tests and two
 runtime skips, lint, TypeScript and both builds. This checkpoint update changed
 only documentation after those checks; its formatting and whitespace checks
 passed separately. No publication or complete Phase 0 acceptance is claimed.
+
+## Spool inventory field on the status frame
+
+Status frames (`StatusMessage`, one per Connector over the browser-to-Connector
+channel) carry an optional, additive `inventory` field: a bounded, read-only
+mirror of Spoolman spools. It never travels through the server.
+
+- Shape (`packages/farm-protocol/src/inventory.ts`): `observedAt`, `stale`,
+  `total` (at most 10000) and at most 8 `spools`. Each spool has `name` (32),
+  `material` (16), `colorHex` (6 lowercase hex), integer `remainingGrams`,
+  `location` (32) and `archived`. All objects are strict; unknown fields are
+  rejected. Negative remaining weight is preserved.
+- The whole frame stays within the existing 2048-byte application cap. The
+  Connector drops trailing spools until it fits and keeps `total` truthful. If
+  even zero spools do not fit, the inventory is omitted and the page shows it as
+  unavailable. A frame without `inventory` means unavailable or not configured.
+- Staleness: the Connector sets `stale` when the Spoolman mirror is not
+  currently observed or is 30 s old or more. The browser also treats an
+  inventory as stale after 30 s without a new frame. When the feed closes, the
+  last inventory is kept but marked historical (stale at once, like printer
+  rows); during a seamless lease renewal it stays live; a new farm clears it.
+
+Compatibility and rollout order. Deploy the farm server and browser first, then
+Connectors.
+
+- A new browser accepts frames from old Connectors, which never send
+  `inventory`.
+- A new browser drops only an invalid `inventory` (the page shows spools as
+  unavailable) and keeps printer status flowing. Printer fields and any unknown
+  top-level key still reject the frame. This tolerance is receive-side only
+  (`parseStatusMessageTolerant`); the Connector validates outbound frames
+  strictly.
+- An old browser validates frames strictly, so it drops the whole feed on any
+  frame that contains `inventory`. This is why browsers must be updated before
+  Connectors that send it.

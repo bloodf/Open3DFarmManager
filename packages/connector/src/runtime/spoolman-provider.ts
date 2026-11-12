@@ -1,8 +1,13 @@
-import WebSocket from 'ws'
 import { z } from 'zod'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 import { SpoolmanConfig } from '../spoolman/config.ts'
 import { createBoundedSpoolmanReader } from '../spoolman/bounded-read.ts'
+
+// Same approved ws addon policy as the Moonraker client: set before ws loads.
+process.env.WS_NO_BUFFER_UTIL = '1'
+process.env.WS_NO_UTF_8_VALIDATE = '1'
+const { default: WebSocket } = await import('ws')
+type WebSocket = InstanceType<typeof WebSocket>
 
 type Inventory = Awaited<
   ReturnType<ReturnType<typeof createBoundedSpoolmanReader>>

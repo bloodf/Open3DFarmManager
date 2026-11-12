@@ -48,6 +48,10 @@ The first keyframe must arrive within the helper's 2 s per-unit deadline, so cam
 - unavailable: "Câmera indisponível."
 - live: "Câmera ao vivo."
 
+## Farm view
+
+The browser signalling client takes an opt-in camera hooks factory per peer. The farm status feed builds `BrowserCameraMedia` authorized only for that feed's server assignment refs. It publishes `{ assignmentId, stream }` and always publishes `null` on revocation. `useFarmView` keeps the streams outside the farm-view state machine. `farm.vue` mounts `CameraDisplay` for each active assignment whose Connector is approved; the pause control is unchanged. The region and video are named per printer. The video is muted, has no `autoplay` attribute and starts through `play()` only after authorization. With `prefers-reduced-motion: reduce`, the image starts only after the user presses "Mostrar imagem ao vivo".
+
 ## Configuration (opt-in)
 
 The camera section is absent by default. When it is absent, the Connector adds no track, no channel and no helper.
@@ -74,6 +78,6 @@ The camera section is absent by default. When it is absent, the Connector adds n
 
 ## Remaining
 
-- Mount `CameraDisplay` in the farm view for authorized assignments and wire `BrowserCameraMedia` into the status feed (PR 2).
+- Real farm-page acceptance with video playing through the authenticated HTTPS signalling harness (Postgres, built app, Connector child with camera config).
 - Native NACK/RTCP handling for lossy networks, cross-network NAT and physical cameras are untested. The Connector peer still binds to loopback.
 - Native, process-wide memory and CPU bounds are not measured.

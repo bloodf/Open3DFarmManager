@@ -1,31 +1,79 @@
 // Opt-in live check of the Connector Spoolman provider (REST + ws) against a
-// seeded disposable service. The provider must only issue GET requests.
-// The script itself PATCHes one synthetic spool (and restores it) to emit an event.
+// seeded DISPOSABLE service. The provider must only issue GET requests (the
+// websocket is out of scope for this check). This script itself PATCHes one
+// synthetic spool and restores it in a finally block: never point it at real inventory.
 import assert from 'node:assert/strict'
+import seed from '../infra/sim/spoolman/seed.json' with { type: 'json' }
 import { createSpoolmanProvider } from '../packages/connector/src/runtime/spoolman-provider.ts'
+import { createLoopbackSpoolmanReader } from '../packages/connector/src/spoolman/http-read.ts'
 import type { SpoolmanSnapshot } from '../packages/connector/src/runtime/spoolman-provider.ts'
+import { qualificationScope } from './spoolman-qualification-context.ts'
 
-const origin = process.env.SPOOLMAN_SYNTHETIC_TEST_ORIGIN
-if (!origin || process.env.SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE !== 'yes')
+const requested = process.env.SPOOLMAN_SYNTHETIC_TEST_ORIGIN
+if (!requested || process.env.SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE !== 'yes')
   throw new Error('Explicit disposable synthetic Spoolman origin required')
+// Throws unless the origin is canonical loopback http; nothing is requested here.
+createLoopbackSpoolmanReader({
+  origin: requested,
+  context: { ...qualificationScope, limit: 200 },
+  timeoutMs: 10000,
+})
+const origin = new URL(requested).origin
+
+const RefreshBudgetMs = 5000 // well under the provider's 15 s poll interval
+const call = (path: string, init: RequestInit = {}) =>
+  fetch(new URL(`/api/v1/${path}`, origin), {
+    redirect: 'error',
+    credentials: 'omit',
+    signal: AbortSignal.timeout(5000),
+    ...init,
+  })
+const raw = async () => {
+  const response = await call('spool?allow_archived=true')
+  assert.equal(response.status, 200)
+  return (await response.json()) as {
+    id: number
+    comment?: string
+    remaining_weight: number
+  }[]
+}
+// Refuse to write unless the inventory is exactly the seed fixture.
+const before = await raw()
+assert.deepEqual(
+  before.map((spool) => spool.comment),
+  seed.spools.map((spool) => spool.comment),
+  'inventory is not exactly the seed fixture',
+)
+assert.deepEqual(
+  before.map((spool) => spool.remaining_weight),
+  [1000, 900, 800, 700, 600, 500],
+  'inventory weights are not the seed fixture',
+)
+const target = before[1]!
+const originalWeight = target.remaining_weight
+const patch = async (weight: number) => {
+  const response = await call(`spool/${target.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ remaining_weight: weight }),
+  })
+  assert.equal(response.status, 200)
+  await response.body?.cancel()
+}
 
 const methods: string[] = []
 const snapshots: SpoolmanSnapshot[] = []
 const controller = new AbortController()
 const provider = createSpoolmanProvider({
-  config: {
-    origin,
-    farmId: '00000000-0000-4000-8000-000000000001',
-    serviceId: '00000000-0000-4000-8000-000000000002',
-    limit: 200,
-  },
+  config: { origin, ...qualificationScope, limit: 200 },
   signal: controller.signal,
   onSnapshot: (value) => snapshots.push(value),
   transport: {
     fetch: (input, init) => {
-      methods.push(
-        init?.method ?? (input instanceof Request ? input.method : 'GET'),
-      )
+      const method =
+        init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (method !== 'GET') throw new Error(`Provider issued ${method}`)
+      methods.push(method)
       return fetch(input, init)
     },
   },
@@ -34,44 +82,47 @@ const until = async (predicate: () => boolean, ms: number, what: string) => {
   const deadline = Date.now() + ms
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
-const spool = new URL('/api/v1/spool/2', origin)
-const patch = (weight: number) =>
-  fetch(spool, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ remaining_weight: weight }),
-    signal: AbortSignal.timeout(5000),
-  }).then((response) => assert.equal(response.status, 200))
+const weightOf = () =>
+  provider.snapshot().inventory?.items.find((item) => item.id === target.id)
+    ?.remaining_weight
 
-await until(() => provider.snapshot().kind === 'observed', 20_000, 'observed')
-const first = provider.snapshot()
-assert.equal(first.inventory?.items.length, 6)
-const original = first.inventory?.items[1]?.remaining_weight
-assert.equal(original, 900)
-const readsBefore = methods.length
-await patch(899)
-await until(() => methods.length > readsBefore, 20_000, 'event-driven refresh')
-await until(
-  () => provider.snapshot().inventory?.items[1]?.remaining_weight === 899,
-  20_000,
-  'refreshed inventory',
-)
-await patch(900)
-controller.abort()
-await provider.done
+let refreshMs = 0
+let patched = false
+try {
+  await until(() => provider.snapshot().kind === 'observed', 20_000, 'observed')
+  assert.equal(provider.snapshot().inventory?.items.length, 6)
+  // Let the initial read burst settle so the next read is event-driven.
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  const snapshotsBefore = snapshots.length
+  const changedAt = Date.now()
+  patched = true
+  await patch(originalWeight - 1)
+  await until(
+    () => weightOf() === originalWeight - 1,
+    RefreshBudgetMs,
+    'event-driven refresh within budget',
+  )
+  refreshMs = Date.now() - changedAt
+  const after = snapshots.slice(snapshotsBefore)
+  assert.ok(
+    after.some((value) => value.kind === 'stale'),
+    'no stale snapshot from invalidation',
+  )
+} finally {
+  if (patched) await patch(originalWeight)
+  controller.abort()
+  await provider.done
+}
+assert.equal((await raw())[1]?.remaining_weight, originalWeight)
 const closed = provider.snapshot()
 assert.equal(closed.kind, 'stale')
 assert.equal(closed.inventory?.items.length, 6)
 const readsAtClose = methods.length
 await new Promise((resolve) => setTimeout(resolve, 3000))
 assert.equal(methods.length, readsAtClose, 'no reads after close')
-assert.ok(
-  methods.every((method) => method === 'GET'),
-  'provider issued non-GET',
-)
 assert.equal(snapshots.at(-1)?.kind, 'stale')
 console.log(
   JSON.stringify({
@@ -79,6 +130,7 @@ console.log(
     runtime: process.version,
     providerMethods: [...new Set(methods)],
     reads: readsAtClose,
+    refreshMs,
     staleOnClose: true,
   }),
 )

@@ -27,14 +27,14 @@ Run on a Linux amd64 host with Node v24.22.2 against a fresh disposable containe
 - `scripts/test-spoolman-reader.ts`: exit 0 (empty inventory, two seeds, six spools, archived first spool, limits 1/2/4/200).
 - `scripts/test-spoolman-node.ts`: exit 0, `{"result":"passed","runtime":"v24.22.2","spools":6,"pageLimits":[1,2,4,200],"archivedIncluded":true}`.
 - `sim:seed` run twice more after the archive step: `{ vendors: 2, filaments: 4, spools: 6 }` each time, and the inventory (including archived) stayed at six spools with ascending IDs and weights 1000, 900, 800, 700, 600, 500.
-- `scripts/test-spoolman-provider.ts` (opt-in, same two variables): exit 0. The provider opened the real websocket, reached `observed`, refreshed after an operator-made change on a synthetic spool (restored afterwards), issued only GET requests, and after abort reported `stale` with the last inventory retained and made no further reads.
+- `scripts/test-spoolman-provider.ts` (opt-in, same two variables): exit 0. The provider opened the real websocket, reached `observed`, refreshed within the 5 s budget (well under the 15 s poll interval) after the script itself PATCHed a synthetic spool, issued only GET requests through its fetch transport (the websocket is out of scope for that check), and after abort reported `stale` with the last inventory retained and made no further reads.
 
 Defects found and fixed by this run:
 
 - `packages/sim-tools/src/spoolman.ts` imported `seed.json` without an import attribute, so `sim:seed` crashed on Node 24 (`ERR_IMPORT_ATTRIBUTE_MISSING`).
-- The seed listed spools without `allow_archived=true`. After the reader setup archived a seed spool, a reseed created a duplicate seven-spool inventory. The seed now lists archived spools; a unit test covers it.
+- The seed listed spools without `allow_archived=true`. After the reader setup archived a seed spool, a reseed created a duplicate seven-spool inventory. The seed now lists archived spools; a unit test covers it. An inventory that already holds duplicate seed markers now makes the seed throw `Ambiguous simulator fixture` rather than adding more.
 
-The provider script exercises one websocket event path only; it does not cover network partition, heartbeat timeout or reconnect backoff against a live service (covered by simulated-transport unit tests). A passing receipt does not establish production or hardware acceptance.
+`scripts/test-spoolman-provider.ts` is the one qualification script that writes after setup: it requires the canonical loopback origin and the two opt-in variables, refuses to run unless the inventory is exactly the seed fixture (comment markers and weights), PATCHes one synthetic spool's `remaining_weight` and restores the captured original in a `finally` block. This is the only exception to the "keep the fixture unchanged" instruction above; it is for disposable services only and must be run after `test-spoolman-node.ts`. The provider script exercises one websocket event path only; it does not cover network partition, heartbeat timeout or reconnect backoff against a live service (covered by simulated-transport unit tests). A passing receipt does not establish production or hardware acceptance.
 
 ## Observed local result
 

@@ -27,6 +27,7 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { selectRtcFarmScenarios } from '../tests/helpers/rtc-farm-acceptance-scenarios.ts'
+import { startRtspCamera } from '../tests/helpers/rtc-farm-rtsp-camera.ts'
 
 const exec = promisify(execFile)
 const env = process.env
@@ -56,6 +57,25 @@ if (
     'RTC_FARM_TEST_ADMITTED=yes, a locally available digest-pinned PostgreSQL 17 RTC_FARM_TEST_IMAGE, a loopback RTC_FARM_TEST_DB_PORT and an absolute RTC_FARM_TEST_WORK_ROOT outside the repository are required',
   )
 const scenarios = selectRtcFarmScenarios(env.RTC_FARM_TEST_SCENARIOS)
+// Camera rows need a prebuilt ingest helper (its hash is pinned in tracked
+// code) and a loopback RTSP port.
+const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
+  ? {
+      helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
+      port: Number(env.RTC_FARM_TEST_RTSP_PORT),
+    }
+  : undefined
+if (
+  camera &&
+  (!isAbsolute(camera.helper) ||
+    !Number.isInteger(camera.port) ||
+    camera.port < 1024 ||
+    camera.port > 65535 ||
+    camera.port === dbPort)
+)
+  throw new Error(
+    'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute) and RTC_FARM_TEST_RTSP_PORT',
+  )
 const prefix = env.RTC_FARM_TEST_NAME_PREFIX ?? 'o3dfm-rtc-farm'
 if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
   throw new Error('Invalid RTC farm test name prefix')
@@ -121,6 +141,30 @@ const interrupt = () => {
     } catch {
       /* not created or already removed */
     }
+    try {
+      // Exact compose project of this run's RTSP simulator, if one was started.
+      if (camera)
+        execFileSync(
+          'docker',
+          [
+            'compose',
+            '--project-name',
+            name + '-rtsp',
+            '-f',
+            join(checkout, 'infra/sim/docker-compose.yml'),
+            '-f',
+            join(workDir, 'rtsp-override.yml'),
+            '--profile',
+            'rtsp',
+            'down',
+            '--timeout',
+            '1',
+          ],
+          { timeout: 30000 },
+        )
+    } catch {
+      /* not started or already removed */
+    }
     rmSync(workDir, { recursive: true, force: true })
     process.exit(130)
   }
@@ -176,7 +220,10 @@ async function run(
   }
 }
 
+let rtsp: Awaited<ReturnType<typeof startRtspCamera>> | undefined
 let container: string | undefined
+let createAttempted = false
+const CREATE_SETTLE_MS = 90000
 let sql: ReturnType<typeof postgres> | undefined
 let failure: unknown
 let cleanupFailure: unknown
@@ -202,6 +249,7 @@ try {
   // Fails rather than pulling: image ownership and deletion remain with its owner.
   await docker('image', 'inspect', image)
   ledger({ resource: 'container', name, label, image })
+  createAttempted = true
   await docker(
     ...['create', '--name', name, '--label', label, '--pull', 'never'],
     ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
@@ -303,6 +351,15 @@ try {
     'Layer seal failed',
   )
 
+  if (camera)
+    rtsp = await startRtspCamera({
+      checkout,
+      workDir,
+      project: name + '-rtsp',
+      port: camera.port,
+      helper: camera.helper,
+      ledger,
+    })
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)
@@ -315,6 +372,7 @@ try {
           env: {
             ...nodeEnv,
             ...scenario.env,
+            ...(scenario.resources?.includes('rtsp-camera') ? rtsp?.env : {}),
             SIGNALLING_HTTPS_DISPOSABLE: 'yes',
             SIGNALLING_HTTPS_PORT: String(dbPort),
             SIGNALLING_HTTPS_LEDGER: rowLedger,
@@ -366,15 +424,32 @@ try {
   })
 } finally {
   try {
+    await rtsp?.stop()
+  } catch (error) {
+    cleanupFailure ??= error
+  }
+  try {
     await sql?.end({ timeout: 3 })
   } catch (error) {
-    cleanupFailure = error
+    cleanupFailure ??= error
   }
   try {
     // Exact ownership: recover the ID by name if recording was interrupted.
-    const owned =
+    // A timed-out `docker create` is not cancelled in the daemon and can still
+    // finish later, so keep looking for a bounded time after an attempt.
+    let owned =
       container ??
       (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
+    for (
+      let waited = 0;
+      !owned && createAttempted && waited < CREATE_SETTLE_MS;
+      waited += 2000
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      owned = await docker('inspect', '--format', '{{.Id}}', name).catch(
+        () => '',
+      )
+    }
     if (owned) {
       assert.match(owned, /^[a-f0-9]{64}$/)
       assert.equal(
@@ -386,8 +461,30 @@ try {
         ),
         id,
       )
-      await docker('rm', '--force', owned)
-      ledger({ removed: 'container', id: owned })
+      // A timed-out `rm` can still finish in the daemon: confirm by state.
+      const removal: unknown = await docker('rm', '--force', owned).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      let present = true
+      for (let waited = 0; waited <= CREATE_SETTLE_MS; waited += 2000) {
+        present =
+          (await docker(
+            'ps',
+            '-aq',
+            '--no-trunc',
+            '--filter',
+            'id=' + owned,
+          )) !== ''
+        if (!present) break
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+      if (present) throw removal ?? new Error('Owned container remains')
+      ledger({
+        removed: 'container',
+        id: owned,
+        ...(removal ? { afterClientTimeout: true } : {}),
+      })
     }
   } catch (error) {
     cleanupFailure ??= error

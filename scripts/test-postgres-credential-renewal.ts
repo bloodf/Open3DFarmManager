@@ -27,7 +27,11 @@ if (
     'Fresh test admission and locally available digest-pinned PostgreSQL 17 image required',
   )
 const id = randomUUID()
-const name = 'o3dfm-renewals-' + id
+// Optional caller-owned name prefix so parallel runners can audit their own resources.
+const prefix = process.env.RENEWAL_TEST_NAME_PREFIX ?? 'o3dfm-renewals'
+if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
+  throw new Error('Invalid renewal test name prefix')
+const name = prefix + '-' + id
 const label = 'org.open3dfarmmanager.renewal-test=' + id
 const evidence = join(
   homedir(),

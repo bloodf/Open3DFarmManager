@@ -10,7 +10,7 @@ bash scripts/test-local-ci.sh
 bash scripts/local-ci.sh code
 ```
 
-The code job requires pnpm 12.18.0, Node 24.22.2, existing workspace dependencies,
+The code job requires pnpm 12.18.0, Node 24.22.3, existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
 separately; this runner never installs operating-system packages. Like
 `.github/workflows/ci.yml`, it uses a frozen dependency install with scripts
@@ -39,7 +39,7 @@ bash scripts/local-ci.sh all --containers --simulator
 The image job builds the workflow Dockerfile for `linux/amd64`, starts a
 read-only, capability-dropped container on a dynamically allocated loopback
 port, and checks `/healthz`. Install the `linux/amd64` base images
-`node:24.22.2-alpine` separately first; the runner refuses to
+`node:24.22.3-alpine` separately first; the runner refuses to
 pull shared build bases implicitly. The GitHub job builds on Ubuntu amd64 and
 uses port 3100. The dynamic port avoids disturbing other local services.
 

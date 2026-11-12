@@ -192,7 +192,9 @@ async function run() {
     })()
     pending = Buffer.alloc(0)
   }
-  const lifetime = setTimeout(stop, 30_000)
+  // Bounded child lifetime. The revocation row watches for reopens for longer
+  // than the farm view's 30 s reopen backoff cap, so this must exceed it.
+  const lifetime = setTimeout(stop, 90_000)
   const output = (reply: RtcFixtureReply) => {
     const wire = JSON.stringify(RtcFixtureReply.parse(reply)) + '\n'
     if (!process.stdout.write(wire)) stop()

@@ -29,29 +29,59 @@ test('output file manifest seals into strict receipt and detects changed bytes',
   }
 })
 
-test('contained output links are sealed by target and escaping links are refused', async () => {
+test('internal relative links are sealed by target; escaping links are refused', async () => {
   const root = await mkdtemp(join(tmpdir(), 'signalling-manifest-'))
-  const outside = await mkdtemp(join(tmpdir(), 'signalling-manifest-outside-'))
   try {
-    await mkdir(join(root, 'server/node_modules/a'), { recursive: true })
+    await mkdir(join(root, 'server/node_modules/a/node_modules'), {
+      recursive: true,
+    })
+    await mkdir(join(root, 'server/node_modules/shared'))
     await writeFile(join(root, 'server/index.mjs'), 'entry')
-    await symlink('a', join(root, 'server/node_modules/b'))
+    await symlink(
+      '../../shared',
+      join(root, 'server/node_modules/a/node_modules/shared'),
+    )
     const source = { head: 'a'.repeat(40), sourceSha256: 'b'.repeat(64) }
     const sealed = await createFixtureReceipt(root, source, 'c'.repeat(64))
-    assert.ok(
-      sealed.entries.some((entry) => entry.path === 'server/node_modules/b'),
+    assert.equal(sealed.receipt.outputFiles, 2)
+    await rm(join(root, 'server/node_modules/a/node_modules/shared'))
+    await symlink(
+      '../../../index.mjs',
+      join(root, 'server/node_modules/a/node_modules/shared'),
     )
-    await rm(join(root, 'server/node_modules/b'))
-    await symlink(join(root, 'server'), join(root, 'server/node_modules/b'))
-    const relinked = await createFixtureReceipt(root, source, 'c'.repeat(64))
-    assert.notEqual(sealed.receipt.outputSha256, relinked.receipt.outputSha256)
-    await symlink(outside, join(root, 'server/node_modules/c'))
+    const retargeted = await createFixtureReceipt(root, source, 'c'.repeat(64))
+    assert.notEqual(
+      sealed.receipt.outputSha256,
+      retargeted.receipt.outputSha256,
+    )
+    await symlink('/etc', join(root, 'server/absolute'))
+    await assert.rejects(
+      createFixtureReceipt(root, source, 'c'.repeat(64)),
+      /escapes/,
+    )
+    await rm(join(root, 'server/absolute'))
+    await symlink('../../outside', join(root, 'server/escape'))
+    await assert.rejects(
+      createFixtureReceipt(root, source, 'c'.repeat(64)),
+      /escapes/,
+    )
+    await rm(join(root, 'server/escape'))
+    // Lexically inside, but the chain resolves outside: s -> t, t -> ../..
+    await symlink('t', join(root, 'server/s'))
+    await symlink('../..', join(root, 'server/t'))
+    await assert.rejects(
+      createFixtureReceipt(root, source, 'c'.repeat(64)),
+      /escapes/,
+    )
+    await rm(join(root, 'server/s'))
+    await rm(join(root, 'server/t'))
+    // A link to the output root itself is refused.
+    await symlink('..', join(root, 'server/root'))
     await assert.rejects(
       createFixtureReceipt(root, source, 'c'.repeat(64)),
       /escapes/,
     )
   } finally {
     await rm(root, { recursive: true, force: true })
-    await rm(outside, { recursive: true, force: true })
   }
 })

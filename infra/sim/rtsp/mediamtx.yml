@@ -1,0 +1,23 @@
+# Deterministic synthetic RTSP source. Only RTSP over TCP is enabled.
+logLevel: warn
+rtsp: yes
+rtspTransports: [tcp]
+rtspAddress: :8554
+rtspAuthMethods: []
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: no
+metrics: no
+pprof: no
+playback: no
+paths:
+  test:
+    runOnInit: >-
+      ffmpeg -nostdin -loglevel error -re -f lavfi
+      -i testsrc2=size=320x240:rate=5
+      -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+      -g 5 -bsf:v h264_mp4toannexb
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/test
+    runOnInitRestart: yes

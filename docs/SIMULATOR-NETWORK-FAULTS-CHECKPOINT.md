@@ -15,8 +15,9 @@ a separate internal network. Faults are applied with `iptables`/`tc` inside the
 router only (`NET_ADMIN` on the router and the lan namespace holder, nowhere
 else). Each repeat starts the topology fresh.
 
-The probe uses the Connector's `PeerConnection` options: no STUN/TURN, no
-ICE-TCP, fingerprint verification on. It runs twice per repeat:
+The probe uses the Connector's ICE-relevant `PeerConnection` options: no
+STUN/TURN, no ICE-TCP, fingerprint verification on. It does not mirror
+`disableAutoNegotiation` or `maxMessageSize`, which do not affect reachability. It runs twice per repeat:
 
 - `loopback`: the Connector's current `bindAddress: '127.0.0.1'`, set in
   `readonly-peer.ts`, `pause-control-peer.ts` and `synthetic-peer.ts`.
@@ -77,15 +78,18 @@ runner). Then:
 2. The Spoolman seed (2 vendors, 4 filaments, 6 spools) is applied twice with an
    identical result.
 3. Connector discovery (`discoverMoonraker`, #106) against both printers: ready,
-   u1 exposes exactly `extruder`..`extruder3`, sv06 exactly `extruder`, and each
-   reports its webcam.
+   u1 exposes exactly `extruder`..`extruder3`, sv06 exactly `extruder`, and their
+   webcams are exactly `sv06-test-pattern` and `u1-test-pattern`. One JPEG frame
+   is fetched from each printer webcam and from the camera service.
 4. The Connector's Spoolman provider (HTTP traversal plus websocket
-   invalidation) observes the seeded spools.
+   invalidation) observes exactly the 6 seeded spools.
 5. Real enrollment (pairing, proof, approval, credential claim, two printer
    assignments), the built farm server behind a loopback TLS front, and the real
    Connector CLI `run` with both printers and the Spoolman section. Telemetry for
-   both `sv06` and `u1` must be ingested into `farm.telemetry_events`, and the
-   Connector must exit 0 on SIGTERM.
+   both `sv06` and `u1` must be ingested into `farm.telemetry_events`. After the
+   drain settles the Connector is stopped (exit 0), and exactly-once holds:
+   stored rows = collector `queued` = agent `delivered`, no duplicate event IDs,
+   no expiry/capacity loss, and exactly one idle state record per printer.
 
 It removes its Compose project (containers, volumes, network, built images), the
 PostgreSQL container (verified by ID and label), its database roles and its work

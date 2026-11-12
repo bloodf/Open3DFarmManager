@@ -16,6 +16,7 @@ import type {
   PauseIssuer,
   PausePeerHandle,
 } from '../auth/pause-capability.ts'
+import type { CachedAuthorityFreshness } from '../auth/offline-authority.ts'
 import type {
   PauseCommandOutcome,
   PausePhaseMessage,
@@ -37,7 +38,10 @@ export type PauseRelayReason = PauseDispatchReason | PauseCapabilityRejection
 
 export type PauseRelayConfig = Readonly<{
   /** Trusted local issuer keyring. Never sourced from the peer or from a command. */
-  authority: Readonly<{ issuers: readonly PauseIssuer[] }>
+  authority: Readonly<{
+    issuers: readonly PauseIssuer[]
+    freshness?: CachedAuthorityFreshness
+  }>
   clock: Readonly<{ wallNow(): number; monotonicNow(): number }>
   /** Durable journal used by the dispatcher this relay owns. */
   journal: CommandJournalHandle
@@ -220,7 +224,12 @@ export function createPauseCommandRelay(
   const wallNow = config.clock.wallNow.bind(config.clock)
   const monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const dispatcher = createPauseDispatcher({
-    authority: { issuers: config.authority.issuers },
+    authority: config.authority.freshness
+      ? {
+          issuers: config.authority.issuers,
+          freshness: config.authority.freshness,
+        }
+      : { issuers: config.authority.issuers },
     clock: config.clock,
     journal: config.journal,
     driver: config.driver,

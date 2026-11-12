@@ -90,6 +90,23 @@ export const SignallingServerControl = z
       t: z.literal('rtc.binding'),
       binding: RtcSessionBinding,
     }),
+    // Current-authority confirmation for the Connector's offline tracker. Sent
+    // only on the credential-authenticated Connector inbox, after the server
+    // reread enrollment, credential and revocation state. server_seq strictly
+    // increases; it carries no command or capability.
+    z.strictObject({
+      ...base,
+      t: z.literal('connector.authority-confirm'),
+      server_seq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      farm_id: BrowserDeviceUuid,
+      agent_id: BrowserDeviceUuid,
+      credential_jti: BrowserDeviceUuid,
+    }),
+    z.strictObject({
+      ...base,
+      t: z.literal('connector.authority-revoked'),
+      server_seq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    }),
     z.strictObject({
       ...base,
       t: z.literal('retry'),

@@ -29,3 +29,5 @@ Next work is to isolate the upstream firmware/emulator identification behavior u
 The [image provenance and architecture follow-up](SIMULATOR-IMAGE-PROVENANCE.md) verifies the pinned sources, separates experimental Linux-MCU fixes from this AVR image, and records one native ARM64 stock success followed by a failed project-fixture pair. No replacement was adopted.
 
 The [startup-order measurement](SIMULATOR-STARTUP-MEASUREMENTS.md) records successful controls before and after a failed pair, with a repeatable ordering correlation that still requires a controlled intervention before claiming causality.
+
+The [readiness result](SIMULATOR-READINESS-RESULT.md) identifies the root cause (unoptimised simulavr plus unpaced emulation speed) and records the fix with ten passing cold starts.

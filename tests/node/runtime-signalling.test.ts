@@ -243,3 +243,38 @@ test('expiry timer is terminal even when it fires before the sampled clock deadl
     await running
   }
 })
+
+test('an admitted session resets reconnect backoff to the minimum; unadmitted sessions still back off', async () => {
+  async function gaps(admit: boolean) {
+    const controller = new AbortController()
+    const starts: number[] = []
+    const running = runSignallingLifecycle({
+      credentialExpiresAt: Date.now() + 10000,
+      retryMinMs: 20,
+      retryMaxMs: 400,
+      signal: controller.signal,
+      createSession(terminal, admitted) {
+        starts.push(performance.now())
+        setImmediate(() => {
+          if (admit) admitted()
+          terminal()
+          // A late admission after terminal never resets backoff.
+          if (!admit) admitted()
+        })
+        return {
+          start: async () => {},
+          close() {},
+          dispose: async () => {},
+        }
+      },
+    })
+    while (starts.length < 5) await new Promise((r) => setTimeout(r, 5))
+    controller.abort()
+    await running
+    return starts.slice(1).map((value, index) => value - starts[index]!)
+  }
+  const admitted = await gaps(true)
+  const unadmitted = await gaps(false)
+  assert.ok(Math.max(...admitted) < 120, String(admitted))
+  assert.ok(unadmitted[3]! >= 150, String(unadmitted))
+})

@@ -40,9 +40,12 @@ export async function createPauseExecutionRtcBrowserActor(
     false,
     ['sign', 'verify'],
   )
-  const identity = await validateBrowserDevicePublicKey(
-    await crypto.subtle.exportKey('jwk', pair.publicKey),
+  // Only the public coordinates; the exported JWK also carries key_ops and ext.
+  const { kty, crv, x, y } = await crypto.subtle.exportKey(
+    'jwk',
+    pair.publicKey,
   )
+  const identity = await validateBrowserDevicePublicKey({ kty, crv, x, y })
 
   const abort = new AbortController()
   let enrolled = false

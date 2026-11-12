@@ -156,6 +156,12 @@ import {
 class FixturePeer {
   readonly socket: WebSocketType
   readonly #queue: SignallingServerFrame[] = []
+  /** Authority confirmations arrive independently of the handshake order. */
+  readonly confirms: Array<{
+    at: number
+    frame: Extract<SignallingServerFrame, { t: 'connector.authority-confirm' }>
+  }> = []
+  readonly revocations: number[] = []
   #wake: (() => void) | undefined
   #error: Error | undefined
   constructor(socket: WebSocketType) {
@@ -166,7 +172,14 @@ class FixturePeer {
           throw new Error('Invalid fixture frame')
         if (this.#queue.length >= 64)
           throw new Error('Fixture queue exceeded bound')
-        this.#queue.push(decodeSignallingServerFrame(data.toString('utf8')))
+        const frame = decodeSignallingServerFrame(data.toString('utf8'))
+        if ('t' in frame && frame.t === 'connector.authority-confirm') {
+          if (this.confirms.length >= 64)
+            throw new Error('Fixture confirmations exceeded bound')
+          this.confirms.push({ at: performance.now(), frame })
+        } else if ('t' in frame && frame.t === 'connector.authority-revoked')
+          this.revocations.push(frame.server_seq)
+        else this.#queue.push(frame)
       } catch {
         this.#error = new Error('Invalid server signalling frame')
       }
@@ -500,50 +513,51 @@ export async function runSignallingHttpsAcceptance(input: {
     )
     if (claim.status !== 'approved' || claim.farm_id !== input.farmId)
       throw new Error('Synthetic pairing did not complete')
+    // Browser signalling authority requires at least one active assignment.
+    const printerKey = 'synthetic-readonly-printer'
+    const path = `/api/farms/${input.farmId}/printers`
+    const registration = await pagePost(owner, path, {
+      agentId: claim.agent_id,
+      printerKey,
+      confirmedLocalConfiguration: true,
+    })
+    if (
+      !registration ||
+      typeof registration !== 'object' ||
+      !('assignmentId' in registration) ||
+      typeof registration.assignmentId !== 'string'
+    )
+      throw new Error('Fixture printer registration failed')
+    const assignmentId = registration.assignmentId
+    const listing: unknown = await owner.evaluate(async (target) => {
+      const response = await fetch(target)
+      if (!response.ok) throw new Error('Fixture printer readback failed')
+      return await response.json()
+    }, path)
+    if (
+      !listing ||
+      typeof listing !== 'object' ||
+      !('printers' in listing) ||
+      !Array.isArray(listing.printers) ||
+      !listing.printers.some(
+        (row: unknown) =>
+          row &&
+          typeof row === 'object' &&
+          'assignmentId' in row &&
+          row.assignmentId === assignmentId &&
+          'agentId' in row &&
+          row.agentId === claim.agent_id &&
+          'printerKey' in row &&
+          row.printerKey === printerKey,
+      )
+    )
+      throw new Error('Fixture printer readback mismatch')
     if (
       input.extension &&
       extensionInput &&
       identities &&
       input.disconnectSignalling
     ) {
-      const printerKey = 'synthetic-readonly-printer'
-      const path = `/api/farms/${input.farmId}/printers`
-      const registration = await pagePost(owner, path, {
-        agentId: claim.agent_id,
-        printerKey,
-        confirmedLocalConfiguration: true,
-      })
-      if (
-        !registration ||
-        typeof registration !== 'object' ||
-        !('assignmentId' in registration) ||
-        typeof registration.assignmentId !== 'string'
-      )
-        throw new Error('Fixture printer registration failed')
-      const assignmentId = registration.assignmentId
-      const listing: unknown = await owner.evaluate(async (target) => {
-        const response = await fetch(target)
-        if (!response.ok) throw new Error('Fixture printer readback failed')
-        return await response.json()
-      }, path)
-      if (
-        !listing ||
-        typeof listing !== 'object' ||
-        !('printers' in listing) ||
-        !Array.isArray(listing.printers) ||
-        !listing.printers.some(
-          (row: unknown) =>
-            row &&
-            typeof row === 'object' &&
-            'assignmentId' in row &&
-            row.assignmentId === assignmentId &&
-            'agentId' in row &&
-            row.agentId === claim.agent_id &&
-            'printerKey' in row &&
-            row.printerKey === printerKey,
-        )
-      )
-        throw new Error('Fixture printer readback mismatch')
       await input.extension.afterProvisioned({
         ...extensionInput,
         identities,
@@ -732,6 +746,27 @@ export async function runSignallingHttpsAcceptance(input: {
     const leaseElapsed = performance.now() - inboxStarted
     if (leaseElapsed < 28000 || leaseElapsed > 33000)
       throw new Error('Signalling lifetime outside original 30-second bound')
+    // Current-authority confirmations: scoped to this credential, strictly
+    // increasing, first at admission and then at most 10 s apart.
+    const confirms = machine.confirms
+    if (
+      confirms.length < 4 ||
+      machine.revocations.length !== 0 ||
+      confirms.some(
+        ({ frame }, index) =>
+          frame.farm_id !== input.farmId ||
+          frame.agent_id !== claim.agent_id ||
+          frame.credential_jti !== payload.jti ||
+          (index > 0 &&
+            frame.server_seq <= confirms[index - 1]!.frame.server_seq),
+      ) ||
+      confirms[0]!.at - inboxStarted > 8000 ||
+      confirms.some(
+        ({ at }, index) => index > 0 && at - confirms[index - 1]!.at > 10000,
+      )
+    )
+      throw new Error('Connector authority confirmations were not current')
+    console.error(`[fixture-authority-confirms] ${confirms.length}`)
     return {
       integratedConnectorHandshake: true,
       nativeControlFrames: true,

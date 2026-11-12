@@ -202,6 +202,7 @@ test('RTC child reply boundary excludes credentials, SDP, private keys and unbou
     terminalReason: null,
     inboxReady: false,
     verifiedAdmission: true,
+    authorityConfirms: 1,
     diagnosticsImmutable: true,
     provider: 'finite-synthetic-assigned-status',
     published: 1,

@@ -20,7 +20,8 @@ createLoopbackSpoolmanReader({
 })
 const origin = new URL(requested).origin
 
-const RefreshBudgetMs = 5000 // well under the provider's 15 s poll interval
+const InvalidateBudgetMs = 3000 // event must mark the snapshot stale promptly
+const RefreshBudgetMs = 20_000 // reads are rate limited to one per ~15 s
 const call = (path: string, init: RequestInit = {}) =>
   fetch(new URL(`/api/v1/${path}`, origin), {
     redirect: 'error',
@@ -89,6 +90,7 @@ const weightOf = () =>
   provider.snapshot().inventory?.items.find((item) => item.id === target.id)
     ?.remaining_weight
 
+let invalidateMs = 0
 let refreshMs = 0
 let patched = false
 try {
@@ -101,16 +103,17 @@ try {
   patched = true
   await patch(originalWeight - 1)
   await until(
+    () => snapshots.slice(snapshotsBefore).some((v) => v.kind === 'stale'),
+    InvalidateBudgetMs,
+    'event-driven stale snapshot',
+  )
+  invalidateMs = Date.now() - changedAt
+  await until(
     () => weightOf() === originalWeight - 1,
     RefreshBudgetMs,
-    'event-driven refresh within budget',
+    'refreshed inventory',
   )
   refreshMs = Date.now() - changedAt
-  const after = snapshots.slice(snapshotsBefore)
-  assert.ok(
-    after.some((value) => value.kind === 'stale'),
-    'no stale snapshot from invalidation',
-  )
 } finally {
   if (patched) await patch(originalWeight)
   controller.abort()
@@ -130,6 +133,7 @@ console.log(
     runtime: process.version,
     providerMethods: [...new Set(methods)],
     reads: readsAtClose,
+    invalidateMs,
     refreshMs,
     staleOnClose: true,
   }),

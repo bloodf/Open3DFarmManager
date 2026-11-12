@@ -1,6 +1,6 @@
 # Isolated development simulators
 
-The Compose project owns its network and three independent data volumes. Published ports bind to loopback only. It mounts no hardware devices, host sockets or production files. Image digests pin the reviewed amd64 builds; ARM hosts require emulation.
+The Compose project owns its network and three independent data volumes. Published ports bind to loopback only. It mounts no hardware devices, host sockets or production files. Image digests pin the reviewed amd64 builds; ARM hosts require emulation. Compose builds the Klipper simulators from `klipper/Dockerfile`, which rebuilds simulavr from the pinned image's sources with optimisation and paces it at 0.1× real time; see the [readiness result](../../docs/SIMULATOR-READINESS-RESULT.md).
 
 Execution of containers is an explicit approval gate. The commands below are prepared for use after that approval; configuration validation itself does not start services.
 

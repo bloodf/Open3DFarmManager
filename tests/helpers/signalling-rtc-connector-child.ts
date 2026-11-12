@@ -92,6 +92,8 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .regex(/^[a-zA-Z0-9:_-]{1,80}$/)
       .nullable(),
     verifiedAdmission: z.boolean(),
+    // Strictly increasing, scope-checked server authority confirmations.
+    authorityConfirms: z.number().int().min(0).max(64),
     diagnosticsImmutable: z.boolean(),
     provider: z.literal('finite-synthetic-assigned-status'),
     published: z.number().int().min(0).max(1),
@@ -146,6 +148,8 @@ async function run() {
     closing = false,
     verifiedAdmission = false,
     published = 0,
+    authorityConfirms = 0,
+    authoritySeq = 0,
     providerClosed = false,
     admissionDeadline = 0,
     sourceDeadline = 0
@@ -282,6 +286,11 @@ async function run() {
           },
           {
             genuineStatus: { assignmentRefs: refs },
+            onAuthorityConfirm: (serverSeq) => {
+              if (serverSeq <= authoritySeq) throw Error('Stale confirmation')
+              authoritySeq = serverSeq
+              authorityConfirms = Math.min(64, authorityConfirms + 1)
+            },
             onVerifiedAdmission: (admission) => {
               if (
                 !Object.isFrozen(admission) ||
@@ -347,6 +356,7 @@ async function run() {
               : 'unclassified'
             : null,
           verifiedAdmission,
+          authorityConfirms,
           diagnosticsImmutable: Object.isFrozen(diagnostics),
           provider: 'finite-synthetic-assigned-status',
           published,

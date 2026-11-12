@@ -587,11 +587,7 @@ if (mode === '--prepare-layer') {
     const catalog = await loadMigrationCatalog()
     const history =
       await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-    const appliedCount = assertSignallingCatalog(
-      catalog,
-      [...history],
-      rtcFixture || pauseFixture || pauseRtcFixture,
-    )
+    const appliedCount = assertSignallingCatalog(catalog, [...history])
     if (
       (pauseFixture || pauseRtcFixture) &&
       catalog[17]?.id !== '0018_pause_authority'

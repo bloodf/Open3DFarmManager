@@ -172,3 +172,62 @@ test('invalid or unsafe cursors fail closed without changing the log', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('SIGKILL at arbitrary points of the ack path never loses or resurrects records', async () => {
+  const { spawn } = await import('node:child_process')
+  const queueModule = new URL(
+    '../../packages/connector/src/cloud/queue.ts',
+    import.meta.url,
+  ).href
+  for (let round = 0; round < 8; round++) {
+    const dir = mkdtempSync(join(tmpdir(), 'open3d-queue-ack-kill-'))
+    try {
+      const seed = new TelemetryQueue(dir, 1000)
+      const ids = Array.from(
+        { length: 120 },
+        (_, i) => seed.enqueue({ ...state, progress: i / 1000 }, 1000).eventId,
+      )
+      seed.close()
+      // Child acknowledges one record at a time, compacting often, and reports
+      // each acknowledgement only after it returned.
+      const child = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { writeSync } from 'node:fs'
+           import { TelemetryQueue } from ${JSON.stringify(queueModule)}
+           const q = new TelemetryQueue(process.argv[1], 2000, { compactAfterBytes: 600 })
+           while (q.depth) { const [r] = q.batch(2000, 1).records; q.acknowledge([r.eventId], 2000); writeSync(1, r.eventId + '\\n') }
+           setInterval(() => {}, 1000)`,
+          dir,
+        ],
+        { stdio: ['ignore', 'pipe', 'inherit'] },
+      )
+      let output = ''
+      child.stdout.on('data', (chunk) => (output += chunk))
+      const target = 5 + ((round * 13) % 100)
+      while (output.split('\n').length - 1 < target)
+        await new Promise((r) => setTimeout(r, 1))
+      const exited = new Promise((r) => child.once('exit', r))
+      child.kill('SIGKILL')
+      await exited
+      const reported = output.split('\n').filter(Boolean)
+      const queue = new TelemetryQueue(dir, 3000)
+      try {
+        assert.equal(queue.recoveredStaleLock, true)
+        const remaining = queue.batch(3000, 1000).records.map((r) => r.eventId)
+        // Remaining records are an exact suffix of the original FIFO, and every
+        // reported acknowledgement is gone; at most one in-flight ack is replayed.
+        const start = ids.length - remaining.length
+        assert.deepEqual(remaining, ids.slice(start))
+        assert.ok(start >= reported.length, 'acknowledged record resurrected')
+        assert.ok(start <= reported.length + 1, 'unacknowledged record lost')
+      } finally {
+        queue.close()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+})

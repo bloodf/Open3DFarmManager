@@ -20,7 +20,11 @@ export async function browserDeviceFixture() {
   const now = Date.now(),
     passwordHash = await (syntheticPasswordHash ??= hashPassword(
       'synthetic-test-password',
-    ))
+    ).catch((error: unknown) => {
+      // A failed derivation is retried by the next fixture, not cached.
+      syntheticPasswordHash = undefined
+      throw error
+    }))
   const sessions = new MemorySessionRepository(
     [{ id: 'account', sessionVersion: 0, disabled: false }],
     [

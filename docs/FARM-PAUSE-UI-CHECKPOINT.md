@@ -25,10 +25,14 @@ The button opens a native modal `<dialog>` (background inert, focus trapped, `Es
 - A rejected command is reported neutrally ("Comando recusado"), because a rejection can come from the Connector or from a local check before sending; in both cases the printer was not paused.
 - The session fails closed with an explicit reason when the key or metadata cannot be resolved, the capability expires before confirmation, the transport ends, or the row stops being live while the dialog is open. Cancel or `Esc` close it. A command in flight cannot be cancelled; the dialog waits for its outcome.
 
+## Known UX gap
+
+Just after the direct connection recovers, **Pausar impressão** can be enabled before the Connector has re-admitted its separate pause inbox. A dialog opened in that window fails closed ("A conexão segura foi encerrada…" or "Não foi possível obter uma autorização segura…"), and no command is sent. Opening it again a few seconds later works. The page does not yet know the Connector's pause readiness; exposing it would need a server-side readiness signal.
+
 ## Validation boundary
 
 - `tests/node/farm-pause-control.test.ts`: real keys and signatures with issuer and signalling doubles. Covers one command after admission, no offer without enough capability validity, transport end before confirmation, unresolved key, cancel while ready, and every availability reason.
 - `tests/e2e/farm-view.spec.ts` (opt-in `FARM_VIEW_E2E=true`): the button stays disabled with the pt-BR reason when pause is not enabled and when no approved device is selected.
-- A browser end-to-end run of this page against the real HTTPS fixture (login, farm page, signed pause, applied) is not automated yet: the HTTPS fixture drives its own browser actors, not this page. The execution rows in `PAUSE-RTC-CONSUMER-CHECKPOINT.md` exercise the same browser modules against the real server and a synthetic Moonraker.
+- `farm-page-pause` in the real-RTC runner ([RTC-FARM-ACCEPTANCE-CHECKPOINT.md](RTC-FARM-ACCEPTANCE-CHECKPOINT.md)) drives this page end to end: login, live row, stale and revoked disabled reasons, the dialog, one confirmed signed pause over WebRTC and exactly one pause on the synthetic Moonraker.
 
 No physical printer was used.

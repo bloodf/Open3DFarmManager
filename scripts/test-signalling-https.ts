@@ -219,10 +219,21 @@ function fixtureMode() {
     flags.filter((value) => value === 'yes').length > 1
   )
     throw new Error('Invalid mutually exclusive fixture opt-in')
+  // Farm-page signed pause: the composed runtime Connector with pause control.
+  const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE
+  if (
+    farmPause !== undefined &&
+    (farmPause !== 'yes' ||
+      flags[0] !== 'yes' ||
+      process.env.SIGNALLING_HTTPS_RTC_RUNTIME !== 'yes' ||
+      process.env.SIGNALLING_HTTPS_FARM_PAGE !== 'yes')
+  )
+    throw new Error('Farm pause requires the composed farm page RTC fixture')
   return {
     rtcFixture: flags[0] === 'yes',
     pauseFixture: flags[1] === 'yes',
     pauseRtcFixture: flags[2] === 'yes',
+    farmPause: farmPause === 'yes',
   }
 }
 const mode = process.argv[2]
@@ -403,7 +414,7 @@ if (mode === '--prepare-layer') {
     process.env.SIGNALLING_HTTPS_DISPOSABLE !== 'yes'
   )
     throw new Error('Explicit disposable fixture required')
-  const { rtcFixture, pauseFixture, pauseRtcFixture } = fixtureMode()
+  const { rtcFixture, pauseFixture, pauseRtcFixture, farmPause } = fixtureMode()
   const portText = process.env.SIGNALLING_HTTPS_PORT,
     port = Number(portText)
   const requestedLedger = process.env.SIGNALLING_HTTPS_LEDGER
@@ -467,7 +478,9 @@ if (mode === '--prepare-layer') {
     'farm_connector_credential_acceptor',
     // Browser signalling requires an active assignment in every mode.
     'farm_printer_ownership',
-    ...(pauseFixture || pauseRtcFixture ? ['farm_pause_authority'] : []),
+    ...(pauseFixture || pauseRtcFixture || farmPause
+      ? ['farm_pause_authority']
+      : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -688,7 +701,7 @@ if (mode === '--prepare-layer') {
       sessionSecret = randomBytes(32).toString('hex')
     privateValues.push(sessionSecret)
     let pauseIssuer: { path: string; publicKeySpki: string } | undefined
-    if (pauseFixture || pauseRtcFixture) {
+    if (pauseFixture || pauseRtcFixture || farmPause) {
       const keys = generateKeyPairSync('ed25519')
       const privateKeyPkcs8 = keys.privateKey
         .export({ format: 'der', type: 'pkcs8' })
@@ -825,6 +838,7 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_ADMIN: admin,
           SIGNALLING_HTTPS_PASSWORD: password,
           ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
+          ...(farmPause ? { SIGNALLING_HTTPS_FARM_PAUSE: 'yes' } : {}),
           ...(pauseRtcFixture
             ? {
                 SIGNALLING_HTTPS_PAUSE_RTC_FIXTURE: 'yes',
@@ -943,13 +957,15 @@ if (mode === '--prepare-layer') {
     )
     if (!failed && !failures.length)
       await note(
-        pauseRtcFixture
-          ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
-          : pauseFixture
-            ? 'PASS real generated Nitro HTTPS pause issuer; synthetic control proofs, no RTC or command execution'
-            : rtcFixture
-              ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
-              : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
+        farmPause
+          ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
+          : pauseRtcFixture
+            ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
+            : pauseFixture
+              ? 'PASS real generated Nitro HTTPS pause issuer; synthetic control proofs, no RTC or command execution'
+              : rtcFixture
+                ? 'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture'
+                : 'PASS real generated Nitro HTTPS/WSS signalling admission; RTC client integration remains pending',
       )
     await ledger.close()
     globalThis.process.removeListener('SIGINT', interrupt)

@@ -16,9 +16,8 @@ const state = ref<CameraDisplayState>('closed')
 const reducedMotion = ref(false)
 const started = ref(true)
 onMounted(() => {
-  reducedMotion.value = window.matchMedia?.(
-    '(prefers-reduced-motion: reduce)',
-  )?.matches ?? false
+  reducedMotion.value =
+    window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
   started.value = !reducedMotion.value
 })
 

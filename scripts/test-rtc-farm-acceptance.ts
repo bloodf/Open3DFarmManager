@@ -222,6 +222,8 @@ async function run(
 
 let rtsp: Awaited<ReturnType<typeof startRtspCamera>> | undefined
 let container: string | undefined
+let createAttempted = false
+const CREATE_SETTLE_MS = 90000
 let sql: ReturnType<typeof postgres> | undefined
 let failure: unknown
 let cleanupFailure: unknown
@@ -247,6 +249,7 @@ try {
   // Fails rather than pulling: image ownership and deletion remain with its owner.
   await docker('image', 'inspect', image)
   ledger({ resource: 'container', name, label, image })
+  createAttempted = true
   await docker(
     ...['create', '--name', name, '--label', label, '--pull', 'never'],
     ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
@@ -432,9 +435,21 @@ try {
   }
   try {
     // Exact ownership: recover the ID by name if recording was interrupted.
-    const owned =
+    // A timed-out `docker create` is not cancelled in the daemon and can still
+    // finish later, so keep looking for a bounded time after an attempt.
+    let owned =
       container ??
       (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
+    for (
+      let waited = 0;
+      !owned && createAttempted && waited < CREATE_SETTLE_MS;
+      waited += 2000
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      owned = await docker('inspect', '--format', '{{.Id}}', name).catch(
+        () => '',
+      )
+    }
     if (owned) {
       assert.match(owned, /^[a-f0-9]{64}$/)
       assert.equal(

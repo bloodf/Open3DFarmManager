@@ -44,6 +44,8 @@ Receipt age uses monotonic time. The display stale threshold is 30 seconds, incl
 
 The consumer closes terminally at the original session deadline, wall-clock expiry, or 30 seconds after subscription, whichever occurs first. The producer remains responsible for its own stricter local expiry and current authority. Repeated authentication callbacks cannot change the original session or extend its lease. Disconnect, rejection, revocation, and expiry leave only same-scope historical observations, and late callbacks cannot restore a closed feed. A new genuinely admitted transport requires a new subscription.
 
+Loss detection and reopen are view-owned and timer-free: the composable's one-second tick drives both. A feed that delivers no newer frame for 9 seconds closes, so a silent P2P stall becomes read-only, historical data within 10 seconds; a disconnect or open failure is read-only immediately. A lease end on a healthy feed (data for at least 10 seconds, last frame under 9 seconds old) is a renewal: rows keep their live connection and observation while a fresh subscription opens at once, transient connecting/verifying steps stay hidden, and liveness still closes the rows 9 seconds after the last frame if the renewal does not deliver. Healthy renewals skip the HTTP authority re-check; the producer and signalling server enforce current authority at every admission, so a revoked renewal fails to admit and falls into the reopen path below. Any other close except `revoked` and `rejected` schedules a reopen after `min(30 s, 1 s × 2^n) × [0.5, 1)` jitter, where `n` counts consecutive unhealthy subscriptions; at most six reopens (seven subscriptions) run before the view waits for the next revalidation (focus, page show or visibility change). Each reopen first re-reads identity and the complete assignment scan, because the browser cannot observe a signalling 403 or a server-side revocation. All Connectors of one run share one in-flight scan (reused for 1 second after it settles). 401/403 or an account change fail the view; a revoked Connector or changed assignment set refreshes the current farm page so statuses and feeds match the server; 429 waits for `Retry-After` (else 30 seconds) without spending the reopen budget. `revoked` and `rejected` (invalid or tampered feed) stop immediately. The feed reports `rejected` only for validation failures: a callback that arrives after its lease or deadline lapsed, before the expiry timer runs, closes as `expired`, and local slot capacity or a view-callback fault closes as `disconnected`. Auth invalidation, logout, farm/key change, route leave and unmount retire the run, which cancels any pending reopen. The page's `role="status"` notice announces only live ↔ unavailable changes; per-row text carries transient steps.
+
 The Connector runtime owner must install the complete fresh snapshot provider alongside the genuine client and document its bounded publishing strategy and disposal behavior. Opening a WebSocket, ICE connectivity, registry approval, a proof fixture, or `fixture-idle` cannot satisfy this contract. There is no command, signing, media, arbitrary-URL fetch, HTTP status fallback, or TURN method on the port.
 
 ## Local-interface navigation
@@ -134,3 +136,38 @@ The final complete source check passed 326 Bun tests, 383 Node tests and two
 runtime skips, lint, TypeScript and both builds. This checkpoint update changed
 only documentation after those checks; its formatting and whitespace checks
 passed separately. No publication or complete Phase 0 acceptance is claimed.
+
+## Spool inventory field on the status frame
+
+Status frames (`StatusMessage`, one per Connector over the browser-to-Connector
+channel) carry an optional, additive `inventory` field: a bounded, read-only
+mirror of Spoolman spools. It never travels through the server.
+
+- Shape (`packages/farm-protocol/src/inventory.ts`): `observedAt`, `stale`,
+  `total` (at most 10000) and at most 8 `spools`. Each spool has `name` (32),
+  `material` (16), `colorHex` (6 lowercase hex), integer `remainingGrams`,
+  `location` (32) and `archived`. All objects are strict; unknown fields are
+  rejected. Negative remaining weight is preserved.
+- The whole frame stays within the existing 2048-byte application cap. The
+  Connector drops trailing spools until it fits and keeps `total` truthful. If
+  even zero spools do not fit, the inventory is omitted and the page shows it as
+  unavailable. A frame without `inventory` means unavailable or not configured.
+- Staleness: the Connector sets `stale` when the Spoolman mirror is not
+  currently observed or is 30 s old or more. The browser also treats an
+  inventory as stale after 30 s without a new frame. When the feed closes, the
+  last inventory is kept but marked historical (stale at once, like printer
+  rows); during a seamless lease renewal it stays live; a new farm clears it.
+
+Compatibility and rollout order. Deploy the farm server and browser first, then
+Connectors.
+
+- A new browser accepts frames from old Connectors, which never send
+  `inventory`.
+- A new browser drops only an invalid `inventory` (the page shows spools as
+  unavailable) and keeps printer status flowing. Printer fields and any unknown
+  top-level key still reject the frame. This tolerance is receive-side only
+  (`parseStatusMessageTolerant`); the Connector validates outbound frames
+  strictly.
+- An old browser validates frames strictly, so it drops the whole feed on any
+  frame that contains `inventory`. This is why browsers must be updated before
+  Connectors that send it.

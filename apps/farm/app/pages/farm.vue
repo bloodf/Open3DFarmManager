@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
+  farmConnectionNotice,
   localInterfaceOrigin,
   observationAge,
   printerStateLabel,
@@ -80,16 +81,10 @@ const renderedRows = computed(
       draft: drafts.value[row.assignment.assignmentId],
     })) ?? [],
 )
-const connectionNotice = computed(() => {
-  const rows = ready.value?.rows ?? []
-  if (rows.some((row) => row.connection === 'authenticated'))
-    return 'Conexão direta autenticada. Os controles continuam em modo somente leitura.'
-  if (rows.some((row) => row.connection === 'verifying'))
-    return 'Verificando conexão direta…'
-  if (rows.some((row) => row.connection === 'connecting'))
-    return 'Estabelecendo conexão direta…'
-  return 'Conexão direta indisponível. A conexão direta com o Connector ainda não está disponível.'
-})
+// role="status" announces only live <-> unavailable; per-row text shows transient steps.
+const connectionNotice = computed(() =>
+  farmConnectionNotice(ready.value?.rows ?? []),
+)
 function chooseFarm(event: Event) {
   if (event.target instanceof HTMLSelectElement)
     void selectFarm(event.target.value)

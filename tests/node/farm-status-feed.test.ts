@@ -88,6 +88,7 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
       Parameters<NonNullable<Options['createClient']>>[0] | undefined,
     closes = 0
   const health: string[] = [],
+    reasons: string[] = [],
     snapshots: unknown[] = []
   const feed = createAuthenticatedFarmStatusFeed({
     resolveKey: async (request) => ({
@@ -118,8 +119,9 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     assignmentRefs: refs,
     browserKeyId: keyId,
     signal: controller.signal,
-    onHealth: (value: { kind: string }) => {
+    onHealth: (value: { kind: string; reason?: string }) => {
       health.push(value.kind)
+      if (value.reason) reasons.push(value.reason)
       if (asyncAt === 'authenticated' && value.kind === 'authenticated')
         return Promise.reject(Error('late failure'))
     },
@@ -146,6 +148,7 @@ async function fixture(asyncAt?: 'authenticated' | 'snapshot') {
     binding,
     callbacks,
     health,
+    reasons,
     snapshots,
     handle,
     controller,
@@ -183,6 +186,7 @@ test('only verified complete assigned snapshots reach the view', async () => {
     assert.equal(snap.sourceClockComparable, false)
     f.callbacks.onStatus({ t: 'snapshot', seq: 1, printers: [] })
     assert.equal(f.health.at(-1), 'closed')
+    assert.deepEqual(f.reasons, ['rejected'])
     assert.equal(f.closes(), 1)
     f.callbacks.onStatus({
       t: 'snapshot',
@@ -569,3 +573,65 @@ test(
     }
   },
 )
+
+test('a frame arriving after the lease deadline, before the timer fires, closes as expired', async () => {
+  const f = await fixture()
+  try {
+    f.callbacks.onVerifiedAdmission({
+      binding: f.binding,
+      deadlineMonoMs: performance.now() + 20,
+    })
+    assert.equal(f.health.at(-1), 'authenticated')
+    // Block the event loop past the deadline so the expiry timer cannot run first.
+    const until = performance.now() + 30
+    while (performance.now() < until);
+    f.callbacks.onStatus({
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: 'printer-a',
+          state: 'idle',
+          progress: 0,
+          observedAt: Date.now(),
+        },
+      ],
+    })
+    assert.equal(f.health.at(-1), 'closed')
+    assert.deepEqual(f.reasons, ['expired'])
+    assert.equal(f.snapshots.length, 0)
+  } finally {
+    f.handle.close()
+  }
+})
+
+test('local slot capacity is reported as disconnected, not rejected', async () => {
+  const f = await fixture()
+  try {
+    const reasons: string[] = []
+    const opened = []
+    for (let index = 0; index < 100; index++) {
+      const agentId = randomUUID()
+      opened.push(
+        f.feed.open({
+          ...f.input,
+          agentId,
+          assignmentRefs: [
+            {
+              ...f.refs[0]!,
+              agentId,
+              assignmentId: randomUUID(),
+            },
+          ],
+          onHealth: (value: { kind: string; reason?: string }) => {
+            if (value.reason) reasons.push(value.reason)
+          },
+        }),
+      )
+    }
+    assert.deepEqual(reasons, ['disconnected'])
+    for (const handle of opened) handle.close()
+  } finally {
+    f.handle.close()
+  }
+})

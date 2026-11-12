@@ -101,6 +101,13 @@ describe('tolerant browser parsing', () => {
       false,
     )
   })
+  test('an unknown top-level key is rejected even with an invalid inventory', () => {
+    const bad = { ...inventory, spools: [{ ...spool, extra: 1 }] }
+    expect(
+      parseStatusMessageTolerant({ ...base, inventory: bad, extra: true })
+        .success,
+    ).toBe(false)
+  })
   test('keeps a valid inventory and rejects other violations', () => {
     const ok = parseStatusMessageTolerant({ ...base, inventory })
     expect(ok.success && ok.data.inventory).toEqual(inventory)

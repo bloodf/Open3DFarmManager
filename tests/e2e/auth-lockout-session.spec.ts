@@ -63,16 +63,19 @@ const login = (
   secret = password,
 ) => post(request, '/api/auth/login', { username, password: secret })
 const me = (request: APIRequestContext) => request.get('/api/auth/me')
-const failures = (
+// Sequential on purpose: concurrent hashing beyond the per-process cap also answers 429.
+async function failures(
   request: APIRequestContext,
   username: string,
   count: number,
-) =>
-  Promise.all(
-    Array.from({ length: count }, () =>
-      login(request, username, 'wrong-' + randomBytes(6).toString('hex')),
-    ),
-  )
+) {
+  const replies: APIResponse[] = []
+  for (let index = 0; index < count; index++)
+    replies.push(
+      await login(request, username, 'wrong-' + randomBytes(6).toString('hex')),
+    )
+  return replies
+}
 async function cookieOf(request: APIRequestContext): Promise<string> {
   const found = (await request.storageState()).cookies.find(
     (item) => item.name === COOKIE,

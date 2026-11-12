@@ -44,6 +44,7 @@ export async function testPostgresSignallingSuccessors(
   port: number,
 ): Promise<string[]> {
   const checks: string[] = []
+  const outcomes: string[] = []
   const suffix = randomUUID().replaceAll('-', '')
   const logins = {
     reader: 'successor_reader_' + suffix,
@@ -360,8 +361,11 @@ export async function testPostgresSignallingSuccessors(
         }),
       })
     }
-    const acceptedJti = (result: Awaited<ReturnType<typeof prove>>) =>
-      result.ok && result.kind === 'accepted' ? result.jti : null
+    const acceptedJti = (result: Awaited<ReturnType<typeof prove>>) => {
+      // Reasons only (no tokens), kept for a failing assertion's context.
+      outcomes.push(result.ok ? result.kind : result.reason)
+      return result.ok && result.kind === 'accepted' ? result.jti : null
+    }
 
     const a = await connector('a')
     const b = await connector('b')
@@ -489,6 +493,12 @@ export async function testPostgresSignallingSuccessors(
       '(c) revoked Connector: the live successor is refused by reader, browser authority and acceptor; others unaffected',
     )
     return checks
+  } catch (error) {
+    throw new Error(
+      'Signalling successor check failed; proof outcomes: ' +
+        outcomes.join(','),
+      { cause: error },
+    )
   } finally {
     if (server)
       await new Promise<void>((resolve) => server!.close(() => resolve()))

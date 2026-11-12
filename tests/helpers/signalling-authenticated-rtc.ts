@@ -23,6 +23,7 @@ import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src
 import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
 import { snapshotAssignmentRefs } from '../../packages/connector/src/webrtc/readonly-session.ts'
 import { testAuthenticatedFarmPage } from './signalling-farm-page.ts'
+import { cameraFixtureFromEnv } from './signalling-camera-fixture.ts'
 
 type BrowserActor = Awaited<ReturnType<typeof createSignallingRtcBrowserActor>>
 type Closure = 'disconnect' | 'revocation'
@@ -131,6 +132,9 @@ async function connectorChild(
           : {}),
         ...(process.env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes'
           ? { SIGNALLING_HTTPS_RTC_PACKAGED: 'yes' }
+          : {}),
+        ...(process.env.SIGNALLING_HTTPS_CAMERA
+          ? { SIGNALLING_HTTPS_CAMERA: process.env.SIGNALLING_HTTPS_CAMERA }
           : {}),
       },
     },
@@ -306,6 +310,10 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
       }
     | undefined
   const closure = process.env.SIGNALLING_HTTPS_RTC_CLOSURE ?? 'disconnect'
+  // Camera video only on the composed runtime farm page (closure: revocation).
+  const camera = cameraFixtureFromEnv()
+  if (camera && process.env.SIGNALLING_HTTPS_FARM_PAGE !== 'yes')
+    throw Error('Camera fixture requires the farm page')
   if (closure !== 'disconnect' && closure !== 'revocation')
     throw Error('Invalid RTC closure scenario')
   let used = false
@@ -556,6 +564,7 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               closure: session.closure,
               startedAt: runtimeStartedAt,
               note: session.note,
+              ...(camera ? { camera } : {}),
               advance: async () => {
                 await session.connector.request({ kind: 'advance-runtime' })
               },

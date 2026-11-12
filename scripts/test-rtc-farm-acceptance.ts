@@ -27,6 +27,7 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { selectRtcFarmScenarios } from '../tests/helpers/rtc-farm-acceptance-scenarios.ts'
+import { startRtspCamera } from '../tests/helpers/rtc-farm-rtsp-camera.ts'
 
 const exec = promisify(execFile)
 const env = process.env
@@ -56,6 +57,26 @@ if (
     'RTC_FARM_TEST_ADMITTED=yes, a locally available digest-pinned PostgreSQL 17 RTC_FARM_TEST_IMAGE, a loopback RTC_FARM_TEST_DB_PORT and an absolute RTC_FARM_TEST_WORK_ROOT outside the repository are required',
   )
 const scenarios = selectRtcFarmScenarios(env.RTC_FARM_TEST_SCENARIOS)
+// Camera rows need a prebuilt, hash-pinned ingest helper and a loopback RTSP port.
+const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
+  ? {
+      helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
+      helperSha256: env.RTC_FARM_TEST_RTSP_HELPER_SHA256 ?? '',
+      port: Number(env.RTC_FARM_TEST_RTSP_PORT),
+    }
+  : undefined
+if (
+  camera &&
+  (!isAbsolute(camera.helper) ||
+    !/^[a-f0-9]{64}$/.test(camera.helperSha256) ||
+    !Number.isInteger(camera.port) ||
+    camera.port < 1024 ||
+    camera.port > 65535 ||
+    camera.port === dbPort)
+)
+  throw new Error(
+    'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute), RTC_FARM_TEST_RTSP_HELPER_SHA256 and RTC_FARM_TEST_RTSP_PORT',
+  )
 const prefix = env.RTC_FARM_TEST_NAME_PREFIX ?? 'o3dfm-rtc-farm'
 if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
   throw new Error('Invalid RTC farm test name prefix')
@@ -121,6 +142,24 @@ const interrupt = () => {
     } catch {
       /* not created or already removed */
     }
+    try {
+      // Exact compose project of this run's RTSP simulator, if one was started.
+      if (camera)
+        execFileSync(
+          'docker',
+          [
+            'compose',
+            '--project-name',
+            name + '-rtsp',
+            'down',
+            '--timeout',
+            '1',
+          ],
+          { timeout: 30000 },
+        )
+    } catch {
+      /* not started or already removed */
+    }
     rmSync(workDir, { recursive: true, force: true })
     process.exit(130)
   }
@@ -176,6 +215,7 @@ async function run(
   }
 }
 
+let rtsp: Awaited<ReturnType<typeof startRtspCamera>> | undefined
 let container: string | undefined
 let sql: ReturnType<typeof postgres> | undefined
 let failure: unknown
@@ -303,6 +343,16 @@ try {
     'Layer seal failed',
   )
 
+  if (camera)
+    rtsp = await startRtspCamera({
+      checkout,
+      workDir,
+      project: name + '-rtsp',
+      port: camera.port,
+      helper: camera.helper,
+      helperSha256: camera.helperSha256,
+      ledger,
+    })
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)
@@ -315,6 +365,7 @@ try {
           env: {
             ...nodeEnv,
             ...scenario.env,
+            ...(scenario.resources?.includes('rtsp-camera') ? rtsp?.env : {}),
             SIGNALLING_HTTPS_DISPOSABLE: 'yes',
             SIGNALLING_HTTPS_PORT: String(dbPort),
             SIGNALLING_HTTPS_LEDGER: rowLedger,
@@ -365,6 +416,11 @@ try {
     failure: error instanceof Error ? error.message.slice(0, 500) : 'unknown',
   })
 } finally {
+  try {
+    await rtsp?.stop()
+  } catch (error) {
+    cleanupFailure = error
+  }
   try {
     await sql?.end({ timeout: 3 })
   } catch (error) {

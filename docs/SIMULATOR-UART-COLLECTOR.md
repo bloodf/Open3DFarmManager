@@ -167,5 +167,5 @@ incluindo mais de 1 MiB, parada forçada sem footer e último registro cortado.
 Não iniciam subprocesso nem simulador. A suíte experimental existente também
 inclui fixtures locais de processo e PTY sintéticos, sem firmware. Os testes não
 comprovam a futura integração do executor, prazos reais ou comportamento nativo.
-`bun run check:all` continua obrigatório antes de publicação; não faz parte desta
+`pnpm run check:all` continua obrigatório antes de publicação; não faz parte desta
 suíte Python. Não instalar dependências apenas para formatar estes arquivos.

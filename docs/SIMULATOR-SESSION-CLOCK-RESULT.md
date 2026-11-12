@@ -111,7 +111,7 @@ git diff --check
 exceção por identidade, timeout, callback tardio, restauração do reactor, rejeição
 de fonte antes de execução, falhas de saída/relógio, descarte no produtor,
 prefixo superior a 1 MiB, parada forçada, footer e início ausentes.
-`bun run check:all` e integração nativa continuam pendentes. Não houve publicação,
+`pnpm run check:all` e integração nativa continuam pendentes. Não houve publicação,
 push, PR, deploy, alteração de DNS ou credenciais.
 
 O ledger e a evidência limitada ficam fora do repositório. Foram preservados os
@@ -186,7 +186,7 @@ restauração após exceção, rejeição de hash antes de execução, manutenç
 buffer verificado após alteração do arquivo, argumentos da CLI, pipes reais,
 drenagem além do limite, prazo fixo, processo filho com pipes herdados e falha
 de launch. O hash sintético não é aceito como hash de produção pelo coletor.
-`git diff --check` passou. `bun run check:all` permanece pendente; não houve
+`git diff --check` passou. `pnpm run check:all` permanece pendente; não houve
 publicação, push, PR ou deploy.
 
 A evidência nova limitada, o runner privado e os recibos ficam em um único

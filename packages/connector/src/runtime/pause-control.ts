@@ -6,6 +6,7 @@ import {
 import {
   createPauseCommandRelay,
   type PauseRelayOutcome,
+  type PauseRelayReason,
 } from '../control/pause-command-relay.ts'
 import { loadPauseIssuerKeys } from '../config/pause.ts'
 import { credentialLookupId } from '../config/signalling.ts'
@@ -24,7 +25,12 @@ export type PauseControlDiagnostic =
   | { kind: 'pause-listening' }
   | { kind: 'pause-admitted' }
   | { kind: 'pause-denied'; reason: string }
-  | { kind: 'pause-outcome'; outcome: PauseRelayOutcome }
+  | {
+      kind: 'pause-outcome'
+      outcome: PauseRelayOutcome
+      /** Fixed relay reason of the latest settled command, never free text. */
+      reason: PauseRelayReason | undefined
+    }
   | { kind: 'pause-terminal'; reason: string }
   | { kind: 'pause-close-stalled'; waitedMs: number }
 
@@ -35,6 +41,26 @@ type PauseClient = Pick<
   PauseConnectorSignallingClient,
   'start' | 'close' | 'dispose' | 'sendPhase' | 'sendResult'
 >
+
+/** Fixed classification of a pause-path failure; no free text leaves the path. */
+export type PauseFailureReason = 'journal' | 'credential' | 'runtime'
+class PauseControlError extends Error {
+  readonly reason: PauseFailureReason
+  constructor(reason: PauseFailureReason) {
+    super('Pause control ' + reason + ' failure')
+    this.reason = reason
+  }
+}
+export function pauseFailureReason(error: unknown): PauseFailureReason {
+  return error instanceof PauseControlError ? error.reason : 'runtime'
+}
+function classified<T>(reason: PauseFailureReason, run: () => T): T {
+  try {
+    return run()
+  } catch {
+    throw new PauseControlError(reason)
+  }
+}
 
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 30000
@@ -83,28 +109,39 @@ export async function runPauseControl(input: {
     throw new Error('Pause control assignment is not provisioned locally')
   const issuers = await loadPauseIssuerKeys(pause)
   if (input.signal.aborted) return
-  const jti = credentialLookupId(credential.device_token)
-  const journal = openCommandJournal({
-    directory: join(input.dataDirectory, 'pause-journal'),
-    clock: Date.now,
-  })
+  const jti = classified('credential', () =>
+    credentialLookupId(credential.device_token),
+  )
+  const journal = classified('journal', () =>
+    openCommandJournal({
+      directory: join(input.dataDirectory, 'pause-journal'),
+      clock: Date.now,
+    }),
+  )
   const clock = Object.freeze({
     wallNow: () => Date.now(),
     monotonicNow: () => performance.now(),
   })
-  const router = createPauseDriverRouter({
-    allowedOrigins: config.collection.allowedOrigins,
-    limits: config.collection.limits,
-    clock,
-    observe: (binding, observation) => relay.observe(binding, observation),
-  })
-  const relay = createPauseCommandRelay({
-    authority: { issuers, freshness: input.freshness },
-    clock,
-    journal,
-    driver: router,
-    bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
-  })
+  let relay: ReturnType<typeof createPauseCommandRelay>
+  try {
+    const router = createPauseDriverRouter({
+      allowedOrigins: config.collection.allowedOrigins,
+      limits: config.collection.limits,
+      clock,
+      observe: (binding, observation) => relay.observe(binding, observation),
+    })
+    relay = createPauseCommandRelay({
+      authority: { issuers, freshness: input.freshness },
+      clock,
+      journal,
+      driver: router,
+      bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
+    })
+  } catch (error) {
+    // Nothing reached the journal yet: release it before failing.
+    closeCommandJournal(journal)
+    throw error
+  }
   const createClient =
     input.createClient ??
     ((scope, options) => new PauseConnectorSignallingClient(scope, options))
@@ -179,11 +216,17 @@ export async function runPauseControl(input: {
               if (frame.t !== 'control.command' || !transportId) return
               // One attempt only. The relay answers the peer; nothing retries.
               void relay.commandPeer({ transportId, wire: frame.wire }).then(
-                (outcome) => diagnostic({ kind: 'pause-outcome', outcome }),
+                (outcome) =>
+                  diagnostic({
+                    kind: 'pause-outcome',
+                    outcome,
+                    reason: relay.diagnostics().lastReason,
+                  }),
                 () =>
                   diagnostic({
                     kind: 'pause-outcome',
                     outcome: 'outcome-unknown',
+                    reason: undefined,
                   }),
               )
             },

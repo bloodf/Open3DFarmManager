@@ -53,7 +53,7 @@ async function inventory(page: Page) {
   )
 }
 
-test('pt-BR inventory wraps exact keys at 320px, separates approval from status, and always disables pause', async ({
+test('pt-BR inventory wraps exact keys at 320px, separates approval from status, and disables pause without a live connection', async ({
   page,
 }) => {
   await inventory(page)
@@ -336,4 +336,40 @@ test('stale, empty, truncated and unavailable inventories are distinguished', as
   // Received more than 30 s ago counts as stale even if the Connector said fresh.
   await expect(page.getByText('Desatualizado.')).toBeVisible()
   expect(await violations(page)).toEqual([])
+})
+
+test('pause stays disabled with a pt-BR reason when control is not enabled or no approved device is selected', async ({
+  page,
+}) => {
+  await inventory(page)
+  await page.route('**/api/signalling/pause-metadata', (route) =>
+    route.fulfill({
+      json: { enabled: false, origin: null, audience: null },
+    }),
+  )
+  await page.goto('/farm')
+  const pause = page.getByRole('button', { name: 'Pausar impressão' })
+  await expect(pause).toBeDisabled()
+  await expect(pause).toHaveAccessibleDescription(
+    'Pausa indisponível. O controle seguro não está habilitado.',
+  )
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.unroute('**/api/signalling/pause-metadata')
+  await page.route('**/api/signalling/pause-metadata', (route) =>
+    route.fulfill({
+      json: {
+        enabled: true,
+        origin: new URL(page.url()).origin,
+        audience: 'open3dfarmmanager:pause',
+      },
+    }),
+  )
+  await page.reload()
+  await expect(pause).toBeDisabled()
+  // No approved local device: the reason names what is missing, never a stale success.
+  await expect(pause).toHaveAccessibleDescription(
+    'Pausa indisponível. Selecione um dispositivo aprovado deste navegador.',
+  )
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })

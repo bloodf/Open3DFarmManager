@@ -1,7 +1,7 @@
 import { readJson } from './body.ts'
 import { z } from 'zod'
 import { simulatorUrl } from './probe.ts'
-import seed from '../../../infra/sim/spoolman/seed.json'
+import seed from '../../../infra/sim/spoolman/seed.json' with { type: 'json' }
 
 const Entity = z.object({
   id: z.number().int().positive(),

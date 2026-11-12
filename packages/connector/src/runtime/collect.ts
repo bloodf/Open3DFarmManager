@@ -7,6 +7,7 @@ import type {
   RawMoonrakerUnavailable,
 } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
+import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import {
   readLocalCollectorConfig,
@@ -92,6 +93,9 @@ export async function collectIntoQueue(input: {
     partialTail: false,
     unavailable: 0,
   }
+  // Transitions are detected in memory; the first observation after a restart emits none.
+  // Changes during unreachability fold into one transition from the last-known state at reconnect.
+  const lastState = new Map<string, PrinterState['state']>()
   function diagnostic(value: Diagnostic) {
     if (diagnosticBudget-- > 0) input.onDiagnostic(value)
   }
@@ -136,7 +140,23 @@ export async function collectIntoQueue(input: {
               totals.unavailable++
               diagnostic({ kind: 'unavailable', reason: event.reason })
             } else {
-              const receipt = queue.enqueue(event.printer, Date.now())
+              const now = Date.now()
+              const previous = lastState.get(event.printer.printerKey)
+              lastState.set(event.printer.printerKey, event.printer.state)
+              if (previous !== undefined && previous !== event.printer.state) {
+                const transition = queue.enqueueTransition(
+                  {
+                    printerKey: event.printer.printerKey,
+                    from: previous,
+                    to: event.printer.state,
+                    observedAt: event.printer.observedAt,
+                  },
+                  now,
+                )
+                totals.queued++
+                loss(transition.loss, 'retention')
+              }
+              const receipt = queue.enqueue(event.printer, now)
               totals.queued++
               loss(receipt.loss, 'retention')
               // enqueue returns only after its append/compaction and fsync succeed.

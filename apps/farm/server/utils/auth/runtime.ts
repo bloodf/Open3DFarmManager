@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
 import postgres from 'postgres'
 import { createError, useRuntimeConfig, type SessionConfig } from 'nuxt/server'
 import type { SessionRepository } from './session-contract.ts'
 import { PostgresSessionRepository } from '../../storage/postgres-session.ts'
 import { PostgresCredentials } from '../../storage/postgres-credentials.ts'
+import { PostgresRegistration } from '../../storage/postgres-registration.ts'
 import {
   configuredAuthOrigin,
   SESSION_COOKIE_ATTRIBUTES,
@@ -14,6 +16,12 @@ export interface AuthRuntime {
   cookie: SessionConfig
   sessions: SessionRepository
   credentials: Pick<PostgresCredentials, 'consumeLimit' | 'find' | 'issue'>
+  registration?: Pick<
+    PostgresRegistration,
+    'bootstrap' | 'createInvite' | 'register'
+  >
+  /** SHA-256 of the first-owner bootstrap secret; undefined disables bootstrap. */
+  bootstrapTokenDigest?: Buffer | undefined
   idleTimeoutMs: number
   lifetimeMs: number
 }
@@ -63,6 +71,13 @@ export function authRuntime(): AuthRuntime {
       },
       sessions: new PostgresSessionRepository(sql),
       credentials: new PostgresCredentials(sql),
+      registration: new PostgresRegistration(sql),
+      bootstrapTokenDigest:
+        'bootstrapToken' in config &&
+        typeof config.bootstrapToken === 'string' &&
+        config.bootstrapToken.length >= 32
+          ? createHash('sha256').update(config.bootstrapToken).digest()
+          : undefined,
       idleTimeoutMs: 30 * 60 * 1000,
       lifetimeMs: 8 * 60 * 60 * 1000,
     }

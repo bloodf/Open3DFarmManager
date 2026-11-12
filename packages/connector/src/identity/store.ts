@@ -26,6 +26,7 @@ import {
 import { signPairingProof } from './pairing-proof.ts'
 import { signCredentialProof } from './credential-proof.ts'
 import { signTelemetryProof } from './telemetry-proof.ts'
+import { signRenewalIntent, signRenewalProof } from './renewal-proof.ts'
 
 import { z } from 'zod'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
@@ -121,6 +122,16 @@ export class ConnectorIdentity {
     input: Omit<Parameters<typeof signCredentialProof>[0], 'privateKey'>,
   ): string {
     return signCredentialProof({ ...input, privateKey: this.#key })
+  }
+  signRenewalProof(
+    input: Omit<Parameters<typeof signRenewalProof>[0], 'privateKey'>,
+  ): string {
+    return signRenewalProof({ ...input, privateKey: this.#key })
+  }
+  signRenewalIntent(
+    input: Omit<Parameters<typeof signRenewalIntent>[0], 'privateKey'>,
+  ): string {
+    return signRenewalIntent({ ...input, privateKey: this.#key })
   }
   signPairingProof(
     input: Omit<Parameters<typeof signPairingProof>[0], 'privateKey'>,

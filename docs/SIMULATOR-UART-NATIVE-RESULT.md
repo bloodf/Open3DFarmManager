@@ -72,7 +72,7 @@ evidências. O checkout e o grupo de processos do coordenador foram preservados.
 Logs, configurações, inventários e evidências operacionais permanecem fora do
 repositório. Código GPL externo não foi copiado para este documento.
 
-`git diff --check` passou. `bun run check:all` não foi executado nesta tarefa e
+`git diff --check` passou. `pnpm run check:all` não foi executado nesta tarefa e
 continua pendente antes de publicação. Não houve push, PR, publicação ou deploy.
 
 A próxima discriminação continua sendo a correlação das operações nativas de I/O,

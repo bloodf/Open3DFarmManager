@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
 // Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
@@ -78,6 +79,19 @@ test('pt-BR inventory wraps exact keys at 320px, separates approval from status,
     page.getByRole('button', { name: 'Pausar impressão' }),
   ).toBeDisabled()
   await expect(page.locator('progress')).toHaveCount(0)
+  // Spool inventory is read-only and reports unavailability without a direct connection.
+  await expect(
+    page.getByRole('heading', { name: 'Estoque de filamento', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Estoque indisponível sem conexão direta com o Connector.'),
+  ).toBeVisible()
+  await expect(page.locator('table')).toHaveCount(0)
+  expect(
+    (await new AxeBuilder({ page }).analyze()).violations.map(
+      (violation) => violation.id,
+    ),
+  ).toEqual([])
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,

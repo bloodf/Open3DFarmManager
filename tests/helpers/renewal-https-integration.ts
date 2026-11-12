@@ -12,6 +12,10 @@ import { join } from 'node:path'
 import type { Sql } from 'postgres'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import { writeCredentialFileAtomically } from '../../packages/connector/src/cloud/credential-renewal.ts'
+import {
+  loadMigrationCatalog,
+  runMigrations,
+} from '../../scripts/db/migrations.ts'
 import { PostgresPairing } from '../../apps/farm/server/storage/postgres-pairing.ts'
 import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pairing-proof.ts'
 
@@ -96,6 +100,8 @@ export async function testRenewalHttps(
   ports: { app: number; proxy: number },
 ): Promise<string[]> {
   const checks: string[] = []
+  // The built server verifies the full catalog; bring the disposable cluster current.
+  await runMigrations(admin, await loadMigrationCatalog(), { kind: 'up' })
   const role = 'renewal_https_' + randomUUID().replaceAll('-', '')
   const secret = randomBytes(24).toString('hex')
   await admin.unsafe(

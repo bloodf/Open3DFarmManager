@@ -19,7 +19,7 @@ Eleven Node tests cover that flow, empty queues, strict acknowledgements, cancel
 - The sender must authenticate the destination, enforce a bounded response, interpret the actual agent protocol and accept only durable server commits. None of those network behaviors is supplied here.
 - The caller must provide a deadline-bearing AbortSignal. The coordinator has no implicit timer, scheduler or automatic retry. A transport that ignores cancellation may still complete remotely; repeat telemetry delivery therefore requires server deduplication by stable event ID.
 - A production server needs transactional ingestion and a uniqueness constraint scoped to the authenticated agent and event ID. This checkpoint demonstrates at-least-once attempts with a synthetic idempotent sink, not exactly-once network delivery.
-- Authentication, ingestion endpoints, the synchronization loop and outage acceptance against a running service remain unimplemented. Queue stale-lock recovery and power-loss fault injection remain separate gaps.
+- Outage and restart acceptance against the built server, PostgreSQL and the real Connector process is recorded in [CONNECTOR-OUTAGE-RECOVERY-CHECKPOINT.md](CONNECTOR-OUTAGE-RECOVERY-CHECKPOINT.md). Queue stale-lock recovery and power-loss fault injection remain separate gaps.
 - Commands are not eligible telemetry and no command retry or server command forwarding is added. The offline authorization policy is unchanged.
 
 ## Cancellation concurrency regression

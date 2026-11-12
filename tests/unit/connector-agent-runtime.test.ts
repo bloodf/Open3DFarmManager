@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect, onTestFailed } from 'vitest'
 import {
   createHash,
   createPublicKey,
@@ -55,6 +55,12 @@ function job(args: string[], env = {}) {
   })
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
+  // A test timeout names what the child printed and whether it was still alive.
+  onTestFailed(() =>
+    console.error(
+      `Agent fixture child: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+    ),
+  )
   const reading = (async () => {
     for await (const bytes of child.stdout!) output += bytes.toString('utf8')
   })()
@@ -88,12 +94,14 @@ function job(args: string[], env = {}) {
       return child.exitCode !== null
     },
     finish,
+    // Waits for the agent's own output or fixture events, never a fixed
+    // window: the test timeout is the only hang bound, and an early exit
+    // fails at once with the agent's output.
     async until(predicate: () => boolean) {
-      const deadline = Date.now() + 7000
       while (!predicate()) {
-        if (child.exitCode !== null || Date.now() > deadline)
+        if (child.exitCode !== null)
           throw new Error(
-            `Agent fixture condition not reached: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+            `Agent exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
           )
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
@@ -528,12 +536,8 @@ test('standalone collection rechecks scope under lock before recovery', async ()
       readFileSync(compact),
     ]
     writeFileSync(join(server.temp.path, 'resume'), 'go')
-    const deadline = Date.now() + 7000
-    while (
-      Date.now() < deadline &&
-      !running.exited &&
-      lines(running.output, 'queued') === 0
-    )
+    // Wait for the agent's decision (exit or a queued record), not a window.
+    while (!running.exited && lines(running.output, 'queued') === 0)
       await new Promise((resolve) => setTimeout(resolve, 10))
     const result = running.exited
       ? await running.finish()

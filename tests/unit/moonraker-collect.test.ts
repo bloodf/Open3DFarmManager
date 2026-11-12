@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect, onTestFailed } from 'vitest'
 import {
   mkdtempSync,
   writeFileSync,
@@ -152,6 +152,12 @@ function launch(args: string[], auditPath?: string) {
   )
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
+  // A test timeout names what the child printed and whether it was still alive.
+  onTestFailed(() =>
+    console.error(
+      `CLI fixture child: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+    ),
+  )
   const stdout = (async () => {
     for await (const part of child.stdout!) output += part.toString('utf8')
   })()
@@ -181,11 +187,15 @@ function launch(args: string[], auditPath?: string) {
     get output() {
       return output
     },
+    // Waits for the CLI's own output or fixture events, never a fixed
+    // window: the test timeout is the only hang bound, and an early exit
+    // fails at once with the CLI's output.
     async until(predicate: (text: string) => boolean) {
-      const deadline = Date.now() + 5000
       while (!predicate(output)) {
-        if (child.exitCode !== null || Date.now() > deadline)
-          throw new Error('CLI fixture condition was not reached')
+        if (child.exitCode !== null)
+          throw new Error(
+            `CLI exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+          )
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },

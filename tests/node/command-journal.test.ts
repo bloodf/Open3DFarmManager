@@ -251,87 +251,98 @@ test('SQLite failures fail closed and do not release unresolved attempt', async 
   }
 })
 
-test('independent processes race the same assignment without a queue', async () => {
-  const f = fixture()
-  const script = `import {openCommandJournal,claimCommand} from './packages/connector/src/control/command-journal.ts'; const [directory,input]=process.argv.slice(1); const j=openCommandJournal({directory,clock:()=>1000}); console.log('ready'); process.stdin.once('data',()=>{const result=claimCommand(j,JSON.parse(input)); console.log(JSON.stringify(result.ok ? {ok:true}:result));process.exit(0)})`
-  const ready: Array<() => void> = []
-  const children = [0, 1].map(() =>
-    spawn(
-      process.execPath,
-      [
-        '--input-type=module',
-        '--eval',
-        script,
-        f.directory,
-        JSON.stringify({
-          command: f.command(),
-          printerKey: 'printer-1',
-          wireSha256: randomBytes(32).toString('hex'),
-        }),
-      ],
-      { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
-    ),
-  )
-  try {
-    const results = children.map(
-      (child) =>
-        new Promise<{ ok: boolean; reason?: string }>((resolve, reject) => {
-          let output = '',
-            stderr = ''
-          const timer = setTimeout(() => {
-            child.kill()
-            reject(new Error('child race timed out'))
-          }, 5000)
-          child.stdout.on('data', (chunk) => {
-            output += chunk
-            if (output.includes('ready\n')) {
-              child.stdout.removeAllListeners('data')
-              resolveReady()
-            }
-          })
-          function resolveReady() {
-            ready.push(() => child.stdin.write('go\n'))
+// Children are killed in finally; the test timeout is the single hang bound.
+test(
+  'independent processes race the same assignment without a queue',
+  {
+    timeout: 30000,
+  },
+  async () => {
+    const f = fixture()
+    const script = `import {openCommandJournal,claimCommand} from './packages/connector/src/control/command-journal.ts'; const [directory,input]=process.argv.slice(1); const j=openCommandJournal({directory,clock:()=>1000}); console.log('ready'); process.stdin.once('data',()=>{const result=claimCommand(j,JSON.parse(input)); console.log(JSON.stringify(result.ok ? {ok:true}:result));process.exit(0)})`
+    const ready: Array<() => void> = []
+    const children = [0, 1].map(() =>
+      spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          script,
+          f.directory,
+          JSON.stringify({
+            command: f.command(),
+            printerKey: 'printer-1',
+            wireSha256: randomBytes(32).toString('hex'),
+          }),
+        ],
+        { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
+      ),
+    )
+    try {
+      const results = children.map(
+        (child) =>
+          new Promise<{ ok: boolean; reason?: string }>((resolve, reject) => {
+            let output = '',
+              stderr = ''
             child.stdout.on('data', (chunk) => {
               output += chunk
+              if (output.includes('ready\n')) {
+                child.stdout.removeAllListeners('data')
+                resolveReady()
+              }
             })
-          }
-          child.stderr.on('data', (chunk) => {
-            stderr += chunk
-          })
-          child.on('error', reject)
-          child.on('close', (code) => {
-            clearTimeout(timer)
-            if (code !== 0) return reject(new Error('child failed ' + stderr))
-            const line = output.trim().split('\n').at(-1)
-            try {
-              resolve(JSON.parse(line ?? ''))
-            } catch (e) {
-              reject(e)
+            function resolveReady() {
+              ready.push(() => child.stdin.write('go\n'))
+              child.stdout.on('data', (chunk) => {
+                output += chunk
+              })
             }
-          })
-        }),
-    )
-    const deadline = Date.now() + 5000
-    while (ready.length < 2) {
-      assert.ok(Date.now() < deadline, 'children failed to reach barrier')
-      await new Promise((resolve) => setTimeout(resolve, 5))
+            child.stderr.on('data', (chunk) => {
+              stderr += chunk
+            })
+            child.on('error', reject)
+            child.on('close', (code) => {
+              if (code !== 0) return reject(new Error('child failed ' + stderr))
+              const line = output.trim().split('\n').at(-1)
+              try {
+                resolve(JSON.parse(line ?? ''))
+              } catch (e) {
+                reject(e)
+              }
+            })
+          }),
+      )
+      // Wait for both children to announce the barrier; a child that fails or
+      // exits first rejects here with its own error instead of a time window.
+      let passed = false
+      const early = Promise.all(results).then(() => {
+        if (!passed)
+          throw new Error('children exited before reaching the barrier')
+      })
+      early.catch(() => {})
+      while (ready.length < 2)
+        await Promise.race([
+          new Promise((resolve) => setTimeout(resolve, 5)),
+          early,
+        ])
+      passed = true
+      for (const release of ready) release()
+      const outcomes = await Promise.all(results)
+      assert.equal(outcomes.filter((x) => x.ok).length, 1)
+      assert.equal(
+        outcomes.filter(
+          (x) =>
+            !x.ok &&
+            ['assignment-busy', 'storage-unavailable'].includes(x.reason ?? ''),
+        ).length,
+        1,
+      )
+    } finally {
+      for (const child of children) if (child.exitCode === null) child.kill()
+      f.cleanup()
     }
-    for (const release of ready) release()
-    const outcomes = await Promise.all(results)
-    assert.equal(outcomes.filter((x) => x.ok).length, 1)
-    assert.equal(
-      outcomes.filter(
-        (x) =>
-          !x.ok &&
-          ['assignment-busy', 'storage-unavailable'].includes(x.reason ?? ''),
-      ).length,
-      1,
-    )
-  } finally {
-    for (const child of children) if (child.exitCode === null) child.kill()
-    f.cleanup()
-  }
-})
+  },
+)
 
 test('unknown database application ID is rejected before journal mode changes', async () => {
   const { DatabaseSync } = await import('node:sqlite')

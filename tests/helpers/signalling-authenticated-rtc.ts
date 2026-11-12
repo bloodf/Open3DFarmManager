@@ -133,6 +133,13 @@ async function connectorChild(
         ...(process.env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes'
           ? { SIGNALLING_HTTPS_RTC_PACKAGED: 'yes' }
           : {}),
+        ...(process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
+          ? {
+              SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+              SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY:
+                process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY ?? '',
+            }
+          : {}),
         ...(process.env.SIGNALLING_HTTPS_CAMERA
           ? { SIGNALLING_HTTPS_CAMERA: process.env.SIGNALLING_HTTPS_CAMERA }
           : {}),
@@ -568,6 +575,13 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               advance: async () => {
                 await session.connector.request({ kind: 'advance-runtime' })
               },
+              ...(process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
+                ? {
+                    pauses: async () => (await observeRuntime()).pauses,
+                    pauseInboxReady: async () =>
+                      (await observeRuntime()).pauseInboxReady,
+                  }
+                : {}),
             })
             assert.ok((await observeRuntime()).queued >= 2)
             await session.note(

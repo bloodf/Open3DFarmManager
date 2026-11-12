@@ -1,3 +1,4 @@
+import { rtcBindAddress } from '../config/rtc.ts'
 import { PeerConnection, type DataChannel } from 'node-datachannel'
 import {
   SyntheticSession,
@@ -8,6 +9,8 @@ import {
 } from './synthetic-session.ts'
 
 type PeerOptions = {
+  /** Local ICE bind address. Default loopback. */
+  bindAddress?: string
   scope: Scope
   privateKey: CryptoKey
   remotePublicKey: CryptoKey
@@ -59,7 +62,7 @@ export class SyntheticConnectorPeer {
     })
     this.peer = new PeerConnection('synthetic-connector', {
       iceServers: [],
-      bindAddress: '127.0.0.1',
+      bindAddress: rtcBindAddress(options.bindAddress),
       enableIceTcp: false,
       disableAutoNegotiation: true,
       maxMessageSize: SYNTHETIC_LIMITS.frameBytes,

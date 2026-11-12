@@ -9,6 +9,7 @@ import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import { isLoopbackBindAddress } from '../config/rtc.ts'
 import type {
   PauseControlDiagnostic,
   PauseFailureReason,
@@ -21,6 +22,7 @@ import {
 
 type AgentDiagnostic =
   | CollectionDiagnostic
+  | { kind: 'rtc-bind-non-loopback'; address: string }
   | RenewalDiagnostic
   | PauseControlDiagnostic
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
@@ -111,6 +113,12 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     input.configPath,
     readCredentialEnvelope(input.credentialPath, identity.fingerprint),
   )
+  // One startup line whenever the operator widened the ICE bind beyond loopback.
+  if (!isLoopbackBindAddress(config.rtc.bindAddress))
+    input.onDiagnostic({
+      kind: 'rtc-bind-non-loopback',
+      address: config.rtc.bindAddress,
+    })
   const { readOrRecoverRuntimeCredential, createRenewalHttpTransport } =
     await import('../cloud/credential-renewal.ts')
   const renewalOrigin = new URL(config.telemetry.endpoint).origin
@@ -278,6 +286,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
+                bindAddress: config.rtc.bindAddress,
                 origin: signalling.origin,
                 audience: signalling.audience,
                 agentId: credential.agent_id,

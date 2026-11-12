@@ -234,6 +234,7 @@ const results: {
   ms: number
   readonlyMs?: number
   recoveredMs?: number
+  pauseAppliedMs?: number
 }[] = []
 try {
   await mkdir(workDir, { recursive: true, mode: 0o700 })
@@ -409,6 +410,9 @@ try {
         ms: Math.round(performance.now() - startedAt),
         ...metric('readonly'),
         ...metric('recovered'),
+        ...(metric('pause-applied')['pause-appliedMs'] === undefined
+          ? {}
+          : { pauseAppliedMs: metric('pause-applied')['pause-appliedMs'] }),
       })
       ledger({ result: results.at(-1) })
       if (interrupted) throw new Error('Interrupted')

@@ -172,6 +172,7 @@ export async function runPauseControl(input: {
         const client: PauseClient = createClient(
           {
             url: pause.signalling.endpoint,
+            bindAddress: config.rtc.bindAddress,
             origin: pause.signalling.origin,
             audience: pause.signalling.audience,
             credentialAudience: pause.signalling.credentialAudience,

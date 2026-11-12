@@ -274,7 +274,7 @@ Anything else is a fail. Record it, roll back, and open an issue with the redact
 
 All values are placeholders. Keep the real files private, with mode `0600`.
 
-**Connector runtime configuration** (`<config>`). Field details are in the documents linked in section 3. The `pause` section is added only in section 8. The camera `source.address` must be a literal IP address; host names are rejected.
+**Connector runtime configuration** (`<config>`). Field details are in the documents linked in section 3. The `pause` section is added only in section 8. The camera `source.address` must be a literal IP address; host names are rejected. `rtc.bindAddress` is needed only when the browser reaches the Connector over the LAN instead of the same host; it widens exposure, so see the security note in [CONNECTOR-RTC-RUNTIME-CHECKPOINT.md](CONNECTOR-RTC-RUNTIME-CHECKPOINT.md#ice-bind-address-loopback-default-opt-in-lan).
 
 ```json
 {
@@ -310,6 +310,7 @@ All values are placeholders. Keep the real files private, with mode `0600`.
     "audience": "<signalling-audience>"
   },
   "renewal": { "audience": "<renewal-proof-audience>" },
+  "rtc": { "bindAddress": "<connector-lan-ip>" },
   "camera": {
     "helper": { "path": "/abs/path/rtsp-ingest", "sha256": "<hex>" },
     "maxSessions": 1,

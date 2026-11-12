@@ -1,3 +1,4 @@
+import { rtcBindAddress } from '../config/rtc.ts'
 import {
   captureEffectiveRtcDescriptions,
   checkEffectiveRtcDescriptions,
@@ -44,6 +45,8 @@ export type FixtureOnlyMediaHooks = Readonly<{
 }>
 
 type Options = {
+  /** Local ICE bind address from validated runtime config. Default loopback. */
+  bindAddress?: string
   /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
   authDeadline?: number | undefined
   lifetimeDeadline?: number
@@ -134,7 +137,7 @@ export class ReadonlyConnectorPeer {
     }
     this.#peer = new PeerConnection('readonly-connector', {
       iceServers: [],
-      bindAddress: '127.0.0.1',
+      bindAddress: rtcBindAddress(options.bindAddress),
       enableIceTcp: false,
       disableAutoNegotiation: true,
       disableFingerprintVerification: false,

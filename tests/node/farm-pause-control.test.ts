@@ -7,6 +7,7 @@ import {
   type FarmPauseControlState,
 } from '../../apps/farm/app/utils/webrtc/farm-pause-control.ts'
 import {
+  livePauseAvailability,
   pauseAvailability,
   pauseStatusText,
 } from '../../apps/farm/app/utils/farm-pause.ts'
@@ -383,4 +384,27 @@ test('outcome copy stays neutral about where a rejection happened and never clai
     pauseStatusText({ kind: 'settled', outcome: 'outcome-unknown' }, 0),
     /Verifique a impressora/,
   )
+})
+
+test('pause freshness uses a sample taken at the check, never only the last page tick', () => {
+  const row = live({}, 0)
+  // The frame arrived 400 ms after the last once-a-second tick.
+  row.observation!.received = { wall: 100_400, mono: 50_400 }
+  const tick = { wall: 100_000, mono: 50_000 }
+  assert.equal(pauseAvailability(row, keys, true, tick).available, false)
+  assert.deepEqual(
+    livePauseAvailability(row, keys, true, () => ({
+      wall: 100_450,
+      mono: 50_450,
+    })),
+    { available: true },
+  )
+  const stale = (sample: { wall: number; mono: number }) => {
+    const value = livePauseAvailability(row, keys, true, () => sample)
+    return value.available ? '' : value.reason
+  }
+  // A sample older than the frame (negative age) is still stale.
+  assert.match(stale({ wall: 100_300, mono: 50_300 }), /desatualizado/)
+  assert.match(stale({ wall: Number.NaN, mono: Number.NaN }), /desatualizado/)
+  assert.match(stale({ wall: 100_400, mono: Number.NaN }), /desatualizado/)
 })

@@ -60,6 +60,23 @@ export function pauseAvailability(
   return { available: true }
 }
 
+const sampleClock = (): Clock => ({ wall: Date.now(), mono: performance.now() })
+
+/**
+ * `pauseAvailability` against a clock sampled at the moment of the check. The
+ * page clock only ticks once a second, so a frame received after the last tick
+ * would otherwise look like a negative, stale age. A sample older than the
+ * frame, or a non-finite one, still counts as stale.
+ */
+export function livePauseAvailability(
+  row: FarmRow,
+  keys: FarmKeyState,
+  pauseEnabled: boolean,
+  sample: () => Clock = sampleClock,
+): PauseAvailability {
+  return pauseAvailability(row, keys, pauseEnabled, sample())
+}
+
 const outcomeText: Record<PauseCommandOutcome, string> = {
   applied: 'Impressão pausada. O Connector confirmou a pausa.',
   rejected:

@@ -29,14 +29,12 @@ export class FixtureProcess {
   #exited: Promise<void>
   #closed: Promise<void>
   #ipcError: Error | undefined
-  constructor(runtime: string) {
+  constructor(runtime: string, entry = './native-media-child.ts') {
     if (runtime !== process.execPath || process.versions.bun)
       throw Error('Node runtime required')
-    this.process = spawn(
-      runtime,
-      [new URL('./native-media-child.ts', import.meta.url).pathname],
-      { stdio: 'pipe' },
-    )
+    this.process = spawn(runtime, [new URL(entry, import.meta.url).pathname], {
+      stdio: 'pipe',
+    })
     this.process.stdin.on('error', (error) => {
       this.#ipcError = error
       const pending = this.#pending

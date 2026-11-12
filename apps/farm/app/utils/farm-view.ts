@@ -174,7 +174,16 @@ type Dependencies = {
   clock: () => Clock
   changed: (state: FarmViewState) => void
   feed?: FarmStatusFeed
+  /** Jitter source in [0, 1). */
+  random?: () => number
 }
+// A live Connector re-sends within its 5 s source validity or closes, so 9 s of
+// silence plus the 1 s view tick bounds loss detection to 10 s.
+const LIVENESS_MS = 9_000
+// Reopen after loss: exponential backoff with jitter, bounded consecutive failures.
+const REOPEN_BASE_MS = 1_000
+const REOPEN_MAX_MS = 30_000
+const REOPEN_ATTEMPTS = 6
 class AccountChanged extends Error {}
 function httpStatus(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null) return
@@ -682,6 +691,7 @@ export function createFarmView(deps: Dependencies) {
     >,
   ) {
     if (!deps.feed || state.kind !== 'ready') return
+    const feed = deps.feed
     const agents = new Set(
       state.rows
         .filter(
@@ -695,11 +705,22 @@ export function createFarmView(deps: Dependencies) {
       if (!run.current() || state.kind !== 'ready') return
       const refs = groups.get(agentId)
       if (!refs) return
+      subscribe(agentId, refs, 0)
+    }
+    function subscribe(
+      agentId: string,
+      refs: readonly Pick<
+        FarmAssignment,
+        'assignmentId' | 'agentId' | 'printerKey'
+      >[],
+      failures: number,
+    ) {
       let terminal = false,
         session: FarmAdmittedSession | null = null,
         seq = -1
       let handle: { close(): void } | undefined
       const started = deps.clock()
+      let lastSign = started.mono
       const current = () =>
         run.current() &&
         !terminal &&
@@ -729,6 +750,7 @@ export function createFarmView(deps: Dependencies) {
       function close() {
         if (terminal) return
         terminal = true
+        connections = connections.filter((item) => item !== entry)
         // Producer teardown cannot prevent retiring private view state.
         try {
           handle?.close()
@@ -736,7 +758,7 @@ export function createFarmView(deps: Dependencies) {
           // Already terminal locally.
         }
       }
-      function end() {
+      function end(reason?: Extract<FarmHealth, { kind: 'closed' }>['reason']) {
         if (!current()) return
         close()
         update((row) => ({
@@ -746,6 +768,31 @@ export function createFarmView(deps: Dependencies) {
             ? { ...row.observation, historical: true }
             : null,
         }))
+        // Revocation is final; logout/auth invalidation retires the run instead.
+        // Only a feed that delivered data resets the consecutive-failure budget.
+        const next = seq >= 0 ? 0 : failures + 1
+        if (reason === 'revoked' || next > REOPEN_ATTEMPTS) return
+        const jitter =
+          0.5 + Math.min(Math.max((deps.random ?? Math.random)(), 0), 1) / 2
+        const retryAt =
+          deps.clock().mono +
+          Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** next) * jitter
+        const retry = {
+          close() {
+            connections = connections.filter((item) => item !== retry)
+          },
+          expire(now: Clock) {
+            if (!(now.mono >= retryAt)) return
+            retry.close()
+            if (
+              run.current() &&
+              state.kind === 'ready' &&
+              state.scope?.viewEpoch === scope.viewEpoch
+            )
+              subscribe(agentId, refs, next)
+          },
+        }
+        connections.push(retry)
       }
       function expire(now: Clock) {
         if (!current()) return
@@ -755,16 +802,18 @@ export function createFarmView(deps: Dependencies) {
           now.mono < started.mono ||
           now.wall < started.wall ||
           now.mono - started.mono >= 30_000 ||
+          now.mono - lastSign >= LIVENESS_MS ||
           (session &&
             (now.wall >= session.expiresAt ||
               now.mono >= session.deadlineMonoMs))
         )
           end()
       }
-      connections.push({ close, expire })
+      const entry = { close, expire }
+      connections.push(entry)
       update((row) => ({ ...row, connection: 'connecting' }))
       try {
-        handle = deps.feed.open({
+        handle = feed.open({
           scope,
           agentId,
           assignmentRefs: refs,
@@ -774,7 +823,7 @@ export function createFarmView(deps: Dependencies) {
             expire(deps.clock())
             if (!current()) return
             if (health.kind === 'closed') {
-              end()
+              end(health.reason)
               return
             }
             if (health.kind === 'authenticated') {
@@ -799,6 +848,7 @@ export function createFarmView(deps: Dependencies) {
                 end()
                 return
               }
+              if (!session) lastSign = now.mono
               session = candidate
               update((row) => ({ ...row, connection: 'authenticated' }))
             } else if (
@@ -860,6 +910,7 @@ export function createFarmView(deps: Dependencies) {
             }
             if (message.seq <= seq) return
             seq = message.seq
+            lastSign = now.mono
             update((row) => {
               const printer = message.printers.find(
                 (item) => item.printerKey === row.assignment.printerKey,
@@ -948,7 +999,7 @@ export function createFarmView(deps: Dependencies) {
     selectKey,
     confirmOrigin,
     tick: () => {
-      for (const connection of connections) connection.expire(deps.clock())
+      for (const connection of [...connections]) connection.expire(deps.clock())
     },
     invalidate: () => {
       const run = retire()

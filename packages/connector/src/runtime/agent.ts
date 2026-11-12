@@ -220,8 +220,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       ? createOfflineAuthority({
           onStale(reason) {
             pauseDiagnostic({ kind: 'pause-authority-stale', reason })
-            // The fsynced write runs after the caller's freshness check returns.
-            queueMicrotask(() =>
+            // The fsynced write runs on a later turn, never inside the caller's
+            // freshness check or its microtask queue.
+            setImmediate(() =>
               recordAuthorityStale(
                 input.dataDirectory,
                 reason,
@@ -239,6 +240,17 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       const { runSignallingLifecycle } = await import('./signalling.ts')
       const signalling = config.signalling
       const source = snapshots
+      const cameraMedia = config.camera
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -259,6 +271,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
               },
               {
                 genuineStatus: { assignmentRefs: refs },
+                ...(cameraMedia ? { cameraMedia } : {}),
                 onInboxReady() {
                   onAdmitted()
                   diagnostic({ kind: 'readonly-listening' })

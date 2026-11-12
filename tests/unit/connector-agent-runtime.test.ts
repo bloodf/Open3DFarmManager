@@ -92,7 +92,9 @@ function job(args: string[], env = {}) {
       const deadline = Date.now() + 7000
       while (!predicate()) {
         if (child.exitCode !== null || Date.now() > deadline)
-          throw new Error('Agent fixture condition not reached')
+          throw new Error(
+            `Agent fixture condition not reached: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+          )
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },
@@ -969,7 +971,10 @@ test('new observations cannot bypass a pending outer retry deadline', async () =
     server.delta()
     await running.until(() => lines(running.output, 'queued') >= 2)
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(server.issued.length).toBe(1)
+    // The retry legitimately fires ~300 ms after the first attempt; a slow host
+    // may reach this point later. No request may precede that deadline.
+    for (const request of server.issued.slice(1))
+      expect(request.at - server.issued[0]!.at).toBeGreaterThanOrEqual(280)
     await running.until(() => server.completed.length >= 2)
     expect(server.issued[1]!.at - server.issued[0]!.at).toBeGreaterThanOrEqual(
       280,

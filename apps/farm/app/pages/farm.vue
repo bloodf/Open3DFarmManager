@@ -10,6 +10,7 @@ import {
 } from 'vue'
 import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
+import CameraDisplay from '../components/CameraDisplay.vue'
 import {
   farmConnectionNotice,
   localInterfaceOrigin,
@@ -27,8 +28,16 @@ import {
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
 definePageMeta({ middleware: 'farm-flag' })
-const { state, ready, now, discover, selectFarm, selectKey, confirmOrigin } =
-  useFarmView()
+const {
+  state,
+  ready,
+  now,
+  discover,
+  selectFarm,
+  selectKey,
+  confirmOrigin,
+  cameraFor,
+} = useFarmView()
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
@@ -570,6 +579,14 @@ function dateLabel(time: number) {
                       >
                     </p>
                   </template>
+                  <CameraDisplay
+                    v-if="
+                      row.assignment.status === 'active' &&
+                      row.assignment.connectorStatus === 'approved'
+                    "
+                    :stream="cameraFor(row.assignment.assignmentId)"
+                    :printer-name="row.assignment.printerKey"
+                  />
                   <template
                     v-if="
                       row.assignment.status === 'active' &&

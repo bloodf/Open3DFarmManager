@@ -70,6 +70,29 @@ The camera section is absent by default. When it is absent, the Connector adds n
 }
 ```
 
+## Reproducing the interop run
+
+Build the helper offline from the vendored sources. The module replacements point at `third_party/rtsp-ingest`; no download happens.
+
+```sh
+cd tools/rtsp-ingest
+GOFLAGS=-mod=mod GOPROXY=off GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath -o /abs/path/rtsp-ingest ./cmd/rtsp-ingest
+sha256sum /abs/path/rtsp-ingest
+```
+
+Start the `rtsp` simulator profile with a task-owned project name and port. A compose override maps `127.0.0.1:<port>` to the container's `8554`. Then run the gated test:
+
+```sh
+COMPOSE_PROJECT_NAME=<task> docker compose -f infra/sim/docker-compose.yml \
+  -f <override.yml> --profile rtsp up -d rtsp
+CAMERA_RTSP_GATE=1 RTSP_SIM_PORT=<port> CAMERA_HTTP_PORT=<port> \
+  RTSP_HELPER_PATH=/abs/path/rtsp-ingest RTSP_HELPER_SHA256=<hex> \
+  node --test packages/webrtc-experiment/real-identity/camera-rtsp.interop.test.ts
+```
+
+Stop the simulator with `docker compose … --profile rtsp down` afterwards.
+
 ## Evidence
 
 - `node --test tests/node/camera-media.test.ts tests/node/camera-runtime-config.test.ts` covers the offer and countersign ordering, wrong keys, early or repeated frames, unassigned cameras, slot exhaustion, synchronous revocation and config rejection.

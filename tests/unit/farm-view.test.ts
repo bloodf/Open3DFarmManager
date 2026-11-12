@@ -10,6 +10,7 @@ import {
   FarmDiscoveryPage,
   localInterfaceOrigin,
   observationAge,
+  spoolInventoryStale,
   type FarmAdmittedSession,
   type FarmAssignment,
   type FarmSnapshot,
@@ -1456,6 +1457,7 @@ function send(
   session: FarmAdmittedSession,
   seq: number,
   printerKey = row.printerKey,
+  inventory?: unknown,
 ) {
   h.peer(index).input.onSnapshot({
     session: { ...session },
@@ -1470,7 +1472,8 @@ function send(
           observedAt: h.time.wall,
         },
       ],
-    },
+      ...(inventory ? { inventory } : {}),
+    } as never,
     receivedAtWallMs: h.time.wall,
     receivedAtMonoMs: h.time.mono,
     sourceClockComparable: true,
@@ -1901,4 +1904,358 @@ test('429 Retry-After accepts an HTTP date and spreads the wait with jitter', as
       expect(h.time.mono - from).toBe(expected)
     })
   }
+})
+
+test('spool inventory is kept per Connector, replaced by each snapshot and unavailable when omitted', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  expect(h.ready().spools).toEqual([])
+  const inventory = {
+    observedAt: h.time.wall,
+    stale: false,
+    total: 1,
+    spools: [
+      {
+        name: 'PLA <b>',
+        material: 'PLA',
+        colorHex: 'ffffff',
+        remainingGrams: 400,
+        location: null,
+        archived: false,
+      },
+    ],
+  }
+  const send = (seq: number, withInventory: boolean) =>
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        ...(withInventory ? { inventory } : {}),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  send(0, true)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.agentId).toBe(agent)
+  expect(h.ready().spools[0]?.inventory?.spools[0]?.remainingGrams).toBe(400)
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(false)
+  expect(
+    spoolInventoryStale(h.ready().spools[0]!, {
+      wall: h.time.wall,
+      mono: h.time.mono + 30_000,
+    }),
+  ).toBe(true)
+  send(1, false)
+  expect(h.ready().spools).toHaveLength(1)
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+  expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
+})
+
+test('an invalid inventory is dropped without interrupting printer status', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: { observedAt: 1, stale: false, total: 1, spools: [{}] },
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.first().connection).toBe('authenticated')
+  expect(h.first().observation?.state.state).toBe('idle')
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+})
+
+test('an invalid printer field still ends the feed', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        { printerKey: row.printerKey, state: 'exploded', progress: 0 },
+      ],
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.first().connection).toBe('closed')
+  expect(h.ready().spools).toEqual([])
+})
+
+test('unchanged inventory content keeps the same object across snapshots', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  const inventory = { observedAt: 1, stale: false, total: 0, spools: [] }
+  for (const seq of [0, 1])
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        inventory: structuredClone(inventory),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  const first = h.ready().spools[0]?.inventory
+  expect(first).toEqual(inventory)
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 2,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: structuredClone(inventory),
+    },
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.ready().spools[0]?.inventory).toBe(first)
+})
+
+const spoolInventory = { observedAt: 1, stale: false, total: 0, spools: [] }
+
+test('spools stay live through seamless renewal, then follow printer rows on loss and reopen', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    let seq = 0
+    while (h.peers.length === 1) {
+      send(h, 0, session, seq++, row.printerKey, spoolInventory)
+      expect(h.ready().spools[0]?.historical).toBe(false)
+      await second()
+    }
+    // Renewal in flight: inventory is retained and not flagged historical.
+    expect(h.ready().spools).toHaveLength(1)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    const renewed = admit(h, 1)
+    send(h, 1, renewed, 0, row.printerKey, spoolInventory)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    // Loss: last inventory is kept but immediately stale.
+    h.peer(1).input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(h.first().connection).toBe('closed')
+    expect(h.ready().spools[0]?.historical).toBe(true)
+    expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
+    // A fresh frame on the reopened feed makes it current again.
+    while (h.peers.length < 3) await second()
+    const reopened = admit(h, 2)
+    send(h, 2, reopened, 0, row.printerKey, spoolInventory)
+    expect(h.ready().spools[0]?.historical).toBe(false)
+    expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(false)
+  })
+})
+
+test('a revoked or rejected feed flags spools historical and a new farm clears them', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    send(h, 0, session, 0, row.printerKey, spoolInventory)
+    h.peer(0).input.onHealth({ kind: 'closed', reason: 'revoked' })
+    expect(h.ready().spools[0]?.historical).toBe(true)
+    await h.view.selectFarm(farm)
+    expect(h.ready().spools).toEqual([])
+  })
+})
+
+function spoolFrame(
+  h: ReturnType<typeof setup>,
+  index: number,
+  session: FarmAdmittedSession,
+) {
+  h.peer(index).input.onSnapshot({
+    session: { ...session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: {
+        observedAt: h.time.wall,
+        stale: false,
+        total: 1,
+        spools: [
+          {
+            name: 'PLA',
+            material: 'PLA',
+            colorHex: 'ffffff',
+            remainingGrams: 400,
+            location: null,
+            archived: false,
+          },
+        ],
+      },
+    },
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+}
+
+test('in-place refresh keeps spool inventory stale-flagged; another farm clears it', async () => {
+  const farmB = '00000000-0000-4000-8000-000000000009'
+  const h = setup(true, () => 0)
+  h.data.farms.farms.push({ farmId: farmB })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    await h.view.selectFarm(farm)
+    spoolFrame(h, 0, admit(h, 0))
+    expect(h.ready().spools).toMatchObject([
+      { agentId: agent, historical: false },
+    ])
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(h.ready().spools).toMatchObject([{ historical: true }])
+    expect(await nextPeer(h)).not.toBeNull()
+    expect(h.ready().rows).toHaveLength(2)
+    expect(h.ready().spools).toMatchObject([
+      { agentId: agent, historical: true, inventory: { total: 1 } },
+    ])
+    h.hooks.read = async (path, signal, query) =>
+      path === `/api/farms/${farmB}/printers`
+        ? { printers: [], nextAfter: null, canManage: true }
+        : h.baseRead(path, signal, query)
+    const selecting = h.view.selectFarm(farmB)
+    expect(h.ready().spools).toEqual([])
+    await selecting
+    expect(h.ready().spools).toEqual([])
+  })
+})
+
+test('refresh drops origins of assignments or Connectors revoked meanwhile', async () => {
+  for (const change of ['assignment', 'connector'] as const) {
+    const h = setup(true, () => 0)
+    await fakeTimers(h, async () => {
+      await h.view.discover()
+      expect(
+        h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+      ).toBe(true)
+      h.data.printers.printers = [
+        change === 'assignment'
+          ? { ...row, status: 'revoked' }
+          : { ...row, connectorStatus: 'revoked' },
+      ]
+      h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      expect(await nextPeer(h, 10_000)).toBeNull()
+      expect(h.first().localOrigin).toBeNull()
+      expect(h.first().assignment).toMatchObject(h.data.printers.printers[0]!)
+    })
+  }
+})
+
+test('an origin confirmed while the refresh is loading survives it', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    let printerReads = 0
+    const gate = deferred<void>()
+    h.hooks.read = async (path, signal, query) => {
+      // Second read after the change is the refresh's inventory page.
+      if (path === `/api/farms/${farm}/printers` && ++printerReads === 2)
+        await gate.promise
+      return h.baseRead(path, signal, query)
+    }
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    while (printerReads < 2) await second()
+    expect(h.ready().inventory).toBe('ready')
+    expect(
+      h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+    ).toBe(true)
+    gate.resolve()
+    await second(0)
+    await second(0)
+    expect(h.ready().rows).toHaveLength(2)
+    expect(h.first().localOrigin).toBe('http://localhost:7125')
+  })
+})
+
+test('a refresh whose preferred key was revoked falls back to the remaining key', async () => {
+  const keyB = '00000000-0000-4000-8000-000000000008'
+  const h = setup(true, () => 0)
+  h.data.devices.push({ ...device, keyId: keyB, thumbprint: 'Q'.repeat(43) })
+  h.data.local.push({ thumbprint: 'Q'.repeat(43) })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    await h.view.selectKey(keyB)
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
+    h.data.devices = h.data.devices.map((item) =>
+      item.keyId === keyB ? { ...item, status: 'revoked' } : item,
+    )
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    h.peers.at(-1)!.input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(await nextPeer(h)).not.toBeNull()
+    expect(h.ready().keys).toMatchObject({ kind: 'available', selected: keyId })
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyId)
+  })
 })

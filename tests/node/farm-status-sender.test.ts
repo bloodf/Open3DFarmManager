@@ -11,6 +11,7 @@ import {
 } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 import {
   immutableAdmission,
+  validatedStatusMessage,
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
 
@@ -501,4 +502,61 @@ test('sender copies optional finite temperatures without making a command or cha
   } finally {
     f.sender.close()
   }
+})
+
+test('sender forwards a bounded spool inventory and rejects unbounded or unknown inventory', async () => {
+  const f = await fixture()
+  try {
+    await f.sender.start()
+    await f.admit()
+    const spool = {
+      name: 'PLA',
+      material: 'PLA',
+      colorHex: 'ffffff',
+      remainingGrams: 500,
+      location: null,
+      archived: false,
+    }
+    const inventory = {
+      observedAt: Date.now(),
+      stale: false,
+      total: 1,
+      spools: [spool],
+    }
+    f.complete({ inventory })
+    assert.deepEqual((f.sent[0] as { inventory: unknown }).inventory, inventory)
+    assert.equal(
+      Object.isFrozen((f.sent[0] as { inventory: unknown }).inventory),
+      true,
+    )
+    assert.equal(f.closed(), 0)
+    f.complete({ inventory: { ...inventory, spools: Array(9).fill(spool) } })
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.sender.close()
+  }
+})
+
+test('receiving side drops an invalid inventory while sending stays strict', () => {
+  const ref = {
+    assignmentId: randomUUID(),
+    agentId: randomUUID(),
+    printerKey: 'printer-a',
+  }
+  const message = {
+    t: 'snapshot',
+    seq: 0,
+    printers: [
+      { printerKey: 'printer-a', state: 'idle', progress: 0, observedAt: 1 },
+    ],
+    inventory: { observedAt: 1, stale: false, total: 1, spools: [{ bad: 1 }] },
+  }
+  assert.throws(() => validatedStatusMessage(message, [ref]))
+  const received = validatedStatusMessage(message, [ref], true)
+  assert.equal(received.inventory, undefined)
+  assert.equal(received.printers.length, 1)
+  assert.throws(() =>
+    validatedStatusMessage({ ...message, extra: 1 }, [ref], true),
+  )
 })

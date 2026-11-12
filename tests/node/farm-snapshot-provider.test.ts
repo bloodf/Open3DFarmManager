@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import type { SpoolmanSnapshot } from '../../packages/connector/src/runtime/spoolman-provider.ts'
 import type { RawMoonrakerObservation } from '../../packages/connector/src/moonraker/subscription.ts'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import type {
@@ -373,4 +374,156 @@ test('future/regressive temperature stamps invalidate evidence without publishin
       f.source.close()
     }
   }
+})
+
+function spoolman(
+  count: number,
+  kind: SpoolmanSnapshot['kind'] = 'observed',
+  ageMs = 1000,
+): SpoolmanSnapshot {
+  const filament = (n: number) => ({
+    id: n,
+    name: `Filamento ${n} ${'x'.repeat(100)}`,
+    material: 'PETG-CF-EXTRA-LONG-MATERIAL',
+    vendor: null,
+    density: null,
+    diameter: null,
+    weight: null,
+    spool_weight: null,
+    color_hex: 'AABBCCDD',
+    extra: {},
+  })
+  return {
+    kind,
+    ageMs,
+    inventory: {
+      farmId: randomUUID(),
+      serviceId: randomUUID(),
+      observedFrom: 1,
+      observedThrough: 1,
+      items: Array.from({ length: count }, (_, i) => ({
+        id: i + 1,
+        filament: filament(i + 1),
+        initial_weight: 1000,
+        spool_weight: 200,
+        used_weight: 100,
+        remaining_weight: i === 1 ? -4.4 : 900.6,
+        location: i === 2 ? null : 'Prateleira A',
+        lot_nr: null,
+        // First spool is archived; active ones must sort ahead of it.
+        archived: i === 0,
+        extra: {},
+      })),
+    },
+  } as unknown as SpoolmanSnapshot
+}
+test('spool mirror rides on snapshots: bounded, sorted, stale-aware and omitted when unavailable', () => {
+  const f = fixture(['a'])
+  const wall = Date.now()
+  try {
+    f.observe('a')
+    f.open(100_000)
+    assert.equal(f.received.at(-1)?.inventory, undefined)
+    f.source.setInventory(spoolman(20))
+    const inv = f.received.at(-1)?.inventory
+    assert.ok(inv)
+    assert.equal(inv.total, 20)
+    assert.ok(inv.spools.length <= 8)
+    assert.equal(inv.stale, false)
+    assert.ok(Math.abs(inv.observedAt - (wall - 1000)) < 5000)
+    // Active spools first; archived one sorts last.
+    assert.equal(inv.spools[0]?.archived, false)
+    assert.equal(
+      inv.spools.some((s) => s.archived),
+      false,
+    )
+    assert.equal(inv.spools[0]?.remainingGrams, -4)
+    assert.equal(inv.spools[1]?.location, null)
+    assert.equal(inv.spools[0]?.colorHex, 'aabbcc')
+    assert.ok((inv.spools[0]?.name?.length ?? 99) <= 32)
+    assert.equal(Object.isFrozen(inv), true)
+    assert.equal(Object.isFrozen(inv.spools[0]), true)
+    // Whole frame still fits the 2048-byte application cap.
+    assert.ok(
+      new TextEncoder().encode(
+        JSON.stringify({
+          t: 'snapshot',
+          seq: 1024,
+          printers: f.received.at(-1)?.printers,
+          inventory: inv,
+        }),
+      ).byteLength <= 2048,
+    )
+    // Monotonic age advances; 30 s makes it stale without a provider update.
+    f.setNow(31_200)
+    f.observe('a', 1, {
+      webhooks: 31_200,
+      printState: 31_200,
+      progress: 31_200,
+    })
+    assert.equal(f.received.at(-1)?.inventory?.stale, true)
+    f.source.setInventory(spoolman(2, 'stale'))
+    assert.equal(f.received.at(-1)?.inventory?.stale, true)
+    f.source.setInventory({ kind: 'unavailable', inventory: null, ageMs: null })
+    assert.equal(f.received.at(-1)?.inventory, undefined)
+  } finally {
+    f.source.close()
+  }
+})
+
+function* crowded() {
+  // Printer sets that fit alone but leave little room for spools.
+  for (let count = 4; count <= 16; count++)
+    for (let length = 128; length >= 40; length--) {
+      const keys = Array.from(
+        { length: count },
+        (_, i) => `${String(i).padStart(2, '0')}${'k'.repeat(length - 2)}`,
+      )
+      const size = JSON.stringify({
+        t: 'snapshot',
+        seq: 1024,
+        printers: keys.map((printerKey) => ({
+          printerKey,
+          state: 'printing',
+          progress: 0.2,
+          observedAt: 10,
+        })),
+      }).length
+      yield { keys, size }
+    }
+}
+function emitWithSpools(keys: string[]) {
+  const f = fixture(keys)
+  try {
+    for (const key of keys) f.observe(key)
+    f.open()
+    f.source.setInventory(spoolman(30))
+    const last = f.received.at(-1)
+    assert.ok(last)
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        t: 'snapshot',
+        seq: 1024,
+        printers: last.printers,
+        ...(last.inventory ? { inventory: last.inventory } : {}),
+      }),
+    ).byteLength
+    assert.ok(bytes <= 2048)
+    return last.inventory
+  } finally {
+    f.source.close()
+  }
+}
+test('crowded frames drop spools to fit with an honest total', () => {
+  const roomy = [...crowded()].find((c) => c.size >= 900 && c.size <= 1100)
+  assert.ok(roomy)
+  const inv = emitWithSpools(roomy.keys)
+  assert.ok(inv)
+  assert.equal(inv.total, 30)
+  assert.ok(inv.spools.length > 0 && inv.spools.length < 8)
+})
+test('inventory is omitted when even zero spools cannot fit, printers still flow', () => {
+  const full = [...crowded()].find((c) => c.size >= 1990 && c.size <= 2048)
+  assert.ok(full)
+  assert.equal(emitWithSpools(full.keys), undefined)
 })

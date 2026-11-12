@@ -1,16 +1,12 @@
 import { z } from 'zod'
-import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
+import { createMoonrakerSocket } from './socket.ts'
+import { Reply, decodeMoonrakerFrame } from './frame.ts'
 import { parseMoonrakerServerInfo } from './parse.ts'
 import type { MoonrakerLimits } from '../config/moonraker.ts'
 export {
   validateMoonrakerInput,
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
-
-// Set before module evaluation. Do not statically import ws or enable addons.
-process.env.WS_NO_BUFFER_UTIL = '1'
-process.env.WS_NO_UTF_8_VALIDATE = '1'
-const { default: WebSocket } = await import('ws')
 
 export type MoonrakerFailureReason =
   'offline' | 'stale' | 'not-ready' | 'invalid-response'
@@ -77,11 +73,6 @@ export async function readMoonrakerReady(input: {
   }
 }
 
-const Reply = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  result: z.unknown(),
-})
 const Notification = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().max(128),
@@ -104,8 +95,6 @@ const completeObjects = {
   heater_bed: ['temperature'],
 }
 
-// The ws receiver enforces payload/fragment/chunk bounds before message dispatch.
-// Compression, redirects and optional native addons are disabled.
 export function openMoonrakerClient(input: {
   origin: string
   limits: MoonrakerLimits
@@ -119,18 +108,9 @@ export function openMoonrakerClient(input: {
   closed: Promise<MoonrakerFailureReason>
   close: () => void
 } {
-  const url = new URL('/websocket', input.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  const socket = new WebSocket(url, {
-    maxPayload: input.limits.maxMessageBytes,
-    maxFragments: 128,
-    maxBufferedChunks: 128,
-    // Let the snapshot promise continuation install its baseline before a delta.
+  // Let the snapshot promise continuation install its baseline before a delta.
+  const socket = createMoonrakerSocket(input.origin, input.limits, {
     allowSynchronousEvents: false,
-    perMessageDeflate: false,
-    followRedirects: false,
-    handshakeTimeout: input.limits.connectTimeoutMs,
-    skipUTF8Validation: false,
   })
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
@@ -243,18 +223,11 @@ export function openMoonrakerClient(input: {
   function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
     try {
-      if (
-        isBinary ||
-        !Buffer.isBuffer(data) ||
-        data.byteLength > input.limits.maxMessageBytes
+      const value = decodeMoonrakerFrame(
+        data,
+        isBinary,
+        input.limits.maxMessageBytes,
       )
-        throw new Error('Invalid frame')
-      const value = parseBoundedJson(data.toString('utf8'), {
-        maxBytes: input.limits.maxMessageBytes,
-        maxDepth: 16,
-        maxValues: 8192,
-        maxStringChars: 16384,
-      })
       const reply = Reply.safeParse(value)
       if (reply.success) {
         if (

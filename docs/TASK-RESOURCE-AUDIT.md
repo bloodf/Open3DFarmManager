@@ -11,9 +11,9 @@ The task label is the value of the `o3dfm.task` Docker label. A resource counts 
 The task label is a required argument. There is no default and no inference from the current branch or directory.
 
 ```sh
-bun scripts/audit-task-resources.ts --task-label <value>
-bun scripts/audit-task-resources.ts --task-label <value> --pretty
-bun scripts/audit-task-resources.ts --task-label <value> --repo <path>
+node scripts/audit-task-resources.ts --task-label <value>
+node scripts/audit-task-resources.ts --task-label <value> --pretty
+node scripts/audit-task-resources.ts --task-label <value> --repo <path>
 ```
 
 The report is a single JSON object on stdout. Errors go to stderr.
@@ -130,10 +130,10 @@ A dirty worktree holds work that no other branch has. Confirm that its commits a
 
 Run these against a scratch environment with no task-owned resources, then again against a label that owns something.
 
-1. Missing label. `bun scripts/audit-task-resources.ts` prints the usage error on stderr and exits 1.
+1. Missing label. `node scripts/audit-task-resources.ts` prints the usage error on stderr and exits 1.
 
    ```sh
-   bun scripts/audit-task-resources.ts >/dev/null 2>&1; echo $?
+   node scripts/audit-task-resources.ts >/dev/null 2>&1; echo $?
    # 1
    ```
 

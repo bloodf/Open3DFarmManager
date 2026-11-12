@@ -10,7 +10,7 @@ import {
   BrowserDeviceTextId,
   validateBrowserDevicePublicKey,
 } from '../../../../../packages/farm-protocol/src/browser-device-proof.ts'
-import { StatusMessage } from '../../../../../packages/farm-protocol/src/channel.ts'
+import { parseStatusMessageTolerant } from '../../../../../packages/farm-protocol/src/channel.ts'
 import { RtcSessionBinding } from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
 import { AuthenticatedBrowserSignallingClient } from './authenticated-signalling-client.ts'
 
@@ -324,7 +324,9 @@ export function createAuthenticatedFarmStatusFeed(
             onStatus(value) {
               if (!current() || !session) return close('rejected')
               try {
-                const parsed = StatusMessage.safeParse(structuredClone(value))
+                const parsed = parseStatusMessageTolerant(
+                  structuredClone(value),
+                )
                 if (
                   !parsed.success ||
                   !Number.isSafeInteger(parsed.data.seq) ||

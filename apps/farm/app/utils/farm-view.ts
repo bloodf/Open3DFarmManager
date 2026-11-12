@@ -5,7 +5,10 @@ import {
 } from '../../../../packages/farm-protocol/src/browser-device-http.ts'
 import { BrowserDeviceUuid } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
-import { StatusMessage } from '../../../../packages/farm-protocol/src/channel.ts'
+import {
+  StatusMessage,
+  parseStatusMessageTolerant,
+} from '../../../../packages/farm-protocol/src/channel.ts'
 import type { SpoolInventory } from '../../../../packages/farm-protocol/src/inventory.ts'
 
 const exactKey = PrinterState.shape.printerKey.refine(
@@ -114,6 +117,12 @@ export type FarmSpoolObservation = {
   agentId: string
   inventory: SpoolInventory | null
   received: Clock
+}
+function sameInventory(
+  a: SpoolInventory | null | undefined,
+  b: SpoolInventory | undefined,
+) {
+  return !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
 }
 export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
   const elapsed = now.mono - item.received.mono
@@ -834,7 +843,7 @@ export function createFarmView(deps: Dependencies) {
             expire(now)
             if (!current() || !session) return
             const parsedSession = AdmittedSession.safeParse(snapshot.session)
-            const parsed = StatusMessage.safeParse(snapshot.message)
+            const parsed = parseStatusMessageTolerant(snapshot.message)
             if (
               !parsedSession.success ||
               !sameSession(session, parsedSession.data) ||
@@ -881,14 +890,21 @@ export function createFarmView(deps: Dependencies) {
             }
             if (message.seq <= seq) return
             seq = message.seq
-            if (state.kind === 'ready')
+            if (state.kind === 'ready') {
+              const before = state.spools.find(
+                (item) => item.agentId === agentId,
+              )?.inventory
+              // Keep the previous object when content is unchanged.
+              const inventory = sameInventory(before, message.inventory)
+                ? (before ?? null)
+                : (message.inventory ?? null)
               publish({
                 ...state,
                 spools: [
                   ...state.spools.filter((item) => item.agentId !== agentId),
                   {
                     agentId,
-                    inventory: message.inventory ?? null,
+                    inventory,
                     received: {
                       wall: snapshot.receivedAtWallMs,
                       mono: snapshot.receivedAtMonoMs,
@@ -896,6 +912,7 @@ export function createFarmView(deps: Dependencies) {
                   },
                 ].sort((a, b) => a.agentId.localeCompare(b.agentId)),
               })
+            }
             update((row) => {
               const printer = message.printers.find(
                 (item) => item.printerKey === row.assignment.printerKey,

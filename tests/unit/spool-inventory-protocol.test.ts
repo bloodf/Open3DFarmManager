@@ -3,6 +3,7 @@ import {
   MAX_INVENTORY_SPOOLS,
   SpoolInventory,
   StatusMessage,
+  parseStatusMessageTolerant,
 } from '@open3dfarmmanager/farm-protocol'
 
 const spool = {
@@ -87,5 +88,31 @@ describe('spool inventory schema', () => {
       expect(SpoolInventory.safeParse({ ...inventory, ...bad }).success).toBe(
         false,
       )
+  })
+})
+
+describe('tolerant browser parsing', () => {
+  const base = { t: 'snapshot' as const, seq: 1, printers: [] }
+  test('drops only an invalid inventory and keeps printers', () => {
+    const bad = { ...inventory, spools: [{ ...spool, extra: 1 }] }
+    const result = parseStatusMessageTolerant({ ...base, inventory: bad })
+    expect(result.success && result.data).toEqual(base)
+    expect(StatusMessage.safeParse({ ...base, inventory: bad }).success).toBe(
+      false,
+    )
+  })
+  test('keeps a valid inventory and rejects other violations', () => {
+    const ok = parseStatusMessageTolerant({ ...base, inventory })
+    expect(ok.success && ok.data.inventory).toEqual(inventory)
+    expect(
+      parseStatusMessageTolerant({ ...base, inventory, extra: 1 }).success,
+    ).toBe(false)
+    expect(
+      parseStatusMessageTolerant({
+        ...base,
+        printers: [{ printerKey: 'a', state: 'bad' }],
+        inventory: 'x',
+      }).success,
+    ).toBe(false)
   })
 })

@@ -20,6 +20,8 @@ import {
   type SpoolSummaryState,
 } from './spool-inventory.ts'
 
+const FRAME_LIMIT = 'Application frame limit'
+
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
@@ -112,7 +114,11 @@ export function createFarmSnapshotSource(input: {
             refs,
           )
           break
-        } catch {}
+        } catch (error) {
+          // Only the frame cap shrinks the list; anything else is a real fault.
+          if (!(error instanceof Error && error.message === FRAME_LIMIT))
+            throw error
+        }
       }
     }
     return Object.freeze({
@@ -238,7 +244,12 @@ export function createFarmSnapshotSource(input: {
   /** Spoolman mirror updates re-emit the snapshot; unavailable inventory is omitted. */
   function setInventory(value: SpoolmanSnapshot) {
     if (closed) return
-    const summary = summarizeSpoolman(value)
+    let summary: SpoolSummaryState | null = null
+    try {
+      summary = summarizeSpoolman(value)
+    } catch {
+      // Malformed mirror data must never disturb printer status.
+    }
     spoolState = summary ? { value: summary, receivedMono: clock() } : undefined
     notify()
   }

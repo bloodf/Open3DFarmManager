@@ -3,7 +3,10 @@ import {
   RtcAssignmentRef,
 } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import type { SpoolInventory } from '../../../farm-protocol/src/inventory.ts'
-import { StatusMessage } from '../../../farm-protocol/src/channel.ts'
+import {
+  StatusMessage,
+  parseStatusMessageTolerant,
+} from '../../../farm-protocol/src/channel.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import {
   RtcSessionBinding,
@@ -111,6 +114,8 @@ export function snapshotAssignmentRefs(
 export function validatedStatusMessage(
   input: unknown,
   refs: readonly AssignmentRef[],
+  /** Receiving side only: drop an invalid inventory instead of failing the frame. */
+  tolerantInventory = false,
 ): ReadonlyStatusMessage {
   if (
     typeof input !== 'object' ||
@@ -120,7 +125,11 @@ export function validatedStatusMessage(
     input.printers.length > 100
   )
     throw Error('Status printer limit')
-  const parsed = StatusMessage.parse(input)
+  const result = tolerantInventory
+    ? parseStatusMessageTolerant(input)
+    : StatusMessage.safeParse(input)
+  if (!result.success) throw result.error
+  const parsed = result.data
   if (
     parsed.printers.length !== refs.length ||
     new Set(parsed.printers.map((p) => p.printerKey)).size !== refs.length ||
@@ -361,6 +370,7 @@ export class ReadonlyRtcSession {
         const message = validatedStatusMessage(
           JSON.parse(wire),
           this.#genuine.assignmentRefs,
+          true,
         )
         if (
           !Number.isSafeInteger(message.seq) ||

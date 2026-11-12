@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   spoolInventoryStale,
+  type FarmRow,
   type FarmSpoolObservation,
 } from '../utils/farm-view.ts'
 
@@ -10,12 +11,19 @@ const props = defineProps<{
   items: readonly FarmSpoolObservation[]
   now: { wall: number; mono: number }
   connected: boolean
+  rows: readonly FarmRow[]
 }>()
 const sections = computed(() =>
   props.items.map((item) => {
     const seconds = Math.floor((props.now.mono - item.received.mono) / 1000)
+    const names = props.rows
+      .filter((row) => row.assignment.agentId === item.agentId)
+      .map((row) => row.assignment.printerKey)
     return {
       item,
+      label: names.length
+        ? `Connector das impressoras ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` e mais ${names.length - 3}` : ''}`
+        : 'Connector',
       stale: spoolInventoryStale(item, props.now),
       age:
         Number.isFinite(seconds) && seconds >= 0
@@ -42,9 +50,10 @@ function grams(value: number | null) {
       }}
     </p>
     <div v-for="section in sections" :key="section.item.agentId">
-      <h3 class="opaque">Connector {{ section.item.agentId }}</h3>
+      <h3 class="opaque">{{ section.label }}</h3>
       <p v-if="!section.item.inventory" role="status">
-        Estoque indisponível. O Connector não informou dados do Spoolman.
+        Estoque indisponível. O Connector não informou dados do Spoolman neste
+        momento.
       </p>
       <template v-else>
         <p :role="section.stale ? 'status' : undefined">
@@ -59,7 +68,7 @@ function grams(value: number | null) {
           class="scroll"
           tabindex="0"
           role="region"
-          :aria-label="`Bobinas do Connector ${section.item.agentId}`"
+          :aria-label="`Bobinas: ${section.label}`"
         >
           <table>
             <caption>

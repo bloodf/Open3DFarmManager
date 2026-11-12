@@ -11,6 +11,7 @@ import {
 } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 import {
   immutableAdmission,
+  validatedStatusMessage,
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
 
@@ -535,4 +536,27 @@ test('sender forwards a bounded spool inventory and rejects unbounded or unknown
   } finally {
     f.sender.close()
   }
+})
+
+test('receiving side drops an invalid inventory while sending stays strict', () => {
+  const ref = {
+    assignmentId: randomUUID(),
+    agentId: randomUUID(),
+    printerKey: 'printer-a',
+  }
+  const message = {
+    t: 'snapshot',
+    seq: 0,
+    printers: [
+      { printerKey: 'printer-a', state: 'idle', progress: 0, observedAt: 1 },
+    ],
+    inventory: { observedAt: 1, stale: false, total: 1, spools: [{ bad: 1 }] },
+  }
+  assert.throws(() => validatedStatusMessage(message, [ref]))
+  const received = validatedStatusMessage(message, [ref], true)
+  assert.equal(received.inventory, undefined)
+  assert.equal(received.printers.length, 1)
+  assert.throws(() =>
+    validatedStatusMessage({ ...message, extra: 1 }, [ref], true),
+  )
 })

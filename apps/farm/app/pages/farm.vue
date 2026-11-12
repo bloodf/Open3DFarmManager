@@ -247,6 +247,7 @@ function dateLabel(time: number) {
         </section>
         <SpoolInventory
           :items="ready.spools"
+          :rows="ready.rows"
           :now="now"
           :connected="
             ready.rows.some((row) => row.connection === 'authenticated')

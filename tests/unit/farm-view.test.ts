@@ -1485,7 +1485,7 @@ test('spool inventory is kept per Connector, replaced by each snapshot and unava
   expect(spoolInventoryStale(h.ready().spools[0]!, h.time)).toBe(true)
 })
 
-test('an invalid inventory ends the feed without publishing spools', async () => {
+test('an invalid inventory is dropped without interrupting printer status', async () => {
   const h = setup(true)
   await h.view.discover()
   h.authenticate()
@@ -1509,6 +1509,80 @@ test('an invalid inventory ends the feed without publishing spools', async () =>
     sourceClockComparable: true,
     complete: true,
   })
-  expect(h.ready().spools).toEqual([])
+  expect(h.first().connection).toBe('authenticated')
+  expect(h.first().observation?.state.state).toBe('idle')
+  expect(h.ready().spools[0]?.inventory).toBeNull()
+})
+
+test('an invalid printer field still ends the feed', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        { printerKey: row.printerKey, state: 'exploded', progress: 0 },
+      ],
+    } as never,
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
   expect(h.first().connection).toBe('closed')
+  expect(h.ready().spools).toEqual([])
+})
+
+test('unchanged inventory content keeps the same object across snapshots', async () => {
+  const h = setup(true)
+  await h.view.discover()
+  h.authenticate()
+  const inventory = { observedAt: 1, stale: false, total: 0, spools: [] }
+  for (const seq of [0, 1])
+    h.peer().input.onSnapshot({
+      session: { ...h.session },
+      message: {
+        t: 'snapshot',
+        seq,
+        printers: [
+          {
+            printerKey: row.printerKey,
+            state: 'idle',
+            progress: 0,
+            observedAt: h.time.wall,
+          },
+        ],
+        inventory: structuredClone(inventory),
+      },
+      receivedAtWallMs: h.time.wall,
+      receivedAtMonoMs: h.time.mono,
+      sourceClockComparable: true,
+      complete: true,
+    })
+  const first = h.ready().spools[0]?.inventory
+  expect(first).toEqual(inventory)
+  h.peer().input.onSnapshot({
+    session: { ...h.session },
+    message: {
+      t: 'snapshot',
+      seq: 2,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: structuredClone(inventory),
+    },
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+  expect(h.ready().spools[0]?.inventory).toBe(first)
 })

@@ -203,7 +203,11 @@ test(
         '../../packages/connector/src/auth/replay.ts',
         import.meta.url,
       ).href
-      const source = `import { PersistentReplayStore } from ${JSON.stringify(module)}; const store = new PersistentReplayStore(process.argv[1]); try { process.stdout.write(store.claim(JSON.parse(process.argv[2]), 1000)) } finally { store.close() }`
+      // Each worker opens its store (a write of its own), announces 'ready' and
+      // claims only after all four are released together, so the race covers
+      // the claims rather than four concurrent store initialisations.
+      const source = `import { PersistentReplayStore } from ${JSON.stringify(module)}; const store = new PersistentReplayStore(process.argv[1]); process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { process.stdout.write(store.claim(JSON.parse(process.argv[2]), 1000)) } finally { store.close(); process.stdin.destroy() } })`
+      let ready = 0
       const results = await Promise.all(
         Array.from(
           { length: 4 },
@@ -218,7 +222,7 @@ test(
                   dir,
                   JSON.stringify(command),
                 ],
-                { stdio: ['ignore', 'pipe', 'pipe'] },
+                { stdio: ['pipe', 'pipe', 'pipe'] },
               )
               spawned.push(child)
               let output = ''
@@ -230,12 +234,16 @@ test(
                 ])
               })
               child.stdout.on('data', (chunk) => {
+                const before = output
                 output += chunk
+                if (!before.includes('ready\n') && output.includes('ready\n'))
+                  if (++ready === 4)
+                    for (const each of spawned) each.stdin!.write('go\n')
               })
               child.on('error', reject)
               child.on('close', (status, signal) =>
                 status === 0
-                  ? resolve(output)
+                  ? resolve(output.replace('ready\n', ''))
                   : reject(
                       new Error(
                         `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,

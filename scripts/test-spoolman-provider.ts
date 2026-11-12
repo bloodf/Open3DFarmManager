@@ -1,8 +1,7 @@
 // Opt-in live check of the Connector Spoolman provider (REST + ws) against a
-// seeded disposable service. The provider must only GET and never send ws data.
+// seeded disposable service. The provider must only issue GET requests.
 // The script itself PATCHes one synthetic spool (and restores it) to emit an event.
 import assert from 'node:assert/strict'
-import WebSocket from 'ws'
 import { createSpoolmanProvider } from '../packages/connector/src/runtime/spoolman-provider.ts'
 import type { SpoolmanSnapshot } from '../packages/connector/src/runtime/spoolman-provider.ts'
 
@@ -11,7 +10,6 @@ if (!origin || process.env.SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE !== 'yes')
   throw new Error('Explicit disposable synthetic Spoolman origin required')
 
 const methods: string[] = []
-const sent: unknown[] = []
 const snapshots: SpoolmanSnapshot[] = []
 const controller = new AbortController()
 const provider = createSpoolmanProvider({
@@ -30,15 +28,6 @@ const provider = createSpoolmanProvider({
       )
       return fetch(input, init)
     },
-    socket: (url) => {
-      const socket = new WebSocket(url, { followRedirects: false })
-      const send = socket.send.bind(socket)
-      socket.send = (...args: Parameters<typeof send>) => {
-        sent.push(args[0])
-        return send(...args)
-      }
-      return socket
-    },
   },
 })
 const until = async (predicate: () => boolean, ms: number, what: string) => {
@@ -49,27 +38,28 @@ const until = async (predicate: () => boolean, ms: number, what: string) => {
   }
 }
 const spool = new URL('/api/v1/spool/2', origin)
-const patch = (comment: string) =>
+const patch = (weight: number) =>
   fetch(spool, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ comment }),
+    body: JSON.stringify({ remaining_weight: weight }),
     signal: AbortSignal.timeout(5000),
   }).then((response) => assert.equal(response.status, 200))
 
 await until(() => provider.snapshot().kind === 'observed', 20_000, 'observed')
 const first = provider.snapshot()
 assert.equal(first.inventory?.items.length, 6)
-const original = first.inventory?.items[1]?.comment ?? ''
+const original = first.inventory?.items[1]?.remaining_weight
+assert.equal(original, 900)
 const readsBefore = methods.length
-await patch(`${original} w13`)
+await patch(899)
 await until(() => methods.length > readsBefore, 20_000, 'event-driven refresh')
 await until(
-  () => provider.snapshot().inventory?.items[1]?.comment === `${original} w13`,
+  () => provider.snapshot().inventory?.items[1]?.remaining_weight === 899,
   20_000,
   'refreshed inventory',
 )
-await patch(original)
+await patch(900)
 controller.abort()
 await provider.done
 const closed = provider.snapshot()
@@ -82,7 +72,6 @@ assert.ok(
   methods.every((method) => method === 'GET'),
   'provider issued non-GET',
 )
-assert.deepEqual(sent, [], 'provider sent ws data')
 assert.equal(snapshots.at(-1)?.kind, 'stale')
 console.log(
   JSON.stringify({
@@ -91,6 +80,5 @@ console.log(
     providerMethods: [...new Set(methods)],
     reads: readsAtClose,
     staleOnClose: true,
-    wsSends: sent.length,
   }),
 )

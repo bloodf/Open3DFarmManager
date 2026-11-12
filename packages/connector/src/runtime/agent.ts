@@ -8,9 +8,11 @@ import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import type { PauseControlDiagnostic } from './pause-control.ts'
 
 type AgentDiagnostic =
   | CollectionDiagnostic
+  | PauseControlDiagnostic
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
@@ -209,6 +211,20 @@ export async function runConnectorAgent(input: {
               dispose: (ms) => client.dispose(ms),
             }
           },
+        }).catch(fail),
+      )
+    }
+    if (config.pause?.control) {
+      // Explicit opt-in only. Absent `pause.control` creates no pause resource.
+      const { runPauseControl } = await import('./pause-control.ts')
+      tasks.push(
+        runPauseControl({
+          config,
+          credential,
+          identity,
+          dataDirectory: input.dataDirectory,
+          signal,
+          onDiagnostic: diagnostic,
         }).catch(fail),
       )
     }

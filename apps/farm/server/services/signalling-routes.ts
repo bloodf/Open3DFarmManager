@@ -7,6 +7,7 @@ import {
 import { signallingRuntime } from './signalling-runtime-bootstrap.ts'
 import type { SignallingMode } from './signalling-negotiation-adapter.ts'
 import type { IncomingMessage } from 'node:http'
+import { databaseServing } from '../utils/database/phase.ts'
 /** H3's WebSocket resolver bypasses ordinary HTTP handlers/middleware. Every
  * upgrade therefore enters this boundary explicitly, including disabled startup. */
 export function signallingSocketHooks(
@@ -36,6 +37,11 @@ export function signallingSocketHooks(
   }
   return {
     async upgrade(request: unknown): Promise<Response | void> {
+      // Upgrades bypass middleware: refuse until the schema gate has passed.
+      if (!databaseServing()) {
+        destroySignallingUpgrade(request)
+        return new Response(null, { status: 503 })
+      }
       const runtime = lookup()
       if (!runtime) {
         destroySignallingUpgrade(request)

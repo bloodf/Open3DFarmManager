@@ -1,10 +1,11 @@
 import { defineConfig } from '@playwright/test'
+import { e2ePort } from './tests/helpers/e2e-port.ts'
 
 if (process.env.FARM_VIEW_E2E !== 'true')
   throw new Error('Set FARM_VIEW_E2E=true for the isolated farm view UI checks')
 
-const port = process.env.FARM_VIEW_E2E_PORT ?? '3101'
-if (!/^\d{4,5}$/.test(port)) throw new Error('Invalid FARM_VIEW_E2E_PORT')
+// Override the loopback port with FARM_VIEW_PORT when 3101 is taken.
+const port = e2ePort('FARM_VIEW_PORT', 3101)
 
 export default defineConfig({
   testDir: './tests/e2e',

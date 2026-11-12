@@ -4,6 +4,12 @@ export default defineNuxtConfig({
   nitro: { preset: 'node-server' },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
   runtimeConfig: {
+    database: {
+      enabled: false,
+      databaseUrl: '',
+      migrations: 'verify',
+      migrationsDir: '',
+    },
     auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },

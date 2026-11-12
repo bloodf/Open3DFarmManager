@@ -40,10 +40,12 @@ The runner uses ports `base` to `base + 3` (PostgreSQL, server, TLS proxy, Moonr
 
 The first run failed scenario 2. A server started while PostgreSQL was unreachable passed the database gate once PostgreSQL returned, but its telemetry runtime had tried to activate once, failed, and stayed disabled: every telemetry request answered 503 until a process restart. The telemetry plugin now retries activation until it succeeds or the server closes, and never blocks startup. An unreachable database (connection errors, SQLSTATE class 08, 57P01 to 57P03, 53300, 57014) is retried with capped backoff from 1 s to 30 s. A rejected configuration (role or key file) is retried only at the 30 s maximum. The fixed failure class is reported on the first failure and on each change. `tests/unit/telemetry-runtime-bootstrap.test.ts` covers retry until success, slowdown after rejection, reporting and cancellation.
 
-## Findings not fixed here
+## Follow-up fixes (queue recovery)
 
-- **Stale queue lock after a crash.** After SIGKILL the Connector cannot restart (exit 1) because `telemetry.lock` remains. Scenario 3 performs the documented operator step: it confirms the lock names the killed and reaped PID, removes that exact file and restarts. Unattended crash recovery needs a supervised lock-ownership design (PID liveness alone is unsafe across PID reuse and namespaces), which is a separate change to the queue.
-- **Full-queue drain rate.** Each acknowledgement rewrites and fsyncs the entire queue file. With a full 50 MiB queue (about 265 000 records) the measured drain was 33 to 44 records/s across runs, so a full backlog would take roughly two hours to clear. The drain is bounded and makes progress, but its cost grows with backlog size. Keeping the backlog drainable in proportion to its size needs an acknowledgement format that does not rewrite the log (for example a durable head offset with periodic compaction).
+- **Stale queue lock after a crash.** The queue now takes over a lock whose owner certainly cannot be running (see [TELEMETRY-QUEUE.md](TELEMETRY-QUEUE.md)). Scenario 3 restarts the Connector after SIGKILL with no operator step and requires the `queue-lock-recovered` diagnostic.
+- **Full-queue drain rate.** Acknowledgements now write a small cursor file instead of rewriting the log. A queue-only measurement on cortexos (262 138 records, 50 MiB, `batch` plus `acknowledge` with no network) went from 105 to 2156 records/s. End to end, scenario 4 now drains at 46 to 47 records/s, up from 33 to 44. The remaining cost is outside the queue, in the per-batch challenge and commit requests and the server's per-record ingestion. A full backlog still takes about 95 minutes end to end, and server-side batch ingestion is the next lever.
+
+Follow-up runs (`fix/connector-queue-recovery`, three consecutive passes, host load average about 15): totals 78, 77 and 76 s; automatic lock recovery and 1 accepted replay in scenario 3; 25 exactly-once rows; scenario 4 evicted 5, reopened a full queue in 3.7 to 4.8 s and drained 46 to 47 records/s.
 
 ## Results
 

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,12 +29,16 @@ test('Vercel config and real Git history enforce main and changed inputs', () =>
     GIT_COMMITTER_EMAIL: 'gate@example.invalid',
   }
   const git = (...args) =>
-    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], {
-      cwd: repo,
-      env,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim()
+    execFileSync(
+      'git',
+      ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args],
+      {
+        cwd: repo,
+        env,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    ).trim()
   const put = (path, text = path) => {
     mkdirSync(dirname(join(repo, path)), { recursive: true })
     writeFileSync(join(repo, path), text)
@@ -39,7 +49,14 @@ test('Vercel config and real Git history enforce main and changed inputs', () =>
     return git('rev-parse', 'HEAD')
   }
   let cases = 0
-  const check = (previous, current, expected, label, extra = {}, cwd = repo) => {
+  const check = (
+    previous,
+    current,
+    expected,
+    label,
+    extra = {},
+    cwd = repo,
+  ) => {
     const run = spawnSync(process.execPath, [gate], {
       cwd,
       env: {
@@ -54,7 +71,11 @@ test('Vercel config and real Git history enforce main and changed inputs', () =>
       encoding: 'utf8',
     })
     assert.equal(run.status, expected, `${label}: ${run.stdout} ${run.stderr}`)
-    assert.match(run.stdout, expected === 1 ? /^BUILD:/ : /^(SKIP|HOLD):/, label)
+    assert.match(
+      run.stdout,
+      expected === 1 ? /^BUILD:/ : /^(SKIP|HOLD):/,
+      label,
+    )
     cases++
   }
   try {
@@ -158,17 +179,34 @@ test('Vercel config and real Git history enforce main and changed inputs', () =>
     check(feature, current, 1, 'ancestor in merged history')
     const shallow = join(dir, 'shallow')
     git('clone', '--depth=1', '--branch=main', `file://${repo}`, shallow)
-    check(previous, current, 0, 'missing prior in shallow clone holds', {}, shallow)
+    check(
+      previous,
+      current,
+      0,
+      'missing prior in shallow clone holds',
+      {},
+      shallow,
+    )
     check(previous, current, 0, 'missing Git repository holds', {}, dir)
     mkdirSync(join(repo, 'apps/farm'), { recursive: true })
-    check(previous, current, 1, 'gate works from app root', {}, join(repo, 'apps/farm'))
+    check(
+      previous,
+      current,
+      1,
+      'gate works from app root',
+      {},
+      join(repo, 'apps/farm'),
+    )
     writeFileSync(join(repo, 'scripts/vercel-ignore.mjs'), readFileSync(gate))
     for (const [configPath, command] of [
       ['vercel.json', 'node scripts/vercel-ignore.mjs'],
       ['apps/farm/vercel.json', 'node ../../scripts/vercel-ignore.mjs'],
     ]) {
       const config = JSON.parse(readFileSync(join(root, configPath), 'utf8'))
-      assert.deepEqual(config.git.deploymentEnabled, { '**': false, main: true })
+      assert.deepEqual(config.git.deploymentEnabled, {
+        '**': false,
+        main: true,
+      })
       assert.ok(config.ignoreCommand.includes(command))
       const allowed = spawnSync('sh', ['-c', config.ignoreCommand], {
         cwd: join(repo, dirname(configPath)),
@@ -184,17 +222,25 @@ test('Vercel config and real Git history enforce main and changed inputs', () =>
       })
       assert.equal(allowed.status, 1, allowed.stderr)
       assert.match(allowed.stdout, /^BUILD:/)
-      const missing = spawnSync('sh', ['-c', config.ignoreCommand], { cwd: dir, encoding: 'utf8' })
+      const missing = spawnSync('sh', ['-c', config.ignoreCommand], {
+        cwd: dir,
+        encoding: 'utf8',
+      })
       assert.equal(missing.status, 0)
       assert.match(missing.stdout, /^HOLD: missing build gate/)
     }
-    for (const path of ['.github/workflows/ci.yml', '.github/workflows/sim.yml']) {
+    for (const path of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/sim.yml',
+    ]) {
       const workflow = readFileSync(join(root, path), 'utf8')
       assert.match(workflow, /^on: \[workflow_dispatch\]$/m)
       assert.match(workflow, /timeout-minutes:/)
       assert.match(workflow, /cancel-in-progress: true/)
     }
-    console.log(`${cases} real Git gate cases passed; both configs and manual workflows checked`)
+    console.log(
+      `${cases} real Git gate cases passed; both configs and manual workflows checked`,
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

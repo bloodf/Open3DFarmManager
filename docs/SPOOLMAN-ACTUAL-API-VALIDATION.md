@@ -10,7 +10,7 @@ Compatibility with one pinned Spoolman version does not validate authentication,
 
 ## Node 24 read-only qualification
 
-This qualification has not been run. On an authorized isolated Linux slot, the parent owns a fresh disposable Spoolman service, its dedicated volume and network, and a loopback-only published port. Verify ownership and an initially empty inventory before setup. Use the pinned image digest recorded below. The parent can run the existing `scripts/test-spoolman-reader.ts` setup with the historical Bun environment and the same two opt-in variables; it checks empty inventory, seeds twice and archives the first spool. That script performs writes and must never target real inventory. Confirm the six synthetic spools have weights 1000, 900, 800, 700, 600 and 500 in ascending ID order, with only the first archived. Keep the fixture unchanged during qualification.
+On an authorized isolated Linux slot, the parent owns a fresh disposable Spoolman service, its dedicated volume and network, and a loopback-only published port. Verify ownership and an initially empty inventory before setup. Use the pinned image digest recorded below. The parent can run the existing `scripts/test-spoolman-reader.ts` setup with the historical Bun environment and the same two opt-in variables; it checks empty inventory, seeds twice and archives the first spool. That script performs writes and must never target real inventory. Confirm the six synthetic spools have weights 1000, 900, 800, 700, 600 and 500 in ascending ID order, with only the first archived. Keep the fixture unchanged during qualification.
 
 With project dependencies available and Node >=24.22.2 <25, run on that Linux host:
 
@@ -19,6 +19,22 @@ SPOOLMAN_SYNTHETIC_TEST_ORIGIN=http://127.0.0.1:<port> SPOOLMAN_SYNTHETIC_TEST_D
 ```
 
 The qualification resolves each spool's expected filament and vendor names through `infra/sim/spoolman/seed.json`, independently of returned IDs. It also checks ID relationships, exact weights, archive position and pagination equality. The reader validates the canonical loopback origin and performs GET requests only. Capture its bounded JSON output, exit status, Node version and image digest as the receipt. The parent owns setup, service lifecycle, isolation verification and cleanup. This opt-in is an operator assertion, not proof that the service is disposable. A passing receipt does not establish production or hardware acceptance.
+
+### Node 24 qualification receipt (2026-11-11)
+
+Run on a Linux amd64 host with Node v24.22.2 against a fresh disposable container of the pinned image `sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa` (loopback port, dedicated bridge and volume, same restrictions as above, no relation to any existing Spoolman service).
+
+- `scripts/test-spoolman-reader.ts`: exit 0 (empty inventory, two seeds, six spools, archived first spool, limits 1/2/4/200).
+- `scripts/test-spoolman-node.ts`: exit 0, `{"result":"passed","runtime":"v24.22.2","spools":6,"pageLimits":[1,2,4,200],"archivedIncluded":true}`.
+- `sim:seed` run twice more after the archive step: `{ vendors: 2, filaments: 4, spools: 6 }` each time, and the inventory (including archived) stayed at six spools with ascending IDs and weights 1000, 900, 800, 700, 600, 500.
+- `scripts/test-spoolman-provider.ts` (opt-in, same two variables): exit 0. The provider opened the real websocket, reached `observed`, marked the snapshot stale within 3 s of a websocket event caused by the script's own PATCH of a synthetic spool and then refreshed the inventory within 20 s (reads are rate limited to about one per 15 s), issued only GET requests through its fetch transport (the websocket is out of scope for that check), and after abort reported `stale` with the last inventory retained and made no further reads.
+
+Defects found and fixed by this run:
+
+- `packages/sim-tools/src/spoolman.ts` imported `seed.json` without an import attribute, so `sim:seed` crashed on Node 24 (`ERR_IMPORT_ATTRIBUTE_MISSING`).
+- The seed listed spools without `allow_archived=true`. After the reader setup archived a seed spool, a reseed created a duplicate seven-spool inventory. The seed now lists archived spools; a unit test covers it. An inventory that already holds duplicate seed markers now makes the seed throw `Ambiguous simulator fixture` rather than adding more.
+
+`scripts/test-spoolman-provider.ts` is the one qualification script that writes after setup: it requires the canonical loopback origin and the two opt-in variables, refuses to run unless the inventory is exactly the seed fixture (comment markers and weights), PATCHes one synthetic spool's `remaining_weight` and restores the captured original in a `finally` block. This is the only exception to the "keep the fixture unchanged" instruction above; it is for disposable services only and must be run after `test-spoolman-node.ts`. The provider script exercises one websocket event path only; it does not cover network partition, heartbeat timeout or reconnect backoff against a live service (covered by simulated-transport unit tests). A passing receipt does not establish production or hardware acceptance.
 
 ## Observed local result
 

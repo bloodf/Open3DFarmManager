@@ -1,7 +1,7 @@
 import { readJson } from './body.ts'
 import { z } from 'zod'
 import { simulatorUrl } from './probe.ts'
-import seed from '../../../infra/sim/spoolman/seed.json'
+import seed from '../../../infra/sim/spoolman/seed.json' with { type: 'json' }
 
 const Entity = z.object({
   id: z.number().int().positive(),
@@ -25,7 +25,9 @@ export async function seedSpoolman(origin: string) {
   }
   const vendors = z.array(Entity).parse(await request('vendor'))
   const filaments = z.array(Entity).parse(await request('filament'))
-  const spools = z.array(Entity).parse(await request('spool'))
+  const spools = z
+    .array(Entity)
+    .parse(await request('spool?allow_archived=true'))
   async function ensure(
     kind: string,
     existing: Entity[],
@@ -64,7 +66,9 @@ export async function seedSpoolman(origin: string) {
       filament_id: filamentId,
     })
   }
-  const result = z.array(Entity).parse(await request('spool'))
+  const result = z
+    .array(Entity)
+    .parse(await request('spool?allow_archived=true'))
   const markers = new Set(seed.spools.map((spool) => spool.comment))
   const count = result.filter(
     (spool) => spool.comment && markers.has(spool.comment),

@@ -177,25 +177,11 @@ function writeCandidate(path: string, owner: Owner) {
   }
   return candidate
 }
-/**
- * Publishes a complete owner record without replacing anything: write and fsync
- * a unique candidate, then hard-link it into place (EEXIST if present). A crash
- * can leave only a candidate, never an empty lock.
- */
-function writeNew(path: string, owner: Owner) {
-  const candidate = writeCandidate(path, owner)
-  try {
-    linkSync(candidate, path)
-  } finally {
-    unlinkSync(candidate)
-  }
-  syncDirectory(path)
-}
 const ignore = (action: () => void) => {
   try {
     action()
   } catch {
-    // Best-effort removal of leftovers.
+    // Best-effort cleanup; never replaces the error being reported.
   }
 }
 const ours = (path: string, owner: Owner) =>
@@ -205,6 +191,27 @@ function release(path: string, owner: Owner) {
   if (!ours(path, owner)) return
   unlinkSync(path)
   syncDirectory(path)
+}
+/**
+ * Publishes a complete owner record without replacing anything: write and fsync
+ * a unique candidate, then hard-link it into place (EEXIST if present). A crash
+ * can leave only a candidate, never an empty lock. A crash between link and
+ * candidate unlink leaves a two-link lock, which needs an operator.
+ */
+function writeNew(path: string, owner: Owner) {
+  const candidate = writeCandidate(path, owner)
+  try {
+    linkSync(candidate, path)
+  } finally {
+    ignore(() => unlinkSync(candidate))
+  }
+  try {
+    syncDirectory(path)
+  } catch (error) {
+    // Not durably ours: give it back rather than hold it unreported.
+    ignore(() => release(path, owner))
+    throw error
+  }
 }
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -256,7 +263,7 @@ export function acquireQueueLock(
         throw syncError
       }
     } finally {
-      release(mutex, owner)
+      ignore(() => release(mutex, owner))
     }
     return { recovered: true }
   }

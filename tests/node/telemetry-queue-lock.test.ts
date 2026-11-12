@@ -359,3 +359,32 @@ test('a lock that is not a private regular file is never taken over', () => {
     )
   })
 })
+
+test('a failed directory sync after publishing releases the new lock', () => {
+  const dir = scratch()
+  const path = join(dir, 'telemetry.lock')
+  try {
+    // Write and search permission only: link and unlink work, fsync of the dir does not.
+    chmodSync(dir, 0o300)
+    assert.throws(() => acquireQueueLock(path, probe()), /EACCES/)
+    chmodSync(dir, 0o700)
+    assert.deepEqual(readdirSync(dir), [], 'no lock or candidate left behind')
+  } finally {
+    chmodSync(dir, 0o700)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a failed takeover releases its mutex and leaves the stale lock', () => {
+  withLock(owner, (path) => {
+    const dir = join(path, '..')
+    chmodSync(dir, 0o300)
+    try {
+      assert.throws(() => acquireQueueLock(path, probe({ alive: () => false })))
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+    assert.equal(existsSync(path + '.recover'), false)
+    assert.equal(lockOwner(path).instance, owner.instance)
+  })
+})

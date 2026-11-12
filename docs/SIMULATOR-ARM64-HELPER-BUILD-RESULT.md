@@ -70,7 +70,7 @@ O espaço livre interno da VM Docker não foi medido.
 O runner, o payload e os recibos limitados permanecem em evidência privada.
 O worktree e todos os commits anteriores foram preservados. Apenas este
 relatório integra o commit local. `git diff --check` foi executado.
-`bun run check:all` e as verificações de integração permanecem pendentes.
+`pnpm run check:all` e as verificações de integração permanecem pendentes.
 Não houve push, PR, publicação ou deploy.
 
 ## Tentativa única com correção dos logs
@@ -161,7 +161,7 @@ Os artefatos temporários internos desapareceram com o contêiner.
 Nenhum AVR, firmware, emulador, SSH, banco ou dispositivo foi usado.
 Os serviços preexistentes permaneceram fora da tarefa.
 Somente este relatório integra o novo commit local de documentação.
-`git diff --check` passou. `bun run check:all` e as verificações de integração
+`git diff --check` passou. `pnpm run check:all` e as verificações de integração
 permanecem pendentes. Não houve push, PR, publicação ou deploy.
 
 ## Tentativa única com correção do recibo
@@ -293,6 +293,6 @@ completo, SSH, PG, dispositivos e fixtures de navegador/HTTP permaneceram
 fora da execução. A evidência anterior de build, dlopen e timer continua válida.
 
 Somente este acréscimo documental integra o commit local.
-`git diff --check` passou. `bun run check:all` e verificações de integração
+`git diff --check` passou. `pnpm run check:all` e verificações de integração
 continuam pendentes; a aceitação completa do simulador permanece aberta.
 Não houve subagentes, novo checkout, push, PR, publicação ou deploy.

@@ -9,4 +9,9 @@ export * from './pairing.ts'
 export * from './canonical.ts'
 export * from './encoding.ts'
 export * from './sign.ts'
-export { TelemetryEvent, TelemetryBatch } from './telemetry.ts'
+export {
+  TelemetryEvent,
+  TelemetryBatch,
+  PrinterTransition,
+  telemetryPrinterKey,
+} from './telemetry.ts'

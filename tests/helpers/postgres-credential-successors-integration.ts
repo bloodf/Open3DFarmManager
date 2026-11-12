@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID, randomBytes } from 'node:crypto'
 import postgres, { type Sql, type TransactionSql } from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   runMigrations,
 } from '../../scripts/db/migrations.ts'
@@ -19,7 +20,10 @@ export async function testPostgresCredentialSuccessors(
   admin: Sql,
   port: number,
 ) {
-  const catalog = await loadMigrationCatalog()
+  const catalog = catalogThrough(
+    await loadMigrationCatalog(),
+    '0021_connector_credential_successors',
+  )
   assert.equal(catalog.at(-1)?.id, '0021_connector_credential_successors')
   assert.equal((await admin`SELECT current_database() AS db`)[0]?.db, 'fixture')
   assert.equal(

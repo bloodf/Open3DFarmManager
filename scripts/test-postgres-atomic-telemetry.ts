@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { isAbsolute, relative } from 'node:path'
 import postgres from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
+  runMigrations,
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { testPostgresAtomicTelemetry } from '../tests/helpers/postgres-atomic-telemetry-integration.ts'
@@ -44,11 +46,15 @@ try {
   )[0]
   assert.equal(identity?.database, 'fixture')
   assert.equal(identity?.user, 'fixture')
-  const catalog = await loadMigrationCatalog()
-  assert.equal(catalog.length, 22, 'Migrations0001–0022 are required')
+  const catalog = catalogThrough(
+    await loadMigrationCatalog(),
+    '0022_connector_successor_proofs',
+  )
+  // Later migrations are not applied: this fixture rolls 0022 back and forward.
+  await runMigrations(sql, catalog, { kind: 'up' })
   const rows =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...rows]), 22)
+  assert.equal(validateMigrationHistory(catalog, [...rows]), catalog.length)
   assert.equal(
     (
       await sql`SELECT to_regclass('farm.connector_credential_proofs')::text AS name`

@@ -142,7 +142,7 @@ integração de drenagem limitada sem deadlock e parada externa armada antes do
 start. Preservar UID/GID 1000, no-new-privileges, cap-drop ALL, network none,
 sem portas/dispositivos, 1 CPU, 1 GiB, 256 PIDs, 90 s, inicializador, ordem/delay,
 reinícios, tmpfs, firmware, baud e pacing. Se qualquer gate falhar, não executar.
-Nenhuma execução nativa está autorizada agora. `bun run check:all` continua
+Nenhuma execução nativa está autorizada agora. `pnpm run check:all` continua
 pendente antes de publicação; não há push, publicação, deploy ou prontidão.
 
 ## Contrato da implementação local

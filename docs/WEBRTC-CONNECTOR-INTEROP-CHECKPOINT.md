@@ -57,12 +57,12 @@ No teste RTC, a fixture do navegador retém a ativação do certificado enquanto
 Com as dependências do workspace instaladas e o Chromium do Playwright disponível:
 
 ```sh
-bun run --cwd packages/webrtc-experiment typecheck
-bun test packages/webrtc-experiment/session.test.ts
-node --test packages/webrtc-experiment/interop.test.ts
+pnpm --dir packages/webrtc-experiment run typecheck
+pnpm --dir packages/webrtc-experiment run test:session
+pnpm --dir packages/webrtc-experiment run test:interop
 ```
 
-O harness de interoperabilidade usa Node 24 como driver do Playwright e compila o módulo do navegador com Bun em memória. Os testes portáteis continuam usando Bun. Uma execução anterior do driver completo em `bun:test` concluiu as observações RTC, mas ficou pendente em `browser.close()` mesmo após os processos de peers e Chromium terminarem; esse caminho não é declarado aprovado. Um probe mínimo e a execução completa devem incluir encerramento normal de todos os atores para aprovação.
+O harness de interoperabilidade usa Node 24 como driver do Playwright e compila o módulo do navegador com esbuild em memória. Os testes portáteis usam Vitest. Uma execução anterior do driver completo em `bun:test` (registro histórico, pré-pnpm) concluiu as observações RTC, mas ficou pendente em `browser.close()` mesmo após os processos de peers e Chromium terminarem; esse caminho não é declarado aprovado. Um probe mínimo e a execução completa devem incluir encerramento normal de todos os atores para aprovação.
 
 O teste de interoperabilidade executa os mesmos dez casos em processos Node e Bun reais: entrega válida, identidade incorreta, transcrição substituída, replay de prova anterior, prazo, peer fechado, fingerprint SDP adulterado em cada sentido, sobrecarga antes do certificado e flood após autenticação. Ambos os casos de SDP adulterado exigem, simetricamente no nativo e no navegador, zero envio e recepção de provas, zero frames RTC recebidos e zero dados de aplicação aceitos. Os contadores de prova RTC medem o envio efetivo ou o recebimento dos frames canônicos da fixture, separadamente das tentativas locais de assinatura. A saída registra as versões efetivamente usadas, fingerprints sintéticos, tipos de candidatos, contadores RTC e decisões locais. Evidências operacionais, portas e caminhos de executáveis ficam somente no ledger local da tarefa.
 

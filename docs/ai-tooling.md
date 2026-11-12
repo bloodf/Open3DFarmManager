@@ -1,6 +1,6 @@
 # AI tooling
 
-Product development is on HOLD until Heitor explicitly authorizes its resumption. Tooling checks, reviews and merges do not resume product work or authorize product PRs, deployment, DNS or credential changes. Follow the existing security, review and resource ownership rules in `AGENTS.md`.
+Product development was resumed by the owner on 2026-11-11. Deployment, publication of the separate local payload, DNS or credential changes, production services and hardware tests still need separate authorization. Follow the existing security, review and resource ownership rules in `AGENTS.md`.
 
 ## CodeGraph
 

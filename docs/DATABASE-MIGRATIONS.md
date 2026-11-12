@@ -41,10 +41,14 @@ ALTER ROLE o3dfm_migrator SET createrole_self_grant = 'set, inherit';
 GRANT CREATE ON DATABASE open3dfarm TO o3dfm_migrator;
 GRANT CREATE ON SCHEMA public TO o3dfm_migrator;
 CREATE ROLE o3dfm_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE;
--- after migrations: GRANT farm_schema_reader TO o3dfm_app; plus the farm_* runtime roles it needs
+-- after migrations: GRANT farm_schema_reader TO o3dfm_app WITH INHERIT TRUE; plus the farm_* runtime roles it needs
 ```
 
 The same-target check compares host, port and database name as written, so spell the host identically in every `*DatabaseUrl` (do not mix `localhost`, `127.0.0.1` and aliases).
+
+PostgreSQL roles are cluster-wide, so run one Open3DFarm database per PostgreSQL cluster: migration 0001 onward creates fixed `farm_*` role names that a second database in the same cluster would collide with. When discarding a disposable database, also drop the leftover `farm_*` roles (and any `o3dfm_*` login roles) before reusing the cluster; dropping only the database or schema leaves them behind and a fresh apply then fails.
+
+Startup failures map SQLSTATE to fixed messages: `42501` is `database permission denied`, class `28` is `database authentication failed`, `3D000` (missing database) is `invalid database configuration`, and anything else while reading the journal is `database unreachable`.
 
 ### Database service and tests
 

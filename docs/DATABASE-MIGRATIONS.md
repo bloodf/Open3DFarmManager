@@ -18,11 +18,11 @@ The coordinator ran this helper successfully against a disposable native ARM64 P
 
 ## Application startup, readiness and database service
 
-Startup gating is opt-in through the `database` runtime config (`NUXT_DATABASE_ENABLED=true`, `NUXT_DATABASE_DATABASE_URL`, `NUXT_DATABASE_MIGRATIONS` = `verify` (default) or `apply`, `NUXT_DATABASE_MIGRATIONS_DIR`; the container image sets the directory to `/app/migrations`). The Nitro plugin `database-lifecycle` awaits startup before the server listens:
+Startup gating is opt-in through the `database` runtime config (`NUXT_DATABASE_ENABLED=true`, `NUXT_DATABASE_DATABASE_URL`, `NUXT_DATABASE_MIGRATIONS` = `verify` (default) or `apply`, `NUXT_DATABASE_MIGRATIONS_DIR`; the container image sets the directory to `/app/migrations`). The Nitro plugin `database-lifecycle` runs startup before the server accepts traffic:
 
 - `verify` compares `public.open3dfarm_migrations` with the catalog read-only. Missing journal, pending migrations, a changed/unknown/out-of-order history or an unreachable database reject startup, so the process exits instead of serving. This is the recommended production mode; run migrations as a separate step with the owner role.
 - `apply` first runs the pending migrations with the runner described above (advisory lock, single transaction), then verifies. The configured role must own the schema; use it only for an isolated migration owner or a single-instance deployment, not for the restricted application roles.
-- Invalid enabled configuration also rejects startup. Disabled (default) skips the database entirely and `/readyz` reports `database: "disabled"`.
+- Invalid enabled configuration also rejects startup. Startup failures log a short message (no URL or driver detail) and exit the process with code 1. Disabled (default) skips the database entirely and `/readyz` reports `database: "disabled"`.
 
 `GET /healthz` stays a cheap process-liveness check with no database access (used by the container `HEALTHCHECK`). `GET /readyz` runs the same read-only journal comparison on the pooled connection with a 2 second bound and returns 200 only for `database: "ok"` (or `"disabled"`). Otherwise it returns 503 with one of `unavailable`, `schema-pending` or `schema-mismatch`; driver errors, hosts and credentials are never included.
 

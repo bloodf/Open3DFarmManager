@@ -13,6 +13,7 @@ export type StartupFailureCode =
   | 'invalid-config'
   | 'migrations-unavailable'
   | 'unreachable'
+  | 'permission-denied'
   | 'migration-failed'
   | 'schema-pending'
   | 'schema-mismatch'
@@ -22,6 +23,7 @@ export const STARTUP_FAILURE_MESSAGES: Record<StartupFailureCode, string> = {
   'invalid-config': 'invalid database configuration',
   'migrations-unavailable': 'migration files unavailable',
   unreachable: 'database unreachable',
+  'permission-denied': 'database permission denied',
   'migration-failed': 'migration failed',
   'schema-pending': 'schema has pending migrations',
   'schema-mismatch': 'schema does not match this build',
@@ -34,6 +36,11 @@ export class DatabaseStartupError extends Error {
     this.code = code
   }
 }
+
+const sqlstate = (error: unknown): unknown =>
+  typeof error === 'object' && error !== null
+    ? Reflect.get(error, 'code')
+    : undefined
 
 /** Read-only comparison of the migration journal with the local catalog.
  * `onQuery` receives each pending query so a caller can cancel it on timeout. */
@@ -70,15 +77,19 @@ export async function prepareSchema(
   let state: SchemaState
   try {
     state = await schemaState(sql, catalog)
-  } catch {
-    throw new DatabaseStartupError('unreachable')
+  } catch (error) {
+    throw new DatabaseStartupError(
+      sqlstate(error) === '42501' ? 'permission-denied' : 'unreachable',
+    )
   }
   if (state === 'pending' && mode === 'apply') {
     try {
       await runMigrations(sql, catalog, { kind: 'up' })
       state = await schemaState(sql, catalog)
-    } catch {
-      throw new DatabaseStartupError('migration-failed')
+    } catch (error) {
+      throw new DatabaseStartupError(
+        sqlstate(error) === '42501' ? 'permission-denied' : 'migration-failed',
+      )
     }
   }
   if (state === 'pending') throw new DatabaseStartupError('schema-pending')

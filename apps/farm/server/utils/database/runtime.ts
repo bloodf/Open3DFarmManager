@@ -54,7 +54,9 @@ function target(value: string) {
   return `${url.hostname}:${url.port || '5432'}${url.pathname}`
 }
 
-/** Every enabled feature must point at the database whose schema was verified. */
+/** Compared as written: spell the host identically in every URL (no localhost vs
+ * 127.0.0.1, no case or alias differences) or startup fails closed.
+ * Every enabled feature must point at the database whose schema was verified. */
 export function assertSameDatabaseTargets(
   config: DatabaseRuntimeConfig,
   root: unknown,

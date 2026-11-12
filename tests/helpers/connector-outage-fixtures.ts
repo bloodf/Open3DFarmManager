@@ -52,6 +52,8 @@ export async function startFakeMoonraker(port: number) {
   let state: 'printing' | 'paused' = 'printing'
   let progress = 0
   let subscriptions = 0
+  // Progress served by each subscription: every one is a new baseline observation.
+  const baselines: number[] = []
   const server = createHttpServer((req, res) => {
     if (req.method !== 'GET' || req.url !== '/server/info') {
       res.writeHead(404).end()
@@ -76,6 +78,7 @@ export async function startFakeMoonraker(port: number) {
           if (!message || typeof message !== 'object' || !('id' in message))
             return
           subscriptions++
+          baselines.push(progress)
           ws.send(
             JSON.stringify({
               jsonrpc: '2.0',
@@ -110,6 +113,7 @@ export async function startFakeMoonraker(port: number) {
     get progress() {
       return progress
     },
+    baselines,
     get subscriptions() {
       return subscriptions
     },

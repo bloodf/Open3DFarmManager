@@ -26,6 +26,7 @@ import {
   startFaultProxy,
   until,
 } from './connector-outage-fixtures.ts'
+import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -269,9 +270,9 @@ export async function runConnectorOutageScenarios(input: {
     }
     let app: ReturnType<typeof startFarmApp> | undefined
     const appLog = join(workDir, 'app.log')
-    const launchApp = () => {
+    const launchApp = (extraEnv: { [name: string]: string } = {}) => {
       app = startFarmApp({
-        env: appEnv,
+        env: { ...appEnv, ...extraEnv },
         logPath: appLog,
         onPid: (pid) => ledger({ resource: 'app-process', pid }),
       })
@@ -287,8 +288,8 @@ export async function runConnectorOutageScenarios(input: {
         return false
       }
     }
-    async function startApp() {
-      const current = launchApp()
+    async function startApp(extraEnv: { [name: string]: string } = {}) {
+      const current = launchApp(extraEnv)
       await until(
         async () => {
           if (!current.running) throw new Error('Farm app exited at startup')
@@ -719,12 +720,34 @@ export async function runConnectorOutageScenarios(input: {
       }
     })
 
-    report.scenarios.push({
-      name: '6-credential-renewal-across-outage',
-      result: 'skipped',
-      reason:
-        'Not implemented in this runner yet: server renewal activation landed in #132 after this runner was written; renewal across an outage is a follow-up scenario.',
-    })
+    let renewalEnv: { [name: string]: string } = {}
+    await scenario('6-credential-renewal-across-outage', () =>
+      credentialRenewalAcrossOutage({
+        admin,
+        connect,
+        rolePrefix: prefix,
+        dbPort: ports.db,
+        workDir,
+        origin: proxy.origin,
+        cert,
+        keyFile,
+        keys,
+        issuer,
+        audience,
+        moon,
+        telemetry: TELEMETRY,
+        async restartApp(extraEnv) {
+          renewalEnv = { ...renewalEnv, ...extraEnv }
+          await app?.stop()
+          await startApp(renewalEnv)
+        },
+        stopApp: async () => {
+          await app?.stop()
+        },
+        ledger,
+        dropRoleLater: (role) => created.push(role),
+      }),
+    )
     return report
   } finally {
     const failures: string[] = []

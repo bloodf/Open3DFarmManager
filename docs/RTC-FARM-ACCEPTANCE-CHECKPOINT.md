@@ -21,14 +21,17 @@ RTC_FARM_TEST_WORK_ROOT=<absolute directory outside the repository> \
 pnpm run test:rtc-farm
 ```
 
-| Variable                    | Meaning                                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `RTC_FARM_TEST_IMAGE`       | Digest-pinned PostgreSQL 17 image, already present locally (never pulled).                                    |
-| `RTC_FARM_TEST_DB_PORT`     | Loopback port for the container. The server, proxy and Moonraker use OS-assigned loopback ports.              |
-| `RTC_FARM_TEST_WORK_ROOT`   | Private parent directory. Each run creates `<root>/<id>` (`0700`) and removes exactly that path in `finally`. |
-| `RTC_FARM_TEST_SCENARIOS`   | Optional comma list of rows. Default: every row.                                                              |
-| `RTC_FARM_TEST_REPEAT`      | Optional repeat count (1–5) of the selected rows against one cluster and build.                               |
-| `RTC_FARM_TEST_NAME_PREFIX` | Optional container name prefix (default `o3dfm-rtc-farm`).                                                    |
+| Variable                           | Meaning                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `RTC_FARM_TEST_IMAGE`              | Digest-pinned PostgreSQL 17 image, already present locally (never pulled).                                    |
+| `RTC_FARM_TEST_DB_PORT`            | Loopback port for the container. The server, proxy and Moonraker use OS-assigned loopback ports.              |
+| `RTC_FARM_TEST_WORK_ROOT`          | Private parent directory. Each run creates `<root>/<id>` (`0700`) and removes exactly that path in `finally`. |
+| `RTC_FARM_TEST_SCENARIOS`          | Optional comma list of rows. Default: every row.                                                              |
+| `RTC_FARM_TEST_REPEAT`             | Optional repeat count (1–5) of the selected rows against one cluster and build.                               |
+| `RTC_FARM_TEST_NAME_PREFIX`        | Optional container name prefix (default `o3dfm-rtc-farm`).                                                    |
+| `RTC_FARM_TEST_RTSP_HELPER`        | Camera rows only: absolute path of a prebuilt `rtsp-ingest` (see below).                                      |
+| `RTC_FARM_TEST_RTSP_HELPER_SHA256` | Camera rows only: expected SHA-256 of that helper. It is checked before and after the private copy.           |
+| `RTC_FARM_TEST_RTSP_PORT`          | Camera rows only: loopback port for the task-owned RTSP simulator.                                            |
 
 Prerequisites:
 
@@ -56,10 +59,25 @@ On cortexos, both a single SIGTERM and a double SIGTERM left no container, no wo
 
 ## Rows
 
-| Row                    | Flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `farm-page-disconnect` | Login → paired Connector → farm view shows "Conexão direta autenticada" and live progress over WebRTC (0.25 → 0.75). Then the signalling connections drop: the row turns read-only within 10 s (`farm-page-readonly-after-ms`), keeps the last observation, and the pause button stays disabled. Recovery (#121): the view re-checks authority and reopens while the Connector reconnects. Live status returns (`farm-page-recovered-after-ms`, measured from the drop), and a new fixture observation (0.9) reaches the page. |
-| `farm-page-revocation` | Same, then the Connector is revoked: read-only within 10 s. No signalling WebSocket is opened, and live status does not return, for 31 s: longer than the view's 30 s reopen backoff cap (`REOPEN_MAX_MS`).                                                                                                                                                                                                                                                                                                                    |
+| Row                    | Flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `farm-page-disconnect` | Login → paired Connector → farm view shows "Conexão direta autenticada" and live progress over WebRTC (0.25 → 0.75). Then the signalling connections drop: the row turns read-only within 10 s (`farm-page-readonly-after-ms`), keeps the last observation, and the pause button stays disabled. Recovery (#121): the view re-checks authority and reopens while the Connector reconnects. Live status returns (`farm-page-recovered-after-ms`, measured from the drop), and a new fixture observation (0.9) reaches the page.          |
+| `farm-page-revocation` | Same, then the Connector is revoked: read-only within 10 s. No signalling WebSocket is opened, and live status does not return, for 31 s: longer than the view's 30 s reopen backoff cap (`REOPEN_MAX_MS`).                                                                                                                                                                                                                                                                                                                             |
+| `farm-page-camera`     | Same as revocation, plus camera video for the authorized assignment. The region shows "Câmera ao vivo." and the decoder makes progress (`currentTime` and `getVideoPlaybackQuality().totalVideoFrames` both advance over 1.5 s), with the ingest helper process running. "Parar imagem ao vivo" detaches the stream ("Imagem ao vivo parada."), and "Mostrar imagem ao vivo" plays it again with advancing frames. After revocation, no `<video>` in the page holds a stream, "Câmera ao vivo." is gone, and no helper process remains. |
+
+### Camera row
+
+`farm-page-camera` needs the ingest helper, built offline from the vendored sources as in [CAMERA-END-TO-END-CHECKPOINT.md](CAMERA-END-TO-END-CHECKPOINT.md#reproducing-the-interop-run). It can be cross-compiled with `GOOS=linux GOARCH=amd64` and copied to the runner host.
+
+The runner then:
+
+- verifies the helper's SHA-256, copies it into the work directory (`0700`) and verifies the copy;
+- starts only the `rtsp` service of `infra/sim/docker-compose.yml` under the exact compose project `<container name>-rtsp`. A generated override maps `127.0.0.1:<RTC_FARM_TEST_RTSP_PORT>` to `8554`, the image must already be present (`--pull never`), and an RTSP `DESCRIBE` of `/test` must succeed before the row starts;
+- passes the row a camera section for the Connector runtime: loopback literal address, that port, `/test`, the helper copy and its hash, for the single fixture assignment.
+
+`docker compose down` removes that project in `finally`, and the runner checks that no container with the project label remains. A second signal also removes it.
+
+Credential renewal while the page stays live is not a row yet. The signalling harness does not enable the renewal runtime or a renewal-capable Connector configuration, so it would need a new harness opt-in rather than a registry entry.
 
 ## Adding rows
 

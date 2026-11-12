@@ -29,6 +29,6 @@ The button opens a native modal `<dialog>` (background inert, focus trapped, `Es
 
 - `tests/node/farm-pause-control.test.ts`: real keys and signatures with issuer and signalling doubles. Covers one command after admission, no offer without enough capability validity, transport end before confirmation, unresolved key, cancel while ready, and every availability reason.
 - `tests/e2e/farm-view.spec.ts` (opt-in `FARM_VIEW_E2E=true`): the button stays disabled with the pt-BR reason when pause is not enabled and when no approved device is selected.
-- A browser end-to-end run of this page against the real HTTPS fixture (login, farm page, signed pause, applied) is not automated yet: the HTTPS fixture drives its own browser actors, not this page. The execution rows in `PAUSE-RTC-CONSUMER-CHECKPOINT.md` exercise the same browser modules against the real server and a synthetic Moonraker.
+- `farm-page-pause` in the real-RTC runner ([RTC-FARM-ACCEPTANCE-CHECKPOINT.md](RTC-FARM-ACCEPTANCE-CHECKPOINT.md)) drives this page end to end: login, live row, stale and revoked disabled reasons, the dialog, one confirmed signed pause over WebRTC and exactly one pause on the synthetic Moonraker.
 
 No physical printer was used.

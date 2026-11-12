@@ -71,6 +71,8 @@ export async function createRuntimeMoonrakerFixture() {
   const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
   if (farmPause && !pauseKey) throw Error('Farm pause issuer key required')
   let pauses = 0
+  // The Connector's pause inbox is admitted and waiting for a browser.
+  let pauseInboxReady = false
   let printState: 'printing' | 'paused' = 'printing'
   let closeServer: (() => Promise<void>) | undefined
   let port = 0
@@ -94,6 +96,8 @@ export async function createRuntimeMoonrakerFixture() {
     if (parsed.kind === 'queued') queued++
     if (parsed.kind === 'readonly-admitted') admitted++
     if (parsed.kind === 'readonly-listening') listening++
+    if (parsed.kind === 'pause-listening') pauseInboxReady = true
+    if (parsed.kind === 'pause-terminal') pauseInboxReady = false
     if (parsed.kind === 'readonly-terminal')
       terminalReason = parsed.reason ?? 'unclassified'
   }
@@ -495,6 +499,7 @@ export async function createRuntimeMoonrakerFixture() {
         packagedManifestSha256,
         packagedFiles,
         pauses,
+        pauseInboxReady,
       }
     },
     close() {

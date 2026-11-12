@@ -567,7 +567,11 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 await session.connector.request({ kind: 'advance-runtime' })
               },
               ...(process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
-                ? { pauses: async () => (await observeRuntime()).pauses }
+                ? {
+                    pauses: async () => (await observeRuntime()).pauses,
+                    pauseInboxReady: async () =>
+                      (await observeRuntime()).pauseInboxReady,
+                  }
                 : {}),
             })
             assert.ok((await observeRuntime()).queued >= 2)

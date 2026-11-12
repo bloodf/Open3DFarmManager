@@ -14,6 +14,8 @@ export async function testAuthenticatedFarmPage(input: {
   note(value: string): Promise<void>
   /** Farm pause row only: pause requests the synthetic Moonraker received. */
   pauses?: () => Promise<number>
+  /** Farm pause row only: the Connector's pause inbox is admitted. */
+  pauseInboxReady?: () => Promise<boolean>
 }) {
   const farmPause = !!input.pauses
   const { fixture } = input
@@ -137,6 +139,7 @@ export async function testAuthenticatedFarmPage(input: {
           pauseButton,
           note: input.note,
           pauses: input.pauses!,
+          pauseInboxReady: input.pauseInboxReady!,
         })
       else await expect(pauseButton).toBeDisabled()
     } else {
@@ -185,9 +188,13 @@ async function testFarmPagePause(input: {
   pauseButton: import('@playwright/test').Locator
   note(value: string): Promise<void>
   pauses(): Promise<number>
+  pauseInboxReady(): Promise<boolean>
 }) {
   const { page, row, pauseButton } = input
   await expect(pauseButton).toBeEnabled()
+  // After the drop the Connector re-admits its pause inbox with bounded backoff.
+  // A dialog opened before that fails closed by design; wait for readiness.
+  await expect.poll(input.pauseInboxReady, { timeout: 10000 }).toBe(true)
   assert.equal(await input.pauses(), 0)
   const commandRequests: string[] = []
   page.on('request', (request) => {

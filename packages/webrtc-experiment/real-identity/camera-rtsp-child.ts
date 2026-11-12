@@ -27,9 +27,9 @@ let slots = 1
 let resolveBinding: (value: unknown) => void = () => {}
 const output = (value: unknown) =>
   process.stdout.write(JSON.stringify(value) + '\n')
-const text = (input: Record<string, unknown>, key: string) => {
+const text = (input: Record<string, unknown>, key: string, max = 1024) => {
   const value = input[key]
-  if (typeof value !== 'string' || value.length > 1024)
+  if (typeof value !== 'string' || value.length > max)
     throw Error('Missing ' + key)
   return value
 }
@@ -121,7 +121,7 @@ lines.on('line', (line) => {
           break
         }
         case 'answer':
-          peer?.answer(text(control, 'sdp'))
+          peer?.answer(text(control, 'sdp', 7000))
           output({ ok: true })
           break
         case 'admit':

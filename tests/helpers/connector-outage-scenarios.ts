@@ -116,7 +116,10 @@ export async function runConnectorOutageScenarios(input: {
       cert: readFileSync(cert),
       key: readFileSync(tlsKey),
     })
-    closers.push(() => proxy.close())
+    closers.push(async () => {
+      writeFileSync(join(workDir, 'proxy-log.json'), JSON.stringify(proxy.log))
+      await proxy.close()
+    })
     ledger({ resource: 'loopback-proxy', port: ports.proxy })
     const moon = await startFakeMoonraker(ports.moonraker)
     closers.push(() => moon.close())

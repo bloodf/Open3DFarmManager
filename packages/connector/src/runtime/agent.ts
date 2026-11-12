@@ -9,10 +9,18 @@ import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import type {
+  PauseControlDiagnostic,
+  PauseFailureReason,
+} from './pause-control.ts'
+import type { OfflineAuthorityStaleReason } from '../auth/offline-authority.ts'
 
 type AgentDiagnostic =
   | CollectionDiagnostic
   | RenewalDiagnostic
+  | PauseControlDiagnostic
+  | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
+  | { kind: 'pause-failed'; reason: PauseFailureReason }
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
@@ -253,6 +261,46 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             controller.abort()
           },
         }).catch(fail),
+      )
+    }
+    if (config.pause?.control) {
+      // Explicit opt-in only. Absent `pause.control` creates no pause resource.
+      const { runPauseControl, pauseFailureReason } =
+        await import('./pause-control.ts')
+      const { createOfflineAuthority } =
+        await import('../auth/offline-authority.ts')
+      // Own budget: pause traffic never starves read-only diagnostics.
+      let pauseBudget = 256
+      const pauseDiagnostic = (value: AgentDiagnostic) => {
+        if (pauseBudget-- <= 0) return
+        try {
+          input.onDiagnostic(value)
+        } catch {
+          // A throwing sink never rejects the pause task or stops the agent.
+        }
+      }
+      // No authenticated confirm() source exists yet, so authority stays
+      // stale and every pause command is rejected. Never stub it as fresh.
+      const offline = createOfflineAuthority({
+        onStale: (reason) =>
+          pauseDiagnostic({ kind: 'pause-authority-stale', reason }),
+      })
+      tasks.push(
+        runPauseControl({
+          config,
+          credential,
+          identity,
+          dataDirectory: input.dataDirectory,
+          signal,
+          freshness: offline.freshness,
+          onDiagnostic: pauseDiagnostic,
+        }).catch((error: unknown) => {
+          // A pause-path failure never stops read-only telemetry or status.
+          pauseDiagnostic({
+            kind: 'pause-failed',
+            reason: pauseFailureReason(error),
+          })
+        }),
       )
     }
     async function drainLoop() {

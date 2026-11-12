@@ -1,19 +1,31 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import {
   createCameraDisplaySession,
   type CameraDisplayState,
 } from '../utils/camera-display.ts'
 
 // Supply only a stream admitted by the browser-to-Connector flow. No URL input.
-const props = defineProps<{ stream: MediaStream | null }>()
+const props = defineProps<{
+  stream: MediaStream | null
+  printerName?: string
+}>()
 const video = ref<HTMLVideoElement | null>(null)
 const state = ref<CameraDisplayState>('closed')
+// Live video is moving content: with reduced motion it starts only on request.
+const reducedMotion = ref(false)
+const started = ref(true)
+onMounted(() => {
+  reducedMotion.value = window.matchMedia?.(
+    '(prefers-reduced-motion: reduce)',
+  )?.matches ?? false
+  started.value = !reducedMotion.value
+})
 
 watch(
-  [video, () => props.stream],
-  ([element, stream], _previous, onCleanup) => {
-    if (!element || !stream) {
+  [video, () => props.stream, started],
+  ([element, stream, start], _previous, onCleanup) => {
+    if (!element || !stream || !start) {
       state.value = 'closed'
       return
     }
@@ -48,23 +60,45 @@ watch(
 </script>
 
 <template>
-  <section aria-label="Câmera da impressora" :aria-busy="state === 'loading'">
+  <section
+    :aria-label="
+      printerName
+        ? `Câmera da impressora ${printerName}`
+        : 'Câmera da impressora'
+    "
+    :aria-busy="state === 'loading'"
+  >
     <video
       ref="video"
       v-show="state === 'ready'"
-      autoplay
       muted
       playsinline
-      aria-label="Imagem ao vivo da impressora, sem áudio"
+      disablepictureinpicture
+      :aria-label="
+        printerName
+          ? `Imagem ao vivo da impressora ${printerName}, sem áudio`
+          : 'Imagem ao vivo da impressora, sem áudio'
+      "
     />
     <p role="status" aria-live="polite">
-      <template v-if="state === 'loading'">Carregando câmera…</template>
+      <template v-if="stream && !started">
+        Câmera disponível. A imagem não inicia sozinha porque o movimento
+        reduzido está ativado.
+      </template>
+      <template v-else-if="state === 'loading'">Carregando câmera…</template>
       <template v-else-if="state === 'error'">
         Não foi possível exibir a câmera. A visualização foi encerrada.
       </template>
       <template v-else-if="state === 'closed'">Câmera indisponível.</template>
       <template v-else>Câmera ao vivo.</template>
     </p>
+    <button
+      v-if="reducedMotion && stream"
+      type="button"
+      @click="started = !started"
+    >
+      {{ started ? 'Parar imagem ao vivo' : 'Mostrar imagem ao vivo' }}
+    </button>
   </section>
 </template>
 

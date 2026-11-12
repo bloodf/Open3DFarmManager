@@ -21,17 +21,16 @@ RTC_FARM_TEST_WORK_ROOT=<absolute directory outside the repository> \
 pnpm run test:rtc-farm
 ```
 
-| Variable                           | Meaning                                                                                                       |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `RTC_FARM_TEST_IMAGE`              | Digest-pinned PostgreSQL 17 image, already present locally (never pulled).                                    |
-| `RTC_FARM_TEST_DB_PORT`            | Loopback port for the container. The server, proxy and Moonraker use OS-assigned loopback ports.              |
-| `RTC_FARM_TEST_WORK_ROOT`          | Private parent directory. Each run creates `<root>/<id>` (`0700`) and removes exactly that path in `finally`. |
-| `RTC_FARM_TEST_SCENARIOS`          | Optional comma list of rows. Default: every row.                                                              |
-| `RTC_FARM_TEST_REPEAT`             | Optional repeat count (1–5) of the selected rows against one cluster and build.                               |
-| `RTC_FARM_TEST_NAME_PREFIX`        | Optional container name prefix (default `o3dfm-rtc-farm`).                                                    |
-| `RTC_FARM_TEST_RTSP_HELPER`        | Camera rows only: absolute path of a prebuilt `rtsp-ingest` (see below).                                      |
-| `RTC_FARM_TEST_RTSP_HELPER_SHA256` | Camera rows only: expected SHA-256 of that helper. It is checked before and after the private copy.           |
-| `RTC_FARM_TEST_RTSP_PORT`          | Camera rows only: loopback port for the task-owned RTSP simulator.                                            |
+| Variable                    | Meaning                                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RTC_FARM_TEST_IMAGE`       | Digest-pinned PostgreSQL 17 image, already present locally (never pulled).                                                                          |
+| `RTC_FARM_TEST_DB_PORT`     | Loopback port for the container. The server, proxy and Moonraker use OS-assigned loopback ports.                                                    |
+| `RTC_FARM_TEST_WORK_ROOT`   | Private parent directory. Each run creates `<root>/<id>` (`0700`) and removes exactly that path in `finally`.                                       |
+| `RTC_FARM_TEST_SCENARIOS`   | Optional comma list of rows. Default: every row that needs no external resources. Camera rows run only when named (for example `farm-page-camera`). |
+| `RTC_FARM_TEST_REPEAT`      | Optional repeat count (1–5) of the selected rows against one cluster and build.                                                                     |
+| `RTC_FARM_TEST_NAME_PREFIX` | Optional container name prefix (default `o3dfm-rtc-farm`).                                                                                          |
+| `RTC_FARM_TEST_RTSP_HELPER` | Camera rows only: absolute path of a prebuilt `rtsp-ingest` (see below).                                                                            |
+| `RTC_FARM_TEST_RTSP_PORT`   | Camera rows only: loopback port for the task-owned RTSP simulator.                                                                                  |
 
 Prerequisites:
 
@@ -67,15 +66,29 @@ On cortexos, both a single SIGTERM and a double SIGTERM left no container, no wo
 
 ### Camera row
 
-`farm-page-camera` needs the ingest helper, built offline from the vendored sources as in [CAMERA-END-TO-END-CHECKPOINT.md](CAMERA-END-TO-END-CHECKPOINT.md#reproducing-the-interop-run). It can be cross-compiled with `GOOS=linux GOARCH=amd64` and copied to the runner host.
+`farm-page-camera` is opt-in. Name it in `RTC_FARM_TEST_SCENARIOS`, for example `farm-page-disconnect,farm-page-revocation,farm-page-camera`. A plain `pnpm run test:rtc-farm` runs only the rows that need no external resources.
+
+The row needs the ingest helper, built offline from the vendored sources (see [CAMERA-END-TO-END-CHECKPOINT.md](CAMERA-END-TO-END-CHECKPOINT.md#reproducing-the-interop-run)). The build is reproducible only without VCS stamping:
+
+```sh
+cd tools/rtsp-ingest
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod GOPROXY=off \
+  go build -trimpath -buildvcs=false -o /abs/path/rtsp-ingest ./cmd/rtsp-ingest
+```
+
+With Go 1.27.1, two clean builds of the current sources both give SHA-256 `6fda3b53d6d637ec8e1b728690918794698566f3b6a49f2d8ab27bbc6e575c00`. That value is pinned in tracked code (`RTSP_HELPER_SHA256_LINUX_AMD64` in `tests/helpers/rtc-farm-rtsp-camera.ts`). The runner compares the file at `RTC_FARM_TEST_RTSP_HELPER`, and its private copy, against that reviewed value, not against anything the operator supplies. A different Go version, helper source or vendored dependency gives a different hash. Update the constant in the same commit. A build with VCS stamping embeds the commit and never matches.
 
 The runner then:
 
-- verifies the helper's SHA-256, copies it into the work directory (`0700`) and verifies the copy;
+- copies the helper into the work directory (`0700`) and verifies the copy;
 - starts only the `rtsp` service of `infra/sim/docker-compose.yml` under the exact compose project `<container name>-rtsp`. A generated override maps `127.0.0.1:<RTC_FARM_TEST_RTSP_PORT>` to `8554`, the image must already be present (`--pull never`), and an RTSP `DESCRIBE` of `/test` must succeed before the row starts;
 - passes the row a camera section for the Connector runtime: loopback literal address, that port, `/test`, the helper copy and its hash, for the single fixture assignment.
 
-`docker compose down` removes that project in `finally`, and the runner checks that no container with the project label remains. A second signal also removes it.
+`docker compose down` removes that project in `finally`. The runner checks that no container and no network with the project label remain.
+
+- If startup fails and the cleanup also fails, both errors are reported together (`AggregateError`) and the failure is written to the ledger.
+- A second signal runs the same `down` with the same compose files.
+- If the farm-page navigation is retried after `net::ERR_NETWORK_CHANGED`, the row ledger records `farm-page-navigation-retried-after-network-change`.
 
 Credential renewal while the page stays live is not a row yet. The signalling harness does not enable the renewal runtime or a renewal-capable Connector configuration, so it would need a new harness opt-in rather than a registry entry.
 

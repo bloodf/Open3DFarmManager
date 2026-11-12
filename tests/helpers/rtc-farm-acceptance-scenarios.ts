@@ -9,7 +9,10 @@ export type RtcFarmScenario = {
   env: Readonly<Record<string, string>>
   /** Ledger lines that must appear for the row to count as passed. */
   expect: readonly string[]
-  /** Task-owned resources the runner starts once for every row that needs them. */
+  /**
+   * Task-owned resources the runner starts once for every row that needs them.
+   * Rows with resources are opt-in: they run only when named explicitly.
+   */
   resources?: readonly 'rtsp-camera'[]
 }
 
@@ -60,7 +63,10 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
   })
 
 export function selectRtcFarmScenarios(list: string | undefined) {
-  const names = (list ?? Object.keys(RTC_FARM_SCENARIOS).join(','))
+  const defaults = Object.entries(RTC_FARM_SCENARIOS)
+    .filter(([, row]) => !row.resources?.length)
+    .map(([name]) => name)
+  const names = (list ?? defaults.join(','))
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)

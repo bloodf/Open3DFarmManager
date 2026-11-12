@@ -53,8 +53,9 @@ export async function testAuthenticatedFarmPage(input: {
       })
     // Chromium aborts a navigation when host interfaces change (for example a
     // container network appearing on a shared Docker host). Retry that once.
-    const response = await open().catch((error: unknown) => {
+    const response = await open().catch(async (error: unknown) => {
       if (!String(error).includes('net::ERR_NETWORK_CHANGED')) throw error
+      await input.note('farm-page-navigation-retried-after-network-change')
       return open()
     })
     assert.equal(response?.status(), 200)

@@ -11,6 +11,14 @@ import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
 const RTSP_PATH = '/test'
+/**
+ * Reviewed, reproducible helper hash: tools/rtsp-ingest built with Go 1.27.1 as
+ * `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod GOPROXY=off go build
+ * -trimpath -buildvcs=false ./cmd/rtsp-ingest`. Update it in the same commit as
+ * any helper source, vendored dependency or toolchain change.
+ */
+export const RTSP_HELPER_SHA256_LINUX_AMD64 =
+  '6fda3b53d6d637ec8e1b728690918794698566f3b6a49f2d8ab27bbc6e575c00'
 const sha256 = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
@@ -45,21 +53,21 @@ export async function startRtspCamera(input: {
   project: string
   port: number
   helper: string
-  helperSha256: string
   ledger(value: object): void
 }) {
   if (
     !isAbsolute(input.helper) ||
-    !/^[a-f0-9]{64}$/.test(input.helperSha256) ||
     !/^o3dfm-[a-z0-9-]{1,60}$/.test(input.project)
   )
     throw new Error('Invalid RTSP camera resource request')
-  if ((await sha256(input.helper)) !== input.helperSha256)
-    throw new Error('Ingest helper SHA-256 mismatch')
+  // Compared with the tracked value above, not with operator input.
+  const helperSha256 = RTSP_HELPER_SHA256_LINUX_AMD64
+  if ((await sha256(input.helper)) !== helperSha256)
+    throw new Error('Ingest helper SHA-256 differs from the reviewed build')
   const helperPath = join(input.workDir, 'rtsp-ingest')
   await copyFile(input.helper, helperPath)
   await chmod(helperPath, 0o700)
-  if ((await sha256(helperPath)) !== input.helperSha256)
+  if ((await sha256(helperPath)) !== helperSha256)
     throw new Error('Ingest helper copy SHA-256 mismatch')
   input.ledger({ resource: 'rtsp-helper', path: helperPath })
   const override = join(input.workDir, 'rtsp-override.yml')
@@ -98,6 +106,16 @@ export async function startRtspCamera(input: {
       ])
     ).stdout.trim()
     if (left) throw new Error('RTSP simulator containers remain')
+    const network = (
+      await exec('docker', [
+        'network',
+        'ls',
+        '-q',
+        '--filter',
+        `label=com.docker.compose.project=${input.project}`,
+      ])
+    ).stdout.trim()
+    if (network) throw new Error('RTSP simulator network remains')
     input.ledger({ removed: 'compose-project', project: input.project })
   }
   input.ledger({ resource: 'compose-project', project: input.project })
@@ -115,15 +133,27 @@ export async function startRtspCamera(input: {
       await new Promise((resolve) => setTimeout(resolve, 500))
     }
   } catch (error) {
-    await stop().catch(() => {})
-    started = false
+    try {
+      await stop()
+    } catch (stopError) {
+      input.ledger({
+        failure: 'rtsp-compose-down-after-startup-failure',
+        project: input.project,
+      })
+      throw new AggregateError(
+        [error, stopError],
+        'RTSP simulator startup failed and its cleanup also failed',
+      )
+    } finally {
+      started = false
+    }
     throw error
   }
   return {
     env: {
       SIGNALLING_HTTPS_CAMERA: JSON.stringify({
         helperPath,
-        helperSha256: input.helperSha256,
+        helperSha256,
         rtspPort: input.port,
         rtspPath: RTSP_PATH,
       }),

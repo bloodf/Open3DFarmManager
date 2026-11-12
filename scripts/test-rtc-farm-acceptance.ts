@@ -57,25 +57,24 @@ if (
     'RTC_FARM_TEST_ADMITTED=yes, a locally available digest-pinned PostgreSQL 17 RTC_FARM_TEST_IMAGE, a loopback RTC_FARM_TEST_DB_PORT and an absolute RTC_FARM_TEST_WORK_ROOT outside the repository are required',
   )
 const scenarios = selectRtcFarmScenarios(env.RTC_FARM_TEST_SCENARIOS)
-// Camera rows need a prebuilt, hash-pinned ingest helper and a loopback RTSP port.
+// Camera rows need a prebuilt ingest helper (its hash is pinned in tracked
+// code) and a loopback RTSP port.
 const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   ? {
       helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
-      helperSha256: env.RTC_FARM_TEST_RTSP_HELPER_SHA256 ?? '',
       port: Number(env.RTC_FARM_TEST_RTSP_PORT),
     }
   : undefined
 if (
   camera &&
   (!isAbsolute(camera.helper) ||
-    !/^[a-f0-9]{64}$/.test(camera.helperSha256) ||
     !Number.isInteger(camera.port) ||
     camera.port < 1024 ||
     camera.port > 65535 ||
     camera.port === dbPort)
 )
   throw new Error(
-    'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute), RTC_FARM_TEST_RTSP_HELPER_SHA256 and RTC_FARM_TEST_RTSP_PORT',
+    'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute) and RTC_FARM_TEST_RTSP_PORT',
   )
 const prefix = env.RTC_FARM_TEST_NAME_PREFIX ?? 'o3dfm-rtc-farm'
 if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
@@ -151,6 +150,12 @@ const interrupt = () => {
             'compose',
             '--project-name',
             name + '-rtsp',
+            '-f',
+            join(checkout, 'infra/sim/docker-compose.yml'),
+            '-f',
+            join(workDir, 'rtsp-override.yml'),
+            '--profile',
+            'rtsp',
             'down',
             '--timeout',
             '1',
@@ -350,7 +355,6 @@ try {
       project: name + '-rtsp',
       port: camera.port,
       helper: camera.helper,
-      helperSha256: camera.helperSha256,
       ledger,
     })
   for (let attempt = 1; attempt <= runs; attempt++)
@@ -419,12 +423,12 @@ try {
   try {
     await rtsp?.stop()
   } catch (error) {
-    cleanupFailure = error
+    cleanupFailure ??= error
   }
   try {
     await sql?.end({ timeout: 3 })
   } catch (error) {
-    cleanupFailure = error
+    cleanupFailure ??= error
   }
   try {
     // Exact ownership: recover the ID by name if recording was interrupted.

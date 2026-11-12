@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { lstat, readdir, readFile, readlink } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 
 export const Receipt = z.strictObject({
@@ -37,9 +37,29 @@ export async function outputSnapshot(root: string) {
             .update(await readFile(path))
             .digest('hex'),
         })
+      } else if (entry.isSymbolicLink()) {
+        // Current Nitro output links deduplicated packages inside server/node_modules.
+        // Only relative links that stay inside the sealed output are accepted.
+        const target = await readlink(path)
+        const resolved = resolve(dirname(path), target)
+        const inside = relative(root, resolved)
+        if (
+          isAbsolute(target) ||
+          inside.startsWith('..') ||
+          isAbsolute(inside) ||
+          entries.length >= 10000
+        )
+          throw new Error('Output link escapes the sealed output')
+        entries.push({
+          path: relative(root, path),
+          size: 0,
+          sha256: createHash('sha256')
+            .update('symlink\0' + target)
+            .digest('hex'),
+        })
       } else
         throw new Error(
-          'Output must contain regular files and directories only',
+          'Output must contain regular files, directories and internal links only',
         )
     }
   }

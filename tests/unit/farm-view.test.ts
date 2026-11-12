@@ -1774,17 +1774,44 @@ test('logout invalidation, route leave and unmount cancel pending reopens and le
 test('an assignment set changed on the server refreshes the farm and resubscribes with it', async () => {
   const h = setup(true, () => 0)
   await fakeTimers(h, async () => {
+    // Two approved local keys: the user picked the second one.
+    const keyB = '00000000-0000-4000-8000-000000000008'
+    h.data.devices.push({ ...device, keyId: keyB, thumbprint: 'Q'.repeat(43) })
+    h.data.local.push({ thumbprint: 'Q'.repeat(43) })
     await h.view.discover()
+    await h.view.selectKey(keyB)
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
+    expect(
+      h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+    ).toBe(true)
+    const opened = h.peers.length
+    const kinds: string[] = []
+    let current = h.result.state
+    Object.defineProperty(h.result, 'state', {
+      get: () => current,
+      set: (next: FarmViewState) => {
+        current = next
+        kinds.push(
+          next.kind === 'ready' ? `ready:${next.inventory}` : next.kind,
+        )
+      },
+    })
     h.data.printers.printers = [
       row,
       { ...row, assignmentId: other, printerKey: 'second' },
     ]
-    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    h.peers.at(-1)!.input.onHealth({ kind: 'closed', reason: 'disconnected' })
     expect(await nextPeer(h)).not.toBeNull()
-    expect(h.peer(0).input.signal.aborted).toBe(true)
+    expect(h.peer(opened - 1).input.signal.aborted).toBe(true)
+    // Refreshed in place: no loading flash, key and confirmed origin kept.
+    expect(new Set(kinds)).toEqual(new Set(['ready:ready']))
     expect(h.ready().rows).toHaveLength(2)
+    expect(h.first().localOrigin).toBe('http://localhost:7125')
+    expect(h.ready().rows[1]?.localOrigin).toBeNull()
+    expect(h.ready().keys).toMatchObject({ kind: 'available', selected: keyB })
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
     expect(
-      h.peer(1).input.assignmentRefs.map((ref) => ref.assignmentId),
+      h.peers.at(-1)?.input.assignmentRefs.map((ref) => ref.assignmentId),
     ).toEqual([assignment, other])
   })
 })
@@ -1841,6 +1868,42 @@ test('429 on the re-check honours Retry-After and does not spend the reopen budg
     expect(elapsed).toBe(1000 + 10 * 5000)
     expect(h.peers).toHaveLength(2)
   })
+})
+
+test('429 Retry-After accepts an HTTP date and spreads the wait with jitter', async () => {
+  for (const [random, header, expected] of [
+    [1, '5', 8000], // 5 s * 1.5 = 7.5 s, observed on the next 1 s tick
+    [0, 'date', 10_000], // HTTP date 10 s ahead of the wall clock
+  ] as const) {
+    const h = setup(true, () => random)
+    await fakeTimers(h, async () => {
+      await h.view.discover()
+      let limited = false
+      h.hooks.read = async (path, signal, query) => {
+        if (path === `/api/farms/${farm}/printers` && !limited) {
+          limited = true
+          const value =
+            header === 'date'
+              ? new Date(h.time.wall + 10_000).toUTCString()
+              : header
+          throw Object.assign(new Error('429'), {
+            statusCode: 429,
+            response: new Response(null, {
+              status: 429,
+              headers: { 'retry-after': value },
+            }),
+          })
+        }
+        return h.baseRead(path, signal, query)
+      }
+      h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      // First reopen waits 2 s * jitter, then the rate-limited wait.
+      while (!limited) await second()
+      const from = h.time.mono
+      expect(await nextPeer(h, 60_000)).not.toBeNull()
+      expect(h.time.mono - from).toBe(expected)
+    })
+  }
 })
 
 test('spool inventory is kept per Connector, replaced by each snapshot and unavailable when omitted', async () => {
@@ -2046,5 +2109,153 @@ test('a revoked or rejected feed flags spools historical and a new farm clears t
     expect(h.ready().spools[0]?.historical).toBe(true)
     await h.view.selectFarm(farm)
     expect(h.ready().spools).toEqual([])
+  })
+})
+
+function spoolFrame(
+  h: ReturnType<typeof setup>,
+  index: number,
+  session: FarmAdmittedSession,
+) {
+  h.peer(index).input.onSnapshot({
+    session: { ...session },
+    message: {
+      t: 'snapshot',
+      seq: 0,
+      printers: [
+        {
+          printerKey: row.printerKey,
+          state: 'idle',
+          progress: 0,
+          observedAt: h.time.wall,
+        },
+      ],
+      inventory: {
+        observedAt: h.time.wall,
+        stale: false,
+        total: 1,
+        spools: [
+          {
+            name: 'PLA',
+            material: 'PLA',
+            colorHex: 'ffffff',
+            remainingGrams: 400,
+            location: null,
+            archived: false,
+          },
+        ],
+      },
+    },
+    receivedAtWallMs: h.time.wall,
+    receivedAtMonoMs: h.time.mono,
+    sourceClockComparable: true,
+    complete: true,
+  })
+}
+
+test('in-place refresh keeps spool inventory stale-flagged; another farm clears it', async () => {
+  const farmB = '00000000-0000-4000-8000-000000000009'
+  const h = setup(true, () => 0)
+  h.data.farms.farms.push({ farmId: farmB })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    await h.view.selectFarm(farm)
+    spoolFrame(h, 0, admit(h, 0))
+    expect(h.ready().spools).toMatchObject([
+      { agentId: agent, historical: false },
+    ])
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(h.ready().spools).toMatchObject([{ historical: true }])
+    expect(await nextPeer(h)).not.toBeNull()
+    expect(h.ready().rows).toHaveLength(2)
+    expect(h.ready().spools).toMatchObject([
+      { agentId: agent, historical: true, inventory: { total: 1 } },
+    ])
+    h.hooks.read = async (path, signal, query) =>
+      path === `/api/farms/${farmB}/printers`
+        ? { printers: [], nextAfter: null, canManage: true }
+        : h.baseRead(path, signal, query)
+    const selecting = h.view.selectFarm(farmB)
+    expect(h.ready().spools).toEqual([])
+    await selecting
+    expect(h.ready().spools).toEqual([])
+  })
+})
+
+test('refresh drops origins of assignments or Connectors revoked meanwhile', async () => {
+  for (const change of ['assignment', 'connector'] as const) {
+    const h = setup(true, () => 0)
+    await fakeTimers(h, async () => {
+      await h.view.discover()
+      expect(
+        h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+      ).toBe(true)
+      h.data.printers.printers = [
+        change === 'assignment'
+          ? { ...row, status: 'revoked' }
+          : { ...row, connectorStatus: 'revoked' },
+      ]
+      h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      expect(await nextPeer(h, 10_000)).toBeNull()
+      expect(h.first().localOrigin).toBeNull()
+      expect(h.first().assignment).toMatchObject(h.data.printers.printers[0]!)
+    })
+  }
+})
+
+test('an origin confirmed while the refresh is loading survives it', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    let printerReads = 0
+    const gate = deferred<void>()
+    h.hooks.read = async (path, signal, query) => {
+      // Second read after the change is the refresh's inventory page.
+      if (path === `/api/farms/${farm}/printers` && ++printerReads === 2)
+        await gate.promise
+      return h.baseRead(path, signal, query)
+    }
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    while (printerReads < 2) await second()
+    expect(h.ready().inventory).toBe('ready')
+    expect(
+      h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+    ).toBe(true)
+    gate.resolve()
+    await second(0)
+    await second(0)
+    expect(h.ready().rows).toHaveLength(2)
+    expect(h.first().localOrigin).toBe('http://localhost:7125')
+  })
+})
+
+test('a refresh whose preferred key was revoked falls back to the remaining key', async () => {
+  const keyB = '00000000-0000-4000-8000-000000000008'
+  const h = setup(true, () => 0)
+  h.data.devices.push({ ...device, keyId: keyB, thumbprint: 'Q'.repeat(43) })
+  h.data.local.push({ thumbprint: 'Q'.repeat(43) })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    await h.view.selectKey(keyB)
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
+    h.data.devices = h.data.devices.map((item) =>
+      item.keyId === keyB ? { ...item, status: 'revoked' } : item,
+    )
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    h.peers.at(-1)!.input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(await nextPeer(h)).not.toBeNull()
+    expect(h.ready().keys).toMatchObject({ kind: 'available', selected: keyId })
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyId)
   })
 })

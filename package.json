@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit && pnpm --dir apps/farm typecheck",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:auth-session": "node scripts/test-auth-session-e2e.ts",
     "check:all": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:node && pnpm run test:rtsp-supervisor && pnpm run test:rtsp-framing && pnpm run build",
     "sim:smoke": "node packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",

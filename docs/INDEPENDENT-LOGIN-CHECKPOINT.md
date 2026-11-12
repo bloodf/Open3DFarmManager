@@ -35,7 +35,7 @@ O coordenador executou `scripts/test-independent-login.ts` com PostgreSQL 17.11 
 Para criar exclusivamente a conta sintética em um banco `fixture` descartável acessível por loopback:
 
 ```sh
-AUTH_SYNTHETIC_TEST_DISPOSABLE=yes AUTH_SYNTHETIC_TEST_PORT=15433 bun scripts/create-disposable-account.ts
+AUTH_SYNTHETIC_TEST_DISPOSABLE=yes AUTH_SYNTHETIC_TEST_PORT=15433 node scripts/create-disposable-account.ts
 ```
 
 O script cria `fixture_user` com a senha pública de teste `synthetic-password-for-isolated-tests-only`. Não aceita URL nem credenciais de produção. A segunda execução falha pela unicidade, sem substituir uma conta existente. A instância PostgreSQL, seus dados e o processo da aplicação pertencem ao coordenador do teste e devem ser removidos ao terminar, preservando somente evidências necessárias.

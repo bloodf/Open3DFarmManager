@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   validateMigrationHistory,
 } from './db/migrations.ts'
@@ -89,10 +90,13 @@ try {
   assert.equal(identity?.database, 'fixture')
   assert.notEqual(identity.started, value.databaseStarted)
   assert.notEqual(process.pid, value.seedPid)
-  const catalog = (await loadMigrationCatalog()).slice(0, 16),
+  const catalog = catalogThrough(
+      await loadMigrationCatalog(),
+      '0022_connector_successor_proofs',
+    ),
     history =
       await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...history]), 16)
+  assert.equal(validateMigrationHistory(catalog, [...history]), catalog.length)
   const publicKey = await crypto.subtle.importKey(
     'spki',
     Buffer.from(value.publicKeySpki, 'base64url'),

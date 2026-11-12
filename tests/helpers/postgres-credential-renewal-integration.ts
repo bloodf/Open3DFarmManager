@@ -2,7 +2,16 @@ import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID, sign, createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  createRenewalHttpTransport,
+  renewCredentialOnce,
+  writeCredentialFileAtomically,
+} from '../../packages/connector/src/cloud/credential-renewal.ts'
+import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
+import { credentialLookupId } from '../../packages/connector/src/config/signalling.ts'
 import { pathToFileURL } from 'node:url'
 import postgres, { type Sql, type TransactionSql } from 'postgres'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -832,6 +841,149 @@ export async function testPostgresCredentialRenewal(
       'synthetic privileged receipt corruption cannot be returned through digest mismatch readback',
     )
 
+    // Connector renewal client end to end: real HTTP handler, official store, real clock.
+    const connectorClient = async (): Promise<string[]> => {
+      const done: string[] = []
+      const listen = async (clock: () => number) => {
+        const h = createCredentialRenewalHttpHandler(
+          store(sql, config, clock),
+          5000,
+        )
+        const srv = createServer((request, response) => {
+          void h({ '~app': { node: { req: request } } }).then((result) => {
+            response.writeHead(result.status, {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store',
+            })
+            response.end(JSON.stringify(result.body))
+          })
+        })
+        await new Promise<void>((resolve, reject) => {
+          srv.once('error', reject)
+          srv.listen(0, '127.0.0.1', () => resolve())
+        })
+        const address = srv.address()
+        if (!address || typeof address === 'string')
+          throw new Error('Missing loopback port')
+        return {
+          transport: createRenewalHttpTransport({
+            origin: `http://127.0.0.1:${address.port}`,
+            timeoutMs: 5000,
+            allowLoopbackHttpForTests: true,
+          }),
+          close: () =>
+            new Promise<void>((resolve, reject) =>
+              srv.close((error) => (error ? reject(error) : resolve())),
+            ),
+        }
+      }
+      const directory = await mkdtemp(join(tmpdir(), 'o3dfm-renewal-client-'))
+      await chmod(directory, 0o700)
+      const live = await listen(Date.now)
+      const late = await listen(() => Date.now() + 10_000_000)
+      try {
+        const item = await issued()
+        const credentialPath = join(directory, 'credential.json')
+        writeCredentialFileAtomically(credentialPath, {
+          version: 1,
+          expected_fingerprint: item.identity.fingerprint,
+          approval: {
+            status: 'approved',
+            agent_id: item.root.agent_id,
+            farm_id: item.farmId,
+            device_token: item.root.device_token,
+            expires_at: item.root.expires_at,
+          },
+        })
+        const current = () =>
+          readRuntimeCredential(
+            credentialPath,
+            item.identity.fingerprint,
+            Date.now(),
+          )
+        const once = (transport = live.transport) =>
+          renewCredentialOnce({
+            credentialPath,
+            credential: current(),
+            identity: item.identity,
+            transport,
+            origin: config.origin,
+            audience: config.proofAudience,
+            signal: AbortSignal.timeout(20000),
+            now: Date.now,
+          })
+        const successors = async () =>
+          (
+            await admin`SELECT jti::text,ordinal FROM farm.connector_credential_successors WHERE root_jti=${item.metadata.jti}::uuid ORDER BY ordinal`
+          ).map((r) => ({ jti: r.jti as string, ordinal: r.ordinal as number }))
+
+        const root = current()
+        assert.equal((await once()).kind, 'renewed')
+        const first = current()
+        assert.equal(first.root_jti, item.metadata.jti)
+        assert.deepEqual(await successors(), [
+          { jti: credentialLookupId(first.device_token), ordinal: 1 },
+        ])
+        assert.equal((await stat(credentialPath)).mode & 0o777, 0o600)
+        assert.equal(first.device_token === root.device_token, false)
+        done.push(
+          'connector client renewed root over real HTTP and persisted the committed successor privately',
+        )
+
+        // Successor expiry must strictly exceed the parent's (1 s claim resolution).
+        await new Promise((resolve) => setTimeout(resolve, 1100))
+        assert.equal((await once()).kind, 'renewed')
+        const second = current()
+        assert.deepEqual((await successors()).at(-1), {
+          jti: credentialLookupId(second.device_token),
+          ordinal: 2,
+        })
+        done.push('connector client renewed a successor as kind successor')
+
+        // Commit succeeds server-side, local write cannot: the old credential stays.
+        await new Promise((resolve) => setTimeout(resolve, 1100))
+        await chmod(directory, 0o500)
+        await assert.rejects(once())
+        await chmod(directory, 0o700)
+        assert.deepEqual(current(), second)
+        const committed = (await successors()).at(-1)
+        assert.equal(committed?.ordinal, 3)
+        assert.equal((await once()).kind, 'renewed')
+        const recovered = current()
+        assert.equal(credentialLookupId(recovered.device_token), committed?.jti)
+        assert.equal((await successors()).length, 3)
+        assert.equal(
+          (
+            await admin`SELECT result_token_sha256 FROM farm.connector_credential_renewals WHERE predecessor_jti=${credentialLookupId(second.device_token)}::uuid`
+          )[0]?.result_token_sha256,
+          createHash('sha256')
+            .update(recovered.device_token)
+            .digest('base64url'),
+        )
+        assert.deepEqual(await readdir(directory), ['credential.json'])
+        done.push(
+          'connector crash between server commit and local write recovered the same successor by readback',
+        )
+
+        // Server clock past hard expiry: denial, no successor, credential untouched.
+        assert.deepEqual(await once(late.transport), {
+          kind: 'retry',
+          reason: 'challenge-403',
+        })
+        assert.deepEqual(current(), recovered)
+        assert.equal((await successors()).length, 3)
+        done.push(
+          'connector client fails closed when the predecessor is expired at the server',
+        )
+      } finally {
+        await chmod(directory, 0o700)
+        await rm(directory, { recursive: true, force: true })
+        await live.close()
+        await late.close()
+      }
+      return done
+    }
+
     // Real HTTP transport boundary, not a stand-in store or SQL string mock.
     const httpItem = await issued(),
       handler = createCredentialRenewalHttpHandler(store(), 1000)
@@ -908,6 +1060,7 @@ export async function testPostgresCredentialRenewal(
     checks.push(
       'real loopback HTTP challenge/complete handler writes official store; foreign cookie refused; server closed',
     )
+    checks.push(...(await connectorClient()))
     return checks
   } finally {
     for (const pool of pools) await pool.end({ timeout: 3 })

@@ -15,6 +15,7 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { testPostgresCredentialRenewal } from '../tests/helpers/postgres-credential-renewal-integration.ts'
+import { testRenewalHttps } from '../tests/helpers/renewal-https-integration.ts'
 
 const exec = promisify(execFile)
 const image = process.env.RENEWAL_TEST_IMAGE
@@ -27,6 +28,14 @@ if (
   throw new Error(
     'Fresh test admission and locally available digest-pinned PostgreSQL 17 image required',
   )
+// Optional built-server phase: "<appPort>,<proxyPort>" on loopback; needs apps/farm/.output.
+const httpsPorts = process.env.RENEWAL_TEST_HTTPS_PORTS?.split(',').map(Number)
+if (
+  httpsPorts &&
+  (httpsPorts.length !== 2 ||
+    httpsPorts.some((p) => !Number.isInteger(p) || p < 1024 || p > 65535))
+)
+  throw new Error('Invalid built-server port pair')
 const id = randomUUID()
 // Optional caller-owned name prefix so parallel runners can audit their own resources.
 const prefix = process.env.RENEWAL_TEST_NAME_PREFIX ?? 'o3dfm-renewals'
@@ -230,6 +239,13 @@ try {
     port,
     join(evidence, 'child-resources.jsonl'),
   )
+  if (httpsPorts)
+    checks.push(
+      ...(await testRenewalHttps(sql, port, {
+        app: httpsPorts[0]!,
+        proxy: httpsPorts[1]!,
+      })),
+    )
   const last = catalog.at(-1)
   if (!last) throw new Error('Missing migration')
   await assert.rejects(

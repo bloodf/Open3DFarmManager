@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import {
   acquireQueueLock,
+  lockFs,
   type LockProbe,
 } from '../../packages/connector/src/cloud/queue-lock.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
@@ -33,6 +34,11 @@ const queueModule = new URL(
 function scratch() {
   return mkdtempSync(join(tmpdir(), 'open3d-queue-lock-'))
 }
+// chmod cannot deny root, and Windows has no POSIX directory modes.
+const chmodUnreliable =
+  process.platform === 'win32' || process.getuid?.() === 0
+    ? 'directory permission faults need a non-root POSIX user'
+    : false
 const probe = (over: Partial<LockProbe> = {}): LockProbe => ({
   hostname: () => 'host-a',
   machineId: () => 'machine-a',
@@ -350,12 +356,152 @@ test('a live recovery mutex keeps the original lock error', () => {
   })
 })
 
-test('a lock that is not a private regular file is never taken over', () => {
+test(
+  'a lock that is not a private regular file is never taken over',
+  { skip: chmodUnreliable },
+  () => {
+    withLock(owner, (path) => {
+      chmodSync(path, 0o644)
+      assert.throws(
+        () => acquireQueueLock(path, probe({ alive: () => false })),
+        /EEXIST/,
+      )
+    })
+  },
+)
+
+test(
+  'a failed directory sync after publishing releases the new lock',
+  { skip: chmodUnreliable },
+  () => {
+    const dir = scratch()
+    const path = join(dir, 'telemetry.lock')
+    try {
+      // Write and search permission only: link and unlink work, fsync of the dir does not.
+      chmodSync(dir, 0o300)
+      assert.throws(() => acquireQueueLock(path, probe()), /EACCES/)
+      chmodSync(dir, 0o700)
+      assert.deepEqual(readdirSync(dir), [], 'no lock or candidate left behind')
+    } finally {
+      chmodSync(dir, 0o700)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'a takeover whose mutex cannot be published durably keeps the lock error and leaves no mutex',
+  { skip: chmodUnreliable },
+  () => {
+    withLock(owner, (path) => {
+      const dir = join(path, '..')
+      chmodSync(dir, 0o300)
+      try {
+        assert.throws(
+          () => acquireQueueLock(path, probe({ alive: () => false })),
+          (error: NodeJS.ErrnoException & { dest?: string }) =>
+            error.code === 'EEXIST' && error.dest === path,
+        )
+      } finally {
+        chmodSync(dir, 0o700)
+      }
+      assert.equal(existsSync(path + '.recover'), false)
+      assert.equal(lockOwner(path).instance, owner.instance)
+    })
+  },
+)
+
+const fsError = (code: string) =>
+  Object.assign(new Error(code), { code }) as NodeJS.ErrnoException
+const candidateName = /\.lock(\.recover)?\.[0-9a-f-]{36}$/
+
+test('a candidate cleanup failure never replaces the lock error', (t) => {
   withLock(owner, (path) => {
-    chmodSync(path, 0o644)
+    const unlink = lockFs.unlink
+    t.mock.method(lockFs, 'unlink', (target: string) => {
+      if (candidateName.test(target)) throw fsError('ENOENT')
+      unlink(target)
+    })
+    assert.throws(
+      () => acquireQueueLock(path, probe()),
+      (error: NodeJS.ErrnoException) => error.code === 'EEXIST',
+    )
+    assert.equal(lockOwner(path).instance, owner.instance)
+  })
+})
+
+test('a failed takeover rename keeps its error when mutex release also fails', (t) => {
+  withLock(owner, (path) => {
+    t.mock.method(lockFs, 'rename', () => {
+      throw fsError('EIO')
+    })
+    const unlink = lockFs.unlink
+    t.mock.method(lockFs, 'unlink', (target: string) => {
+      if (target === path + '.recover') throw fsError('EPERM')
+      unlink(target)
+    })
     assert.throws(
       () => acquireQueueLock(path, probe({ alive: () => false })),
-      /EEXIST/,
+      (error: NodeJS.ErrnoException) => error.code === 'EIO',
     )
+    assert.equal(lockOwner(path).instance, owner.instance)
   })
+})
+
+test('a takeover whose directory sync fails after the rename releases the lock', (t) => {
+  withLock(owner, (path) => {
+    const rename = lockFs.rename
+    let renamed = false
+    t.mock.method(lockFs, 'rename', (from: string, to: string) => {
+      rename(from, to)
+      renamed = true
+    })
+    const sync = lockFs.syncDirectory
+    let failures = 0
+    t.mock.method(lockFs, 'syncDirectory', (target: string) => {
+      if (!renamed) return sync(target)
+      // The first failure is the one to report; later ones come from cleanup.
+      throw fsError(failures++ === 0 ? 'EIO' : 'ENOSPC')
+    })
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      (error: NodeJS.ErrnoException) => error.code === 'EIO',
+    )
+    assert.equal(existsSync(path), false, 'lock released, not held unreported')
+    assert.equal(existsSync(path + '.recover'), false)
+  })
+})
+
+test('a mutex that cannot be removed after takeover is reported', (t) => {
+  withLock(owner, (path) => {
+    const unlink = lockFs.unlink
+    t.mock.method(lockFs, 'unlink', (target: string) => {
+      if (target === path + '.recover') throw fsError('EPERM')
+      unlink(target)
+    })
+    assert.deepEqual(acquireQueueLock(path, probe({ alive: () => false })), {
+      recovered: true,
+      mutexLeft: true,
+    })
+    assert.notEqual(lockOwner(path).instance, owner.instance)
+    assert.equal(existsSync(path + '.recover'), true)
+  })
+})
+
+test('a publish whose directory sync fails releases the lock and keeps that error', (t) => {
+  const dir = scratch()
+  try {
+    const path = join(dir, 'telemetry.lock')
+    let failures = 0
+    t.mock.method(lockFs, 'syncDirectory', () => {
+      throw fsError(failures++ === 0 ? 'EIO' : 'ENOSPC')
+    })
+    assert.throws(
+      () => acquireQueueLock(path, probe()),
+      (error: NodeJS.ErrnoException) => error.code === 'EIO',
+    )
+    assert.deepEqual(readdirSync(dir), [], 'no lock or candidate left behind')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

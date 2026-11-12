@@ -17,6 +17,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { acquireQueueLock } from './queue-lock.ts'
 import {
   PrinterState,
   PrinterTransition,
@@ -124,6 +125,8 @@ export class TelemetryQueue {
   private lastNow: number
   private readonly directory: string
   readonly recovery: QueueLoss
+  /** True when this open took over a lock left by an owner that cannot be running. */
+  readonly recoveredStaleLock: boolean
 
   constructor(
     directory: string,
@@ -150,13 +153,7 @@ export class TelemetryQueue {
     this.path = join(directory, 'telemetry.jsonl')
     this.lock = join(directory, 'telemetry.lock')
     this.temporary = join(directory, 'telemetry.compact')
-    const lockFd = openSync(this.lock, 'wx', 0o600)
-    try {
-      writeFileSync(lockFd, JSON.stringify({ pid: process.pid }))
-      fsyncSync(lockFd)
-    } finally {
-      closeSync(lockFd)
-    }
+    this.recoveredStaleLock = acquireQueueLock(this.lock).recovered
     try {
       if (policy) {
         const result: unknown = policy.beforeRecovery()

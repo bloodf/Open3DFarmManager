@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -23,7 +23,7 @@ const id = '00000000-0000-4000-8000-000000000001'
 const context = { farmId: id, agentId: id, printerKeys: new Set(['synthetic']) }
 
 test(
-  'hard crash after acceptance leaves a locked FIFO for explicit recovery and idempotent replay',
+  'hard crash after acceptance recovers the lock automatically and replays idempotently',
   { timeout: 10000 },
   async () => {
     const directory = mkdtempSync(join(tmpdir(), 'open3d-crash-'))
@@ -60,11 +60,9 @@ test(
       assert.equal(child.kill('SIGKILL'), true)
       const [, signal] = await exited
       assert.equal(signal, 'SIGKILL')
-      assert.throws(() => new TelemetryQueue(directory, 1001), /EEXIST/)
-      // This test owns the only child and has observed its exit. Production needs
-      // external supervision to establish exclusive ownership before lock removal.
-      unlinkSync(join(directory, 'telemetry.lock'))
+      // The killed owner cannot be running, so the restart takes over its lock.
       queue = new TelemetryQueue(directory, 1001)
+      assert.equal(queue.recoveredStaleLock, true)
       assert.deepEqual(
         queue.batch(1001).records.map((record) => record.eventId),
         records.map((record) => record.eventId),

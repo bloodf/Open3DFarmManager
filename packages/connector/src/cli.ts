@@ -3,6 +3,8 @@ import { projectVersion } from '@open3dfarmmanager/shared'
 import { parseStatusPort } from './status/local.ts'
 import { parseArgs } from 'node:util'
 import { loadExistingIdentity, loadOrCreateIdentity } from './identity/store.ts'
+import { PairingProofOrigin } from '../../farm-protocol/src/pairing-proof.ts'
+import { pairConnector, readCredentialStatus } from './cloud/pairing-client.ts'
 
 const help = `Open3DFarmManager Connector
 
@@ -14,10 +16,14 @@ Uso:
   run --config <arquivo> --credential-file <segredo> --data-dir <dir>
                                     Coletar e enviar telemetria autenticada
   run ... --status-port <porta>    Habilitar página local em 127.0.0.1
+  pair --server <origem> --audience <audiência> --data-dir <dir> --credential-file <arquivo>
+                                    Parear com o servidor: exibe código e impressão digital para confirmar no navegador
+  status --data-dir <dir> [--credential-file <arquivo>]
+                                    Estado local (JSON): impressão digital e validade da credencial; sem segredos
   collect --config <arquivo> --data-dir <dir>
                                     Coletar telemetria local somente para leitura
 
-A consulta não cria uma identidade. O comando collect grava apenas localmente. O comando run exige uma identidade e uma credencial existentes para enviar telemetria autenticada. Nenhum dos dois faz pareamento.`
+A consulta não cria uma identidade. O comando collect grava apenas localmente. O comando run exige uma identidade e uma credencial existentes para enviar telemetria autenticada. Somente o comando pair faz pareamento; ele exige uma identidade existente, aprovação no navegador em até 60 segundos após a exibição do código e nunca sobrescreve uma credencial existente.`
 
 export function main(args: string[]): number {
   let parsed: ReturnType<
@@ -79,7 +85,99 @@ export function main(args: string[]): number {
     return 1
   }
 }
+async function pair(args: string[]): Promise<number> {
+  const controller = new AbortController()
+  const stop = () => controller.abort()
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  try {
+    const { values, positionals } = parseArgs({
+      args,
+      options: {
+        server: { type: 'string' },
+        audience: { type: 'string' },
+        'data-dir': { type: 'string' },
+        'credential-file': { type: 'string' },
+      },
+      allowPositionals: true,
+    })
+    if (
+      positionals.length ||
+      !values.server ||
+      !values.audience ||
+      !values['data-dir'] ||
+      !values['credential-file']
+    ) {
+      console.error('Argumentos inválidos. Use --help.')
+      return 1
+    }
+    const result = await pairConnector({
+      serverOrigin: PairingProofOrigin.parse(values.server.replace(/\/$/, '')),
+      audience: values.audience,
+      identity: loadExistingIdentity(values['data-dir']),
+      credentialPath: values['credential-file'],
+      signal: controller.signal,
+      onCode({ userCode, fingerprint }) {
+        console.log(
+          `Confirme no navegador (em até 60 segundos):\n  Código: ${userCode}\n  Impressão digital: ${fingerprint}\nA impressão digital exibida no navegador deve ser idêntica.`,
+        )
+      },
+    })
+    console.log(
+      `Pareamento concluído. Credencial válida até ${new Date(result.expiresAt).toISOString()}.`,
+    )
+    return 0
+  } catch {
+    // No tokens, device codes, paths or server bodies in terminal output.
+    console.error(
+      'Não foi possível concluir o pareamento. Verifique o servidor, a audiência, a identidade, se a credencial já existe e a aprovação no navegador; inicie um novo pareamento.',
+    )
+    return 1
+  } finally {
+    process.off('SIGINT', stop)
+    process.off('SIGTERM', stop)
+  }
+}
+function status(args: string[]): number {
+  try {
+    const { values, positionals } = parseArgs({
+      args,
+      options: {
+        'data-dir': { type: 'string' },
+        'credential-file': { type: 'string' },
+      },
+      allowPositionals: true,
+    })
+    if (positionals.length || !values['data-dir']) {
+      console.error('Argumentos inválidos. Use --help.')
+      return 1
+    }
+    const identity = loadExistingIdentity(values['data-dir'])
+    const credentialFile = values['credential-file']
+    console.log(
+      JSON.stringify({
+        fingerprint: identity.fingerprint,
+        credential:
+          credentialFile === undefined
+            ? null
+            : readCredentialStatus(
+                credentialFile,
+                identity.fingerprint,
+                Date.now(),
+              ),
+      }),
+    )
+    return 0
+  } catch {
+    console.error(
+      'Não foi possível consultar o estado local. Verifique o diretório e as permissões.',
+    )
+    return 1
+  }
+}
 async function dispatch(args: string[]): Promise<number> {
+  if (args[0] === 'pair') return pair(args.slice(1))
+  if (args[0] === 'status') return status(args.slice(1))
   if (args[0] !== 'collect' && args[0] !== 'run') return main(args)
   const running = args[0] === 'run'
   const controller = new AbortController()

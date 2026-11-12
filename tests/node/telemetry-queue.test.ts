@@ -121,8 +121,15 @@ test('outage queue survives restart, repeats unacknowledged batches and persists
       [first, second],
     )
     assert.deepEqual(queue.batch(1002).records, batch)
-    batch[0]!.state.printerKey = 'mutated'
-    assert.equal(queue.batch(1002).records[0]!.state.printerKey, 'sim-1')
+    const head = batch[0]!
+    assert.equal(head.kind, 'printer-state')
+    if (head.kind !== 'printer-state') return
+    head.state.printerKey = 'mutated'
+    const reread = queue.batch(1002).records[0]!
+    assert.equal(
+      reread.kind === 'printer-state' && reread.state.printerKey,
+      'sim-1',
+    )
     assert.throws(() => queue.acknowledge([second], 1002), /FIFO/)
     queue.acknowledge([first], 1002)
     const third = queue.enqueue(state, 1003).eventId

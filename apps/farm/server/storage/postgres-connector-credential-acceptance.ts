@@ -14,6 +14,7 @@ import { PairingProofOrigin } from '../../../../packages/farm-protocol/src/pairi
 import {
   canonicalize,
   parseBoundedJson,
+  telemetryPrinterKey,
 } from '@open3dfarmmanager/farm-protocol'
 import { verifyConnectorCredential } from '../utils/connector-credentials.ts'
 import {
@@ -609,7 +610,9 @@ export class PostgresConnectorCredentialAcceptance {
               if (operation.kind === 'telemetry') {
                 const printerKeys = [
                   ...new Set(
-                    operation.records.map((record) => record.state.printerKey),
+                    operation.records.map((record) =>
+                      telemetryPrinterKey(record),
+                    ),
                   ),
                 ].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
                 for (const key of printerKeys) {

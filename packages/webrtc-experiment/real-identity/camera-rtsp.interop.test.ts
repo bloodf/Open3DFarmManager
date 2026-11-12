@@ -171,15 +171,25 @@ test(
           return f.snapshot()
         })
 
-      // Unauthorized assignment: the browser refuses the offer, so the
-      // Connector never starts the helper and no video is attached.
+      // Unauthorized assignment: the browser declines only the camera, so the
+      // status peer stays verified, the Connector never starts the helper and
+      // no video is attached.
       await connect(page, child, helper, false)
-      const refused = await observe(read, (value: Snapshot) =>
-        Boolean(value.peer && value.peer.state === 'readonly'),
+      const refused = await observe(
+        read,
+        (value: Snapshot) =>
+          value.peer?.state === 'verified' &&
+          value.camera?.state === 'terminal',
       )
       assert.equal(refused.attached, false)
       assert.equal(refused.attachments, 0)
-      const refusedNative = record(await child.request({ kind: 'snapshot' }))
+      const refusedNative = record(
+        await observe(
+          () => child!.request({ kind: 'snapshot' }),
+          (value) => record(value).camera?.state === 'terminal',
+        ),
+      )
+      assert.equal(refusedNative.peer.state, 'verified')
       assert.equal(refusedNative.helperPid, undefined)
       assert.equal(refusedNative.camera.sent, 0)
       console.info(JSON.stringify({ stage: 'unauthorized-refused' }))

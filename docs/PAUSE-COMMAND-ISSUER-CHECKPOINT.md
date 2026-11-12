@@ -87,7 +87,7 @@ The neighbouring pause command client suite still passes with 24 tests.
 The focused run borrowed the installed dependencies of the root checkout
 through symlinks. No install, no build, no network, no listener, no container,
 no PostgreSQL, no browser and no printer were used. The complete repository
-`bun run check:all` gate remains pending on the integrated head and belongs to
+`pnpm run check:all` gate remains pending on the integrated head and belongs to
 the coordinator.
 
 ## Remaining acceptance

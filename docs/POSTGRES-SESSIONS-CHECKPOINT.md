@@ -18,9 +18,9 @@ Os IDs são referências internas, nunca tokens de autenticação. Não há emis
 O script `scripts/test-postgres-sessions.ts` exige PostgreSQL descartável e vazio, acessível apenas por loopback, com banco e usuário sintéticos `fixture`. Nunca aponte para um banco usado pela aplicação.
 
 ```sh
-SESSIONS_SYNTHETIC_TEST_DISPOSABLE=yes SESSIONS_SYNTHETIC_TEST_PORT=15433 bun scripts/test-postgres-sessions.ts
+SESSIONS_SYNTHETIC_TEST_DISPOSABLE=yes SESSIONS_SYNTHETIC_TEST_PORT=15433 node scripts/test-postgres-sessions.ts
 # Reinicie somente a instância descartável criada para este teste.
-SESSIONS_SYNTHETIC_TEST_DISPOSABLE=yes SESSIONS_SYNTHETIC_TEST_PORT=15433 bun scripts/test-postgres-sessions.ts --after-restart
+SESSIONS_SYNTHETIC_TEST_DISPOSABLE=yes SESSIONS_SYNTHETIC_TEST_PORT=15433 node scripts/test-postgres-sessions.ts --after-restart
 ```
 
 A primeira execução verifica limites, bloqueio de conta, isolamento de contas, ambas as ordens de corrida entre autorização e revogação, rollback, falha no COMMIT, timeout de bloqueio e privilégios restritos. A segunda verifica atividade e revogações após reinício, repete verificações de privilégios e executa down/up/down. Remove o schema e as roles da fixture. A primeira execução conserva dados para a verificação após reinício; o coordenador é responsável pela instância descartável e por preservar evidências de falhas.

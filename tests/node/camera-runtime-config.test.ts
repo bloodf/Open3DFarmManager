@@ -15,6 +15,19 @@ const valid = {
 }
 
 test('opt-in camera config accepts literal sources for runtime assignments', () => {
+  for (const address of ['127.0.0.1', '10.1.2.3', 'fd12::5', 'fe80::1'])
+    parseCameraRuntimeConfig(
+      {
+        ...valid,
+        cameras: [
+          {
+            ...valid.cameras[0],
+            source: { ...valid.cameras[0]!.source, address },
+          },
+        ],
+      },
+      [assignment],
+    )
   const config = parseCameraRuntimeConfig(valid, [assignment])
   assert.equal(config.maxSessions, 1)
   assert.equal(config.cameras[0]?.source.address, '192.168.1.10')
@@ -33,6 +46,45 @@ test('camera config rejects names, credentials, foreign assignments and unbounde
       ...valid,
       cameras: [
         { ...camera, source: { ...camera.source, address: '203.0.113.7' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: '169.254.169.254' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: 'fd00:ec2:0::254' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        {
+          ...camera,
+          source: { ...camera.source, address: '::ffff:127.0.0.1' },
+        },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: '::ffff:7f00:1' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: 'fe80::1%eth0' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: '192.168.1.255' } },
       ],
     },
     {

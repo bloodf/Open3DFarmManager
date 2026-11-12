@@ -198,3 +198,25 @@ func TestStreamDropsBoundedLeadingNonIDRUntilBootstrap(t *testing.T) {
 		t.Fatal("unbounded bootstrap skip")
 	}
 }
+
+func TestSkippedUnitsNeverCommitBootstrapState(t *testing.T) {
+	d, _ := strictDecoder()
+	s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
+	offered := 0
+	offer := func(uint64, bool, [][]byte) error { offered++; return nil }
+	// [SPS, PPS, non-IDR] before ready is skipped; its parameter sets do not count.
+	if err := s.accept(fixturePacket(1, 100, true, 0x78, 0, 1, 0x67, 0, 1, 0x68, 0, 1, 0x61), offer); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.accept(fixturePacket(2, 200, true, 0x65), offer); err != ErrRTP || offered != 0 {
+		t.Fatal("offered a bare IDR without offered parameter sets")
+	}
+	// A unit mixing non-IDR and IDR slices is invalid, before and after bootstrap.
+	for _, ready := range []bool{false, true} {
+		d, _ = strictDecoder()
+		s = streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d, sps: ready, pps: ready, ready: ready}
+		if err := s.accept(fixturePacket(1, 100, true, 0x78, 0, 1, 0x67, 0, 1, 0x68, 0, 1, 0x61, 0, 1, 0x65), offer); err != ErrRTP || offered != 0 {
+			t.Fatal("accepted mixed IDR/non-IDR unit")
+		}
+	}
+}

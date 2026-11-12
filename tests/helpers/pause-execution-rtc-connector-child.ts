@@ -530,6 +530,8 @@ export async function run() {
 
         relay = createPauseCommandRelay({
           authority: {
+            // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+            freshness: { freshAt: () => true },
             issuers: [
               {
                 issuer: input.issuer.issuer,

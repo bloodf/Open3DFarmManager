@@ -2,7 +2,7 @@
 
 The opt-in `scripts/test-spoolman-reader.ts` exercises the actual HTTP reader against a fresh disposable Spoolman service. It is deliberately excluded from CI and `check:all`; its setup writes synthetic vendor, filament and spool records and archives one synthetic spool. The reader itself uses GET only.
 
-To run against an explicitly created disposable instance, set `SPOOLMAN_SYNTHETIC_TEST_ORIGIN` to its canonical loopback HTTP origin and `SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE=yes`, then run `bun scripts/test-spoolman-reader.ts`. It refuses to seed a nonempty spool inventory. This check is a guard, not proof of ownership: operators must create and verify the disposable service themselves before invoking it.
+To run against an explicitly created disposable instance, set `SPOOLMAN_SYNTHETIC_TEST_ORIGIN` to its canonical loopback HTTP origin and `SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE=yes`, then run `node scripts/test-spoolman-reader.ts`. It refuses to seed a nonempty spool inventory. This check is a guard, not proof of ownership: operators must create and verify the disposable service themselves before invoking it.
 
 Coverage includes an initially empty inventory, two idempotent seed executions, six spools with four filaments/two vendors, exact remaining weights, page limits 1/2/4/200, trusted scope retention, and inclusion of an archived spool. Limits 1 and 2 exercise an empty terminal page; limit 4 exercises a partial terminal page. Synthetic transport tests separately cover malformed responses, redirects, cancellation and deadlines.
 

@@ -80,7 +80,7 @@ lines.on('line', (line) => {
                 statement,
                 expectedAgentId: agent,
               }),
-            async openSource(handle, signal, expiresAtMonoMs) {
+            async openSource(handle, signal, expiresAtMonoMs, isCurrent) {
               const source = await openHelperSource({
                 executable: { path: helperPath, sha256: helperSha256 },
                 sourceHandle: handle,
@@ -92,7 +92,7 @@ lines.on('line', (line) => {
                 signal,
                 expiresAtMonoMs,
                 generation: 1,
-                isAdmitted: () => !signal.aborted,
+                isAdmitted: () => !signal.aborted && isCurrent(),
               })
               helperPid = source.pid
               helperClosed = source.closed.catch(() => {})

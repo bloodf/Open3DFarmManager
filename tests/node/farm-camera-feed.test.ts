@@ -195,8 +195,9 @@ test('offers for assignments outside the server refs never reach the view', asyn
   const f = await fixture()
   f.start()
   f.deliver(f.offer(randomUUID()))
-  await until(() => f.violations.length === 1)
-  assert.deepEqual(f.violations, ['camera-unauthorized'])
+  // Declines the camera only: no violation, so the status peer survives.
+  await until(() => f.track.stopped)
+  assert.deepEqual(f.violations, [])
   assert.deepEqual(f.events, [])
   assert.deepEqual(f.sent, [])
 })

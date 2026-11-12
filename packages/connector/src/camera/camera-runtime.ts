@@ -42,7 +42,7 @@ export async function createCameraMediaFactory(input: {
           statement,
           expectedAgentId: agentId,
         }),
-      openSource: (handle, signal, expiresAtMonoMs) =>
+      openSource: (handle, signal, expiresAtMonoMs, isCurrent) =>
         openHelperSource({
           executable: helper,
           sourceHandle: handle,
@@ -50,7 +50,7 @@ export async function createCameraMediaFactory(input: {
           signal,
           expiresAtMonoMs,
           generation: 1,
-          isAdmitted: () => !signal.aborted,
+          isAdmitted: () => !signal.aborted && isCurrent(),
         }),
       acquireSlot() {
         if (active >= config.maxSessions) return undefined

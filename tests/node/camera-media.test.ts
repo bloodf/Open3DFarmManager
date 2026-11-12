@@ -45,6 +45,13 @@ class FakeChannel {
   sent: string[] = []
   closed = false
   #handler: (raw: unknown) => void = () => {}
+  #closed: () => void = () => {}
+  onClosed(handler: () => void) {
+    this.#closed = handler
+  }
+  remoteClose() {
+    this.#closed()
+  }
   onMessage(handler: (raw: unknown) => void) {
     this.#handler = handler
   }
@@ -125,7 +132,8 @@ async function fixture(
   const track = new FakeTrack(),
     channel = new FakeChannel()
   const violations: string[] = [],
-    opened: string[] = []
+    opened: string[] = [],
+    currents: (() => boolean)[] = []
   let slots = options.slots ?? 1,
     released = 0
   const media = new ConnectorCameraMedia({
@@ -147,8 +155,9 @@ async function fixture(
     ],
     signProof: (statement) =>
       identity.signCameraPurposeProof({ statement, expectedAgentId: agentId }),
-    async openSource(handle) {
+    async openSource(handle, _signal, _expiresAt, isCurrent) {
       opened.push(handle)
+      currents.push(isCurrent)
       const count = options.units ?? 3
       return (async function* (): AsyncGenerator<CameraAccessUnit> {
         for (let i = 0; i < count; i++) {
@@ -190,6 +199,7 @@ async function fixture(
     channel,
     violations,
     opened,
+    currents,
     browserKeys,
     released: () => released,
     activate() {
@@ -251,7 +261,9 @@ test('revocation stops synchronously and submits nothing afterwards', async () =
     ),
   )
   await until(() => f.track.sent.length >= 2)
+  assert.equal(f.currents[0]!(), true)
   f.media.stop()
+  assert.equal(f.currents[0]!(), false)
   const count = f.track.sent.length
   assert.equal(f.track.open, false)
   assert.equal(f.channel.closed, true)
@@ -312,4 +324,14 @@ test('unassigned cameras are never offered and an exhausted slot never opens a s
   await until(() => g.track.open === false)
   assert.deepEqual(g.opened, [])
   assert.deepEqual(g.violations, [])
+})
+
+test('a browser that closes only the camera channel declines without a violation', async () => {
+  const f = await fixture()
+  f.activate()
+  await countersign(f)
+  f.channel.remoteClose()
+  assert.equal(f.track.open, false)
+  assert.deepEqual(f.violations, [])
+  assert.deepEqual(f.opened, [])
 })

@@ -1,7 +1,5 @@
-import { createRequire } from 'node:module'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-
-const require = createRequire(import.meta.url)
 
 // Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
 // FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
@@ -166,6 +164,77 @@ test('unauthenticated and failed requests never render a false empty inventory',
   await expect(page.getByRole('article')).toHaveCount(0)
 })
 
+async function violations(page: Page) {
+  const result = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze()
+  return result.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    helpUrl: v.helpUrl,
+    nodes: v.nodes.map((n) => ({
+      target: n.target,
+      failureSummary: n.failureSummary,
+    })),
+  }))
+}
+
+for (const width of [320, 1280]) {
+  test(`axe finds no WCAG A/AA violations in the farm inventory at ${width}px`, async ({
+    page,
+  }) => {
+    await inventory(page)
+    await page.setViewportSize({ width, height: 800 })
+    await page.goto('/farm')
+    await expect(page.locator(`#printer-${assignment}`)).toHaveText(key)
+    expect(await violations(page)).toEqual([])
+  })
+}
+
+test('axe finds no WCAG A/AA violations with the local interface form open and confirmed', async ({
+  page,
+}) => {
+  await inventory(page)
+  await page.goto('/farm')
+  await page
+    .getByRole('button', { name: 'Configurar interface local', exact: true })
+    .click()
+  await page
+    .getByLabel('Origem da interface local', { exact: true })
+    .fill('http://printer.invalid:8080/')
+  expect(await violations(page)).toEqual([])
+  await page
+    .getByLabel(
+      'Conferi que este endereço abre a interface local desta impressora.',
+    )
+    .check()
+  await page.getByRole('button', { name: 'Confirmar interface local' }).click()
+  await expect(
+    page.getByRole('link', { name: /Abrir interface local de/ }),
+  ).toBeVisible()
+  expect(await violations(page)).toEqual([])
+})
+
+test('axe finds no WCAG A/AA violations in the sign-in and service-error states', async ({
+  page,
+}) => {
+  await page.route('**/api/auth/me', (route) =>
+    route.fulfill({ status: 401, json: {} }),
+  )
+  await page.goto('/farm')
+  await expect(
+    page.getByRole('link', { name: 'Entrar', exact: true }),
+  ).toBeVisible()
+  expect(await violations(page)).toEqual([])
+  await page.unroute('**/api/auth/me')
+  await page.route('**/api/auth/me', (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  )
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByRole('alert')).toBeFocused()
+  expect(await violations(page)).toEqual([])
+})
+
 test('camera region is named, unavailable without an authorized stream, silent and axe-clean', async ({
   page,
 }) => {
@@ -193,16 +262,5 @@ test('camera region is named, unavailable without an authorized stream, silent a
   await expect(
     page.getByRole('button', { name: 'Pausar impressão' }),
   ).toBeDisabled()
-  await page.addScriptTag({ path: require.resolve('axe-core') })
-  const violations = await page.evaluate(async () => {
-    const axe = (window as unknown as { axe: typeof import('axe-core') }).axe
-    const result = await axe.run(document, {
-      runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'],
-    })
-    return result.violations.map((v) => ({
-      id: v.id,
-      nodes: v.nodes.map((n) => n.target.join(' ')),
-    }))
-  })
-  expect(violations).toEqual([])
+  expect(await violations(page)).toEqual([])
 })

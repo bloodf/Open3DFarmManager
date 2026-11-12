@@ -90,7 +90,7 @@ export function cameraPurposeProofPayload(
   if (role !== 'browser' && role !== 'connector')
     throw new Error('Invalid camera proof role')
   return new TextEncoder().encode(
-    'Open3DFarmManager/rtc-session-proof/v3\0' +
+    'Open3DFarmManager/camera-purpose-proof/v1\0' +
       role +
       '\0' +
       canonicalize(CameraPurposeStatement.parse(input)),

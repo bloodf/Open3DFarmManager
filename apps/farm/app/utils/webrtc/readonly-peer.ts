@@ -244,11 +244,14 @@ export class ReadonlyBrowserPeer {
         }
       } else if (
         channel.label === CAMERA_CHANNEL_LABEL &&
-        this.#camera &&
         !this.#cameraChannel
       ) {
+        // Camera is optional: its channel never carries status or proofs, so
+        // closing or declining it ends only the camera, never the peer.
         this.#cameraChannel = true
-        this.#camera.onChannel(channel)
+        if (this.#camera) this.#camera.onChannel(channel)
+        else channel.close()
+        return
       } else {
         channel.close()
         this.close('unexpected-channel')

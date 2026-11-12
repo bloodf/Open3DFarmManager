@@ -18,11 +18,20 @@ for (const [net, prefix] of [
 local.addAddress('::1', 'ipv6')
 local.addSubnet('fc00::', 7, 'ipv6')
 local.addSubnet('fe80::', 10, 'ipv6')
+// Cloud instance metadata endpoints sit inside link-local/ULA ranges.
+const metadata = new BlockList()
+metadata.addAddress('169.254.169.254', 'ipv4')
+metadata.addAddress('fd00:ec2::254', 'ipv6')
 const localAddress = (value: string) => {
   const family = isIP(value)
   return (
     family !== 0 &&
+    // No zone ids, no IPv4-mapped or dotted IPv6 forms, no broadcast.
     !value.includes('%') &&
+    !(family === 6 && value.includes('.')) &&
+    !/^::ffff:/i.test(value) &&
+    !value.endsWith('.255') &&
+    !metadata.check(value, family === 4 ? 'ipv4' : 'ipv6') &&
     local.check(value, family === 4 ? 'ipv4' : 'ipv6')
   )
 }

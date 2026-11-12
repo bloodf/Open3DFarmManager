@@ -15,10 +15,13 @@ MediaMTX advertises out-of-band `sprop-parameter-sets` and starts each new reade
 
 Media requires a camera-purpose V3 statement signed by both ends, after both RTC role proofs of the admitted v2 assignment binding.
 
-- After verification, the Connector picks the first configured camera whose assignment is in the admitted assignment set. It derives the statement from the binding with `cameraStatementFromBinding`, which copies the transport, identities, nonces, SDP hashes, DTLS fingerprints, assignment digest and lifetime, then adds `camera_id`, `printer_id` (the assignment id), `video_mid` and a random `lease_ref`. It sends its Ed25519 signature over that statement.
+- After verification, the Connector picks the first configured camera whose assignment is in the admitted assignment set. It derives the statement from the binding with `cameraStatementFromBinding`, which copies the transport, identities, nonces, SDP hashes, DTLS fingerprints, assignment digest and lifetime, then adds `camera_id`, `printer_id` (the assignment id), `video_mid` and a random `lease_ref`. It sends its Ed25519 signature over that statement. Camera proofs sign under their own domain, `Open3DFarmManager/camera-purpose-proof/v1\0<role>\0`, so they cannot collide with any RTC session proof version.
 - The browser rebuilds the expected statement from its own admitted binding and takes only the four camera fields from the offer. It requires `printer_id` to be an assignment the view authorized and `video_mid` to match the actual transceiver MID. It verifies the Connector key from the binding, then countersigns with the non-extractable P-256 device key.
 - The Connector verifies the browser signature against its own offered statement and the binding's browser key. Only then does it acquire a session slot and start the helper. Before that point no source is opened and no access unit exists.
 - Any malformed, early, repeated or wrongly signed frame closes the whole peer (fail closed). A missing camera leaves the channel idle.
+- Declining is camera-only. When the offer names an assignment the view did not authorize, or the browser has no camera consumer, the browser closes only the `camera-purpose-v3` channel. The Connector then ends that camera without opening a source, and the status peer stays verified. Closing the camera channel never closes the peer on either side.
+- The helper's `isAdmitted` check requires an unaborted lease, live camera media and an unexpired admitted binding on the monotonic and wall clocks.
+- Camera freshness is bounded by the server-admitted binding (at most 30 s). Video stops when that binding expires, independently of the offline status tracker.
 - Revocation is `peer.close()` on either side. The Connector's `stop()` synchronously aborts the lease, stops the session and closes the track. The supervisor then stops and reaps the helper. The browser's `stop()` synchronously detaches the stream, as `CameraDisplay` does.
 - The browser never receives the RTSP address, path or any credential. The configuration rejects host names, `@`, query and fragment, and the statement carries only opaque ids.
 
@@ -34,7 +37,7 @@ Media requires a camera-purpose V3 statement signed by both ends, after both RTC
 | Browser loading            | 10 s (`CAMERA_LOADING_TIMEOUT_MS`), then error and detach                |
 | Camera proof frame         | 8 KiB canonical JSON; one offer and one answer per peer                  |
 
-The first keyframe must arrive within the helper's 2 s per-unit deadline, so cameras need a keyframe interval of about 2 s or less. Configured sources must be loopback, private or link-local literal addresses. Frame dimensions are not parsed on the Connector. The access-unit byte bound limits them indirectly, and the browser decoder enforces its own limits.
+The first keyframe must arrive within the helper's 2 s per-unit deadline, so cameras need a keyframe interval of about 2 s or less. Configured sources must be loopback, private or link-local literal addresses. Zone ids, IPv4-mapped or dotted IPv6 forms, `.255` broadcast addresses and the cloud metadata endpoints `169.254.169.254` and `fd00:ec2::254` are rejected. Frame dimensions are not parsed on the Connector. The access-unit byte bound limits them indirectly, and the browser decoder enforces its own limits.
 
 ## Failure states (pt-BR)
 
@@ -67,7 +70,7 @@ The camera section is absent by default. When it is absent, the Connector adds n
 
 - `node --test tests/node/camera-media.test.ts tests/node/camera-runtime-config.test.ts` covers the offer and countersign ordering, wrong keys, early or repeated frames, unassigned cameras, slot exhaustion, synchronous revocation and config rejection.
 - `go test ./...` in `tools/rtsp-ingest` covers bounded sprop acceptance and the bounded bootstrap skip.
-- The gated native interop test `packages/webrtc-experiment/real-identity/camera-rtsp.interop.test.ts` ran on Linux amd64 against the `rtsp` simulator profile, with Node 24.22.2, libdatachannel 0.24.6 and Chromium 158.0.8127.18. Three of three runs passed. Each refused an unauthorized assignment without starting the helper, decoded 15 distinct 320 × 240 frames in Chromium from 15 access units sent, checked that browser state held no source location, and showed a synchronous terminal track on revocation, a detached browser video and stable counters for 500 ms. Afterwards no helper process remained.
+- The gated native interop test `packages/webrtc-experiment/real-identity/camera-rtsp.interop.test.ts` ran on Linux amd64 against the `rtsp` simulator profile, with Node 24.22.2, libdatachannel 0.24.6 and Chromium 158.0.8127.18. Each run declined an unauthorized assignment without starting the helper while the status peer stayed verified, decoded 15 distinct 320 × 240 frames in Chromium from 15 access units sent, checked that browser state held no source location, and showed a synchronous terminal track on revocation, a detached browser video and stable counters for 500 ms. Afterwards no helper process remained.
 
 ## Remaining
 

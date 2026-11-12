@@ -20,7 +20,8 @@ registerHooks({
     }
     if (url.endsWith('/runtime/agent.ts') && process.env.QUEUE_ADVANCE_DRAIN) {
       const source = String(result.source)
-      const needle = '            Date.now,\n            attemptSignal,'
+      const needle =
+        '            () => clock.now(),\n            attemptSignal,'
       const enqueue = '  const controller = new AbortController()'
       if (!source.includes(needle) || !source.includes(enqueue))
         throw new Error('Drain clock hook missing')

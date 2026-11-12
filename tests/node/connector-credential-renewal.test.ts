@@ -462,124 +462,150 @@ test('renewal proof signing refuses foreign or stale challenges', async (t) => {
     )
 })
 
-test('agent restarts after renewal and its telemetry sender uses the successor', async (t) => {
-  const data = mkdtempSync(join(tmpdir(), 'o3dfm-renewal-agent-'))
-  chmodSync(data, 0o700)
-  const identity = loadOrCreateIdentity(data)
-  // Real clock: root expires in ~4 s, so renewal runs within ~2-3 s.
-  const f = fixture(Date.now(), { identity, rootRemainingMs: 4000 })
-  Object.defineProperty(f.clock, 'now', { get: Date.now, set() {} })
-  const originalFetch = globalThis.fetch
-  const closed = createServer()
-  await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve))
-  const moonPort = (closed.address() as { port: number }).port
-  await new Promise<void>((resolve) => closed.close(() => resolve()))
-  t.after(() => {
-    globalThis.fetch = originalFetch
-    f.cleanup()
-    rmSync(data, { recursive: true, force: true })
-  })
-  const root = f.read()
-  const moon = `http://127.0.0.1:${moonPort}`
-  const configPath = join(data, 'runtime.json')
-  writeFileSync(
-    configPath,
-    JSON.stringify({
-      version: 1,
-      collection: {
+test(
+  'agent restarts after renewal and its telemetry sender uses the successor',
+  {
+    timeout: 30000,
+  },
+  async (t) => {
+    const data = mkdtempSync(join(tmpdir(), 'o3dfm-renewal-agent-'))
+    chmodSync(data, 0o700)
+    const identity = loadOrCreateIdentity(data)
+    // Agent and fake server share one wall clock that moves only through the
+    // renewal's own sleep, so the 4 s root lifetime cannot run out while the
+    // host is slow. After the first renewal, further renewal sleeps wait for
+    // shutdown, so exactly one successor is issued.
+    let wall = Date.now()
+    const f = fixture(wall, { identity, rootRemainingMs: 4000 })
+    Object.defineProperty(f.clock, 'now', { get: () => wall, set() {} })
+    const originalFetch = globalThis.fetch
+    const closed = createServer()
+    await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve))
+    const moonPort = (closed.address() as { port: number }).port
+    await new Promise<void>((resolve) => closed.close(() => resolve()))
+    t.after(() => {
+      globalThis.fetch = originalFetch
+      f.cleanup()
+      rmSync(data, { recursive: true, force: true })
+    })
+    const root = f.read()
+    const moon = `http://127.0.0.1:${moonPort}`
+    const configPath = join(data, 'runtime.json')
+    writeFileSync(
+      configPath,
+      JSON.stringify({
         version: 1,
-        allowedOrigins: [moon],
-        printers: [{ printerKey: 'sim-1', origin: moon }],
-      },
-      assignments: [
-        {
-          assignment_id: randomUUID(),
-          agent_id: root.agent_id,
-          farm_id: root.farm_id,
-          printer_key: 'sim-1',
-          moonraker_origin: moon,
+        collection: {
+          version: 1,
+          allowedOrigins: [moon],
+          printers: [{ printerKey: 'sim-1', origin: moon }],
         },
-      ],
-      telemetry: {
-        endpoint: ORIGIN + '/api/connector/telemetry',
-        audience: 'open3dfarmmanager:connector',
-        retryMinMs: 100,
-        retryMaxMs: 100,
-        idleMs: 100,
+        assignments: [
+          {
+            assignment_id: randomUUID(),
+            agent_id: root.agent_id,
+            farm_id: root.farm_id,
+            printer_key: 'sim-1',
+            moonraker_origin: moon,
+          },
+        ],
+        telemetry: {
+          endpoint: ORIGIN + '/api/connector/telemetry',
+          audience: 'open3dfarmmanager:connector',
+          retryMinMs: 100,
+          retryMaxMs: 100,
+          idleMs: 100,
+        },
+        renewal: { audience: AUDIENCE, retryMinMs: 100, retryMaxMs: 200 },
+      }),
+      { mode: 0o600 },
+    )
+    // Seed one record so the drain loop actually calls the telemetry sender.
+    const queue = openScopedTelemetryQueue({
+      dataDirectory: data,
+      config: readAgentRuntimeConfig(configPath, root),
+      credential: root,
+      now: wall,
+    })
+    const { printer } = parseMoonrakerSnapshot(
+      readFileSync(
+        new URL('../fixtures/moonraker/printing.json', import.meta.url),
+        'utf8',
+      ),
+      { printerKey: 'sim-1', observedAt: wall },
+    )
+    queue.enqueue(printer, wall)
+    queue.close()
+    const telemetryJtis: string[] = []
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      const target = String(url)
+      const json = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        })
+      if (target.startsWith(ORIGIN + '/api/connector/credentials/renewal/')) {
+        const step = target.slice(target.lastIndexOf('/') + 1) as
+          'challenge' | 'complete'
+        const answer = await f.transport(
+          step,
+          JSON.parse(String(init?.body)),
+          new AbortController().signal,
+        )
+        return json(answer.status, answer.body)
+      }
+      if (target === ORIGIN + '/api/connector/telemetry/challenge') {
+        const auth = new Headers(init?.headers).get('authorization') ?? ''
+        telemetryJtis.push(credentialLookupId(auth.replace(/^Bearer /, '')))
+        return json(503, { error: 'synthetic' })
+      }
+      throw new Error('Unexpected fetch ' + target)
+    }) as typeof fetch
+    const rootJti = credentialLookupId(root.device_token)
+    const controller = new AbortController()
+    const kinds: string[] = []
+    const running = runConnectorAgent({
+      clock: {
+        now: () => wall,
+        sleep: (ms, signal) => {
+          if (kinds.includes('credential-renewed'))
+            return new Promise<void>((resolve) =>
+              signal.addEventListener('abort', () => resolve(), { once: true }),
+            )
+          wall += ms
+          return new Promise<void>((resolve) => setImmediate(resolve))
+        },
       },
-      renewal: { audience: AUDIENCE, retryMinMs: 100, retryMaxMs: 200 },
-    }),
-    { mode: 0o600 },
-  )
-  // Seed one record so the drain loop actually calls the telemetry sender.
-  const queue = openScopedTelemetryQueue({
-    dataDirectory: data,
-    config: readAgentRuntimeConfig(configPath, root),
-    credential: root,
-    now: Date.now(),
-  })
-  const { printer } = parseMoonrakerSnapshot(
-    readFileSync(
-      new URL('../fixtures/moonraker/printing.json', import.meta.url),
-      'utf8',
-    ),
-    { printerKey: 'sim-1', observedAt: Date.now() },
-  )
-  queue.enqueue(printer, Date.now())
-  queue.close()
-  const telemetryJtis: string[] = []
-  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-    const target = String(url)
-    const json = (status: number, body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      })
-    if (target.startsWith(ORIGIN + '/api/connector/credentials/renewal/')) {
-      const step = target.slice(target.lastIndexOf('/') + 1) as
-        'challenge' | 'complete'
-      const answer = await f.transport(
-        step,
-        JSON.parse(String(init?.body)),
-        new AbortController().signal,
-      )
-      return json(answer.status, answer.body)
-    }
-    if (target === ORIGIN + '/api/connector/telemetry/challenge') {
-      const auth = new Headers(init?.headers).get('authorization') ?? ''
-      telemetryJtis.push(credentialLookupId(auth.replace(/^Bearer /, '')))
-      return json(503, { error: 'synthetic' })
-    }
-    throw new Error('Unexpected fetch ' + target)
-  }) as typeof fetch
-  const rootJti = credentialLookupId(root.device_token)
-  const controller = new AbortController()
-  const kinds: string[] = []
-  const running = runConnectorAgent({
-    configPath,
-    credentialPath: f.credentialPath,
-    dataDirectory: data,
-    signal: controller.signal,
-    onDiagnostic: (d) => kinds.push(d.kind),
-  })
-  const deadline = Date.now() + 15000
-  while (!telemetryJtis.some((jti) => jti !== rootJti) && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  controller.abort()
-  await running
-  const successor = f.read()
-  const successorJti = credentialLookupId(successor.device_token)
-  assert.notEqual(successorJti, rootJti)
-  assert.equal(successor.root_jti, rootJti)
-  assert.equal(telemetryJtis[0], rootJti)
-  assert.equal(telemetryJtis.at(-1), successorJti)
-  // After the switch, the root token is never presented again.
-  const first = telemetryJtis.indexOf(successorJti)
-  assert.ok(telemetryJtis.slice(first).every((jti) => jti === successorJti))
-  assert.ok(kinds.includes('credential-renewed'))
-  // One summary per agent run: the original and the restarted one.
-  assert.equal(kinds.filter((k) => k === 'agent-summary').length, 2)
-})
+      configPath,
+      credentialPath: f.credentialPath,
+      dataDirectory: data,
+      signal: controller.signal,
+      onDiagnostic: (d) => kinds.push(d.kind),
+    })
+    // Wait for the successor token to reach telemetry; the test timeout is the
+    // only hang bound, and an agent that stops first ends the wait at once.
+    let stopped = false
+    void running.finally(() => {
+      stopped = true
+    })
+    while (!telemetryJtis.some((jti) => jti !== rootJti) && !stopped)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    controller.abort()
+    await running
+    const successor = f.read()
+    const successorJti = credentialLookupId(successor.device_token)
+    assert.notEqual(successorJti, rootJti)
+    assert.equal(successor.root_jti, rootJti)
+    assert.equal(telemetryJtis[0], rootJti)
+    assert.equal(telemetryJtis.at(-1), successorJti)
+    // After the switch, the root token is never presented again.
+    const first = telemetryJtis.indexOf(successorJti)
+    assert.ok(telemetryJtis.slice(first).every((jti) => jti === successorJti))
+    assert.ok(kinds.includes('credential-renewed'))
+    // One summary per agent run: the original and the restarted one.
+    assert.equal(kinds.filter((k) => k === 'agent-summary').length, 2)
+  },
+)
 
 test('startup recovers an expired credential by readback only, never by issue', async (t) => {
   const f = fixture()

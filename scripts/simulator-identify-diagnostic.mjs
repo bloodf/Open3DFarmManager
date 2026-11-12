@@ -1104,7 +1104,17 @@ function verifyComposePin(composeFile) {
   const images = [...text.matchAll(/^[ \t]*image:[ \t]*(\S+)[ \t]*$/gm)].map(
     (match) => match[1],
   )
-  if (!images.includes(PINNED_IMAGE_REFERENCE))
+  // The harness builds its printers FROM the pinned digest (klipper/Dockerfile).
+  const dockerfile = join(dirname(composeFile), 'klipper', 'Dockerfile')
+  const bases = existsSync(dockerfile)
+    ? [...readFileSync(dockerfile, 'utf8').matchAll(/^FROM[ \t]+(\S+)/gm)].map(
+        (match) => match[1],
+      )
+    : []
+  if (
+    !images.includes(PINNED_IMAGE_REFERENCE) &&
+    !bases.includes(PINNED_IMAGE_REFERENCE)
+  )
     throw diagnostic(
       'compose file does not pin the reviewed amd64 image digest',
       'preflight',

@@ -6,6 +6,7 @@ import {
   decodeCommand,
 } from '@open3dfarmmanager/farm-protocol'
 import type { SignedCommand } from '@open3dfarmmanager/farm-protocol'
+import { OFFLINE_AUTHORITY_MAX_MS } from './offline-authority.ts'
 
 const coordinate = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)
 const PublicKey = z.strictObject({
@@ -117,7 +118,8 @@ export function authorizeCommand(
   if (key.revokedAt !== null) return { ok: false, reason: 'revoked-key' }
   if (!['operator', 'admin', 'owner'].includes(key.role))
     return { ok: false, reason: 'role-denied' }
-  // Provisional fail-closed lease for this prototype; transport must authenticate its provenance.
+  // Provisional fail-closed lease for this prototype; the lease is caller-supplied and transport
+  // must authenticate its provenance. This length cap alone does not enforce the offline lifetime.
   if (
     ![authorization.issuedAt, authorization.expiresAt].every(
       Number.isSafeInteger,
@@ -125,7 +127,7 @@ export function authorizeCommand(
     authorization.issuedAt < 0 ||
     authorization.issuedAt > now ||
     authorization.expiresAt <= authorization.issuedAt ||
-    authorization.expiresAt - authorization.issuedAt > 60_000
+    authorization.expiresAt - authorization.issuedAt > OFFLINE_AUTHORITY_MAX_MS
   )
     return { ok: false, reason: 'invalid-authorization' }
   if (authorization.expiresAt <= now)

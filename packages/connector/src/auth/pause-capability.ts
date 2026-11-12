@@ -20,6 +20,7 @@ import {
   readPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
+import type { CachedAuthorityFreshness } from './offline-authority.ts'
 
 export type PauseAuthorityClock = { wallNow(): number; monotonicNow(): number }
 export type PauseIssuer = { issuer: string; kid: string; publicKey: CryptoKey }
@@ -104,6 +105,8 @@ export function createPauseCapabilityVerifier(config: {
   issuers: readonly PauseIssuer[]
   clock: PauseAuthorityClock
   policy?: Partial<PausePolicy>
+  /** Offline lifetime gate for cached server authority; stale authority denies admission and dispatch. */
+  freshness?: CachedAuthorityFreshness
 }) {
   const policy = Object.freeze(
     PausePolicy.parse({
@@ -133,6 +136,14 @@ export function createPauseCapabilityVerifier(config: {
   // Snapshot callbacks as well as the keyring: later config mutation cannot change authority.
   const wallNow = config.clock.wallNow.bind(config.clock)
   const monotonicNow = config.clock.monotonicNow.bind(config.clock)
+  const freshness = config.freshness
+  function cachedAuthorityFresh(now: ClockSample): boolean {
+    try {
+      return !freshness || freshness.freshAt(now) === true
+    } catch {
+      return false
+    }
+  }
   let baseline: ClockSample | undefined
   let previous: ClockSample | undefined
   let clockBroken = false
@@ -213,6 +224,7 @@ export function createPauseCapabilityVerifier(config: {
       return { ok: false, reason: 'expired-or-inactive' }
     if (
       authority.expired ||
+      !cachedAuthorityFresh(now) ||
       now.mono >= authority.deadline ||
       now.wall < authority.capability.issued_at ||
       now.wall >= authority.capability.expires_at ||
@@ -234,6 +246,7 @@ export function createPauseCapabilityVerifier(config: {
   function admissionCurrent(admission: Admission): ClockSample | null {
     const now = sample()
     return now &&
+      cachedAuthorityFresh(now) &&
       now.mono < admission.deadline &&
       now.wall < admission.start.wall + policy.admissionMs &&
       peerCurrent(admission, now)

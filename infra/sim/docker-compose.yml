@@ -1,6 +1,9 @@
 name: open3dfarmmanager-sim
 x-printer: &printer
-  image: ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47
+  # Derived from the pinned upstream digest in klipper/Dockerfile: optimised
+  # simulavr build plus real-time pacing (docs/SIMULATOR-READINESS-RESULT.md).
+  build:
+    context: ./klipper
   platform: linux/amd64
   profiles: [klipper]
   tmpfs:

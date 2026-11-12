@@ -306,17 +306,20 @@ function agentRefs(
     throw Error('Complete Connector frame capacity')
   return refs
 }
-// 429 honours Retry-After (seconds) and otherwise waits the maximum backoff.
-function retryAfterMs(error: unknown) {
+// 429 honours Retry-After (seconds or HTTP date) and otherwise waits the
+// maximum backoff.
+function retryAfterMs(error: unknown, nowWall: number) {
   const response =
     typeof error === 'object' && error !== null && 'response' in error
       ? error.response
       : null
   const header =
     response instanceof Response ? response.headers.get('retry-after') : null
-  const seconds = header === null || header.trim() === '' ? NaN : Number(header)
-  return Number.isFinite(seconds) && seconds >= 0
-    ? Math.min(Math.max(seconds * 1000, REOPEN_BASE_MS), RETRY_AFTER_MAX_MS)
+  const text = header?.trim() ?? ''
+  const seconds = /^\d+$/.test(text) ? Number(text) * 1000 : NaN
+  const delay = Number.isFinite(seconds) ? seconds : Date.parse(text) - nowWall
+  return Number.isFinite(delay)
+    ? Math.min(Math.max(delay, REOPEN_BASE_MS), RETRY_AFTER_MAX_MS)
     : REOPEN_MAX_MS
 }
 function sameRefs(a: Refs, b: Refs) {
@@ -440,9 +443,23 @@ export function createFarmView(deps: Dependencies) {
       if (run.current()) failed(error)
     }
   }
-  async function selectFarm(farmId: string, after: string | null = null) {
+  /** `refreshKey` refreshes in place: keeps the key, confirmed origins and
+   * visible rows (as history) instead of flashing an empty loading inventory. */
+  async function selectFarm(
+    farmId: string,
+    after: string | null = null,
+    refreshKey?: string,
+  ) {
     if (disposed || state.kind !== 'ready') return
     const previous = state
+    const origins = new Map(
+      refreshKey
+        ? previous.rows.map((row) => [
+            row.assignment.assignmentId,
+            row.localOrigin,
+          ])
+        : [],
+    )
     const run = begin()
     if (!run.current()) return
     if (!farmId || !previous.farms.some((farm) => farm.farmId === farmId)) {
@@ -464,17 +481,36 @@ export function createFarmView(deps: Dependencies) {
       farmId,
       viewEpoch: run.epoch,
     }
-    publish({
-      ...previous,
-      scope,
-      inventory: 'loading',
-      feedScope: deps.feed ? 'idle' : 'disabled',
-      rows: [],
-      nextPrinter: null,
-      printerAfter: after,
-      canManage: false,
-      keys: { kind: 'loading' },
-    })
+    publish(
+      refreshKey
+        ? {
+            ...previous,
+            scope,
+            feedScope: deps.feed ? 'idle' : 'disabled',
+            rows: previous.rows.map((row) =>
+              row.connection === 'unavailable'
+                ? row
+                : {
+                    ...row,
+                    connection: 'closed',
+                    observation: row.observation
+                      ? { ...row.observation, historical: true }
+                      : null,
+                  },
+            ),
+          }
+        : {
+            ...previous,
+            scope,
+            inventory: 'loading',
+            feedScope: deps.feed ? 'idle' : 'disabled',
+            rows: [],
+            nextPrinter: null,
+            printerAfter: after,
+            canManage: false,
+            keys: { kind: 'loading' },
+          },
+    )
     try {
       await me(run.signal, scope.accountId)
       if (!run.current()) return
@@ -494,17 +530,26 @@ export function createFarmView(deps: Dependencies) {
           assignment,
           connection: 'unavailable',
           observation: null,
-          localOrigin: null,
+          // Same rule as confirmOrigin: only live, non-revoked assignments.
+          localOrigin:
+            assignment.status === 'active' &&
+            assignment.connectorStatus !== 'revoked'
+              ? (origins.get(assignment.assignmentId) ?? null)
+              : null,
         })),
         nextPrinter: page.nextAfter,
         canManage: page.canManage,
       })
-      await loadKeys(scope, run)
+      await loadKeys(scope, run, refreshKey)
     } catch (error) {
       if (run.current()) failed(error)
     }
   }
-  async function loadKeys(scope: FarmScope, run: ReturnType<typeof begin>) {
+  async function loadKeys(
+    scope: FarmScope,
+    run: ReturnType<typeof begin>,
+    preferredKey?: string,
+  ) {
     let local: readonly { thumbprint: string }[]
     try {
       local = await deps.listKeys(scope)
@@ -578,7 +623,11 @@ export function createFarmView(deps: Dependencies) {
         return
       }
       const selected =
-        choices.length === 1 && choices[0] ? choices[0].keyId : ''
+        preferredKey && choices.some((choice) => choice.keyId === preferredKey)
+          ? preferredKey
+          : choices.length === 1 && choices[0]
+            ? choices[0].keyId
+            : ''
       publish({ ...state, keys: { kind: 'available', choices, selected } })
       if (selected) await prepareFeeds(scope, selected, run)
     } catch (error) {
@@ -791,14 +840,17 @@ export function createFarmView(deps: Dependencies) {
     ) {
       if (failures > REOPEN_ATTEMPTS) return
       const random = (deps.random ?? Math.random)()
-      const jitter =
-        0.5 +
-        (Number.isFinite(random) ? Math.min(Math.max(random, 0), 1) : 0.5) / 2
+      const spread = Number.isFinite(random)
+        ? Math.min(Math.max(random, 0), 1)
+        : 0.5
+      // Backoff uses [0.5, 1) jitter; a server-imposed minimum is spread over
+      // [1, 1.5) so rate-limited views do not retry in lockstep.
       const retryAt =
         deps.clock().mono +
         Math.max(
-          minDelayMs,
-          Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** failures) * jitter,
+          minDelayMs * (1 + spread / 2),
+          Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** failures) *
+            (0.5 + spread / 2),
         )
       const retry = {
         close() {
@@ -827,7 +879,7 @@ export function createFarmView(deps: Dependencies) {
         if (!fresh || !sameRefs(fresh, refs)) {
           // Server state moved on: refresh the farm so statuses and feeds match.
           if (state.kind === 'ready')
-            void selectFarm(scope.farmId, state.printerAfter)
+            void selectFarm(scope.farmId, state.printerAfter, browserKeyId)
           return
         }
         subscribe(agentId, refs, failures)
@@ -844,7 +896,12 @@ export function createFarmView(deps: Dependencies) {
         if (!viewCurrent()) return
         // Rate limiting is server pacing, not a feed failure: keep the budget.
         if (httpStatus(error) === 429)
-          schedule(agentId, refs, failures, retryAfterMs(error))
+          schedule(
+            agentId,
+            refs,
+            failures,
+            retryAfterMs(error, deps.clock().wall),
+          )
         else schedule(agentId, refs, failures + 1)
       }
     }

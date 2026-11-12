@@ -1771,17 +1771,44 @@ test('logout invalidation, route leave and unmount cancel pending reopens and le
 test('an assignment set changed on the server refreshes the farm and resubscribes with it', async () => {
   const h = setup(true, () => 0)
   await fakeTimers(h, async () => {
+    // Two approved local keys: the user picked the second one.
+    const keyB = '00000000-0000-4000-8000-000000000008'
+    h.data.devices.push({ ...device, keyId: keyB, thumbprint: 'Q'.repeat(43) })
+    h.data.local.push({ thumbprint: 'Q'.repeat(43) })
     await h.view.discover()
+    await h.view.selectKey(keyB)
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
+    expect(
+      h.view.confirmOrigin(assignment, 'http://localhost:7125', true),
+    ).toBe(true)
+    const opened = h.peers.length
+    const kinds: string[] = []
+    let current = h.result.state
+    Object.defineProperty(h.result, 'state', {
+      get: () => current,
+      set: (next: FarmViewState) => {
+        current = next
+        kinds.push(
+          next.kind === 'ready' ? `ready:${next.inventory}` : next.kind,
+        )
+      },
+    })
     h.data.printers.printers = [
       row,
       { ...row, assignmentId: other, printerKey: 'second' },
     ]
-    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    h.peers.at(-1)!.input.onHealth({ kind: 'closed', reason: 'disconnected' })
     expect(await nextPeer(h)).not.toBeNull()
-    expect(h.peer(0).input.signal.aborted).toBe(true)
+    expect(h.peer(opened - 1).input.signal.aborted).toBe(true)
+    // Refreshed in place: no loading flash, key and confirmed origin kept.
+    expect(new Set(kinds)).toEqual(new Set(['ready:ready']))
     expect(h.ready().rows).toHaveLength(2)
+    expect(h.first().localOrigin).toBe('http://localhost:7125')
+    expect(h.ready().rows[1]?.localOrigin).toBeNull()
+    expect(h.ready().keys).toMatchObject({ kind: 'available', selected: keyB })
+    expect(h.peers.at(-1)?.input.browserKeyId).toBe(keyB)
     expect(
-      h.peer(1).input.assignmentRefs.map((ref) => ref.assignmentId),
+      h.peers.at(-1)?.input.assignmentRefs.map((ref) => ref.assignmentId),
     ).toEqual([assignment, other])
   })
 })
@@ -1838,4 +1865,40 @@ test('429 on the re-check honours Retry-After and does not spend the reopen budg
     expect(elapsed).toBe(1000 + 10 * 5000)
     expect(h.peers).toHaveLength(2)
   })
+})
+
+test('429 Retry-After accepts an HTTP date and spreads the wait with jitter', async () => {
+  for (const [random, header, expected] of [
+    [1, '5', 8000], // 5 s * 1.5 = 7.5 s, observed on the next 1 s tick
+    [0, 'date', 10_000], // HTTP date 10 s ahead of the wall clock
+  ] as const) {
+    const h = setup(true, () => random)
+    await fakeTimers(h, async () => {
+      await h.view.discover()
+      let limited = false
+      h.hooks.read = async (path, signal, query) => {
+        if (path === `/api/farms/${farm}/printers` && !limited) {
+          limited = true
+          const value =
+            header === 'date'
+              ? new Date(h.time.wall + 10_000).toUTCString()
+              : header
+          throw Object.assign(new Error('429'), {
+            statusCode: 429,
+            response: new Response(null, {
+              status: 429,
+              headers: { 'retry-after': value },
+            }),
+          })
+        }
+        return h.baseRead(path, signal, query)
+      }
+      h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      // First reopen waits 2 s * jitter, then the rate-limited wait.
+      while (!limited) await second()
+      const from = h.time.mono
+      expect(await nextPeer(h, 60_000)).not.toBeNull()
+      expect(h.time.mono - from).toBe(expected)
+    })
+  }
 })

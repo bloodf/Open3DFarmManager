@@ -118,7 +118,8 @@ export function authorizeCommand(
   if (key.revokedAt !== null) return { ok: false, reason: 'revoked-key' }
   if (!['operator', 'admin', 'owner'].includes(key.role))
     return { ok: false, reason: 'role-denied' }
-  // Provisional fail-closed lease; never longer than the offline authorization lifetime maximum.
+  // Provisional fail-closed lease for this prototype; the lease is caller-supplied and transport
+  // must authenticate its provenance. This length cap alone does not enforce the offline lifetime.
   if (
     ![authorization.issuedAt, authorization.expiresAt].every(
       Number.isSafeInteger,

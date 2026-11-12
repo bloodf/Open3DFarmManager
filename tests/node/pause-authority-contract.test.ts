@@ -689,7 +689,7 @@ test('stale offline authority denies admission and dispatch inspection but keeps
   const { createOfflineAuthority } =
     await import('../../packages/connector/src/auth/offline-authority.ts')
   const offline = createOfflineAuthority({ maxAgeMs: 5000 })
-  const f = await verifierFixture(0, offline)
+  const f = await verifierFixture(0, offline.freshness)
   const never = f.begin()
   assert.deepEqual(
     await f.verifier.admit(
@@ -698,7 +698,7 @@ test('stale offline authority denies admission and dispatch inspection but keeps
     ),
     { ok: false, reason: 'expired-or-inactive' },
   )
-  offline.confirm({ wall: 1000, mono: 1000 })
+  offline.confirm({ wall: 1000, mono: 1000 }, 1)
   const revoked = f.begin()
   const first = await f.verifier.admit(
     revoked.token,
@@ -706,10 +706,12 @@ test('stale offline authority denies admission and dispatch inspection but keeps
   )
   assert.ok(first.ok)
   assert.equal(f.verifier.inspect(first.handle).ok, true)
-  offline.revoke()
+  offline.revoke(2)
   assert.equal(f.verifier.inspect(first.handle).ok, false)
   assert.equal(f.verifier.inspectLifecycle(first.handle), true)
-  offline.confirm({ wall: 1000, mono: 1000 })
+  assert.equal(offline.confirm({ wall: 1000, mono: 1000 }, 2), false)
+  assert.equal(f.verifier.inspect(first.handle).ok, false)
+  offline.confirm({ wall: 1000, mono: 1000 }, 3)
   const attempt = f.begin()
   const decision = await f.verifier.admit(
     attempt.token,
@@ -724,6 +726,6 @@ test('stale offline authority denies admission and dispatch inspection but keeps
     reason: 'expired-or-inactive',
   })
   assert.equal(f.verifier.inspectLifecycle(decision.handle), true)
-  offline.confirm({ wall: 6000, mono: 6000 })
+  offline.confirm({ wall: 6000, mono: 6000 }, 4)
   assert.equal(f.verifier.inspect(decision.handle).ok, false)
 })

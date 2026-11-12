@@ -1,7 +1,9 @@
 /**
  * Bounded offline lifetime for authority the Connector cached from the server.
- * See docs/OFFLINE-AUTHORIZATION-LIFETIME.md. The tracker owns no clock and performs no I/O:
- * callers pass the same wall/monotonic sample they use for their own checks.
+ * See docs/OFFLINE-AUTHORIZATION-LIFETIME.md. The tracker owns no clock and performs no I/O.
+ * Callers pass one `{ wall: Date.now(), mono: performance.now() }` pair taken immediately
+ * before the call, the same pair they use for their own checks.
+ * Nothing is persisted: after a restart authority stays stale until the first authenticated confirm().
  */
 export const OFFLINE_AUTHORITY_DEFAULT_MS = 30_000
 export const OFFLINE_AUTHORITY_MAX_MS = 60_000
@@ -9,7 +11,6 @@ export const OFFLINE_AUTHORITY_MAX_MS = 60_000
 export const OFFLINE_AUTHORITY_MAX_SKEW_MS = 1_000
 
 export type AuthoritySample = Readonly<{ wall: number; mono: number }>
-export type PersistedOfflineAuthority = Readonly<{ confirmedWall: number }>
 export type OfflineAuthorityStaleReason = 'expired' | 'clock' | 'revoked'
 
 /** The only question command paths ask: is cached authority still fresh at this sample? */
@@ -43,6 +44,8 @@ export function createOfflineAuthority(
   const onStale = config.onStale
   let anchor: AuthoritySample | null = null
   let previous: AuthoritySample | null = null
+  // Server sequence floor: a confirm at or below it (stale or pre-revocation) never restores authority.
+  let floor = -1
 
   function stale(reason: OfflineAuthorityStaleReason): false {
     const wasFresh = anchor !== null
@@ -80,42 +83,33 @@ export function createOfflineAuthority(
 
   return Object.freeze({
     maxAgeMs,
-    freshAt,
-    /** The server just confirmed cached authority over an authenticated channel. */
-    confirm(now: AuthoritySample): boolean {
-      if (!validSample(now)) return false
+    /** Read-only view to hand to verifiers; it cannot confirm or revoke. */
+    freshness: Object.freeze({ freshAt }) as CachedAuthorityFreshness,
+    /**
+     * The server just confirmed cached authority. `serverSeq` must strictly increase
+     * past every earlier confirm and revocation; anything else is refused.
+     */
+    confirm(now: AuthoritySample, serverSeq: number): boolean {
+      if (
+        !validSample(now) ||
+        !Number.isSafeInteger(serverSeq) ||
+        serverSeq <= floor
+      )
+        return false
+      floor = serverSeq
       anchor = Object.freeze({ wall: now.wall, mono: now.mono })
       previous = anchor
       return true
     },
-    /**
-     * Restart path. The monotonic clock does not survive a restart, so only the remaining
-     * wall-clock window is restored, never more than one lifetime and never after a backwards jump.
-     */
-    restore(persisted: unknown, now: AuthoritySample): boolean {
-      anchor = null
-      previous = null
-      if (!validSample(now) || typeof persisted !== 'object' || !persisted)
-        return false
-      const confirmedWall = (persisted as { confirmedWall?: unknown })
-        .confirmedWall
+    /** Stale immediately. A server sequence raises the floor so older confirms cannot revive authority. */
+    revoke(serverSeq?: number): void {
       if (
-        !Number.isSafeInteger(confirmedWall) ||
-        (confirmedWall as number) > now.wall ||
-        now.wall - (confirmedWall as number) >= maxAgeMs
+        serverSeq !== undefined &&
+        Number.isSafeInteger(serverSeq) &&
+        serverSeq > floor
       )
-        return false
-      const age = now.wall - (confirmedWall as number)
-      anchor = Object.freeze({ wall: now.wall - age, mono: now.mono - age })
-      previous = Object.freeze({ wall: now.wall, mono: now.mono })
-      return true
-    },
-    /** Server reported revocation, or the caller dropped its cache: stale immediately. */
-    revoke(): void {
+        floor = serverSeq
       stale('revoked')
-    },
-    snapshot(): PersistedOfflineAuthority | null {
-      return anchor ? Object.freeze({ confirmedWall: anchor.wall }) : null
     },
   })
 }

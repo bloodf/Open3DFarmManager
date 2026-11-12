@@ -33,7 +33,7 @@ The Klipper simulator is an external GPL-3.0 service. Its defaults remain in its
 
 ## RTSP test stream
 
-The optional `rtsp` profile runs a digest-pinned MediaMTX image (MIT) with its bundled FFmpeg. FFmpeg generates the `testsrc2` pattern in-container and publishes it to `rtsp://127.0.0.1:8554/test`, so the stream is synthetic and deterministic and needs no camera, host device or network input. Only RTSP over TCP is enabled; UDP, RTMP, HLS, WebRTC, SRT, API and metrics are off. The service runs as UID/GID 10001 with a read-only root, all capabilities dropped and CPU, memory and PID limits; the mounted [config](rtsp/mediamtx.yml) is read-only.
+The optional `rtsp` profile runs a digest-pinned MediaMTX image (MIT) with its bundled FFmpeg. FFmpeg generates the `testsrc2` pattern in-container and publishes it to `rtsp://127.0.0.1:8554/test`, so the stream is synthetic and deterministic and needs no camera, host device or network input. Only RTSP over TCP is enabled; publishing is allowed only from 127.0.0.1 on path `test` and reading only on `test`; UDP, RTMP, HLS, WebRTC, SRT, API and metrics are off. The service runs as UID/GID 10001 with a read-only root, all capabilities dropped and CPU, memory and PID limits; the mounted [config](rtsp/mediamtx.yml) is read-only.
 
 ```sh
 docker compose -f infra/sim/docker-compose.yml --profile rtsp up -d
@@ -41,8 +41,8 @@ pnpm run sim:verify:rtsp
 docker compose -f infra/sim/docker-compose.yml --profile rtsp down
 ```
 
-`sim:verify:rtsp` (override with `SIM_RTSP_URL`, loopback only) retries for 60 seconds, then performs DESCRIBE, SETUP and PLAY over interleaved TCP and requires 10 RTP packets within 15 seconds. It checks that the source delivers media; it does not exercise the Connector's `tools/rtsp-ingest` fixture. MediaMTX (MIT) and its bundled GPL FFmpeg build remain external services; see [THIRD_PARTY.md](../../THIRD_PARTY.md).
+`sim:verify:rtsp` (override with `SIM_RTSP_URL`, loopback only) validates the URL once, then retries within a 60-second total budget; each attempt performs DESCRIBE, SETUP and PLAY over interleaved TCP and requires 10 RTP packets within 15 seconds (or the remaining budget). It checks that the source delivers media; it does not exercise the Connector's `tools/rtsp-ingest` fixture. MediaMTX (MIT) and its bundled GPL FFmpeg build remain external services; see [THIRD_PARTY.md](../../THIRD_PARTY.md).
 
-The [container validation checkpoint](../../docs/CONTAINER-VALIDATION-CHECKPOINT.md) records actual image, camera and Spoolman results and the failed Klipper readiness gate. Remaining E0 gates: successful Klipper container acceptance, RTSP/MediaMTX test stream against the Connector ingest path (the stream itself is below), NAT/loss/latency/UDP fault rig and CI execution. Passing unit tests or Compose parsing does not complete those gates.
+The [container validation checkpoint](../../docs/CONTAINER-VALIDATION-CHECKPOINT.md) records actual image, camera and Spoolman results and the failed Klipper readiness gate. Remaining E0 gates: successful Klipper container acceptance, RTSP/MediaMTX Connector ingest path (the RTSP test stream source is done, see below), NAT/loss/latency/UDP fault rig and CI execution. Passing unit tests or Compose parsing does not complete those gates.
 
 Simulator JSON clients reject invalid UTF-8, duplicate object keys (including escaped aliases), invalid Unicode, nonfinite numbers and excessive nesting before schema validation. Response budgets are 256 KiB, depth 32, 32,768 JSON values and 65,536 characters per string. The bounded parser is the existing local protocol implementation; no external parser dependency was added. These checks do not establish simulator readiness or authenticate a real service.

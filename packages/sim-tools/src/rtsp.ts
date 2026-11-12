@@ -2,8 +2,10 @@ import { connect } from 'node:net'
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
-function parseRtspUrl(raw: string) {
+export function parseRtspUrl(raw: string) {
   const url = new URL(raw)
+  if (url.username || url.password)
+    throw new Error('RTSP URL must not contain credentials')
   if (url.protocol !== 'rtsp:' || !LOOPBACK.has(url.hostname))
     throw new Error('RTSP URL must be rtsp:// on a loopback host')
   return {
@@ -81,10 +83,12 @@ export async function verifyRtsp(
         const end = buffer.indexOf('\r\n\r\n')
         if (end < 0) return
         const head = buffer.subarray(0, end).toString('latin1')
+        const isStatus = head.startsWith('RTSP/1.0 ')
         const len = Number(/^Content-Length:\s*(\d+)/im.exec(head)?.[1] ?? 0)
         if (buffer.length < end + 4 + len) return
         const body = buffer.subarray(end + 4, end + 4 + len).toString('latin1')
         buffer = buffer.subarray(end + 4 + len)
+        if (step === 'stream' && !isStatus) continue
         if (!/^RTSP\/1\.0 200/.test(head))
           return finish(
             new Error(`RTSP ${step} failed: ${head.split('\r\n')[0]}`),

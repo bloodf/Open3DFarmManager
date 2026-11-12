@@ -11,6 +11,19 @@ api: no
 metrics: no
 pprof: no
 playback: no
+authInternalUsers:
+  - user: any
+    pass:
+    ips: ['127.0.0.1/32']
+    permissions:
+      - action: publish
+        path: test
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+        path: test
 paths:
   test:
     runOnInit: >-

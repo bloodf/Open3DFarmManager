@@ -5,7 +5,7 @@ import { verifyRtsp } from '../../packages/sim-tools/src/rtsp.ts'
 
 const sdp = 'v=0\r\nm=video 0 RTP/AVP 96\r\na=control:trackID=0\r\n'
 
-function fakeRtsp(describeStatus = '200 OK') {
+function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
   const server = createServer((socket) => {
     socket.on('data', (data) => {
       const text = data.toString()
@@ -22,7 +22,12 @@ function fakeRtsp(describeStatus = '200 OK') {
           Buffer.from([0x24, 0, 0, 12]),
           Buffer.alloc(12),
         ])
-        for (let i = 0; i < 5; i += 1) socket.write(rtp)
+        const bytes = Buffer.concat(Array.from({ length: packets }, () => rtp))
+        if (split) {
+          socket.write(bytes.subarray(0, 2))
+          setTimeout(() => socket.write(bytes.subarray(2, 9)), 20)
+          setTimeout(() => socket.write(bytes.subarray(9)), 40)
+        } else socket.write(bytes)
       }
     })
   })
@@ -37,6 +42,23 @@ function fakeRtsp(describeStatus = '200 OK') {
 }
 
 describe('verifyRtsp', () => {
+  it('reassembles $ frames split across TCP chunks', async () => {
+    const rtsp = await fakeRtsp('200 OK', true)
+    await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)
+    rtsp.close()
+  })
+  it('times out when too few packets arrive', async () => {
+    const rtsp = await fakeRtsp('200 OK', false, 2)
+    await expect(
+      verifyRtsp(rtsp.url, { minPackets: 5, timeoutMs: 300 }),
+    ).rejects.toThrow('2 packets')
+    rtsp.close()
+  })
+  it('rejects URLs with credentials', async () => {
+    await expect(verifyRtsp('rtsp://u:p@127.0.0.1/test')).rejects.toThrow(
+      'credentials',
+    )
+  })
   it('counts RTP packets over interleaved TCP', async () => {
     const rtsp = await fakeRtsp()
     await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)

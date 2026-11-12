@@ -156,7 +156,12 @@ test('rejects malformed, ambiguous, oversized and wrong-type responses', async (
 test(
   'deadline spans pagination and hanging response body',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
+    // The 150 ms deadline elapses only on the virtual clock, after the second
+    // page started its hanging body, whatever the host load.
+    let now = 0
+    t.mock.method(performance, 'now', () => now)
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     let requests = 0
     const fixture = await server((_req, res) => {
       requests++
@@ -164,16 +169,20 @@ test(
       if (requests === 1) res.end(JSON.stringify([spool(1), spool(2)]))
       else {
         res.write('[')
+        setImmediate(() => {
+          now += 150
+          t.mock.timers.tick(150)
+        })
       }
     })
     try {
-      const started = performance.now()
+      const started = Date.now()
       await assert.rejects(
         reader(fixture.origin, 150)(),
         /Local Spoolman read failed/,
       )
       assert.equal(requests, 2)
-      assert.ok(performance.now() - started < 2000)
+      assert.ok(Date.now() - started < 2000)
     } finally {
       await fixture.close()
     }

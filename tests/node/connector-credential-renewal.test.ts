@@ -7,10 +7,27 @@ import {
   randomUUID,
   verify,
 } from 'node:crypto'
-import { chmodSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
+import { createServer } from 'node:http'
+import {
+  ConnectorIdentity,
+  loadOrCreateIdentity,
+} from '../../packages/connector/src/identity/store.ts'
+import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
+import { credentialLookupId } from '../../packages/connector/src/config/signalling.ts'
+import { openScopedTelemetryQueue } from '../../packages/connector/src/runtime/queue-scope.ts'
+import { parseMoonrakerSnapshot } from '../../packages/connector/src/moonraker/parse.ts'
+import { runConnectorAgent } from '../../packages/connector/src/runtime/agent.ts'
 import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
 import {
   renewCredentialOnce,
@@ -31,6 +48,10 @@ const ORIGIN = 'https://farm.example'
 const AUDIENCE = 'open3dfarmmanager:renewal'
 const TTL = 300
 
+const readCredentialEnvelope = (path: string) =>
+  JSON.parse(readFileSync(path, 'utf8')) as {
+    approval: Record<string, unknown>
+  }
 const b64 = (value: object) =>
   Buffer.from(JSON.stringify(value)).toString('base64url')
 function token(claims: Record<string, unknown>) {
@@ -38,11 +59,14 @@ function token(claims: Record<string, unknown>) {
 }
 
 /** In-memory server double that enforces the same signed challenge contract. */
-function fixture(start = 1_000_000_000_000) {
+function fixture(
+  start = 1_000_000_000_000,
+  options: { identity?: ConnectorIdentity; rootRemainingMs?: number } = {},
+) {
   const clock = { now: start }
-  const identity = new ConnectorIdentity(
-    generateKeyPairSync('ed25519').privateKey,
-  )
+  const identity =
+    options.identity ??
+    new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
   const publicKey = createPublicKey({
     key: Buffer.from(identity.publicKeySpki, 'base64url'),
     format: 'der',
@@ -51,15 +75,28 @@ function fixture(start = 1_000_000_000_000) {
   const agentId = randomUUID(),
     farmId = randomUUID(),
     rootJti = randomUUID()
+  const server = {
+    audience: 'open3dfarmmanager:connector',
+    issued: 0,
+    reject: 0 as number,
+    unavailable: 0 as number,
+    tamper: false,
+    lastIdentity: undefined as RenewalIdentity | undefined,
+  }
   const claims = (jti: string, exp: number) => ({
     sub: agentId,
     farm_id: farmId,
     fingerprint: identity.fingerprint,
+    iss: ORIGIN,
+    aud: server.audience,
     jti,
     iat: exp - TTL,
     exp,
   })
-  const rootExp = Math.floor(start / 1000) + TTL
+  // Root issued 100 s before the fixture clock, like a credential in service.
+  const rootExp = Math.floor(
+    (start + (options.rootRemainingMs ?? (TTL - 100) * 1000)) / 1000,
+  )
   const directory = mkdtempSync(join(tmpdir(), 'o3dfm-renewal-'))
   chmodSync(directory, 0o700)
   const credentialPath = join(directory, 'credential.json')
@@ -79,13 +116,6 @@ function fixture(start = 1_000_000_000_000) {
     string,
     { childJti: string; token: string; expiresAt: number }
   >()
-  const server = {
-    issued: 0,
-    reject: 0 as number,
-    unavailable: 0 as number,
-    tamper: false,
-    lastIdentity: undefined as RenewalIdentity | undefined,
-  }
   const challenges = new Map<string, RenewalChallenge>()
   const transport: RenewalTransport = async (step, body) => {
     if (server.unavailable > 0) {
@@ -241,9 +271,49 @@ test('server rejection and mismatched successors leave the current credential un
   assert.deepEqual(await f.once(), { kind: 'retry', reason: 'challenge-403' })
   f.server.unavailable = 1
   assert.deepEqual(await f.once(), { kind: 'retry', reason: 'challenge-503' })
+  f.server.audience = 'open3dfarmmanager:other'
+  await assert.rejects(f.once(), /claims do not match/)
+  f.server.audience = 'open3dfarmmanager:connector'
   f.server.tamper = true
-  await assert.rejects(f.once(), /does not match/)
-  assert.deepEqual(f.read(), before)
+  await assert.rejects(f.once(), /does not match the reservation/)
+  // The scheduler reports a mismatch distinctly from a generic failure.
+  const reasons: string[] = []
+  await runCredentialRenewal({
+    credentialPath: f.credentialPath,
+    credential: f.read(),
+    identity: f.identity,
+    transport: f.transport,
+    origin: ORIGIN,
+    audience: AUDIENCE,
+    retryMinMs: 100_000,
+    retryMaxMs: 100_000,
+    signal: new AbortController().signal,
+    onRenewed: () => assert.fail('mismatched successor must not be used'),
+    onDiagnostic: (d) => {
+      if (d.kind === 'credential-renewal-retry') reasons.push(d.reason)
+    },
+    now: () => f.clock.now,
+    random: () => 0,
+    sleep: async (ms) => {
+      f.clock.now += ms
+    },
+  })
+  assert.ok(reasons.length > 0)
+  assert.ok(reasons.every((r) => r === 'successor-mismatch'))
+  // An invalid envelope is rejected in memory, before any temp file or rename.
+  assert.throws(() =>
+    writeCredentialFileAtomically(f.credentialPath, {
+      ...readCredentialEnvelope(f.credentialPath),
+      expected_fingerprint: 'not-a-fingerprint',
+    } as never),
+  )
+  assert.deepEqual(readCredentialEnvelope(f.credentialPath).approval, {
+    status: 'approved',
+    agent_id: before.agent_id,
+    farm_id: before.farm_id,
+    device_token: before.device_token,
+    expires_at: before.expires_at,
+  })
   assert.deepEqual(readdirSync(f.directory), ['credential.json'])
 })
 
@@ -381,4 +451,123 @@ test('renewal proof signing refuses foreign or stale challenges', async (t) => {
       () => f.identity.signRenewalProof({ ...base, ...change }),
       /not current or trusted/,
     )
+})
+
+test('agent restarts after renewal and its telemetry sender uses the successor', async (t) => {
+  const data = mkdtempSync(join(tmpdir(), 'o3dfm-renewal-agent-'))
+  chmodSync(data, 0o700)
+  const identity = loadOrCreateIdentity(data)
+  // Real clock: root expires in ~4 s, so renewal runs within ~2-3 s.
+  const f = fixture(Date.now(), { identity, rootRemainingMs: 4000 })
+  Object.defineProperty(f.clock, 'now', { get: Date.now, set() {} })
+  const originalFetch = globalThis.fetch
+  const closed = createServer()
+  await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve))
+  const moonPort = (closed.address() as { port: number }).port
+  await new Promise<void>((resolve) => closed.close(() => resolve()))
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    f.cleanup()
+    rmSync(data, { recursive: true, force: true })
+  })
+  const root = f.read()
+  const moon = `http://127.0.0.1:${moonPort}`
+  const configPath = join(data, 'runtime.json')
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      version: 1,
+      collection: {
+        version: 1,
+        allowedOrigins: [moon],
+        printers: [{ printerKey: 'sim-1', origin: moon }],
+      },
+      assignments: [
+        {
+          assignment_id: randomUUID(),
+          agent_id: root.agent_id,
+          farm_id: root.farm_id,
+          printer_key: 'sim-1',
+          moonraker_origin: moon,
+        },
+      ],
+      telemetry: {
+        endpoint: ORIGIN + '/api/connector/telemetry',
+        audience: 'open3dfarmmanager:connector',
+        retryMinMs: 100,
+        retryMaxMs: 100,
+        idleMs: 100,
+      },
+      renewal: { audience: AUDIENCE, retryMinMs: 100, retryMaxMs: 200 },
+    }),
+    { mode: 0o600 },
+  )
+  // Seed one record so the drain loop actually calls the telemetry sender.
+  const queue = openScopedTelemetryQueue({
+    dataDirectory: data,
+    config: readAgentRuntimeConfig(configPath, root),
+    credential: root,
+    now: Date.now(),
+  })
+  const { printer } = parseMoonrakerSnapshot(
+    readFileSync(
+      new URL('../fixtures/moonraker/printing.json', import.meta.url),
+      'utf8',
+    ),
+    { printerKey: 'sim-1', observedAt: Date.now() },
+  )
+  queue.enqueue(printer, Date.now())
+  queue.close()
+  const telemetryJtis: string[] = []
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const target = String(url)
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+    if (target.startsWith(ORIGIN + '/api/connector/credentials/renewal/')) {
+      const step = target.slice(target.lastIndexOf('/') + 1) as
+        'challenge' | 'complete'
+      const answer = await f.transport(
+        step,
+        JSON.parse(String(init?.body)),
+        new AbortController().signal,
+      )
+      return json(answer.status, answer.body)
+    }
+    if (target === ORIGIN + '/api/connector/telemetry/challenge') {
+      const auth = new Headers(init?.headers).get('authorization') ?? ''
+      telemetryJtis.push(credentialLookupId(auth.replace(/^Bearer /, '')))
+      return json(503, { error: 'synthetic' })
+    }
+    throw new Error('Unexpected fetch ' + target)
+  }) as typeof fetch
+  const rootJti = credentialLookupId(root.device_token)
+  const controller = new AbortController()
+  const kinds: string[] = []
+  const running = runConnectorAgent({
+    configPath,
+    credentialPath: f.credentialPath,
+    dataDirectory: data,
+    signal: controller.signal,
+    onDiagnostic: (d) => kinds.push(d.kind),
+  })
+  const deadline = Date.now() + 15000
+  while (!telemetryJtis.some((jti) => jti !== rootJti) && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  controller.abort()
+  await running
+  const successor = f.read()
+  const successorJti = credentialLookupId(successor.device_token)
+  assert.notEqual(successorJti, rootJti)
+  assert.equal(successor.root_jti, rootJti)
+  assert.equal(telemetryJtis[0], rootJti)
+  assert.equal(telemetryJtis.at(-1), successorJti)
+  // After the switch, the root token is never presented again.
+  const first = telemetryJtis.indexOf(successorJti)
+  assert.ok(telemetryJtis.slice(first).every((jti) => jti === successorJti))
+  assert.ok(kinds.includes('credential-renewed'))
+  // One summary per agent run: the original and the restarted one.
+  assert.equal(kinds.filter((k) => k === 'agent-summary').length, 2)
 })

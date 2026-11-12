@@ -54,8 +54,7 @@ function untilAbort(signal: AbortSignal): Promise<void> {
   })
 }
 
-/** One scoped queue, one maintained authenticated sender, one serial drain loop. */
-export async function runConnectorAgent(input: {
+type AgentInput = {
   statusPort?: number
   configPath: string
   credentialPath: string
@@ -63,7 +62,20 @@ export async function runConnectorAgent(input: {
   signal: AbortSignal
   onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
-}): Promise<void> {
+}
+
+/** Restarts the agent after each persisted, server-confirmed credential renewal. */
+export async function runConnectorAgent(input: AgentInput): Promise<void> {
+  while ((await runConnectorAgentOnce(input)) && !input.signal.aborted) {
+    // Every run re-reads identity, credential and config from disk.
+  }
+}
+
+/**
+ * One scoped queue, one maintained authenticated sender, one serial drain loop.
+ * Resolves true when a renewed credential was persisted and a restart is due.
+ */
+async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
   const identity = loadExistingIdentity(input.dataDirectory)
   const credential = readRuntimeCredential(
     input.credentialPath,
@@ -74,7 +86,7 @@ export async function runConnectorAgent(input: {
   const lookupId = config.signalling
     ? credentialLookupId(credential.device_token)
     : undefined
-  if (input.signal.aborted) return
+  if (input.signal.aborted) return false
   bootstrapNetworking()
   const { createAuthenticatedTelemetrySender } =
     await import('../cloud/authenticated-http-telemetry.ts')
@@ -89,7 +101,7 @@ export async function runConnectorAgent(input: {
   })
   if (Date.now() >= credential.expires_at)
     throw new Error('Runtime credential expired before startup')
-  if (input.signal.aborted) return
+  if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
     config,
@@ -138,7 +150,7 @@ export async function runConnectorAgent(input: {
         onError: fail,
       })
     }
-    if (signal.aborted) return
+    if (signal.aborted) return false
     snapshots = config.signalling
       ? createFarmSnapshotSource({ assignmentRefs: refs })
       : undefined
@@ -375,6 +387,5 @@ export async function runConnectorAgent(input: {
     }
   }
   if (failure) throw failure.error
-  // ponytail: restart per renewal (one promise per TTL); in-place sender swap if reconnect churn matters.
-  if (renewed && !input.signal.aborted) return runConnectorAgent(input)
+  return renewed
 }

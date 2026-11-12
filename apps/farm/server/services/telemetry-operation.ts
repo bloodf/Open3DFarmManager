@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   parseBoundedJson,
   TelemetryBatch,
+  telemetryPrinterKey,
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
 import { TELEMETRY_OPERATION_PATH } from '../../../../packages/farm-protocol/src/telemetry-proof.ts'
@@ -32,7 +33,7 @@ export function prepareTelemetryOperation(input: unknown): TelemetryOperation {
     }),
   )
   for (const record of records) {
-    const key = record.state.printerKey
+    const key = telemetryPrinterKey(record)
     if (
       key.includes('\0') ||
       /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(

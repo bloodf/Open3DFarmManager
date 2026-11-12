@@ -1,7 +1,9 @@
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
+import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { createPublicKey, randomBytes, verify } from 'node:crypto'
 import {
   chmodSync,
@@ -369,6 +371,45 @@ test('default transport caps response size by header and by stream', async () =>
     }
   } finally {
     server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('missing hardlink support fails before any network call and leaves no files', async () => {
+  const { dir, identity, clock, base } = await setup()
+  const link = mock.method(fs, 'linkSync', () => {
+    throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' })
+  })
+  syncBuiltinESMExports()
+  try {
+    const server = fakeServer(identity, [[200, approved]], clock)
+    await assert.rejects(
+      pairConnector({ ...base, fetch: server.fetch }),
+      /EXDEV/,
+    )
+    assert.deepEqual(server.calls, [])
+    assert.deepEqual(readdirSync(dir), ['id'])
+  } finally {
+    link.mock.restore()
+    syncBuiltinESMExports()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('non-200 response bodies are drained', async () => {
+  const { dir, base } = await setup()
+  try {
+    let drained = 0
+    const fetch: PairingFetch = async () => ({
+      status: 403,
+      text: async () => {
+        drained++
+        return ''
+      },
+    })
+    await assert.rejects(pairConnector({ ...base, fetch }), /rejected/)
+    assert.equal(drained, 1)
+  } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })

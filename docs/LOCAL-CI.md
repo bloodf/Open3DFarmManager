@@ -29,7 +29,8 @@ The code job leaves two paths out. The default Playwright run skips
 `tests/e2e/farm-view.spec.ts`, because the file calls `test.skip` unless
 `FARM_VIEW_E2E` is `true`, and the default configuration keeps the farm view
 flag off. The dedicated configuration `playwright.farm-view.config.ts` refuses
-to load without that variable, turns the flag on and serves the app on port 3101.
+to load without that variable, turns the flag on and serves the app on port 3101 (override with `FARM_VIEW_PORT`; the default suite's
+port 3100 is overridable with `E2E_PORT`; both accept an integer from 1 to 65535).
 Build the app first, then run these cases on their own:
 
 ```sh

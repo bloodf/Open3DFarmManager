@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { isAbsolute, relative } from 'node:path'
 import postgres from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
+  runMigrations,
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { testPostgresAtomicTelemetry } from '../tests/helpers/postgres-atomic-telemetry-integration.ts'
@@ -44,14 +46,25 @@ try {
   )[0]
   assert.equal(identity?.database, 'fixture')
   assert.equal(identity?.user, 'fixture')
-  const catalog = await loadMigrationCatalog()
-  assert.ok(
-    catalog.length >= 22,
-    'Migrations 0001–0022 are required; the rollback checks need 0022 as the last applied migration',
+  const full = await loadMigrationCatalog()
+  const catalog = catalogThrough(full, '0022_connector_successor_proofs')
+  const existing = Number(
+    (
+      await sql`SELECT count(*)::int AS n FROM public.open3dfarm_migrations`.catch(
+        () => [{ n: 0 }],
+      )
+    )[0]?.n,
   )
+  if (existing > catalog.length)
+    throw new Error(
+      'Atomic telemetry runner requires a fresh fixture DB; it applies 0001–0022 itself and found ' +
+        existing +
+        ' migrations',
+    )
+  await runMigrations(sql, catalog, { kind: 'up' })
   const rows =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...rows]), 22)
+  assert.equal(validateMigrationHistory(catalog, [...rows]), catalog.length)
   assert.equal(
     (
       await sql`SELECT to_regclass('farm.connector_credential_proofs')::text AS name`

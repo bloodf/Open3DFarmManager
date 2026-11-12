@@ -207,7 +207,10 @@ function reserveCredential(path: string) {
     linkSync(tmp, tmp + '.probe')
     unlinkSync(tmp + '.probe')
   } catch (error) {
-    closeSync(fd)
+    // Each step is independent: a close error must neither skip cleanup nor mask `error`.
+    try {
+      closeSync(fd)
+    } catch {}
     for (const name of [tmp, tmp + '.probe']) {
       try {
         unlinkSync(name)

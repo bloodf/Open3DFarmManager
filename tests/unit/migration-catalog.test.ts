@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   migrationCatalog,
   validateMigrationHistory,
@@ -12,8 +13,12 @@ const pair = [
 describe('migration catalog', () => {
   test('loads repository pairs and hashes both directions deterministically', async () => {
     const repository = await loadMigrationCatalog()
-    expect(repository).toHaveLength(23)
-    expect(repository.at(-1)?.id).toBe('0023_connector_credential_renewals')
+    expect(repository.length).toBeGreaterThanOrEqual(23)
+    expect(repository.map((entry) => entry.id.slice(0, 4))).toEqual(
+      repository.map((_, index) => String(index + 1).padStart(4, '0')),
+    )
+    expect(repository[22]?.id).toBe('0023_connector_credential_renewals')
+    expect(repository[24]?.id).toBe('0025_schema_reader')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )
@@ -62,5 +67,20 @@ describe('migration catalog', () => {
       [{ ...row, unexpected: true }],
     ])
       expect(() => validateMigrationHistory(catalog, rows)).toThrow()
+  })
+
+  test('catalogThrough returns the prefix ending at the id and rejects unknown ids', () => {
+    const catalog = migrationCatalog([
+      ...pair,
+      { name: '0002_next.up.sql', sql: 'SELECT 1;' },
+      { name: '0002_next.down.sql', sql: 'SELECT 2;' },
+    ])
+    const first = catalogThrough(catalog, '0001_example')
+    expect(first).toEqual(catalog.slice(0, 1))
+    expect(first.at(-1)?.id).toBe('0001_example')
+    expect(catalogThrough(catalog, '0002_next')).toEqual(catalog)
+    expect(() => catalogThrough(catalog, '0003_missing')).toThrow(
+      /not in the catalog/,
+    )
   })
 })

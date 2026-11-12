@@ -3,3 +3,6 @@ export function flagEnabled(value: unknown): boolean {
 }
 
 export const projectVersion = '0.0.1'
+
+export { createLogger, redact } from './log.ts'
+export type { Logger, LogLevel } from './log.ts'

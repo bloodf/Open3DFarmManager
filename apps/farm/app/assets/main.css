@@ -45,3 +45,43 @@ small {
     color: #8dd9b1;
   }
 }
+.account-form {
+  max-width: 26rem;
+}
+.account-form label {
+  display: block;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+.account-form input,
+.account-form select {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+.account-form button {
+  min-height: 2.75rem;
+  margin-top: 1rem;
+  padding: 0.65rem 1.25rem;
+  font: inherit;
+  cursor: pointer;
+}
+.account-form button:disabled {
+  cursor: wait;
+}
+.account-form input:focus-visible,
+.account-form select:focus-visible,
+.account-form button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+.account-form .help {
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0;
+}

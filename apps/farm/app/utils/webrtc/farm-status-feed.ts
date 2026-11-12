@@ -103,6 +103,15 @@ export function createAuthenticatedFarmStatusFeed(
           ? performance.now() < authDeadline
           : performance.now() < session.deadlineMonoMs &&
             Date.now() < session.expiresAt)
+      // A lapsed lease or deadline is expiry, not a validation failure: the
+      // view renews or reopens on 'expired' and stops on 'rejected'.
+      const lapsed = () =>
+        performance.now() >= lifetimeDeadline ||
+        (!session
+          ? performance.now() >= authDeadline
+          : performance.now() >= session.deadlineMonoMs ||
+            Date.now() >= session.expiresAt)
+      const stale = () => close(lapsed() ? 'expired' : 'rejected')
       const close = (
         reason:
           'expired' | 'revoked' | 'disconnected' | 'rejected' = 'disconnected',
@@ -155,15 +164,16 @@ export function createAuthenticatedFarmStatusFeed(
         return { close }
       }
       active.get(slot)?.()
+      // Local capacity and callback faults are not producer tampering.
       if (active.has(slot) || active.size >= 100) {
-        close('rejected')
+        close('disconnected')
         return { close }
       }
       active.set(slot, retire)
       try {
         requireSync(() => onHealth({ kind: 'connecting' }))
       } catch {
-        close('rejected')
+        close('disconnected')
       }
       void (async () => {
         try {
@@ -265,7 +275,8 @@ export function createAuthenticatedFarmStatusFeed(
             },
             assignmentRefs: refs,
             onVerifiedAdmission(value) {
-              if (!current() || session) return close('rejected')
+              if (session) return close('rejected')
+              if (!current()) return stale()
               try {
                 const b = RtcSessionBinding.parse(
                     structuredClone(value.binding),
@@ -322,7 +333,8 @@ export function createAuthenticatedFarmStatusFeed(
               }
             },
             onStatus(value) {
-              if (!current() || !session) return close('rejected')
+              if (!session) return close('rejected')
+              if (!current()) return stale()
               try {
                 const parsed = StatusMessage.safeParse(structuredClone(value))
                 if (

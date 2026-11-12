@@ -6,11 +6,13 @@ import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
 import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
+import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
 
 type AgentDiagnostic =
   | CollectionDiagnostic
+  | RenewalDiagnostic
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
@@ -97,6 +99,7 @@ export async function runConnectorAgent(input: {
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let failure: { error: unknown } | undefined
+  let renewed = false
   let diagnosticBudget = 1024
   const totals = {
     delivered: 0,
@@ -208,6 +211,34 @@ export async function runConnectorAgent(input: {
               close: (reason) => sender.close(reason),
               dispose: (ms) => client.dispose(ms),
             }
+          },
+        }).catch(fail),
+      )
+    }
+    // Credential renewal: a persisted, server-confirmed successor restarts the
+    // agent so every sender re-reads the credential file (see end of function).
+    if (config.renewal) {
+      const { runCredentialRenewal, createRenewalHttpTransport } =
+        await import('../cloud/credential-renewal.ts')
+      const origin = new URL(config.telemetry.endpoint).origin
+      tasks.push(
+        runCredentialRenewal({
+          credentialPath: input.credentialPath,
+          credential,
+          identity,
+          transport: createRenewalHttpTransport({
+            origin,
+            timeoutMs: config.renewal.timeoutMs,
+          }),
+          origin,
+          audience: config.renewal.audience,
+          retryMinMs: config.renewal.retryMinMs,
+          retryMaxMs: config.renewal.retryMaxMs,
+          signal,
+          onDiagnostic: diagnostic,
+          onRenewed() {
+            renewed = true
+            controller.abort()
           },
         }).catch(fail),
       )
@@ -344,4 +375,6 @@ export async function runConnectorAgent(input: {
     }
   }
   if (failure) throw failure.error
+  // ponytail: restart per renewal (one promise per TTL); in-place sender swap if reconnect churn matters.
+  if (renewed && !input.signal.aborted) return runConnectorAgent(input)
 }

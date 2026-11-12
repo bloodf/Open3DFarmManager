@@ -192,10 +192,14 @@ function launch(args: string[], auditPath?: string) {
     // fails at once with the CLI's output.
     async until(predicate: (text: string) => boolean) {
       while (!predicate(output)) {
-        if (child.exitCode !== null)
+        if (child.exitCode !== null) {
+          // Output written just before exit may still be in the pipe.
+          await stdout
+          if (predicate(output)) return
           throw new Error(
             `CLI exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
           )
+        }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },

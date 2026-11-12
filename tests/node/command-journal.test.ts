@@ -257,7 +257,7 @@ test(
   {
     timeout: 30000,
   },
-  async () => {
+  async (t) => {
     const f = fixture()
     const script = `import {openCommandJournal,claimCommand} from './packages/connector/src/control/command-journal.ts'; const [directory,input]=process.argv.slice(1); const j=openCommandJournal({directory,clock:()=>1000}); console.log('ready'); process.stdin.once('data',()=>{const result=claimCommand(j,JSON.parse(input)); console.log(JSON.stringify(result.ok ? {ok:true}:result));process.exit(0)})`
     const ready: Array<() => void> = []
@@ -278,6 +278,10 @@ test(
         { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
       ),
     )
+    // Also runs when the test times out, unlike the finally below.
+    t.after(() => {
+      for (const child of children) if (child.exitCode === null) child.kill()
+    })
     try {
       const results = children.map(
         (child) =>

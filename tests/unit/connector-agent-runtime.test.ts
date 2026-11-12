@@ -99,10 +99,14 @@ function job(args: string[], env = {}) {
     // fails at once with the agent's output.
     async until(predicate: () => boolean) {
       while (!predicate()) {
-        if (child.exitCode !== null)
+        if (child.exitCode !== null) {
+          // Output written just before exit may still be in the pipe.
+          await reading
+          if (predicate()) return
           throw new Error(
             `Agent exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
           )
+        }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },

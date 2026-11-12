@@ -78,9 +78,11 @@ function journalRows(directory: string) {
 }
 
 // Timers are mocked per test, so this waits on events between event-loop
-// turns; the suite's test timeout is the single hang bound.
-async function waitFor(condition: () => boolean) {
+// turns. The test's own signal ends the wait when the test times out, so a
+// timed-out body stops instead of spinning on.
+async function waitFor(signal: AbortSignal, condition: () => boolean) {
   while (!condition()) {
+    signal.throwIfAborted()
     await new Promise((resolve) => setImmediate(resolve))
   }
 }
@@ -403,11 +405,11 @@ async function fixture(
     wire?: string | (() => Promise<string>),
     options: { admitted?: boolean } = {},
   ) {
-    await waitFor(() => sessions.length === 1)
+    await waitFor(t.signal, () => sessions.length === 1)
     const session = sessions[0]!
     session.options.onInboxReady?.()
     session.options.onProofsReady?.(proofs)
-    await waitFor(() => session.phases.length === 1)
+    await waitFor(t.signal, () => session.phases.length === 1)
     const nonce = session.phases[0]!.admission_nonce!
     const issued = await admission(nonce)
     const frame = (t: string, value: string) =>
@@ -424,7 +426,7 @@ async function fixture(
     session.options.onPhase?.(
       frame('control.admission-proof', issued.admissionProofWire),
     )
-    await waitFor(() =>
+    await waitFor(t.signal, () =>
       diagnostics.some(
         (d) =>
           d.kind ===
@@ -532,13 +534,14 @@ test('an admitted signed pause reaches the fake Moonraker once, is journaled and
   assert.equal(session.scope.credentialAudience, SIGNALLING.credentialAudience)
   assert.equal(session.scope.assignmentId, f.assignmentId)
   assert.equal(session.scope.jti, f.jti)
-  await waitFor(() => session.results.length === 1)
+  await waitFor(t.signal, () => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'applied')
   assert.equal(f.moonraker.counts().pauses, 1)
   // A repeated command on the same peer answers the first outcome and never
   // reaches the printer again.
   session.options.onData?.(frame('control.command', command))
   await waitFor(
+    t.signal,
     () => f.diagnostics.filter((d) => d.kind === 'pause-outcome').length === 2,
   )
   assert.equal(f.moonraker.counts().pauses, 1)
@@ -584,7 +587,7 @@ test('without an authenticated confirmation the production path is inert: every 
       (d) => d.kind === 'pause-denied' && d.reason === 'expired-or-inactive',
     ),
   )
-  await waitFor(() => session.results.length === 1)
+  await waitFor(t.signal, () => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'rejected')
   assert.equal(f.moonraker.counts().connections, 0)
   assert.equal(f.moonraker.counts().pauses, 0)
@@ -611,7 +614,7 @@ test('after an applied pause and a restart on the same data directory the comman
   const f = await fixture(t)
   const first = f.start()
   const { command } = await f.admitAndCommand()
-  await waitFor(() => f.sessions[0]!.results.length === 1)
+  await waitFor(t.signal, () => f.sessions[0]!.results.length === 1)
   assert.equal(f.sessions[0]!.results[0]!.outcome, 'applied')
   f.controller.abort()
   await first
@@ -623,10 +626,12 @@ test('after an applied pause and a restart on the same data directory the comman
   const { session } = await f.admitAndCommand(async () =>
     encodeCommandV2(await f.signedCommand(decodeCommandV2(command).cmd_id)),
   )
-  await waitFor(() => session.results.length === 1)
+  await waitFor(t.signal, () => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'rejected')
   // The rejection comes from the durable journal's replay refusal.
-  await waitFor(() => f.diagnostics.some((d) => d.kind === 'pause-outcome'))
+  await waitFor(t.signal, () =>
+    f.diagnostics.some((d) => d.kind === 'pause-outcome'),
+  )
   assert.deepEqual(
     f.diagnostics.filter((d) => d.kind === 'pause-outcome'),
     [{ kind: 'pause-outcome', outcome: 'rejected', reason: 'replay' }],
@@ -657,7 +662,7 @@ test('a leftover write-started row from a crash keeps the assignment busy and no
   closeCommandJournal(journal)
   const running = f.start()
   const { session } = await f.admitAndCommand()
-  await waitFor(() => session.results.length === 1)
+  await waitFor(t.signal, () => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'rejected')
   assert.equal(f.moonraker.counts().connections, 0)
   assert.equal(f.moonraker.counts().pauses, 0)
@@ -674,10 +679,10 @@ test('a leftover write-started row from a crash keeps the assignment busy and no
 test('a terminal transport closes the peer before any command and the lifecycle reconnects', async (t) => {
   const f = await fixture(t)
   const running = f.start()
-  await waitFor(() => f.sessions.length === 1)
+  await waitFor(t.signal, () => f.sessions.length === 1)
   const first = f.sessions[0]!
   first.options.onProofsReady?.(f.proofs)
-  await waitFor(() => first.phases.length === 1)
+  await waitFor(t.signal, () => first.phases.length === 1)
   first.options.onTerminal?.('socket-closed')
   assert.ok(
     f.diagnostics.some(

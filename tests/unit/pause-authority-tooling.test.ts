@@ -39,10 +39,11 @@ for (const cleanupFails of [false, true]) {
 }
 
 const checkout = fileURLToPath(new URL('../../', import.meta.url))
-// The child kill bound stays below the case budget so a stalled child reports
-// its own diagnostic.
-const CHILD_TIMEOUT_MS = 5000
-const CASE_TIMEOUT_MS = 30000
+// Hang detectors only: git and the CLI start in well under a second on an
+// idle host but can take several seconds on a contended one. The child bound
+// stays below the case budget so a stalled child reports its own diagnostic.
+const CHILD_TIMEOUT_MS = 25000
+const CASE_TIMEOUT_MS = 60000
 
 function git(args: string[]) {
   const result = spawnSync('git', args, {

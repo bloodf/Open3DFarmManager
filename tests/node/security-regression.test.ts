@@ -178,9 +178,13 @@ test(
   {
     timeout: 30000,
   },
-  async () => {
+  async (t) => {
     const dir = scratch()
     const spawned: ReturnType<typeof spawn>[] = []
+    // Also runs when the test times out, unlike the finally below.
+    t.after(() => {
+      for (const child of spawned) if (child.exitCode === null) child.kill()
+    })
     try {
       const initialized = new PersistentReplayStore(dir)
       initialized.close()

@@ -179,8 +179,15 @@ onMounted(async () => {
 })
 function availability(row: FarmRow) {
   const current = ready.value
+  // `now` only ticks once a second, so a frame received after the last tick
+  // would look like a negative (stale) age. Read the tick for reactivity, but
+  // judge freshness against a clock sampled now.
+  void now.value
   return current
-    ? pauseAvailability(row, current.keys, pauseEnabled.value, now.value)
+    ? pauseAvailability(row, current.keys, pauseEnabled.value, {
+        wall: Date.now(),
+        mono: performance.now(),
+      })
     : { available: false as const, reason: '' }
 }
 const pauseDialog = ref<HTMLDialogElement | null>(null)

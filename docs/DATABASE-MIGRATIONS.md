@@ -4,7 +4,7 @@ This opt-in local tool applies reviewed SQL to a fresh synthetic PostgreSQL data
 
 Set `MIGRATION_SYNTHETIC_TEST_DISPOSABLE=yes` and `MIGRATION_SYNTHETIC_TEST_PORT` to the loopback-published port of a task-owned disposable PostgreSQL instance. Both database and user must be `fixture`; the host is fixed to `127.0.0.1`. No `DATABASE_URL` is read. The operator must verify resource ownership before invoking this destructive tool; the flag and fixture name cannot prove a database is disposable.
 
-Run `bun scripts/migrate-disposable-db.ts up`. To reverse exactly one migration, run `bun scripts/migrate-disposable-db.ts down 0004_account_sessions`, substituting the actual last applied ID. Rollback may destroy data and is never automatic. Existing schemas created by older manual test scripts cannot be adopted automatically: use a fresh disposable database.
+Run `node scripts/migrate-disposable-db.ts up`. To reverse exactly one migration, run `node scripts/migrate-disposable-db.ts down 0004_account_sessions`, substituting the actual last applied ID. Rollback may destroy data and is never automatic. Existing schemas created by older manual test scripts cannot be adopted automatically: use a fresh disposable database.
 
 Files must be contiguous numbered pairs, starting at `0001`, named `NNNN_lowercase_name.up.sql` and `.down.sql`. Every directory entry must be a regular SQL file. The runner hashes the ID and exact contents of both directions. Changing an already applied file, removing it, or finding unknown/out-of-order history prevents further migration SQL from executing. Restore the reviewed source or investigate the fixture; do not rewrite the journal to hide drift.
 

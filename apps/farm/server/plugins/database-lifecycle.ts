@@ -1,24 +1,14 @@
 import { useRuntimeConfig } from 'nuxt/server'
-import {
-  closeDatabaseRuntime,
-  parseDatabaseRuntimeConfig,
-  startDatabaseRuntime,
-} from '../utils/database/runtime.ts'
+import { beginDatabaseStartup } from '../utils/database/lifecycle.ts'
+import { closeDatabaseRuntime } from '../utils/database/runtime.ts'
+import { setDatabasePhase } from '../utils/database/phase.ts'
 
-export default defineNitroPlugin(async (nitro) => {
-  nitro.hooks.hook('close', closeDatabaseRuntime)
-  // Fail closed: an invalid config, unreachable database or schema mismatch
-  // must stop the process; a rejected plugin alone would still let Nitro listen.
-  try {
-    const config = parseDatabaseRuntimeConfig(
-      Reflect.get(useRuntimeConfig(), 'database'),
-    )
-    if (config) await startDatabaseRuntime(config)
-  } catch (error) {
-    console.error(
-      'Database startup failed; refusing to serve:',
-      error instanceof Error ? error.message : 'unknown error',
-    )
-    process.exit(1)
-  }
+export default defineNitroPlugin((nitro) => {
+  nitro.hooks.hook('close', async () => {
+    setDatabasePhase('failed')
+    await closeDatabaseRuntime()
+  })
+  // Never at build/prerender time: it must not touch a database or exit the build.
+  if (import.meta.prerender) return
+  void beginDatabaseStartup(useRuntimeConfig())
 })

@@ -10,13 +10,24 @@ import {
 } from '../apps/farm/server/utils/database/schema.ts'
 
 const url = process.env.STARTUP_GATING_DATABASE_URL
-if (!url || new URL(url).hostname !== '127.0.0.1')
-  throw new Error('Set STARTUP_GATING_DATABASE_URL to a loopback disposable DB')
+if (
+  process.env.STARTUP_GATING_DISPOSABLE !== 'yes' ||
+  !url ||
+  new URL(url).hostname !== '127.0.0.1' ||
+  new URL(url).pathname !== '/fixture'
+)
+  throw new Error(
+    'Set STARTUP_GATING_DISPOSABLE=yes and a loopback STARTUP_GATING_DATABASE_URL for database "fixture"',
+  )
 const catalog = await loadMigrationCatalog(
   new URL('../infra/db/migrations/', import.meta.url),
 )
 const sql = postgres(url, { max: 2, connect_timeout: 5 })
 try {
+  const [journal] =
+    await sql`SELECT to_regclass('public.open3dfarm_migrations') AS name`
+  if (journal?.name)
+    throw new Error('Journal exists: use a fresh disposable DB')
   assert.equal(await schemaState(sql, catalog), 'pending')
   assert.equal(await databaseReadiness(sql, catalog), 'schema-pending')
   await assert.rejects(prepareSchema(sql, catalog, 'verify'), /pending/)
@@ -29,6 +40,12 @@ try {
   await sql`DELETE FROM public.open3dfarm_migrations WHERE position = ${catalog.length}`
   await sql`UPDATE public.open3dfarm_migrations SET checksum = ${catalog[0]!.checksum} WHERE position = 1`
   assert.equal(await schemaState(sql, catalog), 'pending')
+  await sql`INSERT INTO public.open3dfarm_migrations (position, id, checksum) VALUES (${catalog.length}, ${catalog.at(-1)!.id}, ${catalog.at(-1)!.checksum})`
+  await sql`INSERT INTO public.open3dfarm_migrations (position, id, checksum) VALUES (${catalog.length + 1}, '9999_future', ${'1'.repeat(64)})`
+  assert.equal(await schemaState(sql, catalog), 'ahead')
+  assert.equal(await databaseReadiness(sql, catalog), 'ahead')
+  await prepareSchema(sql, catalog, 'apply')
+  await sql`DELETE FROM public.open3dfarm_migrations WHERE position = ${catalog.length + 1}`
   const dead = postgres(url.replace(/:\d+\//, ':1/'), { connect_timeout: 2 })
   assert.equal(await databaseReadiness(dead, catalog, 3000), 'unavailable')
   await dead.end({ timeout: 1 })

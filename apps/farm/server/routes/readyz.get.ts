@@ -1,9 +1,9 @@
 import { currentDatabaseReadiness } from '../utils/database/runtime.ts'
+import { readinessHttp } from '../utils/database/schema.ts'
 
 export default defineEventHandler(async (event) => {
-  const database = (await currentDatabaseReadiness()) ?? 'disabled'
-  const ready = database === 'ok' || database === 'disabled'
-  setResponseStatus(event, ready ? 200 : 503)
+  const { status, body } = readinessHttp(await currentDatabaseReadiness())
+  setResponseStatus(event, status)
   setResponseHeader(event, 'cache-control', 'no-store')
-  return { status: ready ? 'ok' : 'unavailable', checks: { database } }
+  return body
 })

@@ -5,7 +5,13 @@ import {
   loadMigrationCatalog,
   type migrationCatalog,
 } from '../../../../../scripts/db/migrations.ts'
-import { databaseReadiness, prepareSchema, type Readiness } from './schema.ts'
+import { databasePhase } from './phase.ts'
+import {
+  databaseReadiness,
+  DatabaseStartupError,
+  prepareSchema,
+  type Readiness,
+} from './schema.ts'
 
 const Config = z.strictObject({
   enabled: z.literal(true),
@@ -30,20 +36,49 @@ const Config = z.strictObject({
 })
 export type DatabaseRuntimeConfig = z.infer<typeof Config>
 
-/** Disabled (or absent) config returns undefined; enabled-but-invalid throws. */
+/** Unset/false: undefined. Anything else that is not a valid enabled config fails closed. */
 export function parseDatabaseRuntimeConfig(
   raw: unknown,
 ): DatabaseRuntimeConfig | undefined {
-  if (
-    typeof raw !== 'object' ||
-    raw === null ||
-    !('enabled' in raw) ||
-    raw.enabled !== true
-  )
-    return undefined
-  const parsed = Config.safeParse(raw)
-  if (!parsed.success) throw new Error('Invalid database runtime configuration')
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') throw new DatabaseStartupError('invalid-config')
+  const enabled: unknown = Reflect.get(raw, 'enabled')
+  if (enabled === undefined || enabled === false) return undefined
+  const parsed = enabled === true ? Config.safeParse(raw) : undefined
+  if (!parsed?.success) throw new DatabaseStartupError('invalid-config')
   return parsed.data
+}
+
+function target(value: string) {
+  const url = new URL(value)
+  return `${url.hostname}:${url.port || '5432'}${url.pathname}`
+}
+
+/** Every enabled feature must point at the database whose schema was verified. */
+export function assertSameDatabaseTargets(
+  config: DatabaseRuntimeConfig,
+  root: unknown,
+): void {
+  const expected = target(config.databaseUrl)
+  if (typeof root !== 'object' || root === null) return
+  for (const [key, feature] of Object.entries(root)) {
+    if (
+      key === 'database' ||
+      typeof feature !== 'object' ||
+      feature === null ||
+      Reflect.get(feature, 'enabled') !== true
+    )
+      continue
+    for (const [field, value] of Object.entries(feature)) {
+      if (!/databaseurl$/i.test(field) || value === '') continue
+      try {
+        if (typeof value === 'string' && target(value) === expected) continue
+      } catch {
+        /* fall through to the fixed failure */
+      }
+      throw new DatabaseStartupError('invalid-config')
+    }
+  }
 }
 
 type Active = {
@@ -51,21 +86,28 @@ type Active = {
   catalog: ReturnType<typeof migrationCatalog>
 }
 let active: Active | undefined
-let expected = false
+let generation = 0
 
-/** Rejects (so the server refuses to serve) on unreachable DB or schema mismatch. */
+/** Rejects (so the caller can exit) on unreachable DB or schema mismatch.
+ * If closed while starting, releases the pool and publishes nothing. */
 export async function startDatabaseRuntime(
   config: DatabaseRuntimeConfig,
 ): Promise<void> {
-  expected = true
-  const catalog = await loadMigrationCatalog(
-    pathToFileURL(config.migrationsDir.replace(/\/?$/, '/')),
-  )
+  const mine = ++generation
+  let catalog: Active['catalog']
+  try {
+    catalog = await loadMigrationCatalog(
+      pathToFileURL(config.migrationsDir.replace(/\/?$/, '/')),
+    )
+  } catch {
+    throw new DatabaseStartupError('migrations-unavailable')
+  }
   const sql = postgres(config.databaseUrl, {
     max: 2,
     connect_timeout: 5,
     idle_timeout: 20,
-    connection: { statement_timeout: 30000, lock_timeout: 5000 },
+    // Migrations SET LOCAL their own, longer limits inside their transaction.
+    connection: { statement_timeout: 2000, lock_timeout: 1000 },
   })
   try {
     await prepareSchema(sql, catalog, config.migrations)
@@ -73,16 +115,38 @@ export async function startDatabaseRuntime(
     await sql.end({ timeout: 3 })
     throw error
   }
+  if (mine !== generation) {
+    await sql.end({ timeout: 3 })
+    return
+  }
   active = { sql, catalog }
 }
 
-/** null: database runtime disabled. Enabled but not started reports unavailable. */
-export function currentDatabaseReadiness(): Promise<Readiness> | null {
-  if (active) return databaseReadiness(active.sql, active.catalog)
-  return expected ? Promise.resolve('unavailable') : null
+const CACHE_MS = 1000
+let inflight: Promise<Readiness> | undefined
+let cached: { at: number; value: Readiness } | undefined
+
+/** null: database runtime disabled. Not started/failed reports unavailable.
+ * Single-flight with a short cache so probes cannot stack queries. */
+export async function currentDatabaseReadiness(): Promise<Readiness | null> {
+  if (databasePhase() === 'disabled') return null
+  const current = active
+  if (!current) return 'unavailable'
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.value
+  inflight ??= databaseReadiness(current.sql, current.catalog)
+    .then((value) => {
+      cached = { at: Date.now(), value }
+      return value
+    })
+    .finally(() => {
+      inflight = undefined
+    })
+  return inflight
 }
 
 export async function closeDatabaseRuntime(): Promise<void> {
+  generation++
+  cached = undefined
   const current = active
   active = undefined
   await current?.sql.end({ timeout: 3 })

@@ -14,6 +14,15 @@ import {
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
 
+// Freeze the monotonic clock the sender trusts. The 100 ms source windows below
+// then expire only through the sender's own timers or an explicit test clock,
+// never because this process was descheduled under CPU contention.
+const frozenMonoMs = performance.now()
+Object.defineProperty(performance, 'now', {
+  configurable: true,
+  value: () => frozenMonoMs,
+})
+
 async function fixture(onSend?: () => void) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -150,8 +159,8 @@ async function fixture(onSend?: () => void) {
     complete,
     admit: async (input = admission) => {
       listener?.(input)
-      const deadline = performance.now() + 500
-      while (!provider && !closed && performance.now() < deadline)
+      const deadline = Date.now() + 5000
+      while (!provider && !closed && Date.now() < deadline)
         await new Promise<void>((resolve) => setTimeout(resolve, 1))
     },
     provider: () => provider,

@@ -16,6 +16,14 @@ case "$scenario" in nat | netem | udp-block) ;; *)
 esac
 [[ $repeats =~ ^[1-9][0-9]?$ ]] || { echo 'repeats must be 1-99' >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
+# Subnets 10.<octet>.31.0/24 (wan) and 10.<octet>.32.0/24 (lan). Concurrent
+# projects on one host need distinct octets; Docker rejects overlapping pools.
+NETFAULT_OCTET=${NETFAULT_OCTET:-231}
+[[ $NETFAULT_OCTET =~ ^[0-9]{1,3}$ ]] && ((NETFAULT_OCTET >= 1 && NETFAULT_OCTET <= 254)) || {
+  echo 'NETFAULT_OCTET must be 1-254' >&2
+  exit 2
+}
+export NETFAULT_OCTET
 project=${NETFAULT_PROJECT:-o3dfm-netfault}
 [[ $project =~ ^o3dfm-[a-z0-9-]{1,40}$ ]] || { echo 'invalid NETFAULT_PROJECT' >&2; exit 2; }
 dc() { docker compose -p "$project" -f "$here/docker-compose.yml" "$@"; }
@@ -36,13 +44,14 @@ chmod -R a+rX "$NETFAULT_NDC"
 cleanup() { dc --profile probe down --volumes --remove-orphans >/dev/null 2>&1 || true; }
 trap 'cleanup; dc --profile probe down --rmi local >/dev/null 2>&1 || true; rm -rf "$NETFAULT_NDC"' EXIT
 
-router() { dc exec -T router sh -euc "$1"; }
+router() { dc exec -T -e O="$NETFAULT_OCTET" router sh -euc "$1"; }
 apply_fault() {
   # Interfaces are found by the fixed addresses from docker-compose.yml.
   router '
-    lan=$(ip -o -4 addr show | awk "/10\.231\.32\.2\//{print \$2}")
-    wan=$(ip -o -4 addr show | awk "/10\.231\.31\.2\//{print \$2}")
-    iptables -t nat -A POSTROUTING -s 10.231.32.0/24 -o "$wan" -j MASQUERADE
+    lan=$(ip -o -4 addr show | awk "/10\.$O\.32\.2\//{print \$2}")
+    wan=$(ip -o -4 addr show | awk "/10\.$O\.31\.2\//{print \$2}")
+    iptables -A OUTPUT -d "10.$O.32.1" -j DROP
+    iptables -t nat -A POSTROUTING -s "10.$O.32.0/24" -o "$wan" -j MASQUERADE
     iptables -A FORWARD -i "$lan" -o "$wan" -j ACCEPT
     iptables -A FORWARD -i "$wan" -o "$lan" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -P FORWARD DROP
@@ -60,7 +69,11 @@ for run in $(seq 1 "$repeats"); do
     cleanup
     dc up -d --build --wait router lan-gw browser >/dev/null
     apply_fault
-    result=$(dc --profile probe run --rm -T -e PROBE_BIND="$bind" connector | tail -1)
+    # The lan namespace must not reach the host gateway on the lan bridge.
+    dc exec -T lan-gw iptables -C OUTPUT -d "10.$NETFAULT_OCTET.32.1" -j DROP
+    result=$(dc --profile probe run --rm -T -e PROBE_BIND="$bind" connector 2>/dev/null | tail -1 || true)
+    # A crashed probe prints a stack trace, not a JSON object.
+    [[ $result == '{'* ]] || result=null
     browser=$(dc logs --no-log-prefix browser | grep '"event":"channel"' | tail -1 || true)
     printf '{"scenario":"%s","run":%s,"connector":%s,"browser":%s}\n' \
       "$scenario" "$run" "$result" "${browser:-null}" | tee -a "$out/$scenario.jsonl"

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Test-only WebRTC reachability probe for the network fault harness.
-// Uses the Connector's PeerConnection options (no STUN/TURN, no ICE-TCP,
-// fingerprint verification on); only the bind address varies.
+// Uses the Connector's ICE-relevant PeerConnection options (no STUN/TURN, no
+// ICE-TCP, fingerprint verification on); only the bind address varies. It does
+// not mirror disableAutoNegotiation or maxMessageSize, which do not affect
+// candidate gathering or reachability.
 //   PROBE_ROLE=answer  "browser" side: HTTP offer endpoint, echoes data.
 //   PROBE_ROLE=offer   "Connector" side: posts an offer, measures the channel.
 // Prints one JSON result line. Never contacts anything but PROBE_PEER.

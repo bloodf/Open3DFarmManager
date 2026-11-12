@@ -16,6 +16,7 @@ import { discoverMoonraker } from '../../packages/connector/src/moonraker/discov
 import { createSpoolmanProvider } from '../../packages/connector/src/runtime/spoolman-provider.ts'
 import { probePrinter } from '../../packages/sim-tools/src/probe.ts'
 import { seedSpoolman } from '../../packages/sim-tools/src/spoolman.ts'
+import { verifyCamera } from '../../packages/sim-tools/src/verify.ts'
 import { ENROLLMENT, enrollConnector } from './connector-enrollment.ts'
 import {
   startConnector,
@@ -166,7 +167,11 @@ export async function runSimFarmAcceptance(input: {
       },
     })
     assert.equal(result.server.ready, true, `${printer} discovered ready`)
-    assert.ok(result.webcams.length >= 1, `${printer} webcam discovered`)
+    assert.deepEqual(
+      result.webcams.map((webcam) => webcam.name),
+      [`${printer}-test-pattern`],
+      `${printer} webcam discovered`,
+    )
     discovered[printer] = {
       tools: result.tools.tools.map((tool) => tool.object),
       activeTool: result.tools.activeObject,
@@ -179,6 +184,12 @@ export async function runSimFarmAcceptance(input: {
     'u1 exposes four tools',
   )
   assert.deepEqual((discovered.sv06 as { tools: string[] }).tools, ['extruder'])
+  // One JPEG frame from each printer webcam and from the camera service.
+  const snapshotBytes = {
+    sv06: await verifyCamera(origin(ports.sv06Cam)),
+    u1: await verifyCamera(origin(ports.u1Cam)),
+    camera: await verifyCamera(origin(ports.camera)),
+  }
   mark('discovered')
 
   // 4. Connector Spoolman provider observes the seeded inventory.
@@ -204,10 +215,7 @@ export async function runSimFarmAcceptance(input: {
     providerAbort.abort()
     await provider.done.catch(() => undefined)
   }
-  assert.ok(
-    observed !== null && observed >= seeded.spools,
-    'inventory holds the seeded spools',
-  )
+  assert.ok(observed === seeded.spools, 'inventory holds the seeded spools')
   mark('inventoryObserved')
 
   // 5. Real enrollment, built server and Connector CLI for both printers.
@@ -394,7 +402,47 @@ export async function runSimFarmAcceptance(input: {
       'telemetry rows for both printers',
     )
     mark('telemetryIngested')
+    // Exactly-once: let the drain settle, stop the Connector, then compare what
+    // the collector queued, what the agent delivered and what was stored.
+    const delivered = () =>
+      connector.diagnostics
+        .filter((d) => d.kind === 'delivery' && d.status === 'delivered')
+        .reduce((sum, d) => sum + Number(d.count), 0)
+    const stored = async () =>
+      (
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid`
+      )[0]!.n as number
+    await until(
+      async () =>
+        delivered() >= connector.count('queued') &&
+        (await stored()) === delivered(),
+      30000,
+      'telemetry drain settled',
+    )
+    await connector.stop()
+    const stopped = await connector.exited
+    assert.deepEqual(stopped, { code: 0, signal: null }, 'Connector clean exit')
+    const summary = connector.diagnostics.find((d) => d.kind === 'summary')
+    const agentSummary = connector.diagnostics.find(
+      (d) => d.kind === 'agent-summary',
+    )
+    assert.ok(summary && agentSummary, 'Connector summaries present')
+    assert.equal(summary.expired, 0)
+    assert.equal(summary.capacity, 0)
+    const [totals] =
+      (await admin`SELECT count(*)::int AS n, count(DISTINCT event_id)::int AS d FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid`) as unknown as {
+        n: number
+        d: number
+      }[]
+    assert.equal(totals!.n, totals!.d, 'each event stored exactly once')
+    assert.equal(totals!.n, summary.queued, 'every queued record stored')
+    assert.equal(agentSummary.delivered, summary.queued, 'every record acked')
     const rows = await perPrinter()
+    // Idle simulators: exactly one baseline state record per printer.
+    assert.deepEqual(
+      Object.fromEntries(rows.map((row) => [row.printer, row.n])),
+      { sv06: 1, u1: 1 },
+    )
     const states =
       (await admin`SELECT DISTINCT payload#>>'{state,state}' AS state FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND payload ? 'state'`) as unknown as {
         state: string
@@ -403,14 +451,18 @@ export async function runSimFarmAcceptance(input: {
     const unavailable = connector.diagnostics
       .filter((diagnostic) => diagnostic.kind === 'unavailable')
       .map((diagnostic) => String(diagnostic.reason))
-    await connector.stop()
-    const stopped = await connector.exited
-    assert.deepEqual(stopped, { code: 0, signal: null }, 'Connector clean exit')
     mark('connectorStopped')
     return {
       timings,
       seeded,
       discovered,
+      snapshotBytes,
+      exactlyOnce: {
+        queued: summary.queued,
+        delivered: agentSummary.delivered,
+        stored: totals!.n,
+        distinct: totals!.d,
+      },
       inventorySpools: observed,
       telemetryRows: Object.fromEntries(
         rows.map((row) => [row.printer, row.n]),

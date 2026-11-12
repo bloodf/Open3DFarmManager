@@ -465,9 +465,8 @@ if (mode === '--prepare-layer') {
     'farm_connector_revoker',
     'farm_signalling_reader',
     'farm_connector_credential_acceptor',
-    ...(rtcFixture || pauseFixture || pauseRtcFixture
-      ? ['farm_printer_ownership']
-      : []),
+    // Browser signalling requires an active assignment in every mode.
+    'farm_printer_ownership',
     ...(pauseFixture || pauseRtcFixture ? ['farm_pause_authority'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
@@ -587,11 +586,7 @@ if (mode === '--prepare-layer') {
     const catalog = await loadMigrationCatalog()
     const history =
       await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-    const appliedCount = assertSignallingCatalog(
-      catalog,
-      [...history],
-      rtcFixture || pauseFixture || pauseRtcFixture,
-    )
+    const appliedCount = assertSignallingCatalog(catalog, [...history])
     if (
       (pauseFixture || pauseRtcFixture) &&
       catalog[17]?.id !== '0018_pause_authority'
@@ -730,16 +725,10 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_ORIGIN: origin,
         NUXT_AUTH_SESSION_SECRET: sessionSecret,
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
-        ...(rtcFixture || pauseFixture || pauseRtcFixture
-          ? {
-              NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
-              NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
-              NUXT_PUBLIC_FLAGS_FARM_VIEW:
-                process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes'
-                  ? 'true'
-                  : 'false',
-            }
-          : {}),
+        NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
+        NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
+        NUXT_PUBLIC_FLAGS_FARM_VIEW:
+          process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes' ? 'true' : 'false',
         ...(pauseIssuer
           ? {
               NUXT_PAUSE_AUTHORITY_ENABLED: 'true',

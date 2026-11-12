@@ -92,6 +92,8 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .regex(/^[a-zA-Z0-9:_-]{1,80}$/)
       .nullable(),
     verifiedAdmission: z.boolean(),
+    // Strictly increasing, scope-checked server authority confirmations.
+    authorityConfirms: z.number().int().min(0).max(64),
     diagnosticsImmutable: z.boolean(),
     provider: z.literal('finite-synthetic-assigned-status'),
     published: z.number().int().min(0).max(1),
@@ -146,6 +148,8 @@ async function run() {
     closing = false,
     verifiedAdmission = false,
     published = 0,
+    authorityConfirms = 0,
+    authoritySeq = 0,
     providerClosed = false,
     admissionDeadline = 0,
     sourceDeadline = 0
@@ -188,7 +192,9 @@ async function run() {
     })()
     pending = Buffer.alloc(0)
   }
-  const lifetime = setTimeout(stop, 30_000)
+  // Bounded child lifetime. The revocation row watches for reopens for longer
+  // than the farm view's 30 s reopen backoff cap, so this must exceed it.
+  const lifetime = setTimeout(stop, 90_000)
   const output = (reply: RtcFixtureReply) => {
     const wire = JSON.stringify(RtcFixtureReply.parse(reply)) + '\n'
     if (!process.stdout.write(wire)) stop()
@@ -282,6 +288,11 @@ async function run() {
           },
           {
             genuineStatus: { assignmentRefs: refs },
+            onAuthorityConfirm: (serverSeq) => {
+              if (serverSeq <= authoritySeq) throw Error('Stale confirmation')
+              authoritySeq = serverSeq
+              authorityConfirms = Math.min(64, authorityConfirms + 1)
+            },
             onVerifiedAdmission: (admission) => {
               if (
                 !Object.isFrozen(admission) ||
@@ -347,6 +358,7 @@ async function run() {
               : 'unclassified'
             : null,
           verifiedAdmission,
+          authorityConfirms,
           diagnosticsImmutable: Object.isFrozen(diagnostics),
           provider: 'finite-synthetic-assigned-status',
           published,

@@ -184,6 +184,8 @@ export class SignallingRuntime {
   readonly #resources: SignallingWebSocketResources
   readonly #coordinator: SignallingCoordinator
   readonly #connections = new Map<IncomingMessage, Connection>()
+  /** Strictly increasing confirmation sequence, anchored to database time. */
+  #authoritySeq = 0
   readonly #inboxes = new Map<string, Connection>()
   #closed = false
   readonly #pauseConfig: PauseConfiguration | undefined
@@ -673,6 +675,7 @@ export class SignallingRuntime {
           expires_at: connection.inboxExpiresAt,
           commands_enabled: false,
         })
+        this.#confirmAuthority(connection, current)
         this.#revalidation(connection)
         break
       }
@@ -909,14 +912,49 @@ export class SignallingRuntime {
       void this.#resources.work(connection.resource, async () => {
         const current = await this.#current(connection, state.identity)
         if (!current || connection.closed) {
+          this.#revokeAuthority(connection)
           this.#close(connection)
           return
         }
         // Never overwrite a later state established by a concurrently awaited proof.
         if (connection.state === state) state.identity = current
+        this.#confirmAuthority(connection, current)
         this.#revalidation(connection)
       })
     })
+  }
+  #nextAuthoritySeq(observedAt: number): number {
+    // Database time keeps the floor across restarts and instances. A database
+    // clock step backwards only makes the Connector refuse confirms (stale).
+    this.#authoritySeq = Math.max(this.#authoritySeq + 1, observedAt * 1000)
+    return this.#authoritySeq
+  }
+  /** Connector inbox only: the current-authority reread just succeeded. */
+  #confirmAuthority(connection: Connection, current: Identity): void {
+    if (connection.mode !== 'read-only' || connection.closed) return
+    this.#send(connection, {
+      v: 1,
+      t: 'connector.authority-confirm',
+      server_seq: this.#nextAuthoritySeq(current.budget.observedAt),
+      farm_id: current.identity.farm_id,
+      agent_id: current.identity.agent_id,
+      credential_jti: current.identity.credential_jti,
+    })
+  }
+  /** A failed reread revokes the Connector's cached authority before closing. */
+  #revokeAuthority(connection: Connection): void {
+    if (connection.mode !== 'read-only' || connection.closed) return
+    try {
+      this.#send(connection, {
+        v: 1,
+        t: 'connector.authority-revoked',
+        // prev + 1 only: an app-server wall clock ahead of database time
+        // must never lift the Connector floor above other instances' confirms.
+        server_seq: this.#nextAuthoritySeq(0),
+      })
+    } catch {
+      // Closing still ends the session; the offline lifetime bounds the rest.
+    }
   }
   #close(connection: Connection): void {
     if (connection.closed) return

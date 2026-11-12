@@ -39,7 +39,7 @@ Cached authority is fresh only while both `mono - confirmedMono < lifetime` and 
 - **Commands:** `createPauseCapabilityVerifier({ freshness })` checks freshness against the same clock sample during `admit()` (at every recheck between asynchronous steps) and during `inspectAt()` before each dispatch boundary. A stale result returns `expired-or-inactive`. The dispatcher then rejects with `invalid-authority`, and the handle is latched as expired, so reconfirmation cannot revive it. The browser must obtain a new capability.
 - **The relay requires it:** `createPauseCommandRelay` requires `authority.freshness` and always passes it to the verifier. The low-level verifier keeps it optional for unit tests only.
 - **Read-only:** status, telemetry, camera and `inspectLifecycle()` result auditing do not check freshness. Loss of connectivity alone does not stop a print, and local watchdogs keep running.
-- **Audit:** `onStale(reason)` runs once per fresh-to-stale transition, with `expired`, `clock` or `revoked`, so the runtime can write a local audit entry. If the audit callback throws, authority is still not restored.
+- **Audit:** every stale transition emits `pause-authority-stale` and, after the freshness check returns, appends one fsynced JSON line to `<data>/pause-journal/authority-audit.jsonl`. The directory must be a real, private directory owned by the Connector user; the file must be a private single-link regular file. A full file (1 MiB) rotates to `authority-audit.jsonl.1`, replacing the previous rotation. A failed write emits `pause-audit-failed` and never restores authority. A refused confirmation emits `pause-authority-confirm-refused`. These two repeating diagnostics bypass the pause diagnostic budget and are reported at most once a minute.
 
 ## Revocation latency tradeoff
 
@@ -61,12 +61,17 @@ The Connector agent creates one tracker when `pause.control` is configured and p
 
 - **Source:** the server sends `connector.authority-confirm` on the read-only Connector inbox (`/api/signalling/connector`) right after `connector.inbox-ready` and after every successful 5 s current-authority reread (enrollment approved, credential current and unrevoked, unchanged identity pins). That is at most `maxAgeMs / 6`. The frame is sent after the reread result has been applied to the connection. It carries `server_seq`, `farm_id`, `agent_id` and `credential_jti`.
 - **Connector acceptance:** `AuthenticatedConnectorSignallingClient` accepts the frame only after the server admitted the inbox credential proof, and only when farm, agent and credential id match its own scope; anything else is terminal. The agent then calls `confirm({ wall: Date.now(), mono: performance.now() }, server_seq)`. The pause signalling client, the WebRTC peers and browser frames have no path to `confirm()`.
-- **Revocation:** when a reread fails, the server sends `connector.authority-revoked` with a higher `server_seq` and closes the inbox. The agent calls `revoke(server_seq)`.
+- **Revocation:** when a reread fails, the server sends `connector.authority-revoked` with `server_seq = previous + 1` and closes the inbox. The agent calls `revoke(server_seq)`. The revocation never uses the app server's wall clock: an app clock ahead of database time would lift the Connector's floor above other instances' confirmations and silently disable pause.
 - **Sequence:** `server_seq = max(previous + 1, databaseObservedAtMs * 1000)`, so it strictly increases within a process and, anchored to database time, across restarts and instances.
 - **Backoff:** `runSignallingLifecycle` resets backoff to `retryMinMs` once a session's inbox is admitted, so reconnect gaps stay far below the lifetime.
 - **Audit:** every stale transition appends one fsynced JSON line to `<data>/pause-journal/authority-audit.jsonl` (private file, no symlink, 1 MiB bound) and emits `pause-authority-stale`. A failed or full write emits `pause-audit-failed` and never restores authority.
 
 Without the read-only `signalling` section no confirmation arrives and the pause path stays inert.
+
+## Known follow-ups
+
+- The reader returns no authority for both a definitive denial and a transient database error, so both revoke. A three-state reader should skip one confirmation on a transient error and revoke only on a definitive denial.
+- Each revocation closes the inbox. A Connector that is admitted and then revoked again on every reread reconnects at `retryMinMs` (1 s by default), because backoff resets after each admitted inbox.
 
 ## Threat considerations
 

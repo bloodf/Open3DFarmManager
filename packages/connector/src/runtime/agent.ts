@@ -26,6 +26,7 @@ type AgentDiagnostic =
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
   | { kind: 'pause-failed'; reason: PauseFailureReason }
   | { kind: 'pause-audit-failed' }
+  | { kind: 'pause-authority-confirm-refused' }
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
@@ -199,6 +200,19 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
         // A throwing sink never rejects the pause task or stops the agent.
       }
     }
+    // Repeating faults bypass the pause budget but are reported once a minute.
+    const rareAt = new Map<string, number>()
+    const pauseRareDiagnostic = (value: AgentDiagnostic) => {
+      const at = performance.now(),
+        last = rareAt.get(value.kind)
+      if (last !== undefined && at - last < 60_000) return
+      rareAt.set(value.kind, at)
+      try {
+        input.onDiagnostic(value)
+      } catch {
+        // A throwing sink never rejects the pause task or stops the agent.
+      }
+    }
     // Offline authority for the pause path. Only the credential-authenticated
     // read-only inbox confirms it; without `signalling` it stays stale and
     // every pause command is rejected. Never stub it as fresh.
@@ -206,7 +220,14 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       ? createOfflineAuthority({
           onStale(reason) {
             pauseDiagnostic({ kind: 'pause-authority-stale', reason })
-            recordAuthorityStale(input.dataDirectory, reason, pauseDiagnostic)
+            // The fsynced write runs after the caller's freshness check returns.
+            queueMicrotask(() =>
+              recordAuthorityStale(
+                input.dataDirectory,
+                reason,
+                pauseRareDiagnostic,
+              ),
+            )
           },
         })
       : undefined
@@ -244,10 +265,16 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                 },
                 // Callbacks must return nothing; a refused confirm stays stale.
                 onAuthorityConfirm(serverSeq) {
-                  offline?.confirm(
-                    { wall: Date.now(), mono: performance.now() },
-                    serverSeq,
+                  if (
+                    offline &&
+                    !offline.confirm(
+                      { wall: Date.now(), mono: performance.now() },
+                      serverSeq,
+                    )
                   )
+                    pauseRareDiagnostic({
+                      kind: 'pause-authority-confirm-refused',
+                    })
                 },
                 onAuthorityRevoked(serverSeq) {
                   offline?.revoke(serverSeq)

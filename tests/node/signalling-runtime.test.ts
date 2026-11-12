@@ -85,8 +85,10 @@ async function fixture(
   let wall = 100_000,
     mono = 1000,
     revoked = false,
-    busyContext = false
-  const clock = { wall: () => wall, monotonic: () => mono }
+    busyContext = false,
+    appSkew = 0
+  // The app server clock; `appSkew` models an app wall clock ahead of database time.
+  const clock = { wall: () => wall + appSkew, monotonic: () => mono }
   let authorityGate: Promise<void> | null = null
   let afterAccept = () => {}
   const browserKey = await crypto.subtle.generateKey(
@@ -623,6 +625,9 @@ async function fixture(
     advance(ms: number) {
       wall += ms
       mono += ms
+    },
+    skewAppWall(ms: number) {
+      appSkew = ms
     },
     regressWall() {
       wall--
@@ -1438,5 +1443,49 @@ test('the read-only Connector inbox receives scoped, strictly increasing authori
     assert.equal(first.raw.socket.destroyed, true)
   } finally {
     f.close()
+  }
+})
+
+test('a revocation from an app server whose wall clock runs ahead never blocks later database-time confirmations', async () => {
+  const { createOfflineAuthority } =
+    await import('../../packages/connector/src/auth/offline-authority.ts')
+  const tracker = createOfflineAuthority()
+  const sample = () => ({ wall: Date.now(), mono: performance.now() })
+  const seq = (p: { wires: { t: string }[] }, t: string) =>
+    (p.wires.find((wire) => wire.t === t) as { server_seq: number } | undefined)
+      ?.server_seq
+  const first = await fixture()
+  let revokedSeq: number | undefined
+  try {
+    // The app server wall clock runs one day ahead of database time.
+    first.skewAppWall(86_400_000)
+    const inbox = await first.inbox()
+    assert.equal(
+      tracker.confirm(sample(), seq(inbox, 'connector.authority-confirm')!),
+      true,
+    )
+    // The next current-authority reread fails.
+    first.revoke()
+    const deadline = Date.now() + 8000
+    while (
+      (revokedSeq = seq(inbox, 'connector.authority-revoked')) === undefined
+    ) {
+      if (Date.now() > deadline) throw new Error('No revocation')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    tracker.revoke(revokedSeq)
+  } finally {
+    first.close()
+  }
+  // Another instance confirms from slightly later database time.
+  const second = await fixture()
+  try {
+    second.advance(1000)
+    const inbox = await second.inbox()
+    const confirmSeq = seq(inbox, 'connector.authority-confirm')!
+    assert.ok(confirmSeq > revokedSeq!)
+    assert.equal(tracker.confirm(sample(), confirmSeq), true)
+  } finally {
+    second.close()
   }
 })

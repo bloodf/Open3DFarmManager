@@ -470,12 +470,8 @@ export async function readOrRecoverRuntimeCredential(input: {
     input.credentialPath,
     input.identity.fingerprint,
   )
-  if (envelope.expires_at > now())
-    return readRuntimeCredential(
-      input.credentialPath,
-      input.identity.fingerprint,
-      now(),
-    )
+  // Same validator as readRuntimeCredential; no second read of the file.
+  if (envelope.expires_at > now()) return envelope
   const recovery = input.recovery
   const attempts = recovery?.attempts ?? 3
   for (let attempt = 0; recovery && attempt < attempts; attempt++) {

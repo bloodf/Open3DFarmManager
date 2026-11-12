@@ -10,6 +10,8 @@ import {
 } from '../../services/credential-renewal-http-runtime.ts'
 import { loadTelemetryVerificationKeys } from '../../services/telemetry-key-registry.ts'
 import { loadPairingSigningKey } from '../connector-pairing/runtime.ts'
+import { databasePhase } from '../database/phase.ts'
+import { createLogger } from '@open3dfarmmanager/shared'
 
 const databaseUrl = z
   .string()
@@ -62,17 +64,65 @@ export const RenewalRuntimeConfig = z.strictObject({
 
 let starting: Promise<void> | undefined
 let pool: ReturnType<typeof postgres> | undefined
+let closed = false
+let retryAfter = 0
+const RETRY_MS = 30_000
+const log = createLogger('farm-server')
 
 function unavailable() {
   return createError({ status: 503, message: 'Renovação indisponível.' })
 }
 
+async function activate(config: z.infer<typeof RenewalRuntimeConfig>) {
+  const sql = postgres(config.databaseUrl, {
+    max: 3,
+    connect_timeout: 3,
+    idle_timeout: 20,
+    connection: { statement_timeout: 2000, lock_timeout: 1000 },
+  })
+  try {
+    const [privateKey, publicKeys] = await Promise.all([
+      loadPairingSigningKey(config.signingKeyPath),
+      loadTelemetryVerificationKeys(config.publicKeyRegistryPath),
+    ])
+    // The issued child must stay verifiable by every acceptance path.
+    if (!publicKeys.has(config.signingKeyId))
+      throw new Error('Signing key is not in the public registry')
+    if (closed) throw new Error('Renewal runtime closed')
+    await activateCredentialRenewalHttpRuntime({
+      sql,
+      bodyTimeoutMs: config.bodyTimeoutMs,
+      config: {
+        issuer: config.issuer,
+        audience: config.audience,
+        origin: config.origin,
+        proofAudience: config.proofAudience,
+        ttlSeconds: config.tokenTtlSeconds,
+        kid: config.signingKeyId,
+        publicKeys,
+        privateKeys: new Map([[config.signingKeyId, privateKey]]),
+        proofTtlMs: config.proofTtlMs,
+      },
+    })
+    // Closed while activating: undo, never leave an installed handler or a pool.
+    if (closed) {
+      deactivateCredentialRenewalHttpRuntime()
+      throw new Error('Renewal runtime closed')
+    }
+    pool = sql
+  } catch (error) {
+    await sql.end({ timeout: 3 })
+    throw error
+  }
+}
+
 /**
- * Activates the renewal handler on first use. Runs behind the database gate
- * middleware, so the schema is already verified (or no database is managed).
- * Disabled → 404; invalid config or failed activation → 503 (fail closed).
+ * Activates the renewal handler on first use, only once the database gate has
+ * verified the schema (phase 'ready'); an unmanaged database is refused.
+ * Disabled → 404; invalid config, unready database, closed runtime or failed
+ * activation → 503. A failed activation is retried no sooner than 30 s later.
  */
-export async function connectorRenewalHandler() {
+export async function connectorRenewalHandler(now: () => number = Date.now) {
   const raw: unknown = Reflect.get(useRuntimeConfig(), 'connectorRenewal')
   if (
     typeof raw !== 'object' ||
@@ -82,59 +132,38 @@ export async function connectorRenewalHandler() {
   )
     throw createError({ status: 404, message: 'Renovação indisponível.' })
   const parsed = RenewalRuntimeConfig.safeParse(raw)
-  if (!parsed.success) throw unavailable()
+  if (!parsed.success || closed || databasePhase() !== 'ready')
+    throw unavailable()
   const active = credentialRenewalHttpRuntime()
   if (active) return active
-  starting ??= (async () => {
-    const config = parsed.data
-    const sql = postgres(config.databaseUrl, {
-      max: 3,
-      connect_timeout: 3,
-      idle_timeout: 20,
-      connection: { statement_timeout: 2000, lock_timeout: 1000 },
-    })
-    try {
-      const [privateKey, publicKeys] = await Promise.all([
-        loadPairingSigningKey(config.signingKeyPath),
-        loadTelemetryVerificationKeys(config.publicKeyRegistryPath),
-      ])
-      // The issued child must stay verifiable by every acceptance path.
-      if (!publicKeys.has(config.signingKeyId))
-        throw new Error('Signing key is not in the public registry')
-      await activateCredentialRenewalHttpRuntime({
-        sql,
-        bodyTimeoutMs: config.bodyTimeoutMs,
-        config: {
-          issuer: config.issuer,
-          audience: config.audience,
-          origin: config.origin,
-          proofAudience: config.proofAudience,
-          ttlSeconds: config.tokenTtlSeconds,
-          kid: config.signingKeyId,
-          publicKeys,
-          privateKeys: new Map([[config.signingKeyId, privateKey]]),
-          proofTtlMs: config.proofTtlMs,
-        },
+  if (!starting) {
+    if (now() < retryAfter) throw unavailable()
+    const mine = activate(parsed.data)
+    starting = mine
+    mine.catch((error: unknown) => {
+      if (starting === mine) {
+        starting = undefined
+        retryAfter = now() + RETRY_MS
+      }
+      // Fixed message and error class only: no paths, URLs or key material.
+      log.error('connector-renewal-activation-failed', {
+        errorClass: error instanceof Error ? error.constructor.name : 'unknown',
+        retryAfterMs: RETRY_MS,
       })
-      pool = sql
-    } catch (error) {
-      await sql.end({ timeout: 3 })
-      throw error
-    }
-  })()
+    })
+  }
   try {
     await starting
   } catch {
-    // Retry on a later request; nothing was installed.
-    starting = undefined
     throw unavailable()
   }
-  const handler = credentialRenewalHttpRuntime()
+  const handler = closed ? undefined : credentialRenewalHttpRuntime()
   if (!handler) throw unavailable()
   return handler
 }
 
 export async function closeConnectorRenewalRuntime(): Promise<void> {
+  closed = true
   await starting?.catch(() => {})
   starting = undefined
   deactivateCredentialRenewalHttpRuntime()

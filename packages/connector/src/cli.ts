@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { projectVersion } from '@open3dfarmmanager/shared'
 import { parseStatusPort } from './status/local.ts'
+import { CredentialRepairRequired } from './cloud/credential-renewal.ts'
 import { parseArgs } from 'node:util'
 import { loadExistingIdentity, loadOrCreateIdentity } from './identity/store.ts'
 import { PairingProofOrigin } from '../../farm-protocol/src/pairing-proof.ts'
@@ -242,8 +243,6 @@ async function dispatch(args: string[]): Promise<number> {
     }
     return 0
   } catch (error) {
-    const { CredentialRepairRequired } =
-      await import('./cloud/credential-renewal.ts')
     if (error instanceof CredentialRepairRequired) {
       console.error(
         'A credencial deste Connector expirou e não pôde ser recuperada pelo servidor. Pareie o Connector novamente.',

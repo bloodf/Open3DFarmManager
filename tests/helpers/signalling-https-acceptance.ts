@@ -513,50 +513,51 @@ export async function runSignallingHttpsAcceptance(input: {
     )
     if (claim.status !== 'approved' || claim.farm_id !== input.farmId)
       throw new Error('Synthetic pairing did not complete')
+    // Browser signalling authority requires at least one active assignment.
+    const printerKey = 'synthetic-readonly-printer'
+    const path = `/api/farms/${input.farmId}/printers`
+    const registration = await pagePost(owner, path, {
+      agentId: claim.agent_id,
+      printerKey,
+      confirmedLocalConfiguration: true,
+    })
+    if (
+      !registration ||
+      typeof registration !== 'object' ||
+      !('assignmentId' in registration) ||
+      typeof registration.assignmentId !== 'string'
+    )
+      throw new Error('Fixture printer registration failed')
+    const assignmentId = registration.assignmentId
+    const listing: unknown = await owner.evaluate(async (target) => {
+      const response = await fetch(target)
+      if (!response.ok) throw new Error('Fixture printer readback failed')
+      return await response.json()
+    }, path)
+    if (
+      !listing ||
+      typeof listing !== 'object' ||
+      !('printers' in listing) ||
+      !Array.isArray(listing.printers) ||
+      !listing.printers.some(
+        (row: unknown) =>
+          row &&
+          typeof row === 'object' &&
+          'assignmentId' in row &&
+          row.assignmentId === assignmentId &&
+          'agentId' in row &&
+          row.agentId === claim.agent_id &&
+          'printerKey' in row &&
+          row.printerKey === printerKey,
+      )
+    )
+      throw new Error('Fixture printer readback mismatch')
     if (
       input.extension &&
       extensionInput &&
       identities &&
       input.disconnectSignalling
     ) {
-      const printerKey = 'synthetic-readonly-printer'
-      const path = `/api/farms/${input.farmId}/printers`
-      const registration = await pagePost(owner, path, {
-        agentId: claim.agent_id,
-        printerKey,
-        confirmedLocalConfiguration: true,
-      })
-      if (
-        !registration ||
-        typeof registration !== 'object' ||
-        !('assignmentId' in registration) ||
-        typeof registration.assignmentId !== 'string'
-      )
-        throw new Error('Fixture printer registration failed')
-      const assignmentId = registration.assignmentId
-      const listing: unknown = await owner.evaluate(async (target) => {
-        const response = await fetch(target)
-        if (!response.ok) throw new Error('Fixture printer readback failed')
-        return await response.json()
-      }, path)
-      if (
-        !listing ||
-        typeof listing !== 'object' ||
-        !('printers' in listing) ||
-        !Array.isArray(listing.printers) ||
-        !listing.printers.some(
-          (row: unknown) =>
-            row &&
-            typeof row === 'object' &&
-            'assignmentId' in row &&
-            row.assignmentId === assignmentId &&
-            'agentId' in row &&
-            row.agentId === claim.agent_id &&
-            'printerKey' in row &&
-            row.printerKey === printerKey,
-        )
-      )
-        throw new Error('Fixture printer readback mismatch')
       await input.extension.afterProvisioned({
         ...extensionInput,
         identities,

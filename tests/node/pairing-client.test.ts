@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { createPublicKey, randomBytes, verify } from 'node:crypto'
 import {
+  chmodSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   statSync,
   readFileSync,
@@ -207,13 +210,12 @@ test('pair fails closed: denied, rejection, wrong audience, existing credential,
       /mismatch/,
     )
     writeFileSync(base.credentialPath, 'keep', { mode: 0o600 })
+    const untouched = fakeServer(identity, [[200, approved]], clock)
     await assert.rejects(
-      pairConnector({
-        ...base,
-        fetch: fakeServer(identity, [[200, approved]], clock).fetch,
-      }),
-      /EEXIST/,
+      pairConnector({ ...base, fetch: untouched.fetch }),
+      /already exists/,
     )
+    assert.deepEqual(untouched.calls, []) // detected before any network call
     assert.equal(readFileSync(base.credentialPath, 'utf8'), 'keep')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -232,8 +234,10 @@ test('pair gives up after bounded transient failures and times out at the pairin
     const server = fakeServer(identity, [], clock) // pending forever
     await assert.rejects(
       pairConnector({ ...base, fetch: server.fetch }),
-      /timed out/,
+      /proof expired/,
     )
+    // 60 s proof lifetime at a 5 s interval: bounded, not the 15 min pairing TTL.
+    assert.ok(server.calls.filter((c) => c === 'claim').length <= 12)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -277,6 +281,94 @@ test('status CLI prints local identity and credential metadata without secrets',
     assert.equal(run('status').status, 1)
     assert.equal(run('pair', '--server', ORIGIN).status, 1)
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('credential write is checked up front and leaves no partial files', async () => {
+  const { dir, identity, clock, base } = await setup()
+  try {
+    const names = () => readdirSync(dir).sort()
+    // Unsafe parent directory: rejected before any network call.
+    chmodSync(dir, 0o777)
+    const unsafe = fakeServer(identity, [], clock)
+    await assert.rejects(
+      pairConnector({ ...base, fetch: unsafe.fetch }),
+      /not writable by others/,
+    )
+    assert.deepEqual(unsafe.calls, [])
+    chmodSync(dir, 0o700)
+    assert.deepEqual(names(), ['id'])
+    // Final path appears during pairing: link fails, temp file removed, other file kept.
+    const server = fakeServer(identity, [[200, approved]], clock)
+    await assert.rejects(
+      pairConnector({
+        ...base,
+        fetch: (url, init) => {
+          if (url.endsWith('/claim'))
+            writeFileSync(base.credentialPath, 'other', { mode: 0o600 })
+          return server.fetch(url, init)
+        },
+      }),
+      /EEXIST/,
+    )
+    assert.deepEqual(names(), ['credential.json', 'id'])
+    assert.equal(readFileSync(base.credentialPath, 'utf8'), 'other')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('pair rejects an approval for a different agent and leaves no file', async () => {
+  const { dir, identity, clock, base } = await setup()
+  try {
+    const server = fakeServer(
+      identity,
+      [[200, { ...approved, agent_id: FARM }]],
+      clock,
+    )
+    await assert.rejects(
+      pairConnector({ ...base, fetch: server.fetch }),
+      /agent mismatch/,
+    )
+    assert.deepEqual(readdirSync(dir), ['id'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('default transport caps response size by header and by stream', async () => {
+  const { dir, base } = await setup()
+  const big = 'x'.repeat(20_000)
+  const server = createServer((req, res) => {
+    req.resume()
+    if (req.url?.includes('chunked')) {
+      res.write(big.slice(0, 10_000)) // no content-length
+      res.end(big.slice(10_000))
+    } else res.end(big) // content-length 20000
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  try {
+    await assert.rejects(
+      pairConnector({ ...base, serverOrigin: origin }),
+      /Pairing request failed/,
+    )
+    const rewrite = (url: string) =>
+      url.replace('/api/connector-pairing/', '/chunked/')
+    const nativeFetch = globalThis.fetch
+    globalThis.fetch = ((url: string, init: RequestInit) =>
+      nativeFetch(rewrite(url), init)) as typeof fetch
+    try {
+      await assert.rejects(
+        pairConnector({ ...base, serverOrigin: origin }),
+        /Invalid pairing response/,
+      )
+    } finally {
+      globalThis.fetch = nativeFetch
+    }
+  } finally {
+    server.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })

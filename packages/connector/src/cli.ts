@@ -4,7 +4,11 @@ import { parseStatusPort } from './status/local.ts'
 import { parseArgs } from 'node:util'
 import { loadExistingIdentity, loadOrCreateIdentity } from './identity/store.ts'
 import { PairingProofOrigin } from '../../farm-protocol/src/pairing-proof.ts'
-import { pairConnector, readCredentialStatus } from './cloud/pairing-client.ts'
+import {
+  PairingProofExpired,
+  pairConnector,
+  readCredentialStatus,
+} from './cloud/pairing-client.ts'
 
 const help = `Open3DFarmManager Connector
 
@@ -127,8 +131,14 @@ async function pair(args: string[]): Promise<number> {
       `Pareamento concluído. Credencial válida até ${new Date(result.expiresAt).toISOString()}.`,
     )
     return 0
-  } catch {
+  } catch (error) {
     // No tokens, device codes, paths or server bodies in terminal output.
+    if (error instanceof PairingProofExpired) {
+      console.error(
+        'A prova expirou antes da aprovação. Inicie um novo pareamento e aprove em até 60 segundos após a exibição do código.',
+      )
+      return 1
+    }
     console.error(
       'Não foi possível concluir o pareamento. Verifique o servidor, a audiência, a identidade, se a credencial já existe e a aprovação no navegador; inicie um novo pareamento.',
     )

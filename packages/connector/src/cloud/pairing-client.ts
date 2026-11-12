@@ -1,14 +1,24 @@
-import { closeSync, fsyncSync, openSync, writeSync, constants } from 'node:fs'
-import { z } from 'zod'
+import {
+  closeSync,
+  constants,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { dirname, join } from 'node:path'
 import { projectVersion } from '@open3dfarmmanager/shared'
 import {
-  PairingPollResponse,
-  PairingStartResponse,
+  PAIRING_TTL_MS,
   acceptPairingStart,
   formatPairingCode,
   parsePairingResponse,
 } from '../../../farm-protocol/src/pairing.ts'
 import { PairingProofChallenge } from '../../../farm-protocol/src/pairing-proof.ts'
+import { CredentialFile } from '../config/credential.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 
@@ -57,13 +67,31 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 const defaultFetch: PairingFetch = async (url, init) => {
   const response = await fetch(url, { ...init, redirect: 'error' })
+  const length = response.headers.get('content-length')
+  if (length !== null && !(Number(length) <= MAX_RESPONSE_BYTES)) {
+    await response.body?.cancel().catch(() => {})
+    throw new Error('Pairing response exceeds size limit')
+  }
   return {
     status: response.status,
     async text() {
-      const text = await response.text()
-      if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES)
-        throw new Error('Pairing response exceeds size limit')
-      return text
+      const reader = response.body?.getReader()
+      if (!reader) return ''
+      const chunks: Uint8Array[] = []
+      let size = 0
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        size += chunk.value.byteLength
+        if (size > MAX_RESPONSE_BYTES) {
+          await reader.cancel().catch(() => {})
+          throw new Error('Pairing response exceeds size limit')
+        }
+        chunks.push(chunk.value)
+      }
+      return new TextDecoder('utf-8', { fatal: true }).decode(
+        Buffer.concat(chunks),
+      )
     },
   }
 }
@@ -105,53 +133,101 @@ async function post(
   }
 }
 
-/** Retries transient failures with doubling, capped backoff; never retries rejections. */
+/** Retries transient failures with doubling, capped backoff, never past the deadline. */
 async function postRetrying(
   input: PairInput,
   path: string,
   body: object,
+  deadline: number,
 ): Promise<unknown> {
   const sleep = input.sleep ?? defaultSleep
+  const now = input.now ?? Date.now
   for (let failures = 0; ; failures++) {
     try {
       return await post(input, path, body)
     } catch (error) {
+      const wait = Math.min(1000 * 2 ** failures, MAX_BACKOFF_MS)
       if (
         !(error instanceof TransientError) ||
-        failures + 1 >= MAX_TRANSIENT_FAILURES
+        failures + 1 >= MAX_TRANSIENT_FAILURES ||
+        now() + wait >= deadline
       )
         throw error
-      await sleep(Math.min(1000 * 2 ** failures, MAX_BACKOFF_MS), input.signal)
+      await sleep(wait, input.signal)
       if (input.signal.aborted) throw new Error('Pairing cancelled')
     }
   }
 }
 
-/** Never overwrites: a credential for another pairing must be removed deliberately. */
-function writeCredential(
-  path: string,
-  fingerprint: string,
-  approval: PairingPollResponse,
-) {
-  const text =
-    JSON.stringify({
-      version: 1,
-      expected_fingerprint: fingerprint,
-      approval,
-    }) + '\n'
+/** The proof lives at most 60 s; claim without a current proof is always denied. */
+export class PairingProofExpired extends Error {
+  constructor() {
+    super('Pairing proof expired before approval')
+  }
+}
+
+/**
+ * Checked before any network call so a token is never consumed server-side only
+ * to fail locally: final path absent, parent private to us, temp file reserved.
+ */
+function reserveCredential(path: string) {
+  try {
+    lstatSync(path)
+    throw new Error('Credential file already exists')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const directory = dirname(path)
+  const stat = lstatSync(directory)
+  if (
+    !stat.isDirectory() ||
+    (process.platform !== 'win32' &&
+      ((stat.mode & 0o022) !== 0 || stat.uid !== process.getuid?.()))
+  )
+    throw new Error(
+      'Credential directory must be owned and not writable by others',
+    )
+  const tmp = join(
+    directory,
+    `.credential-${randomBytes(8).toString('hex')}.tmp`,
+  )
   const fd = openSync(
-    path,
+    tmp,
     constants.O_WRONLY |
       constants.O_CREAT |
       constants.O_EXCL |
       constants.O_NOFOLLOW,
     0o600,
   )
-  try {
-    writeSync(fd, text)
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
+  let open = true
+  const close = () => {
+    if (open) closeSync(fd)
+    open = false
+  }
+  return {
+    /** Atomic and never replaces: link fails with EEXIST; tmp is removed (nlink 1). */
+    commit(text: string) {
+      const bytes = Buffer.from(text)
+      for (let written = 0; written < bytes.length;)
+        written += writeSync(fd, bytes, written)
+      fsyncSync(fd)
+      close()
+      linkSync(tmp, path)
+      unlinkSync(tmp)
+      const dirFd = openSync(directory, 'r')
+      try {
+        fsyncSync(dirFd)
+      } finally {
+        closeSync(dirFd)
+      }
+    },
+    /** Always safe to call: removes the temp file only; a linked credential is kept. */
+    abort() {
+      close()
+      try {
+        unlinkSync(tmp)
+      } catch {}
+    },
   }
 }
 
@@ -167,58 +243,82 @@ export async function pairConnector(
   const now = input.now ?? Date.now
   const sleep = input.sleep ?? defaultSleep
   const { identity } = input
-  const start = acceptPairingStart(
-    await postRetrying(input, 'start', {
-      public_key_spki: identity.publicKeySpki,
-      platform: process.platform,
-      version: projectVersion,
-    }),
-    identity.fingerprint,
-    now(),
-  )
-  const challenge = PairingProofChallenge.parse(
-    await postRetrying(input, 'challenge', { device_code: start.device_code }),
-  )
-  const signature = identity.signPairingProof({
-    challenge,
-    expectedOrigin: input.serverOrigin,
-    expectedAudience: input.audience,
-    now: now(),
-  })
-  await postRetrying(input, 'proof', {
-    device_code: start.device_code,
-    challenge,
-    signature,
-  })
-  input.onCode({
-    userCode: formatPairingCode(start.user_code),
-    fingerprint: identity.fingerprint,
-  })
-  let waitMs = start.poll_interval_s * 1000
-  while (now() < start.expires_at) {
-    await sleep(waitMs, input.signal)
-    if (input.signal.aborted) throw new Error('Pairing cancelled')
-    const poll = parsePairingResponse(
-      JSON.stringify(
-        await postRetrying(input, 'claim', { device_code: start.device_code }),
+  const reservation = reserveCredential(input.credentialPath)
+  try {
+    const start = acceptPairingStart(
+      await postRetrying(
+        input,
+        'start',
+        {
+          public_key_spki: identity.publicKeySpki,
+          platform: process.platform,
+          version: projectVersion,
+        },
+        now() + PAIRING_TTL_MS,
+      ),
+      identity.fingerprint,
+      now(),
+    )
+    const challenge = PairingProofChallenge.parse(
+      await postRetrying(
+        input,
+        'challenge',
+        { device_code: start.device_code },
+        start.expires_at,
       ),
     )
-    if (poll.status === 'approved') {
-      writeCredential(input.credentialPath, identity.fingerprint, poll)
-      return { expiresAt: poll.expires_at }
+    const deadline = Math.min(start.expires_at, challenge.expires_at)
+    const signature = identity.signPairingProof({
+      challenge,
+      expectedOrigin: input.serverOrigin,
+      expectedAudience: input.audience,
+      now: now(),
+    })
+    await postRetrying(
+      input,
+      'proof',
+      { device_code: start.device_code, challenge, signature },
+      deadline,
+    )
+    input.onCode({
+      userCode: formatPairingCode(start.user_code),
+      fingerprint: identity.fingerprint,
+    })
+    let waitMs = start.poll_interval_s * 1000
+    for (;;) {
+      await sleep(Math.min(waitMs, Math.max(deadline - now(), 0)), input.signal)
+      if (input.signal.aborted) throw new Error('Pairing cancelled')
+      if (now() >= deadline) throw new PairingProofExpired()
+      const poll = parsePairingResponse(
+        JSON.stringify(
+          await postRetrying(
+            input,
+            'claim',
+            { device_code: start.device_code },
+            deadline,
+          ),
+        ),
+      )
+      if (poll.status === 'approved') {
+        if (poll.agent_id !== challenge.agent_id)
+          throw new Error('Pairing agent mismatch')
+        reservation.commit(
+          JSON.stringify({
+            version: 1,
+            expected_fingerprint: identity.fingerprint,
+            approval: poll,
+          }) + '\n',
+        )
+        return { expiresAt: poll.expires_at }
+      }
+      if (poll.status === 'denied') throw new Error('Pairing denied')
+      if (poll.status === 'expired') throw new Error('Pairing expired')
+      waitMs = Math.max(poll.retry_after_s, start.poll_interval_s) * 1000
     }
-    if (poll.status === 'denied') throw new Error('Pairing denied')
-    if (poll.status === 'expired') throw new Error('Pairing expired')
-    waitMs = Math.max(poll.retry_after_s, start.poll_interval_s) * 1000
+  } finally {
+    reservation.abort()
   }
-  throw new Error('Pairing timed out')
 }
-
-const StoredCredential = z.strictObject({
-  version: z.literal(1),
-  expected_fingerprint: PairingStartResponse.shape.fingerprint,
-  approval: PairingPollResponse,
-})
 
 /** Local metadata only. The device token never leaves the parsed file. */
 export function readCredentialStatus(
@@ -227,7 +327,7 @@ export function readCredentialStatus(
   now: number,
 ) {
   try {
-    const { approval, expected_fingerprint } = StoredCredential.parse(
+    const { approval, expected_fingerprint } = CredentialFile.parse(
       readPrivateJsonFile(path, { maxBytes: 16 * 1024, maxStringChars: 8192 }),
     )
     if (approval.status !== 'approved') return { present: true, valid: false }

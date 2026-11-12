@@ -109,6 +109,17 @@ describe('prepareSchema (startup gate)', () => {
   })
 })
 
+describe('permission denied (SQLSTATE 42501)', () => {
+  const denied = Object.assign(new Error('permission denied for table x'), {
+    code: '42501',
+  })
+  test('verify maps to permission-denied, not unreachable', async () => {
+    await expect(
+      prepareSchema(fakeSql(denied), catalog, 'verify'),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+  })
+})
+
 describe('databaseReadiness', () => {
   test('ok / ahead / pending / mismatch', async () => {
     expect(await databaseReadiness(fakeSql(journal(2)), catalog)).toBe('ok')

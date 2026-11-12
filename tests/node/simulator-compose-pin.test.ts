@@ -10,11 +10,16 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { verifyComposePin, PINNED_IMAGE_REFERENCE } =
-  (await import('../../scripts/simulator-identify-diagnostic.mjs')) as {
-    verifyComposePin: (composeFile: string) => string
-    PINNED_IMAGE_REFERENCE: string
-  }
+const moduleUrl = new URL(
+  '../../scripts/simulator-identify-diagnostic.mjs',
+  import.meta.url,
+).href
+const { verifyComposePin, PINNED_IMAGE_REFERENCE } = (await import(
+  moduleUrl
+)) as {
+  verifyComposePin: (composeFile: string) => string
+  PINNED_IMAGE_REFERENCE: string
+}
 
 const repoCompose = readFileSync(
   new URL('../../infra/sim/docker-compose.yml', import.meta.url),

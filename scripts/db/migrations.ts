@@ -60,6 +60,17 @@ export async function loadMigrationCatalog(
   )
 }
 
+/** Catalog prefix ending at one specific migration, so later migrations cannot change a pinned acceptance fixture. */
+export function catalogThrough(
+  catalog: ReturnType<typeof migrationCatalog>,
+  lastId: string,
+) {
+  const index = catalog.findIndex((entry) => entry.id === lastId)
+  if (index < 0)
+    throw new Error('Migration ' + lastId + ' is not in the catalog')
+  return catalog.slice(0, index + 1)
+}
+
 export function validateMigrationHistory(
   catalog: ReturnType<typeof migrationCatalog>,
   input: unknown,
@@ -101,9 +112,12 @@ export async function runMigrations(
     ]),
   )
   return sql.begin(async (tx) => {
-    await tx`SET LOCAL lock_timeout = '5000ms'`
+    // Concurrent runners queue on the advisory lock (bounded by statement_timeout);
+    // DDL lock waits keep the short limit.
+    await tx`SET LOCAL lock_timeout = 0`
     await tx`SET LOCAL statement_timeout = '30000ms'`
     await tx`SELECT pg_advisory_xact_lock(1870033, 1)`
+    await tx`SET LOCAL lock_timeout = '5000ms'`
     await tx`CREATE TABLE IF NOT EXISTS public.open3dfarm_migrations (
       position integer PRIMARY KEY CHECK (position > 0),
       id text UNIQUE NOT NULL,

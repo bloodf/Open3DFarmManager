@@ -1,5 +1,5 @@
 import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -11,8 +11,20 @@ import {
 } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 import {
   immutableAdmission,
+  validatedStatusMessage,
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
+
+// Freeze both clocks the sender trusts; admissions map wall expiry onto the
+// monotonic clock, so they must stand still together. The 100 ms source
+// windows below then expire only through the sender's own timers or an
+// explicit test clock, never because this process was descheduled.
+const frozenMonoMs = performance.now()
+Object.defineProperty(performance, 'now', {
+  configurable: true,
+  value: () => frozenMonoMs,
+})
+mock.timers.enable({ apis: ['Date'], now: Date.now() })
 
 async function fixture(onSend?: () => void) {
   const identity = new ConnectorIdentity(
@@ -150,8 +162,8 @@ async function fixture(onSend?: () => void) {
     complete,
     admit: async (input = admission) => {
       listener?.(input)
-      const deadline = performance.now() + 500
-      while (!provider && !closed && performance.now() < deadline)
+      // Hang guard in turns of the real event loop; both clocks are frozen.
+      for (let turn = 0; !provider && !closed && turn < 5000; turn++)
         await new Promise<void>((resolve) => setTimeout(resolve, 1))
     },
     provider: () => provider,
@@ -501,4 +513,61 @@ test('sender copies optional finite temperatures without making a command or cha
   } finally {
     f.sender.close()
   }
+})
+
+test('sender forwards a bounded spool inventory and rejects unbounded or unknown inventory', async () => {
+  const f = await fixture()
+  try {
+    await f.sender.start()
+    await f.admit()
+    const spool = {
+      name: 'PLA',
+      material: 'PLA',
+      colorHex: 'ffffff',
+      remainingGrams: 500,
+      location: null,
+      archived: false,
+    }
+    const inventory = {
+      observedAt: Date.now(),
+      stale: false,
+      total: 1,
+      spools: [spool],
+    }
+    f.complete({ inventory })
+    assert.deepEqual((f.sent[0] as { inventory: unknown }).inventory, inventory)
+    assert.equal(
+      Object.isFrozen((f.sent[0] as { inventory: unknown }).inventory),
+      true,
+    )
+    assert.equal(f.closed(), 0)
+    f.complete({ inventory: { ...inventory, spools: Array(9).fill(spool) } })
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.sender.close()
+  }
+})
+
+test('receiving side drops an invalid inventory while sending stays strict', () => {
+  const ref = {
+    assignmentId: randomUUID(),
+    agentId: randomUUID(),
+    printerKey: 'printer-a',
+  }
+  const message = {
+    t: 'snapshot',
+    seq: 0,
+    printers: [
+      { printerKey: 'printer-a', state: 'idle', progress: 0, observedAt: 1 },
+    ],
+    inventory: { observedAt: 1, stale: false, total: 1, spools: [{ bad: 1 }] },
+  }
+  assert.throws(() => validatedStatusMessage(message, [ref]))
+  const received = validatedStatusMessage(message, [ref], true)
+  assert.equal(received.inventory, undefined)
+  assert.equal(received.printers.length, 1)
+  assert.throws(() =>
+    validatedStatusMessage({ ...message, extra: 1 }, [ref], true),
+  )
 })

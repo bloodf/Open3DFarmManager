@@ -20,7 +20,18 @@ node packages/connector/dist/cli.js identity --data-dir /path/to/private-data
 
 `init-identity` creates an Ed25519 identity only when none exists, or reuses a valid existing identity. Repeating it preserves the key and fingerprint. `identity` only reads. Successful output is JSON containing algorithm, fingerprint and public SPKI; it does not contain the private key.
 
-This is local identity preparation, not pairing or authentication. The CLI makes no network request and starts no service. `pair`, `run`, service installation and printer discovery/control are not implemented. Initializing an identity does not register or authorize it with a farm.
+`init-identity` and `identity` are local only: no network request, no service. Initializing an identity does not register or authorize it with a farm.
+
+## Pair and inspect status
+
+```sh
+node packages/connector/dist/cli.js pair --server https://farm.example --audience <audience> --data-dir /path/to/private-data --credential-file /path/to/private-data/credential.json
+node packages/connector/dist/cli.js status --data-dir /path/to/private-data --credential-file /path/to/private-data/credential.json
+```
+
+`pair` needs an existing identity. It starts pairing, signs the server challenge with the identity (proof of key possession), then prints a short code and the local fingerprint. Confirm in the browser that the fingerprint is identical and approve the code; the server requires approval within 60 seconds of the proof. The CLI polls with the server-provided interval, retries transient network failures with capped backoff (five attempts) and stops at the pairing deadline (15 minutes). The credential is written with mode `0600` and is never overwritten; remove an old file deliberately. The credential path and its directory are checked before any network call (directory owned by you and not group/world writable), and the file is created atomically via a temporary file. Polling stops when the proof expires (a message asks you to start over). If a proof or claim response is lost, pairing fails closed: run `pair` again. `--audience` is the farm's configured pairing audience and is never taken from the server response.
+
+`status` reads local state only and prints JSON: the identity fingerprint and, when `--credential-file` is given, credential presence, validity, expiry, agent and farm IDs. The device token is never printed. Persisted server or printer state does not exist locally yet, so none is reported.
 
 On failure the CLI exits nonzero with a fixed pt-BR message. Existing corrupt identity data is not overwritten. Incomplete initialization may leave recovery files; do not delete them or generate replacement keys without reviewing [identity recovery constraints](../../docs/CONNECTOR-IDENTITY.md).
 

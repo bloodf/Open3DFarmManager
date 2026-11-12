@@ -63,6 +63,25 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+  rtsp:
+    image: bluenviron/mediamtx@sha256:2356620b402c32c0a0e61d2d731af37c9e957ae4a97421b05722580385d92aa3
+    platform: linux/amd64
+    profiles: [rtsp]
+    user: '10001:10001'
+    command: ['/mediamtx.yml']
+    ports:
+      - '127.0.0.1:8554:8554'
+    volumes:
+      - ./rtsp/mediamtx.yml:/mediamtx.yml:ro
+    tmpfs:
+      - /tmp:noexec
+    networks: [sim]
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 
 networks:
   sim:

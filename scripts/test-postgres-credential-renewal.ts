@@ -9,11 +9,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import postgres from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   runMigrations,
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { testPostgresCredentialRenewal } from '../tests/helpers/postgres-credential-renewal-integration.ts'
+import { testRenewalHttps } from '../tests/helpers/renewal-https-integration.ts'
 
 const exec = promisify(execFile)
 const image = process.env.RENEWAL_TEST_IMAGE
@@ -26,8 +28,20 @@ if (
   throw new Error(
     'Fresh test admission and locally available digest-pinned PostgreSQL 17 image required',
   )
+// Optional built-server phase: "<appPort>,<proxyPort>" on loopback; needs apps/farm/.output.
+const httpsPorts = process.env.RENEWAL_TEST_HTTPS_PORTS?.split(',').map(Number)
+if (
+  httpsPorts &&
+  (httpsPorts.length !== 2 ||
+    httpsPorts.some((p) => !Number.isInteger(p) || p < 1024 || p > 65535))
+)
+  throw new Error('Invalid built-server port pair')
 const id = randomUUID()
-const name = 'o3dfm-renewals-' + id
+// Optional caller-owned name prefix so parallel runners can audit their own resources.
+const prefix = process.env.RENEWAL_TEST_NAME_PREFIX ?? 'o3dfm-renewals'
+if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
+  throw new Error('Invalid renewal test name prefix')
+const name = prefix + '-' + id
 const label = 'org.open3dfarmmanager.renewal-test=' + id
 const evidence = join(
   homedir(),
@@ -196,12 +210,14 @@ try {
   )
   const version = (await sql`SHOW server_version`)[0]?.server_version
   assert.match(version, /^17\./)
-  const catalog = await loadMigrationCatalog()
-  assert.equal(catalog.at(-1)?.id, '0023_connector_credential_renewals')
+  const catalog = catalogThrough(
+    await loadMigrationCatalog(),
+    '0023_connector_credential_renewals',
+  )
   await runMigrations(sql, catalog, { kind: 'up' })
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...journal]), 23)
+  assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
   await writeFile(
     join(evidence, 'journal.json'),
     JSON.stringify({ version, image, journal }, null, 2),
@@ -223,6 +239,13 @@ try {
     port,
     join(evidence, 'child-resources.jsonl'),
   )
+  if (httpsPorts)
+    checks.push(
+      ...(await testRenewalHttps(sql, port, {
+        app: httpsPorts[0]!,
+        proxy: httpsPorts[1]!,
+      })),
+    )
   const last = catalog.at(-1)
   if (!last) throw new Error('Missing migration')
   await assert.rejects(

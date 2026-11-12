@@ -3,9 +3,15 @@ export * from './command.ts'
 export * from './signalling.ts'
 export * from './agent.ts'
 export * from './channel.ts'
+export * from './inventory.ts'
 export * from './json.ts'
 export * from './pairing.ts'
 export * from './canonical.ts'
 export * from './encoding.ts'
 export * from './sign.ts'
-export { TelemetryEvent, TelemetryBatch } from './telemetry.ts'
+export {
+  TelemetryEvent,
+  TelemetryBatch,
+  PrinterTransition,
+  telemetryPrinterKey,
+} from './telemetry.ts'

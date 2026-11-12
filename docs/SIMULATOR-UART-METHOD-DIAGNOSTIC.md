@@ -133,5 +133,5 @@ Fixtures are original synthetic classes and in-memory streams. They verify exact
 return/exception behavior, hidden-errno and write-count limits, clock/output
 failure, source rejection before execution, argument forwarding and bounds.
 They start no emulator, container, SSH session, device or service and write no
-bytecode or temporary files. Native integration and `bun run check:all` remain
+bytecode or temporary files. Native integration and `pnpm run check:all` remain
 pending; these experimental Python checks are not part of that unchanged gate.

@@ -397,7 +397,10 @@ test('issuer and browser admission use independent domains and canonical UTF-8 w
   )
 })
 
-async function verifierFixture(expireOnRead = 0) {
+async function verifierFixture(
+  expireOnRead = 0,
+  freshness?: { freshAt(now: { wall: number; mono: number }): boolean },
+) {
   const f = await authorityFixture()
   const { createPrinterBindingRegistry } =
     await import('../../packages/connector/src/control/printer-binding.ts')
@@ -429,6 +432,7 @@ async function verifierFixture(expireOnRead = 0) {
   ]
   const verifier = createPauseCapabilityVerifier({
     issuers,
+    ...(freshness ? { freshness } : {}),
     clock: {
       wallNow: () => {
         if (++reads === expireOnRead) {
@@ -679,4 +683,49 @@ test('opaque peer provenance, terminal lifecycle and explicit revocation require
     }),
   )
   assert.throws(() => JSON.stringify(peer.peer))
+})
+
+test('stale offline authority denies admission and dispatch inspection but keeps readonly lifecycle', async () => {
+  const { createOfflineAuthority } =
+    await import('../../packages/connector/src/auth/offline-authority.ts')
+  const offline = createOfflineAuthority({ maxAgeMs: 5000 })
+  const f = await verifierFixture(0, offline.freshness)
+  const never = f.begin()
+  assert.deepEqual(
+    await f.verifier.admit(
+      never.token,
+      await f.wires(never.challenge.admissionNonce),
+    ),
+    { ok: false, reason: 'expired-or-inactive' },
+  )
+  offline.confirm({ wall: 1000, mono: 1000 }, 1)
+  const revoked = f.begin()
+  const first = await f.verifier.admit(
+    revoked.token,
+    await f.wires(revoked.challenge.admissionNonce),
+  )
+  assert.ok(first.ok)
+  assert.equal(f.verifier.inspect(first.handle).ok, true)
+  offline.revoke(2)
+  assert.equal(f.verifier.inspect(first.handle).ok, false)
+  assert.equal(f.verifier.inspectLifecycle(first.handle), true)
+  assert.equal(offline.confirm({ wall: 1000, mono: 1000 }, 2), false)
+  assert.equal(f.verifier.inspect(first.handle).ok, false)
+  offline.confirm({ wall: 1000, mono: 1000 }, 3)
+  const attempt = f.begin()
+  const decision = await f.verifier.admit(
+    attempt.token,
+    await f.wires(attempt.challenge.admissionNonce),
+  )
+  assert.ok(decision.ok)
+  f.advance(4999)
+  assert.equal(f.verifier.inspect(decision.handle).ok, true)
+  f.advance(1)
+  assert.deepEqual(f.verifier.inspect(decision.handle), {
+    ok: false,
+    reason: 'expired-or-inactive',
+  })
+  assert.equal(f.verifier.inspectLifecycle(decision.handle), true)
+  offline.confirm({ wall: 6000, mono: 6000 }, 4)
+  assert.equal(f.verifier.inspect(decision.handle).ok, false)
 })

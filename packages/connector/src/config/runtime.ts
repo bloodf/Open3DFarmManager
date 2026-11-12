@@ -30,6 +30,17 @@ const Runtime = z.strictObject({
       idleMs: z.number().int().min(100).max(5000).default(500),
     })
     .refine((value) => value.retryMinMs <= value.retryMaxMs),
+  // Optional: absent means no renewal and the agent stops at credential expiry.
+  // Renewal uses the telemetry endpoint origin; only the proof audience differs.
+  renewal: z
+    .strictObject({
+      audience: PairingProofAudience,
+      timeoutMs: z.number().int().min(100).max(60000).default(5000),
+      retryMinMs: z.number().int().min(100).max(300000).default(1000),
+      retryMaxMs: z.number().int().min(100).max(300000).default(30000),
+    })
+    .refine((value) => value.retryMinMs <= value.retryMaxMs)
+    .optional(),
   // The pause section is optional and parsed strictly by its own module. An
   // absent section carries no authority and causes no cryptographic work.
   pause: z.unknown().optional(),
@@ -87,9 +98,12 @@ export function readAgentRuntimeConfig(
   }
   const pause =
     input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
+  if (pause?.control && !provisioned.has(pause.control.assignmentId))
+    throw new Error('Pause control assignment is not provisioned locally')
   return {
     collection,
     telemetry: input.telemetry,
+    renewal: input.renewal,
     assignments,
     signalling: input.signalling,
     pause,

@@ -17,17 +17,27 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  PrinterState,
+  PrinterTransition,
+} from '@open3dfarmmanager/farm-protocol'
 
 const MAX_BYTES = 50 * 1024 * 1024
 const MAX_AGE = 24 * 60 * 60 * 1000
 const MAX_RECORD = 64 * 1024
-export interface TelemetryRecord {
-  eventId: string
-  queuedAt: number
-  kind: 'printer-state'
-  state: PrinterState
-}
+export type TelemetryRecord =
+  | {
+      eventId: string
+      queuedAt: number
+      kind: 'printer-state'
+      state: PrinterState
+    }
+  | {
+      eventId: string
+      queuedAt: number
+      kind: 'printer-transition'
+      transition: PrinterTransition
+    }
 export interface QueueLimits {
   maxBytes?: number
   maxAgeMs?: number
@@ -68,17 +78,28 @@ function parseRecord(value: unknown): TelemetryRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error('Invalid queue record')
   const record = value as Record<string, unknown>
+  const transition = record.kind === 'printer-transition'
   if (
-    Object.keys(record).sort().join(',') !== 'eventId,kind,queuedAt,state' ||
+    Object.keys(record).sort().join(',') !==
+      (transition
+        ? 'eventId,kind,queuedAt,transition'
+        : 'eventId,kind,queuedAt,state') ||
     typeof record.eventId !== 'string' ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
       record.eventId,
     ) ||
-    record.kind !== 'printer-state' ||
+    (record.kind !== 'printer-state' && !transition) ||
     typeof record.queuedAt !== 'number'
   )
     throw new Error('Invalid queue record')
   clock(record.queuedAt)
+  if (transition)
+    return {
+      eventId: record.eventId,
+      queuedAt: record.queuedAt,
+      kind: 'printer-transition',
+      transition: PrinterTransition.parse(record.transition),
+    }
   return {
     eventId: record.eventId,
     queuedAt: record.queuedAt,
@@ -289,12 +310,34 @@ export class TelemetryQueue {
     state: PrinterState,
     now: number,
   ): { eventId: string; loss: QueueLoss } {
+    return this.append(
+      { kind: 'printer-state', state: PrinterState.parse(state) },
+      now,
+    )
+  }
+  enqueueTransition(
+    transition: PrinterTransition,
+    now: number,
+  ): { eventId: string; loss: QueueLoss } {
+    return this.append(
+      {
+        kind: 'printer-transition',
+        transition: PrinterTransition.parse(transition),
+      },
+      now,
+    )
+  }
+  private append(
+    body:
+      | { kind: 'printer-state'; state: PrinterState }
+      | { kind: 'printer-transition'; transition: PrinterTransition },
+    now: number,
+  ): { eventId: string; loss: QueueLoss } {
     this.ready(now)
     const record: TelemetryRecord = {
       eventId: randomUUID(),
       queuedAt: now,
-      kind: 'printer-state',
-      state: PrinterState.parse(state),
+      ...body,
     }
     const serialized = line(record)
     if (Buffer.byteLength(serialized) > Math.min(MAX_RECORD, this.maxBytes))

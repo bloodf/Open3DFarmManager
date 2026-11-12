@@ -5,7 +5,11 @@ import {
 } from '../../../../packages/farm-protocol/src/browser-device-http.ts'
 import { BrowserDeviceUuid } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
-import { StatusMessage } from '../../../../packages/farm-protocol/src/channel.ts'
+import {
+  StatusMessage,
+  parseStatusMessageTolerant,
+} from '../../../../packages/farm-protocol/src/channel.ts'
+import type { SpoolInventory } from '../../../../packages/farm-protocol/src/inventory.ts'
 
 const exactKey = PrinterState.shape.printerKey.refine(
   (value) =>
@@ -108,6 +112,31 @@ export type FarmObservation = {
   sourceClockComparable: boolean
   historical: boolean
 }
+/** Read-only Spoolman mirror per Connector. Null inventory means unavailable. */
+export type FarmSpoolObservation = {
+  agentId: string
+  inventory: SpoolInventory | null
+  received: Clock
+  /** Feed closed: last observation only, never current. */
+  historical: boolean
+}
+function sameInventory(
+  a: SpoolInventory | null | undefined,
+  b: SpoolInventory | undefined,
+) {
+  return !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
+}
+export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
+  const elapsed = now.mono - item.received.mono
+  return (
+    item.historical ||
+    !item.inventory ||
+    item.inventory.stale ||
+    !Number.isFinite(elapsed) ||
+    elapsed < 0 ||
+    elapsed >= 30_000
+  )
+}
 export type FarmRow = {
   assignment: FarmAssignment
   connection:
@@ -142,6 +171,7 @@ type Ready = {
   inventory: 'loading' | 'ready'
   feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
+  spools: readonly FarmSpoolObservation[]
   nextPrinter: string | null
   printerAfter: string | null
   canManage: boolean
@@ -174,7 +204,26 @@ type Dependencies = {
   clock: () => Clock
   changed: (state: FarmViewState) => void
   feed?: FarmStatusFeed
+  /** Jitter source in [0, 1). */
+  random?: () => number
 }
+// A live Connector re-sends within its 5 s source validity or closes, so 9 s of
+// silence plus the 1 s view tick bounds loss detection to 10 s.
+const LIVENESS_MS = 9_000
+// Reopen after loss: exponential backoff with jitter, at most six reopens in a
+// row. Only a feed that delivered data for 10 s resets the budget.
+const REOPEN_BASE_MS = 1_000
+const REOPEN_MAX_MS = 30_000
+const REOPEN_ATTEMPTS = 6
+const HEALTHY_MS = 10_000
+// Agents of one run share a re-check scan started within this window.
+const RECHECK_SHARE_MS = 1_000
+const RETRY_AFTER_MAX_MS = 300_000
+type Refs = readonly Pick<
+  FarmAssignment,
+  'assignmentId' | 'agentId' | 'printerKey'
+>[]
+type Closed = Extract<FarmHealth, { kind: 'closed' }>['reason']
 class AccountChanged extends Error {}
 function httpStatus(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null) return
@@ -243,6 +292,78 @@ export const printerStateLabel: Record<
   paused: 'Pausada',
   error: 'Erro',
   offline: 'Indisponível segundo o Connector',
+}
+
+/** Live-region copy: only stable live/unavailable changes, never transient steps. */
+export function farmConnectionNotice(rows: readonly FarmRow[]) {
+  return rows.some((row) => row.connection === 'authenticated')
+    ? 'Conexão direta autenticada. Os controles continuam em modo somente leitura.'
+    : 'Conexão direta indisponível. A conexão direta com o Connector ainda não está disponível.'
+}
+function agentRefs(
+  assignments: ReadonlyMap<string, Readonly<FarmAssignment>>,
+  agentId: string,
+): Refs {
+  const refs = Object.freeze(
+    [...assignments.values()]
+      .filter(
+        (row) =>
+          row.agentId === agentId &&
+          row.status === 'active' &&
+          row.connectorStatus === 'approved',
+      )
+      .map(({ assignmentId, agentId, printerKey }) =>
+        Object.freeze({ assignmentId, agentId, printerKey }),
+      ),
+  )
+  // Reserve conservative numeric JSON width as well as escaped UTF8 keys.
+  // This is a capacity check, not an invitation to truncate or split sets.
+  const bytes =
+    new TextEncoder().encode(
+      JSON.stringify({
+        t: 'snapshot',
+        seq: Number.MAX_SAFE_INTEGER,
+        printers: refs.map((ref) => ({
+          printerKey: ref.printerKey,
+          state: 'printing',
+          progress: 0,
+          observedAt: Number.MAX_SAFE_INTEGER,
+        })),
+      }),
+    ).byteLength +
+    refs.length * 24
+  if (!refs.length || refs.length > 100 || bytes > 2048)
+    throw Error('Complete Connector frame capacity')
+  return refs
+}
+// 429 honours Retry-After (seconds or HTTP date) and otherwise waits the
+// maximum backoff.
+function retryAfterMs(error: unknown, nowWall: number) {
+  const response =
+    typeof error === 'object' && error !== null && 'response' in error
+      ? error.response
+      : null
+  const header =
+    response instanceof Response ? response.headers.get('retry-after') : null
+  const text = header?.trim() ?? ''
+  const seconds = /^\d+$/.test(text) ? Number(text) * 1000 : NaN
+  const delay = Number.isFinite(seconds) ? seconds : Date.parse(text) - nowWall
+  return Number.isFinite(delay)
+    ? Math.min(Math.max(delay, REOPEN_BASE_MS), RETRY_AFTER_MAX_MS)
+    : REOPEN_MAX_MS
+}
+function sameRefs(a: Refs, b: Refs) {
+  return (
+    a.length === b.length &&
+    a.every((ref) =>
+      b.some(
+        (other) =>
+          ref.assignmentId === other.assignmentId &&
+          ref.agentId === other.agentId &&
+          ref.printerKey === other.printerKey,
+      ),
+    )
+  )
 }
 
 export function createFarmView(deps: Dependencies) {
@@ -335,6 +456,7 @@ export function createFarmView(deps: Dependencies) {
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         rows: [],
+        spools: [],
         nextPrinter: null,
         printerAfter: null,
         canManage: false,
@@ -352,7 +474,13 @@ export function createFarmView(deps: Dependencies) {
       if (run.current()) failed(error)
     }
   }
-  async function selectFarm(farmId: string, after: string | null = null) {
+  /** `refreshKey` refreshes in place: keeps the key, confirmed origins and
+   * visible rows (as history) instead of flashing an empty loading inventory. */
+  async function selectFarm(
+    farmId: string,
+    after: string | null = null,
+    refreshKey?: string,
+  ) {
     if (disposed || state.kind !== 'ready') return
     const previous = state
     const run = begin()
@@ -362,6 +490,7 @@ export function createFarmView(deps: Dependencies) {
         ...previous,
         scope: null,
         rows: [],
+        spools: [],
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
@@ -376,17 +505,42 @@ export function createFarmView(deps: Dependencies) {
       farmId,
       viewEpoch: run.epoch,
     }
-    publish({
-      ...previous,
-      scope,
-      inventory: 'loading',
-      feedScope: deps.feed ? 'idle' : 'disabled',
-      rows: [],
-      nextPrinter: null,
-      printerAfter: after,
-      canManage: false,
-      keys: { kind: 'loading' },
-    })
+    publish(
+      refreshKey
+        ? {
+            ...previous,
+            scope,
+            feedScope: deps.feed ? 'idle' : 'disabled',
+            rows: previous.rows.map((row) =>
+              row.connection === 'unavailable'
+                ? row
+                : {
+                    ...row,
+                    connection: 'closed',
+                    observation: row.observation
+                      ? { ...row.observation, historical: true }
+                      : null,
+                  },
+            ),
+            // Same farm: last spool inventory stays visible, flagged stale.
+            spools: previous.spools.map((item) => ({
+              ...item,
+              historical: true,
+            })),
+          }
+        : {
+            ...previous,
+            scope,
+            inventory: 'loading',
+            feedScope: deps.feed ? 'idle' : 'disabled',
+            rows: [],
+            spools: [],
+            nextPrinter: null,
+            printerAfter: after,
+            canManage: false,
+            keys: { kind: 'loading' },
+          },
+    )
     try {
       await me(run.signal, scope.accountId)
       if (!run.current()) return
@@ -399,6 +553,15 @@ export function createFarmView(deps: Dependencies) {
       if (!run.current()) return
       await me(run.signal, scope.accountId)
       if (!run.current() || state.kind !== 'ready') return
+      // Read origins now so ones confirmed while the refresh loaded survive.
+      const identity = (row: FarmAssignment) =>
+        JSON.stringify([row.assignmentId, row.agentId, row.printerKey])
+      const origins = new Map(
+        refreshKey
+          ? state.rows.map((row) => [identity(row.assignment), row.localOrigin])
+          : [],
+      )
+      const agents = new Set(page.printers.map((row) => row.agentId))
       publish({
         ...state,
         inventory: 'ready',
@@ -406,17 +569,28 @@ export function createFarmView(deps: Dependencies) {
           assignment,
           connection: 'unavailable',
           observation: null,
-          localOrigin: null,
+          // Same rule as confirmOrigin: only live, non-revoked assignments.
+          localOrigin:
+            assignment.status === 'active' &&
+            assignment.connectorStatus !== 'revoked'
+              ? (origins.get(identity(assignment)) ?? null)
+              : null,
         })),
+        // Refresh keeps stale spools only for Connectors still on this page.
+        spools: state.spools.filter((item) => agents.has(item.agentId)),
         nextPrinter: page.nextAfter,
         canManage: page.canManage,
       })
-      await loadKeys(scope, run)
+      await loadKeys(scope, run, refreshKey)
     } catch (error) {
       if (run.current()) failed(error)
     }
   }
-  async function loadKeys(scope: FarmScope, run: ReturnType<typeof begin>) {
+  async function loadKeys(
+    scope: FarmScope,
+    run: ReturnType<typeof begin>,
+    preferredKey?: string,
+  ) {
     let local: readonly { thumbprint: string }[]
     try {
       local = await deps.listKeys(scope)
@@ -490,7 +664,11 @@ export function createFarmView(deps: Dependencies) {
         return
       }
       const selected =
-        choices.length === 1 && choices[0] ? choices[0].keyId : ''
+        preferredKey && choices.some((choice) => choice.keyId === preferredKey)
+          ? preferredKey
+          : choices.length === 1 && choices[0]
+            ? choices[0].keyId
+            : ''
       publish({ ...state, keys: { kind: 'available', choices, selected } })
       if (selected) await prepareFeeds(scope, selected, run)
     } catch (error) {
@@ -558,51 +736,8 @@ export function createFarmView(deps: Dependencies) {
     publish({ ...state, feedScope: 'loading' })
     if (!run.current()) return
     try {
-      await me(run.signal, scope.accountId)
-      if (!run.current()) return
-      const assignments = new Map<string, Readonly<FarmAssignment>>()
-      const cursors = new Set<string>()
-      const activeKeys = new Set<string>()
-      const connectorStatuses = new Map<
-        string,
-        FarmAssignment['connectorStatus']
-      >()
-      let after: string | null = null,
-        complete = false
-      for (let pageNumber = 0; pageNumber < 32; pageNumber++) {
-        const page = BoundedAssignmentPage.parse(
-          await deps.read(`/api/farms/${scope.farmId}/printers`, run.signal, {
-            limit: 20,
-            ...(after ? { after } : {}),
-          }),
-        )
-        if (!run.current()) return
-        for (const row of page.printers) {
-          if (assignments.has(row.assignmentId))
-            throw Error('Duplicate inventory assignment')
-          const status = connectorStatuses.get(row.agentId)
-          if (status !== undefined && status !== row.connectorStatus)
-            throw Error('Contradictory Connector status')
-          connectorStatuses.set(row.agentId, row.connectorStatus)
-          if (row.status === 'active') {
-            const key = JSON.stringify([row.agentId, row.printerKey])
-            if (activeKeys.has(key)) throw Error('Duplicate active printer key')
-            activeKeys.add(key)
-          }
-          assignments.set(row.assignmentId, Object.freeze({ ...row }))
-        }
-        if (page.nextAfter === null) {
-          complete = true
-          break
-        }
-        if (!page.printers.length || cursors.has(page.nextAfter))
-          throw Error('Inventory cursor cycle')
-        cursors.add(page.nextAfter)
-        after = page.nextAfter
-      }
-      await me(run.signal, scope.accountId)
-      if (!run.current() || state.kind !== 'ready') return
-      if (!complete) throw Error('Incomplete inventory scope')
+      const assignments = await scanAssignments(scope, run)
+      if (!assignments || !run.current() || state.kind !== 'ready') return
       for (const row of visible) {
         const candidate = assignments.get(row.assignmentId)
         if (
@@ -614,46 +749,9 @@ export function createFarmView(deps: Dependencies) {
         )
           throw Error('Visible assignment changed during scan')
       }
-      const groups = new Map<
-        string,
-        readonly Pick<
-          FarmAssignment,
-          'assignmentId' | 'agentId' | 'printerKey'
-        >[]
-      >()
-      for (const agentId of agents) {
-        const refs = Object.freeze(
-          [...assignments.values()]
-            .filter(
-              (row) =>
-                row.agentId === agentId &&
-                row.status === 'active' &&
-                row.connectorStatus === 'approved',
-            )
-            .map(({ assignmentId, agentId, printerKey }) =>
-              Object.freeze({ assignmentId, agentId, printerKey }),
-            ),
-        )
-        // Reserve conservative numeric JSON width as well as escaped UTF8 keys.
-        // This is a capacity check, not an invitation to truncate or split sets.
-        const bytes =
-          new TextEncoder().encode(
-            JSON.stringify({
-              t: 'snapshot',
-              seq: Number.MAX_SAFE_INTEGER,
-              printers: refs.map((ref) => ({
-                printerKey: ref.printerKey,
-                state: 'printing',
-                progress: 0,
-                observedAt: Number.MAX_SAFE_INTEGER,
-              })),
-            }),
-          ).byteLength +
-          refs.length * 24
-        if (!refs.length || refs.length > 100 || bytes > 2048)
-          throw Error('Complete Connector frame capacity')
-        groups.set(agentId, refs)
-      }
+      const groups = new Map<string, Refs>()
+      for (const agentId of agents)
+        groups.set(agentId, agentRefs(assignments, agentId))
       publish({ ...state, feedScope: 'ready' })
       if (!run.current()) return
       openFeeds(scope, browserKeyId, run, groups)
@@ -672,16 +770,66 @@ export function createFarmView(deps: Dependencies) {
         publish({ ...state, feedScope: 'unavailable' })
     }
   }
+  /** Complete current farm assignment scan bracketed by identity checks. */
+  async function scanAssignments(
+    scope: FarmScope,
+    run: ReturnType<typeof begin>,
+  ) {
+    await me(run.signal, scope.accountId)
+    if (!run.current()) return null
+    const assignments = new Map<string, Readonly<FarmAssignment>>()
+    const cursors = new Set<string>()
+    const activeKeys = new Set<string>()
+    const connectorStatuses = new Map<
+      string,
+      FarmAssignment['connectorStatus']
+    >()
+    let after: string | null = null,
+      complete = false
+    for (let pageNumber = 0; pageNumber < 32; pageNumber++) {
+      const page = BoundedAssignmentPage.parse(
+        await deps.read(`/api/farms/${scope.farmId}/printers`, run.signal, {
+          limit: 20,
+          ...(after ? { after } : {}),
+        }),
+      )
+      if (!run.current()) return null
+      for (const row of page.printers) {
+        if (assignments.has(row.assignmentId))
+          throw Error('Duplicate inventory assignment')
+        const status = connectorStatuses.get(row.agentId)
+        if (status !== undefined && status !== row.connectorStatus)
+          throw Error('Contradictory Connector status')
+        connectorStatuses.set(row.agentId, row.connectorStatus)
+        if (row.status === 'active') {
+          const key = JSON.stringify([row.agentId, row.printerKey])
+          if (activeKeys.has(key)) throw Error('Duplicate active printer key')
+          activeKeys.add(key)
+        }
+        assignments.set(row.assignmentId, Object.freeze({ ...row }))
+      }
+      if (page.nextAfter === null) {
+        complete = true
+        break
+      }
+      if (!page.printers.length || cursors.has(page.nextAfter))
+        throw Error('Inventory cursor cycle')
+      cursors.add(page.nextAfter)
+      after = page.nextAfter
+    }
+    await me(run.signal, scope.accountId)
+    if (!run.current()) return null
+    if (!complete) throw Error('Incomplete inventory scope')
+    return assignments
+  }
   function openFeeds(
     scope: FarmScope,
     browserKeyId: string,
     run: ReturnType<typeof begin>,
-    groups: ReadonlyMap<
-      string,
-      readonly Pick<FarmAssignment, 'assignmentId' | 'agentId' | 'printerKey'>[]
-    >,
+    groups: ReadonlyMap<string, Refs>,
   ) {
     if (!deps.feed || state.kind !== 'ready') return
+    const feed = deps.feed
     const agents = new Set(
       state.rows
         .filter(
@@ -695,11 +843,123 @@ export function createFarmView(deps: Dependencies) {
       if (!run.current() || state.kind !== 'ready') return
       const refs = groups.get(agentId)
       if (!refs) return
+      subscribe(agentId, refs, 0)
+    }
+    const viewCurrent = () =>
+      run.current() &&
+      state.kind === 'ready' &&
+      state.scope?.viewEpoch === scope.viewEpoch
+    let check:
+      | {
+          promise: Promise<ReadonlyMap<string, Readonly<FarmAssignment>> | null>
+          settled: number | null
+        }
+      | undefined
+    function sharedScan() {
+      const now = deps.clock().mono
+      if (
+        check &&
+        (check.settled === null || now - check.settled < RECHECK_SHARE_MS)
+      )
+        return check.promise
+      const entry: NonNullable<typeof check> = {
+        promise: scanAssignments(scope, run),
+        settled: null,
+      }
+      const settle = () => {
+        entry.settled = deps.clock().mono
+      }
+      entry.promise.then(settle, settle)
+      check = entry
+      return entry.promise
+    }
+    function schedule(
+      agentId: string,
+      refs: Refs,
+      failures: number,
+      minDelayMs = 0,
+    ) {
+      if (failures > REOPEN_ATTEMPTS) return
+      const random = (deps.random ?? Math.random)()
+      const spread = Number.isFinite(random)
+        ? Math.min(Math.max(random, 0), 1)
+        : 0.5
+      // Backoff uses [0.5, 1) jitter; a server-imposed minimum is spread over
+      // [1, 1.5) so rate-limited views do not retry in lockstep.
+      const retryAt =
+        deps.clock().mono +
+        Math.max(
+          minDelayMs * (1 + spread / 2),
+          Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** failures) *
+            (0.5 + spread / 2),
+        )
+      const retry = {
+        close() {
+          connections = connections.filter((item) => item !== retry)
+        },
+        expire(now: Clock) {
+          if (!(now.mono >= retryAt)) return
+          retry.close()
+          if (viewCurrent()) void reopen(agentId, refs, failures)
+        },
+      }
+      connections.push(retry)
+    }
+    // Re-check identity and current assignment authority before every reopen:
+    // the browser cannot observe a signalling 403 or a server-side revocation.
+    async function reopen(agentId: string, refs: Refs, failures: number) {
+      try {
+        const assignments = await sharedScan()
+        if (!assignments || !viewCurrent()) return
+        let fresh: Refs | null = null
+        try {
+          fresh = agentRefs(assignments, agentId)
+        } catch {
+          // Connector or every assignment revoked, or capacity exceeded.
+        }
+        if (!fresh || !sameRefs(fresh, refs)) {
+          // Server state moved on: refresh the farm so statuses and feeds match.
+          if (state.kind === 'ready')
+            void selectFarm(scope.farmId, state.printerAfter, browserKeyId)
+          return
+        }
+        subscribe(agentId, refs, failures)
+      } catch (error) {
+        if (!run.current()) return
+        if (
+          httpStatus(error) === 401 ||
+          httpStatus(error) === 403 ||
+          error instanceof AccountChanged
+        ) {
+          failed(error)
+          return
+        }
+        if (!viewCurrent()) return
+        // Rate limiting is server pacing, not a feed failure: keep the budget.
+        if (httpStatus(error) === 429)
+          schedule(
+            agentId,
+            refs,
+            failures,
+            retryAfterMs(error, deps.clock().wall),
+          )
+        else schedule(agentId, refs, failures + 1)
+      }
+    }
+    function subscribe(
+      agentId: string,
+      refs: Refs,
+      failures: number,
+      // Seamless lease renewal: monotonic time of the last accepted frame.
+      renewFrom?: number,
+    ) {
       let terminal = false,
         session: FarmAdmittedSession | null = null,
-        seq = -1
+        seq = -1,
+        firstSign = -1
       let handle: { close(): void } | undefined
       const started = deps.clock()
+      let lastSign = renewFrom ?? started.mono
       const current = () =>
         run.current() &&
         !terminal &&
@@ -729,6 +989,7 @@ export function createFarmView(deps: Dependencies) {
       function close() {
         if (terminal) return
         terminal = true
+        connections = connections.filter((item) => item !== entry)
         // Producer teardown cannot prevent retiring private view state.
         try {
           handle?.close()
@@ -736,9 +997,17 @@ export function createFarmView(deps: Dependencies) {
           // Already terminal locally.
         }
       }
-      function end() {
+      function end(reason: Closed) {
         if (!current()) return
         close()
+        const now = deps.clock().mono
+        const healthy = seq >= 0 && lastSign - firstSign >= HEALTHY_MS
+        // A lease ending on a healthy feed is a renewal: keep rows live and
+        // reopen at once; liveness still closes them 9 s after the last frame.
+        if (reason === 'expired' && healthy && now - lastSign < LIVENESS_MS) {
+          subscribe(agentId, refs, 0, lastSign)
+          return
+        }
         update((row) => ({
           ...row,
           connection: 'closed',
@@ -746,6 +1015,22 @@ export function createFarmView(deps: Dependencies) {
             ? { ...row.observation, historical: true }
             : null,
         }))
+        // Spool inventory follows printer rows: last data stays, flagged stale.
+        if (
+          run.current() &&
+          state.kind === 'ready' &&
+          state.scope?.viewEpoch === scope.viewEpoch
+        )
+          publish({
+            ...state,
+            spools: state.spools.map((item) =>
+              item.agentId === agentId ? { ...item, historical: true } : item,
+            ),
+          })
+        // Revocation and rejected (invalid/tampered) feeds stop; logout and
+        // auth invalidation retire the run instead.
+        if (reason === 'revoked' || reason === 'rejected') return
+        schedule(agentId, refs, healthy ? 0 : failures + 1)
       }
       function expire(now: Clock) {
         if (!current()) return
@@ -754,17 +1039,23 @@ export function createFarmView(deps: Dependencies) {
           !Number.isSafeInteger(now.wall) ||
           now.mono < started.mono ||
           now.wall < started.wall ||
+          now.mono - lastSign >= LIVENESS_MS
+        )
+          end('disconnected')
+        else if (
           now.mono - started.mono >= 30_000 ||
           (session &&
             (now.wall >= session.expiresAt ||
               now.mono >= session.deadlineMonoMs))
         )
-          end()
+          end('expired')
       }
-      connections.push({ close, expire })
-      update((row) => ({ ...row, connection: 'connecting' }))
+      const entry = { close, expire }
+      connections.push(entry)
+      if (renewFrom === undefined)
+        update((row) => ({ ...row, connection: 'connecting' }))
       try {
-        handle = deps.feed.open({
+        handle = feed.open({
           scope,
           agentId,
           assignmentRefs: refs,
@@ -774,14 +1065,14 @@ export function createFarmView(deps: Dependencies) {
             expire(deps.clock())
             if (!current()) return
             if (health.kind === 'closed') {
-              end()
+              end(health.reason)
               return
             }
             if (health.kind === 'authenticated') {
               const parsed = AdmittedSession.safeParse(health.session),
                 now = deps.clock()
               if (!parsed.success) {
-                end()
+                end('rejected')
                 return
               }
               const candidate = parsed.data
@@ -796,13 +1087,15 @@ export function createFarmView(deps: Dependencies) {
                 candidate.deadlineMonoMs - now.mono > 30_000 ||
                 (session && !sameSession(session, candidate))
               ) {
-                end()
+                end('rejected')
                 return
               }
+              if (!session && renewFrom === undefined) lastSign = now.mono
               session = candidate
               update((row) => ({ ...row, connection: 'authenticated' }))
             } else if (
               !session &&
+              renewFrom === undefined &&
               (health.kind === 'connecting' || health.kind === 'verifying')
             ) {
               update((row) => ({ ...row, connection: health.kind }))
@@ -813,7 +1106,7 @@ export function createFarmView(deps: Dependencies) {
             expire(now)
             if (!current() || !session) return
             const parsedSession = AdmittedSession.safeParse(snapshot.session)
-            const parsed = StatusMessage.safeParse(snapshot.message)
+            const parsed = parseStatusMessageTolerant(snapshot.message)
             if (
               !parsedSession.success ||
               !sameSession(session, parsedSession.data) ||
@@ -821,7 +1114,7 @@ export function createFarmView(deps: Dependencies) {
               snapshot.complete !== true ||
               typeof snapshot.sourceClockComparable !== 'boolean'
             ) {
-              end()
+              end('rejected')
               return
             }
             const message = parsed.data
@@ -843,7 +1136,7 @@ export function createFarmView(deps: Dependencies) {
               snapshot.receivedAtMonoMs < started.mono ||
               snapshot.receivedAtMonoMs > now.mono
             ) {
-              end()
+              end('rejected')
               return
             }
             if (
@@ -855,11 +1148,37 @@ export function createFarmView(deps: Dependencies) {
                   ),
               )
             ) {
-              end()
+              end('rejected')
               return
             }
             if (message.seq <= seq) return
             seq = message.seq
+            lastSign = now.mono
+            if (firstSign < 0) firstSign = now.mono
+            if (state.kind === 'ready') {
+              const before = state.spools.find(
+                (item) => item.agentId === agentId,
+              )?.inventory
+              // Keep the previous object when content is unchanged.
+              const inventory = sameInventory(before, message.inventory)
+                ? (before ?? null)
+                : (message.inventory ?? null)
+              publish({
+                ...state,
+                spools: [
+                  ...state.spools.filter((item) => item.agentId !== agentId),
+                  {
+                    agentId,
+                    inventory,
+                    historical: false,
+                    received: {
+                      wall: snapshot.receivedAtWallMs,
+                      mono: snapshot.receivedAtMonoMs,
+                    },
+                  },
+                ].sort((a, b) => a.agentId.localeCompare(b.agentId)),
+              })
+            }
             update((row) => {
               const printer = message.printers.find(
                 (item) => item.printerKey === row.assignment.printerKey,
@@ -904,7 +1223,7 @@ export function createFarmView(deps: Dependencies) {
         })
         if (terminal) handle.close()
       } catch {
-        end()
+        end('disconnected')
       }
     }
   }
@@ -948,7 +1267,7 @@ export function createFarmView(deps: Dependencies) {
     selectKey,
     confirmOrigin,
     tick: () => {
-      for (const connection of connections) connection.expire(deps.clock())
+      for (const connection of [...connections]) connection.expire(deps.clock())
     },
     invalidate: () => {
       const run = retire()

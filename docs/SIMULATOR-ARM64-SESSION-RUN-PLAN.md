@@ -226,7 +226,7 @@ coordenador pode autorizar e agendar uma única execução. Nenhuma nova execuç
 
 Unidade nativa, domínio comum observado, cobertura temporal, overhead total,
 prontidão e causa permanecem desconhecidos. O resultado ARM64 não comprovará
-aceitação amd64 ou aceitação completa da fazenda. `bun run check:all` e integração
+aceitação amd64 ou aceitação completa da fazenda. `pnpm run check:all` e integração
 continuam pendentes antes de publicação; não foram executados porque incluem
 build fora do escopo autorizado.
 

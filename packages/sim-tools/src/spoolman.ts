@@ -25,7 +25,9 @@ export async function seedSpoolman(origin: string) {
   }
   const vendors = z.array(Entity).parse(await request('vendor'))
   const filaments = z.array(Entity).parse(await request('filament'))
-  const spools = z.array(Entity).parse(await request('spool'))
+  const spools = z
+    .array(Entity)
+    .parse(await request('spool?allow_archived=true'))
   async function ensure(
     kind: string,
     existing: Entity[],
@@ -64,7 +66,9 @@ export async function seedSpoolman(origin: string) {
       filament_id: filamentId,
     })
   }
-  const result = z.array(Entity).parse(await request('spool'))
+  const result = z
+    .array(Entity)
+    .parse(await request('spool?allow_archived=true'))
   const markers = new Set(seed.spools.map((spool) => spool.comment))
   const count = result.filter(
     (spool) => spool.comment && markers.has(spool.comment),

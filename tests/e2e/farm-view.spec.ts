@@ -1,4 +1,6 @@
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { renderSpoolInventory } from './render-spool-inventory.ts'
 
 // Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
 // FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
@@ -78,6 +80,14 @@ test('pt-BR inventory wraps exact keys at 320px, separates approval from status,
     page.getByRole('button', { name: 'Pausar impressão' }),
   ).toBeDisabled()
   await expect(page.locator('progress')).toHaveCount(0)
+  // Spool inventory is read-only and reports unavailability without a direct connection.
+  await expect(
+    page.getByRole('heading', { name: 'Estoque de filamento', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Estoque indisponível sem conexão direta com o Connector.'),
+  ).toBeVisible()
+  await expect(page.locator('table')).toHaveCount(0)
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -161,4 +171,169 @@ test('unauthenticated and failed requests never render a false empty inventory',
   )
   await expect(page.getByRole('alert')).toBeFocused()
   await expect(page.getByRole('article')).toHaveCount(0)
+})
+
+async function violations(page: Page) {
+  const result = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze()
+  return result.violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    helpUrl: v.helpUrl,
+    nodes: v.nodes.map((n) => ({
+      target: n.target,
+      failureSummary: n.failureSummary,
+    })),
+  }))
+}
+
+for (const width of [320, 1280]) {
+  test(`axe finds no WCAG A/AA violations in the farm inventory at ${width}px`, async ({
+    page,
+  }) => {
+    await inventory(page)
+    await page.setViewportSize({ width, height: 800 })
+    await page.goto('/farm')
+    await expect(page.locator(`#printer-${assignment}`)).toHaveText(key)
+    expect(await violations(page)).toEqual([])
+  })
+}
+
+test('axe finds no WCAG A/AA violations with the local interface form open and confirmed', async ({
+  page,
+}) => {
+  await inventory(page)
+  await page.goto('/farm')
+  await page
+    .getByRole('button', { name: 'Configurar interface local', exact: true })
+    .click()
+  await page
+    .getByLabel('Origem da interface local', { exact: true })
+    .fill('http://printer.invalid:8080/')
+  expect(await violations(page)).toEqual([])
+  await page
+    .getByLabel(
+      'Conferi que este endereço abre a interface local desta impressora.',
+    )
+    .check()
+  await page.getByRole('button', { name: 'Confirmar interface local' }).click()
+  await expect(
+    page.getByRole('link', { name: /Abrir interface local de/ }),
+  ).toBeVisible()
+  expect(await violations(page)).toEqual([])
+})
+
+test('axe finds no WCAG A/AA violations in the sign-in and service-error states', async ({
+  page,
+}) => {
+  await page.route('**/api/auth/me', (route) =>
+    route.fulfill({ status: 401, json: {} }),
+  )
+  await page.goto('/farm')
+  await expect(
+    page.getByRole('link', { name: 'Entrar', exact: true }),
+  ).toBeVisible()
+  expect(await violations(page)).toEqual([])
+  await page.unroute('**/api/auth/me')
+  await page.route('**/api/auth/me', (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  )
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByRole('alert')).toBeFocused()
+  expect(await violations(page)).toEqual([])
+})
+
+const spool = (overrides: Record<string, unknown> = {}) => ({
+  name: 'PLA Branco',
+  material: 'PLA',
+  colorHex: 'ffffff',
+  remainingGrams: 742,
+  location: 'Prateleira A',
+  archived: false,
+  ...overrides,
+})
+const clock = { wall: 1_000_000, mono: 1000 }
+const observation = (inventory: unknown, mono = 1000) => ({
+  agentId: agent,
+  inventory,
+  received: { wall: 1_000_000, mono },
+})
+const rows = [{ assignment: { agentId: agent, printerKey: 'impressora-1' } }]
+async function showInventory(page: Page, items: unknown[], connected = true) {
+  const { html, css } = await renderSpoolInventory({
+    items,
+    now: clock,
+    connected,
+    rows,
+  })
+  await page.setContent(
+    `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Estoque</title><style>${css}</style></head><body><main>${html}</main></body></html>`,
+  )
+}
+for (const width of [320, 1280]) {
+  test(`populated spool table is accessible and fits at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 })
+    await showInventory(page, [
+      observation({
+        observedAt: 1,
+        stale: false,
+        total: 12,
+        spools: [
+          spool(),
+          spool({
+            name: null,
+            material: null,
+            colorHex: null,
+            remainingGrams: null,
+            location: null,
+          }),
+          spool({
+            name: 'ABS Preto muito longo '.repeat(1),
+            remainingGrams: -12,
+            archived: true,
+            colorHex: '000000',
+          }),
+        ],
+      }),
+    ])
+    const table = page.getByRole('table')
+    await expect(table).toBeVisible()
+    await expect(table.getByRole('columnheader')).toHaveCount(6)
+    await expect(table.getByRole('rowheader').first()).toHaveText('PLA Branco')
+    await expect(table).toContainText('742 g')
+    await expect(table).toContainText('-12 g')
+    await expect(page.getByText('Exibindo parte do estoque')).toBeVisible()
+    await expect(page.getByText('Desatualizado.')).toHaveCount(0)
+    expect(await violations(page)).toEqual([])
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true)
+  })
+}
+test('stale, empty, truncated and unavailable inventories are distinguished', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  const base = { observedAt: 1, stale: false }
+  await showInventory(page, [
+    observation({ ...base, stale: true, total: 0, spools: [] }),
+  ])
+  await expect(page.getByText('Desatualizado.')).toBeVisible()
+  await expect(page.getByText('Nenhuma bobina cadastrada')).toBeVisible()
+  await showInventory(page, [observation({ ...base, total: 5, spools: [] })])
+  await expect(page.getByText('Exibindo 0 de 5 bobinas')).toBeVisible()
+  await expect(page.getByText('Nenhuma bobina cadastrada')).toHaveCount(0)
+  await showInventory(page, [observation(null)])
+  await expect(page.getByText('Estoque indisponível.')).toBeVisible()
+  await showInventory(page, [
+    observation({ ...base, total: 0, spools: [] }, 1000 - 31_000),
+  ])
+  // Received more than 30 s ago counts as stale even if the Connector said fresh.
+  await expect(page.getByText('Desatualizado.')).toBeVisible()
+  expect(await violations(page)).toEqual([])
 })

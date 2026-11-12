@@ -79,6 +79,8 @@ if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1}
   exit 0
 fi
 if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == build ]]; then exit 43; fi
+if [[ ${LOCAL_CI_FAKE_RUNNING:-} == service && $* == *'label=com.docker.compose.service=u1'* ]]; then printf '%s\n' cccccccccccc; exit 0; fi
+if [[ ${LOCAL_CI_FAKE_RUNNING:-} == image && $1 == ps && $* == *'{{.Image}}'* ]]; then printf '%s\n' other-project-sv06; exit 0; fi
 if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then
   case "$*" in
     *'ps -aq sv06'*) printf '%s\n' aaaaaaaaaaaa ;;
@@ -129,6 +131,12 @@ if grep -q 'Selected local job(s) passed' "$scratch/output"; then exit 1; fi
 ledger=$(sed -n 's/^Evidence ledger: //p' "$scratch/output")
 [[ $ledger == "$scratch"/open3d-local-ci.* && -f $ledger/disk-before.txt && -f $ledger/disk-after.txt ]]
 export LOCAL_CI_FAKE_SIM=1
+for running in service image; do
+  : > "$scratch/docker-calls"
+  LOCAL_CI_FAKE_RUNNING=$running expect_status 2 klipper --containers --simulator
+  grep -q 'another simulator is running' "$scratch/output"
+  if grep -q '^compose .* up ' "$scratch/docker-calls"; then exit 1; fi
+done
 expect_status 42 klipper --containers --simulator
 ledger=$(sed -n 's/^Evidence ledger: //p' "$scratch/output")
 [[ -f $ledger/simulator-failure.log ]]

@@ -50,7 +50,7 @@ cleanup() {
     docker volume ls --filter "label=com.docker.compose.project=$project_name" > "$ledger/simulator-volumes.txt" || cleanup_failed=1
     docker network ls --no-trunc --filter "label=com.docker.compose.project=$project_name" > "$ledger/simulator-networks.txt" || cleanup_failed=1
     docker image inspect "$sim_image" > "$ledger/simulator-image.json" 2>/dev/null || true
-    docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper down --volumes --remove-orphans >> "$ledger/cleanup.log" 2>&1 || cleanup_failed=1
+    docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper down --volumes --remove-orphans --rmi local >> "$ledger/cleanup.log" 2>&1 || cleanup_failed=1
   fi
   if ((image_container)) && docker container inspect "$container_name" >/dev/null 2>&1; then docker rm -f "$container_name" >> "$ledger/cleanup.log" 2>&1 || cleanup_failed=1; fi
   if ((image_created)) && docker image inspect "$image_tag" >/dev/null 2>&1; then docker image rm "$image_tag" >> "$ledger/cleanup.log" 2>&1 || cleanup_failed=1; fi
@@ -158,7 +158,10 @@ klipper_job() {
   if docker image inspect "$sim_image" >/dev/null 2>&1; then
     running_pinned=$(docker ps -q --filter "ancestor=$sim_image")
   fi
-  if [[ -n $running_pinned ]] || grep -q 'virtual-klipper-printer' <<< "$running_images"; then
+  # Derived simulator images are named <project>-sv06/-u1; also match the services.
+  running_pinned+=$(docker ps -q --filter label=com.docker.compose.service=sv06)
+  running_pinned+=$(docker ps -q --filter label=com.docker.compose.service=u1)
+  if [[ -n $running_pinned ]] || grep -Eq 'virtual-klipper-printer|-(sv06|u1)(:|$)' <<< "$running_images"; then
     printf '%s\n' 'UNSUPPORTED: another simulator is running; coordinate ownership first.' >&2
     return 2
   fi

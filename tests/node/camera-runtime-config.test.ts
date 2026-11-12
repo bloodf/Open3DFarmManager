@@ -9,7 +9,7 @@ const valid = {
     {
       cameraId: 'cam-1',
       assignmentId: assignment,
-      source: { address: '192.0.2.10', port: 8554, path: '/stream' },
+      source: { address: '192.168.1.10', port: 8554, path: '/stream' },
     },
   ],
 }
@@ -17,7 +17,7 @@ const valid = {
 test('opt-in camera config accepts literal sources for runtime assignments', () => {
   const config = parseCameraRuntimeConfig(valid, [assignment])
   assert.equal(config.maxSessions, 1)
-  assert.equal(config.cameras[0]?.source.address, '192.0.2.10')
+  assert.equal(config.cameras[0]?.source.address, '192.168.1.10')
 })
 
 test('camera config rejects names, credentials, foreign assignments and unbounded sessions', () => {
@@ -27,6 +27,12 @@ test('camera config rejects names, credentials, foreign assignments and unbounde
       ...valid,
       cameras: [
         { ...camera, source: { ...camera.source, address: 'camera.local' } },
+      ],
+    },
+    {
+      ...valid,
+      cameras: [
+        { ...camera, source: { ...camera.source, address: '203.0.113.7' } },
       ],
     },
     {

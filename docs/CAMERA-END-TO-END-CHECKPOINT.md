@@ -34,7 +34,7 @@ Media requires a camera-purpose V3 statement signed by both ends, after both RTC
 | Browser loading            | 10 s (`CAMERA_LOADING_TIMEOUT_MS`), then error and detach                |
 | Camera proof frame         | 8 KiB canonical JSON; one offer and one answer per peer                  |
 
-Frame dimensions are not parsed on the Connector. The access-unit byte bound limits them indirectly, and the browser decoder enforces its own limits.
+The first keyframe must arrive within the helper's 2 s per-unit deadline, so cameras need a keyframe interval of about 2 s or less. Configured sources must be loopback, private or link-local literal addresses. Frame dimensions are not parsed on the Connector. The access-unit byte bound limits them indirectly, and the browser decoder enforces its own limits.
 
 ## Failure states (pt-BR)
 

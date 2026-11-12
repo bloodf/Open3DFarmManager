@@ -187,23 +187,29 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
       agentId: statement.agent_id,
       printerId: statement.printer_id,
     }
-    const session = startCameraSession({
-      cameraId: statement.camera_id,
-      scope,
-      lease: {
+    let session: ReturnType<typeof startCameraSession>
+    try {
+      session = startCameraSession({
         cameraId: statement.camera_id,
         scope,
-        expiresAt: this.#deadline,
-        signal: this.#abort.signal,
-      },
-      registry: this.#registry,
-      openSource: (handle, signal) =>
-        this.#options.openSource(handle, signal, this.#deadline),
-      sink: {
-        trySend: (unit) => this.send(unit),
-        close: () => this.stopMedia(),
-      },
-    })
+        lease: {
+          cameraId: statement.camera_id,
+          scope,
+          expiresAt: this.#deadline,
+          signal: this.#abort.signal,
+        },
+        registry: this.#registry,
+        openSource: (handle, signal) =>
+          this.#options.openSource(handle, signal, this.#deadline),
+        sink: {
+          trySend: (unit) => this.send(unit),
+          close: () => this.stopMedia(),
+        },
+      })
+    } catch {
+      release()
+      return this.stopMedia()
+    }
     this.#session = session
     void session.done.finally(release)
   }

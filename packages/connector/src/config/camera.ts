@@ -1,16 +1,35 @@
 // SPDX-License-Identifier: MIT
 import { isAbsolute } from 'node:path'
-import { isIP } from 'node:net'
+import { BlockList, isIP } from 'node:net'
 import { z } from 'zod'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 
 const textId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
+// Cameras are local devices: loopback, private and link-local ranges only.
+const local = new BlockList()
+for (const [net, prefix] of [
+  ['127.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['169.254.0.0', 16],
+] as const)
+  local.addSubnet(net, prefix, 'ipv4')
+local.addAddress('::1', 'ipv6')
+local.addSubnet('fc00::', 7, 'ipv6')
+local.addSubnet('fe80::', 10, 'ipv6')
+const localAddress = (value: string) => {
+  const family = isIP(value)
+  return (
+    family !== 0 &&
+    !value.includes('%') &&
+    local.check(value, family === 4 ? 'ipv4' : 'ipv6')
+  )
+}
 // Literal IP, port and path only: no DNS, credentials, query or fragment. The
 // ingest helper re-validates; these values never leave the Connector process.
 const Source = z.strictObject({
-  address: z
-    .string()
-    .refine((value) => isIP(value) !== 0 && !value.includes('%')),
+  address: z.string().refine(localAddress),
   port: z.number().int().min(1).max(65535),
   path: z
     .string()

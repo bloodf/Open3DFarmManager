@@ -17,6 +17,7 @@ test('simulator row is absent unless both loopback origins are set', () => {
     'http://10.0.0.5:7126',
     'http://127.0.0.1:7126/',
     'http://127.0.0.1',
+    'not a url',
   ])
     assert.throws(
       () =>

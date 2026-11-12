@@ -13,7 +13,12 @@
 import type { RtcFarmScenario } from './rtc-farm-acceptance-scenarios.ts'
 
 function loopbackOrigin(name: string, value: string) {
-  const url = new URL(value)
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`${name} must be an http://127.0.0.1:<port> origin`)
+  }
   if (
     url.protocol !== 'http:' ||
     url.hostname !== '127.0.0.1' ||

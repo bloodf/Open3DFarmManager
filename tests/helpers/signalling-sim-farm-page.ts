@@ -72,7 +72,8 @@ export async function testSimulatorFarmPage(input: {
     const [shown, total] = (await caption.innerText())
       .match(/\d+/g)!
       .map(Number)
-    assert.ok(shown! >= seed.spools.length && total! >= shown!)
+    assert.equal(shown, seed.spools.length)
+    assert.equal(total, seed.spools.length)
     for (const filament of seed.filaments)
       await expect(
         table.getByRole('rowheader', { name: filament.name, exact: true }),

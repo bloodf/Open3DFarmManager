@@ -10,6 +10,10 @@ import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
+import {
+  cameraFixtureFromEnv,
+  cameraRuntimeSection,
+} from './signalling-camera-fixture.ts'
 
 const Request = z.strictObject({
   jsonrpc: z.literal('2.0'),
@@ -203,8 +207,12 @@ export async function createRuntimeMoonrakerFixture() {
       const sim = await (
         await import('./rtc-farm-acceptance-sim-scenarios.ts')
       ).readSimulatorSources(process.env)
+      // The ready check above is the simulator's first request; the runtime
+      // readiness wait expects requests > 0, which the synthetic server would
+      // otherwise provide.
       if (sim) requests++
       const moon = sim?.moonraker ?? `http://127.0.0.1:${address.port}`
+      const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),
         credentialPath = join(directory, 'credential.json')
       await writeFile(
@@ -233,6 +241,9 @@ export async function createRuntimeMoonrakerFixture() {
               moonraker_origin: moon,
             },
           ],
+          ...(camera
+            ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
+            : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',
             audience: input.audience,

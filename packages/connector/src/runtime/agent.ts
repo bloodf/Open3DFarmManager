@@ -1,7 +1,7 @@
 import { openLocalStatus } from '../status/local.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import { loadExistingIdentity } from '../identity/store.ts'
-import { readRuntimeCredential } from '../config/credential.ts'
+import { readCredentialEnvelope } from '../config/credential.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
 import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
@@ -90,12 +90,32 @@ export async function runConnectorAgent(input: AgentInput): Promise<void> {
  */
 async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
   const identity = loadExistingIdentity(input.dataDirectory)
-  const credential = readRuntimeCredential(
-    input.credentialPath,
-    identity.fingerprint,
-    Date.now(),
+  // Config scope only needs agent/farm, which an expired envelope still binds.
+  const config = readAgentRuntimeConfig(
+    input.configPath,
+    readCredentialEnvelope(input.credentialPath, identity.fingerprint),
   )
-  const config = readAgentRuntimeConfig(input.configPath, credential)
+  const { readOrRecoverRuntimeCredential, createRenewalHttpTransport } =
+    await import('../cloud/credential-renewal.ts')
+  const renewalOrigin = new URL(config.telemetry.endpoint).origin
+  const credential = await readOrRecoverRuntimeCredential({
+    credentialPath: input.credentialPath,
+    identity,
+    onDiagnostic: input.onDiagnostic,
+    ...(config.renewal
+      ? {
+          recovery: {
+            transport: createRenewalHttpTransport({
+              origin: renewalOrigin,
+              timeoutMs: config.renewal.timeoutMs,
+            }),
+            origin: renewalOrigin,
+            audience: config.renewal.audience,
+            signal: input.signal,
+          },
+        }
+      : {}),
+  })
   const lookupId = config.signalling
     ? credentialLookupId(credential.device_token)
     : undefined
@@ -419,7 +439,14 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
-        ...(input.onInventory ? { onInventory: input.onInventory } : {}),
+        ...(input.onInventory || snapshots
+          ? {
+              onInventory(value: SpoolmanSnapshot) {
+                snapshots?.setInventory(value)
+                input.onInventory?.(value)
+              },
+            }
+          : {}),
         queue,
         signal,
         onDiagnostic: diagnostic,

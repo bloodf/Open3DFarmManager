@@ -13,6 +13,8 @@ export type StartupFailureCode =
   | 'invalid-config'
   | 'migrations-unavailable'
   | 'unreachable'
+  | 'permission-denied'
+  | 'authentication-failed'
   | 'migration-failed'
   | 'schema-pending'
   | 'schema-mismatch'
@@ -22,6 +24,8 @@ export const STARTUP_FAILURE_MESSAGES: Record<StartupFailureCode, string> = {
   'invalid-config': 'invalid database configuration',
   'migrations-unavailable': 'migration files unavailable',
   unreachable: 'database unreachable',
+  'permission-denied': 'database permission denied',
+  'authentication-failed': 'database authentication failed',
   'migration-failed': 'migration failed',
   'schema-pending': 'schema has pending migrations',
   'schema-mismatch': 'schema does not match this build',
@@ -33,6 +37,23 @@ export class DatabaseStartupError extends Error {
     super(STARTUP_FAILURE_MESSAGES[code])
     this.code = code
   }
+}
+
+/** SQLSTATE-based mapping; the driver message itself is never surfaced. */
+function classify(
+  error: unknown,
+  fallback: StartupFailureCode,
+): DatabaseStartupError {
+  const code: unknown =
+    typeof error === 'object' && error !== null
+      ? Reflect.get(error, 'code')
+      : undefined
+  if (code === '42501') return new DatabaseStartupError('permission-denied')
+  if (typeof code === 'string' && code.startsWith('28'))
+    return new DatabaseStartupError('authentication-failed')
+  // 3D000: the configured database does not exist.
+  if (code === '3D000') return new DatabaseStartupError('invalid-config')
+  return new DatabaseStartupError(fallback)
 }
 
 /** Read-only comparison of the migration journal with the local catalog.
@@ -70,15 +91,15 @@ export async function prepareSchema(
   let state: SchemaState
   try {
     state = await schemaState(sql, catalog)
-  } catch {
-    throw new DatabaseStartupError('unreachable')
+  } catch (error) {
+    throw classify(error, 'unreachable')
   }
   if (state === 'pending' && mode === 'apply') {
     try {
       await runMigrations(sql, catalog, { kind: 'up' })
       state = await schemaState(sql, catalog)
-    } catch {
-      throw new DatabaseStartupError('migration-failed')
+    } catch (error) {
+      throw classify(error, 'migration-failed')
     }
   }
   if (state === 'pending') throw new DatabaseStartupError('schema-pending')

@@ -16,6 +16,12 @@ OAuth/PKCE and email-based verification remain out of scope.
 
 Migration `0024_account_registration` adds `farm.account_invites` (immutable except one consumption; deletes and truncates rejected) and the `farm_account_registration` role (member of `farm_password_auth`) with insert/select on accounts, credentials, farms, memberships and invites. The connection role used by `NUXT_AUTH_DATABASE_URL` must be a member of it for these endpoints; without registration grants the endpoints fail closed with 503.
 
+## Role privileges and follow-up
+
+`farm_account_registration` has plain `INSERT` on `farm.session_accounts`, `farm.password_credentials`, `farm.farms` and `farm.memberships`. Anyone holding that database credential could insert an `owner` membership directly; application code never does. Follow-up: replace the grants with `SECURITY DEFINER` functions (`bootstrap_owner`, `redeem_invite`) or an insert trigger on `farm.memberships` that rejects `owner` outside bootstrap, then drop the table INSERT grants.
+
+An invite is redeemable only while its creator is still an active, non-disabled owner of the farm; revoking or disabling the owner kills their outstanding invites.
+
 ## Known limits
 
 - Owner status is read without a row lock during invite creation; a concurrent revocation can race one invite. The invite still grants only a non-owner role.

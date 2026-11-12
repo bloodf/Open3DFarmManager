@@ -57,7 +57,10 @@ export class PostgresRegistration {
         await tx`SET LOCAL statement_timeout = '2000ms'`
         await tx`SET LOCAL lock_timeout = '1000ms'`
         const invites =
-          await tx`SELECT id, farm_id, role FROM farm.account_invites WHERE digest = ${digest} AND consumed_at IS NULL AND expires_at > clock_timestamp() FOR UPDATE`
+          await tx`SELECT i.id, i.farm_id, i.role FROM farm.account_invites i
+          JOIN farm.memberships m ON m.farm_id = i.farm_id AND m.account_id = i.created_by AND m.role = 'owner' AND m.revoked_at IS NULL
+          JOIN farm.session_accounts a ON a.id = i.created_by AND NOT a.disabled
+          WHERE i.digest = ${digest} AND i.consumed_at IS NULL AND i.expires_at > clock_timestamp() FOR UPDATE OF i`
         const invite = invites[0]
         if (!invite) return false
         const accountId = randomUUID()

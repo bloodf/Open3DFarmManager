@@ -13,6 +13,7 @@
       token-label="Código de configuração"
       token-help="Fornecido por quem instalou o serviço."
       submit-label="Criar conta de proprietário"
+      secret-token
     />
     <p><NuxtLink to="/entrar">Já tenho conta</NuxtLink></p>
   </main>

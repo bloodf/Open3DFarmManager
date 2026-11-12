@@ -119,8 +119,23 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
   )
   await assert.rejects(admin`DELETE FROM farm.account_invites`)
 
-  // A revoked owner can no longer invite.
+  // An invite minted by an owner who is later revoked or disabled is dead.
+  await store.createInvite(ownerRow.id, farm, 'viewer', digest('1'), 60_000)
+  await store.createInvite(ownerRow.id, farm, 'viewer', digest('2'), 60_000)
+  await admin`UPDATE farm.session_accounts SET disabled = true WHERE id = ${ownerRow.id}`
+  assert.equal(
+    await store.register(digest('1'), `new_g_${suffix}`, hash),
+    false,
+  )
+  await admin`UPDATE farm.session_accounts SET disabled = false WHERE id = ${ownerRow.id}`
+  assert.equal(await store.register(digest('2'), `new_h_${suffix}`, hash), true)
+  await store.createInvite(ownerRow.id, farm, 'viewer', digest('3'), 60_000)
+  // A revoked owner can no longer invite, and earlier invites stop working.
   await admin`UPDATE farm.memberships SET revoked_at = 1 WHERE account_id = ${ownerRow.id}`
+  assert.equal(
+    await store.register(digest('3'), `new_i_${suffix}`, hash),
+    false,
+  )
   assert.equal(
     await store.createInvite(ownerRow.id, farm, 'viewer', digest('7'), 60_000),
     null,
@@ -131,6 +146,6 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     'invite single use under concurrency with invite role',
     'username conflict keeps invite and leaves no orphan',
     'expired and unknown invites rejected, consumed invites immutable',
-    'revoked owner cannot invite',
+    'revoked or disabled owner cannot invite and their invites are dead',
   ]
 }

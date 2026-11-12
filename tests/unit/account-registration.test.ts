@@ -15,8 +15,9 @@ import { MemorySessionRepository } from '../helpers/memory-session-repository.ts
 // scrypt cost is covered by password tests; keep this file fast.
 vi.mock('../../apps/farm/server/utils/auth/password.ts', async (original) => ({
   ...(await original<object>()),
-  hashPassword: async () => '$scrypt$synthetic-hash',
+  hashPassword: vi.fn(async () => '$scrypt$synthetic-hash'),
 }))
+import { hashPassword } from '../../apps/farm/server/utils/auth/password.ts'
 
 const origin = 'https://farm.example.invalid'
 const secret = 'synthetic-bootstrap-secret-0123456789abcdef'
@@ -131,6 +132,18 @@ describe('first-owner bootstrap', () => {
       status: 400,
     })
     expect(runtime.registration!.bootstrap).not.toHaveBeenCalled()
+  })
+  test('refused bootstrap never spends scrypt capacity but still rate-limits', async () => {
+    const { runtime, calls } = fixture()
+    vi.mocked(hashPassword).mockClear()
+    await expect(
+      bootstrapOwner(
+        event('/x', { 'x-bootstrap-token': 'x'.repeat(40) }, credentials),
+        runtime,
+      ),
+    ).rejects.toMatchObject({ status: 400 })
+    expect(hashPassword).not.toHaveBeenCalled()
+    expect(calls.limits.length).toBe(2)
   })
   test('disabled when no secret is configured, same response as wrong secret', async () => {
     const { runtime } = fixture()

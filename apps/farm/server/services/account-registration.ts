@@ -43,9 +43,12 @@ async function createAccount(
   event: AuthEvent,
   runtime: AuthRuntime,
   create: (username: string, passwordHash: string) => Promise<boolean>,
+  /** False skips scrypt so refused callers cannot consume shared hash capacity. */
+  precheck: () => boolean = () => true,
 ): Promise<{ accountId: string }> {
   registrationStore(runtime)
   mutation(event, runtime)
+  event.res.headers.set('Referrer-Policy', 'no-referrer')
   await limit(
     runtime,
     's',
@@ -56,6 +59,7 @@ async function createAccount(
   await limit(runtime, 'a', 'register:' + input.username)
   if ([...input.password].length < MIN_PASSWORD_CHARS) throw refused()
   let created: boolean
+  if (!precheck()) throw refused()
   try {
     created = await create(input.username, await hashPassword(input.password))
   } catch (error) {
@@ -84,10 +88,14 @@ export async function bootstrapOwner(event: AuthEvent, runtime: AuthRuntime) {
   const given = createHash('sha256').update(header).digest()
   // Bootstrap disabled (no secret configured) is indistinguishable from a wrong secret.
   const ok = expected !== undefined && timingSafeEqual(expected, given)
-  return await createAccount(event, runtime, async (username, hash) => {
-    if (!ok) return false
-    return registrationStore(runtime).bootstrap(username, hash)
-  })
+  return await createAccount(
+    event,
+    runtime,
+    async (username, hash) => {
+      return registrationStore(runtime).bootstrap(username, hash)
+    },
+    () => ok,
+  )
 }
 
 export async function registerWithInvite(
@@ -114,6 +122,7 @@ export async function createFarmInvite(
 ): Promise<{ token: string; expiresAt: string; role: InviteRole }> {
   registrationStore(runtime)
   mutation(event, runtime)
+  event.res.headers.set('Referrer-Policy', 'no-referrer')
   const { accountId } = await authenticatedSession(event, runtime)
   await limit(runtime, 'a', 'invite:' + accountId)
   const body = await readInviteBody(event.req)

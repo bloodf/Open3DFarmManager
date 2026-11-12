@@ -35,7 +35,14 @@ test('first-access form posts the setup code header, then clears secrets', async
     body: { username: 'dono_farm', password: 'senha-sintetica-longa' },
   })
   await expect(page.getByLabel('Senha', { exact: true })).toHaveValue('')
-  await expect(page.getByLabel('Código de configuração')).toHaveValue('')
+  // The code stays so a retry (for example a taken username) needs no re-paste.
+  await expect(page.getByLabel('Código de configuração')).toHaveValue(
+    'setup-code',
+  )
+  await expect(page.getByLabel('Código de configuração')).toHaveAttribute(
+    'type',
+    'password',
+  )
   await expect(page.locator('body')).not.toContainText('private detail')
 })
 

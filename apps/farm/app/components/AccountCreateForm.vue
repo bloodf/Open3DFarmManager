@@ -9,6 +9,7 @@ const props = defineProps<{
   submitLabel: string
   /** Read the code from the URL fragment (never sent to servers or logs) and clear it. */
   tokenFromFragment?: boolean
+  secretToken?: boolean
 }>()
 
 const username = ref('')
@@ -39,6 +40,7 @@ async function submit() {
         timeout: 15_000,
       }),
     )
+    token.value = ''
     await navigateTo('/')
   } catch (error: unknown) {
     const status =
@@ -53,7 +55,6 @@ async function submit() {
           : 'Não foi possível criar a conta agora. Tente novamente mais tarde.'
   } finally {
     password.value = ''
-    token.value = ''
     pending.value = false
     if (errorMessage.value) {
       await nextTick()
@@ -70,6 +71,7 @@ async function submit() {
       id="account-token"
       v-model="token"
       name="token"
+      :type="secretToken ? 'password' : 'text'"
       autocomplete="off"
       autocapitalize="none"
       :spellcheck="false"

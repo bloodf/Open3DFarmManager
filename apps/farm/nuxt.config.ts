@@ -3,6 +3,12 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   nitro: { preset: 'node-server' },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
+  routeRules: Object.fromEntries(
+    ['/primeiro-acesso', '/criar-conta', '/convites'].map((path) => [
+      path,
+      { headers: { 'Referrer-Policy': 'no-referrer' } },
+    ]),
+  ),
   runtimeConfig: {
     auth: {
       enabled: false,

@@ -16,4 +16,29 @@ Opt in through `scripts/test-signalling-https.ts` using both `SIGNALLING_HTTPS_P
 
 The journal and simulator stay owned until relay closure and actual settlement. A rejected or unresolved close retains ownership; the child cannot start twice. Forced process cleanup is a failed gate, never successful settlement. Supplemental signed relay tests exercise fresh, revoked, stale, retired binding and closed peer cases without HTTPS; their keys are test keys and their results cannot establish HTTPS admission acceptance.
 
-All rows are source-only and UNRUN on this Mac. Linux must run formatting, type checks, root checks, native RTC and isolated simulator gates on the exact source head. Fresh independent source review is required. The existing unrelated simulator tests are unchanged. Synthetic HTTP/WebSocket Moonraker is not real Klipper acceptance, and no full Phase 0 acceptance is claimed.
+All rows are source-only and UNRUN on this Mac; see the Linux run below. Linux must run formatting, type checks, root checks, native RTC and isolated simulator gates on the exact source head. Fresh independent source review is required. The existing unrelated simulator tests are unchanged. Synthetic HTTP/WebSocket Moonraker is not real Klipper acceptance, and no full Phase 0 acceptance is claimed.
+
+## Linux run on 2026-11-12
+
+Rows were run on cortexos (Ubuntu amd64, Node 24.22.2, node-datachannel native RTC) at head `e88179a` of `feat/farm-pause-control`. The setup was a disposable PostgreSQL 17 container with the full current migration catalog, a sealed generated Nitro build, the real HTTPS/WSS proxy, Chromium and the synthetic loopback Moonraker. No physical printer was contacted. The host was shared with other test runs (load average 12–20 on 24 cores).
+
+Two fixture defects were fixed first:
+
+- Every execution row failed at identity setup on `main` too. The browser actor passed the whole exported JWK, including `key_ops` and `ext`, to the strict public key check. It now passes only `kty`, `crv`, `x` and `y`.
+- Sealing refused the pnpm symlinks in the Nitro output. Contained links are now sealed by target (see #135).
+
+| Row                         | Result                                               |
+| --------------------------- | ---------------------------------------------------- |
+| read-only (no RTC opt-in)   | PASS                                                 |
+| authenticated read-only RTC | PASS                                                 |
+| pause authority             | PASS                                                 |
+| pause RTC                   | PASS 2 of 3 (one browser-side terminal after proofs) |
+| execution `standard`        | PASS 1 of 2 (one fixture deadline)                   |
+| execution `revocation`      | PASS 1 of 1                                          |
+| execution `disconnect`      | PASS 1 of 2 (one observation deadline)               |
+| execution `stale`           | PASS 1 of 2 (one observation deadline)               |
+| execution `reassigned`      | PASS 1 of 1                                          |
+| execution `peer-closed`     | PASS 1 of 2 (one Playwright login timeout)           |
+| execution `late-close`      | PASS 1 of 2 (one observation deadline)               |
+
+Every row passed at least once. The failures were timeouts in fixture observation or login under host load, never a wrong outcome or an unexpected printer request. The fixture deadlines are tight for a shared host; they are not widened here. Runs that collided on a reused ledger name were discarded and are not counted.

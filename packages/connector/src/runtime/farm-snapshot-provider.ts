@@ -13,6 +13,14 @@ import {
   type AssignmentRef,
 } from '../webrtc/readonly-session.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
+import type { SpoolmanSnapshot } from './spoolman-provider.ts'
+import {
+  inventoryAt,
+  summarizeSpoolman,
+  type SpoolSummaryState,
+} from './spool-inventory.ts'
+
+const FRAME_LIMIT = 'Application frame limit'
 
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
@@ -29,6 +37,7 @@ export function createFarmSnapshotSource(input: {
   const entries = new Map<string, RawMoonrakerObservation>()
   const epochs = new Map<string, number>()
   const retired = new Map<string, number>()
+  let spoolState: { value: SpoolSummaryState; receivedMono: number } | undefined
   const listeners = new Set<() => void>()
   let closed = false,
     lastNow = -1
@@ -86,14 +95,37 @@ export function createFarmSnapshotSource(input: {
     }
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
-    const message = validatedStatusMessage(
+    // Fit as many spools as the frame cap allows; the total stays truthful.
+    let message = validatedStatusMessage(
       { t: 'snapshot', seq: 1024, printers },
       refs,
     )
+    if (spoolState) {
+      const elapsed = now - spoolState.receivedMono
+      for (let n = spoolState.value.spools.length; n >= 0; n--) {
+        try {
+          message = validatedStatusMessage(
+            {
+              t: 'snapshot',
+              seq: 1024,
+              printers,
+              inventory: inventoryAt(spoolState.value, elapsed, Date.now(), n),
+            },
+            refs,
+          )
+          break
+        } catch (error) {
+          // Only the frame cap shrinks the list; anything else is a real fault.
+          if (!(error instanceof Error && error.message === FRAME_LIMIT))
+            throw error
+        }
+      }
+    }
     return Object.freeze({
       assignmentRefs: refs,
       complete: true,
       printers: message.printers,
+      ...(message.inventory ? { inventory: message.inventory } : {}),
       capturedAtMonoMs: captured,
       validUntilMonoMs: until,
     })
@@ -209,6 +241,18 @@ export function createFarmSnapshotSource(input: {
     epochs.set(value.printerKey, value.epoch)
     notify()
   }
+  /** Spoolman mirror updates re-emit the snapshot; unavailable inventory is omitted. */
+  function setInventory(value: SpoolmanSnapshot) {
+    if (closed) return
+    let summary: SpoolSummaryState | null = null
+    try {
+      summary = summarizeSpoolman(value)
+    } catch {
+      // Malformed mirror data must never disturb printer status.
+    }
+    spoolState = summary ? { value: summary, receivedMono: clock() } : undefined
+    notify()
+  }
   const open: FarmSnapshotProvider = (options) => {
     let terminal = false,
       timer: ReturnType<typeof setTimeout> | undefined
@@ -275,5 +319,5 @@ export function createFarmSnapshotSource(input: {
     update()
     return { close: () => stop(false) }
   }
-  return { observe, invalidate, open, close }
+  return { observe, invalidate, setInventory, open, close }
 }

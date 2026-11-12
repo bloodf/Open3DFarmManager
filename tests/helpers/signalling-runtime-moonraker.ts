@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -199,7 +199,12 @@ export async function createRuntimeMoonrakerFixture() {
       if (!address || typeof address === 'string')
         throw Error('Fixture listener missing')
       port = address.port
-      const moon = `http://127.0.0.1:${address.port}`
+      // Opt-in genuine simulator sources (rtc-farm-acceptance-sim-scenarios.ts).
+      const sim = await (
+        await import('./rtc-farm-acceptance-sim-scenarios.ts')
+      ).readSimulatorSources(process.env)
+      if (sim) requests++
+      const moon = sim?.moonraker ?? `http://127.0.0.1:${address.port}`
       const configPath = join(directory, 'runtime.json'),
         credentialPath = join(directory, 'credential.json')
       await writeFile(
@@ -211,6 +216,13 @@ export async function createRuntimeMoonrakerFixture() {
             allowedOrigins: [moon],
             printers: [{ printerKey: ref.printerKey, origin: moon }],
             limits: { staleAfterMs: 5000 },
+            ...(sim && {
+              spoolman: {
+                origin: sim.spoolman,
+                farmId: input.claim.farm_id,
+                serviceId: randomUUID(),
+              },
+            }),
           },
           assignments: [
             {

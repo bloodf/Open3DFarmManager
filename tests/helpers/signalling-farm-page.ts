@@ -156,7 +156,7 @@ export async function testAuthenticatedFarmPage(input: {
       if (camera && input.camera)
         await assertCameraDetached({
           page,
-          ...camera,
+          region: camera.region,
           helperPath: input.camera.helperPath,
           note: input.note,
         })

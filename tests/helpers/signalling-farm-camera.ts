@@ -59,20 +59,32 @@ const helperProcesses = (helperPath: string) =>
     .split('\n')
     .filter((line) => line.startsWith(helperPath)).length
 
-/** After revocation: stream detached in the page and no helper left running. */
+/**
+ * After revocation: no video element in the page holds a stream (the camera
+ * region may also be removed once the view sees the revoked Connector), and no
+ * ingest helper is left running.
+ */
 export async function assertCameraDetached(input: {
   page: Page
   region: Locator
-  video: Locator
   helperPath: string
   note(value: string): Promise<void>
 }) {
-  await expect(
-    input.region.getByText('Câmera indisponível.', { exact: true }),
-  ).toBeVisible({ timeout: 10000 })
   await expect
-    .poll(async () => (await frames(input.video)).attached, { timeout: 5000 })
-    .toBe(false)
+    .poll(
+      () =>
+        input.page.evaluate(
+          () =>
+            [...document.querySelectorAll('video')].filter(
+              (video) => video.srcObject !== null,
+            ).length,
+        ),
+      { timeout: 10000 },
+    )
+    .toBe(0)
+  await expect(
+    input.region.getByText('Câmera ao vivo.', { exact: true }),
+  ).toHaveCount(0)
   await expect
     .poll(() => helperProcesses(input.helperPath), { timeout: 10000 })
     .toBe(0)

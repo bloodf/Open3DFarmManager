@@ -96,11 +96,16 @@ export async function testSimulatorFarmPage(input: {
       .locator('main')
       .innerText({ timeout: 1000 })
       .catch(() => 'Page unavailable')
+    const uuid = /[0-9a-f]{8}-[0-9a-f-]{27}/g
     await input.note(
       'farm-page-failure:' +
-        JSON.stringify(
-          text.slice(0, 4096).replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id'),
-        ),
+        JSON.stringify({
+          // Locator and expectation only; page text is already sanitized.
+          error: String(error instanceof Error ? error.message : error)
+            .slice(0, 1024)
+            .replace(uuid, ':id'),
+          text: text.slice(0, 4096).replace(uuid, ':id'),
+        }),
     )
     throw error
   } finally {

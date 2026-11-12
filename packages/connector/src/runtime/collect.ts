@@ -18,6 +18,7 @@ import { assertUnscopedCollection } from './queue-scope.ts'
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
   | { kind: 'queue-lock-recovered' }
+  | { kind: 'queue-lock-mutex-left' }
   | {
       kind: 'loss'
       phase: 'recovery' | 'retention'
@@ -113,6 +114,7 @@ export async function collectIntoQueue(input: {
   }
   try {
     if (queue.recoveredStaleLock) diagnostic({ kind: 'queue-lock-recovered' })
+    if (queue.recoveryMutexLeft) diagnostic({ kind: 'queue-lock-mutex-left' })
     loss(queue.recovery, 'recovery')
     if (config.spoolman && !signal.aborted) {
       const provider = createSpoolmanProvider({

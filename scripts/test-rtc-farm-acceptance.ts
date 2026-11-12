@@ -195,7 +195,7 @@ try {
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
   const harness = join(checkout, 'scripts/test-signalling-https.ts')
-  const nodeEnv = { ...env, TMPDIR: workDir }
+  const nodeEnv: NodeJS.ProcessEnv = { ...env, TMPDIR: workDir }
   delete nodeEnv.NODE_TLS_REJECT_UNAUTHORIZED
   assert.equal(
     await run(

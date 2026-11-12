@@ -274,7 +274,7 @@ Anything else is a fail. Record it, roll back, and open an issue with the redact
 
 All values are placeholders. Keep the real files private, with mode `0600`.
 
-**Connector runtime configuration** (`<config>`). Field details are in the documents linked in section 3. The `pause` section is added only in section 8.
+**Connector runtime configuration** (`<config>`). Field details are in the documents linked in section 3. The `pause` section is added only in section 8. The camera `source.address` must be a literal IP address; host names are rejected.
 
 ```json
 {
@@ -318,7 +318,7 @@ All values are placeholders. Keep the real files private, with mode `0600`.
         "cameraId": "cam-1",
         "assignmentId": "<assignment-id>",
         "source": {
-          "address": "<camera-host>",
+          "address": "<camera-ip>",
           "port": 8554,
           "path": "/stream"
         }
@@ -349,4 +349,4 @@ All values are placeholders. Keep the real files private, with mode `0600`.
 
 - Connector signalling: `NUXT_CONNECTOR_SIGNALLING_ENABLED=true`, `NUXT_CONNECTOR_SIGNALLING_ORIGIN`, `…_ISSUER`, `…_AUDIENCE`, `…_PUBLIC_KEY_REGISTRY_PATH`, `…_TOKEN_TTL_SECONDS`, `…_PROOF_TTL_MS`, `…_READER_DATABASE_URL` and `…_PROOF_DATABASE_URL`.
 - Pause authority, set **only from section 8**: `NUXT_PAUSE_AUTHORITY_ENABLED=true`, `NUXT_PAUSE_AUTHORITY_DATABASE_URL`, `…_ISSUER`, `…_KID`, `…_AUDIENCE`, `…_ISSUER_KEY_PATH`, `…_ISSUER_PUBLIC_KEY_SPKI`, `…_CREDENTIAL_ISSUER` and `…_CREDENTIAL_AUDIENCE`. The Connector's `pause.issuers` and `pause.signalling` must match these values.
-- Farm view: `NUXT_PUBLIC_FLAGS_FARM_VIEW=true`, plus printer assignments (`NUXT_PRINTER_ASSIGNMENTS_ENABLED`) and browser devices, pairing, telemetry and renewal, each with its own `…_ENABLED` flag and database URL.
+- Farm view: `NUXT_PUBLIC_FLAGS_FARM_VIEW=true`, plus printer assignments (`NUXT_PRINTER_ASSIGNMENTS_ENABLED`), the Connector inventory used by the Connector pages (`NUXT_CONNECTOR_INVENTORY_ENABLED` with `NUXT_CONNECTOR_INVENTORY_DATABASE_URL`) and browser devices, pairing, telemetry and renewal, each with its own `…_ENABLED` flag and database URL.

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { expect } from '@playwright/test'
 import type { ProvisionedSignallingFixture } from './signalling-https-fixture-contract.ts'
+import {
+  assertCameraDetached,
+  assertCameraPlaying,
+} from './signalling-farm-camera.ts'
+import type { CameraFixture } from './signalling-camera-fixture.ts'
 
 /** Mirrors REOPEN_MAX_MS in apps/farm/app/utils/farm-view.ts (#121). */
 const REOPEN_BACKOFF_CAP_MS = 30_000
@@ -12,6 +17,8 @@ export async function testAuthenticatedFarmPage(input: {
   startedAt: number
   advance(): Promise<void>
   note(value: string): Promise<void>
+  /** Camera row: video must play before the closure and detach after it. */
+  camera?: CameraFixture
 }) {
   const { fixture } = input
   const assignment = fixture.assignmentRefs[0]
@@ -39,9 +46,17 @@ export async function testAuthenticatedFarmPage(input: {
   fixture.signal.addEventListener('abort', abort, { once: true })
   try {
     fixture.signal.throwIfAborted()
-    const response = await page.goto(fixture.origin + '/farm', {
-      waitUntil: 'domcontentloaded',
-      timeout: 7500,
+    const open = () =>
+      page.goto(fixture.origin + '/farm', {
+        waitUntil: 'domcontentloaded',
+        timeout: 7500,
+      })
+    // Chromium aborts a navigation when host interfaces change (for example a
+    // container network appearing on a shared Docker host). Retry that once.
+    const response = await open().catch(async (error: unknown) => {
+      if (!String(error).includes('net::ERR_NETWORK_CHANGED')) throw error
+      await input.note('farm-page-navigation-retried-after-network-change')
+      return open()
     })
     assert.equal(response?.status(), 200)
     await expect(
@@ -76,6 +91,14 @@ export async function testAuthenticatedFarmPage(input: {
       '0.75',
       { timeout: 3000 },
     )
+    const camera = input.camera
+      ? await assertCameraPlaying({
+          page,
+          printerKey: assignment.printerKey,
+          helperPath: input.camera.helperPath,
+          note: input.note,
+        })
+      : undefined
     // Issue #8: read-only within 10 s of losing the direct connection.
     const closureWait = 10000
     const sockets: number[] = []
@@ -131,6 +154,13 @@ export async function testAuthenticatedFarmPage(input: {
       await input.note(
         `farm-page-no-reopen-window-ms:${REOPEN_BACKOFF_CAP_MS + 1000}`,
       )
+      if (camera && input.camera)
+        await assertCameraDetached({
+          page,
+          region: camera.region,
+          helperPath: input.camera.helperPath,
+          note: input.note,
+        })
     }
     fixture.signal.throwIfAborted()
   } catch (error) {

@@ -3,14 +3,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import {
-  appendFileSync,
-  existsSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'
@@ -545,30 +538,19 @@ export async function runConnectorOutageScenarios(input: {
         eventIds.every((id) => stillQueued.has(id)),
         'ack was lost',
       )
-      // Restart: the queue lock left by SIGKILL is never removed automatically.
-      let operatorLockRecovery = false
-      const blocked = launchConnector()
-      const outcome = await blocked.exited
-      if (
-        outcome.code === 1 &&
-        existsSync(lockFile) &&
-        // The CLI's fixed local-collection failure text (pt-BR), not a crash.
-        blocked.stderr.includes('Não foi possível manter a coleta local')
-      ) {
-        const owner = JSON.parse(readFileSync(lockFile, 'utf8')) as {
-          pid: number
-        }
-        assert.equal(
-          owner.pid,
-          killedPid,
-          'stale lock belongs to reaped process',
-        )
-        unlinkSync(lockFile) // Documented operator step, exact path only.
-        operatorLockRecovery = true
-      } else
-        assert.fail('unexpected restart outcome ' + JSON.stringify(outcome))
+      // Restart: the lock left by SIGKILL names a dead owner and is taken over automatically.
+      assert.equal(
+        (JSON.parse(readFileSync(lockFile, 'utf8')) as { pid: number }).pid,
+        killedPid,
+        'SIGKILL left the owner lock behind',
+      )
       const restartAt = performance.now()
-      await startConnectorAndBaseline()
+      const restarted = await startConnectorAndBaseline()
+      assert.equal(
+        restarted.count('queue-lock-recovered'),
+        1,
+        'automatic stale-lock recovery diagnostic',
+      )
       const drainMs = await drained()
       const replays = proxy.log.filter(
         (e) =>
@@ -581,13 +563,9 @@ export async function runConnectorOutageScenarios(input: {
       const after = await rows()
       for (const id of eventIds)
         assert.equal(after.filter((r) => r.id === id).length, 1, 'no duplicate')
-      if (operatorLockRecovery)
-        report.findings.push(
-          'After SIGKILL the queue lock (telemetry.lock) blocks restart (exit 1) until an operator removes it; unattended restart after a crash is not automatic.',
-        )
       return {
         heldEventIds: eventIds.length,
-        operatorLockRecovery,
+        automaticLockRecovery: true,
         replays,
         drainMs,
       }
@@ -679,6 +657,7 @@ export async function runConnectorOutageScenarios(input: {
       await startApp()
       const drainStart = performance.now()
       const logFrom = proxy.log.length
+      const rowsBefore = (await rows()).length
       await until(
         () => current.count('delivery', (d) => d.status === 'delivered') >= 3,
         60000,
@@ -686,9 +665,8 @@ export async function runConnectorOutageScenarios(input: {
       )
       await new Promise((r) => setTimeout(r, 20000))
       const seconds = (performance.now() - drainStart) / 1000
-      const delivered = current.diagnostics
-        .filter((d) => d.kind === 'delivery' && d.status === 'delivered')
-        .reduce((n, d) => n + Number(d.count), 0)
+      // Database rows, not diagnostics: the diagnostic budget is bounded per run.
+      const delivered = (await rows()).length - rowsBefore
       assert.ok(current.running, 'no crash while draining a full queue')
       const first =
         await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[evicted]!}::uuid`
@@ -708,7 +686,7 @@ export async function runConnectorOutageScenarios(input: {
         lines.length / Math.max(1, delivered / seconds),
       )
       report.findings.push(
-        `Full-queue drain rate ${drainRecordsPerSecond} records/s (estimated ${backlogDrainEstimateS} s for ${lines.length} records); each acknowledgement rewrites and fsyncs the whole queue file.`,
+        `Full-queue drain rate ${drainRecordsPerSecond} records/s (estimated ${backlogDrainEstimateS} s for ${lines.length} records).`,
       )
       return {
         seededRecords: seededCount,

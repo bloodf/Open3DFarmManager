@@ -59,7 +59,15 @@ if (base) {
   if (worktrees.length === 0)
     throw new Error('Cannot verify private handoff location')
   for (const entry of worktrees) {
-    const root = await realpath(entry.slice('worktree '.length))
+    // A registered root removed by another task cannot contain the existing
+    // handoff parent, so it needs no check.
+    const root = await realpath(entry.slice('worktree '.length)).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      },
+    )
+    if (root === undefined) continue
     const outside = relative(root, parent)
     if (!outside.startsWith('../') && outside !== '..')
       throw new Error(

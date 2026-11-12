@@ -68,7 +68,22 @@ function untilAbort(signal: AbortSignal): Promise<void> {
   })
 }
 
+/**
+ * Wall clock for the reads in this file (credential expiry, queue time, local
+ * status, pause authority confirm, drain clock) and for credential readback
+ * and renewal scheduling. Downstream modules such as pause-control,
+ * authenticated-http-telemetry and signalling still use real time, so an
+ * injected clock is for tests of this file's logic only. Production omits it
+ * and uses Date.now and the renewal's real timer sleep.
+ */
+export type AgentClock = Readonly<{
+  now(): number
+  sleep?(ms: number, signal: AbortSignal): Promise<void>
+}>
+const systemClock: AgentClock = { now: () => Date.now() }
+
 type AgentInput = {
+  clock?: AgentClock
   statusPort?: number
   configPath: string
   credentialPath: string
@@ -99,7 +114,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
   const { readOrRecoverRuntimeCredential, createRenewalHttpTransport } =
     await import('../cloud/credential-renewal.ts')
   const renewalOrigin = new URL(config.telemetry.endpoint).origin
+  const clock = input.clock ?? systemClock
   const credential = await readOrRecoverRuntimeCredential({
+    now: () => clock.now(),
     credentialPath: input.credentialPath,
     identity,
     onDiagnostic: input.onDiagnostic,
@@ -133,14 +150,14 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     agentId: credential.agent_id,
     identity,
   })
-  if (Date.now() >= credential.expires_at)
+  if (clock.now() >= credential.expires_at)
     throw new Error('Runtime credential expired before startup')
   if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
     config,
     credential,
-    now: Date.now(),
+    now: clock.now(),
   })
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
@@ -179,7 +196,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           delivered: totals.delivered,
           retries: totals.retries,
           credentialExpired:
-            totals.credentialExpired || Date.now() >= credential.expires_at,
+            totals.credentialExpired || clock.now() >= credential.expires_at,
         }),
         onError: fail,
       })
@@ -281,7 +298,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                   if (
                     offline &&
                     !offline.confirm(
-                      { wall: Date.now(), mono: performance.now() },
+                      { wall: clock.now(), mono: performance.now() },
                       serverSeq,
                     )
                   )
@@ -339,6 +356,10 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     if (config.renewal) {
       const { runCredentialRenewal, createRenewalHttpTransport } =
         await import('../cloud/credential-renewal.ts')
+      const sleep = clock.sleep
+      const renewalSleep = sleep
+        ? (ms: number, s: AbortSignal) => sleep.call(clock, ms, s)
+        : undefined
       const origin = new URL(config.telemetry.endpoint).origin
       tasks.push(
         runCredentialRenewal({
@@ -353,6 +374,8 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           audience: config.renewal.audience,
           retryMinMs: config.renewal.retryMinMs,
           retryMaxMs: config.renewal.retryMaxMs,
+          now: () => clock.now(),
+          ...(renewalSleep ? { sleep: renewalSleep } : {}),
           signal,
           onDiagnostic: diagnostic,
           onRenewed() {
@@ -388,7 +411,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       let backoff = config.telemetry.retryMinMs
       let notBefore = 0
       while (!signal.aborted) {
-        if (Date.now() >= credential.expires_at) {
+        if (clock.now() >= credential.expires_at) {
           totals.credentialExpired = true
           diagnostic({ kind: 'credential-expired' })
           await untilAbort(signal)
@@ -397,7 +420,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
         const wait = notBefore - performance.now()
         if (wait > 0) {
           await pause(
-            Math.min(wait, credential.expires_at - Date.now()),
+            Math.min(wait, credential.expires_at - clock.now()),
             signal,
           )
           continue
@@ -410,7 +433,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             1,
             Math.min(
               config.telemetry.timeoutMs,
-              credential.expires_at - Date.now(),
+              credential.expires_at - clock.now(),
             ),
           ),
         )
@@ -426,7 +449,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           result = await drainTelemetryOnce(
             queue,
             tracked,
-            Date.now,
+            () => clock.now(),
             attemptSignal,
           )
         } finally {

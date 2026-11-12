@@ -22,6 +22,7 @@ import {
   type SocketPort,
 } from '../../../../../packages/connector/src/webrtc/signalling-client-channel.ts'
 import { ReadonlyBrowserPeer } from './readonly-peer.ts'
+import type { BrowserCameraHooks } from './camera-media.ts'
 
 const protocol = 'open3dfarm.signalling.v1'
 export function browserSocket(url: string): SocketPort {
@@ -89,7 +90,11 @@ type PeerOptions = {
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
+  cameraMedia?: BrowserCameraHooks
 }
+type CameraFactory = (
+  onViolation: (reason: string) => void,
+) => BrowserCameraHooks
 export class AuthenticatedBrowserSignallingClient {
   #channel: SignallingClientChannel
   #scope: Readonly<Scope>
@@ -103,6 +108,7 @@ export class AuthenticatedBrowserSignallingClient {
     genuineStatus?: GenuineStatusOptions
     onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
     onTerminal?: (reason: string) => void
+    cameraMedia?: CameraFactory
   }>
   #peer: Peer | undefined
   #resolveBinding: (value: unknown) => void = () => {}
@@ -125,6 +131,8 @@ export class AuthenticatedBrowserSignallingClient {
       genuineStatus?: GenuineStatusOptions
       onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
       onTerminal?: (reason: string) => void
+      /** Opt-in camera media per peer; violations close this session. */
+      cameraMedia?: CameraFactory
     } = {},
   ) {
     if (
@@ -235,6 +243,13 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
+        ...(this.#options.cameraMedia
+          ? {
+              cameraMedia: this.#options.cameraMedia((reason) =>
+                this.#channel.close(reason),
+              ),
+            }
+          : {}),
         ...(this.#options.genuineStatus
           ? {
               genuineStatus: {

@@ -13,6 +13,7 @@ import {
 import { StatusMessage } from '../../../../../packages/farm-protocol/src/channel.ts'
 import { RtcSessionBinding } from '../../../../../packages/farm-protocol/src/rtc-session-binding.ts'
 import { AuthenticatedBrowserSignallingClient } from './authenticated-signalling-client.ts'
+import { BrowserCameraMedia, type BrowserCameraHooks } from './camera-media.ts'
 
 type Assignment = { assignmentId: string; agentId: string; printerKey: string }
 type ResolvedKey = {
@@ -41,7 +42,12 @@ type ClientInput = {
   }) => void
   onStatus: (value: unknown) => void
   onTerminal: (reason: string) => void
+  cameraMedia?: (onViolation: (reason: string) => void) => BrowserCameraHooks
 }
+export type FarmCameraEvent = Readonly<{
+  assignmentId: string
+  stream: MediaStream | null
+}>
 type Options = {
   resolveKey: (input: {
     scope: FarmScope
@@ -49,6 +55,9 @@ type Options = {
     signal: AbortSignal
   }) => Promise<ResolvedKey>
   createClient?: (input: ClientInput) => Client
+  /** Opt-in camera. Streams are offered only for this feed's server assignment
+   * refs; null is always emitted when an attached stream is revoked. */
+  onCamera?: (event: FarmCameraEvent) => void
 }
 function requireSync(callback: () => void) {
   const result: unknown = callback()
@@ -251,6 +260,29 @@ export function createAuthenticatedFarmStatusFeed(
                 },
                 onVerifiedAdmission: value.onVerifiedAdmission,
                 onTerminal: value.onTerminal,
+                ...(value.cameraMedia
+                  ? { cameraMedia: value.cameraMedia }
+                  : {}),
+              }))
+          const onCamera = options.onCamera
+          let attached: string | undefined
+          const cameraMedia =
+            onCamera &&
+            ((onViolation: (reason: string) => void) =>
+              new BrowserCameraMedia({
+                privateKey: resolved.privateKey,
+                authorizedPrinterIds: refs.map((ref) => ref.assignmentId),
+                onStream(stream, printerId) {
+                  if (stream && printerId && current() && !attached) {
+                    attached = printerId
+                    onCamera({ assignmentId: printerId, stream })
+                  } else if (!stream && attached) {
+                    const assignmentId = attached
+                    attached = undefined
+                    onCamera({ assignmentId, stream: null })
+                  }
+                },
+                onViolation,
               }))
           const made = create({
             scope: {
@@ -264,6 +296,7 @@ export function createAuthenticatedFarmStatusFeed(
               privateKey: resolved.privateKey,
             },
             assignmentRefs: refs,
+            ...(cameraMedia ? { cameraMedia } : {}),
             onVerifiedAdmission(value) {
               if (!current() || session) return close('rejected')
               try {

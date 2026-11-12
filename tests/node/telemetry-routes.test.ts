@@ -62,45 +62,52 @@ after(() => {
   Reflect.deleteProperty(globalThis, token)
 })
 
+const good = ['content-type', 'application/json']
 for (const [path, route] of routes) {
-  test(`${path} enforces the boundary before runtime and forwards runtime responses`, async () => {
+  const run = async (rawHeaders: string[], method = 'POST') => {
     const req = new IncomingMessage(new Socket())
-    req.method = 'POST'
+    req.method = method
     req.url = path
-    req.rawHeaders = [
-      'content-type',
-      'application/json',
-      'cookie',
-      'session=synthetic',
-    ]
+    req.rawHeaders = rawHeaders
     const event = {
       '~app': { node: { req } },
       res: { headers: new Headers(), status: 200 },
     }
     runtimeCalls = 0
     handlerCalls = 0
+    const body = await route(event as unknown as Parameters<typeof route>[0])
+    return { body, event }
+  }
+  test(`${path} enforces the boundary before runtime and forwards runtime responses`, async () => {
     enabled = true
-    assert.deepEqual(await route(event as never), {
-      error: 'Solicitação inválida.',
-    })
-    assert.equal(event.res.status, 400)
-    assert.equal(event.res.headers.get('cache-control'), 'no-store')
+    let r = await run([...good, 'cookie', 'session=synthetic'])
+    assert.deepEqual(r.body, { error: 'Solicitação inválida.' })
+    assert.equal(r.event.res.status, 400)
+    assert.equal(r.event.res.headers.get('cache-control'), 'no-store')
     assert.equal(runtimeCalls, 0)
     assert.equal(handlerCalls, 0)
 
-    req.rawHeaders = ['content-type', 'application/json']
+    r = await run(['content-type', 'application/json'], 'GET')
+    assert.deepEqual(r.body, { error: 'Solicitação inválida.' })
+    assert.equal(r.event.res.status, 400)
+    assert.equal(r.event.res.headers.get('cache-control'), 'no-store')
+    assert.equal(runtimeCalls, 0)
+    assert.equal(handlerCalls, 0)
+
     enabled = false
-    assert.deepEqual(await route(event as never), {
-      error: 'Telemetria indisponível.',
-    })
-    assert.equal(event.res.status, 503)
-    assert.equal(event.res.headers.get('cache-control'), 'no-store')
+    r = await run(good)
+    assert.deepEqual(r.body, { error: 'Telemetria indisponível.' })
+    assert.equal(r.event.res.status, 503)
+    assert.equal(r.event.res.headers.get('cache-control'), 'no-store')
+    assert.equal(runtimeCalls, 1)
     assert.equal(handlerCalls, 0)
 
     enabled = true
-    assert.deepEqual(await route(event as never), response.body)
-    assert.equal(event.res.status, 401)
-    assert.equal(event.res.headers.get('cache-control'), 'no-store')
+    r = await run(good)
+    assert.deepEqual(r.body, response.body)
+    assert.equal(r.event.res.status, 401)
+    assert.equal(r.event.res.headers.get('cache-control'), 'no-store')
+    assert.equal(runtimeCalls, 1)
     assert.equal(handlerCalls, 1)
   })
 }

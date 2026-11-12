@@ -46,9 +46,16 @@ export async function testAuthenticatedFarmPage(input: {
   fixture.signal.addEventListener('abort', abort, { once: true })
   try {
     fixture.signal.throwIfAborted()
-    const response = await page.goto(fixture.origin + '/farm', {
-      waitUntil: 'domcontentloaded',
-      timeout: 7500,
+    const open = () =>
+      page.goto(fixture.origin + '/farm', {
+        waitUntil: 'domcontentloaded',
+        timeout: 7500,
+      })
+    // Chromium aborts a navigation when host interfaces change (for example a
+    // container network appearing on a shared Docker host). Retry that once.
+    const response = await open().catch((error: unknown) => {
+      if (!String(error).includes('net::ERR_NETWORK_CHANGED')) throw error
+      return open()
     })
     assert.equal(response?.status(), 200)
     await expect(

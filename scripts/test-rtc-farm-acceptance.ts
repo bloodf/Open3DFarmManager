@@ -210,6 +210,18 @@ try {
     0,
     'Layer preparation failed',
   )
+  // The layer's Vue SFCs resolve the app tsconfig, which `nuxt prepare` generates
+  // (ignored .nuxt output in the checkout; git status stays clean).
+  assert.equal(
+    await run(
+      'prepare-app',
+      join(checkout, 'apps/farm/node_modules/.bin/nuxt'),
+      ['prepare'],
+      { cwd: join(checkout, 'apps/farm'), env: nodeEnv, timeoutMs: 300000 },
+    ),
+    0,
+    'App type preparation failed',
+  )
   assert.equal(
     await run('build-layer', join(layer, 'node_modules/.bin/nuxt'), ['build'], {
       cwd: layer,

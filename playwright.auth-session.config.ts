@@ -2,6 +2,10 @@ import { randomBytes } from 'node:crypto'
 import { defineConfig } from '@playwright/test'
 
 const env = process.env
+if (env.AUTH_E2E_DISPOSABLE !== 'yes')
+  throw new Error(
+    'AUTH_E2E_DISPOSABLE=yes required; use scripts/test-auth-session-e2e.ts',
+  )
 const app = Number(env.AUTH_E2E_APP_PORT)
 const tls = Number(env.AUTH_E2E_TLS_PORT)
 const db = Number(env.AUTH_E2E_DB_PORT)

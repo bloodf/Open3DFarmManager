@@ -22,9 +22,10 @@ const IDLE_MS = 30 * 60 * 1000
 const LIFETIME_MS = 8 * 60 * 60 * 1000
 const password = 'synthetic-password-' + randomBytes(8).toString('hex')
 const origin = `https://127.0.0.1:${env.AUTH_E2E_TLS_PORT}`
+const dbPort = Number(env.AUTH_E2E_DB_PORT)
 const sql = postgres({
   host: '127.0.0.1',
-  port: Number(env.AUTH_E2E_DB_PORT),
+  port: dbPort,
   database: 'fixture',
   username: 'fixture',
   ssl: false,
@@ -34,6 +35,33 @@ const sql = postgres({
 let passwordHash = ''
 
 test.beforeAll(async () => {
+  // Admission guard: this suite deletes rate limits and bypasses triggers, so it
+  // must only ever touch the disposable, fully migrated fixture database.
+  if (
+    !/^[0-9]{4,5}$/.test(env.AUTH_E2E_DB_PORT ?? '') ||
+    !Number.isInteger(dbPort) ||
+    dbPort < 1024 ||
+    dbPort > 65535
+  )
+    throw new Error('Explicit disposable loopback PostgreSQL port required')
+  expect((await sql`SELECT current_database() AS name`)[0]?.name).toBe(
+    'fixture',
+  )
+  for (const table of [
+    'farm.session_accounts',
+    'farm.account_sessions',
+    'farm.password_credentials',
+    'farm.auth_rate_limits',
+  ])
+    expect(
+      (await sql`SELECT to_regclass(${table})::text AS name`)[0]?.name,
+      'Apply all migrations before running this suite',
+    ).toBe(table)
+  expect(
+    (
+      await sql`SELECT count(*)::int AS n FROM pg_roles WHERE rolname = 'farm_password_auth'`
+    )[0]?.n,
+  ).toBe(1)
   passwordHash = await hashPassword(password)
   // The app connects as a least-privilege login role; create it once.
   const [role] =
@@ -188,7 +216,9 @@ test.describe('login rate limit and lockout', () => {
     const { username } = await account()
     await failures(request, username, 15)
     expect((await login(request, username)).status()).toBe(429)
-    await sql`UPDATE farm.auth_rate_limits SET window_start = clock_timestamp() - interval '16 minutes'`
+    // Only the username bucket ages out; the address bucket stays well under 60.
+    const key = 'a:' + createHash('sha256').update(username).digest('hex')
+    await sql`UPDATE farm.auth_rate_limits SET window_start = clock_timestamp() - interval '16 minutes' WHERE key = ${key}`
     expect((await login(request, username)).status()).toBe(200)
   })
 
@@ -242,6 +272,41 @@ test.describe('login rate limit and lockout', () => {
     expect(
       (await page.context().cookies()).some((c) => c.name === COOKIE),
     ).toBe(false)
+  })
+})
+
+test.describe('same-origin enforcement on auth mutations', () => {
+  test('login from a foreign Origin is refused and issues no cookie', async ({
+    request,
+  }) => {
+    const { username } = await account()
+    const reply = await request.post('/api/auth/login', {
+      data: { username, password },
+      headers: { origin: 'https://unrelated.invalid' },
+    })
+    expect(reply.status()).toBe(403)
+    expect((await request.storageState()).cookies).toEqual([])
+  })
+
+  test('login without an Origin header is refused', async ({ request }) => {
+    const { username } = await account()
+    const reply = await request.post('/api/auth/login', {
+      data: { username, password },
+    })
+    expect(reply.status()).toBe(403)
+  })
+
+  test('logout from a foreign Origin is refused and the session stays valid', async ({
+    request,
+  }) => {
+    const { username } = await account()
+    await login(request, username)
+    const reply = await request.post('/api/auth/logout', {
+      data: {},
+      headers: { origin: 'https://unrelated.invalid' },
+    })
+    expect(reply.status()).toBe(403)
+    expect((await me(request)).status()).toBe(200)
   })
 })
 
@@ -318,6 +383,7 @@ test.describe('session expiry, rotation and revocation', () => {
   }) => {
     const { id, username } = await account()
     await login(request, username)
+    expect((await me(request)).status()).toBe(200)
     const now = Date.now()
     await rewriteSession(id, {
       createdAt: now - LIFETIME_MS - 3600_000,
@@ -325,6 +391,7 @@ test.describe('session expiry, rotation and revocation', () => {
       absoluteExpiresAt: now - 60_000,
     })
     expect((await me(request)).status()).toBe(401)
+    expect((await sessionRow(id))?.revokedAt).not.toBeNull()
   })
 
   test('activity inside the idle window keeps the session and refreshes last seen', async ({

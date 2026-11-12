@@ -25,16 +25,19 @@ execFileSync(
   ],
   { stdio: 'ignore', timeout: 15_000 },
 )
+const key = readFileSync(join(directory, 'key.pem'))
+const cert = readFileSync(join(directory, 'c.pem'))
+// Key material lives in memory only; nothing to clean up on shutdown.
+rmSync(directory, { recursive: true, force: true })
 const server = pairingHttpProxy({
-  key: readFileSync(join(directory, 'key.pem')),
-  cert: readFileSync(join(directory, 'c.pem')),
+  key,
+  cert,
   upstreamPort: () => upstream,
   // Fault injection is unused here; a random control value can never match.
   dropControl: randomBytes(16).toString('hex'),
 })
 const stop = () => {
   server.close()
-  rmSync(directory, { recursive: true, force: true })
   process.exit(0)
 }
 process.once('SIGTERM', stop)

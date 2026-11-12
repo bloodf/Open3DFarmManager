@@ -4,22 +4,34 @@ This queue tracks the independent MIT project without private deployment configu
 
 ## Current checkpoint
 
-The shared head is `e5b50ca`. The latest `bun run check:all` passed formatting, type checks, 222 Bun tests, 110 Node tests and both production builds using the `0014` source and a frozen, uncommitted `0015` source snapshot. It does not establish a clean committed-head result or `0015` PostgreSQL acceptance. Rerun the gate after current source changes settle on a committed candidate.
+The reference head is `36d1198` on `origin/main`. The official migration catalog is contiguous through `0023` (`infra/db/migrations`). The toolchain is pnpm 12.18.0 with Node 24.22.2; the gate is `pnpm run check:all`. No integrated gate has been run on this head. Earlier gate counts in checkpoint records describe their named sources only. Run the gate on the final committed candidate and report PostgreSQL, browser/WebRTC and simulator checks for that same head separately.
 
-- **0013 browser-device registry — accepted slice:** source `828bd579` was integrated at `741dd1f`. The official contiguous migration history, rollback/reapply, restart persistence and bundled browser proof were exercised. This is an internal registry and proof component; it does not supply enrollment/approval HTTP, authenticated signalling, transport leases or browser-to-Connector dispatch. See [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md).
-- **0014 credential proof — accepted point-in-time slice:** `e5b50ca` records eleven real PostgreSQL groups passing twice, official 0014 down/up, and a fresh-process check across a database restart. The consumed proof is a point-in-time receipt, not a durable authorization or telemetry write. The offline Connector cannot learn remote revocation immediately. No HTTP telemetry endpoint or transport lease is accepted. See [credential acceptance checkpoint](CONNECTOR-CREDENTIAL-ACCEPTANCE-CHECKPOINT.md).
-- **0015 printer ownership — in progress:** migration and storage sources are uncommitted. Focused checks and the `check:all` snapshot cover static/unit/build behavior only. No real PostgreSQL, official migration reversal, or race/privilege acceptance is claimed. See [printer ownership checkpoint](PRINTER-OWNERSHIP-CHECKPOINT.md).
-- **0016 operation-bound telemetry — in progress:** source work is uncommitted. It must bind current authorization, proof consumption and telemetry persistence into one database operation. Do not reuse the 0014 receipt as authority for a later write. Real PostgreSQL acceptance and integrated checks remain pending.
-
-A separate pairing HTTP branch has exact-catalog evidence at `8352a1e` and the root recovery rate-limit fix at `14d018e`. Its full HTTPS gate is running and is not accepted yet. Keep its result distinct from the `0013`/`0014` acceptance.
+- **0013 browser-device registry and 0014 credential proof — accepted slices:** see [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md) and [credential acceptance checkpoint](CONNECTOR-CREDENTIAL-ACCEPTANCE-CHECKPOINT.md). The 0014 receipt is point-in-time context, not durable authorization.
+- **0015 printer ownership — committed and accepted on real PostgreSQL:** eleven synthetic behavior groups passed on a disposable cluster through the official contiguous runner, again after a PostgreSQL restart, with official 0015 down/up. See [printer ownership checkpoint](PRINTER-OWNERSHIP-CHECKPOINT.md).
+- **0016 operation-bound telemetry — committed and accepted on real PostgreSQL:** the storage/proof slice binds current authorization, proof consumption and telemetry persistence into one operation. HTTP/client integration and authenticated transport are separate slices. See [atomic telemetry checkpoint](ATOMIC-TELEMETRY-CHECKPOINT.md).
+- **Later migrations 0017–0023 are on `main`:** signalling authorization, pause authority, assignment-scoped signalling, password reset, credential successors, successor proofs and credential renewals. Their evidence is in the per-slice checkpoints and the [Phase 0 ledger](PHASE-0.md); this queue does not restate it. The server-side renewal and readback exist; the Connector renewal client does not.
+- **WebRTC unbounded-queue blocker — fixed in the experiment adapter:** the adapter now bounds queue length, bytes and total budget and goes read-only on saturation, with sustained-input tests. Native SCTP, libdatachannel, N-API and Chromium memory is still unmeasured. Heartbeat, current authorization and revocation distribution remain pending. See [WebRTC interoperability checkpoint](WEBRTC-CONNECTOR-INTEROP-CHECKPOINT.md).
+- **Health endpoint:** `/healthz` reports process liveness only; it does not check PostgreSQL.
 
 ## Active work and dependency order
 
-1. Finish `0015` against a disposable PostgreSQL cluster using the official contiguous migration runner. Validate down/up, races, privilege boundaries and current authorization checks. Commit the slice, then run the integrated gate on that committed candidate rather than treating the frozen `0015` snapshot as committed-head acceptance.
-2. Finish `0016` operation-bound telemetry after its storage and authorization interfaces settle. Test concurrent proof/revocation/write outcomes, retries and rollback against real PostgreSQL, then verify bounded outage recovery and exact event acknowledgement. Keep the HTTP gate separate until its HTTPS checks complete.
-3. Resolve the WebRTC queue blocker. Native Node/Chromium interoperability passed at `1e1ceba`, but independent review found an unbounded queue. Corrective work is uncommitted and unvalidated. Define bounded queue/backpressure behavior, test saturation and disconnect/reconnect, then rerun interoperability and review. The earlier pass is not current acceptance.
-4. Re-run simulator evidence with the bounded collector. The UART pair at `bf6c368` was inconclusive because collector startup output was lost. The local collector fix at `da5d377` has 52 experimental checks only; it is not simulator acceptance and establishes no printer or architecture claim. Preserve failure evidence and the original failing exit status.
-5. Once these slices have settled on one committed candidate, run the required integrated, database, browser/WebRTC and simulator gates for that exact head. Report each local, validated, integrated, published and merged state separately.
+Development resumed on 2026-11-11. Remaining Phase 0 work, in dependency order:
+
+1. Simulator readiness: resolve the startup and stability failures with bounded diagnostics, then accept SV06 and the four-tool fixture, Spoolman read-only inventory and restart behavior. Do not relax readiness or safety limits on inconclusive runs.
+2. PostgreSQL-backed `/healthz` and startup migrations (the migration runner is currently a disposable-database tool, not application startup).
+3. Logger redaction and structured diagnostics.
+4. Connector pair and status CLI (the CLI currently supports `collect`, `run` and local status only; it does not pair).
+5. Connector credential-renewal client, against the existing server renewal and readback.
+6. Offline authorization lifetime: define it, enforce it in the Connector and verify expiry fails closed.
+7. Trusted-key cache in the Connector.
+8. Event and snapshot uploads over the authenticated ingestion path.
+9. Moonraker identify, webcams and multi-tool reporting.
+10. Pause wired into the Connector runtime and the farm UI (the issuer, relay, journal and driver exist as separately tested slices; the page keeps the control disabled).
+11. Feed reconnect in the farm view.
+12. Camera end to end: RTSP helper, MediaMTX, authenticated camera over WebRTC and native memory measurement.
+13. Network fault profiles in the simulator.
+14. Combined acceptance on one committed candidate: real services, browser flows, status, camera, signed pause, outage and recovery, with the required gates for that exact head.
+15. Owner-run hardware checklist, after simulator acceptance and separate authorization.
 
 ## Phase 0 acceptance still required
 
@@ -35,7 +47,7 @@ After integrated Phase 0 acceptance, continue with Moonraker discovery, configur
 
 ## Completion and publication gates
 
-- Run `bun run check:all` on the final committed candidate and complete required PostgreSQL, browser/WebRTC and simulator checks for that same head. State pending local or remote checks explicitly.
+- Run `pnpm run check:all` on the final committed candidate and complete required PostgreSQL, browser/WebRTC and simulator checks for that same head. State pending local or remote checks explicitly.
 - Keep diagnostic evidence bounded and outside committed reports; do not include private paths, host details, credentials or account identifiers.
 - Review publication diffs for private material, secrets and license obligations. The existing local payload still requires its separate explicit publication authorization. Do not deploy, change DNS or credentials, start production services, or test physical printers without separate authorization.
 - Preserve worktree outputs and other tasks' resources until ownership, active use and integration are verified. Report cleanup ownership at task completion.

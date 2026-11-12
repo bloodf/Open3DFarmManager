@@ -20,23 +20,19 @@ registerHooks({
     }
     if (url.endsWith('/runtime/agent.ts') && process.env.QUEUE_ADVANCE_DRAIN) {
       const source = String(result.source)
-      const needle = '            Date.now,\n            attemptSignal,'
+      // Tolerates reformatting; still fails loudly if the drain clock moves.
+      const needle = /\(\) => clock\.now\(\),(\s*attemptSignal,)/
       const enqueue = '  const controller = new AbortController()'
-      if (!source.includes(needle) || !source.includes(enqueue))
+      if (!needle.test(source) || !source.includes(enqueue))
         throw new Error('Drain clock hook missing')
       return {
         ...result,
-        source: source
-          .replace(
-            needle,
-            '            () => Date.now() + 120000,\n            attemptSignal,',
-          )
-          .replace(
-            enqueue,
-            `  const originalEnqueue = queue.enqueue.bind(queue);
+        source: source.replace(needle, '() => Date.now() + 120000,$1').replace(
+          enqueue,
+          `  const originalEnqueue = queue.enqueue.bind(queue);
   queue.enqueue = (state, now) => originalEnqueue(state, now + 120000);
 ${enqueue}`,
-          ),
+        ),
       }
     }
     if (

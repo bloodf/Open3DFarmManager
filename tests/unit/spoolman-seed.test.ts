@@ -46,6 +46,38 @@ test('seed is repeatable, retains unrelated rows and uses returned foreign keys'
   }
 })
 
+test('reseed does not duplicate an archived seed spool', async () => {
+  const rows: Record<string, Record<string, unknown>[]> = {
+    vendor: [],
+    filament: [],
+    spool: [],
+  }
+  let nextId = 1
+  const server = await serveTestServer(async (request) => {
+    const url = new URL(request.url)
+    const rowsForKind = rows[url.pathname.split('/').at(-1)!]
+    if (!rowsForKind) return new Response(null, { status: 404 })
+    if (request.method === 'GET')
+      return Response.json(
+        rowsForKind.filter(
+          (row) =>
+            url.searchParams.get('allow_archived') === 'true' || !row.archived,
+        ),
+      )
+    const entity = { ...((await request.json()) as object), id: nextId++ }
+    rowsForKind.push(entity)
+    return Response.json(entity)
+  })
+  try {
+    await seedSpoolman(server.url.origin)
+    rows.spool![0]!.archived = true
+    await seedSpoolman(server.url.origin)
+    expect(rows.spool).toHaveLength(6)
+  } finally {
+    await server.stop()
+  }
+})
+
 test('seed refuses remote origins before issuing any request', async () => {
   await expect(seedSpoolman('http://192.168.1.10:7912')).rejects.toThrow(
     'loopback',

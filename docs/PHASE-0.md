@@ -5,7 +5,7 @@ This is an independent MIT project. Accounts, sessions, credentials and database
 ## Sequence
 
 1. E0.1: accept isolated Klipper simulators, including SV06 and a four-tool printer, Spoolman, cameras through RTSP/MediaMTX, network faults and integration CI.
-2. E1.1/E1.2: complete Bun workspaces, Nuxt 4, Connector packaging, Docker, Postgres migrations, configuration validation, readiness and structured logs.
+2. E1.1/E1.2: complete pnpm workspaces, Nuxt 4, Connector packaging, Docker, Postgres migrations, configuration validation, readiness and structured logs.
 3. E2.1/E2.4: complete independent login and sessions, farm authorization, limits, secure pairing, credential recovery and revocation.
 4. E3.1/E3.2: connect Connector identity, configuration, durable offline telemetry and authenticated ingestion.
 5. E5.1a/E5.4a: connect Moonraker discovery/subscriptions/webcam and a read-only Spoolman inventory mirror.
@@ -62,9 +62,12 @@ Detailed artifacts, limitations and historical failures remain in the
 [native session result](SIMULATOR-ARM64-NATIVE-SESSION-RESULT.md) and
 [Spoolman service validation](SPOOLMAN-ACTUAL-API-VALIDATION.md).
 
-The [implementation queue](IMPLEMENTATION-QUEUE.md) retains an older snapshot;
-its migration labels do not describe the current official catalog through 0019. Use this ledger and the exact checkpoint receipts when selecting remaining
-work. Historical counts and prepared-but-unrun tests are not current acceptance.
+At `origin/main` `36d1198` the official migration catalog is contiguous through
+0023 and the toolchain is pnpm 12.18.0 with Node 24.22.2. The table above was
+recorded earlier and was not re-run on this head; no integrated gate exists for
+it. The [implementation queue](IMPLEMENTATION-QUEUE.md) lists the remaining work
+in dependency order. Use this ledger and the exact checkpoint receipts when
+selecting remaining work. Historical counts and prepared-but-unrun tests are not current acceptance.
 
 The separate pause transport subsequently passed five actual native cases at
 `579f377`, recorded in [the control RTC checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
@@ -76,7 +79,7 @@ not close the integrated issuer, signalling, driver and simulator gate below.
 - **Runtime and database:** built application with PostgreSQL readiness, reversible journal-verified migrations, validated configuration and structured diagnostics. Run the final integrated CI on the exact candidate head.
 - **Simulator and integrations:** SV06 plus the existing four-tool fixture; Moonraker identify, status/subscriptions and cameras through RTSP/MediaMTX; read-only Spoolman against its pinned service; startup/restart and network-fault cases. Repeat on required architectures with bounded logs and no hardware.
 - **Login, pairing and inventory:** independent login/logout, authenticated farm approval, rate limits, current membership/session checks, least-privilege discovery and Connector inventory reads. Verify wrong-farm, wrong-role, expired/revoked session and missing-resource behavior.
-- **Browser identity and transport:** register approved browser keys through the authenticated flow; demonstrate actual Node/Bun Connector interoperability over browser-to-Connector WebRTC for status and camera. Verify signed pause without TURN or server/HTTP fallback.
+- **Browser identity and transport:** register approved browser keys through the authenticated flow; demonstrate actual Node Connector interoperability over browser-to-Connector WebRTC for status and camera. Verify signed pause without TURN or server/HTTP fallback.
 - **Safety and recovery:** reject tampered, replayed, expired, wrong-scope and revoked commands; verify credential delivery/recovery after known and ambiguous failures, server/database outage recovery and read-only degradation. Define and enforce the offline authorization lifetime in the Connector.
 - **Farm interface:** verify the built pt-BR interface from login through pairing and farm/device views, including data age and disabled controls when P2P is unavailable.
 

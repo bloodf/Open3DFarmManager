@@ -1,6 +1,7 @@
 import {
   parseBoundedJson,
   TelemetryBatch,
+  telemetryPrinterKey,
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
 
@@ -70,7 +71,7 @@ export async function ingestTelemetry(
   } catch {
     return { ok: false, reason: 'invalid-batch' }
   }
-  if (records.some((record) => !allowed.has(record.state.printerKey)))
+  if (records.some((record) => !allowed.has(telemetryPrinterKey(record))))
     return { ok: false, reason: 'forbidden-printer' }
   const acceptedEventIds = records.map((record) => record.eventId)
   try {

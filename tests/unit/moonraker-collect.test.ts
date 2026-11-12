@@ -236,10 +236,11 @@ test('actual Node CLI persists opaque-key snapshots and FIFO deltas before queue
     try {
       const records = queue.batch(Date.now()).records
       expect(
-        records.map((record) => [
-          record.state.printerKey,
-          record.state.progress,
-        ]),
+        records.flatMap((record) =>
+          record.kind === 'printer-state'
+            ? [[record.state.printerKey, record.state.progress]]
+            : [],
+        ),
       ).toEqual([
         ['A/\u{1f600}/a', 0.25],
         ['A/\u{1f600}/a', 0.5],
@@ -260,6 +261,53 @@ test('actual Node CLI persists opaque-key snapshots and FIFO deltas before queue
     expect(result.output).not.toContain(service.origin)
     expect(result.output).not.toContain('A/')
     expect(result.output).not.toContain(temp.path)
+  } finally {
+    await job.close()
+    await service.close()
+    temp.close()
+  }
+}, 10000)
+
+test('a print state change queues a transition event before its state snapshot', async () => {
+  const service = await loopback()
+  const temp = temporary()
+  const data = join(temp.path, 'data')
+  const job = launch(
+    [
+      'collect',
+      '--config',
+      config(temp.path, service.origin),
+      '--data-dir',
+      data,
+    ],
+    join(temp.path, 'load-audit.txt'),
+  )
+  try {
+    await job.until((text) => queued(text) === 1)
+    for (const socket of service.sockets)
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_status_update',
+          params: [{ print_stats: { state: 'error' } }, 11],
+        }),
+      )
+    await job.until((text) => queued(text) === 3)
+    expect((await job.stop()).code).toBe(0)
+    const queue = new TelemetryQueue(join(data, 'telemetry'), Date.now())
+    try {
+      const records = queue.batch(Date.now()).records
+      expect(records.map((record) => record.kind)).toEqual([
+        'printer-state',
+        'printer-transition',
+        'printer-state',
+      ])
+      expect(records[1]).toMatchObject({
+        transition: { from: 'printing', to: 'error' },
+      })
+    } finally {
+      queue.close()
+    }
   } finally {
     await job.close()
     await service.close()

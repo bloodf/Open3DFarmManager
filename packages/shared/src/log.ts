@@ -2,7 +2,7 @@
 // Pairing code wire field is `user_code`; `admission_nonce`/nonces are redacted,
 // `challenge_id` is a public correlation id and is kept.
 const SENSITIVE_KEY =
-  /pass|pwd|secret|token|cookie|authorization|credential|private.?key|api.?key|signature|signing.?key|proof|user.?code|pairing.?code|nonce|session|verifier|csrf|hmac|jwt|database.?url|dsn|connection.?string|mnemonic|(^|[_-])otp|auth(?!or)|bearer|cred|access.?key|encryption.?key|master.?key|(^|[_-])key$|[a-z0-9]Key$/i
+  /pass|pwd|secret|token|cookie|authorization|credential|private.?key|api.?key|signature|signing.?key|proof|user.?code|pairing.?code|nonce|session|verifier|csrf|hmac|jwt|database.?url|dsn|connection.?string|mnemonic|(^|[_-])otp|auth(?!or|enticated)|bearer|cred|access.?key|encryption.?key|master.?key|(^|[_-])key$|[a-z0-9]Key$/i
 // Exact (lowercased) keys: private JWK members and short names too broad for a regex.
 const SENSITIVE_EXACT = new Set([
   'd',
@@ -30,7 +30,7 @@ const TEXT_KEY =
   '[\\w-]{0,40}(?:password|passwd|pwd|pass|secret|token|api[_-]?key|cookie|session[_-]?id|authorization)[\\w-]{0,40}|pw|sid'
 // A header/text value: scheme + credential as one value, a quoted string, or a bare word.
 const TEXT_VALUE =
-  '(?:(?:Bearer|Basic|Digest)\\s+[^\\s,;&"\']{1,2048}|"[^"]{0,1024}"|\'[^\']{0,1024}\'|[^\\s,;&"\']{1,2048})'
+  '(?:(?:Bearer|Basic|Digest)\\s+[^\\s,;&"\']{1,2048}|"(?:[^"\\\\]|\\\\.){0,1024}"|\'(?:[^\'\\\\]|\\\\.){0,1024}\'|[^\\s,;&"\']{1,2048})'
 const SCRUBBERS: ReadonlyArray<readonly [RegExp, string]> = [
   [
     /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g,
@@ -41,6 +41,8 @@ const SCRUBBERS: ReadonlyArray<readonly [RegExp, string]> = [
   [/([a-z][a-z0-9+.-]{1,15}:\/\/)[^\s/]{0,256}@/gi, '$1[REDACTED]@'],
   [/\bBearer\s+[\w.~+/=-]+/gi, '[REDACTED]'],
   [/\bBasic\s+[A-Za-z0-9+/]{12,}={0,2}/g, '[REDACTED]'],
+  // Authorization with any scheme (Token, ApiKey, AWS4-HMAC-SHA256 ..., Digest ...): whole value.
+  [/\b((?:proxy-)?authorization\s*[:=]\s*)[^\r\n]{1,2048}/gi, '$1[REDACTED]'],
   // Cookie / Set-Cookie: the whole header value up to end of line.
   [/\b((?:set-)?cookie["']?\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]'],
   [

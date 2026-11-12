@@ -389,3 +389,31 @@ test('hook honors status as well as statusCode', () => {
   spy.mockRestore()
   expect(n).toBe(0)
 })
+
+test('Authorization with any scheme is redacted to end of value', () => {
+  const s = (v: string) => redact(v) as string
+  for (const text of [
+    'Authorization: Token abc123',
+    'authorization: ApiKey abc123',
+    'Authorization: AWS4-HMAC-SHA256 Credential=AKIA/2026/x, Signature=abc123',
+    'Proxy-Authorization: Digest username="u", response="abc123"',
+  ]) {
+    expect(s(text)).not.toContain('abc123')
+    expect(s(text)).not.toMatch(/AKIA|"u"/)
+  }
+  expect(s('{"authorization":"Token abc123"}')).not.toContain('abc123')
+})
+
+test('escaped quotes inside quoted values do not end redaction early', () => {
+  const out = redact('{"password":"ab\\"cd-LEAK","x":"ok"}') as string
+  expect(out).not.toContain('LEAK')
+  expect(out).toContain('"x":"ok"')
+  expect(redact("{'token':'ab\\'cd-LEAK'}")).not.toContain('LEAK')
+})
+
+test('authenticated boolean stays visible, auth is redacted', () => {
+  expect(redact({ authenticated: true, auth: 'x' })).toEqual({
+    authenticated: true,
+    auth: '[REDACTED]',
+  })
+})

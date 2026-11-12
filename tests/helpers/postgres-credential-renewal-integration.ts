@@ -930,6 +930,8 @@ export async function testPostgresCredentialRenewal(
           'connector client renewed root over real HTTP and persisted the committed successor privately',
         )
 
+        // Successor expiry must strictly exceed the parent's (1 s claim resolution).
+        await new Promise((resolve) => setTimeout(resolve, 1100))
         assert.equal((await once()).kind, 'renewed')
         const second = current()
         assert.deepEqual((await successors()).at(-1), {
@@ -939,6 +941,7 @@ export async function testPostgresCredentialRenewal(
         done.push('connector client renewed a successor as kind successor')
 
         // Commit succeeds server-side, local write cannot: the old credential stays.
+        await new Promise((resolve) => setTimeout(resolve, 1100))
         await chmod(directory, 0o500)
         await assert.rejects(once())
         await chmod(directory, 0o700)

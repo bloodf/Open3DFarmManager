@@ -5,7 +5,7 @@ import {
   openSync,
   renameSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
@@ -19,6 +19,7 @@ import {
 } from '../../../farm-protocol/src/credential-renewal.ts'
 import { PairingProofOrigin } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
+  CredentialFile,
   readRuntimeCredential,
   type RuntimeCredential,
 } from '../config/credential.ts'
@@ -40,6 +41,8 @@ export type RenewalDiagnostic =
   | { kind: 'credential-renewed'; expiresAt: number }
   | { kind: 'credential-renewal-retry'; reason: string; delayMs: number }
   | { kind: 'credential-renewal-expired' }
+  // The successor file is in place but its directory entry may not be durable yet.
+  | { kind: 'credential-renewal-directory-sync-failed' }
 
 type Signer = Pick<
   ConnectorIdentity,
@@ -134,8 +137,16 @@ function claims(token: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-/** Writes a private temp file, fsyncs it, renames over the target and fsyncs the directory. */
-export function writeCredentialFileAtomically(path: string, value: unknown) {
+/**
+ * Validates the envelope in memory, writes a private temp file, fsyncs it and
+ * renames it over the target. Returns false only when the final directory fsync
+ * failed: the rename already happened, so the new file is in place.
+ */
+export function writeCredentialFileAtomically(
+  path: string,
+  value: CredentialFile,
+): boolean {
+  const data = JSON.stringify(CredentialFile.parse(value))
   const directory = dirname(path)
   const temp = join(directory, `.${basename(path)}.${randomUUID()}.tmp`)
   const fd = openSync(
@@ -148,7 +159,8 @@ export function writeCredentialFileAtomically(path: string, value: unknown) {
   )
   try {
     try {
-      writeSync(fd, JSON.stringify(value))
+      // writeFileSync loops until every byte is written (no short writes).
+      writeFileSync(fd, data)
       fsyncSync(fd)
     } finally {
       closeSync(fd)
@@ -162,16 +174,23 @@ export function writeCredentialFileAtomically(path: string, value: unknown) {
     }
     throw error
   }
-  const dir = openSync(directory, 'r')
   try {
-    fsyncSync(dir)
-  } finally {
-    closeSync(dir)
+    const dir = openSync(directory, 'r')
+    try {
+      fsyncSync(dir)
+    } finally {
+      closeSync(dir)
+    }
+    return true
+  } catch {
+    return false
   }
 }
 
+class SuccessorMismatch extends Error {}
+
 type Outcome =
-  | { kind: 'renewed'; credential: RuntimeCredential }
+  | { kind: 'renewed'; credential: RuntimeCredential; directorySynced: boolean }
   | { kind: 'retry'; reason: string }
 
 /**
@@ -267,17 +286,21 @@ export async function renewCredentialOnce(input: {
       body.childJti !== reservation.childJti ||
       body.expiresAt !== reservation.expiresAt * 1000 ||
       typeof body.token !== 'string' ||
-      credentialLookupId(body.token) !== reservation.childJti
+      credentialLookupId(body.token) !== reservation.childJti ||
+      body.expiresAt <= credential.expires_at
     )
-      throw new Error('Successor does not match the signed reservation')
+      throw new SuccessorMismatch('Successor does not match the reservation')
     const payload = claims(body.token)
     if (
       payload.sub !== credential.agent_id ||
       payload.farm_id !== credential.farm_id ||
       payload.fingerprint !== identity.fingerprint ||
+      payload.iss !== reservation.issuer ||
+      payload.aud !== reservation.audience ||
+      payload.iat !== reservation.issuedAt ||
       payload.exp !== reservation.expiresAt
     )
-      throw new Error('Successor claims do not match this Connector')
+      throw new SuccessorMismatch('Successor claims do not match')
     return {
       kind: 'credential',
       token: body.token,
@@ -293,7 +316,7 @@ export async function renewCredentialOnce(input: {
   if (result.kind !== 'credential') return result
   if (result.expiresAt <= input.now())
     return { kind: 'retry', reason: 'successor-expired' }
-  writeCredentialFileAtomically(input.credentialPath, {
+  const directorySynced = writeCredentialFileAtomically(input.credentialPath, {
     version: 1,
     expected_fingerprint: credential.expectedFingerprint,
     approval: {
@@ -308,6 +331,7 @@ export async function renewCredentialOnce(input: {
   // Reload through the same validator the agent uses at startup.
   return {
     kind: 'renewed',
+    directorySynced,
     credential: readRuntimeCredential(
       input.credentialPath,
       credential.expectedFingerprint,
@@ -377,14 +401,22 @@ export async function runCredentialRenewal(input: {
         credential: current,
         now,
       })
-    } catch {
-      outcome = { kind: 'retry', reason: 'failed' }
+    } catch (error) {
+      outcome = {
+        kind: 'retry',
+        reason:
+          error instanceof SuccessorMismatch ? 'successor-mismatch' : 'failed',
+      }
     }
     if (input.signal.aborted) return
     if (outcome.kind === 'renewed') {
       current = outcome.credential
       backoff = input.retryMinMs
       at = schedule()
+      if (!outcome.directorySynced)
+        input.onDiagnostic?.({
+          kind: 'credential-renewal-directory-sync-failed',
+        })
       input.onDiagnostic?.({
         kind: 'credential-renewed',
         expiresAt: current.expires_at,

@@ -14,6 +14,8 @@ export const CredentialFile = z.strictObject({
   root_jti: CredentialProofId.optional(),
 })
 
+export type CredentialFile = z.infer<typeof CredentialFile>
+
 /** A local credential envelope is not a JWT authorization decision. */
 export function readRuntimeCredential(
   path: string,

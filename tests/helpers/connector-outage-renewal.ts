@@ -146,7 +146,6 @@ export async function credentialRenewalAcrossOutage(input: {
   )
   if (!claimed.ok || claimed.status !== 'approved')
     throw new Error('Renewal credential fixture failed')
-  const issuedAt = Date.now()
   const { ok: _ok, ...approval } = claimed
   const agentId = claimed.agent_id
   const printerKey = 'renewal-printer'
@@ -228,8 +227,11 @@ export async function credentialRenewalAcrossOutage(input: {
       )
     await until(() => connector.count('queued') >= 1, 30000, 'baseline queued')
     await drained()
-    // Server down well before the renewal point (50-75 % of the lifetime).
+    // The Connector schedules renewal at 50-75 % of the lifetime remaining at its
+    // start, i.e. no earlier than 50 % of the full lifetime. Go down at 30 %.
+    // Issue time comes from the server's expiry, not this process's clock.
     const lifetimeMs = RENEWAL_TTL_SECONDS * 1000
+    const issuedAt = expiresAt - lifetimeMs
     const sinceIssue = () => Date.now() - issuedAt
     await until(
       () => sinceIssue() >= lifetimeMs * 0.3,
@@ -245,11 +247,12 @@ export async function credentialRenewalAcrossOutage(input: {
       pushed.push(progress)
       await until(() => connector.count('queued') > before, 10000, 'queued')
     }
-    // Stay down past the latest renewal point, so renewal is attempted and fails.
+    // Stay down until a renewal attempt has failed against the outage. The latest
+    // possible renewal point is 75 % + 25 % of the start delay; 85 % bounds it.
     await until(
-      () => sinceIssue() >= lifetimeMs * 0.78,
-      lifetimeMs,
-      'renewal point passed during outage',
+      () => connector.count('credential-renewal-retry') >= 1,
+      Math.max(1000, issuedAt + lifetimeMs * 0.85 - Date.now()),
+      'renewal retried during outage',
     )
     const retriesDuringOutage = connector.count('credential-renewal-retry')
     assert.ok(retriesDuringOutage >= 1, 'renewal retried during outage')
@@ -274,6 +277,7 @@ export async function credentialRenewalAcrossOutage(input: {
     assert.deepEqual(sort(stored), sort(expected()), 'exactly once, no loss')
     assert.ok(connector.running, 'Connector survived the renewal outage')
     assert.equal(connector.count('credential-expired'), 0)
+    assert.equal(connector.count('credential-renewal-expired'), 0)
     await connector.stop()
     assert.equal((await connector.exited).code, 0)
     return {

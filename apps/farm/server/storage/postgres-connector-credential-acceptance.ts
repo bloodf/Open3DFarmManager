@@ -634,8 +634,9 @@ export class PostgresConnectorCredentialAcceptance {
                 const sorted = [...operation.records].sort((a, b) =>
                   a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0,
                 )
-                // Set-based: one insert and one locked comparison for the whole batch,
-                // in event-ID order (the former per-row lock order).
+                // Set-based: one insert and one locked comparison for the whole batch.
+                // INSERT … SELECT … ORDER BY does not guarantee insertion order; the
+                // locked SELECT below (FOR SHARE above its sort) sets the event-ID lock order.
                 const batch = save.json(
                   sorted.map((record) => ({
                     id: record.eventId,

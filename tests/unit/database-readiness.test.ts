@@ -109,6 +109,48 @@ describe('prepareSchema (startup gate)', () => {
   })
 })
 
+describe('permission denied (SQLSTATE 42501)', () => {
+  const denied = Object.assign(new Error('permission denied for table x'), {
+    code: '42501',
+  })
+  test('verify maps to permission-denied, not unreachable', async () => {
+    await expect(
+      prepareSchema(fakeSql(denied), catalog, 'verify'),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+  })
+})
+
+describe('startup error classification', () => {
+  const coded = (code: string) =>
+    Object.assign(new Error('driver text'), { code })
+  test.each([
+    ['28P01', 'authentication-failed'],
+    ['28000', 'authentication-failed'],
+    ['3D000', 'invalid-config'],
+    ['08006', 'unreachable'],
+  ])('verify: %s -> %s', async (code, expected) => {
+    await expect(
+      prepareSchema(fakeSql(coded(code)), catalog, 'verify'),
+    ).rejects.toMatchObject({ code: expected })
+  })
+  test('apply path: 42501 from the migration runner -> permission-denied', async () => {
+    const sql = Object.assign(fakeSql('no-table'), {
+      begin: () => Promise.reject(coded('42501')),
+    })
+    await expect(prepareSchema(sql, catalog, 'apply')).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
+  })
+  test('apply path: other failures stay migration-failed', async () => {
+    const sql = Object.assign(fakeSql('no-table'), {
+      begin: () => Promise.reject(coded('23505')),
+    })
+    await expect(prepareSchema(sql, catalog, 'apply')).rejects.toMatchObject({
+      code: 'migration-failed',
+    })
+  })
+})
+
 describe('databaseReadiness', () => {
   test('ok / ahead / pending / mismatch', async () => {
     expect(await databaseReadiness(fakeSql(journal(2)), catalog)).toBe('ok')

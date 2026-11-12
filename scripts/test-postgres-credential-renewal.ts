@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import postgres from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   runMigrations,
   validateMigrationHistory,
@@ -209,12 +210,14 @@ try {
   )
   const version = (await sql`SHOW server_version`)[0]?.server_version
   assert.match(version, /^17\./)
-  const catalog = await loadMigrationCatalog()
-  assert.equal(catalog.at(-1)?.id, '0023_connector_credential_renewals')
+  const catalog = catalogThrough(
+    await loadMigrationCatalog(),
+    '0023_connector_credential_renewals',
+  )
   await runMigrations(sql, catalog, { kind: 'up' })
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...journal]), 23)
+  assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
   await writeFile(
     join(evidence, 'journal.json'),
     JSON.stringify({ version, image, journal }, null, 2),

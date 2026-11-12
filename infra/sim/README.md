@@ -41,7 +41,7 @@ pnpm run sim:verify:rtsp
 docker compose -f infra/sim/docker-compose.yml --profile rtsp down
 ```
 
-`sim:verify:rtsp` (override with `SIM_RTSP_URL`, loopback only) retries for 60 seconds, then performs DESCRIBE, SETUP and PLAY over interleaved TCP and requires 10 RTP packets within 15 seconds. It checks that the source delivers media; it does not exercise the Connector's `tools/rtsp-ingest` fixture. MediaMTX and FFmpeg remain external services; see [THIRD_PARTY.md](../../THIRD_PARTY.md).
+`sim:verify:rtsp` (override with `SIM_RTSP_URL`, loopback only) retries for 60 seconds, then performs DESCRIBE, SETUP and PLAY over interleaved TCP and requires 10 RTP packets within 15 seconds. It checks that the source delivers media; it does not exercise the Connector's `tools/rtsp-ingest` fixture. MediaMTX (MIT) and its bundled GPL FFmpeg build remain external services; see [THIRD_PARTY.md](../../THIRD_PARTY.md).
 
 The [container validation checkpoint](../../docs/CONTAINER-VALIDATION-CHECKPOINT.md) records actual image, camera and Spoolman results and the failed Klipper readiness gate. Remaining E0 gates: successful Klipper container acceptance, RTSP/MediaMTX test stream against the Connector ingest path (the stream itself is below), NAT/loss/latency/UDP fault rig and CI execution. Passing unit tests or Compose parsing does not complete those gates.
 

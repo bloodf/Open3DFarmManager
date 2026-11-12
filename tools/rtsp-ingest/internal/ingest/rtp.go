@@ -28,7 +28,11 @@ type streamAdmission struct {
 	sps     bool
 	pps     bool
 	ready   bool
+	// Live sources join mid-GOP; leading non-IDR units are dropped, never offered.
+	skipped int
 }
+
+const maxBootstrapSkips = 128
 
 func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]byte) error) error {
 	if err := s.guard.Admit(pkt); err != nil {
@@ -41,37 +45,43 @@ func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]b
 	if err != nil {
 		return ErrRTP
 	}
-	keyframe := false
+	// Per-unit flags; stream bootstrap state commits only when the unit is offered.
+	var sps, pps, idr, nonIDR bool
 	for _, nalu := range nalus {
 		if len(nalu) == 0 || nalu[0]&0x80 != 0 {
 			return ErrRTP
 		}
 		switch h264.NALUType(nalu[0] & 0x1f) {
 		case h264.NALUTypeSPS:
-			s.sps = true
+			sps = true
 		case h264.NALUTypePPS:
-			s.pps = true
+			pps = true
 		case h264.NALUTypeIDR:
-			if !s.sps || !s.pps {
-				return ErrRTP
-			}
-			keyframe, s.ready = true, true
+			idr = true
 		case h264.NALUTypeNonIDR:
-			if !s.ready {
-				return ErrRTP
-			}
+			nonIDR = true
 		case h264.NALUTypeSEI, h264.NALUTypeAccessUnitDelimiter:
 		default:
 			return ErrRTP
 		}
 	}
+	if idr && (nonIDR || !(s.sps || sps) || !(s.pps || pps)) {
+		return ErrRTP
+	}
+	if nonIDR && !s.ready {
+		if s.skipped++; s.skipped > maxBootstrapSkips {
+			return ErrRTP
+		}
+		return nil
+	}
 	timestampUs, err := s.clock.Complete(pkt.Timestamp)
 	if err != nil {
 		return err
 	}
-	if offer(timestampUs, keyframe, nalus) != nil {
+	if offer(timestampUs, idr, nalus) != nil {
 		return ErrOutput
 	}
+	s.sps, s.pps, s.ready = s.sps || sps, s.pps || pps, s.ready || idr
 	return nil
 }
 

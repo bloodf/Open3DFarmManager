@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { renderSpoolInventory } from './render-spool-inventory.ts'
+import { cameraDisplayBundle } from './mount-camera-display.ts'
 
 // Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
 // FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
@@ -335,5 +336,121 @@ test('stale, empty, truncated and unavailable inventories are distinguished', as
   ])
   // Received more than 30 s ago counts as stale even if the Connector said fresh.
   await expect(page.getByText('Desatualizado.')).toBeVisible()
+  expect(await violations(page)).toEqual([])
+})
+
+test('camera region is named, unavailable without an authorized stream, silent and axe-clean', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await inventory(page)
+  await page.goto('/farm')
+  const camera = page.getByRole('region', {
+    name: `Câmera da impressora ${key}`,
+  })
+  await expect(camera).toBeVisible()
+  await expect(camera.getByRole('status')).toHaveText('Câmera indisponível.')
+  const video = camera.locator('video')
+  await expect(video).toBeHidden()
+  await expect(video).toHaveAttribute(
+    'aria-label',
+    `Imagem ao vivo da impressora ${key}, sem áudio`,
+  )
+  expect(
+    await video.evaluate((node: HTMLVideoElement) => ({
+      muted: node.muted,
+      autoplay: node.autoplay,
+      source: node.srcObject,
+    })),
+  ).toEqual({ muted: true, autoplay: false, source: null })
+  await expect(
+    page.getByRole('button', { name: 'Pausar impressão' }),
+  ).toBeDisabled()
+  expect(await violations(page)).toEqual([])
+  const handle = await video.elementHandle()
+  await page.getByRole('link', { name: 'Início', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/farm$/)
+  expect(
+    await handle!.evaluate((node: HTMLVideoElement) => node.srcObject),
+  ).toBeNull()
+})
+
+// Stub live stream: a moving canvas, standing in for the authorized RTC track.
+async function mountCamera(page: Page) {
+  const { js, css } = await cameraDisplayBundle()
+  await page.setContent(
+    `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Câmera</title><style>${css}</style></head><body><main><h1>Câmera</h1><div id="camera"></div></main></body></html>`,
+  )
+  await page.addScriptTag({ content: js })
+  await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 48
+    const context = canvas.getContext('2d')!
+    let x = 0
+    setInterval(() => {
+      context.fillStyle = '#000'
+      context.fillRect(0, 0, 64, 48)
+      context.fillStyle = '#fff'
+      context.fillRect((x = (x + 4) % 64), 16, 8, 16)
+    }, 50)
+    const w = window as unknown as Record<string, any>
+    w.stub = canvas.captureStream(10)
+    w.cameraDisplay.mount(document.getElementById('camera'), 'impressora-1')
+  })
+  return page.getByRole('region', { name: 'Câmera da impressora impressora-1' })
+}
+const setStub = (page: Page, on: boolean) =>
+  page.evaluate((on) => {
+    const w = window as unknown as Record<string, any>
+    w.cameraDisplay.setStream(on ? w.stub : null)
+  }, on)
+const source = (page: Page) =>
+  page.locator('video').evaluate((node: HTMLVideoElement) => node.srcObject)
+
+test('live camera can always be stopped and shown again, is axe-clean, and detaches on revoke and unmount', async ({
+  page,
+}) => {
+  const camera = await mountCamera(page)
+  await setStub(page, true)
+  await expect(camera.getByRole('status')).toHaveText('Câmera ao vivo.')
+  await expect(camera.locator('video')).toBeVisible()
+  expect(await violations(page)).toEqual([])
+  await camera.getByRole('button', { name: 'Parar imagem ao vivo' }).click()
+  await expect(camera.getByRole('status')).toHaveText('Imagem ao vivo parada.')
+  expect(await source(page)).toBeNull()
+  expect(await violations(page)).toEqual([])
+  await camera.getByRole('button', { name: 'Mostrar imagem ao vivo' }).click()
+  await expect(camera.getByRole('status')).toHaveText('Câmera ao vivo.')
+  await setStub(page, false)
+  await expect(camera.getByRole('status')).toHaveText('Câmera indisponível.')
+  expect(await source(page)).toBeNull()
+  await expect(camera.getByRole('button')).toHaveCount(0)
+  await setStub(page, true)
+  await expect(camera.getByRole('status')).toHaveText('Câmera ao vivo.')
+  const handle = await page.locator('video').elementHandle()
+  // Route leave unmounts the component; the stream must be detached.
+  await page.evaluate(() =>
+    (window as unknown as Record<string, any>).cameraDisplay.unmount(),
+  )
+  expect(
+    await handle!.evaluate((node: HTMLVideoElement) => node.srcObject),
+  ).toBeNull()
+})
+
+test('with reduced motion an available camera waits for the user and is axe-clean', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const camera = await mountCamera(page)
+  await setStub(page, true)
+  await expect(camera.getByRole('status')).toHaveText(
+    'Câmera disponível. A imagem não inicia sozinha porque o movimento reduzido está ativado.',
+  )
+  expect(await source(page)).toBeNull()
+  await expect(camera.locator('video')).toBeHidden()
+  expect(await violations(page)).toEqual([])
+  await camera.getByRole('button', { name: 'Mostrar imagem ao vivo' }).click()
+  await expect(camera.getByRole('status')).toHaveText('Câmera ao vivo.')
   expect(await violations(page)).toEqual([])
 })

@@ -16,6 +16,9 @@ export function useFarmView() {
   const now = shallowRef({ wall: 0, mono: 0 })
   const clock = () => ({ wall: Date.now(), mono: performance.now() })
   let feed: FarmStatusFeed | undefined
+  // Streams arrive only through camera-purpose authorization for server
+  // assignment refs; revocation publishes null synchronously.
+  const cameras = shallowRef<ReadonlyMap<string, MediaStream>>(new Map())
   const view = createFarmView({
     read: (path, signal, query) =>
       $fetch<unknown>(path, {
@@ -49,6 +52,12 @@ export function useFarmView() {
   const hide = () => view.invalidate()
   onMounted(() => {
     feed = createAuthenticatedFarmStatusFeed({
+      onCamera({ assignmentId, stream }) {
+        const next = new Map(cameras.value)
+        if (stream) next.set(assignmentId, stream)
+        else next.delete(assignmentId)
+        cameras.value = next
+      },
       resolveKey: createFarmStatusKeyResolver({
         isCurrent(scope, keyId) {
           const current = state.value
@@ -80,6 +89,7 @@ export function useFarmView() {
   onBeforeUnmount(() => {
     view.dispose()
     feed = undefined
+    cameras.value = new Map()
     clearInterval(timer)
     window.removeEventListener('focus', revalidate)
     window.removeEventListener('pageshow', revalidate)
@@ -91,6 +101,8 @@ export function useFarmView() {
     state,
     now,
     ready: computed(() => (state.value.kind === 'ready' ? state.value : null)),
+    cameraFor: (assignmentId: string) =>
+      cameras.value.get(assignmentId) ?? null,
     ...view,
   }
 }

@@ -176,6 +176,10 @@ type Options = {
   onTerminal?: (reason: string) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
+  /** Opt-in camera media per peer; violations close this session. */
+  cameraMedia?: (
+    onViolation: (reason: string) => void,
+  ) => NonNullable<PeerOptions['cameraMedia']>
   clock?: ChannelClock
 }
 /** Detached client. Server 0014 PoP/current-authority checks remain mandatory.
@@ -482,6 +486,13 @@ export class AuthenticatedConnectorSignallingClient {
         ...caps,
         ...(this.#options.genuineStatus
           ? { genuineStatus: this.#options.genuineStatus }
+          : {}),
+        ...(this.#options.cameraMedia
+          ? {
+              cameraMedia: this.#options.cameraMedia((reason) =>
+                this.#channel.close(reason),
+              ),
+            }
           : {}),
         onVerifiedAdmission: (admission) => {
           if (!this.#channel.current()) return

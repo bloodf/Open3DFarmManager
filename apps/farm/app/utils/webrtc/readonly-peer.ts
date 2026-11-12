@@ -23,6 +23,10 @@ import {
   RtcProofInbox,
   boundRtcApplicationFrame,
 } from '../../../../../packages/connector/src/webrtc/rtc-proof-inbox.ts'
+import {
+  CAMERA_CHANNEL_LABEL,
+  type BrowserCameraHooks,
+} from './camera-media.ts'
 
 export type FixtureOnlyVideoHooks = Readonly<{
   onTrack: (
@@ -42,6 +46,8 @@ type Options = {
   onVerified?: () => void
   onTerminal?: (reason: string) => void
   fixtureOnlyVideo?: FixtureOnlyVideoHooks
+  /** Opt-in camera-purpose V3 media; exclusive with fixture video. */
+  cameraMedia?: BrowserCameraHooks
   privateKey: CryptoKey
   expectedAgentId: string
   /** Supplied by trusted signalling/test context, never a peer proof frame. */
@@ -71,12 +77,16 @@ export class ReadonlyBrowserPeer {
   #receivedProofs = 0
   #actualRemote: string | undefined
   #resolveGathered: () => void = () => {}
+  #camera: BrowserCameraHooks | undefined
+  #cameraChannel = false
   #authDeadline = performance.now() + 8000
   #lifetimeDeadline = performance.now() + 30000
   #authTimer: ReturnType<typeof setTimeout>
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
+    if (options.fixtureOnlyVideo && options.cameraMedia)
+      throw Error('Exclusive media hooks')
     const now = performance.now()
     for (const cap of [options.authDeadline, options.lifetimeDeadline])
       if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
@@ -120,6 +130,31 @@ export class ReadonlyBrowserPeer {
         : {}),
     })
     this.#peer = new RTCPeerConnection({ iceServers: [] })
+    const camera = options.cameraMedia
+    this.#camera = camera && {
+      onTrack: camera.onTrack.bind(camera),
+      onChannel: camera.onChannel.bind(camera),
+      activate: camera.activate.bind(camera),
+      stop: camera.stop.bind(camera),
+    }
+    if (this.#camera)
+      this.#peer.ontrack = (event) => {
+        if (this.#terminal) {
+          event.track.stop()
+          return
+        }
+        try {
+          this.#camera?.onTrack(
+            Object.freeze({
+              track: event.track,
+              receiver: event.receiver,
+              mid: event.transceiver.mid,
+            }),
+          )
+        } catch {
+          this.close('camera-track')
+        }
+      }
     if (this.#options.fixtureOnlyVideo)
       this.#peer.ontrack = (event) => {
         if (this.#terminal) {
@@ -207,6 +242,16 @@ export class ReadonlyBrowserPeer {
           }
           this.#session.receiveApplication(data)
         }
+      } else if (
+        channel.label === CAMERA_CHANNEL_LABEL &&
+        !this.#cameraChannel
+      ) {
+        // Camera is optional: its channel never carries status or proofs, so
+        // closing or declining it ends only the camera, never the peer.
+        this.#cameraChannel = true
+        if (this.#camera) this.#camera.onChannel(channel)
+        else channel.close()
+        return
       } else {
         channel.close()
         this.close('unexpected-channel')
@@ -406,6 +451,13 @@ export class ReadonlyBrowserPeer {
               lifetimeDeadline: this.#lifetimeDeadline,
             }),
           )
+        if (this.#camera && this.current())
+          this.#camera.activate(
+            Object.freeze({
+              binding: validated,
+              lifetimeDeadline: this.#lifetimeDeadline,
+            }),
+          )
       },
       onReadonly: () => this.close('session-readonly'),
     })
@@ -430,6 +482,11 @@ export class ReadonlyBrowserPeer {
       this.#options.fixtureOnlyVideo?.stop()
     } catch {
       this.#stage = 'fixture-video-stop-failed'
+    }
+    try {
+      this.#camera?.stop()
+    } catch {
+      this.#stage = 'camera-stop-failed'
     }
     this.#peer.ontrack = null
     clearTimeout(this.#authTimer)

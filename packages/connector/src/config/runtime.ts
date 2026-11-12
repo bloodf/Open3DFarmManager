@@ -14,6 +14,7 @@ import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
 import { parsePauseRuntimeConfig } from './pause.ts'
 import { RuntimeSignalling } from './signalling.ts'
+import { parseCameraRuntimeConfig } from './camera.ts'
 
 const Runtime = z.strictObject({
   version: z.literal(1),
@@ -33,6 +34,8 @@ const Runtime = z.strictObject({
   // The pause section is optional and parsed strictly by its own module. An
   // absent section carries no authority and causes no cryptographic work.
   pause: z.unknown().optional(),
+  // Opt-in camera media; absent means no track, channel or ingest helper.
+  camera: z.unknown().optional(),
 })
 
 export function readAgentRuntimeConfig(
@@ -87,7 +90,15 @@ export function readAgentRuntimeConfig(
   }
   const pause =
     input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
+  const camera =
+    input.camera === undefined
+      ? null
+      : parseCameraRuntimeConfig(
+          input.camera,
+          assignments.map((assignment) => assignment.assignment_id),
+        )
   return {
+    camera,
     collection,
     telemetry: input.telemetry,
     assignments,

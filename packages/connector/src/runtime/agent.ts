@@ -149,6 +149,17 @@ export async function runConnectorAgent(input: {
       const { runSignallingLifecycle } = await import('./signalling.ts')
       const signalling = config.signalling
       const source = snapshots
+      const cameraMedia = config.camera
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -169,6 +180,7 @@ export async function runConnectorAgent(input: {
               },
               {
                 genuineStatus: { assignmentRefs: refs },
+                ...(cameraMedia ? { cameraMedia } : {}),
                 onInboxReady: () => diagnostic({ kind: 'readonly-listening' }),
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),

@@ -61,7 +61,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
   rtsp:
-    image: bluenviron/mediamtx@sha256:2356620b402c32c0a0e61d2d731af37c9e957ae4a97421b05722580385d92aa3
+    image: bluenviron/mediamtx@sha256:59e43552f3be43695b70c19424dc2a42fcec18075f88d91561a24ac5d70a586c
     platform: linux/amd64
     profiles: [rtsp]
     user: '10001:10001'

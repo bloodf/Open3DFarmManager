@@ -69,6 +69,8 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
       return this.violation('camera-channel')
     }
     this.#channel = channel
+    // Closing the camera channel declines or ends only the camera.
+    channel.onclose = () => this.stop()
     channel.onmessage = ({ data }) => {
       if (
         this.#offer !== undefined ||
@@ -99,7 +101,7 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
       !this.#track ||
       this.#mid !== offered.video_mid
     )
-      return this.violation('camera-unauthorized')
+      return this.stop() // Not authorized here: decline the camera only.
     // Every transport, identity, assignment and lifetime field comes from the
     // admitted binding; only the camera fields are taken from the offer.
     const expected = cameraStatementFromBinding(binding, offered)
@@ -145,6 +147,7 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
     }
     if (this.#channel) {
       this.#channel.onmessage = null
+      this.#channel.onclose = null
       this.#channel.close()
     }
   }

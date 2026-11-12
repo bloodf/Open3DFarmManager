@@ -54,6 +54,8 @@ export type ConnectorCameraMediaOptions = Readonly<{
     handle: string,
     signal: AbortSignal,
     expiresAtMonoMs: number,
+    /** Live media, unexpired lease and unexpired admitted binding. */
+    isCurrent: () => boolean,
   ): Promise<AsyncIterable<CameraAccessUnit>>
   /** Process-wide session slot; undefined when the cap is reached. */
   acquireSlot(): (() => void) | undefined
@@ -115,6 +117,8 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
     track.onError(() => this.stopMedia())
     const channel = capability.createDataChannel(CAMERA_CHANNEL_LABEL)
     channel.onMessage((raw) => void this.receive(raw))
+    // A browser may decline the camera by closing only this channel.
+    channel.onClosed(() => this.stopMedia())
     this.#track = track
     this.#config = config
     this.#channel = channel
@@ -200,7 +204,9 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
         },
         registry: this.#registry,
         openSource: (handle, signal) =>
-          this.#options.openSource(handle, signal, this.#deadline),
+          this.#options.openSource(handle, signal, this.#deadline, () =>
+            this.current(),
+          ),
         sink: {
           trySend: (unit) => this.send(unit),
           close: () => this.stopMedia(),
@@ -212,6 +218,14 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
     }
     this.#session = session
     void session.done.finally(release)
+  }
+  private current() {
+    return (
+      this.#state === 'live' &&
+      performance.now() < this.#deadline &&
+      this.#binding !== undefined &&
+      Date.now() < this.#binding.expires_at
+    )
   }
   private send(unit: CameraAccessUnit): 'sent' | 'closed' {
     const track = this.#track,

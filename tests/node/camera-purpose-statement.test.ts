@@ -76,7 +76,7 @@ const connectorKey = createPrivateKey({
 })
 function fixture(role: 'browser' | 'connector') {
   const payload = Buffer.from(
-    'Open3DFarmManager/rtc-session-proof/v3\0' + role + '\0' + literal,
+    'Open3DFarmManager/camera-purpose-proof/v1\0' + role + '\0' + literal,
   )
   const signature =
     role === 'browser'

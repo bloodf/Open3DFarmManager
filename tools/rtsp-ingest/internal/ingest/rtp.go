@@ -45,29 +45,30 @@ func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]b
 	if err != nil {
 		return ErrRTP
 	}
-	keyframe, skip := false, false
+	// Per-unit flags; stream bootstrap state commits only when the unit is offered.
+	var sps, pps, idr, nonIDR bool
 	for _, nalu := range nalus {
 		if len(nalu) == 0 || nalu[0]&0x80 != 0 {
 			return ErrRTP
 		}
 		switch h264.NALUType(nalu[0] & 0x1f) {
 		case h264.NALUTypeSPS:
-			s.sps = true
+			sps = true
 		case h264.NALUTypePPS:
-			s.pps = true
+			pps = true
 		case h264.NALUTypeIDR:
-			if !s.sps || !s.pps {
-				return ErrRTP
-			}
-			keyframe, s.ready = true, true
+			idr = true
 		case h264.NALUTypeNonIDR:
-			skip = !s.ready
+			nonIDR = true
 		case h264.NALUTypeSEI, h264.NALUTypeAccessUnitDelimiter:
 		default:
 			return ErrRTP
 		}
 	}
-	if skip {
+	if idr && (nonIDR || !(s.sps || sps) || !(s.pps || pps)) {
+		return ErrRTP
+	}
+	if nonIDR && !s.ready {
 		if s.skipped++; s.skipped > maxBootstrapSkips {
 			return ErrRTP
 		}
@@ -77,9 +78,10 @@ func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]b
 	if err != nil {
 		return err
 	}
-	if offer(timestampUs, keyframe, nalus) != nil {
+	if offer(timestampUs, idr, nalus) != nil {
 		return ErrOutput
 	}
+	s.sps, s.pps, s.ready = s.sps || sps, s.pps || pps, s.ready || idr
 	return nil
 }
 

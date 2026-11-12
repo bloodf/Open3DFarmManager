@@ -2,6 +2,7 @@ import {
   assignmentSetDigest,
   RtcAssignmentRef,
 } from '../../../farm-protocol/src/rtc-assignment-set.ts'
+import type { SpoolInventory } from '../../../farm-protocol/src/inventory.ts'
 import { StatusMessage } from '../../../farm-protocol/src/channel.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import {
@@ -38,6 +39,13 @@ export type ReadonlyStatusMessage = Readonly<{
   printers: readonly Readonly<
     ReturnType<typeof StatusMessage.parse>['printers'][number]
   >[]
+  inventory?:
+    | Readonly<
+        Omit<SpoolInventory, 'spools'> & {
+          spools: readonly Readonly<SpoolInventory['spools'][number]>[]
+        }
+      >
+    | undefined
 }>
 type ImmutableBinding<B = RtcSessionBinding> = B extends RtcSessionBinding
   ? Readonly<
@@ -125,6 +133,16 @@ export function validatedStatusMessage(
   return Object.freeze({
     ...parsed,
     printers: Object.freeze(parsed.printers.map((p) => Object.freeze(p))),
+    ...(parsed.inventory
+      ? {
+          inventory: Object.freeze({
+            ...parsed.inventory,
+            spools: Object.freeze(
+              parsed.inventory.spools.map((s) => Object.freeze(s)),
+            ),
+          }),
+        }
+      : {}),
   })
 }
 export type GenuineStatusOptions = Readonly<{

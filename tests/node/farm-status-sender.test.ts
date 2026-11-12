@@ -502,3 +502,37 @@ test('sender copies optional finite temperatures without making a command or cha
     f.sender.close()
   }
 })
+
+test('sender forwards a bounded spool inventory and rejects unbounded or unknown inventory', async () => {
+  const f = await fixture()
+  try {
+    await f.sender.start()
+    await f.admit()
+    const spool = {
+      name: 'PLA',
+      material: 'PLA',
+      colorHex: 'ffffff',
+      remainingGrams: 500,
+      location: null,
+      archived: false,
+    }
+    const inventory = {
+      observedAt: Date.now(),
+      stale: false,
+      total: 1,
+      spools: [spool],
+    }
+    f.complete({ inventory })
+    assert.deepEqual((f.sent[0] as { inventory: unknown }).inventory, inventory)
+    assert.equal(
+      Object.isFrozen((f.sent[0] as { inventory: unknown }).inventory),
+      true,
+    )
+    assert.equal(f.closed(), 0)
+    f.complete({ inventory: { ...inventory, spools: Array(9).fill(spool) } })
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.closed(), 1)
+  } finally {
+    f.sender.close()
+  }
+})

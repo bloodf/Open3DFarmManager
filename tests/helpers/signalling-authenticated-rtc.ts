@@ -119,6 +119,8 @@ async function connectorChild(
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         NODE_OPTIONS: '',
+        // Keeps the runtime fixture directory inside the caller's private work root.
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,
         NODE_TLS_REJECT_UNAUTHORIZED: '1',
         WS_NO_BUFFER_UTIL: '1',

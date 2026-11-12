@@ -106,4 +106,15 @@ Runner head `acb30a2` (current rows):
 
 Earlier, three separate invocations at head `714ab51` (with the then-weaker rows) all passed. Recovery took 3.9 s each time.
 
+With the camera row (helper `rtsp-ingest` cross-compiled for linux/amd64, SHA-256 `3bd6091d5ff5681b7665e3e48f78f1bf51ea3abaf39f690cb622e39baee5b818`; MediaMTX `bluenviron/mediamtx@sha256:2356620b…92aa3`), cortexos ran the full default command four times on 2026-11-12. The first three ran at head `e7d316b`, the fourth after merging main at `cdebfa3`.
+
+| Invocation    | `farm-page-disconnect`                                                                                            | `farm-page-revocation` | `farm-page-camera` (frames decoded in 1.5 s) |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------- | -------------------------------------------- |
+| 1 (`e7d316b`) | pass; read-only 24 ms, recovered 7.3 s                                                                            | pass; read-only 2.9 s  | pass; 7 frames                               |
+| 2 (`e7d316b`) | pass; read-only 16 ms, recovered 7.3 s                                                                            | pass; read-only 3.0 s  | pass; 8 frames                               |
+| 3 (`e7d316b`) | fail before the farm page: the harness's existing browser-registration stage got HTTP 401 for the owner's session | pass; read-only 2.4 s  | pass; 8 frames                               |
+| 4 (`cdebfa3`) | pass; read-only 16 ms, recovered 4.2 s                                                                            | pass; read-only 2.9 s  | pass; 7 frames                               |
+
+The run-3 failure happened before any row-specific step. It is recorded here as an open harness flake, not a camera result. After every invocation, no container or compose project with the run's labels remained, the work directory had been removed, and no `rtsp-ingest` process was running.
+
 After every invocation, no container with the run's label remained and the work directory had been removed. This is synthetic evidence for these rows and this artifact. It does not cover a real Moonraker/Klipper, a camera, pause, or a physical printer.

@@ -367,12 +367,19 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
     // browser binding to it is refused (fail closed) and the view retries.
     let credential = root.data
     if (jti !== root.data.jti) {
-      const successors = await readSignallingSuccessorRecords(
-        tx,
-        root.data.jti,
-        jti ?? null,
-        observedAt,
-      )
+      // Before 0026 (or for a role without its grant) only the root resolves.
+      const readable =
+        (
+          await tx`SELECT CASE WHEN to_regclass('farm.connector_credential_successors') IS NULL THEN false ELSE has_table_privilege(current_user,'farm.connector_credential_successors','SELECT') END AS allowed`
+        )[0]?.allowed === true
+      const successors = readable
+        ? await readSignallingSuccessorRecords(
+            tx,
+            root.data.jti,
+            jti ?? null,
+            observedAt,
+          )
+        : []
       if (successors.length) {
         const successor = Credential.safeParse(successors[0])
         if (!successor.success) return null

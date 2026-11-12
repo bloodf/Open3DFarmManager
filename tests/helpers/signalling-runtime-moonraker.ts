@@ -10,6 +10,10 @@ import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
+import {
+  cameraFixtureFromEnv,
+  cameraRuntimeSection,
+} from './signalling-camera-fixture.ts'
 
 // The pause driver opens its own socket: one fixed state query shape and the
 // fixed pause request. Only accepted when the farm pause row opted in.
@@ -271,6 +275,7 @@ export async function createRuntimeMoonrakerFixture() {
         throw Error('Fixture listener missing')
       port = address.port
       const moon = `http://127.0.0.1:${address.port}`
+      const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),
         credentialPath = join(directory, 'credential.json')
       await writeFile(
@@ -292,6 +297,9 @@ export async function createRuntimeMoonrakerFixture() {
               moonraker_origin: moon,
             },
           ],
+          ...(camera
+            ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
+            : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',
             audience: input.audience,

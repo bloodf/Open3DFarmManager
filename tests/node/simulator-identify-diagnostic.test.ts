@@ -2198,7 +2198,7 @@ test('stops on a docker timeout without a retry', async () => {
   }
 })
 
-test('bounds the observation polling to the remaining window', async () => {
+test('observation polls keep the Docker call bound near the end of the window', async () => {
   const docker = createFakeDocker({
     capture: OBSERVER_EVENT(1, 0),
     capturePaths: {
@@ -2215,14 +2215,13 @@ test('bounds the observation polling to the remaining window', async () => {
         call.args[0] === 'inspect' && call.args.includes('{{.State.Status}}'),
     )
     assert.equal(polls.length > 0, true)
-    for (const poll of polls) {
-      assert.equal(typeof poll.timeoutMs, 'number')
+    assert.equal(polls.length > 1, true)
+    for (const poll of polls)
       assert.equal(
-        (poll.timeoutMs as number) <= 4_000,
-        true,
-        'a polling call never receives more than the remaining window',
+        poll.timeoutMs,
+        undefined,
+        'a polling call uses the regular Docker call bound, not the window rest',
       )
-    }
   } finally {
     cleanupLedger(ledger)
   }
@@ -3118,9 +3117,6 @@ for (const mode of ['success', 'diagnostic-failure', 'cleanup-failure']) {
     const docker = createFakeDocker({
       labels,
       capture: records,
-      // One observation poll: later polls would only get the window's leftover
-      // time as their timeout, which a spawned fake Docker misses under load.
-      containerStatus: 'exited',
       ...(mode === 'success' ? {} : { klippyArgv: ['python3', 'klippy.py'] }),
       fail: (args) => {
         const command = args[0]
@@ -3220,8 +3216,7 @@ process.stdin.on('end', () => {
         server.once('error', reject)
         server.listen(socketPath, resolve)
       })
-      // The single poll gets the same bound as every other Docker call.
-      const observationMs = diagnostic.DOCKER_CALL_TIMEOUT_MS
+      const observationMs = 5000
       const output = await new Promise<{
         status: number | null
         stdout: string

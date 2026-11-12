@@ -221,6 +221,9 @@ function attemptSend(send: () => boolean): SendState {
 export function createPauseCommandRelay(
   config: PauseRelayConfig,
 ): PauseCommandRelay {
+  // Runtime guard: a missing or malformed gate must never mean "always fresh".
+  if (typeof config.authority?.freshness?.freshAt !== 'function')
+    throw new Error('Pause relay requires an offline authority freshness gate')
   const bindingFor = config.bindingFor.bind(config)
   const wallNow = config.clock.wallNow.bind(config.clock)
   const monotonicNow = config.clock.monotonicNow.bind(config.clock)

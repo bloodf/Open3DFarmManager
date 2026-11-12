@@ -17,6 +17,14 @@ import {
   runPauseControl,
   type PauseControlDiagnostic,
 } from '../../packages/connector/src/runtime/pause-control.ts'
+import { createOfflineAuthority } from '../../packages/connector/src/auth/offline-authority.ts'
+import {
+  claimCommand,
+  closeCommandJournal,
+  markWriteStarted,
+  openCommandJournal,
+} from '../../packages/connector/src/control/command-journal.ts'
+import { createPauseCommandRelay } from '../../packages/connector/src/control/pause-command-relay.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 import {
   encodeCommandV2,
@@ -44,6 +52,21 @@ const SIGNALLING = {
   credentialAudience: 'credential-audience',
 }
 const digest = () => randomBytes(32).toString('base64url')
+
+function journalRows(directory: string) {
+  const database = new DatabaseSync(join(directory, 'pause-commands.sqlite'), {
+    readOnly: true,
+    allowExtension: false,
+  })
+  try {
+    return database
+      .prepare('SELECT status FROM pause_commands ORDER BY claimed_at')
+      .all()
+      .map((row) => row.status)
+  } finally {
+    database.close()
+  }
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs
@@ -274,28 +297,29 @@ async function fixture(
     }
   }
   async function commandWire() {
+    return encodeCommandV2(await signedCommand())
+  }
+  async function signedCommand() {
     const issuedAt = Date.now()
-    return encodeCommandV2(
-      await signCommandV2(
-        {
-          v: 2,
-          purpose: 'printer-pause',
-          cmd_id: randomUUID(),
-          farm_id: farmId,
-          agent_id: agentId,
-          account_id: binding.account_id,
-          key_id: binding.key_id,
-          transport_id: binding.transport_id,
-          capability_id: capabilityId,
-          assignment_id: assignmentId,
-          action: 'pause',
-          args: {},
-          issued_at: issuedAt,
-          expires_at: issuedAt + 5000,
-          nonce: randomBytes(16).toString('base64url'),
-        },
-        browser.privateKey,
-      ),
+    return await signCommandV2(
+      {
+        v: 2,
+        purpose: 'printer-pause',
+        cmd_id: randomUUID(),
+        farm_id: farmId,
+        agent_id: agentId,
+        account_id: binding.account_id,
+        key_id: binding.key_id,
+        transport_id: binding.transport_id,
+        capability_id: capabilityId,
+        assignment_id: assignmentId,
+        action: 'pause',
+        args: {},
+        issued_at: issuedAt,
+        expires_at: issuedAt + 5000,
+        nonce: randomBytes(16).toString('base64url'),
+      },
+      browser.privateKey,
     )
   }
 
@@ -311,16 +335,31 @@ async function fixture(
     closed: boolean
   }> = []
   const diagnostics: PauseControlDiagnostic[] = []
-  const controller = new AbortController()
-  function start(authorizeDispatch?: () => boolean) {
+  let controller = new AbortController()
+  let serverSeq = 0
+  /**
+   * Starts one runtime owner on the shared data directory. `fresh` confirms a
+   * real offline authority tracker, standing in for the authenticated server
+   * confirmation; without it authority stays stale like production today.
+   */
+  function start(options: { fresh?: boolean } = {}) {
+    sessions.length = 0
+    diagnostics.length = 0
+    controller = new AbortController()
+    const offline = createOfflineAuthority()
+    if (options.fresh !== false)
+      offline.confirm(
+        { wall: Date.now(), mono: performance.now() },
+        ++serverSeq,
+      )
     return runPauseControl({
       config,
       credential,
       identity,
       dataDirectory: directory,
       signal: controller.signal,
+      freshness: offline.freshness,
       onDiagnostic: (value) => diagnostics.push(value),
-      ...(authorizeDispatch ? { authorizeDispatch } : {}),
       createClient(scope, options) {
         const session = {
           scope: { ...scope },
@@ -349,7 +388,10 @@ async function fixture(
     })
   }
   /** Drives proofs, both admission halves and one command through the session. */
-  async function admitAndCommand(wire?: string) {
+  async function admitAndCommand(
+    wire?: string,
+    options: { admitted?: boolean } = {},
+  ) {
     await waitFor(() => sessions.length === 1)
     const session = sessions[0]!
     session.options.onInboxReady?.()
@@ -371,7 +413,13 @@ async function fixture(
     session.options.onPhase?.(
       frame('control.admission-proof', issued.admissionProofWire),
     )
-    await waitFor(() => diagnostics.some((d) => d.kind === 'pause-admitted'))
+    await waitFor(() =>
+      diagnostics.some(
+        (d) =>
+          d.kind ===
+          (options.admitted === false ? 'pause-denied' : 'pause-admitted'),
+      ),
+    )
     const command = wire ?? (await commandWire())
     session.options.onData?.(frame('control.command', command))
     return { session, command, frame }
@@ -380,12 +428,16 @@ async function fixture(
     config,
     proofs,
     journalDirectory: join(directory, 'pause-journal'),
+    directory,
     moonraker,
     assignmentId,
     jti,
     sessions,
     diagnostics,
-    controller,
+    get controller() {
+      return controller
+    },
+    signedCommand,
     start,
     admitAndCommand,
   }
@@ -403,7 +455,7 @@ test('a control assignment that is not provisioned locally is refused at startup
   try {
     const farm = randomUUID()
     const agent = randomUUID()
-    const origin = 'http://127.0.0.1:7125'
+    const origin = 'http://127.0.0.1:9'
     const path = join(directory, 'runtime.json')
     const issuer = await crypto.subtle.generateKey('Ed25519', true, [
       'sign',
@@ -509,21 +561,86 @@ test('an admitted signed pause reaches the fake Moonraker once, is journaled and
   }
 })
 
-test('the dispatch guard injection point leaves a refused command not sent', async (t) => {
+test('without an authenticated confirmation the production path is inert: every command is rejected stale', async (t) => {
   const f = await fixture(t)
-  let checks = 0
-  const running = f.start(() => {
-    checks++
-    return false
-  })
-  const { session } = await f.admitAndCommand()
+  const running = f.start({ fresh: false })
+  const { session } = await f.admitAndCommand(undefined, { admitted: false })
+  assert.ok(
+    f.diagnostics.some(
+      (d) => d.kind === 'pause-denied' && d.reason === 'expired-or-inactive',
+    ),
+  )
   await waitFor(() => session.results.length === 1)
-  assert.equal(session.results[0]!.outcome, 'not-sent')
-  assert.equal(checks, 1)
+  assert.equal(session.results[0]!.outcome, 'rejected')
   assert.equal(f.moonraker.counts().connections, 0)
   assert.equal(f.moonraker.counts().pauses, 0)
   f.controller.abort()
   await running
+})
+
+test('the relay refuses to start without a callable freshness gate', () => {
+  for (const freshness of [undefined, {}, { freshAt: true }])
+    assert.throws(
+      () =>
+        createPauseCommandRelay({
+          authority: { issuers: [], freshness: freshness as never },
+          clock: { wallNow: Date.now, monotonicNow: () => performance.now() },
+          journal: {} as never,
+          driver: {} as never,
+          bindingFor: () => undefined,
+        }),
+      /freshness gate/,
+    )
+})
+
+test('after an applied pause and a restart on the same data directory the command is a replay and never reaches the printer again', async (t) => {
+  const f = await fixture(t)
+  const first = f.start()
+  const { command } = await f.admitAndCommand()
+  await waitFor(() => f.sessions[0]!.results.length === 1)
+  assert.equal(f.sessions[0]!.results[0]!.outcome, 'applied')
+  f.controller.abort()
+  await first
+  assert.equal(f.moonraker.counts().pauses, 1)
+  // Restart: new relay, journal and tracker on the same data directory.
+  const second = f.start()
+  const { session } = await f.admitAndCommand(command)
+  await waitFor(() => session.results.length === 1)
+  assert.equal(session.results[0]!.outcome, 'rejected')
+  assert.equal(f.moonraker.counts().pauses, 1)
+  f.controller.abort()
+  await second
+  assert.deepEqual(journalRows(f.journalDirectory), ['applied'])
+})
+
+test('a leftover write-started row from a crash keeps the assignment busy and no command reaches the printer', async (t) => {
+  const f = await fixture(t)
+  // Simulate a crash between the write mark and the outcome.
+  const journal = openCommandJournal({
+    directory: f.journalDirectory,
+    clock: Date.now,
+  })
+  const crashed = await f.signedCommand()
+  const claim = claimCommand(journal, {
+    command: crashed,
+    printerKey: 'printer-1',
+    wireSha256: createHash('sha256')
+      .update(encodeCommandV2(crashed))
+      .digest('hex'),
+  })
+  assert.equal(claim.ok, true)
+  if (claim.ok) assert.equal(markWriteStarted(journal, claim.receipt), true)
+  closeCommandJournal(journal)
+  const running = f.start()
+  const { session } = await f.admitAndCommand()
+  await waitFor(() => session.results.length === 1)
+  assert.equal(session.results[0]!.outcome, 'rejected')
+  assert.equal(f.moonraker.counts().connections, 0)
+  assert.equal(f.moonraker.counts().pauses, 0)
+  f.controller.abort()
+  await running
+  // Only the crashed row exists: the new command was refused before a claim.
+  assert.deepEqual(journalRows(f.journalDirectory), ['write-started'])
 })
 
 test('a terminal transport closes the peer before any command and the lifecycle reconnects', async (t) => {

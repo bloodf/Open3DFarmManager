@@ -12,6 +12,7 @@ import { credentialLookupId } from '../config/signalling.ts'
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
 import type { RuntimeCredential } from '../config/credential.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
+import type { CachedAuthorityFreshness } from '../auth/offline-authority.ts'
 import {
   PauseConnectorSignallingClient,
   type PauseConnectorSignallingScope,
@@ -25,6 +26,7 @@ export type PauseControlDiagnostic =
   | { kind: 'pause-denied'; reason: string }
   | { kind: 'pause-outcome'; outcome: PauseRelayOutcome }
   | { kind: 'pause-terminal'; reason: string }
+  | { kind: 'pause-close-stalled'; waitedMs: number }
 
 type ClientOptions = NonNullable<
   ConstructorParameters<typeof PauseConnectorSignallingClient>[1]
@@ -36,6 +38,8 @@ type PauseClient = Pick<
 
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 30000
+/** Shutdown waits this long for driver settlement before reporting a stall. */
+export const PAUSE_CLOSE_STALL_MS = 10000
 
 function label(reason: string): string {
   return /^[a-zA-Z0-9:_-]{1,80}$/.test(reason) ? reason : 'unclassified'
@@ -60,10 +64,10 @@ export async function runPauseControl(input: {
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
   /**
-   * Local guard checked immediately before the driver is prepared, after
-   * authority and journal checks. A false result leaves the command not sent.
+   * Required offline lifetime gate: the frozen read-only view from
+   * `createOfflineAuthority()`. Stale authority rejects every command.
    */
-  authorizeDispatch?: () => boolean
+  freshness: CachedAuthorityFreshness
   /** Transport seam for tests. Defaults to the authenticated pause client. */
   createClient?: (
     scope: PauseConnectorSignallingScope,
@@ -95,17 +99,10 @@ export async function runPauseControl(input: {
     observe: (binding, observation) => relay.observe(binding, observation),
   })
   const relay = createPauseCommandRelay({
-    authority: { issuers },
+    authority: { issuers, freshness: input.freshness },
     clock,
     journal,
-    driver: {
-      ...router,
-      prepare(value) {
-        if (input.authorizeDispatch && !input.authorizeDispatch())
-          return Promise.reject(new Error('Pause dispatch not authorized'))
-        return router.prepare(value)
-      },
-    },
+    driver: router,
     bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
   })
   const createClient =
@@ -212,7 +209,19 @@ export async function runPauseControl(input: {
   } finally {
     relay.close()
     // A stalled driver close retains the journal; it is never force-closed.
-    await relay.settled
+    const stall = setTimeout(
+      () =>
+        diagnostic({
+          kind: 'pause-close-stalled',
+          waitedMs: PAUSE_CLOSE_STALL_MS,
+        }),
+      PAUSE_CLOSE_STALL_MS,
+    )
+    try {
+      await relay.settled
+    } finally {
+      clearTimeout(stall)
+    }
     closeCommandJournal(journal)
   }
 }

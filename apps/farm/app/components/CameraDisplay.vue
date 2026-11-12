@@ -12,7 +12,8 @@ const props = defineProps<{
 }>()
 const video = ref<HTMLVideoElement | null>(null)
 const state = ref<CameraDisplayState>('closed')
-// Live video is moving content: with reduced motion it starts only on request.
+// Live video is moving content: anyone can stop it; with reduced motion it
+// starts only on request.
 const reducedMotion = ref(false)
 const started = ref(true)
 onMounted(() => {
@@ -80,9 +81,12 @@ watch(
       "
     />
     <p role="status" aria-live="polite">
-      <template v-if="stream && !started">
+      <template v-if="stream && !started && reducedMotion">
         Câmera disponível. A imagem não inicia sozinha porque o movimento
         reduzido está ativado.
+      </template>
+      <template v-else-if="stream && !started">
+        Imagem ao vivo parada.
       </template>
       <template v-else-if="state === 'loading'">Carregando câmera…</template>
       <template v-else-if="state === 'error'">
@@ -91,11 +95,8 @@ watch(
       <template v-else-if="state === 'closed'">Câmera indisponível.</template>
       <template v-else>Câmera ao vivo.</template>
     </p>
-    <button
-      v-if="reducedMotion && stream"
-      type="button"
-      @click="started = !started"
-    >
+    <!-- WCAG 2.2.2: moving content can always be stopped and shown again. -->
+    <button v-if="stream" type="button" @click="started = !started">
       {{ started ? 'Parar imagem ao vivo' : 'Mostrar imagem ao vivo' }}
     </button>
   </section>

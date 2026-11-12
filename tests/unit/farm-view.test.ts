@@ -5,6 +5,7 @@ import {
 } from '../../apps/farm/app/utils/auth-invalidation.ts'
 import {
   createFarmView,
+  farmConnectionNotice,
   FarmAssignmentPage,
   FarmDiscoveryPage,
   localInterfaceOrigin,
@@ -1436,9 +1437,11 @@ function liveClock(h: ReturnType<typeof setup>) {
   }, 1000)
   return () => clearInterval(interval)
 }
-function admit(h: ReturnType<typeof setup>, index: number) {
+const second = (ms = 1000) => vi.advanceTimersByTimeAsync(ms)
+function admit(h: ReturnType<typeof setup>, index: number, agentId = agent) {
   const session = {
     ...h.session,
+    agentId,
     transportId: `synthetic-transport-${index}`,
     peerGeneration: index + 1,
     expiresAt: h.time.wall + 30_000,
@@ -1452,6 +1455,7 @@ function send(
   index: number,
   session: FarmAdmittedSession,
   seq: number,
+  printerKey = row.printerKey,
 ) {
   h.peer(index).input.onSnapshot({
     session: { ...session },
@@ -1460,7 +1464,7 @@ function send(
       seq,
       printers: [
         {
-          printerKey: row.printerKey,
+          printerKey,
           state: 'printing',
           progress: 0.5,
           observedAt: h.time.wall,
@@ -1473,127 +1477,258 @@ function send(
     complete: true,
   })
 }
-
-test('silent P2P loss becomes read-only within 10 s, then a jittered reopen recovers live data', async () => {
+// Admit and stream frames for `seconds`, leaving the feed healthy (>=10 s of data).
+async function stream(
+  h: ReturnType<typeof setup>,
+  index: number,
+  seconds: number,
+) {
+  const session = admit(h, index)
+  for (let at = 0; at < seconds; at++) {
+    send(h, index, session, at)
+    await second()
+  }
+  send(h, index, session, seconds)
+  return session
+}
+async function fakeTimers<T>(
+  h: ReturnType<typeof setup>,
+  body: () => Promise<T>,
+) {
   vi.useFakeTimers()
-  const h = setup(true, () => 0)
   const stop = liveClock(h)
   try {
+    return await body()
+  } finally {
+    stop()
+    h.view.dispose()
+    vi.useRealTimers()
+  }
+}
+// Waits up to `limit` ms of fake time for a new subscription; returns elapsed ms.
+async function nextPeer(h: ReturnType<typeof setup>, limit = 60_000) {
+  const count = h.peers.length,
+    from = h.time.mono
+  for (let at = 0; at < limit && h.peers.length === count; at += 1000)
+    await second()
+  return h.peers.length === count ? null : h.time.mono - from
+}
+
+test('silent P2P loss becomes read-only within 10 s, then a re-checked jittered reopen recovers', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
     await h.view.discover()
-    send(h, 0, admit(h, 0), 0)
-    expect(h.first().connection).toBe('authenticated')
+    await stream(h, 0, 10)
     expect(h.first().observation?.historical).toBe(false)
     const lost = h.time.mono
-    // No frames, no terminal callback: the transport stalled silently.
     let detected: number | null = null
-    for (let second = 0; second < 10 && detected === null; second++) {
-      vi.advanceTimersByTime(1000)
+    for (let at = 0; at < 10 && detected === null; at++) {
+      await second()
       if (h.first().connection === 'closed') detected = h.time.mono - lost
     }
     expect(detected).not.toBeNull()
     expect(detected).toBeLessThanOrEqual(10_000)
     expect(h.first().observation?.historical).toBe(true)
-    expect(h.peer().closed).toBe(1)
-    expect(h.peers).toHaveLength(1)
-    // Data had flowed, so the budget resets: 1 s * 2^0 * jitter 0.5.
-    vi.advanceTimersByTime(1000)
-    expect(h.peers).toHaveLength(2)
+    expect(farmConnectionNotice(h.ready().rows)).toContain('indisponível')
+    const before = h.requests.length
+    // Healthy feed: budget resets, 1 s * 2^0 * jitter 0.5.
+    expect(await nextPeer(h)).toBeLessThanOrEqual(1000)
+    // Identity and assignment authority are re-read before reopening.
+    expect(h.requests.slice(before).map((request) => request.path)).toEqual([
+      '/api/auth/me',
+      `/api/farms/${farm}/printers`,
+      '/api/auth/me',
+    ])
     expect(h.first().connection).toBe('connecting')
     expect(h.first().observation?.historical).toBe(true)
     const session = admit(h, 1)
     send(h, 1, session, 0)
     expect(h.first().connection).toBe('authenticated')
     expect(h.first().observation?.historical).toBe(false)
+  })
+})
+
+test('a healthy lease end renews seamlessly: rows stay live and the live region stays silent', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    const notices = new Set<string>()
+    const requests = h.requests.length
+    let seq = 0
+    while (h.peers.length === 1) {
+      send(h, 0, session, seq++)
+      expect(h.first().connection).toBe('authenticated')
+      expect(h.first().observation?.historical).toBe(false)
+      notices.add(farmConnectionNotice(h.ready().rows))
+      await second()
+    }
+    expect(h.time.mono - 1000).toBeGreaterThanOrEqual(30_000)
+    expect(h.peer(0).closed).toBe(1)
+    // The renewal neither re-reads HTTP nor surfaces transient steps.
+    expect(h.requests.length).toBe(requests)
+    h.peer(1).input.onHealth({ kind: 'connecting' })
+    h.peer(1).input.onHealth({ kind: 'verifying' })
+    expect(h.first().connection).toBe('authenticated')
+    expect(h.first().observation?.historical).toBe(false)
+    notices.add(farmConnectionNotice(h.ready().rows))
+    const renewed = admit(h, 1)
+    send(h, 1, renewed, 0)
+    notices.add(farmConnectionNotice(h.ready().rows))
+    expect(notices).toEqual(
+      new Set([
+        'Conexão direta autenticada. Os controles continuam em modo somente leitura.',
+      ]),
+    )
     expect(h.first().observation?.received.mono).toBe(h.time.mono)
-    // A healthy feed that keeps sending is never treated as lost.
-    for (let second = 0; second < 8; second++) {
-      vi.advanceTimersByTime(1000)
-      send(h, 1, session, second + 1)
+  })
+})
+
+test('a renewal that never authenticates closes within 10 s of the last frame', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const session = admit(h, 0)
+    let seq = 0,
+      last = h.time.mono
+    while (h.peers.length === 1) {
+      send(h, 0, session, seq++)
+      last = h.time.mono
+      await second()
     }
     expect(h.first().connection).toBe('authenticated')
-    expect(h.peers).toHaveLength(2)
-  } finally {
-    stop()
-    h.view.dispose()
-    vi.useRealTimers()
-  }
-})
-
-test('disconnect and lease end are read-only immediately and reopen with a fresh subscription', async () => {
-  vi.useFakeTimers()
-  const h = setup(true, () => 0.999)
-  const stop = liveClock(h)
-  try {
-    await h.view.discover()
-    let session = admit(h, 0)
-    send(h, 0, session, 0)
-    h.peer(0).input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    while (h.first().connection === 'authenticated') await second()
+    expect(h.time.mono - last).toBeLessThanOrEqual(10_000)
     expect(h.first().connection).toBe('closed')
     expect(h.first().observation?.historical).toBe(true)
-    vi.advanceTimersByTime(1000)
-    expect(h.peers).toHaveLength(2)
-    session = admit(h, 1)
-    // Keep the feed alive until its 30 s consumer lease ends.
-    for (let second = 0; second < 30; second++) {
-      send(h, 1, session, second)
-      vi.advanceTimersByTime(1000)
-    }
-    expect(h.first().connection).toBe('closed')
     expect(h.peer(1).closed).toBe(1)
-    vi.advanceTimersByTime(1000)
-    expect(h.peers).toHaveLength(3)
-    expect(h.peer(2).input.signal.aborted).toBe(false)
-  } finally {
-    stop()
-    h.view.dispose()
-    vi.useRealTimers()
-  }
+  })
 })
 
-test('signalling failures back off exponentially with jitter and stop after a bounded budget', async () => {
-  vi.useFakeTimers()
+test('signalling failures back off exponentially with jitter: six reopens, then stop', async () => {
   const h = setup(true, () => 0)
-  const stop = liveClock(h)
-  try {
+  await fakeTimers(h, async () => {
     await h.view.discover()
-    const opened: number[] = []
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const index = h.peers.length - 1
-      opened.push(h.time.mono)
-      h.peer(index).input.onHealth({ kind: 'closed', reason: 'rejected' })
+    const delays: (number | null)[] = []
+    for (let attempt = 0; attempt < 8; attempt++) {
+      h.peer(h.peers.length - 1).input.onHealth({
+        kind: 'closed',
+        reason: 'disconnected',
+      })
       expect(h.first().connection).toBe('closed')
-      for (
-        let second = 0;
-        second < 60 && h.peers.length === index + 1;
-        second++
-      )
-        vi.advanceTimersByTime(1000)
-      if (h.peers.length === index + 1) break
+      delays.push(await nextPeer(h, 120_000))
+      if (delays.at(-1) === null) break
     }
-    // Delays 1, 2, 4, 8, 15, 15 s (2^n s, capped at 30 s, jitter 0.5).
-    expect(opened.slice(1).map((at, i) => at - opened[i]!)).toEqual([
-      1000, 2000, 4000, 8000, 15_000, 15_000,
-    ])
+    // 2^n s capped at 30 s, jitter 0.5, rounded up to the 1 s view tick.
+    expect(delays).toEqual([1000, 2000, 4000, 8000, 15_000, 15_000, null])
     expect(h.peers).toHaveLength(7)
-    vi.advanceTimersByTime(120_000)
+  })
+})
+
+test('a flapping producer (admit, one frame, close) cannot reset the budget', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const index = h.peers.length - 1
+      send(h, index, admit(h, index), 0)
+      expect(h.first().observation?.historical).toBe(false)
+      h.peer(index).input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      if ((await nextPeer(h, 120_000)) === null) break
+    }
     expect(h.peers).toHaveLength(7)
     expect(h.first().connection).toBe('closed')
-  } finally {
-    stop()
-    h.view.dispose()
-    vi.useRealTimers()
+  })
+})
+
+test('two Connectors back off independently', async () => {
+  const agentB = '00000000-0000-4000-8000-000000000006'
+  const h = setup(true, () => 0)
+  h.data.printers.printers.push({
+    ...row,
+    assignmentId: '00000000-0000-4000-8000-000000000007',
+    agentId: agentB,
+    printerKey: 'b',
+  })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    const peersOf = (agentId: string) =>
+      h.peers.filter((peer) => peer.input.agentId === agentId)
+    expect(peersOf(agent)).toHaveLength(1)
+    expect(peersOf(agentB)).toHaveLength(1)
+    const indexB = h.peers.indexOf(peersOf(agentB)[0]!)
+    const sessionB = admit(h, indexB, agentB)
+    // Agent A fails three times in a row while B keeps streaming.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const last = peersOf(agent).at(-1)!
+      last.input.onHealth({ kind: 'closed', reason: 'disconnected' })
+      while (peersOf(agent).at(-1) === last) {
+        send(h, indexB, sessionB, h.time.mono, 'b')
+        await second()
+      }
+    }
+    expect(peersOf(agent)).toHaveLength(4)
+    expect(peersOf(agentB)).toHaveLength(1)
+    const rowB = () =>
+      h.ready().rows.find((item) => item.assignment.agentId === agentB)
+    expect(rowB()?.connection).toBe('authenticated')
+    // B's first failure starts at its own budget: 2 s * 0.5.
+    peersOf(agentB)[0]!.input.onHealth({
+      kind: 'closed',
+      reason: 'disconnected',
+    })
+    const from = h.time.mono
+    while (peersOf(agentB).length === 1) await second()
+    expect(h.time.mono - from).toBe(1000)
+  })
+})
+
+test('rejected, revoked, or server-revoked Connectors stop; 401 on re-check signs out', async () => {
+  for (const reason of ['rejected', 'revoked'] as const) {
+    const h = setup(true, () => 0)
+    await fakeTimers(h, async () => {
+      await h.view.discover()
+      h.peer().input.onHealth({ kind: 'closed', reason })
+      expect(await nextPeer(h, 120_000)).toBeNull()
+    })
   }
+  const revoked = setup(true, () => 0)
+  await fakeTimers(revoked, async () => {
+    await revoked.view.discover()
+    revoked.data.printers.printers = [{ ...row, connectorStatus: 'revoked' }]
+    revoked.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(await nextPeer(revoked, 120_000)).toBeNull()
+    expect(revoked.first().connection).toBe('closed')
+  })
+  const signedOut = setup(true, () => 0)
+  await fakeTimers(signedOut, async () => {
+    await signedOut.view.discover()
+    signedOut.hooks.read = async (path, signal, query) => {
+      if (path === '/api/auth/me')
+        throw Object.assign(new Error('401'), { statusCode: 401 })
+      return signedOut.baseRead(path, signal, query)
+    }
+    signedOut.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(await nextPeer(signedOut, 10_000)).toBeNull()
+    expect(signedOut.result.state.kind).toBe('sign-in-required')
+  })
+})
+
+test('non-finite injected jitter falls back to the midpoint', async () => {
+  const h = setup(true, () => Number.NaN)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    // 2 s * 0.75 = 1.5 s, observed on the next 1 s tick.
+    expect(await nextPeer(h)).toBe(2000)
+  })
 })
 
 test('producer teardown failure still schedules a reopen', async () => {
-  vi.useFakeTimers()
   const h = setup(true, () => 0)
-  const stop = liveClock(h)
-  try {
+  await fakeTimers(h, async () => {
     let fail = true
-    const feed = h.peers
     await h.view.discover()
-    expect(feed).toHaveLength(1)
     h.hooks.close = () => {
       if (fail) {
         fail = false
@@ -1602,39 +1737,23 @@ test('producer teardown failure still schedules a reopen', async () => {
     }
     h.peer(0).input.onHealth({ kind: 'closed', reason: 'disconnected' })
     expect(h.first().connection).toBe('closed')
-    vi.advanceTimersByTime(2000)
-    expect(feed).toHaveLength(2)
+    expect(await nextPeer(h)).toBe(1000)
     expect(h.first().connection).toBe('connecting')
-  } finally {
-    stop()
-    h.view.dispose()
-    vi.useRealTimers()
-  }
+  })
 })
 
-test('revocation, logout invalidation and unmount never reopen and leave no pending retry', async () => {
+test('logout invalidation, route leave and unmount cancel pending reopens and leave no timers', async () => {
   vi.useFakeTimers()
   try {
-    const revoked = setup(true, () => 0)
-    const stopRevoked = liveClock(revoked)
-    await revoked.view.discover()
-    send(revoked, 0, admit(revoked, 0), 0)
-    revoked.peer().input.onHealth({ kind: 'closed', reason: 'revoked' })
-    expect(revoked.first().connection).toBe('closed')
-    vi.advanceTimersByTime(120_000)
-    expect(revoked.peers).toHaveLength(1)
-    stopRevoked()
-    revoked.view.dispose()
-
     for (const action of ['invalidate', 'dispose'] as const) {
       const h = setup(true, () => 0)
       const stop = liveClock(h)
       await h.view.discover()
       h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
       expect(h.first().connection).toBe('closed')
-      // Auth invalidation (logout) runs view.invalidate(); unmount runs dispose().
+      // Auth invalidation and route leave run invalidate(); unmount runs dispose().
       h.view[action]()
-      vi.advanceTimersByTime(120_000)
+      await second(120_000)
       expect(h.peers).toHaveLength(1)
       expect(h.peer().input.signal.aborted).toBe(true)
       stop()

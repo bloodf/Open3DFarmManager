@@ -172,77 +172,99 @@ test('resigning a claimed payload cannot bypass replay after restart; duplicate 
     rmSync(dir, { recursive: true, force: true })
   }
 })
-test('SQLite claims serialize across separate OS processes', async () => {
-  const dir = scratch()
-  try {
-    const initialized = new PersistentReplayStore(dir)
-    initialized.close()
-    const pair = await createBrowserKey()
-    const id = '00000000-0000-4000-8000-000000000001'
-    const command = await signCommand(
-      {
-        farm_id: id,
-        agent_id: id,
-        printer_id: id,
-        user_id: id,
-        key_id: id,
-        session_id: id,
-        action: 'pause',
-      },
-      pair.privateKey,
-      1000,
-    )
-    const module = new URL(
-      '../../packages/connector/src/auth/replay.ts',
-      import.meta.url,
-    ).href
-    const source = `import { PersistentReplayStore } from ${JSON.stringify(module)}; const store = new PersistentReplayStore(process.argv[1]); try { process.stdout.write(store.claim(JSON.parse(process.argv[2]), 1000)) } finally { store.close() }`
-    const results = await Promise.all(
-      Array.from(
-        { length: 4 },
-        (_, worker) =>
-          new Promise<string>((resolve, reject) => {
-            const child = spawn(
-              process.execPath,
-              [
-                '--input-type=module',
-                '-e',
-                source,
-                dir,
-                JSON.stringify(command),
-              ],
-              { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 },
-            )
-            let output = ''
-            let stderr = Buffer.alloc(0)
-            child.stderr.on('data', (chunk: Buffer) => {
-              stderr = Buffer.concat([
-                stderr,
-                chunk.subarray(0, 4096 - stderr.length),
-              ])
-            })
-            child.stdout.on('data', (chunk) => {
-              output += chunk
-            })
-            child.on('error', reject)
-            child.on('close', (status, signal) =>
-              status === 0
-                ? resolve(output)
-                : reject(
-                    new Error(
-                      `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,
+// Children report through exit; the test timeout is the single hang bound.
+test(
+  'SQLite claims serialize across separate OS processes',
+  {
+    timeout: 30000,
+  },
+  async (t) => {
+    const dir = scratch()
+    const spawned: ReturnType<typeof spawn>[] = []
+    // Also runs when the test times out, unlike the finally below.
+    t.after(() => {
+      for (const child of spawned) if (child.exitCode === null) child.kill()
+    })
+    try {
+      const initialized = new PersistentReplayStore(dir)
+      initialized.close()
+      const pair = await createBrowserKey()
+      const id = '00000000-0000-4000-8000-000000000001'
+      const command = await signCommand(
+        {
+          farm_id: id,
+          agent_id: id,
+          printer_id: id,
+          user_id: id,
+          key_id: id,
+          session_id: id,
+          action: 'pause',
+        },
+        pair.privateKey,
+        1000,
+      )
+      const module = new URL(
+        '../../packages/connector/src/auth/replay.ts',
+        import.meta.url,
+      ).href
+      // Each worker opens its store (a write of its own), announces 'ready' and
+      // claims only after all four are released together, so the race covers
+      // the claims rather than four concurrent store initialisations.
+      const source = `import { PersistentReplayStore } from ${JSON.stringify(module)}; const store = new PersistentReplayStore(process.argv[1]); process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { process.stdout.write(store.claim(JSON.parse(process.argv[2]), 1000)) } finally { store.close(); process.stdin.destroy() } })`
+      let ready = 0
+      const results = await Promise.all(
+        Array.from(
+          { length: 4 },
+          (_, worker) =>
+            new Promise<string>((resolve, reject) => {
+              const child = spawn(
+                process.execPath,
+                [
+                  '--input-type=module',
+                  '-e',
+                  source,
+                  dir,
+                  JSON.stringify(command),
+                ],
+                { stdio: ['pipe', 'pipe', 'pipe'] },
+              )
+              spawned.push(child)
+              let output = ''
+              let stderr = Buffer.alloc(0)
+              child.stderr.on('data', (chunk: Buffer) => {
+                stderr = Buffer.concat([
+                  stderr,
+                  chunk.subarray(0, 4096 - stderr.length),
+                ])
+              })
+              child.stdout.on('data', (chunk) => {
+                const before = output
+                output += chunk
+                if (!before.includes('ready\n') && output.includes('ready\n'))
+                  if (++ready === 4)
+                    for (const each of spawned) each.stdin!.write('go\n')
+              })
+              child.on('error', reject)
+              child.on('close', (status, signal) =>
+                status === 0
+                  ? resolve(output.replace('ready\n', ''))
+                  : reject(
+                      new Error(
+                        `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,
+                      ),
                     ),
-                  ),
-            )
-          }),
-      ),
-    )
-    assert.equal(results.filter((result) => result === 'accepted').length, 1)
-    assert.equal(results.filter((result) => result === 'replay').length, 3)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-})
+              )
+            }),
+        ),
+      )
+      assert.equal(results.filter((result) => result === 'accepted').length, 1)
+      assert.equal(results.filter((result) => result === 'replay').length, 3)
+    } finally {
+      for (const child of spawned) if (child.exitCode === null) child.kill()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+)
 
 test('identity and queue readers reject FIFOs without blocking', async () => {
   for (const kind of ['identity', 'queue']) {

@@ -121,6 +121,9 @@ async function post(
     if (input.signal.aborted) throw new Error('Pairing cancelled')
     throw new TransientError('Pairing request failed')
   }
+  if (response.status !== 200)
+    // Release the connection; text() is size-capped and cancels the stream past the cap.
+    await response.text().catch(() => {})
   if (response.status === 429 || response.status >= 500)
     throw new TransientError('Pairing server unavailable')
   if (response.status !== 200) throw new Error('Pairing request rejected')
@@ -199,6 +202,19 @@ function reserveCredential(path: string) {
       constants.O_NOFOLLOW,
     0o600,
   )
+  try {
+    // Hardlink support is required at commit; fail now, before the single-use approval.
+    linkSync(tmp, tmp + '.probe')
+    unlinkSync(tmp + '.probe')
+  } catch (error) {
+    closeSync(fd)
+    for (const name of [tmp, tmp + '.probe']) {
+      try {
+        unlinkSync(name)
+      } catch {}
+    }
+    throw error
+  }
   let open = true
   const close = () => {
     if (open) closeSync(fd)
@@ -213,13 +229,20 @@ function reserveCredential(path: string) {
       fsyncSync(fd)
       close()
       linkSync(tmp, path)
-      unlinkSync(tmp)
-      const dirFd = openSync(directory, 'r')
+      // The credential exists now: cleanup and durability are best effort. A leftover
+      // temp file is retried by abort(); nothing here may report a false failure.
       try {
-        fsyncSync(dirFd)
-      } finally {
-        closeSync(dirFd)
-      }
+        unlinkSync(tmp)
+      } catch {}
+      if (process.platform !== 'win32')
+        try {
+          const dirFd = openSync(directory, 'r')
+          try {
+            fsyncSync(dirFd)
+          } finally {
+            closeSync(dirFd)
+          }
+        } catch {}
     },
     /** Always safe to call: removes the temp file only; a linked credential is kept. */
     abort() {

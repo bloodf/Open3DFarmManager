@@ -1,16 +1,13 @@
 // Opt-in setup WRITES synthetic data. Use only a fresh disposable service.
 // Not invoked by CI or check:all.
 import assert from 'node:assert/strict'
+import { qualificationScope } from './spoolman-qualification-context.ts'
 import { createLoopbackSpoolmanReader } from '../packages/connector/src/spoolman/http-read.ts'
 import { seedSpoolman } from '../packages/sim-tools/src/spoolman.ts'
 const origin = process.env.SPOOLMAN_SYNTHETIC_TEST_ORIGIN
 if (!origin || process.env.SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE !== 'yes')
   throw new Error('Explicit disposable synthetic Spoolman origin required')
-const context = {
-  farmId: '00000000-0000-4000-8000-000000000001',
-  serviceId: '00000000-0000-4000-8000-000000000002',
-  limit: 2,
-}
+const context = { ...qualificationScope, limit: 2 }
 const read = (limit: number) =>
   createLoopbackSpoolmanReader({
     origin,

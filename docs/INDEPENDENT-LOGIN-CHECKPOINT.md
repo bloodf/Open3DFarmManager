@@ -41,3 +41,7 @@ AUTH_SYNTHETIC_TEST_DISPOSABLE=yes AUTH_SYNTHETIC_TEST_PORT=15433 bun scripts/cr
 O script cria `fixture_user` com a senha pública de teste `synthetic-password-for-isolated-tests-only`. Não aceita URL nem credenciais de produção. A segunda execução falha pela unicidade, sem substituir uma conta existente. A instância PostgreSQL, seus dados e o processo da aplicação pertencem ao coordenador do teste e devem ser removidos ao terminar, preservando somente evidências necessárias.
 
 As migrações 0005 e 0006 foram aplicadas, revertidas na ordem inversa, reaplicadas e revertidas novamente em um cluster PostgreSQL descartável isolado.
+
+## Lockout e2e
+
+`tests/e2e/auth-lockout-session.spec.ts` covers lockout, session expiry, rotation, revocation and same-origin enforcement against the built app and a disposable PostgreSQL. With a built app (`pnpm --dir apps/farm build`) and a local digest-pinned PostgreSQL 17 image, run `AUTH_E2E_ADMITTED=yes AUTH_E2E_IMAGE=postgres:17@sha256:<digest> pnpm run test:e2e:auth-session`. The runner migrates a task-owned container, runs Chromium and always removes the container. An expired session shows a sign-in-again alert; it does not redirect to `/entrar` (follow-up).

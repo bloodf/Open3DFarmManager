@@ -6,13 +6,20 @@ import {
 
 const MAX_FRAME_BYTES = 256 * 1024
 const nonnegative = z.number().finite().nonnegative()
-const klippyState = z.enum([
+export const klippyState = z.enum([
   'ready',
   'startup',
   'shutdown',
   'error',
   'disconnected',
 ])
+/** Single readiness rule: Klippy connected and in the ready state. */
+export function klippyReady(
+  connected: boolean,
+  state: z.infer<typeof klippyState>,
+): boolean {
+  return connected && state === 'ready'
+}
 const ServerInfo = z.object({
   klippy_connected: z.boolean(),
   klippy_state: klippyState,
@@ -93,7 +100,7 @@ export function parseMoonrakerServerInfo(wire: string): {
   return {
     connected: info.klippy_connected,
     state: info.klippy_state,
-    ready: info.klippy_connected && info.klippy_state === 'ready',
+    ready: klippyReady(info.klippy_connected, info.klippy_state),
   }
 }
 

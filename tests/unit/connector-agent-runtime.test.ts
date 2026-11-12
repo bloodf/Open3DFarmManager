@@ -587,6 +587,8 @@ test('uncertain acknowledgement retains drain expiry in the agent summary', asyn
     const log = join(server.data, 'telemetry', 'telemetry.jsonl')
     renameSync(log, log + '.saved')
     mkdirSync(log, { mode: 0o700 })
+    // The acknowledgement cursor is the durable ack step: make it unwritable too.
+    mkdirSync(join(server.data, 'telemetry', 'telemetry.ack'), { mode: 0o700 })
     server.release()
     const result = await running.finish()
     expect(result.code).toBe(1)
@@ -720,6 +722,8 @@ test('uncertain durable acknowledgement aborts and joins all collection without 
     const log = join(server.data, 'telemetry', 'telemetry.jsonl')
     renameSync(log, log + '.saved')
     mkdirSync(log, { mode: 0o700 })
+    // The acknowledgement cursor is the durable ack step: make it unwritable too.
+    mkdirSync(join(server.data, 'telemetry', 'telemetry.ack'), { mode: 0o700 })
     server.release()
     const result = await running.finish()
     expect(result.code).toBe(1)

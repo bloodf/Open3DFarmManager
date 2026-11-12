@@ -26,6 +26,10 @@ import {
 const MAX_BYTES = 50 * 1024 * 1024
 const MAX_AGE = 24 * 60 * 60 * 1000
 const MAX_RECORD = 64 * 1024
+// Acknowledged prefix kept in the log before compaction reclaims it.
+const COMPACT_BYTES = 8 * 1024 * 1024
+const UUID =
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 export type TelemetryRecord =
   | {
       eventId: string
@@ -42,6 +46,8 @@ export type TelemetryRecord =
 export interface QueueLimits {
   maxBytes?: number
   maxAgeMs?: number
+  /** Acknowledged bytes tolerated in the log before compaction (256 to 8 MiB). */
+  compactAfterBytes?: number
 }
 export type QueueOpeningPolicy = Readonly<{ beforeRecovery: () => undefined }>
 export interface QueueLoss {
@@ -109,8 +115,16 @@ function parseRecord(value: unknown): TelemetryRecord {
   }
 }
 const line = (record: TelemetryRecord) => JSON.stringify(record) + '\n'
+// Records are immutable once queued, so their serialized size is computed once.
+const sizes = new WeakMap<TelemetryRecord, number>()
+function size(record: TelemetryRecord) {
+  let value = sizes.get(record)
+  if (value === undefined)
+    sizes.set(record, (value = Buffer.byteLength(line(record))))
+  return value
+}
 const bytes = (records: readonly TelemetryRecord[]) =>
-  records.reduce((size, record) => size + Buffer.byteLength(line(record)), 0)
+  records.reduce((total, record) => total + size(record), 0)
 
 // Single-writer durable telemetry only. No commands, keys, credentials or network calls.
 export class TelemetryQueue {
@@ -118,6 +132,11 @@ export class TelemetryQueue {
   private readonly path: string
   private readonly lock: string
   private readonly temporary: string
+  private readonly cursor: string
+  private readonly cursorTemporary: string
+  private readonly compactAfterBytes: number
+  /** Bytes of acknowledged records still present at the head of the log. */
+  private ackedBytes = 0
   private readonly maxBytes: number
   private readonly maxAgeMs: number
   private closed = false
@@ -139,7 +158,11 @@ export class TelemetryQueue {
     this.lastNow = now
     this.maxBytes = limits.maxBytes ?? MAX_BYTES
     this.maxAgeMs = limits.maxAgeMs ?? MAX_AGE
+    this.compactAfterBytes = limits.compactAfterBytes ?? COMPACT_BYTES
     if (
+      !Number.isSafeInteger(this.compactAfterBytes) ||
+      this.compactAfterBytes < 256 ||
+      this.compactAfterBytes > COMPACT_BYTES ||
       !Number.isSafeInteger(this.maxBytes) ||
       this.maxBytes < 256 ||
       this.maxBytes > MAX_BYTES ||
@@ -153,6 +176,8 @@ export class TelemetryQueue {
     this.path = join(directory, 'telemetry.jsonl')
     this.lock = join(directory, 'telemetry.lock')
     this.temporary = join(directory, 'telemetry.compact')
+    this.cursor = join(directory, 'telemetry.ack')
+    this.cursorTemporary = join(directory, 'telemetry.ack.tmp')
     this.recoveredStaleLock = acquireQueueLock(this.lock).recovered
     try {
       if (policy) {
@@ -184,7 +209,7 @@ export class TelemetryQueue {
       try {
         const stat = fstatSync(readFd)
         privateStat(stat)
-        if (stat.size > MAX_BYTES + MAX_RECORD)
+        if (stat.size > MAX_BYTES + COMPACT_BYTES + MAX_RECORD)
           throw new Error('Queue file exceeds recovery limit')
         data = readFileSync(readFd)
       } finally {
@@ -217,12 +242,23 @@ export class TelemetryQueue {
         if (record.queuedAt > now) throw new Error('Queue clock regressed')
         this.records.push(record)
       }
-      // Validate the committed log before cleaning a leftover compaction file.
-      if (existsSync(this.temporary)) {
-        privateEntry(this.temporary)
-        if (lstatSync(this.temporary).size > MAX_BYTES)
+      // Records up to the cursor were acknowledged; an absent ID means a later
+      // compaction already removed them, so every record in this log is live.
+      const acknowledged = this.readCursor()
+      const head = this.records.findIndex(
+        (record) => record.eventId === acknowledged,
+      )
+      if (head >= 0) {
+        this.ackedBytes = bytes(this.records.slice(0, head + 1))
+        this.records = this.records.slice(head + 1)
+      }
+      // Validate the committed log before cleaning leftover compaction/cursor files.
+      for (const leftover of [this.temporary, this.cursorTemporary]) {
+        if (!existsSync(leftover)) continue
+        privateEntry(leftover)
+        if (lstatSync(leftover).size > MAX_BYTES + COMPACT_BYTES)
           throw new Error('Oversized queue compaction file')
-        unlinkSync(this.temporary)
+        unlinkSync(leftover)
         this.syncDirectory()
       }
       // Only an unterminated tail may be torn. Complete corrupt lines are never discarded.
@@ -250,6 +286,40 @@ export class TelemetryQueue {
       throw error
     }
   }
+  private readCursor(): string | undefined {
+    if (!lstatSync(this.cursor, { throwIfNoEntry: false })) return undefined
+    privateEntry(this.cursor)
+    if (lstatSync(this.cursor).size > 256)
+      throw new Error('Invalid queue acknowledgement cursor')
+    let value: unknown
+    try {
+      value = JSON.parse(readFileSync(this.cursor, 'utf8'))
+    } catch {
+      throw new Error('Invalid queue acknowledgement cursor')
+    }
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Object.keys(value).join(',') !== 'lastAcked' ||
+      !('lastAcked' in value) ||
+      typeof value.lastAcked !== 'string' ||
+      !UUID.test(value.lastAcked)
+    )
+      throw new Error('Invalid queue acknowledgement cursor')
+    return value.lastAcked
+  }
+  /** Durable acknowledgement without rewriting the log: temporary, fsync, rename. */
+  private writeCursor(lastAcked: string) {
+    const fd = openSync(this.cursorTemporary, 'wx', 0o600)
+    try {
+      writeFileSync(fd, JSON.stringify({ lastAcked }))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(this.cursorTemporary, this.cursor)
+    this.syncDirectory()
+  }
   private syncDirectory() {
     const fd = openSync(this.directory, 'r')
     try {
@@ -272,10 +342,10 @@ export class TelemetryQueue {
       if (expired) loss.expired++
       return !expired
     })
-    let size = bytes(retained)
+    let total = bytes(retained)
     let offset = 0
-    while (size > this.maxBytes && offset < retained.length) {
-      size -= Buffer.byteLength(line(retained[offset++]!))
+    while (total > this.maxBytes && offset < retained.length) {
+      total -= size(retained[offset++]!)
       loss.capacity++
     }
     retained = retained.slice(offset)
@@ -296,6 +366,7 @@ export class TelemetryQueue {
       renameSync(temporary, this.path)
       this.syncDirectory()
       this.records = records
+      this.ackedBytes = 0
     } catch (error) {
       this.failed = true
       throw error
@@ -412,7 +483,18 @@ export class TelemetryQueue {
       )
         throw new Error('Acknowledgement must match the current FIFO prefix')
     }
-    if (eventIds.length) this.replace(this.records.slice(eventIds.length))
+    if (!eventIds.length) return
+    const rest = this.records.slice(eventIds.length)
+    try {
+      this.writeCursor(eventIds.at(-1)!)
+    } catch (error) {
+      this.failed = true
+      throw error
+    }
+    this.ackedBytes += bytes(this.records.slice(0, eventIds.length))
+    this.records = rest
+    if (this.ackedBytes >= this.compactAfterBytes || rest.length === 0)
+      this.replace(rest)
   }
   get depth(): number {
     return this.records.length

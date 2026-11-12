@@ -27,10 +27,15 @@ import {
   type GenuineStatusOptions,
 } from './readonly-session.ts'
 
-/** Explicit local fixture hook only; not a production camera permission API. */
+/** Media hooks. Track and channel reservations close before the offer; activate
+ * runs only after both RTC role proofs. Fixture hooks grant no camera authority;
+ * camera hooks must verify their own camera-purpose proofs before sending media. */
 export type FixtureOnlyMediaHooks = Readonly<{
   prepare: (
-    capability: Readonly<{ addVideoTrack: (description: Video) => Track }>,
+    capability: Readonly<{
+      addVideoTrack: (description: Video) => Track
+      createDataChannel: (label: string) => DataChannel
+    }>,
   ) => void
   activate: (
     context: Readonly<{ binding: RtcSessionBinding; lifetimeDeadline: number }>,
@@ -47,6 +52,8 @@ type Options = {
   onVerified?: () => void
   onTerminal?: (reason: string) => void
   fixtureOnlyMedia?: FixtureOnlyMediaHooks
+  /** Opt-in camera media (see camera/camera-media.ts); exclusive with fixture media. */
+  cameraMedia?: FixtureOnlyMediaHooks
   identity: ConnectorIdentity
   /** Trusted enrollment/runtime configuration, never the RTC binding's agent_id. */
   expectedAgentId: string
@@ -72,6 +79,8 @@ export class ReadonlyConnectorPeer {
   #offer: string | undefined
   #answer: string | undefined
   #mediaTrackAdded = false
+  #mediaChannelAdded = false
+  #media: FixtureOnlyMediaHooks | undefined
   #opened = false
   #starting = false
   #stage = 'constructed'
@@ -88,6 +97,8 @@ export class ReadonlyConnectorPeer {
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
+    if (options.fixtureOnlyMedia && options.cameraMedia)
+      throw Error('Exclusive media hooks')
     const now = performance.now()
     for (const cap of [options.authDeadline, options.lifetimeDeadline])
       if (cap !== undefined && (!Number.isFinite(cap) || cap <= now))
@@ -114,22 +125,13 @@ export class ReadonlyConnectorPeer {
             }),
           }
         : {}),
-      ...(options.fixtureOnlyMedia
-        ? {
-            fixtureOnlyMedia: Object.freeze({
-              prepare: options.fixtureOnlyMedia.prepare.bind(
-                options.fixtureOnlyMedia,
-              ),
-              activate: options.fixtureOnlyMedia.activate.bind(
-                options.fixtureOnlyMedia,
-              ),
-              stop: options.fixtureOnlyMedia.stop.bind(
-                options.fixtureOnlyMedia,
-              ),
-            }),
-          }
-        : {}),
     })
+    const media = options.cameraMedia ?? options.fixtureOnlyMedia
+    this.#media = media && {
+      prepare: media.prepare.bind(media),
+      activate: media.activate.bind(media),
+      stop: media.stop.bind(media),
+    }
     this.#peer = new PeerConnection('readonly-connector', {
       iceServers: [],
       bindAddress: '127.0.0.1',
@@ -218,7 +220,7 @@ export class ReadonlyConnectorPeer {
     this.#application.onError(() => this.close('application-error'))
     let preparingFixture = true
     try {
-      this.#options.fixtureOnlyMedia?.prepare(
+      this.#media?.prepare(
         Object.freeze({
           addVideoTrack: (description: Video) => {
             if (
@@ -230,6 +232,19 @@ export class ReadonlyConnectorPeer {
               throw Error('Fixture track reservation closed')
             this.#mediaTrackAdded = true
             return this.#peer.addTrack(description)
+          },
+          createDataChannel: (label: string) => {
+            if (
+              !preparingFixture ||
+              this.#terminal ||
+              this.#offerStarted ||
+              this.#mediaChannelAdded ||
+              label === 'readonly-proof-v1' ||
+              label === 'readonly-fixture-status-v1'
+            )
+              throw Error('Fixture channel reservation closed')
+            this.#mediaChannelAdded = true
+            return this.#peer.createDataChannel(label, { unordered: false })
           },
         }),
       )
@@ -393,8 +408,8 @@ export class ReadonlyConnectorPeer {
             ),
           )
         if (this.current()) this.#options.onVerified?.()
-        if (this.#options.fixtureOnlyMedia && this.current())
-          this.#options.fixtureOnlyMedia.activate(
+        if (this.#media && this.current())
+          this.#media.activate(
             Object.freeze({
               binding: validated,
               lifetimeDeadline: this.#lifetimeDeadline,
@@ -427,7 +442,7 @@ export class ReadonlyConnectorPeer {
     this.#terminal = reason.slice(0, 64) || 'closed'
     this.#resolveClosed()
     try {
-      this.#options.fixtureOnlyMedia?.stop()
+      this.#media?.stop()
     } catch {
       this.#stage = 'fixture-media-stop-failed'
     }

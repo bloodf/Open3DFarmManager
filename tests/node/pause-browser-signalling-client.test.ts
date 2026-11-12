@@ -25,7 +25,9 @@ import type { ControlSessionBinding } from '../../packages/farm-protocol/src/con
 import type { PauseBrowserPeer } from '../../apps/farm/app/utils/webrtc/pause-control-peer.ts'
 
 async function until(check: () => boolean) {
-  for (let n = 0; n < 100; n++) {
+  // Hang guard only (~5 s of turns): real crypto and socket steps can take
+  // longer than 200 ms when the host is oversubscribed.
+  for (let n = 0; n < 2500; n++) {
     if (check()) return
     await new Promise((resolve) => setTimeout(resolve, 2))
   }

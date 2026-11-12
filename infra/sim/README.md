@@ -12,7 +12,7 @@ After approval, on a machine with a running Docker daemon:
 
 ```sh
 docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams up -d --build
-bun run sim:verify
+pnpm run sim:verify
 docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams down
 ```
 

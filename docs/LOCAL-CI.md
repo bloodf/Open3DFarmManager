@@ -24,7 +24,7 @@ or failed tests do not produce a passing result.
 `check:all` covers lint, typechecking, the root unit and Node test suites,
 and the build. It does not run the `packages/webrtc-experiment` package
 self-tests. Playwright runs separately from `check:all`; its default suite
-skips farm-view tests unless `FARM_VIEW_E2E=true`. Other browser or E2E
+skips farm-view tests unless `FARM_VIEW_E2E=true`. Set `E2E_PORT` (default 3100) to run the default suite when that port is busy. Other browser or E2E
 experiments are separate from these checks and may be deferred; this does not
 waive any required hosted checks.
 

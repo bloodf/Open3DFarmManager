@@ -170,7 +170,12 @@ async function violations(page: Page) {
     .analyze()
   return result.violations.map((v) => ({
     id: v.id,
-    targets: v.nodes.map((n) => n.target),
+    impact: v.impact,
+    helpUrl: v.helpUrl,
+    nodes: v.nodes.map((n) => ({
+      target: n.target,
+      failureSummary: n.failureSummary,
+    })),
   }))
 }
 

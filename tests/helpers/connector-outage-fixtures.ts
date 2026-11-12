@@ -6,7 +6,25 @@ import { createServer as createHttpsServer } from 'node:https'
 import { createRequire } from 'node:module'
 import { once } from 'node:events'
 import { appendFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repo = (path: string) =>
+  fileURLToPath(new URL('../../' + path, import.meta.url))
+
+/** Errors raised inside event handlers; scenarios assert this stays empty. */
+export const handlerErrors: string[] = []
+function guarded(label: string, run: () => void) {
+  try {
+    run()
+  } catch (error) {
+    handlerErrors.push(
+      label + ': ' + (error instanceof Error ? error.message : String(error)),
+    )
+  }
+}
+
+/** Aborted by SIGINT/SIGTERM/uncaught errors so waits unwind into cleanup. */
+export const interruption = new AbortController()
 
 export async function until(
   predicate: () => boolean | Promise<boolean>,
@@ -15,6 +33,7 @@ export async function until(
 ) {
   const deadline = performance.now() + timeoutMs
   while (!(await predicate())) {
+    if (interruption.signal.aborted) throw new Error('Interrupted: ' + label)
     if (performance.now() > deadline) throw new Error('Timed out: ' + label)
     await new Promise((resolveWait) => setTimeout(resolveWait, 50))
   }
@@ -51,26 +70,28 @@ export async function startFakeMoonraker(port: number) {
       return
     }
     sockets.handleUpgrade(req, socket, head, (ws) => {
-      ws.on('message', (data) => {
-        const message: unknown = JSON.parse(data.toString())
-        if (!message || typeof message !== 'object' || !('id' in message))
-          return
-        subscriptions++
-        ws.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              eventtime,
-              status: {
-                webhooks: { state: 'ready' },
-                print_stats: { state },
-                virtual_sdcard: { progress },
+      ws.on('message', (data) =>
+        guarded('moonraker message', () => {
+          const message: unknown = JSON.parse(data.toString())
+          if (!message || typeof message !== 'object' || !('id' in message))
+            return
+          subscriptions++
+          ws.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: {
+                eventtime,
+                status: {
+                  webhooks: { state: 'ready' },
+                  print_stats: { state },
+                  virtual_sdcard: { progress },
+                },
               },
-            },
-          }),
-        )
-      })
+            }),
+          )
+        }),
+      )
     })
   })
   server.listen(port, '127.0.0.1')
@@ -150,9 +171,11 @@ export async function startFaultProxy(input: {
         const body = Buffer.concat(chunks)
         const entry: ProxyEntry = { at: performance.now(), route, outcome: 0 }
         if (route === 'commit')
-          entry.eventIds = (
-            JSON.parse(body.toString()) as { eventId: string }[]
-          ).map((record) => record.eventId)
+          guarded('commit body', () => {
+            entry.eventIds = (
+              JSON.parse(body.toString()) as { eventId: string }[]
+            ).map((record) => record.eventId)
+          })
         log.push(entry)
         if (mode === 'reset') {
           entry.outcome = 'reset'
@@ -244,7 +267,7 @@ export function startFarmApp(input: {
 }) {
   const child = spawn(
     process.execPath,
-    [resolve('apps/farm/.output/server/index.mjs')],
+    [repo('apps/farm/.output/server/index.mjs')],
     { env: input.env, stdio: ['ignore', 'pipe', 'pipe'] },
   )
   if (child.pid) input.onPid(child.pid)
@@ -277,7 +300,7 @@ export function startConnector(input: {
 }) {
   const child = spawn(
     process.execPath,
-    [resolve('packages/connector/src/cli.ts'), 'run', ...input.args],
+    [repo('packages/connector/src/cli.ts'), 'run', ...input.args],
     { env: input.env, stdio: ['ignore', 'pipe', 'pipe'] },
   )
   if (child.pid) input.onPid(child.pid)
@@ -291,12 +314,16 @@ export function startConnector(input: {
       const line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
       appendFileSync(input.logPath, line + '\n')
-      diagnostics.push(JSON.parse(line) as Diagnostic)
+      guarded('connector diagnostic', () =>
+        diagnostics.push(JSON.parse(line) as Diagnostic),
+      )
     }
   })
-  child.stderr?.on('data', (chunk: Buffer) =>
-    appendFileSync(input.logPath, chunk),
-  )
+  let stderr = ''
+  child.stderr?.on('data', (chunk: Buffer) => {
+    appendFileSync(input.logPath, chunk)
+    if (stderr.length < 16384) stderr += chunk.toString('utf8')
+  })
   const exited = new Promise<{
     code: number | null
     signal: NodeJS.Signals | null
@@ -305,6 +332,9 @@ export function startConnector(input: {
     child,
     diagnostics,
     exited,
+    get stderr() {
+      return stderr
+    },
     get running() {
       return child.exitCode === null && child.signalCode === null
     },

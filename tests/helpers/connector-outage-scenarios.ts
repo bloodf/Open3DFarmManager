@@ -11,13 +11,15 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'
 import { PostgresPairing } from '../../apps/farm/server/storage/postgres-pairing.ts'
 import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pairing-proof.ts'
 import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgres-printer-ownership.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
+  handlerErrors,
   startConnector,
   startFakeMoonraker,
   startFarmApp,
@@ -252,7 +254,9 @@ export async function runConnectorOutageScenarios(input: {
       NUXT_DATABASE_ENABLED: 'true',
       NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
       NUXT_DATABASE_MIGRATIONS: 'verify',
-      NUXT_DATABASE_MIGRATIONS_DIR: resolve('infra/db/migrations'),
+      NUXT_DATABASE_MIGRATIONS_DIR: fileURLToPath(
+        new URL('../../infra/db/migrations/', import.meta.url),
+      ),
       NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
       NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrl(prefix),
       NUXT_CONNECTOR_TELEMETRY_ORIGIN: proxy.origin,
@@ -293,6 +297,7 @@ export async function runConnectorOutageScenarios(input: {
         30000,
         'farm app ready',
       )
+      assert.ok(current.running, 'farm app alive after readiness')
     }
     closers.push(async () => {
       await app?.stop()
@@ -328,6 +333,7 @@ export async function runConnectorOutageScenarios(input: {
         'connector baseline queued',
       )
       expected.push(moon.progress)
+      assert.ok(current.running, 'connector alive after baseline')
       return current
     }
     closers.push(async () => {
@@ -380,6 +386,7 @@ export async function runConnectorOutageScenarios(input: {
     async function scenario(name: string, body: () => Promise<object>) {
       const start = performance.now()
       const result = await body()
+      assert.deepEqual(handlerErrors, [], 'event handler errors')
       const entry = {
         name,
         result: 'passed',
@@ -489,14 +496,18 @@ export async function runConnectorOutageScenarios(input: {
         await new Promise((r) => setTimeout(r, 3000))
         await input.docker('unpause', input.container)
         paused = false
-        if (app!.running) {
-          await until(ready, 30000, 'gated app becomes ready').catch(() => {})
-        }
-        if (!app!.running || !(await ready())) {
-          if (app!.running) await app!.stop()
-          startupExitCode = await app!.exited
-          await startApp()
-        }
+        // The same gated process must recover on its own: no restart fallback.
+        const gated = app!
+        assert.ok(gated.running, 'gated server still running after unpause')
+        await until(
+          async () => {
+            if (!gated.running) throw new Error('Gated server exited')
+            return ready()
+          },
+          30000,
+          'gated server becomes ready',
+        )
+        assert.ok(gated.running && (await ready()))
         const outageMs = Math.round(performance.now() - outageStart)
         const backoff = maxAttemptGap(outageStart, performance.now())
         assert.ok(backoff.maxGapMs <= MAX_ATTEMPT_GAP_MS, 'bounded backoff')
@@ -537,7 +548,12 @@ export async function runConnectorOutageScenarios(input: {
       let operatorLockRecovery = false
       const blocked = launchConnector()
       const outcome = await blocked.exited
-      if (outcome.code === 1 && existsSync(lockFile)) {
+      if (
+        outcome.code === 1 &&
+        existsSync(lockFile) &&
+        // The CLI's fixed local-collection failure text (pt-BR), not a crash.
+        blocked.stderr.includes('Não foi possível manter a coleta local')
+      ) {
         const owner = JSON.parse(readFileSync(lockFile, 'utf8')) as {
           pid: number
         }
@@ -661,6 +677,7 @@ export async function runConnectorOutageScenarios(input: {
       // Server returns: drain must make bounded progress without a crash.
       await startApp()
       const drainStart = performance.now()
+      const logFrom = proxy.log.length
       await until(
         () => current.count('delivery', (d) => d.status === 'delivered') >= 3,
         60000,
@@ -674,7 +691,15 @@ export async function runConnectorOutageScenarios(input: {
       assert.ok(current.running, 'no crash while draining a full queue')
       const first =
         await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[evicted]!}::uuid`
-      assert.equal(first[0]?.n, 1, 'oldest retained record delivered first')
+      assert.equal(first[0]?.n, 1, 'oldest retained record delivered')
+      const firstCommit = proxy.log
+        .slice(logFrom)
+        .find((e) => e.route === 'commit' && e.outcome === 200)
+      assert.equal(
+        firstCommit?.eventIds?.[0],
+        seeded[evicted],
+        'oldest retained record is the first committed after restart',
+      )
       await current.stop()
       assert.equal((await current.exited).code, 0)
       const drainRecordsPerSecond = Math.round(delivered / seconds)
@@ -698,7 +723,7 @@ export async function runConnectorOutageScenarios(input: {
       name: '6-credential-renewal-across-outage',
       result: 'skipped',
       reason:
-        'The built farm server does not activate the credential renewal HTTP runtime on origin/main (activateCredentialRenewalHttpRuntime has no caller), so renewal endpoints answer 503.',
+        'Not implemented in this runner yet: server renewal activation landed in #132 after this runner was written; renewal across an outage is a follow-up scenario.',
     })
     return report
   } finally {

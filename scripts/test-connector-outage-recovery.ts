@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { access, mkdir, rm, statfs, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { isAbsolute, join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import postgres from 'postgres'
@@ -17,6 +18,7 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { runConnectorOutageScenarios } from '../tests/helpers/connector-outage-scenarios.ts'
+import { interruption } from '../tests/helpers/connector-outage-fixtures.ts'
 
 const exec = promisify(execFile)
 const env = process.env
@@ -42,6 +44,19 @@ if (
   )
 await access(new URL('../apps/farm/.output/server/index.mjs', import.meta.url))
 const ports = { db: base, app: base + 1, proxy: base + 2, moonraker: base + 3 }
+// Admission: every port must be free on loopback before anything is created.
+for (const port of Object.values(ports))
+  await new Promise<void>((resolveProbe, reject) => {
+    const probe = createServer()
+    probe.once('error', () =>
+      reject(
+        new Error(
+          `Port ${port} is in use; choose another OUTAGE_TEST_PORT_BASE`,
+        ),
+      ),
+    )
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolveProbe()))
+  })
 const id = randomUUID()
 const prefix = env.OUTAGE_TEST_NAME_PREFIX ?? 'o3dfm-outage'
 if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
@@ -59,6 +74,20 @@ const docker = async (...args: string[]) =>
   (
     await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
   ).stdout.trim()
+const endpoint =
+  env.DOCKER_HOST ??
+  (await docker('context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'))
+assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
+// Signals and stray errors unwind the scenario waits into the same cleanup below.
+let interrupted: unknown
+const interrupt = (reason: unknown) => {
+  interrupted ??= reason
+  interruption.abort()
+}
+process.once('SIGINT', () => interrupt(new Error('SIGINT')))
+process.once('SIGTERM', () => interrupt(new Error('SIGTERM')))
+process.on('uncaughtException', interrupt)
+process.on('unhandledRejection', interrupt)
 const disk = async () =>
   String(
     await statfs(workRoot, { bigint: true }).then((x) => x.bavail * x.bsize),
@@ -126,8 +155,9 @@ try {
     docker,
     ledger,
   })
+  if (interrupted) throw interrupted
 } catch (error) {
-  failure = error
+  failure = interrupted ?? error
   if (container)
     await writeFile(
       join(workRoot, id + '.postgres.log'),

@@ -25,10 +25,11 @@ const digest = () => randomBytes(32).toString('base64url')
 
 /**
  * Waits without a timer, so the wait also works while the fake timers of a
- * test are enabled.
+ * test are enabled. Only an explicit bound is a window; otherwise the suite's
+ * test timeout is the single hang bound.
  */
-async function waitFor(condition: () => boolean, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs
+async function waitFor(condition: () => boolean, timeoutMs?: number) {
+  const deadline = timeoutMs === undefined ? Infinity : Date.now() + timeoutMs
   while (!condition()) {
     if (Date.now() > deadline) throw new Error('Timed out waiting for state')
     await new Promise((resolve) => setImmediate(resolve))

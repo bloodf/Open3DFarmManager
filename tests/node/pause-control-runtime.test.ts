@@ -1,4 +1,8 @@
-import test from 'node:test'
+import test, { afterEach, beforeEach, mock } from 'node:test'
+// Runtime request, staleness and backoff timers fire only when a test advances
+// them, so a descheduled process cannot turn a loopback reply into a timeout.
+beforeEach(() => mock.timers.enable({ apis: ['setTimeout'] }))
+afterEach(() => mock.timers.reset())
 import assert from 'node:assert/strict'
 import {
   createHash,
@@ -73,11 +77,11 @@ function journalRows(directory: string) {
   }
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs
+// Timers are mocked per test, so this waits on events between event-loop
+// turns; the suite's test timeout is the single hang bound.
+async function waitFor(condition: () => boolean) {
   while (!condition()) {
-    if (Date.now() > deadline) throw new Error('Timed out waiting for state')
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await new Promise((resolve) => setImmediate(resolve))
   }
 }
 
@@ -690,7 +694,11 @@ test('a terminal transport closes the peer before any command and the lifecycle 
       wire: 'x',
     }) as never,
   )
-  await waitFor(() => f.sessions.length === 2, 3000)
+  // The reconnect waits on the lifecycle's backoff timer; advance it explicitly.
+  while (f.sessions.length !== 2) {
+    mock.timers.tick(100)
+    await new Promise((resolve) => setImmediate(resolve))
+  }
   assert.equal(first.closed, true)
   assert.equal(f.moonraker.counts().connections, 0)
   f.controller.abort()

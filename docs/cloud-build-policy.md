@@ -1,7 +1,9 @@
 # Cloud build policy
 
-Product development remains on HOLD. These controls do not authorize deployment,
-publication, changes to live settings, or bypassing reviews and branch protection.
+Product development resumed on 2026-11-11 by the owner. Deployment, publication of
+the separate local payload, DNS or credential changes, production services and
+hardware tests still need separate authorization. These controls do not authorize
+changes to live settings or bypassing reviews and branch protection.
 
 ## GitHub Actions
 

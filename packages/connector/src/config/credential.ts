@@ -5,7 +5,7 @@ import {
 } from '../../../farm-protocol/src/pairing.ts'
 import { readPrivateJsonFile } from './local.ts'
 
-const File = z.strictObject({
+export const CredentialFile = z.strictObject({
   version: z.literal(1),
   expected_fingerprint: PairingStartResponse.shape.fingerprint,
   approval: PairingPollResponse,
@@ -17,7 +17,7 @@ export function readRuntimeCredential(
   expectedFingerprint: string,
   now: number,
 ) {
-  const file = File.parse(
+  const file = CredentialFile.parse(
     readPrivateJsonFile(path, { maxBytes: 16 * 1024, maxStringChars: 8192 }),
   )
   if (

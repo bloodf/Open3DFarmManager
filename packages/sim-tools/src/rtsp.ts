@@ -69,7 +69,11 @@ export async function verifyRtsp(
           if (buffer.length < 4) return
           const size = buffer.readUInt16BE(2)
           if (buffer.length < 4 + size) return
-          if (buffer[1] % 2 === 0 && size >= 12 && ++packets >= minPackets)
+          if (
+            (buffer[1] ?? 1) % 2 === 0 &&
+            size >= 12 &&
+            ++packets >= minPackets
+          )
             return finish(undefined, packets)
           buffer = buffer.subarray(4 + size)
           continue

@@ -11,6 +11,26 @@ import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
 
+// The pause driver opens its own socket: one fixed state query shape and the
+// fixed pause request. Only accepted when the farm pause row opted in.
+const PauseRequest = z.union([
+  z.strictObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.number().int().positive(),
+    method: z.literal('printer.objects.query'),
+    params: z.strictObject({
+      objects: z.strictObject({
+        webhooks: z.tuple([z.literal('state')]),
+        print_stats: z.tuple([z.literal('state')]),
+      }),
+    }),
+  }),
+  z.strictObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.number().int().positive(),
+    method: z.literal('printer.print.pause'),
+  }),
+])
 const Request = z.strictObject({
   jsonrpc: z.literal('2.0'),
   id: z.number().int().positive(),
@@ -46,6 +66,12 @@ export async function createRuntimeMoonrakerFixture() {
     queued = 0,
     progress = 0.25,
     eventtime = 1
+  // Farm-page pause row: pause control is configured and a second socket allowed.
+  const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
+  const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
+  if (farmPause && !pauseKey) throw Error('Farm pause issuer key required')
+  let pauses = 0
+  let printState: 'printing' | 'paused' = 'printing'
   let closeServer: (() => Promise<void>) | undefined
   let port = 0
   let listening = 0,
@@ -122,7 +148,10 @@ export async function createRuntimeMoonrakerFixture() {
         )
       }
       server.on('upgrade', (request, socket, head) => {
-        if (request.url !== '/websocket' || sockets.clients.size !== 0) {
+        if (
+          request.url !== '/websocket' ||
+          sockets.clients.size >= (farmPause ? 2 : 1)
+        ) {
           socket.destroy()
           return
         }
@@ -140,14 +169,52 @@ export async function createRuntimeMoonrakerFixture() {
         socket.on('message', (data, binary) => {
           try {
             if (binary || ++requests > 64) throw Error('Fixture request cap')
-            const request = Request.parse(
-              parseBoundedJson(data.toString(), {
-                maxBytes: 4096,
-                maxDepth: 5,
-                maxValues: 32,
-                maxStringChars: 128,
-              }),
-            )
+            const value = parseBoundedJson(data.toString(), {
+              maxBytes: 4096,
+              maxDepth: 5,
+              maxValues: 32,
+              maxStringChars: 128,
+            })
+            const pause = farmPause ? PauseRequest.safeParse(value) : undefined
+            if (pause?.success) {
+              const call = pause.data
+              if (call.method === 'printer.print.pause') {
+                // Exactly the synthetic printer's pause; never a physical printer.
+                pauses++
+                printState = 'paused'
+                socket.send(
+                  JSON.stringify({ jsonrpc: '2.0', id: call.id, result: 'ok' }),
+                )
+                eventtime++
+                for (const client of sockets.clients)
+                  if (client !== socket)
+                    client.send(
+                      JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'notify_status_update',
+                        params: [
+                          { print_stats: { state: 'paused' } },
+                          eventtime,
+                        ],
+                      }),
+                    )
+              } else
+                socket.send(
+                  JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: call.id,
+                    result: {
+                      eventtime,
+                      status: {
+                        webhooks: { state: 'ready' },
+                        print_stats: { state: printState },
+                      },
+                    },
+                  }),
+                )
+              return
+            }
+            const request = Request.parse(value)
             socket.send(
               JSON.stringify({
                 jsonrpc: '2.0',
@@ -156,7 +223,7 @@ export async function createRuntimeMoonrakerFixture() {
                   eventtime,
                   status: {
                     webhooks: { state: 'ready' },
-                    print_stats: { state: 'printing' },
+                    print_stats: { state: printState },
                     virtual_sdcard: { progress },
                     ...(request.params.objects.extruder
                       ? { extruder: { temperature: 210 } }
@@ -236,6 +303,29 @@ export async function createRuntimeMoonrakerFixture() {
             retryMinMs: 1000,
             retryMaxMs: 1000,
           },
+          ...(farmPause
+            ? {
+                pause: {
+                  version: 1,
+                  issuers: [
+                    {
+                      issuer: input.origin,
+                      kid: 'pause-fixture',
+                      publicKeySpki: pauseKey,
+                    },
+                  ],
+                  signalling: {
+                    endpoint:
+                      input.origin.replace('https:', 'wss:') +
+                      '/api/signalling/pause-connector',
+                    origin: input.origin,
+                    audience: 'open3dfarmmanager:pause',
+                    credentialAudience: input.audience,
+                  },
+                  control: { assignmentId: ref.assignmentId },
+                },
+              }
+            : {}),
         }),
         { mode: 0o600, flag: 'wx' },
       )
@@ -404,6 +494,7 @@ export async function createRuntimeMoonrakerFixture() {
         packagedSha256,
         packagedManifestSha256,
         packagedFiles,
+        pauses,
       }
     },
     close() {

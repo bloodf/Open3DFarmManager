@@ -83,6 +83,7 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
     packagedFiles: z.number().int().min(0).max(64),
+    pauses: z.number().int().min(0).max(64),
   }),
   z.strictObject({
     kind: z.literal('observation'),

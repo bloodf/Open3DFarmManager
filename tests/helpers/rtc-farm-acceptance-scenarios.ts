@@ -43,6 +43,22 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         'farm-page-no-reopen-window-ms:',
       ],
     },
+    // live → stale disables pause with a reason → recovery → dialog → confirm →
+    // exactly one pause on the synthetic Moonraker → revocation keeps it disabled
+    'farm-page-pause': {
+      env: {
+        ...farmPage,
+        SIGNALLING_HTTPS_RTC_CLOSURE: 'disconnect',
+        SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+      },
+      expect: [
+        'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker',
+        'farm-page-pause-stale-disabled-with-reason',
+        'farm-page-pause-applied-after-ms:',
+        'farm-page-pause-revoked-disabled-after-ms:',
+        'farm-page-pause-exactly-one-applied',
+      ],
+    },
   })
 
 export function selectRtcFarmScenarios(list: string | undefined) {

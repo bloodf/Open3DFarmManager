@@ -272,6 +272,24 @@ describe('assertSameDatabaseTargets', () => {
       }),
     ).toThrow('invalid database configuration')
   })
+  test('connector renewal databaseUrl is covered by the same-target check', () => {
+    expect(() =>
+      assertSameDatabaseTargets(config, {
+        connectorRenewal: {
+          enabled: true,
+          databaseUrl: 'postgres://r:q@other.internal/app',
+        },
+      }),
+    ).toThrow('invalid database configuration')
+    expect(() =>
+      assertSameDatabaseTargets(config, {
+        connectorRenewal: {
+          enabled: true,
+          databaseUrl: 'postgres://r:q@db.internal/app',
+        },
+      }),
+    ).not.toThrow()
+  })
 })
 
 describe('gate and phase', () => {

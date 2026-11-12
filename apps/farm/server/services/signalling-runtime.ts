@@ -948,7 +948,9 @@ export class SignallingRuntime {
       this.#send(connection, {
         v: 1,
         t: 'connector.authority-revoked',
-        server_seq: this.#nextAuthoritySeq(this.#clock.wall()),
+        // prev + 1 only: an app-server wall clock ahead of database time
+        // must never lift the Connector floor above other instances' confirms.
+        server_seq: this.#nextAuthoritySeq(0),
       })
     } catch {
       // Closing still ends the session; the offline lifetime bounds the rest.

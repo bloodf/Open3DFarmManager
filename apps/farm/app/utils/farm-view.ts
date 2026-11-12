@@ -186,6 +186,9 @@ const REOPEN_BASE_MS = 1_000
 const REOPEN_MAX_MS = 30_000
 const REOPEN_ATTEMPTS = 6
 const HEALTHY_MS = 10_000
+// Agents of one run share a re-check scan started within this window.
+const RECHECK_SHARE_MS = 1_000
+const RETRY_AFTER_MAX_MS = 300_000
 type Refs = readonly Pick<
   FarmAssignment,
   'assignmentId' | 'agentId' | 'printerKey'
@@ -302,6 +305,19 @@ function agentRefs(
   if (!refs.length || refs.length > 100 || bytes > 2048)
     throw Error('Complete Connector frame capacity')
   return refs
+}
+// 429 honours Retry-After (seconds) and otherwise waits the maximum backoff.
+function retryAfterMs(error: unknown) {
+  const response =
+    typeof error === 'object' && error !== null && 'response' in error
+      ? error.response
+      : null
+  const header =
+    response instanceof Response ? response.headers.get('retry-after') : null
+  const seconds = header === null || header.trim() === '' ? NaN : Number(header)
+  return Number.isFinite(seconds) && seconds >= 0
+    ? Math.min(Math.max(seconds * 1000, REOPEN_BASE_MS), RETRY_AFTER_MAX_MS)
+    : REOPEN_MAX_MS
 }
 function sameRefs(a: Refs, b: Refs) {
   return (
@@ -743,7 +759,36 @@ export function createFarmView(deps: Dependencies) {
       run.current() &&
       state.kind === 'ready' &&
       state.scope?.viewEpoch === scope.viewEpoch
-    function schedule(agentId: string, refs: Refs, failures: number) {
+    let check:
+      | {
+          promise: Promise<ReadonlyMap<string, Readonly<FarmAssignment>> | null>
+          settled: number | null
+        }
+      | undefined
+    function sharedScan() {
+      const now = deps.clock().mono
+      if (
+        check &&
+        (check.settled === null || now - check.settled < RECHECK_SHARE_MS)
+      )
+        return check.promise
+      const entry: NonNullable<typeof check> = {
+        promise: scanAssignments(scope, run),
+        settled: null,
+      }
+      const settle = () => {
+        entry.settled = deps.clock().mono
+      }
+      entry.promise.then(settle, settle)
+      check = entry
+      return entry.promise
+    }
+    function schedule(
+      agentId: string,
+      refs: Refs,
+      failures: number,
+      minDelayMs = 0,
+    ) {
       if (failures > REOPEN_ATTEMPTS) return
       const random = (deps.random ?? Math.random)()
       const jitter =
@@ -751,7 +796,10 @@ export function createFarmView(deps: Dependencies) {
         (Number.isFinite(random) ? Math.min(Math.max(random, 0), 1) : 0.5) / 2
       const retryAt =
         deps.clock().mono +
-        Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** failures) * jitter
+        Math.max(
+          minDelayMs,
+          Math.min(REOPEN_MAX_MS, REOPEN_BASE_MS * 2 ** failures) * jitter,
+        )
       const retry = {
         close() {
           connections = connections.filter((item) => item !== retry)
@@ -768,15 +816,20 @@ export function createFarmView(deps: Dependencies) {
     // the browser cannot observe a signalling 403 or a server-side revocation.
     async function reopen(agentId: string, refs: Refs, failures: number) {
       try {
-        const assignments = await scanAssignments(scope, run)
+        const assignments = await sharedScan()
         if (!assignments || !viewCurrent()) return
-        let fresh: Refs
+        let fresh: Refs | null = null
         try {
           fresh = agentRefs(assignments, agentId)
         } catch {
-          return // Connector or every assignment revoked: stop reopening.
+          // Connector or every assignment revoked, or capacity exceeded.
         }
-        if (!sameRefs(fresh, refs)) return // Scope changed; revalidation rebuilds it.
+        if (!fresh || !sameRefs(fresh, refs)) {
+          // Server state moved on: refresh the farm so statuses and feeds match.
+          if (state.kind === 'ready')
+            void selectFarm(scope.farmId, state.printerAfter)
+          return
+        }
         subscribe(agentId, refs, failures)
       } catch (error) {
         if (!run.current()) return
@@ -788,7 +841,11 @@ export function createFarmView(deps: Dependencies) {
           failed(error)
           return
         }
-        if (viewCurrent()) schedule(agentId, refs, failures + 1)
+        if (!viewCurrent()) return
+        // Rate limiting is server pacing, not a feed failure: keep the budget.
+        if (httpStatus(error) === 429)
+          schedule(agentId, refs, failures, retryAfterMs(error))
+        else schedule(agentId, refs, failures + 1)
       }
     }
     function subscribe(

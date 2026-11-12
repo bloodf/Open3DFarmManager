@@ -1683,7 +1683,7 @@ test('two Connectors back off independently', async () => {
   })
 })
 
-test('rejected, revoked, or server-revoked Connectors stop; 401 on re-check signs out', async () => {
+test('rejected, revoked, or server-revoked Connectors stop and refresh; 401 on re-check signs out', async () => {
   for (const reason of ['rejected', 'revoked'] as const) {
     const h = setup(true, () => 0)
     await fakeTimers(h, async () => {
@@ -1698,7 +1698,10 @@ test('rejected, revoked, or server-revoked Connectors stop; 401 on re-check sign
     revoked.data.printers.printers = [{ ...row, connectorStatus: 'revoked' }]
     revoked.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
     expect(await nextPeer(revoked, 120_000)).toBeNull()
-    expect(revoked.first().connection).toBe('closed')
+    // The reopen re-check refreshes the farm, so the revocation is shown.
+    expect(revoked.first().assignment.connectorStatus).toBe('revoked')
+    expect(revoked.first().connection).toBe('unavailable')
+    expect(revoked.ready().scope?.farmId).toBe(farm)
   })
   const signedOut = setup(true, () => 0)
   await fakeTimers(signedOut, async () => {
@@ -1763,4 +1766,76 @@ test('logout invalidation, route leave and unmount cancel pending reopens and le
   } finally {
     vi.useRealTimers()
   }
+})
+
+test('an assignment set changed on the server refreshes the farm and resubscribes with it', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    h.data.printers.printers = [
+      row,
+      { ...row, assignmentId: other, printerKey: 'second' },
+    ]
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    expect(await nextPeer(h)).not.toBeNull()
+    expect(h.peer(0).input.signal.aborted).toBe(true)
+    expect(h.ready().rows).toHaveLength(2)
+    expect(
+      h.peer(1).input.assignmentRefs.map((ref) => ref.assignmentId),
+    ).toEqual([assignment, other])
+  })
+})
+
+test('agents share one in-flight authority re-check per run', async () => {
+  const agentB = '00000000-0000-4000-8000-000000000006'
+  const h = setup(true, () => 0)
+  h.data.printers.printers.push({
+    ...row,
+    assignmentId: '00000000-0000-4000-8000-000000000007',
+    agentId: agentB,
+    printerKey: 'b',
+  })
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    expect(h.peers).toHaveLength(2)
+    const before = h.requests.length
+    for (const peer of [...h.peers])
+      peer.input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    while (h.peers.length < 4) await second()
+    expect(h.requests.slice(before).map((request) => request.path)).toEqual([
+      '/api/auth/me',
+      `/api/farms/${farm}/printers`,
+      '/api/auth/me',
+    ])
+    expect(new Set(h.peers.slice(2).map((peer) => peer.input.agentId))).toEqual(
+      new Set([agent, agentB]),
+    )
+  })
+})
+
+test('429 on the re-check honours Retry-After and does not spend the reopen budget', async () => {
+  const h = setup(true, () => 0)
+  await fakeTimers(h, async () => {
+    await h.view.discover()
+    let limited = 0
+    h.hooks.read = async (path, signal, query) => {
+      if (path === `/api/farms/${farm}/printers` && limited < 10) {
+        limited++
+        throw Object.assign(new Error('429'), {
+          statusCode: 429,
+          response: new Response(null, {
+            status: 429,
+            headers: { 'retry-after': '5' },
+          }),
+        })
+      }
+      return h.baseRead(path, signal, query)
+    }
+    h.peer().input.onHealth({ kind: 'closed', reason: 'disconnected' })
+    // First reopen at 1 s, then ten rate-limited re-checks 5 s apart, then success.
+    const elapsed = await nextPeer(h, 120_000)
+    expect(limited).toBe(10)
+    expect(elapsed).toBe(1000 + 10 * 5000)
+    expect(h.peers).toHaveLength(2)
+  })
 })

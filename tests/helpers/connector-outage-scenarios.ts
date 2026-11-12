@@ -3,12 +3,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import {
-  appendFileSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'

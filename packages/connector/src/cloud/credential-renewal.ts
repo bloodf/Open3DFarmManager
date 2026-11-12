@@ -20,6 +20,7 @@ import {
 import { PairingProofOrigin } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
   CredentialFile,
+  readCredentialEnvelope,
   readRuntimeCredential,
   type RuntimeCredential,
 } from '../config/credential.ts'
@@ -41,6 +42,9 @@ export type RenewalDiagnostic =
   | { kind: 'credential-renewed'; expiresAt: number }
   | { kind: 'credential-renewal-retry'; reason: string; delayMs: number }
   | { kind: 'credential-renewal-expired' }
+  | { kind: 'credential-recovered'; expiresAt: number }
+  // Expired and not recoverable: the operator must pair this Connector again.
+  | { kind: 'credential-repair-required' }
   // The successor file is in place but its directory entry may not be durable yet.
   | { kind: 'credential-renewal-directory-sync-failed' }
 
@@ -208,6 +212,8 @@ export async function renewCredentialOnce(input: {
   audience: string
   signal: AbortSignal
   now: () => number
+  /** Never presents the (expired) token: only a signed readback intent. */
+  readbackOnly?: boolean
 }): Promise<Outcome> {
   const { credential, identity, transport, signal } = input
   const origin = PairingProofOrigin.parse(input.origin)
@@ -307,7 +313,7 @@ export async function renewCredentialOnce(input: {
       expiresAt: body.expiresAt,
     } as const
   }
-  let result = await exchange('issue')
+  let result = await exchange(input.readbackOnly ? 'readback' : 'issue')
   // A committed successor whose response was lost (crash, timeout, late
   // delivery) is recovered by readback; the server never issues a second one.
   if (result.kind === 'readback-required') result = await exchange('readback')
@@ -434,4 +440,83 @@ export async function runCredentialRenewal(input: {
       delayMs,
     })
   }
+}
+
+export class CredentialRepairRequired extends Error {}
+
+/**
+ * Startup: returns the current credential, or, when the local one has expired,
+ * tries readback-only recovery of a successor the server already committed for
+ * it (a reply lost before the restart). The server bounds this by the
+ * successor's expiry. Anything else fails closed: the operator must re-pair.
+ */
+export async function readOrRecoverRuntimeCredential(input: {
+  credentialPath: string
+  identity: Signer
+  now?: () => number
+  recovery?: {
+    transport: RenewalTransport
+    origin: string
+    audience: string
+    signal: AbortSignal
+    attempts?: number
+    retryMs?: number
+    sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  }
+  onDiagnostic?: (value: RenewalDiagnostic) => void
+}): Promise<RuntimeCredential> {
+  const now = input.now ?? Date.now
+  const envelope = readCredentialEnvelope(
+    input.credentialPath,
+    input.identity.fingerprint,
+  )
+  if (envelope.expires_at > now())
+    return readRuntimeCredential(
+      input.credentialPath,
+      input.identity.fingerprint,
+      now(),
+    )
+  const recovery = input.recovery
+  const attempts = recovery?.attempts ?? 3
+  for (let attempt = 0; recovery && attempt < attempts; attempt++) {
+    if (recovery.signal.aborted) break
+    if (attempt)
+      await (recovery.sleep ?? wait)(recovery.retryMs ?? 1000, recovery.signal)
+    let outcome: Outcome
+    try {
+      outcome = await renewCredentialOnce({
+        credentialPath: input.credentialPath,
+        credential: envelope,
+        identity: input.identity,
+        transport: recovery.transport,
+        origin: recovery.origin,
+        audience: recovery.audience,
+        signal: recovery.signal,
+        now,
+        readbackOnly: true,
+      })
+    } catch (error) {
+      // A mismatched successor is never retried into acceptance.
+      if (error instanceof SuccessorMismatch) break
+      continue
+    }
+    if (outcome.kind === 'renewed') {
+      if (!outcome.directorySynced)
+        input.onDiagnostic?.({
+          kind: 'credential-renewal-directory-sync-failed',
+        })
+      input.onDiagnostic?.({
+        kind: 'credential-recovered',
+        expiresAt: outcome.credential.expires_at,
+      })
+      return outcome.credential
+    }
+    // A denial means nothing recoverable was committed for this credential.
+    if (outcome.reason === 'challenge-403' || outcome.reason === 'complete-403')
+      break
+  }
+  input.onDiagnostic?.({ kind: 'credential-repair-required' })
+  throw new CredentialRepairRequired(
+    'Local credential expired and no committed successor was recovered; re-pair this Connector',
+  )
 }

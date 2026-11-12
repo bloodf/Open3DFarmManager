@@ -241,7 +241,15 @@ async function dispatch(args: string[]): Promise<number> {
       await collectLocalTelemetry(common)
     }
     return 0
-  } catch {
+  } catch (error) {
+    const { CredentialRepairRequired } =
+      await import('./cloud/credential-renewal.ts')
+    if (error instanceof CredentialRepairRequired) {
+      console.error(
+        'A credencial deste Connector expirou e não pôde ser recuperada pelo servidor. Pareie o Connector novamente.',
+      )
+      return 1
+    }
     console.error(
       'Não foi possível manter a coleta local. Verifique a configuração privada, as permissões e o armazenamento. Arquivos de recuperação exigem revisão; nenhum bloqueio antigo foi removido.',
     )

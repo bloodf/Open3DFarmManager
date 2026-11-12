@@ -81,9 +81,9 @@ for (let index = 0; index < worktrees.length; index += WORKTREES_PER_CASE) {
     { timeout: CASE_TIMEOUT_MS },
     () => {
       for (const sibling of group) {
-        // The parent directory exists, so the private handoff path is only
-        // rejected by the worktree guard and never by a missing directory.
-        assert.ok(existsSync(sibling), `missing worktree root ${sibling}`)
+        // Other tasks add and remove worktrees of this shared repository while
+        // the suite runs. A root removed since listing has nothing to protect.
+        if (!existsSync(sibling)) continue
         const base = `${sibling}/must-not-be-written`
         const result = spawnSync(
           process.execPath,
@@ -101,6 +101,8 @@ for (let index = 0; index < worktrees.length; index += WORKTREES_PER_CASE) {
             },
           },
         )
+        // Removed while the child ran: its guard saw a different worktree list.
+        if (!existsSync(sibling)) continue
         const diagnostic = JSON.stringify({
           sibling,
           status: result.status,

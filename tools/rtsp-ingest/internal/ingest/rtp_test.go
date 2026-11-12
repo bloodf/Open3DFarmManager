@@ -145,7 +145,7 @@ func TestDecoderFUCompletion(t *testing.T) {
 }
 
 func TestStreamRequiresInBandBootstrapAndPropagatesOfferFailure(t *testing.T) {
-	for _, nal := range []byte{0x65, 0x61, 0x80} {
+	for _, nal := range []byte{0x65, 0x80} {
 		d, _ := strictDecoder()
 		s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
 		if s.accept(fixturePacket(1, 1, true, nal), func(uint64, bool, [][]byte) error { t.Fatal("offered unbootstrapped video"); return nil }) != ErrRTP {
@@ -156,5 +156,67 @@ func TestStreamRequiresInBandBootstrapAndPropagatesOfferFailure(t *testing.T) {
 	s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
 	if s.accept(fixturePacket(1, 1, true, 0x67), func(uint64, bool, [][]byte) error { return ErrOutput }) != ErrOutput {
 		t.Fatal("lost output failure")
+	}
+}
+
+func TestStreamDropsBoundedLeadingNonIDRUntilBootstrap(t *testing.T) {
+	d, _ := strictDecoder()
+	s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
+	var offered [][][]byte
+	var timestamps []uint64
+	offer := func(timestamp uint64, _ bool, nalus [][]byte) error {
+		offered = append(offered, nalus)
+		timestamps = append(timestamps, timestamp)
+		return nil
+	}
+	seq := uint16(1)
+	for i := 0; i < maxBootstrapSkips; i++ {
+		if err := s.accept(fixturePacket(seq, uint32(i+1)*100, true, 0x61), offer); err != nil {
+			t.Fatal(err)
+		}
+		seq++
+	}
+	if len(offered) != 0 {
+		t.Fatal("offered video before bootstrap")
+	}
+	if err := s.accept(fixturePacket(seq, 900000, true, 0x78, 0, 1, 0x67, 0, 1, 0x68, 0, 1, 0x65), offer); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.accept(fixturePacket(seq+1, 909000, true, 0x61), offer); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(timestamps, []uint64{0, 100000}) || len(offered) != 2 {
+		t.Fatal("wrong output after bootstrap")
+	}
+	d, _ = strictDecoder()
+	s = streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
+	var err error
+	for i := 0; i <= maxBootstrapSkips && err == nil; i++ {
+		err = s.accept(fixturePacket(uint16(i+1), uint32(i+1)*100, true, 0x61), func(uint64, bool, [][]byte) error { t.Fatal("offered"); return nil })
+	}
+	if err != ErrRTP {
+		t.Fatal("unbounded bootstrap skip")
+	}
+}
+
+func TestSkippedUnitsNeverCommitBootstrapState(t *testing.T) {
+	d, _ := strictDecoder()
+	s := streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d}
+	offered := 0
+	offer := func(uint64, bool, [][]byte) error { offered++; return nil }
+	// [SPS, PPS, non-IDR] before ready is skipped; its parameter sets do not count.
+	if err := s.accept(fixturePacket(1, 100, true, 0x78, 0, 1, 0x67, 0, 1, 0x68, 0, 1, 0x61), offer); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.accept(fixturePacket(2, 200, true, 0x65), offer); err != ErrRTP || offered != 0 {
+		t.Fatal("offered a bare IDR without offered parameter sets")
+	}
+	// A unit mixing non-IDR and IDR slices is invalid, before and after bootstrap.
+	for _, ready := range []bool{false, true} {
+		d, _ = strictDecoder()
+		s = streamAdmission{guard: RTPGuard{PayloadType: 96}, decoder: d, sps: ready, pps: ready, ready: ready}
+		if err := s.accept(fixturePacket(1, 100, true, 0x78, 0, 1, 0x67, 0, 1, 0x68, 0, 1, 0x61, 0, 1, 0x65), offer); err != ErrRTP || offered != 0 {
+			t.Fatal("accepted mixed IDR/non-IDR unit")
+		}
 	}
 }

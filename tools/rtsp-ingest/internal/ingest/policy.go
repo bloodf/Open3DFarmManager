@@ -3,6 +3,7 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"net/netip"
 	"strconv"
@@ -160,7 +161,7 @@ func ValidateSDP(desc *sdp.SessionDescription, destination Destination) error {
 }
 
 func validFMTP(value string) bool {
-	seen := make(map[string]bool, 2)
+	seen := make(map[string]bool, 3)
 	for _, parameter := range strings.Split(value, ";") {
 		key, val, ok := strings.Cut(strings.TrimSpace(parameter), "=")
 		if !ok || seen[key] {
@@ -179,9 +180,28 @@ func validFMTP(value string) bool {
 			if _, err := hex.DecodeString(val); err != nil {
 				return false
 			}
+		case "sprop-parameter-sets":
+			// Out-of-band copies are bounded and ignored; SPS/PPS must still arrive in-band.
+			if !validSprop(val) {
+				return false
+			}
 		default:
 			return false
 		}
 	}
 	return seen["packetization-mode"]
+}
+
+func validSprop(value string) bool {
+	sets := strings.Split(value, ",")
+	if len(value) > 1024 || len(sets) > 2 {
+		return false
+	}
+	for _, set := range sets {
+		raw, err := base64.StdEncoding.Strict().DecodeString(set)
+		if err != nil || len(raw) == 0 || len(raw) > 256 {
+			return false
+		}
+	}
+	return true
 }

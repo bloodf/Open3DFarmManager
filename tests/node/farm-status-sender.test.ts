@@ -1,5 +1,5 @@
 import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -14,6 +14,17 @@ import {
   validatedStatusMessage,
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
+
+// Freeze both clocks the sender trusts; admissions map wall expiry onto the
+// monotonic clock, so they must stand still together. The 100 ms source
+// windows below then expire only through the sender's own timers or an
+// explicit test clock, never because this process was descheduled.
+const frozenMonoMs = performance.now()
+Object.defineProperty(performance, 'now', {
+  configurable: true,
+  value: () => frozenMonoMs,
+})
+mock.timers.enable({ apis: ['Date'], now: Date.now() })
 
 async function fixture(onSend?: () => void) {
   const identity = new ConnectorIdentity(
@@ -151,8 +162,8 @@ async function fixture(onSend?: () => void) {
     complete,
     admit: async (input = admission) => {
       listener?.(input)
-      const deadline = performance.now() + 500
-      while (!provider && !closed && performance.now() < deadline)
+      // Hang guard in turns of the real event loop; both clocks are frozen.
+      for (let turn = 0; !provider && !closed && turn < 5000; turn++)
         await new Promise<void>((resolve) => setTimeout(resolve, 1))
     },
     provider: () => provider,

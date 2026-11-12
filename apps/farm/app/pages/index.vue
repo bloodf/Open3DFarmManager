@@ -15,6 +15,7 @@ onMounted(() => heading.value?.focus())
       <NuxtLink to="/parear">Aprovar Connector</NuxtLink>
       <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
+      <NuxtLink to="/convites">Convidar pessoa</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
     <section aria-labelledby="disponibilidade">

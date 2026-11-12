@@ -23,7 +23,9 @@ const cli =
 function run(...args: string[]) {
   return spawnSync(process.execPath, [cli, ...args], {
     encoding: 'utf8',
-    timeout: 5000,
+    // Hang detector only. A ~0.5 s cold start exceeded 5 s while the host ran
+    // several gates at once; status assertions below stay exact.
+    timeout: 30000,
   })
 }
 

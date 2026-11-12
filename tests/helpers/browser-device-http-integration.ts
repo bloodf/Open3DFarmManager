@@ -11,10 +11,16 @@ import {
 } from '../../apps/farm/server/utils/auth/boundary.ts'
 import { MemorySessionRepository } from './memory-session-repository.ts'
 
+// One real scrypt derivation (cost 131072) per process. Repeating it for every
+// fixture made fixed test deadlines depend on host CPU contention.
+let syntheticPasswordHash: Promise<string> | undefined
+
 /** Synthetic session/registry storage. The maintained login, sealed cookie and HTTP service remain real. */
 export async function browserDeviceFixture() {
   const now = Date.now(),
-    passwordHash = await hashPassword('synthetic-test-password')
+    passwordHash = await (syntheticPasswordHash ??= hashPassword(
+      'synthetic-test-password',
+    ))
   const sessions = new MemorySessionRepository(
     [{ id: 'account', sessionVersion: 0, disabled: false }],
     [

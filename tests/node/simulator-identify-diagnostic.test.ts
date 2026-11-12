@@ -48,6 +48,7 @@ interface DiagnosticModule {
   PINNED_AMD64_DIGEST: string
   PINNED_PLATFORM: string
   READINESS_BUDGET_MS: number
+  DOCKER_CALL_TIMEOUT_MS: number
   OBSERVER_MOUNT_PATH: string
   OBSERVER_PREFIX: string
   CAPTURE_BYTE_LIMIT: number
@@ -3117,6 +3118,9 @@ for (const mode of ['success', 'diagnostic-failure', 'cleanup-failure']) {
     const docker = createFakeDocker({
       labels,
       capture: records,
+      // One observation poll: later polls would only get the window's leftover
+      // time as their timeout, which a spawned fake Docker misses under load.
+      containerStatus: 'exited',
       ...(mode === 'success' ? {} : { klippyArgv: ['python3', 'klippy.py'] }),
       fail: (args) => {
         const command = args[0]
@@ -3216,7 +3220,8 @@ process.stdin.on('end', () => {
         server.once('error', reject)
         server.listen(socketPath, resolve)
       })
-      const observationMs = 5000
+      // The single poll gets the same bound as every other Docker call.
+      const observationMs = diagnostic.DOCKER_CALL_TIMEOUT_MS
       const output = await new Promise<{
         status: number | null
         stdout: string

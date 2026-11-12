@@ -113,7 +113,9 @@ async function fixture(mutate = false) {
   }
 }
 async function waitFor(check: () => boolean) {
-  for (let i = 0; i < 100; i++) {
+  // Hang guard only (~5 s of turns): real crypto and socket steps can take
+  // longer than 200 ms when the host is oversubscribed.
+  for (let i = 0; i < 2500; i++) {
     if (check()) return
     await new Promise((resolve) => setTimeout(resolve, 2))
   }

@@ -60,6 +60,17 @@ export async function loadMigrationCatalog(
   )
 }
 
+/** Catalog prefix ending at one specific migration, so later migrations cannot change a pinned acceptance fixture. */
+export function catalogThrough(
+  catalog: ReturnType<typeof migrationCatalog>,
+  lastId: string,
+) {
+  const index = catalog.findIndex((entry) => entry.id === lastId)
+  if (index < 0)
+    throw new Error('Migration ' + lastId + ' is not in the catalog')
+  return catalog.slice(0, index + 1)
+}
+
 export function validateMigrationHistory(
   catalog: ReturnType<typeof migrationCatalog>,
   input: unknown,

@@ -10,6 +10,12 @@ export default defineNuxtConfig({
     ]),
   ),
   runtimeConfig: {
+    database: {
+      enabled: false,
+      databaseUrl: '',
+      migrations: 'verify',
+      migrationsDir: '',
+    },
     auth: {
       enabled: false,
       origin: '',

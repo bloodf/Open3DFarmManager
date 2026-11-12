@@ -24,5 +24,4 @@ An invite is redeemable only while its creator is still an active, non-disabled 
 
 ## Known limits
 
-- Owner status is read without a row lock during invite creation; a concurrent revocation can race one invite. The invite still grants only a non-owner role.
 - Invitation delivery is out of band: the owner copies the link. No email is sent.

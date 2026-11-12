@@ -39,7 +39,7 @@ export class PostgresRegistration {
       await tx`SET LOCAL statement_timeout = '2000ms'`
       await tx`SET LOCAL lock_timeout = '1000ms'`
       const owners =
-        await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${accountId} AND m.role = 'owner' AND m.revoked_at IS NULL AND NOT a.disabled`
+        await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${accountId} AND m.role = 'owner' AND m.revoked_at IS NULL AND NOT a.disabled FOR SHARE OF m, a`
       if (!owners.length) return null
       const rows =
         await tx`INSERT INTO farm.account_invites (farm_id, role, digest, created_by, expires_at) VALUES (${farmId}::uuid, ${role}, ${digest}, ${accountId}, clock_timestamp() + ${ttlMs} * interval '1 millisecond') RETURNING expires_at`
@@ -60,7 +60,7 @@ export class PostgresRegistration {
           await tx`SELECT i.id, i.farm_id, i.role FROM farm.account_invites i
           JOIN farm.memberships m ON m.farm_id = i.farm_id AND m.account_id = i.created_by AND m.role = 'owner' AND m.revoked_at IS NULL
           JOIN farm.session_accounts a ON a.id = i.created_by AND NOT a.disabled
-          WHERE i.digest = ${digest} AND i.consumed_at IS NULL AND i.expires_at > clock_timestamp() FOR UPDATE OF i`
+          WHERE i.digest = ${digest} AND i.consumed_at IS NULL AND i.expires_at > clock_timestamp() FOR UPDATE OF i FOR SHARE OF m, a`
         const invite = invites[0]
         if (!invite) return false
         const accountId = randomUUID()

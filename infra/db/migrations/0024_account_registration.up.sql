@@ -32,3 +32,6 @@ CREATE ROLE farm_account_registration NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROL
 GRANT SELECT, INSERT ON farm.session_accounts, farm.password_credentials, farm.farms, farm.memberships TO farm_account_registration;
 GRANT SELECT, INSERT ON farm.account_invites TO farm_account_registration;
 GRANT UPDATE (consumed_at, consumed_by) ON farm.account_invites TO farm_account_registration;
+-- Row locks need UPDATE on one column; existing guards reject identity changes.
+GRANT UPDATE (farm_id) ON farm.memberships TO farm_account_registration;
+GRANT UPDATE (id) ON farm.session_accounts TO farm_account_registration;

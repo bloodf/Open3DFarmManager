@@ -540,6 +540,7 @@ export async function testPostgresAtomicTelemetry(
       mixedRecords.map((record) => record.eventId),
     )
     assert.equal(await count(mixed), 2)
+    now += 1000
     const stray = bytes([event(mixed.printerKey), transition('not-assigned')]),
       strayChallenge = await challenge(mixed, stray)
     now += 1000

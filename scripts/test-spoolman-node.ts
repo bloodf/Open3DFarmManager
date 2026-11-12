@@ -1,5 +1,6 @@
 // Read-only qualification against a parent-owned disposable synthetic fixture.
 import assert from 'node:assert/strict'
+import { qualificationScope } from './spoolman-qualification-context.ts'
 import seed from '../infra/sim/spoolman/seed.json' with { type: 'json' }
 import { createLoopbackSpoolmanReader } from '../packages/connector/src/spoolman/http-read.ts'
 
@@ -7,11 +8,7 @@ const origin = process.env.SPOOLMAN_SYNTHETIC_TEST_ORIGIN
 if (!origin || process.env.SPOOLMAN_SYNTHETIC_TEST_DISPOSABLE !== 'yes')
   throw new Error('Explicit disposable synthetic Spoolman origin required')
 
-const context = {
-  farmId: '00000000-0000-4000-8000-000000000001',
-  serviceId: '00000000-0000-4000-8000-000000000002',
-  limit: 200,
-}
+const context = { ...qualificationScope, limit: 200 }
 const read = (limit: number) =>
   createLoopbackSpoolmanReader({
     origin,

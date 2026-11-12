@@ -1,5 +1,5 @@
 import { assignmentSetDigest } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
-import test, { mock } from 'node:test'
+import test, { afterEach, beforeEach, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -19,12 +19,20 @@ import {
 // monotonic clock, so they must stand still together. The 100 ms source
 // windows below then expire only through the sender's own timers or an
 // explicit test clock, never because this process was descheduled.
-const frozenMonoMs = performance.now()
-Object.defineProperty(performance, 'now', {
-  configurable: true,
-  value: () => frozenMonoMs,
+const monotonic = Object.getOwnPropertyDescriptor(performance, 'now')
+beforeEach(() => {
+  const frozenMonoMs = performance.now()
+  Object.defineProperty(performance, 'now', {
+    configurable: true,
+    value: () => frozenMonoMs,
+  })
+  mock.timers.enable({ apis: ['Date'], now: Date.now() })
 })
-mock.timers.enable({ apis: ['Date'], now: Date.now() })
+afterEach(() => {
+  mock.timers.reset()
+  if (monotonic) Object.defineProperty(performance, 'now', monotonic)
+  else Reflect.deleteProperty(performance, 'now')
+})
 
 async function fixture(onSend?: () => void) {
   const identity = new ConnectorIdentity(

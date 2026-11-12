@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { afterEach, beforeEach, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -19,6 +19,18 @@ import {
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 import { createHash } from 'node:crypto'
+
+// Dispatch, driver and command deadlines run on clocks the tests control: wall
+// time and timers move only when a test ticks them, and the shared monotonic
+// clock advances 1 µs per read so ordering checks stay strict. A descheduled
+// process therefore cannot turn a slow loopback round trip into a deadline.
+let monotonic = 0
+const monotonicNow = () => (monotonic += 0.001)
+beforeEach(() => {
+  monotonic = performance.now()
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() })
+})
+afterEach(() => mock.timers.reset())
 
 // Synthetic issuer and provisioned mapping; no DB, browser, control RTC or simulator authority proof.
 async function commandFixture() {
@@ -209,7 +221,7 @@ async function fixture(
       reconnectMinMs: 100,
       reconnectMaxMs: 100,
     },
-    clock: { monotonicNow: () => performance.now() },
+    clock: { monotonicNow },
     observe: (binding, observation) =>
       dispatcher?.observe(binding, observation) ?? false,
   })
@@ -224,7 +236,7 @@ async function fixture(
         },
       ],
     },
-    clock: { wallNow: Date.now, monotonicNow: () => performance.now() },
+    clock: { wallNow: () => Date.now(), monotonicNow },
     journal,
     driver,
     resultTimeoutMs: 1500,
@@ -367,6 +379,8 @@ for (const fault of ['lost-ack', 'disconnect'] as const) {
       const f = await fixture(t, {
         pause: (socket) => {
           if (fault === 'disconnect') socket.terminate()
+          // The lost acknowledgement is detected by the driver request timeout.
+          else setImmediate(() => mock.timers.tick(500))
           return true
         },
       })

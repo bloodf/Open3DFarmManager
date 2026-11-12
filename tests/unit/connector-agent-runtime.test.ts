@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect, onTestFailed } from 'vitest'
 import {
   createHash,
   createPublicKey,
@@ -55,6 +55,12 @@ function job(args: string[], env = {}) {
   })
   resource({ kind: 'child', id: child.pid, state: 'created' })
   let output = ''
+  // A test timeout names what the child printed and whether it was still alive.
+  onTestFailed(() =>
+    console.error(
+      `Agent fixture child: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+    ),
+  )
   const reading = (async () => {
     for await (const bytes of child.stdout!) output += bytes.toString('utf8')
   })()
@@ -88,13 +94,19 @@ function job(args: string[], env = {}) {
       return child.exitCode !== null
     },
     finish,
+    // Waits for the agent's own output or fixture events, never a fixed
+    // window: the test timeout is the only hang bound, and an early exit
+    // fails at once with the agent's output.
     async until(predicate: () => boolean) {
-      const deadline = Date.now() + 7000
       while (!predicate()) {
-        if (child.exitCode !== null || Date.now() > deadline)
+        if (child.exitCode !== null) {
+          // Output written just before exit may still be in the pipe.
+          await reading
+          if (predicate()) return
           throw new Error(
-            `Agent fixture condition not reached: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+            `Agent exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
           )
+        }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },
@@ -528,12 +540,8 @@ test('standalone collection rechecks scope under lock before recovery', async ()
       readFileSync(compact),
     ]
     writeFileSync(join(server.temp.path, 'resume'), 'go')
-    const deadline = Date.now() + 7000
-    while (
-      Date.now() < deadline &&
-      !running.exited &&
-      lines(running.output, 'queued') === 0
-    )
+    // Wait for the agent's decision (exit or a queued record), not a window.
+    while (!running.exited && lines(running.output, 'queued') === 0)
       await new Promise((resolve) => setTimeout(resolve, 10))
     const result = running.exited
       ? await running.finish()
@@ -585,7 +593,13 @@ test('uncertain acknowledgement retains drain expiry in the agent summary', asyn
   })
   try {
     await running.until(() => server.completed.length >= 1)
-    expect(JSON.parse(server.completed[0]!.body)).toHaveLength(1)
+    // The expired seed is dropped and the fresh seed is sent. Live collection
+    // may add its own snapshot to this first batch before the drain starts.
+    const observed = JSON.parse(server.completed[0]!.body).map(
+      (record: { state?: { observedAt?: number } }) => record.state?.observedAt,
+    )
+    expect(observed).not.toContain(old)
+    expect(observed).toContain(now)
     const log = join(server.data, 'telemetry', 'telemetry.jsonl')
     renameSync(log, log + '.saved')
     mkdirSync(log, { mode: 0o700 })

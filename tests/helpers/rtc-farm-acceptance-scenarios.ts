@@ -9,6 +9,11 @@ export type RtcFarmScenario = {
   env: Readonly<Record<string, string>>
   /** Ledger lines that must appear for the row to count as passed. */
   expect: readonly string[]
+  /**
+   * Task-owned resources the runner starts once for every row that needs them.
+   * Rows with resources are opt-in: they run only when named explicitly.
+   */
+  resources?: readonly 'rtsp-camera'[]
 }
 
 const farmPage = {
@@ -43,10 +48,25 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         'farm-page-no-reopen-window-ms:',
       ],
     },
+    // live status → camera video plays (frames decode), stop/show toggle →
+    // revocation detaches the video and leaves no ingest helper running
+    'farm-page-camera': {
+      env: { ...farmPage, SIGNALLING_HTTPS_RTC_CLOSURE: 'revocation' },
+      resources: ['rtsp-camera'],
+      expect: [
+        PASS,
+        'farm-page-camera-playing-frames:',
+        'farm-page-camera-toggle-stop-show',
+        'farm-page-camera-detached-no-helper',
+      ],
+    },
   })
 
 export function selectRtcFarmScenarios(list: string | undefined) {
-  const names = (list ?? Object.keys(RTC_FARM_SCENARIOS).join(','))
+  const defaults = Object.entries(RTC_FARM_SCENARIOS)
+    .filter(([, row]) => !row.resources?.length)
+    .map(([name]) => name)
+  const names = (list ?? defaults.join(','))
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)

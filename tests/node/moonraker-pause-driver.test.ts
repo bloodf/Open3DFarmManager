@@ -1,7 +1,8 @@
-import test, { mock } from 'node:test'
+import test, { afterEach, beforeEach, mock } from 'node:test'
 // Driver timers fire only when a test advances them, so a descheduled process
 // cannot turn a loopback reply into a request timeout.
-mock.timers.enable({ apis: ['setTimeout'] })
+beforeEach(() => mock.timers.enable({ apis: ['setTimeout'] }))
+afterEach(() => mock.timers.reset())
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'

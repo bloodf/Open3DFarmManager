@@ -43,7 +43,10 @@ const sender = (endpoint: string, timeoutMs = 1000) =>
 test(
   'real loopback POST connects durable queue to synthetic ingestion and acknowledgement',
   { timeout: 5000 },
-  async () => {
+  async (t) => {
+    // Delivery, not the 1 s sender deadline, is under test here; the deadline
+    // has its own test below. Timers fire only if this test advances them.
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     const directory = mkdtempSync(join(tmpdir(), 'open3d-http-'))
     const queue = new TelemetryQueue(directory, 1000)
     const store = new MemoryTelemetryStore()
@@ -122,33 +125,20 @@ test(
           sender(http.endpoint, 27193)(body, new AbortController().signal),
           /Telemetry transport failed/,
         )
-        // The watchdog bounds a handler that never arrives, including an early failure.
-        let watchdog!: ReturnType<typeof setTimeout>
-        try {
-          await Promise.race([
-            ready,
-            new Promise<never>((_, reject) => {
-              watchdog = originalSetTimeout(
-                () => reject(new Error('Request did not reach handler')),
-                2000,
-              )
-            }),
-          ])
-        } finally {
-          clearTimeout(watchdog)
-        }
+        // Wait for the handler event; a sender that settles first is a failure
+        // in its own right. The test timeout is the only hang bound.
+        await Promise.race([
+          ready,
+          attempt.then(() => {
+            throw new Error(
+              'Sender settled before the request reached the handler',
+            )
+          }),
+        ])
         assert.equal(typeof fireDeadline, 'function')
         fireDeadline()
         await attempt
-        await Promise.race([
-          closeObserved,
-          new Promise<never>((_, reject) => {
-            watchdog = originalSetTimeout(
-              () => reject(new Error('Response did not close')),
-              2000,
-            )
-          }),
-        ]).finally(() => clearTimeout(watchdog))
+        await closeObserved
       } finally {
         timer.mock.restore()
         await http.close()

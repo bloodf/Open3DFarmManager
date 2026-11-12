@@ -63,13 +63,16 @@ export async function testSimulatorFarmPage(input: {
         JSON.stringify({ state: 'Ociosa', temperatures: readings }),
     )
     // Spoolman inventory relayed by the Connector over the same channel.
-    const caption = page.getByText(/^Bobinas \(\d+ de \d+\)$/)
-    await expect(caption).toBeVisible({ timeout: 15000 })
+    // The caption is interpolated across lines; match it whitespace-tolerantly.
+    const table = page.getByRole('region', { name: /^Bobinas: / })
+    const caption = table.locator('caption')
+    await expect(caption).toHaveText(/Bobinas\s*\(\s*\d+\s+de\s+\d+\s*\)/, {
+      timeout: 15000,
+    })
     const [shown, total] = (await caption.innerText())
       .match(/\d+/g)!
       .map(Number)
     assert.ok(shown! >= seed.spools.length && total! >= shown!)
-    const table = page.getByRole('region', { name: /^Bobinas: / })
     for (const filament of seed.filaments)
       await expect(
         table.getByRole('rowheader', { name: filament.name, exact: true }),

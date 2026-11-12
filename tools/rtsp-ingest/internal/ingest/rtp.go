@@ -28,7 +28,11 @@ type streamAdmission struct {
 	sps     bool
 	pps     bool
 	ready   bool
+	// Live sources join mid-GOP; leading non-IDR units are dropped, never offered.
+	skipped int
 }
+
+const maxBootstrapSkips = 128
 
 func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]byte) error) error {
 	if err := s.guard.Admit(pkt); err != nil {
@@ -41,7 +45,7 @@ func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]b
 	if err != nil {
 		return ErrRTP
 	}
-	keyframe := false
+	keyframe, skip := false, false
 	for _, nalu := range nalus {
 		if len(nalu) == 0 || nalu[0]&0x80 != 0 {
 			return ErrRTP
@@ -57,13 +61,17 @@ func (s *streamAdmission) accept(pkt *rtp.Packet, offer func(uint64, bool, [][]b
 			}
 			keyframe, s.ready = true, true
 		case h264.NALUTypeNonIDR:
-			if !s.ready {
-				return ErrRTP
-			}
+			skip = !s.ready
 		case h264.NALUTypeSEI, h264.NALUTypeAccessUnitDelimiter:
 		default:
 			return ErrRTP
 		}
+	}
+	if skip {
+		if s.skipped++; s.skipped > maxBootstrapSkips {
+			return ErrRTP
+		}
+		return nil
 	}
 	timestampUs, err := s.clock.Complete(pkt.Timestamp)
 	if err != nil {

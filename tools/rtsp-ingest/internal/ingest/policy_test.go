@@ -25,7 +25,11 @@ func TestSDPFixtureProfile(t *testing.T) {
 		strings.Replace(fixtureSDP, "video", "audio", 1),
 		strings.Replace(fixtureSDP, "H264/90000", "H265/90000", 1),
 		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=0", 1),
-		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets=Zw==,aA==", 1),
+		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets=Zw==,aA==,aA==", 1),
+		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets=Zw", 1),
+		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets=", 1),
+		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets=Zw==;sprop-parameter-sets=Zw==", 1),
+		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;sprop-parameter-sets="+strings.Repeat("A", 1028), 1),
 		strings.Replace(fixtureSDP, "profile-level-id=42e01f", "profile-level-id=zzzzzz", 1),
 		strings.Replace(fixtureSDP, "packetization-mode=1", "packetization-mode=1;packetization-mode=1", 1),
 		strings.Replace(fixtureSDP, "trackID=0", "rtsp://192.0.2.2:8554/track", 1),
@@ -41,6 +45,15 @@ func TestSDPFixtureProfile(t *testing.T) {
 		if err == nil && ValidateSDP(desc, fixtureDestination()) == nil {
 			t.Fatal("accepted unsupported SDP")
 		}
+	}
+}
+
+// MediaMTX advertises out-of-band parameter sets; they are bounded and ignored.
+func TestSDPAcceptsBoundedOutOfBandParameterSets(t *testing.T) {
+	body := strings.Replace(fixtureSDP, "packetization-mode=1;profile-level-id=42e01f", "packetization-mode=1; profile-level-id=42C00B; sprop-parameter-sets=Z0LAC9oFB+wEQAAAAwBAAAADAqPFCqg=,aM4PyA==", 1)
+	desc, err := sdpunmarshaler.UnmarshalWithLimits([]byte(body), *sdpLimits())
+	if err != nil || ValidateSDP(desc, fixtureDestination()) != nil {
+		t.Fatalf("rejected bounded sprop-parameter-sets: %v", err)
 	}
 }
 

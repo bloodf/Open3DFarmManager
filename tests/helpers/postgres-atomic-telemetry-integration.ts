@@ -1744,12 +1744,11 @@ export async function testPostgresAtomicTelemetry(
         const body = bytes(batch)
         now += 1000
         const proof = signed(bench, body, await challenge(bench, body))
+        now += 1000
         const start = performance.now()
-        assert.equal(
-          committed(await service().commitTelemetryWithProof(proof, body)),
-          true,
-        )
+        const result = await service().commitTelemetryWithProof(proof, body)
         commitMs += performance.now() - start
+        assert.ok(committed(result), JSON.stringify(result))
       }
       assert.equal(await count(bench), batches * 100)
       checks.push(

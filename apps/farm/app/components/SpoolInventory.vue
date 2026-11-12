@@ -42,26 +42,34 @@ function grams(value: number | null) {
   <section aria-labelledby="spools-heading" class="spools">
     <h2 id="spools-heading">Estoque de filamento</h2>
     <p>Somente leitura. Os dados vêm do Spoolman, pelo Connector.</p>
-    <p v-if="!sections.length" role="status">
-      {{
-        connected
-          ? 'Aguardando o estoque informado pelo Connector.'
-          : 'Estoque indisponível sem conexão direta com o Connector.'
-      }}
-    </p>
+    <div role="status">
+      <p v-if="!sections.length">
+        {{
+          connected
+            ? 'Aguardando o estoque informado pelo Connector.'
+            : 'Estoque indisponível sem conexão direta com o Connector.'
+        }}
+      </p>
+    </div>
     <div v-for="section in sections" :key="section.item.agentId">
       <h3 class="opaque">{{ section.label }}</h3>
-      <p v-if="!section.item.inventory" role="status">
-        Estoque indisponível. O Connector não informou dados do Spoolman neste
-        momento.
-      </p>
-      <template v-else>
-        <p :role="section.stale ? 'status' : undefined">
+      <div role="status">
+        <p v-if="!section.item.inventory">
+          Estoque indisponível. O Connector não informou dados do Spoolman neste
+          momento.
+        </p>
+        <p v-else>
           <strong v-if="section.stale">Desatualizado.</strong>
           {{ section.age }}.
         </p>
-        <p v-if="!section.item.inventory.spools.length">
+      </div>
+      <template v-if="section.item.inventory">
+        <p v-if="section.item.inventory.total === 0">
           Nenhuma bobina cadastrada no Spoolman.
+        </p>
+        <p v-else-if="!section.item.inventory.spools.length">
+          Exibindo 0 de {{ section.item.inventory.total }} bobinas. O Connector
+          não pôde enviar o detalhe. Consulte o Spoolman.
         </p>
         <div
           v-else
@@ -117,6 +125,7 @@ function grams(value: number | null) {
         </div>
         <p
           v-if="
+            section.item.inventory.spools.length > 0 &&
             section.item.inventory.total > section.item.inventory.spools.length
           "
         >

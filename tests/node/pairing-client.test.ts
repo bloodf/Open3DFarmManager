@@ -413,3 +413,166 @@ test('non-200 response bodies are drained', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+function withMocks(run: () => Promise<void>) {
+  return async () => {
+    try {
+      await run()
+    } finally {
+      mock.restoreAll()
+      syncBuiltinESMExports()
+    }
+  }
+}
+
+test(
+  'probe unlink failure closes the descriptor, cleans up and keeps the probe error',
+  withMocks(async () => {
+    const { dir, identity, clock, base } = await setup()
+    try {
+      const realUnlink = fs.unlinkSync
+      const realClose = fs.closeSync
+      let probeFailed = false
+      let closed = 0
+      mock.method(fs, 'unlinkSync', (path: string) => {
+        if (path.endsWith('.probe') && !probeFailed) {
+          probeFailed = true
+          throw Object.assign(new Error('EPERM probe'), { code: 'EPERM' })
+        }
+        return realUnlink(path)
+      })
+      mock.method(fs, 'closeSync', (fd: number) => {
+        closed++
+        if (closed === 1) {
+          realClose(fd)
+          throw new Error('close failed') // must not mask the probe error
+        }
+        return realClose(fd)
+      })
+      syncBuiltinESMExports()
+      const server = fakeServer(identity, [[200, approved]], clock)
+      await assert.rejects(
+        pairConnector({ ...base, fetch: server.fetch }),
+        /EPERM probe/,
+      )
+      assert.equal(closed, 1)
+      assert.deepEqual(server.calls, [])
+      assert.deepEqual(readdirSync(dir), ['id'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }),
+)
+
+test('successful probe leaves no probe file, only the reserved temp file', async () => {
+  const { dir, identity, clock, base } = await setup()
+  try {
+    const server = fakeServer(identity, [[200, approved]], clock)
+    let during: string[] = []
+    await pairConnector({
+      ...base,
+      fetch: (url, init) => {
+        if (url.endsWith('/start')) during = readdirSync(dir).sort()
+        return server.fetch(url, init)
+      },
+    })
+    assert.equal(during.length, 2)
+    assert.ok(during.some((n) => /^\.credential-.*\.tmp$/.test(n)))
+    assert.ok(!during.some((n) => n.endsWith('.probe')))
+    assert.deepEqual(readdirSync(dir).sort(), ['credential.json', 'id'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a rejecting body on non-200 is swallowed and the status decides the error', async () => {
+  const { dir, base } = await setup()
+  try {
+    const failing =
+      (status: number): PairingFetch =>
+      async () => ({
+        status,
+        text: async () => {
+          throw new Error('body failed')
+        },
+      })
+    await assert.rejects(
+      pairConnector({ ...base, fetch: failing(403) }),
+      /rejected/,
+    )
+    await assert.rejects(
+      pairConnector({ ...base, fetch: failing(503) }),
+      /unavailable/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an oversized non-200 body via the default transport is cancelled', async () => {
+  const { dir, base } = await setup()
+  const total = 200
+  let sent = 0
+  let closedEarly = false
+  const server = createServer((req, res) => {
+    req.resume()
+    res.writeHead(403)
+    res.on('close', () => {
+      closedEarly = sent < total
+    })
+    const chunk = Buffer.alloc(16_384, 'x')
+    const tick = () => {
+      if (res.destroyed || sent >= total) return res.end()
+      sent++
+      res.write(chunk)
+      setImmediate(tick)
+    }
+    tick()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  try {
+    await assert.rejects(
+      pairConnector({ ...base, serverOrigin: origin }),
+      /rejected/,
+    )
+    await new Promise((r) => setTimeout(r, 100))
+    assert.ok(closedEarly, 'server saw the stream cancelled before completion')
+  } finally {
+    server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test(
+  'post-link unlink and directory fsync failures are swallowed with the credential intact',
+  withMocks(async () => {
+    const { dir, identity, clock, base } = await setup()
+    try {
+      const realUnlink = fs.unlinkSync
+      const realFsync = fs.fsyncSync
+      let fsyncs = 0
+      mock.method(fs, 'unlinkSync', (path: string) => {
+        if (path.endsWith('.tmp')) throw new Error('unlink failed')
+        return realUnlink(path)
+      })
+      mock.method(fs, 'fsyncSync', (fd: number) => {
+        if (++fsyncs > 1) throw new Error('fsync failed') // 1st: file, 2nd: directory
+        return realFsync(fd)
+      })
+      syncBuiltinESMExports()
+      const server = fakeServer(identity, [[200, approved]], clock)
+      const result = await pairConnector({ ...base, fetch: server.fetch })
+      assert.equal(result.expiresAt, approved.expires_at)
+      assert.equal(fsyncs, 2)
+      const stored = JSON.parse(readFileSync(base.credentialPath, 'utf8'))
+      assert.equal(stored.approval.agent_id, AGENT)
+    } finally {
+      mock.restoreAll()
+      syncBuiltinESMExports()
+      for (const name of readdirSync(dir))
+        if (name.endsWith('.tmp')) rmSync(join(dir, name))
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }),
+)

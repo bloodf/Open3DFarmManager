@@ -1,4 +1,4 @@
-FROM node:24.22.2-alpine AS build
+FROM node:24.22.3-alpine AS build
 RUN npm install -g pnpm@12.18.0
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY . .
 RUN pnpm --dir apps/farm build
 
-FROM node:24.22.2-alpine AS runtime
+FROM node:24.22.3-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NITRO_HOST=0.0.0.0 NITRO_PORT=3000 NUXT_DATABASE_MIGRATIONS_DIR=/app/migrations
 COPY --from=build --chown=10001:10001 /app/apps/farm/.output ./

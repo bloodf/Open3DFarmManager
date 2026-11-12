@@ -146,6 +146,8 @@ export class TelemetryQueue {
   readonly recovery: QueueLoss
   /** True when this open took over a lock left by an owner that cannot be running. */
   readonly recoveredStaleLock: boolean
+  /** Takeover succeeded but its recovery mutex could not be removed (operator review). */
+  readonly recoveryMutexLeft: boolean
 
   constructor(
     directory: string,
@@ -178,7 +180,9 @@ export class TelemetryQueue {
     this.temporary = join(directory, 'telemetry.compact')
     this.cursor = join(directory, 'telemetry.ack')
     this.cursorTemporary = join(directory, 'telemetry.ack.tmp')
-    this.recoveredStaleLock = acquireQueueLock(this.lock).recovered
+    const lock = acquireQueueLock(this.lock)
+    this.recoveredStaleLock = lock.recovered
+    this.recoveryMutexLeft = lock.mutexLeft === true
     try {
       if (policy) {
         const result: unknown = policy.beforeRecovery()

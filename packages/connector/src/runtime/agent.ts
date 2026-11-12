@@ -69,8 +69,12 @@ function untilAbort(signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Wall clock for credential expiry, queue time and renewal scheduling. Tests
- * inject one; production uses Date.now and the renewal's real timer sleep.
+ * Wall clock for the reads in this file (credential expiry, queue time, local
+ * status, pause authority confirm, drain clock) and for credential readback
+ * and renewal scheduling. Downstream modules such as pause-control,
+ * authenticated-http-telemetry and signalling still use real time, so an
+ * injected clock is for tests of this file's logic only. Production omits it
+ * and uses Date.now and the renewal's real timer sleep.
  */
 export type AgentClock = Readonly<{
   now(): number
@@ -352,6 +356,10 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     if (config.renewal) {
       const { runCredentialRenewal, createRenewalHttpTransport } =
         await import('../cloud/credential-renewal.ts')
+      const sleep = clock.sleep
+      const renewalSleep = sleep
+        ? (ms: number, s: AbortSignal) => sleep.call(clock, ms, s)
+        : undefined
       const origin = new URL(config.telemetry.endpoint).origin
       tasks.push(
         runCredentialRenewal({
@@ -367,9 +375,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           retryMinMs: config.renewal.retryMinMs,
           retryMaxMs: config.renewal.retryMaxMs,
           now: () => clock.now(),
-          ...(clock.sleep
-            ? { sleep: (ms: number, s: AbortSignal) => clock.sleep!(ms, s) }
-            : {}),
+          ...(renewalSleep ? { sleep: renewalSleep } : {}),
           signal,
           onDiagnostic: diagnostic,
           onRenewed() {

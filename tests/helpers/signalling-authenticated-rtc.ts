@@ -153,7 +153,9 @@ async function connectorChild(
         reject: (error: Error) => void
       }
     | undefined
-  const fail = () => {
+  let failureReason = 'none'
+  const fail = (reason = 'io') => {
+    if (!failure) failureReason = reason
     failure = true
     pending?.reject(Error('RTC child rejected or closed'))
     pending = undefined
@@ -170,7 +172,7 @@ async function connectorChild(
   child.stderr.on('data', (chunk: Buffer) => {
     // Drain without storing or logging native output, SDP, or library errors.
     errorBytes += chunk.byteLength
-    if (errorBytes > 8192) fail()
+    if (errorBytes > 8192) fail('stderr-bound')
   })
   child.stdout.on('data', (chunk: Buffer) => {
     outputBytes += chunk.byteLength
@@ -219,7 +221,10 @@ async function connectorChild(
       child.exitCode !== null ||
       child.signalCode !== null
     )
-      throw Error('RTC child unavailable')
+      // Reason and exit status only: no child output is retained or logged.
+      throw Error(
+        `RTC child unavailable (${failureReason}, exit ${child.exitCode}, signal ${child.signalCode}, stderr ${errorBytes} B)`,
+      )
     const wire = JSON.stringify(RtcFixtureCommand.parse(command)) + '\n'
     if (Buffer.byteLength(wire) > RTC_FIXTURE_IPC_BYTES)
       throw Error('IPC request limit')

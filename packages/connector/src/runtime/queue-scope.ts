@@ -84,8 +84,6 @@ export function openScopedTelemetryQueue(input: {
       'telemetry.jsonl',
       'telemetry.lock',
       'telemetry.compact',
-      'telemetry.ack',
-      'telemetry.ack.tmp',
       RECEIPT,
       PENDING,
     ]) {
@@ -104,8 +102,6 @@ export function openScopedTelemetryQueue(input: {
           for (const name of [
             'telemetry.jsonl',
             'telemetry.compact',
-            'telemetry.ack',
-            'telemetry.ack.tmp',
             RECEIPT,
             PENDING,
           ]) {

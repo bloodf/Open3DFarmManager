@@ -167,6 +167,8 @@ type Scope = {
   jti: string
   token: string
   identity: ConnectorIdentity
+  /** Validated local ICE bind address; default loopback. */
+  bindAddress?: string
 }
 type Options = {
   /** Server-confirmed inbox availability only, never RTC or printer authority. */
@@ -514,6 +516,9 @@ export class AuthenticatedConnectorSignallingClient {
       if (!this.#channel.current()) return
       const caps = this.#channel.deadlines()
       const input: PeerOptions = {
+        ...(this.#scope.bindAddress === undefined
+          ? {}
+          : { bindAddress: this.#scope.bindAddress }),
         identity: this.#scope.identity,
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,

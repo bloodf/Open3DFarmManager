@@ -1,3 +1,4 @@
+import { rtcBindAddress } from '../config/rtc.ts'
 import { PeerConnection, type DataChannel } from 'node-datachannel'
 import { ConnectorIdentity } from '../identity/store.ts'
 import {
@@ -26,6 +27,8 @@ import {
 } from './pause-control-session.ts'
 
 type Options = Readonly<{
+  /** Local ICE bind address from validated runtime config. Default loopback. */
+  bindAddress?: string
   identity: ConnectorIdentity
   expected: PauseExpectedContext
   /** Only the authenticated current signalling owner may resolve this promise. */
@@ -130,7 +133,7 @@ export class PauseConnectorPeer {
     try {
       this.#peer = new PeerConnection('pause-connector', {
         iceServers: [],
-        bindAddress: '127.0.0.1',
+        bindAddress: rtcBindAddress(input.bindAddress),
         enableIceTcp: false,
         disableAutoNegotiation: true,
         disableFingerprintVerification: false,

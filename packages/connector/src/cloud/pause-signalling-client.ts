@@ -53,6 +53,8 @@ export type PauseConnectorSignallingScope = Readonly<{
   jti: string
   token: string
   identity: ConnectorIdentity
+  /** Validated local ICE bind address; default loopback. */
+  bindAddress?: string
   /** Optional independent operator pins, not locally inferred authority. When absent, current server binding owns these fields. */
   accountId?: string
   keyId?: string
@@ -381,6 +383,7 @@ export class PauseConnectorSignallingClient {
       const caps = this.#channel.deadlines(),
         s = this.#scope
       const input: PeerOptions = {
+        ...(s.bindAddress === undefined ? {} : { bindAddress: s.bindAddress }),
         identity: s.identity,
         expected: {
           transportId: this.#contextId,

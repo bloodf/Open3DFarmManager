@@ -278,6 +278,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
+                bindAddress: config.rtc.bindAddress,
                 origin: signalling.origin,
                 audience: signalling.audience,
                 agentId: credential.agent_id,

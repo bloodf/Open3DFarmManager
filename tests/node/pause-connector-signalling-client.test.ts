@@ -36,6 +36,7 @@ async function fixture(
   options: {
     holdPeer?: boolean
     onProofsReady?: (value: PauseProofsReady) => void
+    bindAddress?: string
   } = {},
 ) {
   const identity = new ConnectorIdentity(
@@ -54,6 +55,7 @@ async function fixture(
     jti: randomUUID(),
     token: 'synthetic-test-token',
     identity,
+    ...(options.bindAddress ? { bindAddress: options.bindAddress } : {}),
   }
   let now = performance.now(),
     wall = Date.now(),
@@ -737,5 +739,20 @@ test('credential and pause audiences cannot substitute for one another', async (
     assert.equal(binding.binding(), undefined)
   } finally {
     await binding.cleanup()
+  }
+})
+
+test('the configured RTC bind address reaches the pause control peer; absent keeps the peer default', async () => {
+  for (const bindAddress of ['0.0.0.0', undefined]) {
+    const f = await fixture(bindAddress ? { bindAddress } : {})
+    try {
+      await f.inbox()
+      await f.notice()
+      await f.contextProof()
+      await f.rtcReady()
+      assert.equal(f.input()?.bindAddress, bindAddress)
+    } finally {
+      await f.cleanup()
+    }
   }
 })

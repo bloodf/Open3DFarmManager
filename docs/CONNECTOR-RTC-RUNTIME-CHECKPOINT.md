@@ -40,8 +40,37 @@ per-field observations from the existing collector. Missing, stale, partial,
 oversized or disconnected observations terminate the status session. Configured
 assignment IDs alone are not current authority; server v2 admission must match
 the complete set. The provider's five-second display freshness policy is not a
-command safety policy. Commands remain disabled. Native RTC remains restricted
-to its existing loopback-only policy.
+command safety policy. Commands remain disabled.
+
+## ICE bind address (loopback default, opt-in LAN)
+
+Native RTC binds its ICE agent to `127.0.0.1` by default, for the read-only,
+pause control and synthetic peers alike. The runtime configuration accepts one
+optional section to change it:
+
+```json
+"rtc": { "bindAddress": "192.168.1.20" }
+```
+
+- Only a literal IPv4 or IPv6 address is accepted. `0.0.0.0` and `::` bind all
+  interfaces and must be written explicitly.
+- Host names, ports, brackets, zone IDs (`%eth0`), surrounding spaces and
+  unknown keys are refused. An invalid value stops startup before any task runs,
+  with the strict configuration error.
+- `packages/connector/src/config/rtc.ts` is the single place that validates the
+  value and supplies the default. The agent passes it to both signalling clients,
+  and every peer resolves it through the same function, so a peer given an
+  invalid value refuses to start rather than binding anywhere.
+- No STUN or TURN server is added, and nothing goes through the server: only the
+  local candidate address changes.
+
+**Security note.** A non-loopback address exposes the Connector's ICE/DTLS UDP
+sockets on that interface, and `0.0.0.0` or `::` on every interface. The data
+channels still require the authenticated signalling binding and the DTLS
+fingerprint and proof checks, but the attack surface widens. Enable it only on a
+trusted LAN, prefer one specific LAN address over all interfaces, and restrict
+inbound UDP to the farm's LAN with the host firewall. Never use it on an
+interface reachable from the internet.
 
 Focused validation passed seven Node lifecycle/configuration tests and thirteen
 actual Node CLI groups driven by Bun, with 131 assertions. The CLI fixture

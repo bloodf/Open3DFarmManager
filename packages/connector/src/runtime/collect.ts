@@ -17,7 +17,6 @@ import { assertUnscopedCollection } from './queue-scope.ts'
 
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
-  | { kind: 'queue-lock-recovered' }
   | {
       kind: 'loss'
       phase: 'recovery' | 'retention'
@@ -112,7 +111,6 @@ export async function collectIntoQueue(input: {
     controller.abort()
   }
   try {
-    if (queue.recoveredStaleLock) diagnostic({ kind: 'queue-lock-recovered' })
     loss(queue.recovery, 'recovery')
     if (config.spoolman && !signal.aborted) {
       const provider = createSpoolmanProvider({

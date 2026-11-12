@@ -252,25 +252,10 @@ async function browserLogin(
   password: string,
 ) {
   await page.goto(origin + '/entrar', { timeout: 10000 })
-  // Submitting before hydration posts the form natively (urlencoded) to the
-  // JSON-only endpoint: 415, no session, and a later 401. Wait for the mounted
-  // Vue app, as the other e2e specs do.
-  await page.waitForFunction(
-    () => {
-      const root = document.querySelector('#__nuxt')
-      return root !== null && '__vue_app__' in root
-    },
-    undefined,
-    { timeout: 10000 },
-  )
   await page.getByLabel('Usuário').fill(username)
   await page.getByLabel('Senha').fill(password)
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
-  // Landing on an /api/ path means a native submission, never a login.
-  await page.waitForURL(
-    (url) => url.pathname !== '/entrar' && !url.pathname.startsWith('/api/'),
-    { timeout: 10000 },
-  )
+  await page.waitForURL((url) => url.pathname !== '/entrar', { timeout: 10000 })
 }
 async function pagePost(
   page: Page,

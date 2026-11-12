@@ -10,6 +10,7 @@ The application and test utilities in this repository are original MIT code. No 
 | TypeScript                                   | Development                     | Apache-2.0                               |
 | Bun type definitions, Node type definitions  | Development                     | MIT                                      |
 | Playwright                                   | Browser tests                   | Apache-2.0                               |
+| axe-core 4.14.0                              | Accessibility checks in tests   | MPL-2.0 (unmodified, not distributed)    |
 | Prettier                                     | Formatting                      | MIT                                      |
 | Vitest                                       | Test runner                     | MIT                                      |
 | esbuild                                      | Connector/helper bundler        | MIT                                      |

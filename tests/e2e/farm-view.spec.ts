@@ -1,4 +1,7 @@
+import { createRequire } from 'node:module'
 import { expect, test, type Page } from '@playwright/test'
+
+const require = createRequire(import.meta.url)
 
 // Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
 // FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
@@ -161,4 +164,45 @@ test('unauthenticated and failed requests never render a false empty inventory',
   )
   await expect(page.getByRole('alert')).toBeFocused()
   await expect(page.getByRole('article')).toHaveCount(0)
+})
+
+test('camera region is named, unavailable without an authorized stream, silent and axe-clean', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await inventory(page)
+  await page.goto('/farm')
+  const camera = page.getByRole('region', {
+    name: `Câmera da impressora ${key}`,
+  })
+  await expect(camera).toBeVisible()
+  await expect(camera.getByRole('status')).toHaveText('Câmera indisponível.')
+  const video = camera.locator('video')
+  await expect(video).toBeHidden()
+  await expect(video).toHaveAttribute(
+    'aria-label',
+    `Imagem ao vivo da impressora ${key}, sem áudio`,
+  )
+  expect(
+    await video.evaluate((node: HTMLVideoElement) => ({
+      muted: node.muted,
+      autoplay: node.autoplay,
+      source: node.srcObject,
+    })),
+  ).toEqual({ muted: true, autoplay: false, source: null })
+  await expect(
+    page.getByRole('button', { name: 'Pausar impressão' }),
+  ).toBeDisabled()
+  await page.addScriptTag({ path: require.resolve('axe-core') })
+  const violations = await page.evaluate(async () => {
+    const axe = (window as unknown as { axe: typeof import('axe-core') }).axe
+    const result = await axe.run(document, {
+      runOnly: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'],
+    })
+    return result.violations.map((v) => ({
+      id: v.id,
+      nodes: v.nodes.map((n) => n.target.join(' ')),
+    }))
+  })
+  expect(violations).toEqual([])
 })

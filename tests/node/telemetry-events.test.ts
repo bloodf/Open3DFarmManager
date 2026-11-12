@@ -83,6 +83,11 @@ test('invalid transitions are rejected by schema, queue and ingestion', async ()
       false,
     )
   assert.equal(
+    TelemetryBatch.safeParse([{ ...base, kind: 'printer-foo', transition }])
+      .success,
+    false,
+  )
+  assert.equal(
     TelemetryBatch.safeParse([{ ...base, transition, state }]).success,
     false,
   )

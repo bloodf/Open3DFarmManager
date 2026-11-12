@@ -94,6 +94,7 @@ export async function collectIntoQueue(input: {
     unavailable: 0,
   }
   // Transitions are detected in memory; the first observation after a restart emits none.
+  // Changes during unreachability fold into one transition from the last-known state at reconnect.
   const lastState = new Map<string, PrinterState['state']>()
   function diagnostic(value: Diagnostic) {
     if (diagnosticBudget-- > 0) input.onDiagnostic(value)

@@ -6,10 +6,15 @@
 // accepts a database URL or an existing container. See
 // docs/RTC-FARM-ACCEPTANCE-CHECKPOINT.md.
 import assert from 'node:assert/strict'
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import {
+  execFile,
+  execFileSync,
+  spawn,
+  type ChildProcess,
+} from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rm, statfs } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { homedir } from 'node:os'
@@ -59,66 +64,115 @@ const name = prefix + '-' + id
 const label = 'org.open3dfarmmanager.rtc-farm-test=' + id
 const workDir = join(workRoot, id)
 const evidence = join(homedir(), '.local/state/o3dfm/rtc-farm-tests', id)
-await mkdir(workDir, { recursive: true, mode: 0o700 })
-await mkdir(evidence, { recursive: true, mode: 0o700 })
 const ledgerPath = join(evidence, 'resources.jsonl')
-const ledger = (value: object) =>
-  appendFileSync(ledgerPath, JSON.stringify(value) + '\n', { mode: 0o600 })
-ledger({ resource: 'work-directory', path: workDir, dbPort })
+const ledger = (value: object) => {
+  try {
+    appendFileSync(ledgerPath, JSON.stringify(value) + '\n', { mode: 0o600 })
+  } catch {
+    // Evidence is best effort; cleanup below never depends on it.
+  }
+}
 
 const docker = async (...args: string[]) =>
   (
     await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
   ).stdout.trim()
 
-// Signals interrupt the current child group; cleanup always runs in finally.
-let interrupted = false
+// Children get an allowlisted environment, never the caller's secrets.
+const ALLOWED_ENV = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'PLAYWRIGHT_BROWSERS_PATH',
+  'XDG_CACHE_HOME',
+]
+const childEnv: NodeJS.ProcessEnv = Object.fromEntries(
+  ALLOWED_ENV.flatMap((key) => (env[key] ? [[key, env[key]]] : [])),
+)
+childEnv.TMPDIR = workDir
+
+const KILL_GRACE_MS = 5000
+const LOG_LIMIT_BYTES = 8 * 1024 * 1024
 let current: ChildProcess | undefined
+const signalGroup = (child: ChildProcess | undefined, name: NodeJS.Signals) => {
+  try {
+    if (child?.pid) process.kill(-child.pid, name)
+  } catch {
+    /* group gone */
+  }
+}
+/** SIGTERM the group, then SIGKILL it if it is still there after the grace. */
+const stopGroup = (child: ChildProcess | undefined) => {
+  signalGroup(child, 'SIGTERM')
+  setTimeout(() => signalGroup(child, 'SIGKILL'), KILL_GRACE_MS).unref()
+}
+
+// First signal: stop the current group and let finally clean up. Second
+// signal: best-effort synchronous cleanup of exactly this run, then exit.
+let interrupted = false
 const interrupt = () => {
-  interrupted = true
-  if (current?.pid)
+  if (interrupted) {
+    signalGroup(current, 'SIGKILL')
     try {
-      process.kill(-current.pid, 'SIGTERM')
+      execFileSync('docker', ['rm', '--force', name], { timeout: 15000 })
     } catch {
-      /* already exited */
+      /* not created or already removed */
     }
+    rmSync(workDir, { recursive: true, force: true })
+    process.exit(130)
+  }
+  interrupted = true
+  stopGroup(current)
 }
 process.on('SIGINT', interrupt)
 process.on('SIGTERM', interrupt)
 
-/** Runs one owned process group; output goes to a bounded evidence log. */
+/** Runs one owned process group; output goes to a size-capped evidence log. */
 async function run(
-  label: string,
+  step: string,
   command: string,
   args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+  options: { cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number },
 ): Promise<number> {
   if (interrupted) throw new Error('Interrupted')
-  const log = createWriteStream(join(evidence, label + '.log'), { mode: 0o600 })
+  const log = createWriteStream(join(evidence, step + '.log'), { mode: 0o600 })
+  let logged = 0
+  const write = (chunk: Buffer) => {
+    if (logged >= LOG_LIMIT_BYTES) return
+    const part = chunk.subarray(0, LOG_LIMIT_BYTES - logged)
+    logged += part.length
+    log.write(part)
+    if (logged >= LOG_LIMIT_BYTES) log.write('\n[log truncated]\n')
+  }
   const child = spawn(command, args, {
     cwd: options.cwd ?? checkout,
-    env: options.env ?? env,
+    env: options.env,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   current = child
-  ledger({ resource: 'process-group', label, pid: child.pid })
-  child.stdout?.pipe(log, { end: false })
-  child.stderr?.pipe(log, { end: false })
-  const timer = setTimeout(interrupt, options.timeoutMs)
+  ledger({ resource: 'process-group', step, pid: child.pid })
+  child.stdout?.on('data', write)
+  child.stderr?.on('data', write)
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    stopGroup(child)
+  }, options.timeoutMs)
   try {
-    const [code, signal] = await once(child, 'exit')
-    return signal ? 128 : (code as number)
+    // 'close' waits for both pipes to drain, so the log is complete.
+    const [code, signal] = await once(child, 'close')
+    if (timedOut) ledger({ timeout: step, ms: options.timeoutMs })
+    return timedOut || signal ? 128 : (code as number)
   } finally {
     clearTimeout(timer)
     current = undefined
     // A surviving group after its leader exited is owned and must not linger.
-    try {
-      if (child.pid) process.kill(-child.pid, 'SIGKILL')
-    } catch {
-      /* group gone */
-    }
-    log.end()
+    signalGroup(child, 'SIGKILL')
+    await new Promise<void>((resolve) => log.end(resolve))
   }
 }
 
@@ -131,8 +185,13 @@ const results: {
   scenario: string
   passed: boolean
   ms: number
+  readonlyMs?: number
+  recoveredMs?: number
 }[] = []
 try {
+  await mkdir(workDir, { recursive: true, mode: 0o700 })
+  await mkdir(evidence, { recursive: true, mode: 0o700 })
+  ledger({ resource: 'work-directory', path: workDir, dbPort })
   const free = await statfs(workRoot, { bigint: true })
   assert.ok(free.bavail * free.bsize >= 4n * 1024n ** 3n, 'Need 4 GiB free')
   assert.equal(
@@ -195,8 +254,7 @@ try {
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
   const harness = join(checkout, 'scripts/test-signalling-https.ts')
-  const nodeEnv: NodeJS.ProcessEnv = { ...env, TMPDIR: workDir }
-  delete nodeEnv.NODE_TLS_REJECT_UNAUTHORIZED
+  const nodeEnv = childEnv
   assert.equal(
     await run(
       'prepare-layer',
@@ -280,11 +338,19 @@ try {
           await copyFile(path, join(evidence, path.slice(workDir.length + 1)))
       const passed =
         code === 0 && scenario.expect.every((line) => combined.includes(line))
+      const metric = (name: string) => {
+        const match = combined.match(
+          new RegExp(`farm-page-${name}-after-ms:(\\d+)`),
+        )
+        return match ? { [`${name}Ms`]: Number(match[1]) } : {}
+      }
       results.push({
         run: attempt,
         scenario: scenario.name,
         passed,
         ms: Math.round(performance.now() - startedAt),
+        ...metric('readonly'),
+        ...metric('recovered'),
       })
       ledger({ result: results.at(-1) })
       if (interrupted) throw new Error('Interrupted')

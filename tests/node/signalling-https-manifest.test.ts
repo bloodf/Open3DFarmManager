@@ -65,6 +65,22 @@ test('internal relative links are sealed by target; escaping links are refused',
       createFixtureReceipt(root, source, 'c'.repeat(64)),
       /escapes/,
     )
+    await rm(join(root, 'server/escape'))
+    // Lexically inside, but the chain resolves outside: s -> t, t -> ../..
+    await symlink('t', join(root, 'server/s'))
+    await symlink('../..', join(root, 'server/t'))
+    await assert.rejects(
+      createFixtureReceipt(root, source, 'c'.repeat(64)),
+      /escapes/,
+    )
+    await rm(join(root, 'server/s'))
+    await rm(join(root, 'server/t'))
+    // A link to the output root itself is refused.
+    await symlink('..', join(root, 'server/root'))
+    await assert.rejects(
+      createFixtureReceipt(root, source, 'c'.repeat(64)),
+      /escapes/,
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -21,21 +21,26 @@ const PASS =
 
 export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
   Object.freeze({
-    // login → paired Connector → live status → disconnect → read-only ≤10 s → recovery
+    // login → paired Connector → live status → disconnect → read-only ≤10 s →
+    // recovery that carries new data
     'farm-page-disconnect': {
       env: { ...farmPage, SIGNALLING_HTTPS_RTC_CLOSURE: 'disconnect' },
       expect: [
         PASS,
         'authenticated-farm-page-disconnect-status-transition-and-readonly-degradation',
+        'farm-page-readonly-after-ms:',
         'farm-page-recovered-after-ms:',
       ],
     },
-    // login → paired Connector → live status → revocation → read-only, no reopen
+    // login → paired Connector → live status → revocation → read-only ≤10 s and
+    // no signalling reopen for longer than the view's reopen backoff cap
     'farm-page-revocation': {
       env: { ...farmPage, SIGNALLING_HTTPS_RTC_CLOSURE: 'revocation' },
       expect: [
         PASS,
         'authenticated-farm-page-revocation-status-transition-and-readonly-degradation',
+        'farm-page-readonly-after-ms:',
+        'farm-page-no-reopen-window-ms:',
       ],
     },
   })

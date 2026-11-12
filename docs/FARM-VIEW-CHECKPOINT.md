@@ -44,6 +44,8 @@ Receipt age uses monotonic time. The display stale threshold is 30 seconds, incl
 
 The consumer closes terminally at the original session deadline, wall-clock expiry, or 30 seconds after subscription, whichever occurs first. The producer remains responsible for its own stricter local expiry and current authority. Repeated authentication callbacks cannot change the original session or extend its lease. Disconnect, rejection, revocation, and expiry leave only same-scope historical observations, and late callbacks cannot restore a closed feed. A new genuinely admitted transport requires a new subscription.
 
+Loss detection and reopen are view-owned and timer-free: the composable's one-second tick drives both. A feed that delivers no newer frame for 9 seconds closes, so a silent P2P stall becomes read-only, historical data within 10 seconds; a disconnect or open failure is read-only immediately. A lease end on a healthy feed (data for at least 10 seconds, last frame under 9 seconds old) is a renewal: rows keep their live connection and observation while a fresh subscription opens at once, transient connecting/verifying steps stay hidden, and liveness still closes the rows 9 seconds after the last frame if the renewal does not deliver. Healthy renewals skip the HTTP authority re-check; the producer and signalling server enforce current authority at every admission, so a revoked renewal fails to admit and falls into the reopen path below. Any other close except `revoked` and `rejected` schedules a reopen after `min(30 s, 1 s × 2^n) × [0.5, 1)` jitter, where `n` counts consecutive unhealthy subscriptions; at most six reopens (seven subscriptions) run before the view waits for the next revalidation (focus, page show or visibility change). Each reopen first re-reads identity and the complete assignment scan, because the browser cannot observe a signalling 403 or a server-side revocation. All Connectors of one run share one in-flight scan (reused for 1 second after it settles). 401/403 or an account change fail the view; a revoked Connector or changed assignment set refreshes the current farm page so statuses and feeds match the server; 429 waits for `Retry-After` (else 30 seconds) without spending the reopen budget. `revoked` and `rejected` (invalid or tampered feed) stop immediately. The feed reports `rejected` only for validation failures: a callback that arrives after its lease or deadline lapsed, before the expiry timer runs, closes as `expired`, and local slot capacity or a view-callback fault closes as `disconnected`. Auth invalidation, logout, farm/key change, route leave and unmount retire the run, which cancels any pending reopen. The page's `role="status"` notice announces only live ↔ unavailable changes; per-row text carries transient steps.
+
 The Connector runtime owner must install the complete fresh snapshot provider alongside the genuine client and document its bounded publishing strategy and disposal behavior. Opening a WebSocket, ICE connectivity, registry approval, a proof fixture, or `fixture-idle` cannot satisfy this contract. There is no command, signing, media, arbitrary-URL fetch, HTTP status fallback, or TURN method on the port.
 
 ## Local-interface navigation
@@ -56,14 +58,14 @@ The confirmed origin stays inside the current account, farm, assignment, Connect
 
 The coordinator released the CPU restriction for focused tests, formatting, and static typing. These checks passed:
 
-- `bun test tests/unit/farm-view.test.ts`: 24 tests, 161 assertions. All feed events are explicitly synthetic unit inputs.
+- `bun test tests/unit/farm-view.test.ts` (historical, pre-pnpm; now Vitest): 24 tests, 161 assertions. All feed events are explicitly synthetic unit inputs.
 - Standalone strict TypeScript over the utility, unit tests, and opt-in e2e file, with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` enabled.
 - `apps/farm/node_modules/.bin/vue-tsc --noEmit --incremental false -p apps/farm/.nuxt/tsconfig.app.json`, using the pre-existing generated app configuration without Nuxt preparation or build.
 - Prettier on the six owned files and `git diff --check`.
 
 `tests/e2e/farm-view.spec.ts` adds three isolated UI scenarios for native controls, 320px layout, exact escaped keys, external-anchor privacy attributes, no outbound local-address probe, focus invalidation, sign-in, and service failure. These tests are gated by `FARM_VIEW_E2E=true` and require a separately supplied built app with `farmView` enabled. Use `FARM_VIEW_E2E=true pnpm exec playwright test --config playwright.farm-view.config.ts` after building the app; set `FARM_VIEW_PORT` to move off 3101. The file also holds four axe-core WCAG A/AA scans (320px and 1280px inventory, open/confirmed local-interface form, sign-in and error states). This dedicated configuration enables only the farm-view scenarios on loopback port `FARM_VIEW_PORT` (default 3101; empty uses the default, otherwise an integer 1-65535) and leaves the default flag-off launcher on its own port. Locally observed on 2026-11-11 at commit 91f4ea8 (Chromium 1254, Linux amd64): `FARM_VIEW_E2E=true FARM_VIEW_PORT=22401 pnpm exec playwright test --config playwright.farm-view.config.ts` reported 7 passed, 0 failed. Mocked routes cannot prove genuine login, database, or RTC behavior. The default flag-off suite is unchanged.
 
-The following integration evidence is still required on one immutable candidate: `bun run check:all`; built HTTPS own-login and home-to-farm navigation; real PostgreSQL pagination and authorization scopes; approved nonextractable local browser keys; genuine admitted direct RTC simulator observations; stopped-feed age behavior; account, session, assignment, and revocation races; outages and bounded recovery; deliberate isolated local-interface navigation; keyboard, screen-reader, contrast, and responsive review. Signed pause and camera retain separate acceptance gates. No physical-printer command is authorized or tested by this slice.
+The following integration evidence is still required on one immutable candidate: `pnpm run check:all`; built HTTPS own-login and home-to-farm navigation; real PostgreSQL pagination and authorization scopes; approved nonextractable local browser keys; genuine admitted direct RTC simulator observations; stopped-feed age behavior; account, session, assignment, and revocation races; outages and bounded recovery; deliberate isolated local-interface navigation; keyboard, screen-reader, contrast, and responsive review. Signed pause and camera retain separate acceptance gates. No physical-printer command is authorized or tested by this slice.
 
 No dependency was added. No install, build, browser, network, database, container, simulator, worktree, or persistent application process was started. Focused checks created no task-owned build output. Pre-existing dependencies, generated Nuxt files, application output, worktrees, processes, and other workers' edits were preserved. The outside-repository task ledger retains the resource baseline and bounded verification evidence. No publication or deployment occurred.
 
@@ -134,3 +136,38 @@ The final complete source check passed 326 Bun tests, 383 Node tests and two
 runtime skips, lint, TypeScript and both builds. This checkpoint update changed
 only documentation after those checks; its formatting and whitespace checks
 passed separately. No publication or complete Phase 0 acceptance is claimed.
+
+## Spool inventory field on the status frame
+
+Status frames (`StatusMessage`, one per Connector over the browser-to-Connector
+channel) carry an optional, additive `inventory` field: a bounded, read-only
+mirror of Spoolman spools. It never travels through the server.
+
+- Shape (`packages/farm-protocol/src/inventory.ts`): `observedAt`, `stale`,
+  `total` (at most 10000) and at most 8 `spools`. Each spool has `name` (32),
+  `material` (16), `colorHex` (6 lowercase hex), integer `remainingGrams`,
+  `location` (32) and `archived`. All objects are strict; unknown fields are
+  rejected. Negative remaining weight is preserved.
+- The whole frame stays within the existing 2048-byte application cap. The
+  Connector drops trailing spools until it fits and keeps `total` truthful. If
+  even zero spools do not fit, the inventory is omitted and the page shows it as
+  unavailable. A frame without `inventory` means unavailable or not configured.
+- Staleness: the Connector sets `stale` when the Spoolman mirror is not
+  currently observed or is 30 s old or more. The browser also treats an
+  inventory as stale after 30 s without a new frame. When the feed closes, the
+  last inventory is kept but marked historical (stale at once, like printer
+  rows); during a seamless lease renewal it stays live; a new farm clears it.
+
+Compatibility and rollout order. Deploy the farm server and browser first, then
+Connectors.
+
+- A new browser accepts frames from old Connectors, which never send
+  `inventory`.
+- A new browser drops only an invalid `inventory` (the page shows spools as
+  unavailable) and keeps printer status flowing. Printer fields and any unknown
+  top-level key still reject the frame. This tolerance is receive-side only
+  (`parseStatusMessageTolerant`); the Connector validates outbound frames
+  strictly.
+- An old browser validates frames strictly, so it drops the whole feed on any
+  frame that contains `inventory`. This is why browsers must be updated before
+  Connectors that send it.

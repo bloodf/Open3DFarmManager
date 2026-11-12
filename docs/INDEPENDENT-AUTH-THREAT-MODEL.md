@@ -28,3 +28,9 @@ This helper deliberately does not enable an HTTP development exception. A future
 | Sensitive data in logs                  | Redaction of passwords, session tokens, cookies, authorization headers and recovery material                                                   |
 
 The plan's rolling-session duration and all lifecycle behavior remain unimplemented; these constants do not silently establish expiry or revocation semantics. The separate offline Connector authorization decision is unchanged. Current tests validate configuration and pure origin decisions only. They do not demonstrate a secure login system, TLS/proxy deployment, actual cookie enforcement or end-to-end authentication.
+
+## Account creation (E2.1)
+
+- Bootstrap is gated by a deployment secret and an empty-instance check; a wrong or missing secret skips password hashing and returns the generic refusal.
+- Invites are single-use, expiring, hashed at rest, delivered in a URL fragment, and die with their inviting owner.
+- Accepted risk: an invite holder can tell a taken username from a bad invite only through the single generic refusal, but can probe usernames by retrying a valid invite (a conflict keeps the invite usable). Rate limits per IP and per username bound this; the invite holder is already a trusted recipient.

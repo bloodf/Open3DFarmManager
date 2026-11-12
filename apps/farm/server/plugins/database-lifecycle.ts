@@ -5,6 +5,8 @@ import { setDatabasePhase } from '../utils/database/phase.ts'
 
 export default defineNitroPlugin((nitro) => {
   nitro.hooks.hook('close', async () => {
+    // During shutdown 'failed' (not 'ready') so no request or upgrade is admitted
+    // while the pool closes; the lifecycle ignores failures once not 'starting'.
     setDatabasePhase('failed')
     await closeDatabaseRuntime()
   })

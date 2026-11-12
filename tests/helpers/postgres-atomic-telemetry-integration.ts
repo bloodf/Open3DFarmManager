@@ -19,6 +19,7 @@ import {
 } from '../../apps/farm/server/utils/connector-credentials.ts'
 import { createTelemetryHttpHandler } from '../../apps/farm/server/services/telemetry-http.ts'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   runMigrations,
 } from '../../scripts/db/migrations.ts'
@@ -891,7 +892,10 @@ export async function testPostgresAtomicTelemetry(
     const pauses = [
       ...(await admin`SELECT * FROM farm.pause_authority_challenges ORDER BY challenge_id`),
     ]
-    const catalog = await loadMigrationCatalog()
+    const catalog = catalogThrough(
+      await loadMigrationCatalog(),
+      '0022_connector_successor_proofs',
+    )
     // Even an empty down cannot destroy downstream dependent objects.
     await admin`CREATE VIEW public.atomic_successor_dependency AS SELECT jti FROM farm.connector_successor_proofs`
     await assert.rejects(

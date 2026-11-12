@@ -3,6 +3,12 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   nitro: { preset: 'node-server' },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
+  routeRules: Object.fromEntries(
+    ['/primeiro-acesso', '/criar-conta', '/convites'].map((path) => [
+      path,
+      { headers: { 'Referrer-Policy': 'no-referrer' } },
+    ]),
+  ),
   runtimeConfig: {
     database: {
       enabled: false,
@@ -10,7 +16,13 @@ export default defineNuxtConfig({
       migrations: 'verify',
       migrationsDir: '',
     },
-    auth: { enabled: false, origin: '', sessionSecret: '', databaseUrl: '' },
+    auth: {
+      enabled: false,
+      origin: '',
+      sessionSecret: '',
+      databaseUrl: '',
+      bootstrapToken: '',
+    },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
@@ -47,6 +59,20 @@ export default defineNuxtConfig({
       signingKeyId: '',
       signingKeyPath: '',
       tokenTtlSeconds: '',
+    },
+    connectorRenewal: {
+      enabled: false,
+      databaseUrl: '',
+      origin: '',
+      issuer: '',
+      audience: '',
+      proofAudience: '',
+      signingKeyId: '',
+      signingKeyPath: '',
+      publicKeyRegistryPath: '',
+      tokenTtlSeconds: '',
+      proofTtlMs: '',
+      bodyTimeoutMs: '',
     },
     public: { flags: { farmView: false } },
   },

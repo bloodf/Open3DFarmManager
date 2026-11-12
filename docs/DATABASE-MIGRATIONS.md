@@ -31,14 +31,24 @@ Pinned Nitro does not await plugins, so the `database-lifecycle` plugin sets the
 
 ### Roles
 
-The connection in `database.databaseUrl` must be able to `SELECT` on `public.open3dfarm_migrations`, which lives outside `farm`. The restricted `farm_*` application roles have no access to it, so verification and `/readyz` need the migration owner, or a dedicated read-only role. A follow-up migration should add a reader role limited to that table (no migration number is reserved here). Do not point the whole application at the superuser created by the compose file: after the first start create a non-superuser migration owner and a separate application login, for example:
+Startup verification and `/readyz` only read `public.open3dfarm_migrations`, which lives outside `farm`. Migration `0025_schema_reader` creates the NOLOGIN role `farm_schema_reader` with `SELECT` on that table (and `USAGE` on `public`). The application login used by `database.databaseUrl` in `verify` mode should inherit only that role (plus whatever `farm_*` runtime roles it needs elsewhere); the other `farm_*` roles cannot read the journal. A permission failure at startup (SQLSTATE `42501`) is reported as `database permission denied`, not `database unreachable`. `apply` mode needs the migration owner below.
+
+Do not point the application at the superuser created by the compose file. After the first start create a non-superuser migration owner and a separate application login. On PostgreSQL 17 the owner needs `CREATE` on `public` (the journal lives there), and `createrole_self_grant` so that roles it creates grant it `SET`/`INHERIT` (migrations 0017/0018 run `ALTER FUNCTION ... OWNER TO farm_*_owner`, which requires `SET` on those roles):
 
 ```sql
 CREATE ROLE o3dfm_migrator LOGIN PASSWORD :'migrator_password' NOSUPERUSER CREATEROLE;
+ALTER ROLE o3dfm_migrator SET createrole_self_grant = 'set, inherit';
 GRANT CREATE ON DATABASE open3dfarm TO o3dfm_migrator;
+GRANT CREATE ON SCHEMA public TO o3dfm_migrator;
 CREATE ROLE o3dfm_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE;
--- after migrations, grant o3dfm_app the matching farm_* runtime roles it needs
+-- after migrations: GRANT farm_schema_reader TO o3dfm_app WITH INHERIT TRUE; plus the farm_* runtime roles it needs
 ```
+
+The same-target check compares host, port and database name as written, so spell the host identically in every `*DatabaseUrl` (do not mix `localhost`, `127.0.0.1` and aliases).
+
+PostgreSQL roles are cluster-wide, so run one Open3DFarm database per PostgreSQL cluster: migration 0001 onward creates fixed `farm_*` role names that a second database in the same cluster would collide with. When discarding a disposable database, also drop the leftover `farm_*` roles (and any `o3dfm_*` login roles) before reusing the cluster; dropping only the database or schema leaves them behind and a fresh apply then fails.
+
+Startup failures map SQLSTATE to fixed messages: `42501` is `database permission denied`, class `28` is `database authentication failed`, `3D000` (missing database) is `invalid database configuration`, and anything else while reading the journal is `database unreachable`.
 
 ### Database service and tests
 

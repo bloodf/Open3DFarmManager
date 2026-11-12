@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from '../utils/auth/password.ts'
 import type { AuthRuntime } from '../utils/auth/runtime.ts'
+import type { CredentialSnapshot } from '../storage/postgres-credentials.ts'
 
 type AuthEvent = Pick<RequestEvent, 'req' | 'res'>
 
@@ -30,7 +31,7 @@ export function authResponse(event: AuthEvent): void {
   event.res.headers.set('Cache-Control', 'no-store')
   event.res.headers.set('Pragma', 'no-cache')
 }
-function mutation(event: AuthEvent, runtime: AuthRuntime): void {
+export function mutation(event: AuthEvent, runtime: AuthRuntime): void {
   authResponse(event)
   if (!checkMutationOrigin(event.req.headers.get('origin'), runtime.origin).ok)
     throw createError({
@@ -98,8 +99,8 @@ export async function readLoginBody(
     reader.releaseLock()
   }
 }
-async function limit(
-  runtime: AuthRuntime,
+export async function limit(
+  runtime: Pick<AuthRuntime, 'credentials'>,
   kind: 'a' | 's',
   key: string,
 ): Promise<void> {
@@ -145,6 +146,14 @@ export async function login(
     throw unavailable()
   }
   if (!valid || !snapshot) throw unauthorized()
+  return await establishSession(event, runtime, snapshot)
+}
+/** Issues a session record for a verified credential snapshot and seals it into the host-only cookie. */
+export async function establishSession(
+  event: AuthEvent,
+  runtime: AuthRuntime,
+  snapshot: CredentialSnapshot,
+): Promise<{ accountId: string }> {
   let sessionId: string | null
   try {
     sessionId = await runtime.credentials.issue(

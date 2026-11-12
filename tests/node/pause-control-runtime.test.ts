@@ -14,10 +14,14 @@ import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runt
 import type { RuntimeCredential } from '../../packages/connector/src/config/credential.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
+  pauseFailureReason,
   runPauseControl,
   type PauseControlDiagnostic,
 } from '../../packages/connector/src/runtime/pause-control.ts'
-import { createOfflineAuthority } from '../../packages/connector/src/auth/offline-authority.ts'
+import {
+  createOfflineAuthority,
+  type CachedAuthorityFreshness,
+} from '../../packages/connector/src/auth/offline-authority.ts'
 import {
   claimCommand,
   closeCommandJournal,
@@ -27,6 +31,7 @@ import {
 import { createPauseCommandRelay } from '../../packages/connector/src/control/pause-command-relay.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 import {
+  decodeCommandV2,
   encodeCommandV2,
   signCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
@@ -299,13 +304,13 @@ async function fixture(
   async function commandWire() {
     return encodeCommandV2(await signedCommand())
   }
-  async function signedCommand() {
+  async function signedCommand(cmdId: string = randomUUID()) {
     const issuedAt = Date.now()
     return await signCommandV2(
       {
         v: 2,
         purpose: 'printer-pause',
-        cmd_id: randomUUID(),
+        cmd_id: cmdId,
         farm_id: farmId,
         agent_id: agentId,
         account_id: binding.account_id,
@@ -342,7 +347,9 @@ async function fixture(
    * real offline authority tracker, standing in for the authenticated server
    * confirmation; without it authority stays stale like production today.
    */
-  function start(options: { fresh?: boolean } = {}) {
+  function start(
+    options: { fresh?: boolean; freshness?: CachedAuthorityFreshness } = {},
+  ) {
     sessions.length = 0
     diagnostics.length = 0
     controller = new AbortController()
@@ -358,7 +365,7 @@ async function fixture(
       identity,
       dataDirectory: directory,
       signal: controller.signal,
-      freshness: offline.freshness,
+      freshness: options.freshness ?? offline.freshness,
       onDiagnostic: (value) => diagnostics.push(value),
       createClient(scope, options) {
         const session = {
@@ -389,7 +396,7 @@ async function fixture(
   }
   /** Drives proofs, both admission halves and one command through the session. */
   async function admitAndCommand(
-    wire?: string,
+    wire?: string | (() => Promise<string>),
     options: { admitted?: boolean } = {},
   ) {
     await waitFor(() => sessions.length === 1)
@@ -420,7 +427,10 @@ async function fixture(
           (options.admitted === false ? 'pause-denied' : 'pause-admitted'),
       ),
     )
-    const command = wire ?? (await commandWire())
+    const command =
+      typeof wire === 'function'
+        ? await wire()
+        : (wire ?? (await commandWire()))
     session.options.onData?.(frame('control.command', command))
     return { session, command, frame }
   }
@@ -539,8 +549,8 @@ test('an admitted signed pause reaches the fake Moonraker once, is journaled and
   assert.deepEqual(
     f.diagnostics.filter((d) => d.kind === 'pause-outcome'),
     [
-      { kind: 'pause-outcome', outcome: 'applied' },
-      { kind: 'pause-outcome', outcome: 'applied' },
+      { kind: 'pause-outcome', outcome: 'applied', reason: 'applied' },
+      { kind: 'pause-outcome', outcome: 'applied', reason: 'applied' },
     ],
   )
   // The local audit journal holds exactly one applied record for the command.
@@ -604,9 +614,19 @@ test('after an applied pause and a restart on the same data directory the comman
   assert.equal(f.moonraker.counts().pauses, 1)
   // Restart: new relay, journal and tracker on the same data directory.
   const second = f.start()
-  const { session } = await f.admitAndCommand(command)
+  // Same command id, freshly signed for the new peer and capability, so every
+  // earlier check passes and only the journal can refuse it.
+  const { session } = await f.admitAndCommand(async () =>
+    encodeCommandV2(await f.signedCommand(decodeCommandV2(command).cmd_id)),
+  )
   await waitFor(() => session.results.length === 1)
   assert.equal(session.results[0]!.outcome, 'rejected')
+  // The rejection comes from the durable journal's replay refusal.
+  await waitFor(() => f.diagnostics.some((d) => d.kind === 'pause-outcome'))
+  assert.deepEqual(
+    f.diagnostics.filter((d) => d.kind === 'pause-outcome'),
+    [{ kind: 'pause-outcome', outcome: 'rejected', reason: 'replay' }],
+  )
   assert.equal(f.moonraker.counts().pauses, 1)
   f.controller.abort()
   await second
@@ -639,6 +659,10 @@ test('a leftover write-started row from a crash keeps the assignment busy and no
   assert.equal(f.moonraker.counts().pauses, 0)
   f.controller.abort()
   await running
+  assert.deepEqual(
+    f.diagnostics.filter((d) => d.kind === 'pause-outcome'),
+    [{ kind: 'pause-outcome', outcome: 'rejected', reason: 'busy' }],
+  )
   // Only the crashed row exists: the new command was refused before a claim.
   assert.deepEqual(journalRows(f.journalDirectory), ['write-started'])
 })
@@ -677,4 +701,31 @@ test('a terminal transport closes the peer before any command and the lifecycle 
   closeCommandJournal(
     openCommandJournal({ directory: f.journalDirectory, clock: Date.now }),
   )
+})
+
+test('a relay construction failure releases the journal and is classified without free text', async (t) => {
+  const f = await fixture(t)
+  const error = await f
+    .start({ freshness: {} as CachedAuthorityFreshness })
+    .then(
+      () => undefined,
+      (value: unknown) => value,
+    )
+  assert.ok(error instanceof Error)
+  assert.equal(pauseFailureReason(error), 'runtime')
+  assert.equal(pauseFailureReason(new Error('anything')), 'runtime')
+  // The journal was closed: a fresh owner can open the same directory.
+  closeCommandJournal(
+    openCommandJournal({ directory: f.journalDirectory, clock: Date.now }),
+  )
+})
+
+test('an unusable journal directory fails with the fixed journal reason', async (t) => {
+  const f = await fixture(t)
+  writeFileSync(f.journalDirectory, 'not a directory', { mode: 0o600 })
+  const error = await f.start().then(
+    () => undefined,
+    (value: unknown) => value,
+  )
+  assert.equal(pauseFailureReason(error), 'journal')
 })

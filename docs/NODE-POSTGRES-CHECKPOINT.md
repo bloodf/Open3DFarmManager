@@ -1,6 +1,6 @@
 # Node PostgreSQL adapter transition
 
-The farm application uses Nitro's `node-server` preset. Its PostgreSQL repositories and isolated database harnesses now import the pinned `postgres@3.4.9` driver instead of Bun SQL. Bun remains the workspace package manager and unit-test runner. The driver is declared directly by the application and root test workspace, with one version resolved in `bun.lock`. License provenance and the retained notice are in `THIRD_PARTY.md`.
+The farm application uses Nitro's `node-server` preset. Its PostgreSQL repositories and isolated database harnesses now import the pinned `postgres@3.4.9` driver instead of Bun SQL. The workspace now uses pnpm and Vitest/`node --test` (this checkpoint originally recorded Bun as package manager and test runner; historical). The driver is declared directly by the application and root test workspace, with one version resolved in the lockfile (`bun.lock` when recorded; now `pnpm-lock.yaml`). License provenance and the retained notice are in `THIRD_PARTY.md`.
 
 ## Preserved behavior
 
@@ -12,7 +12,7 @@ The implementation retains safe-integer SQL conversions and existing runtime che
 
 ## Validation and pending gates
 
-The exact registry tarball's SHA-512 and package metadata were verified without executing package scripts. It declares Unlicense and no runtime dependencies. Dependency installation used `bun install --ignore-scripts`. Root TypeScript and Nuxt type checking passed after the driver migration. Node 24.20.0 imported all three repositories and all four PostgreSQL integration helpers without database access.
+The exact registry tarball's SHA-512 and package metadata were verified without executing package scripts. It declares Unlicense and no runtime dependencies. Dependency installation used `bun install --ignore-scripts` (historical; now `pnpm install --frozen-lockfile --ignore-scripts`). Root TypeScript and Nuxt type checking passed after the driver migration. Node 24.20.0 imported all three repositories and all four PostgreSQL integration helpers without database access.
 
 The coordinator executed the enrollment and session harnesses with Node 24.20.0 against isolated PostgreSQL 17.11, including each post-restart phase. Proof/revocation, restricted-role denials, telemetry JSONB conflicts and idempotence, session expiry/revocation races, COMMIT failure and closed-pool rejection passed. The migration helper also passed under Node with migrations 0001 through 0005, including concurrent runners and transactional DDL rollback.
 

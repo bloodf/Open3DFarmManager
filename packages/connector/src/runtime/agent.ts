@@ -6,9 +6,13 @@ import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
 import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
+import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
-import type { PauseControlDiagnostic } from './pause-control.ts'
+import type {
+  PauseControlDiagnostic,
+  PauseFailureReason,
+} from './pause-control.ts'
 import { recordAuthorityStale } from './pause-authority-audit.ts'
 import {
   createOfflineAuthority,
@@ -17,9 +21,10 @@ import {
 
 type AgentDiagnostic =
   | CollectionDiagnostic
+  | RenewalDiagnostic
   | PauseControlDiagnostic
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
-  | { kind: 'pause-failed' }
+  | { kind: 'pause-failed'; reason: PauseFailureReason }
   | { kind: 'pause-audit-failed' }
   | { kind: 'credential-expired' }
   | { kind: 'readonly-admitted' }
@@ -62,8 +67,7 @@ function untilAbort(signal: AbortSignal): Promise<void> {
   })
 }
 
-/** One scoped queue, one maintained authenticated sender, one serial drain loop. */
-export async function runConnectorAgent(input: {
+type AgentInput = {
   statusPort?: number
   configPath: string
   credentialPath: string
@@ -71,7 +75,20 @@ export async function runConnectorAgent(input: {
   signal: AbortSignal
   onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
-}): Promise<void> {
+}
+
+/** Restarts the agent after each persisted, server-confirmed credential renewal. */
+export async function runConnectorAgent(input: AgentInput): Promise<void> {
+  while ((await runConnectorAgentOnce(input)) && !input.signal.aborted) {
+    // Every run re-reads identity, credential and config from disk.
+  }
+}
+
+/**
+ * One scoped queue, one maintained authenticated sender, one serial drain loop.
+ * Resolves true when a renewed credential was persisted and a restart is due.
+ */
+async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
   const identity = loadExistingIdentity(input.dataDirectory)
   const credential = readRuntimeCredential(
     input.credentialPath,
@@ -82,7 +99,7 @@ export async function runConnectorAgent(input: {
   const lookupId = config.signalling
     ? credentialLookupId(credential.device_token)
     : undefined
-  if (input.signal.aborted) return
+  if (input.signal.aborted) return false
   bootstrapNetworking()
   const { createAuthenticatedTelemetrySender } =
     await import('../cloud/authenticated-http-telemetry.ts')
@@ -97,7 +114,7 @@ export async function runConnectorAgent(input: {
   })
   if (Date.now() >= credential.expires_at)
     throw new Error('Runtime credential expired before startup')
-  if (input.signal.aborted) return
+  if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
     config,
@@ -107,6 +124,7 @@ export async function runConnectorAgent(input: {
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let failure: { error: unknown } | undefined
+  let renewed = false
   let diagnosticBudget = 1024
   const totals = {
     delivered: 0,
@@ -145,7 +163,7 @@ export async function runConnectorAgent(input: {
         onError: fail,
       })
     }
-    if (signal.aborted) return
+    if (signal.aborted) return false
     snapshots = config.signalling
       ? createFarmSnapshotSource({ assignmentRefs: refs })
       : undefined
@@ -154,7 +172,12 @@ export async function runConnectorAgent(input: {
     // Own budget: pause traffic never starves read-only diagnostics.
     let pauseBudget = 256
     const pauseDiagnostic = (value: AgentDiagnostic) => {
-      if (pauseBudget-- > 0) input.onDiagnostic(value)
+      if (pauseBudget-- <= 0) return
+      try {
+        input.onDiagnostic(value)
+      } catch {
+        // A throwing sink never rejects the pause task or stops the agent.
+      }
     }
     // Offline authority for the pause path. Only the credential-authenticated
     // read-only inbox confirms it; without `signalling` it stays stale and
@@ -251,9 +274,38 @@ export async function runConnectorAgent(input: {
         }).catch(fail),
       )
     }
+    // Credential renewal: a persisted, server-confirmed successor restarts the
+    // agent so every sender re-reads the credential file (see end of function).
+    if (config.renewal) {
+      const { runCredentialRenewal, createRenewalHttpTransport } =
+        await import('../cloud/credential-renewal.ts')
+      const origin = new URL(config.telemetry.endpoint).origin
+      tasks.push(
+        runCredentialRenewal({
+          credentialPath: input.credentialPath,
+          credential,
+          identity,
+          transport: createRenewalHttpTransport({
+            origin,
+            timeoutMs: config.renewal.timeoutMs,
+          }),
+          origin,
+          audience: config.renewal.audience,
+          retryMinMs: config.renewal.retryMinMs,
+          retryMaxMs: config.renewal.retryMaxMs,
+          signal,
+          onDiagnostic: diagnostic,
+          onRenewed() {
+            renewed = true
+            controller.abort()
+          },
+        }).catch(fail),
+      )
+    }
     if (offline) {
       // Explicit opt-in only. Absent `pause.control` creates no pause resource.
-      const { runPauseControl } = await import('./pause-control.ts')
+      const { runPauseControl, pauseFailureReason } =
+        await import('./pause-control.ts')
       tasks.push(
         runPauseControl({
           config,
@@ -263,9 +315,12 @@ export async function runConnectorAgent(input: {
           signal,
           freshness: offline.freshness,
           onDiagnostic: pauseDiagnostic,
-        }).catch(() => {
+        }).catch((error: unknown) => {
           // A pause-path failure never stops read-only telemetry or status.
-          pauseDiagnostic({ kind: 'pause-failed' })
+          pauseDiagnostic({
+            kind: 'pause-failed',
+            reason: pauseFailureReason(error),
+          })
         }),
       )
     }
@@ -401,4 +456,5 @@ export async function runConnectorAgent(input: {
     }
   }
   if (failure) throw failure.error
+  return renewed
 }

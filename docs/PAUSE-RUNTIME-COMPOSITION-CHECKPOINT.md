@@ -19,7 +19,7 @@ Without `control`, the agent creates no journal, socket, relay or driver; an exi
 
 Each command runs at most once. Nothing retries, queues or falls back to HTTP; a closed transport closes its peer. The session lifecycle reconnects with bounded backoff and stops at credential expiry. On shutdown the relay closes and the journal stays open until every driver attempt actually settled.
 
-A pause-path runtime failure (key import, journal open, lifecycle error) emits `pause-failed` and ends only the pause task; telemetry, local status and read-only signalling keep running. Configuration errors still fail startup. Pause diagnostics have their own budget so they cannot exhaust read-only diagnostics.
+A pause-path runtime failure (key import, journal open, lifecycle error) emits `pause-failed` with a fixed reason (`journal`, `credential` or `runtime`; no free text) and ends only the pause task. A diagnostic sink that throws cannot reject the pause task. If relay construction fails after the journal opened, the journal is closed first; telemetry, local status and read-only signalling keep running. Configuration errors still fail startup. Pause diagnostics have their own budget so they cannot exhaust read-only diagnostics.
 
 ## Journal lockout and manual recovery
 

@@ -12,10 +12,20 @@
 
 FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47 AS simulavr
 USER root
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends g++ make cmake swig gcc-avr avr-libc binutils-avr \
+# Reproducible toolchain: Debian snapshot at a fixed timestamp, exact package
+# versions, and a hash-locked setuptools wheel. None of it reaches the runtime.
+ARG DEBIAN_SNAPSHOT=20261101T000000Z
+RUN rm -f /etc/apt/sources.list.d/* \
+  && printf 'deb http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb http://snapshot.debian.org/archive/debian/%s bookworm-updates main\ndeb http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' \
+    "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
+  && apt-get -o Acquire::Check-Valid-Until=false update \
+  && apt-get install -y --no-install-recommends \
+    g++=4:12.2.0-3 make=4.3-4.1 cmake=3.25.1-1 swig=4.1.0-0.2 \
+    gcc-avr=1:5.4.0+Atmel3.6.2-3 avr-libc=1:2.0.0+Atmel3.6.2-3 binutils-avr=2.26.20160125+Atmel3.6.2-4 \
   && rm -rf /var/lib/apt/lists/* \
-  && python3 -m pip install --no-cache-dir setuptools==80.9.0
+  && printf 'setuptools==80.9.0 --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922\n' > /tmp/requirements.txt \
+  && python3 -m pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements.txt \
+  && rm /tmp/requirements.txt
 USER printer
 WORKDIR /home/printer/simulavr
 # simulavr's generated makefiles are not parallel-safe; build serially.
@@ -31,6 +41,8 @@ COPY --from=simulavr --chown=printer:printer /home/printer/simulavr/build /home/
 # the MCU clock never speeds up after Klippy's clock sync.
 ARG SIMULAVR_PACING_RATE=0.1
 USER root
+RUN echo "$SIMULAVR_PACING_RATE" | grep -Eq '^(0\.[0-9]*[1-9][0-9]*|1(\.0+)?)$' \
+  || { echo "SIMULAVR_PACING_RATE must be a number in (0, 1]" >&2; exit 1; }
 RUN sed -i "s|/home/printer/klipper/scripts/avrsim.py |&-r ${SIMULAVR_PACING_RATE} |" /etc/supervisor/supervisord.conf \
   && grep -q "avrsim.py -r ${SIMULAVR_PACING_RATE} " /etc/supervisor/supervisord.conf
 USER printer

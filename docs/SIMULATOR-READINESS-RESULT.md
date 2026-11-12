@@ -60,11 +60,22 @@ pinned digest**:
 
 Compose builds this image for `sv06` and `u1`. Upstream GPL code stays in the
 external image; the repository adds only the MIT build recipe. The builder
-uses Debian bookworm toolchain packages and `setuptools==80.9.0`; neither
-reaches the runtime image. Without a warm cache the build takes about four
-minutes on the test host, so the manual `Simulator` workflow timeout moved
-from 10 to 20 minutes. Local CI cleanup now passes `--rmi local` to remove
-the built images.
+installs its toolchain from a fixed `snapshot.debian.org` timestamp
+(`20261101T000000Z`) with exact package versions, plus a hash-locked
+`setuptools==80.9.0` wheel; none of it reaches the runtime image. The runtime
+stage keeps the upstream `printer` user (`Config.User` of the pinned image) and
+`/bin/start` entrypoint. `SIMULAVR_PACING_RATE` is validated as a number in
+(0, 1] before the Supervisor command is edited. Without a warm cache the build
+takes about four minutes on the test host, so the manual `Simulator` workflow
+timeout moved from 10 to 20 minutes. Local CI cleanup now passes `--rmi local`
+to remove the built images, and its running-simulator check also matches the
+derived `-sv06`/`-u1` images and Compose service labels.
+
+`scripts/simulator-identify-diagnostic.mjs` intentionally keeps running the
+**stock** pinned image, so it can still reproduce and observe the original
+failure. Its preflight now checks that the harness Compose file builds `sv06`
+and `u1` from `./klipper` and that the Dockerfile's final stage is the pinned
+digest.
 
 | Variant (pair cold starts) | Runs | Both ready     | Identify timeouts | `Timer too close` |
 | -------------------------- | ---- | -------------- | ----------------- | ----------------- |

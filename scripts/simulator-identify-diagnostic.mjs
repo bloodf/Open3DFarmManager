@@ -1097,28 +1097,65 @@ function digestOfFile(path) {
   return sha256(readFileSync(path))
 }
 
-function verifyComposePin(composeFile) {
+/** Trimmed lines of the YAML mapping under `key` at exactly `indent` spaces. */
+function yamlBlock(lines, key, indent) {
+  const prefix = `${' '.repeat(indent)}${key}:`
+  const start = lines.findIndex(
+    (line) => line === prefix || line.startsWith(`${prefix} `),
+  )
+  if (start < 0) return null
+  const block = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() && line.length - line.trimStart().length <= indent) break
+    block.push(line.trim())
+  }
+  return block
+}
+
+function buildsFromKlipper(block) {
+  return (
+    block.includes('build:') &&
+    block.includes('context: ./klipper') &&
+    !block.some((line) => line.startsWith('image:'))
+  )
+}
+
+/**
+ * The harness builds sv06/u1 from klipper/Dockerfile, whose final stage must
+ * be the reviewed digest. The diagnostic itself still runs the stock image.
+ */
+export function verifyComposePin(composeFile) {
   if (!existsSync(composeFile))
     throw diagnostic('compose file is missing', 'preflight')
   const text = readFileSync(composeFile, 'utf8')
-  const images = [...text.matchAll(/^[ \t]*image:[ \t]*(\S+)[ \t]*$/gm)].map(
-    (match) => match[1],
-  )
-  // The harness builds its printers FROM the pinned digest (klipper/Dockerfile).
   const dockerfile = join(dirname(composeFile), 'klipper', 'Dockerfile')
   const bases = existsSync(dockerfile)
-    ? [...readFileSync(dockerfile, 'utf8').matchAll(/^FROM[ \t]+(\S+)/gm)].map(
+    ? [...readFileSync(dockerfile, 'utf8').matchAll(/^FROM[ \t]+(\S+)/gim)].map(
         (match) => match[1],
       )
     : []
-  if (
-    !images.includes(PINNED_IMAGE_REFERENCE) &&
-    !bases.includes(PINNED_IMAGE_REFERENCE)
-  )
+  if (bases.at(-1) !== PINNED_IMAGE_REFERENCE)
     throw diagnostic(
       'compose file does not pin the reviewed amd64 image digest',
       'preflight',
     )
+  const lines = text.split(/\r?\n/)
+  const anchor = yamlBlock(lines, 'x-printer', 0)
+  for (const service of ['sv06', 'u1']) {
+    const block = yamlBlock(lines, service, 2)
+    const ownBuild = block !== null && buildsFromKlipper(block)
+    const inherited =
+      block !== null &&
+      anchor !== null &&
+      buildsFromKlipper(anchor) &&
+      block.includes('<<: *printer') &&
+      !block.some((line) => /^(image|build):/.test(line))
+    if (!ownBuild && !inherited)
+      throw diagnostic(
+        'compose printer services do not build from ./klipper',
+        'preflight',
+      )
+  }
   const platforms = [
     ...text.matchAll(/^[ \t]*platform:[ \t]*(\S+)[ \t]*$/gm),
   ].map((match) => match[1])

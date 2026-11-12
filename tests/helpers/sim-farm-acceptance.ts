@@ -399,9 +399,10 @@ export async function runSimFarmAcceptance(input: {
       (await admin`SELECT DISTINCT payload#>>'{state,state}' AS state FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND payload ? 'state'`) as unknown as {
         state: string
       }[]
-    const unavailable = connector.diagnostics.filter(
-      (diagnostic) => diagnostic.kind === 'unavailable',
-    ).length
+    // Reasons only (fixed labels); a count alone would hide what was unavailable.
+    const unavailable = connector.diagnostics
+      .filter((diagnostic) => diagnostic.kind === 'unavailable')
+      .map((diagnostic) => String(diagnostic.reason))
     await connector.stop()
     const stopped = await connector.exited
     assert.deepEqual(stopped, { code: 0, signal: null }, 'Connector clean exit')
@@ -415,7 +416,7 @@ export async function runSimFarmAcceptance(input: {
         rows.map((row) => [row.printer, row.n]),
       ),
       printerStates: states.map((row) => row.state).sort(),
-      connectorUnavailableDiagnostics: unavailable,
+      connectorUnavailable: unavailable,
       connectorExit: stopped,
     }
   } finally {

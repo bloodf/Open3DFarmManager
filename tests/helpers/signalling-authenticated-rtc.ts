@@ -647,6 +647,7 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             observeConnector,
             (value) =>
               value.verifiedAdmission &&
+              value.authorityConfirms >= 1 &&
               value.published === 1 &&
               value.diagnostics.certificateMatched &&
               value.diagnostics.sentProofs === 1 &&

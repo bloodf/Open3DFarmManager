@@ -461,8 +461,30 @@ try {
         ),
         id,
       )
-      await docker('rm', '--force', owned)
-      ledger({ removed: 'container', id: owned })
+      // A timed-out `rm` can still finish in the daemon: confirm by state.
+      const removal: unknown = await docker('rm', '--force', owned).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      let present = true
+      for (let waited = 0; waited <= CREATE_SETTLE_MS; waited += 2000) {
+        present =
+          (await docker(
+            'ps',
+            '-aq',
+            '--no-trunc',
+            '--filter',
+            'id=' + owned,
+          )) !== ''
+        if (!present) break
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+      if (present) throw removal ?? new Error('Owned container remains')
+      ledger({
+        removed: 'container',
+        id: owned,
+        ...(removal ? { afterClientTimeout: true } : {}),
+      })
     }
   } catch (error) {
     cleanupFailure ??= error

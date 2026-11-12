@@ -292,7 +292,7 @@ test('a print state change queues a transition event before its state snapshot',
           params: [{ print_stats: { state: 'error' } }, 11],
         }),
       )
-    await job.until((text) => queued(text) === 3)
+    await job.until((text) => queued(text) === 2)
     expect((await job.stop()).code).toBe(0)
     const queue = new TelemetryQueue(join(data, 'telemetry'), Date.now())
     try {

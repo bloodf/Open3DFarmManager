@@ -90,3 +90,25 @@ Runner head `acb30a2` (current rows):
 Earlier, three separate invocations at head `714ab51` (with the then-weaker rows) all passed. Recovery took 3.9 s each time.
 
 After every invocation, no container with the run's label remained and the work directory had been removed. This is synthetic evidence for these rows and this artifact. It does not cover a real Moonraker/Klipper, a camera, pause, or a physical printer.
+
+### `farm-page-pause` row (2026-11-12)
+
+The full default command (all three rows) ran three times on cortexos at `032439e`, using the same image and the shared host:
+
+| Invocation | `farm-page-disconnect`       | `farm-page-revocation` | `farm-page-pause` (read-only / recovered / confirm→applied) |
+| ---------- | ---------------------------- | ---------------------- | ----------------------------------------------------------- |
+| 1          | pass                         | pass                   | pass (17 ms / 6.3 s / 124 ms)                               |
+| 2          | fail: harness source re-hash | pass                   | pass (16 ms / 7.3 s / 124 ms)                               |
+| 3          | pass                         | pass                   | pass (18 ms / 4.2 s / 109 ms)                               |
+
+Notes on the non-passing results:
+
+- **Invocation 1** reported `failed` even though all three rows passed. The final `docker rm --force` of its own container took longer than the runner's 60 s Docker timeout under host load. The container was gone afterwards.
+- **Invocation 2:** the `farm-page-disconnect` acceptance itself passed, but the harness's end-of-run source and artifact re-hash ("Cleanup incomplete: source and artifact manifest") failed. This happened in the existing row, unchanged here.
+- **Earlier runs at older heads** also had failures:
+  - Chromium reported `ERR_NETWORK_CHANGED` at login during one `farm-page-disconnect` run. Other jobs on the host were changing the network at the time.
+  - Two `farm-page-pause` failures exposed defects that are now fixed:
+    - The page judged freshness against a once-a-second clock tick, so a frame received after the tick looked stale and closed the dialog. It now uses a current clock sample.
+    - The dialog was opened before the Connector had re-admitted its pause inbox after the drop. The row now waits for that.
+
+Every pause run that reached the confirmation recorded exactly one `printer.print.pause` on the synthetic Moonraker, and none after revocation. No physical printer was contacted.

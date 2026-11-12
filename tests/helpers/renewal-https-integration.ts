@@ -216,7 +216,7 @@ export async function testRenewalHttps(
     // Built server: database gate verifies the schema; renewal is its own opt-in.
     const adminUrl = `postgres://fixture:unused@127.0.0.1:${databasePort}/fixture`
     app = spawn('node', ['apps/farm/.output/server/index.mjs'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       env: {
         PATH: process.env.PATH,
         NITRO_HOST: '127.0.0.1',
@@ -242,9 +242,15 @@ export async function testRenewalHttps(
         NUXT_CONNECTOR_RENEWAL_BODY_TIMEOUT_MS: '5000',
       },
     })
+    // Bounded stderr tail for diagnosis; the server log is already redacted.
+    let appErr = ''
+    app.stderr?.on('data', (chunk: Buffer) => {
+      appErr = (appErr + chunk.toString('utf8')).slice(-2000)
+    })
     const deadline = Date.now() + 30000
     while (true) {
-      if (app.exitCode !== null) throw new Error('Built app exited at startup')
+      if (app.exitCode !== null)
+        throw new Error('Built app exited at startup: ' + appErr)
       const ready = await fetch(`http://127.0.0.1:${ports.app}/readyz`).then(
         (r) => r.ok,
         () => false,

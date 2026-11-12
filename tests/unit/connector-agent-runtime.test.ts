@@ -589,7 +589,13 @@ test('uncertain acknowledgement retains drain expiry in the agent summary', asyn
   })
   try {
     await running.until(() => server.completed.length >= 1)
-    expect(JSON.parse(server.completed[0]!.body)).toHaveLength(1)
+    // The expired seed is dropped and the fresh seed is sent. Live collection
+    // may add its own snapshot to this first batch before the drain starts.
+    const observed = JSON.parse(server.completed[0]!.body).map(
+      (record: { state?: { observedAt?: number } }) => record.state?.observedAt,
+    )
+    expect(observed).not.toContain(old)
+    expect(observed).toContain(now)
     const log = join(server.data, 'telemetry', 'telemetry.jsonl')
     renameSync(log, log + '.saved')
     mkdirSync(log, { mode: 0o700 })

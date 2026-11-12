@@ -45,10 +45,13 @@ try {
   assert.equal(identity?.database, 'fixture')
   assert.equal(identity?.user, 'fixture')
   const catalog = await loadMigrationCatalog()
-  assert.ok(catalog.length >= 22, 'Migrations0001–0022 are required')
+  assert.ok(
+    catalog.length >= 22,
+    'Migrations 0001–0022 are required; the rollback checks need 0022 as the last applied migration',
+  )
   const rows =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
-  assert.equal(validateMigrationHistory(catalog, [...rows]), catalog.length)
+  assert.equal(validateMigrationHistory(catalog, [...rows]), 22)
   assert.equal(
     (
       await sql`SELECT to_regclass('farm.connector_credential_proofs')::text AS name`

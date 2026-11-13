@@ -1,7 +1,8 @@
 import {
+  KOBRALINK_CREDENTIAL_MAX_BYTES,
   KobraLinkRuntimeBinding,
-  readKobraLinkCredential,
-} from '../kobralink/runtime.ts'
+  parseKobraLinkCredential,
+} from '../kobralink/configuration.ts'
 import { createKobraLinkClient } from '../kobralink/client.ts'
 import { SpoolmanConfig } from '../spoolman/config.ts'
 import {
@@ -157,7 +158,12 @@ export function parseLocalCollectorConfig(
         origin: binding.origin,
         allowedOrigins: config.kobralink.allowedOrigins,
       })
-      readKobraLinkCredential(binding)
+      parseKobraLinkCredential(
+        binding,
+        readPrivateJsonFile(binding.credentialFile, {
+          maxBytes: KOBRALINK_CREDENTIAL_MAX_BYTES,
+        }),
+      )
       const target = JSON.stringify([binding.origin, binding.id])
       if (keys.has(binding.printerKey) || targets.has(target))
         throw Error('Duplicate collector target')

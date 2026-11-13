@@ -30,11 +30,27 @@ const operation = {
   commit_sha256: null,
   created_at: 1000,
 }
+const JSONB_OID = 3802
+// Mirrors postgres.js `sql.json(value)`: a Parameter carrying the jsonb oid and the raw value.
+class JsonbParameter {
+  readonly type = JSONB_OID
+  constructor(readonly value: unknown) {}
+}
+// Models what PostgreSQL stores for a record column. The driver serializes a jsonb Parameter
+// exactly once, so the column holds the structured document. Any other bound value (for
+// example a pre-stringified record) arrives as text and is stored as a jsonb string scalar,
+// which strict record parsing must reject. Nothing here decodes stored strings.
+function persisted(value: unknown) {
+  return value instanceof JsonbParameter
+    ? JSON.parse(JSON.stringify(value.value))
+    : value
+}
 // Synthetic SQL boundary: executes the real adapter callback and models commit/rollback;
 // it does not qualify PostgreSQL locking, grants, triggers or isolation.
 function database(rows: Record<string, unknown[]> = {}) {
   let committed = new Map<string, unknown>()
   const statements: string[] = []
+  const parameters: unknown[] = []
   const pool = {
     async begin(level: string, work: (tx: unknown) => Promise<void>) {
       expect(level).toBe('isolation level serializable')
@@ -42,6 +58,7 @@ function database(rows: Record<string, unknown[]> = {}) {
       const tx = async (parts: TemplateStringsArray, ...values: unknown[]) => {
         const text = parts.join('?')
         statements.push(text)
+        parameters.push(...values)
         for (const [pattern, result] of Object.entries(rows)) {
           if (text.includes(pattern)) return result
         }
@@ -49,15 +66,29 @@ function database(rows: Record<string, unknown[]> = {}) {
           return [{ now: 1000 }]
         if (text.includes('INSERT INTO farm.configuration_operations')) {
           if (pending.has(String(values[0]))) return []
-          pending.set(String(values[0]), JSON.parse(String(values[1])))
+          pending.set(String(values[0]), persisted(values[1]))
           return [{ operation_id: values[0] }]
+        }
+        if (text.includes('UPDATE farm.configuration_operations')) {
+          const record = pending.get(String(values[1]))
+          if (
+            typeof record !== 'object' ||
+            record === null ||
+            (record as { commit_sha256?: unknown }).commit_sha256 != null
+          )
+            return []
+          pending.set(String(values[1]), {
+            ...record,
+            commit_sha256: String(values[0]),
+          })
+          return [{ operation_id: values[1] }]
         }
         if (text.includes('SELECT record FROM farm.configuration_operations')) {
           const record = pending.get(String(values[0]))
           return record ? [{ record }] : []
         }
         if (text.includes('INSERT INTO farm.configuration_challenges')) {
-          const record = JSON.parse(String(values[3]))
+          const record = persisted(values[3])
           for (const value of pending.values()) {
             const parsed = ConfigurationChallengeRecord.safeParse(value)
             if (
@@ -88,7 +119,7 @@ function database(rows: Record<string, unknown[]> = {}) {
         }
         if (text.includes('INSERT INTO farm.configuration_receipts')) {
           pending.set(`receipt:${values[0]}`, {
-            record: JSON.parse(String(values[3])),
+            record: persisted(values[3]),
             assignment_id: values[2],
           })
           return []
@@ -99,11 +130,20 @@ function database(rows: Record<string, unknown[]> = {}) {
         }
         return []
       }
+      tx.json = (value: unknown) => new JsonbParameter(value)
       await work(tx)
       committed = pending
     },
   }
-  return { pool: pool as unknown as Sql, statements }
+  return {
+    pool: pool as unknown as Sql,
+    statements,
+    parameters,
+    stored: (key: string) => committed.get(key),
+  }
+}
+function jsonbParameters(values: unknown[]) {
+  return values.filter((value) => value instanceof JsonbParameter)
 }
 describe('production configuration store through synthetic SQL', () => {
   it('denies a missing/revoked session rather than granting a default role', async () => {
@@ -123,6 +163,47 @@ describe('production configuration store through synthetic SQL', () => {
       expect(await tx.operation(operation.operation_id)).toEqual(operation)
       expect(await tx.createOperation(operation)).toBe(false)
     })
+  })
+  it('binds operation records as structured jsonb and round-trips the commit pin', async () => {
+    const db = database()
+    const store = new PostgresConfigurationStore(db.pool, config)
+    await store.transaction(scope, async (tx) => {
+      expect(await tx.createOperation(operation)).toBe(true)
+    })
+    expect(jsonbParameters(db.parameters)).toEqual([
+      new JsonbParameter(operation),
+    ])
+    expect(
+      db.parameters.some(
+        (value) => typeof value === 'string' && value.startsWith('{'),
+      ),
+    ).toBe(false)
+    expect(db.stored(operation.operation_id)).toEqual(operation)
+    const hash = 'C'.repeat(42) + 'E'
+    await store.transaction(scope, async (tx) => {
+      expect(await tx.pinCommit(operation.operation_id, hash)).toBe(true)
+      expect(await tx.pinCommit(operation.operation_id, 'D'.repeat(43))).toBe(
+        false,
+      )
+    })
+    const restarted = new PostgresConfigurationStore(db.pool, config)
+    await restarted.transaction(scope, async (tx) => {
+      expect(await tx.operation(operation.operation_id)).toEqual({
+        ...operation,
+        commit_sha256: hash,
+      })
+    })
+  })
+  it('rejects a record persisted as a jsonb string scalar instead of decoding it', async () => {
+    const db = database({
+      'SELECT record FROM farm.configuration_operations': [
+        { record: JSON.stringify(operation) },
+      ],
+    })
+    const store = new PostgresConfigurationStore(db.pool, config)
+    await expect(
+      store.transaction(scope, (tx) => tx.operation(operation.operation_id)),
+    ).rejects.toThrow()
   })
   it('rolls back writes when callback rejects', async () => {
     const db = database()
@@ -282,6 +363,13 @@ it('registers one canonical assignment, preserves Moonraker rows, and returns th
     tx.registerReceipt(record),
   )
   expect(first).toEqual({ ok: true, assignmentId: identity.assignment_id })
+  expect(db.stored(`receipt:${operation.operation_id}`)).toEqual({
+    record,
+    assignment_id: identity.assignment_id,
+  })
+  expect(jsonbParameters(db.parameters)).toContainEqual(
+    new JsonbParameter(record),
+  )
   const restarted = new PostgresConfigurationStore(db.pool, config)
   expect(
     await restarted.transaction(scope, (tx) =>
@@ -449,6 +537,13 @@ it('retains challenge replay identities across adapter restart', async () => {
       record,
     )
   })
+  const stored = db.stored(`challenge:${record.challenge.challenge_id}`)
+  expect(stored).toEqual(record)
+  expect(
+    (stored as { challenge: { admission_nonce: string } }).challenge
+      .admission_nonce,
+  ).toBe(record.challenge.admission_nonce)
+  expect(jsonbParameters(db.parameters)).toEqual([new JsonbParameter(record)])
   const restarted = new PostgresConfigurationStore(db.pool, config)
   await restarted.transaction(scope, async (tx) => {
     expect(await tx.consumeChallenge(record.challenge.challenge_id)).toBeNull()

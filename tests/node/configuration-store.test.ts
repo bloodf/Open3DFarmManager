@@ -28,3 +28,23 @@ test('production plugin installs the runtime after schema and persistent key che
   assert.match(source, /hooks.hook\('close'/)
   assert.doesNotMatch(source, /generateKey/)
 })
+test('production store binds every configuration record through the driver jsonb parameter', async () => {
+  const source = await readFile(
+    'apps/farm/server/storage/postgres-configuration.ts',
+    'utf8',
+  )
+  assert.doesNotMatch(source, /JSON\.stringify/)
+  assert.match(source, /return tx\.json\(record\)/)
+  for (const table of [
+    'configuration_operations',
+    'configuration_challenges',
+    'configuration_receipts',
+  ]) {
+    assert.match(
+      source,
+      new RegExp(
+        `INSERT INTO farm\\.${table}\\([^)]*\\brecord\\)[^\`]*\\$\\{jsonbRecord\\(tx, r\\)\\}`,
+      ),
+    )
+  }
+})

@@ -2,49 +2,537 @@
   "id": "matrix-consolidation",
   "cutoff": "2026-11-13",
   "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
-  "inspected_head": "c7feac52fda5e344df670cfff1b2be484bc7678b",
+  "inspected_head": "4a1739ca21e2b6bf13d9d549ee44033152f8eee5",
   "ancestry_verified": true,
   "status": "DONE_WITH_CONCERNS",
+  "scope": "FDM",
+  "hardware": "NOT_RUN",
+  "integration": "NOT_RUN",
+  "availability_criterion": {
+    "accepted": [
+      "Declaração datada e explícita de venda ou disponibilidade do fabricante, com região.",
+      "Listagem oficial em estoque ou com envio imediato no corte, com região."
+    ],
+    "not_required": [
+      "Prova de primeira expedição física.",
+      "Estoque mundial.",
+      "Teste de hardware."
+    ],
+    "insufficient": [
+      "Anúncio, exibição em feira, pré-venda, backorder ou financiamento coletivo, isoladamente."
+    ],
+    "chronology_key": "Data do primeiro anúncio ou abertura de pedidos datada pelo fabricante; disponibilidade é filtro separado."
+  },
   "findings": [
-    "Não há base suficiente para aceitar ranking de 15 modelos disponíveis. As posições permanecem abertas; anúncios e oferta não equivalem a envio.",
-    "Bambu: sequência documental de anúncios H3C 2026-11-03, A2L 2026-06-01, X2D 2026-04-14, H2C 2025-11-14, P2S 2025-10-14 confirmada no índice B1; ranking de disponibilidade não confirmado.",
-    "SPARKX i7 tem estreia oficial no CES e oferta atual documentadas. Deve entrar na investigação de elegíveis antes de preencher posições com futuros dispositivos.",
-    "S1 Max tem LAN e transferência local documentadas em A3; o desconhecimento do relatório anterior não deve ser propagado como ausência de LAN.",
+    "Critério corrigido: disponibilidade documental vale com declaração datada e explícita de venda do fabricante ou listagem oficial em estoque no corte, com região declarada. Prova de primeira expedição, estoque mundial e teste de hardware não são exigidos.",
+    "Bambu Lab: cinco posições nominais sustentadas, A2L, X2D, H2C, P2S e H2S. H3C fica na fila de futuros porque a loja US só aceita backorder com datas estimadas a partir de 2026-11-30.",
+    "Creality: Ender-3 V3 Neo, Ender-3 V3 Mega e K3 estão sustentados por comunicados datados do fabricante. As duas vagas restantes ficam entre Ender-3 V4, K2 SE e SPARKX i7; mBox entra na primeira posição se a tecnologia FDM for confirmada.",
+    "Anycubic: Kobra X e Kobra S1 Max têm anúncio oficial de 2025-11-19 e venda declarada. Kobra 3 Max V2 tem venda declarada sem data oficial de lançamento; Kobra 4 tem anúncio datado sem frase de estoque recuperada.",
+    "Nenhuma linha é compatibilidade com OpenFarm. Firmware exato é desconhecido para todos os candidatos; hardware e integração são NOT_RUN.",
     "Versão V2.0.1.3 e data 2026-11-05 do i8 não verificadas: C2 retorna 404. OCL v1.1 em C1 não comprova licença de firmware."
   ],
   "gaps": [
     {
       "brand": "Bambu Lab",
-      "positions": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "detail": "Ordem de anúncios confirmada, mas primeira expedição regional e completude do conjunto não confirmadas. A2L tem disponibilidade declarada, sem prova de primeira entrega."
+      "positions": [],
+      "strongest_candidate": null,
+      "detail": "Cinco posições nominais sustentadas. Falta apenas prova de exaustividade: o índice de comunicados omite o H2S, logo outro lançamento fora do índice não pode ser excluído. Disponibilidade de X2D, H2C e P2S vale para os EUA."
     },
     {
       "brand": "Anycubic",
-      "positions": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "detail": "Kobra 3 Max V2 versus Kobra 4 sem datas oficiais comparáveis; Kobra X sem marco oficial datado revalidado; S1 Max com conflito anterior 5/25 novembro não resolvido; quinto Kobra 3 V2 versus S1 sem data primária recuperada. Revisões V2 exigem regra de identidade explícita."
+      "positions": [1, 2],
+      "strongest_candidate": "Kobra 3 Max V2 (1) e Kobra 4 (2)",
+      "detail": "Falta data oficial de lançamento do Kobra 3 Max V2. Falta frase oficial de estoque ou declaração datada de venda do Kobra 4; a loja respondeu HTTP 429 nesta rodada."
+    },
+    {
+      "brand": "Anycubic",
+      "positions": [3, 4],
+      "strongest_candidate": "Kobra X e Kobra S1 Max, empatados em 2025-11-19",
+      "detail": "Par sustentado por anúncio oficial e declarações de venda. A posição 3–4 só vale se o Kobra 3 V2 for de 2025; se for de 2026, o par desce para 4–5."
+    },
+    {
+      "brand": "Anycubic",
+      "positions": [5],
+      "strongest_candidate": "Kobra 3 V2",
+      "detail": "Falta o ano e a fonte oficial da data '15 de maio' do Kobra 3 V2 e sua declaração de disponibilidade. Alternativa: Kobra S1, com venda declarada em 2026-11-03 via Combo e pré-venda de 2025-01 só em terceiros."
     },
     {
       "brand": "Creality",
-      "positions": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "detail": "K3, Neo, Mega, i8 e V4 não formam cinco disponíveis comprovados. i7 é candidato adicional com estreia e oferta documentadas. Datas comparáveis de envio e exclusão de omissões pendentes."
+      "positions": [4, 5],
+      "strongest_candidate": "Ender-3 V4",
+      "detail": "Falta data oficial de abertura de pedidos do Ender-3 V4 e do K2 SE para ordená-los contra o i7 (2026-01-07). Se o mBox for FDM, ocupa a posição 1, os demais descem uma posição e só a quinta fica em disputa."
+    },
+    {
+      "brand": "Creality",
+      "positions": [1],
+      "strongest_candidate": "mBox",
+      "detail": "Falta declaração do fabricante de que o mBox usa filamento FDM. Sem ela, Neo e Mega ocupam 1–2 e K3 a posição 3."
+    }
+  ],
+  "candidates": [
+    {
+      "brand": "Bambu Lab",
+      "base_model": "A2L",
+      "nominal_position": "1",
+      "position_status": "supported",
+      "region": "Global; Japão e Coreia um dia depois",
+      "announcement": "2026-06-01",
+      "preorder": "desconhecido",
+      "availability": "2026-06-01, declaração datada de venda global; JP/KR 2026-06-02; loja US em estoque no corte",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi 2,4 GHz [B2]; Wi-Fi/LAN/cloud por modelo não documentados; autorização de comandos e Bambu Connect descritos para X1 01.08.03.00 em diante [B3]",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "alinhamento por câmera via Bambu Handy; hardware não especificado",
+      "material": "PLA, PETG; AMS e AMS lite",
+      "commands": {
+        "upload": "Bambu Connect transmite arquivos [B3]; contrato por modelo e firmware desconhecido",
+        "start": "exige autorização em LAN/cloud segundo [B3]; aplicação a este modelo desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Sem módulo laser. Firmware e contrato de API não estudados.",
+      "citations": ["B2", "B15", "B3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Bambu Lab",
+      "base_model": "X2D",
+      "nominal_position": "2",
+      "position_status": "supported",
+      "region": "EUA (loja US)",
+      "announcement": "2026-04-14",
+      "preorder": "desconhecido",
+      "availability": "listagem oficial US em estoque em 2026-11-13; sem declaração datada de início de venda",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi/LAN/cloud por modelo não documentados; autorização de comandos e Bambu Connect descritos para X1 01.08.03.00 em diante [B3]",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "não declarada no anúncio",
+      "material": "PLA, PETG, ABS, ASA, nylon; bico auxiliar",
+      "commands": {
+        "upload": "Bambu Connect transmite arquivos [B3]; contrato por modelo e firmware desconhecido",
+        "start": "exige autorização em LAN/cloud segundo [B3]; aplicação a este modelo desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Outras regiões têm preço publicado, não estoque verificado.",
+      "citations": ["B5", "B11", "B3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Bambu Lab",
+      "base_model": "H2C",
+      "nominal_position": "3",
+      "position_status": "supported",
+      "region": "EUA (loja US)",
+      "announcement": "2025-11-14",
+      "preorder": "desconhecido",
+      "availability": "listagem oficial US em estoque em 2026-11-13 (AMS Combo); sem declaração datada de início de venda",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi/LAN/cloud por modelo não documentados; autorização de comandos e Bambu Connect descritos para X1 01.08.03.00 em diante [B3]",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "quatro câmeras listadas; stream para terceiros desconhecido",
+      "material": "até sete materiais sem purga; AMS amplia",
+      "commands": {
+        "upload": "Bambu Connect transmite arquivos [B3]; contrato por modelo e firmware desconhecido",
+        "start": "exige autorização em LAN/cloud segundo [B3]; aplicação a este modelo desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Variante com laser em backorder estimado para 2026-12-14; laser fora do recorte FDM.",
+      "citations": ["B6", "B12", "B3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Bambu Lab",
+      "base_model": "P2S",
+      "nominal_position": "4",
+      "position_status": "supported",
+      "region": "EUA (loja US); preços em euro no anúncio",
+      "announcement": "2025-10-14",
+      "preorder": "desconhecido",
+      "availability": "listagem oficial US em estoque em 2026-11-13; anúncio declara lançamento sem data de venda por região",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi/LAN/cloud por modelo não documentados; autorização de comandos e Bambu Connect descritos para X1 01.08.03.00 em diante [B3]",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "vídeo 1080p; stream para terceiros desconhecido",
+      "material": "bico 300 °C; AMS 2 Pro no Combo",
+      "commands": {
+        "upload": "Bambu Connect transmite arquivos [B3]; contrato por modelo e firmware desconhecido",
+        "start": "exige autorização em LAN/cloud segundo [B3]; aplicação a este modelo desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Anúncio só traz preços europeus.",
+      "citations": ["B7", "B13", "B3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Bambu Lab",
+      "base_model": "H2S",
+      "nominal_position": "5",
+      "position_status": "supported",
+      "region": "Não declarada no anúncio; EUA na loja",
+      "announcement": "2025-08-26",
+      "preorder": "desconhecido",
+      "availability": "2025-08-26 para AMS Combo e Laser Full Combo ('Available now'); unidade base em outubro de 2025; loja US em estoque no corte",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi/LAN/cloud por modelo não documentados; autorização de comandos e Bambu Connect descritos para X1 01.08.03.00 em diante [B3]",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "três câmeras citadas; stream para terceiros desconhecido",
+      "material": "hotend 350 °C; câmara 65 °C",
+      "commands": {
+        "upload": "Bambu Connect transmite arquivos [B3]; contrato por modelo e firmware desconhecido",
+        "start": "exige autorização em LAN/cloud segundo [B3]; aplicação a este modelo desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Anúncio fora do índice de comunicados, o que mostra que o índice não é exaustivo. H2D Pro (2025-08-11) é anterior.",
+      "citations": ["B8", "B14", "B9", "B3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Anycubic",
+      "base_model": "Kobra 3 Max V2",
+      "nominal_position": "1",
+      "position_status": "unproven_rank",
+      "region": "EUA; promoção em 13 mercados",
+      "announcement": "não comprovado em fonte oficial",
+      "preorder": "desconhecido",
+      "availability": "declaração de venda em 2026-11-03 (Combo na promoção) e página US com 'Ships in 24 hours' registrada",
+      "firmware": "desconhecido",
+      "connection": "Kobra OS citado [A2]; LAN, nuvem e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "câmera opcional listada como acessório",
+      "material": "ACE 2 Pro no Combo",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Falta data oficial de lançamento; terceiros indicam agosto ou setembro de 2026. Janela de envio conflitante em resumo de busca. Identidade: revisão vendida como modelo próprio, contada uma vez e separada do Kobra 3 Max de 2024.",
+      "citations": ["A2", "A8"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Anycubic",
+      "base_model": "Kobra 4",
+      "nominal_position": "2",
+      "position_status": "unproven_availability",
+      "region": "Global (loja global)",
+      "announcement": "2026-04-15, exibição no RAPID+TCT",
+      "preorder": "desconhecido",
+      "availability": "não estabelecida: página oficial com preço de venda, sem frase de estoque ou envio recuperada",
+      "firmware": "desconhecido",
+      "connection": "controle remoto por dispositivo citado; LAN, nuvem e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "720p com detecção por IA [A1]",
+      "material": "PLA e PETG listados; ACE no Combo",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Falta frase oficial de estoque ou declaração datada de venda; o comunicado de 2026-11-03 não cita o modelo. Data de lançamento só em terceiros.",
+      "citations": ["A1", "A6", "A8"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Anycubic",
+      "base_model": "Kobra X",
+      "nominal_position": "3–4 (empate)",
+      "position_status": "conditional",
+      "region": "Reino Unido, Alemanha, França, Países Baixos; loja global",
+      "announcement": "2025-11-19",
+      "preorder": "depósito 2025-12-26, só em reprodução de comunicado",
+      "availability": "2026-05-27, declaração datada para UK/DE/FR/NL; 2026-11-03 Combo 'available'; página global com 'Ships in 24 hours' registrada",
+      "firmware": "desconhecido",
+      "connection": "LAN, nuvem e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "não comprovada",
+      "material": "ACE; PLA, PETG, TPU e outros listados",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Empate de anúncio com o S1 Max. Posição depende do ano do Kobra 3 V2.",
+      "citations": ["A5", "A7", "A8", "A9"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Anycubic",
+      "base_model": "Kobra S1 Max",
+      "nominal_position": "3–4 (empate)",
+      "position_status": "conditional",
+      "region": "Promoção em 13 mercados; região por estoque não confirmada",
+      "announcement": "2025-11-19",
+      "preorder": "novembro de 2025, datas conflitantes só em terceiros",
+      "availability": "declaração de venda em 2026-11-03 (Combo na promoção); estoque por região não lido",
+      "firmware": "desconhecido",
+      "connection": "Kobra OS, Wi-Fi 6, Ethernet e rede local anunciados [A3]; autenticação e API desconhecido",
+      "telemetry": "desconhecido",
+      "files": "transferência local anunciada [A3]",
+      "camera": "720p citada em resumo; não comprovada",
+      "material": "ACE 2 Pro; câmara aquecida",
+      "commands": {
+        "upload": "transferência local de arquivos anunciada [A3]; API desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Declaração de venda é promocional e sem região por modelo. Conflito de pré-venda 5 ou 25 de novembro de 2025 segue aberto.",
+      "citations": ["A3", "A5", "A8"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "mBox",
+      "nominal_position": "1 se FDM confirmado",
+      "position_status": "conditional",
+      "region": "EUA, só TikTok Shop",
+      "announcement": "2026-11-09",
+      "preorder": "desconhecido",
+      "availability": "2026-11-09 a 2026-12-10, declaração datada, canal exclusivo",
+      "firmware": "desconhecido",
+      "connection": "aplicativo Creality Park citado; LAN, nuvem e autenticação desconhecido",
+      "telemetry": "notificação ao responsável via aplicativo",
+      "files": "desconhecido",
+      "camera": "câmera embutida para detecção por IA",
+      "material": "não declarado",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "alerta e pausa automática descritos [C12]; não é comando remoto de terceiros",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Comunicado não declara FDM nem filamento; recorte é só FDM. Produto infantil em canal de terceiros.",
+      "citations": ["C12"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "Ender-3 V3 Neo",
+      "nominal_position": "1–2 (empate)",
+      "position_status": "supported",
+      "region": "EUA e Europa",
+      "announcement": "2026-10-15",
+      "preorder": "desconhecido",
+      "availability": "2026-10-15, declaração datada de pedido nas lojas oficiais US e Europa; loja US em estoque no corte",
+      "firmware": "desconhecido",
+      "connection": "controle via Creality Cloud declarado; LAN e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "câmera integrada segundo a coleta da marca",
+      "material": "CFS Nano opcional",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Empate com o Mega. Preço do comunicado só para Combo. Estado da loja variou no dia.",
+      "citations": ["C10", "C13", "C7"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "Ender-3 V3 Mega",
+      "nominal_position": "1–2 (empate)",
+      "position_status": "supported",
+      "region": "EUA e Europa",
+      "announcement": "2026-10-15",
+      "preorder": "desconhecido",
+      "availability": "2026-10-15, declaração datada de pedido nas lojas oficiais US e Europa; loja US em estoque no corte",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi 2,4 GHz e Creality Cloud declarados; LAN e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "transferência USB/Wi-Fi/Cloud listada",
+      "camera": "câmera Nebula opcional",
+      "material": "TPU 85A–95A direto do carretel; CFS Nano no Combo",
+      "commands": {
+        "upload": "transferência USB/Wi-Fi/Cloud listada na página oficial; protocolo local desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Empate com o Neo. Estado da loja variou no dia.",
+      "citations": ["C10", "C14", "C7"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "K3",
+      "nominal_position": "3",
+      "position_status": "supported",
+      "region": "EUA; Europa esperada para dezembro de 2026",
+      "announcement": "anúncio anterior a 2026-09-30; data exata não recuperada",
+      "preorder": "2026-10-13 (EUA)",
+      "availability": "2026-11-03, declaração datada de disponibilidade oficial nos EUA; primeiras pré-vendas expedidas em 2026-11-02",
+      "firmware": "desconhecido; base Klipper declarada, versão não estudada",
+      "connection": "firmware baseado em Klipper e root declarados [C6]; Moonraker, LAN e autenticação não declarados",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "desconhecido",
+      "material": "quatro bicos KliTek; kit TPU opcional",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Loja US ainda rotula '(Pre-order)' e estima envio 'Early December'. Europa é futura. Klipper não prova Moonraker acessível.",
+      "citations": ["C8", "C9", "C6", "C17"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "Ender-3 V4",
+      "nominal_position": "4–5 em disputa",
+      "position_status": "unproven_rank",
+      "region": "EUA (loja US)",
+      "announcement": "2025-11-19, Formnext 2025 segundo resumo de busca; exibida no CES 2026 [C3]",
+      "preorder": "desconhecido",
+      "availability": "listagem oficial US em estoque em 2026-11-13 (Combo); início de venda sem data oficial",
+      "firmware": "desconhecido",
+      "connection": "Wi-Fi citado em resumo; LAN, nuvem e autenticação não comprovadas",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "desconhecido",
+      "material": "CFS no Combo",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "documentation",
+      "limits": "Falta data oficial de abertura de pedidos. Criação da listagem em 2026-02-27 é metadado, não lançamento. Versão de firmware vista só em resumo de busca, não usada.",
+      "citations": ["C15", "C3"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "K2 SE",
+      "nominal_position": "4–5 em disputa",
+      "position_status": "unproven_rank",
+      "region": "EUA (loja US)",
+      "announcement": "não recuperado",
+      "preorder": "desconhecido",
+      "availability": "listagem oficial US em estoque em 2026-11-13 (4C); listagem Combo sem estoque",
+      "firmware": "desconhecido",
+      "connection": "desconhecido",
+      "telemetry": "desconhecido",
+      "files": "desconhecido",
+      "camera": "desconhecido",
+      "material": "4C e Combo são pacotes da mesma base",
+      "commands": {
+        "upload": "desconhecido",
+        "start": "desconhecido",
+        "pause": "desconhecido",
+        "resume": "desconhecido",
+        "cancel": "desconhecido"
+      },
+      "evidence_level": "unknown",
+      "limits": "Falta qualquer data oficial. Março de 2026 aparece só em terceiros.",
+      "citations": ["C16"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    },
+    {
+      "brand": "Creality",
+      "base_model": "SPARKX i7",
+      "nominal_position": "4–5 em disputa",
+      "position_status": "unproven_rank",
+      "region": "América do Norte na pré-venda; EUA na loja",
+      "announcement": "2026-01-07",
+      "preorder": "2026-01-07 (América do Norte)",
+      "availability": "listagem oficial US em estoque em 2026-11-13; sem declaração datada de venda regular",
+      "firmware": "desconhecido",
+      "connection": "Fluidd, Moonraker e SSH declarados [C1]; autenticação e versão desconhecido",
+      "telemetry": "via Moonraker declarado; não qualificado",
+      "files": "via Moonraker declarado; não qualificado",
+      "camera": "desconhecido",
+      "material": "CFS Lite no Color Combo",
+      "commands": {
+        "upload": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados",
+        "start": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados",
+        "pause": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados",
+        "resume": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados",
+        "cancel": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados"
+      },
+      "evidence_level": "documentation",
+      "limits": "Mais antigo dos três em disputa pela data conhecida. Color e Nano Combo são pacotes da mesma base.",
+      "citations": ["C3", "C4", "C1"],
+      "hardware": "NOT_RUN",
+      "integration": "NOT_RUN"
+    }
+  ],
+  "future_or_unproven_queue": [
+    {
+      "brand": "Bambu Lab",
+      "base_model": "H3C",
+      "state": "Anunciado em 2026-11-03 com preços regionais; loja US aceita pedido em backorder com datas estimadas de 2026-11-30 a 2026-12-18.",
+      "missing_fact": "Declaração datada de disponibilidade ou listagem oficial em estoque.",
+      "citations": ["B4", "B10"]
+    },
+    {
+      "brand": "Creality",
+      "base_model": "SPARKX i8",
+      "state": "Financiamento coletivo desde 2026-09-21 com entrega esperada em novembro; loja US sem estoque.",
+      "missing_fact": "Declaração datada de venda regular ou listagem oficial em estoque. Firmware V2.0.1.3 segue não verificado.",
+      "citations": ["C11", "C5", "C2"]
     }
   ],
   "sources": [
@@ -53,42 +541,126 @@
       "reference": "https://blog.bambulab.com/tag/press-release/",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Datas dos cinco anúncios Bambu; índice não prova disponibilidade nem exaustividade."
+      "supports": "Índice de comunicados: H3C 2026-11-03, R1 2026-09-22, A2L 2026-06-01, X2D 2026-04-14, H2C 2025-11-14, P2S 2025-10-14. Não é exaustivo: o anúncio do H2S não aparece nele."
     },
     {
       "id": "B2",
       "reference": "https://blog.bambulab.com/bambu-lab-a2l-creative-playground-extra-large/",
       "publication_date": "2026-06-01",
       "access_date": "2026-11-13",
-      "supports": "Venda global A2L em 1 junho; Japão/Coreia em 2 junho."
+      "supports": "A2L/A2L Combo disponível globalmente no site oficial desde 2026-06-01; Japão e Coreia desde 2026-06-02. Wi-Fi 2,4 GHz; PLA/PETG."
     },
     {
       "id": "B3",
       "reference": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
       "publication_date": "2025-01-16",
       "access_date": "2026-11-13",
-      "supports": "Autorização de comandos, MQTT status e Bambu Connect; escopo inicial X1, não firmware dos candidatos."
+      "supports": "Autorização de comandos, status MQTT e Bambu Connect; escopo inicial X1 01.08.03.00, não o firmware dos candidatos. Leitura registrada na rodada anterior."
+    },
+    {
+      "id": "B4",
+      "reference": "https://blog.bambulab.com/tool-changer-game-changer-bambu-lab-presents-h3c-the-defining-new-generation-of-3d-printers/",
+      "publication_date": "2026-11-03",
+      "access_date": "2026-11-13",
+      "supports": "Anúncio H3C com preços regionais e link de pedido; sem data de venda, pré-venda, estoque ou envio."
+    },
+    {
+      "id": "B5",
+      "reference": "https://blog.bambulab.com/xcellence-made-simple-bambu-lab-presents-the-x2d/",
+      "publication_date": "2026-04-14",
+      "access_date": "2026-11-13",
+      "supports": "Anúncio X2D com preços US/EU/UK/CA/AU/KR/JP/Global e link de pedido; sem data de venda ou envio."
+    },
+    {
+      "id": "B6",
+      "reference": "https://blog.bambulab.com/bambu-lab-h2c-where-multi-material-vortek-system-meets-engineering-precision/",
+      "publication_date": "2025-11-14",
+      "access_date": "2026-11-13",
+      "supports": "Apresentação H2C; câmeras e especificações; sem preço, região ou data de venda."
+    },
+    {
+      "id": "B7",
+      "reference": "https://blog.bambulab.com/the-icon-redefined-meet-the-p2s-a-completely-reengineered-version-of-the-ultra-productive-p1-series/",
+      "publication_date": "2025-10-14",
+      "access_date": "2026-11-13",
+      "supports": "Anuncia o lançamento do P2S com preços em euro; vídeo 1080p; sem data de venda por região."
+    },
+    {
+      "id": "B8",
+      "reference": "https://blog.bambulab.com/h2s-the-ultimate-single-nozzle-3d-printer-now-bigger-than-ever/",
+      "publication_date": "2025-08-26",
+      "access_date": "2026-11-13",
+      "supports": "Lançamento H2S: AMS Combo e Laser Full Combo 'Available now'; unidade base 'Available in October'. Preços em dólar, região não declarada."
+    },
+    {
+      "id": "B9",
+      "reference": "https://blog.bambulab.com/tag/press-release/page/2/",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Segunda página do índice: H2D Pro 2025-08-11 e H2D 2025-03-25, ambos anteriores ao H2S."
+    },
+    {
+      "id": "B10",
+      "reference": "https://us.store.bambulab.com/products/h3c",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: oferta estruturada InStock, mas os dados das variantes principais trazem marcador BACKORDER com datas estimadas 2026-11-30, 2026-12-15 e 2026-12-18. Não é estoque no corte."
+    },
+    {
+      "id": "B11",
+      "reference": "https://us.store.bambulab.com/products/x2d",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: X2D e X2D AMS Combo com oferta estruturada InStock em USD, sem marcador de backorder ou pré-venda."
+    },
+    {
+      "id": "B12",
+      "reference": "https://us.store.bambulab.com/products/h2c",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: H2C AMS Combo Standard InStock sem marcador de backorder; variante laser com backorder estimado 2026-12-14."
+    },
+    {
+      "id": "B13",
+      "reference": "https://us.store.bambulab.com/products/p2s",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: P2S e P2S Combo InStock em USD, sem marcador de backorder ou pré-venda."
+    },
+    {
+      "id": "B14",
+      "reference": "https://us.store.bambulab.com/products/h2s",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: H2S, AMS Combo e Laser Full Combo InStock em USD, sem marcador de backorder ou pré-venda."
+    },
+    {
+      "id": "B15",
+      "reference": "https://us.store.bambulab.com/products/a2l",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: A2L e A2L Combo InStock em USD, sem marcador de backorder ou pré-venda."
     },
     {
       "id": "A1",
       "reference": "https://store.anycubic.com/products/kobra-4-3d-printer",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Catálogo e oferta Kobra 4, sem cronologia comprovada."
+      "supports": "Página global Kobra 4 com preço de venda e câmera 720p, lida na coleta da marca. Sem frase de estoque ou envio recuperada; nova leitura nesta rodada retornou HTTP 429."
     },
     {
       "id": "A2",
       "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Página regional US Kobra 3 Max V2, sem data de lançamento comprovada."
+      "supports": "Página US Kobra 3 Max V2: 'Ships in 24 hours' e Kobra OS registrados na coleta da marca; resumo de busca indica outra janela de envio. Sem data de lançamento. Nova leitura retornou HTTP 429."
     },
     {
       "id": "A3",
       "reference": "https://store.anycubic.com/products/kobra-s1-max",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Kobra OS, Wi-Fi 6, Ethernet, LAN e transferência de arquivos anunciados; sem contrato de API."
+      "supports": "Kobra OS, Wi-Fi 6, Ethernet, LAN e transferência de arquivos anunciados, lidos na rodada anterior; sem contrato de API. Nova leitura retornou HTTP 429."
     },
     {
       "id": "A4",
@@ -96,6 +668,41 @@
       "publication_date": null,
       "access_date": "2026-11-13",
       "supports": "Tentativa falhou: URL não acessível pela ferramenta; não valida data."
+    },
+    {
+      "id": "A5",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620512.html",
+      "publication_date": "2025-11-19",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Anycubic: Kobra S1 Max e Kobra X apresentados no Formnext 2025. Sem pré-venda, preço, região ou envio."
+    },
+    {
+      "id": "A6",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-showcases-next-generation-3d-printing-lineup-at-rapidtct-2026-highlighting-multicolor-fdm-and-large-format-resin-innovation-302743844.html",
+      "publication_date": "2026-04-15",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Anycubic: Kobra 4 exibido no RAPID+TCT 2026 como máquina nova adicional; não declara venda. Leitura registrada na coleta da marca."
+    },
+    {
+      "id": "A7",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-kobra-x-now-available-on-joybuy-across-four-european-markets-302782843.html",
+      "publication_date": "2026-05-27",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Anycubic: Kobra X disponível na Joybuy no Reino Unido, Alemanha, França e Países Baixos; 'first introduced at Formnext 2025'."
+    },
+    {
+      "id": "A8",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-launches-2026-black-friday-and-cyber-monday-sale-across-13-global-markets-with-up-to-350-off-3d-printers-302927755.html",
+      "publication_date": "2026-11-03",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Anycubic: venda ativa desde 2026-10-26 em 13 mercados, Brasil incluído. Kobra X Combo e Kobra S1 + ACE 2 Pro Combo 'available'; Kobra 3 Max V2 Combo e Kobra S1 Max Combo na promoção. Disponibilidade varia por região. Kobra 4 não é citado."
+    },
+    {
+      "id": "A9",
+      "reference": "https://store.anycubic.com/pages/kobra-x-new-launch",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Página global Kobra X: preço e 'Ships in 24 hours' registrados na coleta da marca; não relida nesta rodada."
     },
     {
       "id": "C1",
@@ -116,83 +723,120 @@
       "reference": "https://www.prnewswire.com/news-releases/from-idea-to-print-creality-sparkx-i7-debuts-at-ces-2026-for-everyday-creators-302655772.html",
       "publication_date": "2026-01-07",
       "access_date": "2026-11-13",
-      "supports": "Comunicado Creality: estreia i7 CES, pré-venda América do Norte; corpo datado 8 janeiro. V4 exibida, não envio."
+      "supports": "Comunicado Creality: estreia i7 no CES e pré-venda na América do Norte; corpo datado de 8 janeiro. Ender-3 V4 exibida."
     },
     {
       "id": "C4",
       "reference": "https://store.creality.com/products/sparkx-i7-3d-printer",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Oferta i7, Color/Nano Combo identificam mesma base; janela Nov 5-7 sem ano não prova envio."
+      "supports": "Loja US: i7, i7 Autofill e i7 Color Combo com oferta InStock e quantidade positiva; Color Combo é pacote da base i7. Janela 'Nov 5 - Nov 7' sem ano é anterior ao acesso e não foi usada."
     },
     {
       "id": "C5",
       "reference": "https://store.creality.com/pages/sparkx-i8",
       "publication_date": null,
       "access_date": "2026-11-13",
-      "supports": "Redireciona a produto i8, Sold Out; janela Nov 5-7 sem ano não prova expedição."
+      "supports": "Produto i8 na loja US: oferta OutOfStock, 'Sold Out', quantidade zero. Janela 'Nov 5 - Nov 7' sem ano não prova expedição."
     },
     {
       "id": "C6",
       "reference": "https://www.creality.com/blog/k3-questions-answered",
       "publication_date": "2026-09-30",
       "access_date": "2026-11-13",
-      "supports": "Pré-venda K3; firmware baseado em Klipper e root declarados, sem contrato Moonraker."
+      "supports": "FAQ K3: firmware baseado em Klipper e root declarados, sem contrato Moonraker."
     },
     {
       "id": "C7",
       "reference": "https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival",
       "publication_date": "2026-10-21",
       "access_date": "2026-11-13",
-      "supports": "Anúncio editorial Neo/Mega no Reino Unido; não comprova primeira entrega."
+      "supports": "Anúncio editorial Neo/Mega no Reino Unido e CFS Nano opcional."
+    },
+    {
+      "id": "C8",
+      "reference": "https://www.prnewswire.com/news-releases/creality-k3-now-available-at-849-making-multi-color-3d-printing-more-practical-302927557.html",
+      "publication_date": "2026-11-03",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: disponibilidade oficial do K3 nos EUA; primeiras pré-vendas expedidas em 2026-11-02; Europa esperada para dezembro de 2026."
+    },
+    {
+      "id": "C9",
+      "reference": "https://www.prnewswire.com/news-releases/creality-k3-opens-for-pre-order-at-849-advancing-multi-color-3d-printing-302906922.html",
+      "publication_date": "2026-10-13",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: pré-venda do K3 aberta nos EUA; promoção de 2026-10-12 a 2026-11-30."
+    },
+    {
+      "id": "C10",
+      "reference": "https://www.prnewswire.com/news-releases/creality-launches-ender-3-v3-mega-combo-at-669-for-large-format-printing-and-batch-production-302909893.html",
+      "publication_date": "2026-10-15",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: Ender-3 V3 Mega e Neo disponíveis para pedido desde 2026-10-15 nas lojas oficiais dos EUA e da Europa; preços só das versões Combo; sem data de envio."
+    },
+    {
+      "id": "C11",
+      "reference": "https://www.prnewswire.com/news-releases/creality-launches-sparkx-i8-on-indiegogo-at-289-bringing-fastest-no-purge-waste-printing-302884861.html",
+      "publication_date": "2026-09-21",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: i8 em financiamento coletivo desde 2026-09-21; envio de fábrica em outubro e entrega esperada em novembro, variável por região. Sem plano de varejo."
+    },
+    {
+      "id": "C12",
+      "reference": "https://www.prnewswire.com/news-releases/creality-debuts-mbox-a-kid-operated-ai-3d-printer-at-329-302934077.html",
+      "publication_date": "2026-11-09",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: mBox disponível só na TikTok Shop dos EUA de 2026-11-09 a 2026-12-10. Tecnologia FDM e filamento não declarados; câmera e aplicativo citados."
+    },
+    {
+      "id": "C13",
+      "reference": "https://store.creality.com/products/ender-3-v3-neo-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: Ender-3 V3 Neo e Combo com oferta InStock e quantidade positiva. A coleta da marca viu 'Sold Out' no mesmo dia: estado dinâmico."
+    },
+    {
+      "id": "C14",
+      "reference": "https://store.creality.com/products/ender-3-v3-mega-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: Ender-3 V3 Mega e Combo com oferta InStock e quantidade positiva. A coleta da marca viu 'Sold Out' no mesmo dia: estado dinâmico."
+    },
+    {
+      "id": "C15",
+      "reference": "https://store.creality.com/products/ender-3-v4-combo-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: Ender-3 V4 Combo com oferta InStock; metadado de criação da listagem 2026-02-27. Metadado não é data de lançamento."
+    },
+    {
+      "id": "C16",
+      "reference": "https://store.creality.com/products/k2-se-4c-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: K2 SE 4C com oferta InStock; a listagem K2 SE Combo estava OutOfStock. Sem data de lançamento."
+    },
+    {
+      "id": "C17",
+      "reference": "https://store.creality.com/products/k3-multi-material-multicolor-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Loja US: K3 com oferta InStock, envio estimado 'Early December' e rótulo de menu '(Pre-order)'."
     }
   ],
   "next_steps": [
-    "Obter anúncios e registros oficiais regionais de envio dos candidatos, sem usar posição no catálogo como cronologia.",
-    "Pesquisar Kobra 3 V2/S1 e Creality i7, K2/K2 Pro e Ender-5 Max como candidatos alternativos; só admitir com cronologia primária e identidade comprovadas.",
-    "Localizar notas oficiais válidas do i8 e identificar versão, autenticação e licença por firmware.",
+    "Reler as páginas oficiais Anycubic após o limite de requisições e registrar frase de estoque do Kobra 4 e do Kobra S1 Max por região.",
+    "Obter data oficial de lançamento de Kobra 3 Max V2, Kobra 3 V2, Ender-3 V4 e K2 SE; confirmar a tecnologia do mBox.",
+    "Revalidar H3C e SPARKX i8 quando houver declaração datada de venda ou listagem em estoque.",
+    "Localizar notas oficiais de firmware por modelo e identificar versão, autenticação e licença.",
     "Documentar upload, start, pause, resume e cancel individualmente antes de qualquer adaptador; qualificação simulada e física permanecem pendentes."
   ],
   "accepted_fifteen_model_ranking": false,
-  "future_or_unproven_queue": [
-    "K3",
-    "Ender-3 V3 Neo",
-    "Ender-3 V3 Mega",
-    "SPARKX i8",
-    "Ender-3 V4"
-  ],
-  "capabilities": {
-    "upload": {
-      "Anycubic": "unknown API; LAN file transfer advertised for S1 Max only",
-      "Bambu Lab": "unknown API for candidate firmware",
-      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
-    },
-    "start": {
-      "Anycubic": "unknown API",
-      "Bambu Lab": "authorization documented historically; candidate firmware unknown",
-      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
-    },
-    "pause": {
-      "Anycubic": "unknown API",
-      "Bambu Lab": "unknown API for candidate firmware",
-      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
-    },
-    "resume": {
-      "Anycubic": "unknown API",
-      "Bambu Lab": "unknown API for candidate firmware",
-      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
-    },
-    "cancel": {
-      "Anycubic": "unknown API",
-      "Bambu Lab": "unknown API for candidate firmware",
-      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
-    }
-  },
   "implementability_ranking": [
     {
       "rank": 1,
-      "scope": "SPARKX i7; i8 condicionado à elegibilidade",
-      "reason": "Acesso Moonraker explicitamente declarado C1; firmware e métodos ainda desconhecidos."
+      "scope": "SPARKX i7",
+      "reason": "Acesso Moonraker explicitamente declarado C1 e listagem US em estoque; firmware e métodos ainda desconhecidos. i8 tem a mesma pista, mas está na fila."
     },
     {
       "rank": 2,
@@ -201,8 +845,8 @@
     },
     {
       "rank": null,
-      "scope": "K3, Neo/Mega, demais Anycubic",
-      "reason": "Evidência insuficiente para ordenar integração local; Klipper ou controle remoto não provam API acessível."
+      "scope": "K3, Neo/Mega, Ender-3 V4, K2 SE, mBox, demais Anycubic",
+      "reason": "Evidência insuficiente para ordenar integração local; Klipper, nuvem ou controle remoto não provam API acessível."
     }
   ]
 }

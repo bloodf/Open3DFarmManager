@@ -1134,179 +1134,197 @@ describe('configuration-connector: issuer metadata and signalling', () => {
     ).toThrow()
   })
 
-  it('signalling proves the credential, advertises the durable revision and relays only rtc frames', async () => {
-    const w = await world()
-    const runtime = w.boot()
-    await runtime.start()
-    const sent: Record<string, unknown>[] = []
-    let handlers: { message(raw: unknown): void; close(): void } | undefined
-    const socket: ConfigurationSocket = {
-      send: (wire) => sent.push(JSON.parse(wire)),
-      close: () => handlers?.close(),
-      bind: (h) => {
-        handlers = h
-      },
-    }
-    const answers: string[] = []
-    const diagnostics: Record<string, unknown>[] = []
-    let bindingSeen: unknown
-    const peer: ConfigurationPeerFactory = (input) => {
-      void input.binding.then((b) => (bindingSeen = b)).catch(() => {})
-      const session = input.session(() => {})
-      return {
-        session,
-        closed: session.closed,
-        offer: async () => sdp(0xaa),
-        answer: (value) => answers.push(value),
-        close: (reason) => session.close(reason),
+  it.each(['remote close', 'wrong transport ICE'])(
+    'signalling rejects %s after establishing a live context',
+    async (invalidation) => {
+      const w = await world()
+      const runtime = w.boot()
+      await runtime.start()
+      const sent: Record<string, unknown>[] = []
+      let handlers: { message(raw: unknown): void; close(): void } | undefined
+      let socketClosed = false
+      const socket: ConfigurationSocket = {
+        send: (wire) => sent.push(JSON.parse(wire)),
+        close: () => {
+          socketClosed = true
+          handlers?.close()
+        },
+        bind: (h) => {
+          handlers = h
+        },
       }
-    }
-    const token = 'aaaa.bbbb.cccc'
-    const client = createConfigurationSignallingClient({
-      identity: w.identity,
-      farmOrigin: FARM_ORIGIN,
-      credentialAudience: AUDIENCE,
-      farmId: w.ids.farm,
-      agentId: w.ids.agent,
-      credential: () => ({ token, jti: w.ids.jti }),
-      runtime: () => runtime,
-      socket: async () => socket,
-      peer,
-      clock: () => w.env.now,
-      retryMinMs: 60_000,
-      onDiagnostic: (event) => diagnostics.push(event),
-    })
-    const controller = new AbortController()
-    const running = client.run(controller.signal)
-    const until = async (check: () => boolean) => {
-      for (let i = 0; i < 200 && !check(); i++)
-        await new Promise((resolve) => setTimeout(resolve, 5))
-    }
-    await until(() => sent.length > 0)
-    expect(sent[0]).toMatchObject({
-      t: 'config.connector-begin',
-      jti: w.ids.jti,
-    })
-    const { createHash, createPublicKey } = await import('node:crypto')
-    const jwk = createPublicKey({
-      key: Buffer.from(w.identity.publicKeySpki, 'base64url'),
-      format: 'der',
-      type: 'spki',
-    }).export({ format: 'jwk' })
-    const challenge = {
-      v: 1,
-      agent_id: w.ids.agent,
-      farm_id: w.ids.farm,
-      jti: w.ids.jti,
-      connection_id: randomUUID(),
-      public_key_spki: w.identity.publicKeySpki,
-      fingerprint: w.identity.fingerprint,
-      thumbprint: createHash('sha256')
-        .update(canonicalize({ crv: 'Ed25519', kty: 'OKP', x: jwk.x }))
-        .digest('base64url'),
-      token_hash: createHash('sha256').update(token).digest('base64url'),
-      origin: FARM_ORIGIN,
-      audience: AUDIENCE,
-      purpose: 'signalling',
-      generation: 1,
-      nonce: nonce(),
-      issued_at: w.env.now,
-      expires_at: w.env.now + 30_000,
-    }
-    const serve = (frame: unknown) =>
-      handlers?.message(encodeConfigurationSignallingServerFrame(frame))
-    serve({ v: 1, t: 'config.connector-challenge', challenge })
-    await until(() => sent.length > 1)
-    expect(sent[1]).toMatchObject({ t: 'config.connector-proof' })
-    expect(client.online()).toBe(false)
-    serve({
-      v: 1,
-      t: 'config.connector-ready',
-      inbox_id: challenge.connection_id,
-      issued_at: w.env.now,
-      expires_at: w.env.now + 60_000,
-    })
-    await until(() => sent.length > 2)
-    expect(sent[2]).toEqual({
-      v: 1,
-      t: 'config.advertise',
-      protocol: 'config-v1',
-      enabled: true,
-      revision: 0,
-    })
-    expect(client.online()).toBe(true)
-    const browser = await browserKey()
-    const transport = randomUUID()
-    serve({
-      v: 1,
-      t: 'config.context-request',
-      transport_id: transport,
-      farm_id: w.ids.farm,
-      agent_id: w.ids.agent,
-      key_id: w.ids.key,
-      account_id: 'account_owner',
-      browser_public_key: browser.publicKey,
-      browser_thumbprint: browser.thumbprint,
-      connector_nonce: nonce(),
-      issued_at: w.env.now,
-      expires_at: w.env.now + 30_000,
-    })
-    await until(() => sent.length > 3)
-    expect(sent[3]).toMatchObject({
-      t: 'rtc.offer',
-      transport_id: transport,
-      seq: 0,
-    })
-    serve({
-      v: 1,
-      t: 'rtc.answer',
-      transport_id: transport,
-      seq: 0,
-      p: { sdp: sdp(0xbb) },
-    })
-    await until(() => answers.length > 0)
-    expect(answers).toEqual([sdp(0xbb)])
-    // Trickle is not consumed: complete SDP in both peers carries every
-    // candidate, and a late candidate cannot change the pinned descriptions.
-    // A bounded, valid candidate stream is observed once and never relayed.
-    const candidate = {
-      candidate: 'candidate:1 1 udp 2122252543 192.168.1.5 50000 typ host',
-      sdpMid: '0',
-      sdpMLineIndex: 0,
-    }
-    for (let seq = 1; seq <= 3; seq++)
-      serve({ v: 1, t: 'rtc.ice', transport_id: transport, seq, p: candidate })
-    await until(
-      () => diagnostics.filter((e) => e.state === 'ice-ignored').length > 0,
-    )
-    expect(diagnostics.filter((e) => e.state === 'ice-ignored')).toHaveLength(1)
-    expect(answers).toEqual([sdp(0xbb)])
-    expect(runtime.diagnostics().sessions).toBe(1)
-    // A close notice for another transport is ignored; a socket close takes
-    // the Connector offline and nothing stays current.
-    serve({
-      v: 1,
-      t: 'config.context-closed',
-      transport_id: randomUUID(),
-    })
-    // A candidate for another transport is a protocol violation: the link
-    // drops and nothing stays current.
-    serve({
-      v: 1,
-      t: 'rtc.ice',
-      transport_id: randomUUID(),
-      seq: 4,
-      p: candidate,
-    })
-    await until(() => !client.online())
-    expect(client.online()).toBe(false)
-    handlers?.close()
-    expect(bindingSeen).toBeUndefined()
-    expect(runtime.diagnostics()).toMatchObject({
-      sessions: 0,
-      openTransports: 0,
-    })
-    controller.abort()
-    await running
-  })
+      const answers: string[] = []
+      const diagnostics: Record<string, unknown>[] = []
+      let bindingSeen: unknown
+      const peer: ConfigurationPeerFactory = (input) => {
+        void input.binding.then((b) => (bindingSeen = b)).catch(() => {})
+        const session = input.session(() => {})
+        return {
+          session,
+          closed: session.closed,
+          offer: async () => sdp(0xaa),
+          answer: (value) => answers.push(value),
+          close: (reason) => session.close(reason),
+        }
+      }
+      const token = 'aaaa.bbbb.cccc'
+      const client = createConfigurationSignallingClient({
+        identity: w.identity,
+        farmOrigin: FARM_ORIGIN,
+        credentialAudience: AUDIENCE,
+        farmId: w.ids.farm,
+        agentId: w.ids.agent,
+        credential: () => ({ token, jti: w.ids.jti }),
+        runtime: () => runtime,
+        socket: async () => socket,
+        peer,
+        clock: () => w.env.now,
+        retryMinMs: 60_000,
+        onDiagnostic: (event) => diagnostics.push(event),
+      })
+      const controller = new AbortController()
+      const running = client.run(controller.signal)
+      const until = async (check: () => boolean) => {
+        for (let i = 0; i < 200 && !check(); i++)
+          await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      await until(() => sent.length > 0)
+      expect(sent[0]).toMatchObject({
+        t: 'config.connector-begin',
+        jti: w.ids.jti,
+      })
+      const { createHash, createPublicKey } = await import('node:crypto')
+      const jwk = createPublicKey({
+        key: Buffer.from(w.identity.publicKeySpki, 'base64url'),
+        format: 'der',
+        type: 'spki',
+      }).export({ format: 'jwk' })
+      const challenge = {
+        v: 1,
+        agent_id: w.ids.agent,
+        farm_id: w.ids.farm,
+        jti: w.ids.jti,
+        connection_id: randomUUID(),
+        public_key_spki: w.identity.publicKeySpki,
+        fingerprint: w.identity.fingerprint,
+        thumbprint: createHash('sha256')
+          .update(canonicalize({ crv: 'Ed25519', kty: 'OKP', x: jwk.x }))
+          .digest('base64url'),
+        token_hash: createHash('sha256').update(token).digest('base64url'),
+        origin: FARM_ORIGIN,
+        audience: AUDIENCE,
+        purpose: 'signalling',
+        generation: 1,
+        nonce: nonce(),
+        issued_at: w.env.now,
+        expires_at: w.env.now + 30_000,
+      }
+      const serve = (frame: unknown) =>
+        handlers?.message(encodeConfigurationSignallingServerFrame(frame))
+      serve({ v: 1, t: 'config.connector-challenge', challenge })
+      await until(() => sent.length > 1)
+      expect(sent[1]).toMatchObject({ t: 'config.connector-proof' })
+      expect(client.online()).toBe(false)
+      serve({
+        v: 1,
+        t: 'config.connector-ready',
+        inbox_id: challenge.connection_id,
+        issued_at: w.env.now,
+        expires_at: w.env.now + 60_000,
+      })
+      await until(() => sent.length > 2)
+      expect(sent[2]).toEqual({
+        v: 1,
+        t: 'config.advertise',
+        protocol: 'config-v1',
+        enabled: true,
+        revision: 0,
+      })
+      expect(client.online()).toBe(true)
+      const browser = await browserKey()
+      const transport = randomUUID()
+      serve({
+        v: 1,
+        t: 'config.context-request',
+        transport_id: transport,
+        farm_id: w.ids.farm,
+        agent_id: w.ids.agent,
+        key_id: w.ids.key,
+        account_id: 'account_owner',
+        browser_public_key: browser.publicKey,
+        browser_thumbprint: browser.thumbprint,
+        connector_nonce: nonce(),
+        issued_at: w.env.now,
+        expires_at: w.env.now + 30_000,
+      })
+      await until(() => sent.length > 3)
+      expect(sent[3]).toMatchObject({
+        t: 'rtc.offer',
+        transport_id: transport,
+        seq: 0,
+      })
+      serve({
+        v: 1,
+        t: 'rtc.answer',
+        transport_id: transport,
+        seq: 0,
+        p: { sdp: sdp(0xbb) },
+      })
+      await until(() => answers.length > 0)
+      expect(answers).toEqual([sdp(0xbb)])
+      // Trickle is not consumed: complete SDP in both peers carries every
+      // candidate, and a late candidate cannot change the pinned descriptions.
+      // A bounded, valid candidate stream is observed once and never relayed.
+      const candidate = {
+        candidate: 'candidate:1 1 udp 2122252543 192.168.1.5 50000 typ host',
+        sdpMid: '0',
+        sdpMLineIndex: 0,
+      }
+      for (let seq = 1; seq <= 3; seq++)
+        serve({
+          v: 1,
+          t: 'rtc.ice',
+          transport_id: transport,
+          seq,
+          p: candidate,
+        })
+      await until(
+        () => diagnostics.filter((e) => e.state === 'ice-ignored').length > 0,
+      )
+      expect(diagnostics.filter((e) => e.state === 'ice-ignored')).toHaveLength(
+        1,
+      )
+      expect(answers).toEqual([sdp(0xbb)])
+      expect(runtime.diagnostics().sessions).toBe(1)
+      expect(client.online()).toBe(true)
+      expect(runtime.diagnostics().sessions).toBe(1)
+      expect(handlers).toBeDefined()
+      if (invalidation === 'remote close') {
+        handlers!.close()
+      } else {
+        serve({
+          v: 1,
+          t: 'config.context-closed',
+          transport_id: randomUUID(),
+        })
+        serve({
+          v: 1,
+          t: 'rtc.ice',
+          transport_id: randomUUID(),
+          seq: 4,
+          p: candidate,
+        })
+      }
+      await until(() => !client.online())
+      expect(client.online()).toBe(false)
+      expect(socketClosed).toBe(true)
+      expect(bindingSeen).toBeUndefined()
+      expect(runtime.diagnostics()).toMatchObject({
+        sessions: 0,
+        openTransports: 0,
+      })
+      controller.abort()
+      await running
+    },
+  )
 })

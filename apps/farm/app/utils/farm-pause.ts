@@ -1,6 +1,7 @@
 import type { PauseCommandOutcome } from '../../../../packages/connector/src/webrtc/pause-control-session.ts'
 import { observationAge, type FarmKeyState, type FarmRow } from './farm-view.ts'
 import type { FarmPauseControlState } from './webrtc/farm-pause-control.ts'
+import { isKobraXPrinterKey } from './kobralink-onboarding.ts'
 
 type Clock = { wall: number; mono: number }
 
@@ -18,6 +19,12 @@ export function pauseAvailability(
   pauseEnabled: boolean,
   now: Clock,
 ): PauseAvailability {
+  if (isKobraXPrinterKey(row.assignment.printerKey))
+    return {
+      available: false,
+      reason:
+        'Pausa indisponível. Impressoras Anycubic Kobra X operam somente em leitura; comandos não são qualificados para este dispositivo.',
+    }
   if (!pauseEnabled)
     return {
       available: false,

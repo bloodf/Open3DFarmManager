@@ -1,0 +1,45 @@
+{
+  "id": "creality",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "findings": [
+    "O FAQ oficial do K3, publicado em 2026-09-30, prevê pré-venda em meados de outubro, sem data de envio; a homepage consultada oferece preorder.",
+    "O evento oficial marca pré-venda Ender-3 V3 Neo/Mega em 2026-10-13. A loja dos EUA mostrava Mega e Combo esgotados, sem estabelecer disponibilidade global.",
+    "Creality declara que SPARKX i7 e i8 oferecem Fluidd, Moonraker e SSH. Isso é evidência documental, não validação por unidade.",
+    "K3 usa firmware baseado em Klipper e root de fábrica segundo FAQ; não inferir Moonraker sem evidência específica.",
+    "Não foram executados comandos, acessados equipamentos, testado firmware, LAN, cloud, autenticação ou licenças."
+  ],
+  "gaps": [
+    "Ranking dos cinco mais recentes não confirmado; datas de crowdfunding, venda regular e primeiro envio da i8 não foram encontradas.",
+    "Datas de envio do K3 e Neo/Mega não comprovadas por região; anúncio, preorder e shipping permanecem etapas distintas.",
+    "Interfaces, auth, telemetria e comandos exatos por método e firmware são desconhecidos para Neo/Mega e K3; Moonraker de i7/i8 é documentação, sem teste autorizado.",
+    "Licenças completas dos firmwares não verificadas; nenhuma ação de root ou flash realizada."
+  ],
+  "sources": [
+    {"reference":"https://www.creality.com/blog/k3-questions-answered","supports":"FAQ K3, preorder previsto para meados de outubro, Klipper-based, root de fábrica, slicers","published":"2026-09-30","accessed":"2026-11-13"},
+    {"reference":"https://www.creality.com/","supports":"Homepage oferece preorder K3 e lista Neo/Mega para compra; estado dinâmico","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://store.creality.com/pages/live-stream","supports":"Agenda lista evento de pré-venda Neo/Mega em 2026-10-13","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://www.creality.com/products/ender-3-v3-mega","supports":"Especificações Mega, standalone vs Combo, transferência Wi-Fi/USB/Cloud e câmera opcional","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://store.creality.com/products/ender-3-v3-mega-3d-printer","supports":"Estado Sold Out regional; janela estimada de envio sem ano visível não prova expedição","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://www.creality.com/support/ender-3-v3-mega","supports":"Suporte lista firmware em 2026-11-13","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://store.creality.com/pages/sparkx-i8","supports":"Especificações i8 FFF, Wi-Fi 2.4 GHz, cloud/app, OTA","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://www.creality.com/blog/sparkx-open-initiative","supports":"Declara acesso Fluidd/Moonraker/SSH em i7/i8 e publicação técnica faseada","published":"2026-10-20","accessed":"2026-11-13"},
+    {"reference":"https://wiki.creality.com/en/sparkx/i8/firmware-update","supports":"Firmware i8 V2.0.1.3 e notas de 2026-11-05","published":"2026-11-05","accessed":"2026-11-13"},
+    {"reference":"https://wiki.creality.com/en/sparkx/i8/FAQ","supports":"Materiais e canais i8; não estabelece interfaces de rede detalhadas","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://wiki.creality.com/en/ender-series","supports":"Índice de manuais Neo/Mega/V4; não prova datas de lançamento","published":null,"accessed":"2026-11-13"},
+    {"reference":"https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival","supports":"Anúncio editorial Neo/Mega e distinções de hardware/CFS nano","published":"2026-10-21","accessed":"2026-11-13"}
+  ],
+  "next_steps": [
+    "Estabelecer datas oficiais de crowdfunding i8, venda regular e primeiro envio por região.",
+    "Confirmar envios K3 e Neo/Mega por região e pesquisar outros lançamentos Creality FDM para completar ranking.",
+    "Obter documentação LAN/auth e comandos por método e firmware, sem inferir suporte por família de firmware.",
+    "Revisar licenças oficiais publicadas; não executar root ou flash sem autorização específica."
+  ],
+  "models": [
+    {"base_model":"Creality K3","region":"Global; disponibilidade por região não verificada","release":"FAQ 2026-09-30 prevê preorder em meados de outubro; homepage oferece preorder em 2026-11-13; shipping não comprovado","availability":"Preorder visível; expedição desconhecida","firmware":"Firmware baseado em Klipper; código anunciado em fases; root de fábrica segundo FAQ. Binário/versão não verificados.","connection":"Cloud/local/LAN e auth desconhecidos; Moonraker não documentado nas fontes consultadas.","capabilities":"FFF CoreXY multicolor e troca de bicos; Creality Print 7+ e OrcaSlicer declarados. Endpoints e comandos desconhecidos.","evidence_level":"documentation","limits":"Não contar combo como modelo; shipping, interfaces, licença e suporte por comando desconhecidos."},
+    {"base_model":"Ender-3 V3 Neo","region":"Páginas regionais Creality; cobertura incompleta","release":"Evento oficial de preorder em 2026-10-13; anúncio editorial publicado 2026-10-21; envio não estabelecido","availability":"Página oficial lista produto; estoque e envio variam/não confirmados por região","firmware":"Firmware exato e licença desconhecidos","connection":"Cloud/controle remoto divulgado; LAN/auth/Moonraker desconhecidos","capabilities":"FFF, 220x220x220 mm, câmera integrada; CFS nano é opcional e não modelo separado. Comandos desconhecidos.","evidence_level":"documentation","limits":"Preorder documentado; shipping e comandos não verificados."},
+    {"base_model":"Ender-3 V3 Mega","region":"Loja EUA consultada; não generalizar globalmente","release":"Evento oficial de preorder em 2026-10-13; anúncio editorial publicado 2026-10-21; suporte lista firmware 2026-11-13","availability":"Produto listado; página EUA mostrava standalone e Combo Sold Out; shipping não confirmado","firmware":"Download listado sem binário/versão/licença analisados","connection":"Wi-Fi 2.4 GHz, USB e Creality Cloud listados; LAN/auth/Moonraker desconhecidos","capabilities":"FFF, 420x420x420 mm, câmera Nebula opcional. CFS nano opcional; Combo não contado à parte. Comandos desconhecidos.","evidence_level":"documentation","limits":"Estado regional; preço e janela estimada sem ano não provam envio; capacidades específicas por firmware desconhecidas."},
+    {"base_model":"SPARKX i8","region":"Creality global; oferta regional não apurada","release":"Data de crowdfunding, preorder, venda regular e primeiro envio desconhecida","availability":"Página de produto e wiki ativas; disponibilidade de compra/envio não verificada","firmware":"Wiki lista V2.0.1.3 (2026-11-05); acesso SSH declarado pela marca; sem inspeção de firmware","connection":"Marca declara Fluidd, Moonraker e SSH para i7/i8; página lista Wi-Fi 2.4 GHz, cloud/app e OTA; auth e modo LAN não verificados","capabilities":"FFF 260x260x255 mm; quatro canais; PLA/PETG recomendados. Nenhum comando Moonraker testado ou confirmado por método.","evidence_level":"documentation","limits":"Não executar root/SSH; crowdfunding e shipping desconhecidos; licença do firmware não verificada."},
+    {"base_model":"Ender-3 V4","region":"Wiki oficial global","release":"Sem anúncio ou data de lançamento confirmados; manual listado na Wiki","availability":"Desconhecida","firmware":"Desconhecido","connection":"Desconhecida","capabilities":"Desconhecidas; documentação presente não prova hardware ou interface.","evidence_level":"unknown","limits":"Entrada exploratória; não classificar como top cinco até obter fonte datada de lançamento e disponibilidade."}
+  ]
+}

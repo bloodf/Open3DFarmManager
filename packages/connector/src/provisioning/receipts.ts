@@ -18,10 +18,16 @@ import {
 } from '../../../farm-protocol/src/configuration-receipt.ts'
 import type { OperationRecord } from './journal.ts'
 
-export interface ReceiptSigner {
-  fingerprint: string
-  receiptKey: CryptoKey
-}
+/**
+ * Either a nonextractable Ed25519 CryptoKey or an encapsulated identity signer
+ * (ConnectorIdentity.configurationReceiptSigner) that never exposes its key.
+ */
+export type ReceiptSigner =
+  | { fingerprint: string; receiptKey: CryptoKey }
+  | {
+      fingerprint: string
+      signReceipt(claims: unknown): Promise<SignedConfigurationReceipt>
+    }
 
 const firmwareRe = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$/
 const modelRe = /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}$/
@@ -45,50 +51,50 @@ export async function signOperationReceipt(
       : op.latest
         ? await configurationReceiptHash(op.latest)
         : null
-  return signConfigurationReceipt(
-    {
-      v: 1,
-      purpose: 'configuration-receipt',
-      protocol: CONFIGURATION_PROTOCOL,
-      receipt_id: randomUUID(),
-      account_id: op.binding.account_id,
-      farm_id: op.binding.farm_id,
-      agent_id: op.binding.agent_id,
-      connector_fingerprint: signer.fingerprint,
-      operation_id: op.operation_id,
-      phase,
-      target: {
-        target_sha256: op.target_sha256,
-        device_id: printer.device_id,
-        bridge_instance_id: op.bridge_instance_id,
-      },
-      observed: {
-        device_id: printer.device_id,
-        model:
-          printer.model !== null && modelRe.test(printer.model)
-            ? printer.model
-            : null,
-        firmware:
-          printer.firmware !== null && firmwareRe.test(printer.firmware)
-            ? { status: 'observed', version: printer.firmware }
-            : { status: 'unknown' },
-        support: 'unqualified',
-      },
-      expected_revision: op.expected_revision,
-      committed_revision: committed
-        ? (op.plan?.committed_revision ?? null)
-        : null,
-      recovery_reason:
-        phase === 'recovery-required'
-          ? op.recovery === 'rollback-failed'
-            ? 'rollback-failed'
-            : 'journal-inconsistent'
-          : null,
-      prior_receipt_sha256: prior,
-      issued_at: issuedAt,
+  const claims = {
+    v: 1,
+    purpose: 'configuration-receipt',
+    protocol: CONFIGURATION_PROTOCOL,
+    receipt_id: randomUUID(),
+    account_id: op.binding.account_id,
+    farm_id: op.binding.farm_id,
+    agent_id: op.binding.agent_id,
+    connector_fingerprint: signer.fingerprint,
+    operation_id: op.operation_id,
+    phase,
+    target: {
+      target_sha256: op.target_sha256,
+      device_id: printer.device_id,
+      bridge_instance_id: op.bridge_instance_id,
     },
-    signer.receiptKey,
-  )
+    observed: {
+      device_id: printer.device_id,
+      model:
+        printer.model !== null && modelRe.test(printer.model)
+          ? printer.model
+          : null,
+      firmware:
+        printer.firmware !== null && firmwareRe.test(printer.firmware)
+          ? { status: 'observed', version: printer.firmware }
+          : { status: 'unknown' },
+      support: 'unqualified',
+    },
+    expected_revision: op.expected_revision,
+    committed_revision: committed
+      ? (op.plan?.committed_revision ?? null)
+      : null,
+    recovery_reason:
+      phase === 'recovery-required'
+        ? op.recovery === 'rollback-failed'
+          ? 'rollback-failed'
+          : 'journal-inconsistent'
+        : null,
+    prior_receipt_sha256: prior,
+    issued_at: issuedAt,
+  }
+  return 'receiptKey' in signer
+    ? signConfigurationReceipt(claims, signer.receiptKey)
+    : signer.signReceipt(claims)
 }
 
 const validated = (frame: unknown): ConfigurationResponseFrame =>

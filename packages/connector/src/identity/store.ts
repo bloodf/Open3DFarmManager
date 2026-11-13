@@ -47,6 +47,19 @@ import {
   controlSessionProofPayload,
   encodeControlProof,
 } from '../../../farm-protocol/src/control-session-binding.ts'
+import {
+  ConnectorConfigurationProof,
+  configurationSessionProofPayload,
+  encodeConfigurationSessionProof,
+  validateConfigurationSessionBinding,
+} from '../../../farm-protocol/src/configuration-binding.ts'
+import {
+  ConfigurationReceiptClaims,
+  SignedConfigurationReceipt,
+  configurationReceiptPayload,
+  encodeConfigurationReceipt,
+  type SignedConfigurationReceipt as SignedReceipt,
+} from '../../../farm-protocol/src/configuration-receipt.ts'
 
 const RtcProofInput = z.strictObject({
   binding: RtcSessionBinding,
@@ -235,6 +248,67 @@ export class ConnectorIdentity {
     })
     encodeControlProof(proof)
     return proof
+  }
+  /**
+   * config-v1 Connector session proof. Signs only the configuration binding
+   * domain after the binding matches this key and the trusted enrolled agent.
+   * Possession only: it grants no configuration permission.
+   */
+  async signConfigurationSessionProof(input: {
+    binding: unknown
+    expectedAgentId: string
+  }): Promise<z.infer<typeof ConnectorConfigurationProof>> {
+    const expectedAgentId = BrowserDeviceUuid.parse(input?.expectedAgentId)
+    const binding = await validateConfigurationSessionBinding(input?.binding)
+    if (
+      binding.agent_id !== expectedAgentId ||
+      binding.connector_public_key_spki !== this.publicKeySpki ||
+      binding.connector_fingerprint !== this.fingerprint
+    )
+      throw new Error(
+        'Configuration binding does not match trusted Connector identity',
+      )
+    const proof = ConnectorConfigurationProof.parse({
+      v: 1,
+      role: 'connector',
+      binding,
+      signature: sign(
+        null,
+        configurationSessionProofPayload(binding, 'connector'),
+        this.#key,
+      ).toString('base64url'),
+    })
+    encodeConfigurationSessionProof(proof)
+    return proof
+  }
+  /**
+   * config-v1 receipt signer bound to this identity. It signs only receipt
+   * claims for this Connector fingerprint; the private key never leaves.
+   */
+  configurationReceiptSigner(): {
+    fingerprint: string
+    signReceipt(claims: unknown): Promise<SignedReceipt>
+  } {
+    const key = this.#key
+    const fingerprint = this.fingerprint
+    return Object.freeze({
+      fingerprint,
+      async signReceipt(input: unknown): Promise<SignedReceipt> {
+        const claims = ConfigurationReceiptClaims.parse(input)
+        if (claims.connector_fingerprint !== fingerprint)
+          throw new Error('Receipt fingerprint does not match identity')
+        const signed = SignedConfigurationReceipt.parse({
+          ...claims,
+          signature: sign(
+            null,
+            configurationReceiptPayload(claims),
+            key,
+          ).toString('base64url'),
+        })
+        encodeConfigurationReceipt(signed)
+        return signed
+      },
+    })
   }
   toJSON() {
     return {

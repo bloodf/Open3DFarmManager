@@ -33,11 +33,39 @@ export interface RuntimeScope {
   runtimeConfigPath: string
   agent_id: string
   farm_id: string
+  /**
+   * Explicit zero-printer provisioning mode. Only when the runtime file does
+   * not exist yet, these local non-collection sections (telemetry, renewal,
+   * signalling, rtc) seed the first committed runtime. The candidate is still
+   * published only after the strict runtime reader accepts it, so an empty
+   * runtime is never written or loaded.
+   */
+  bootstrap?: Readonly<Record<string, unknown>>
 }
+
+const BOOTSTRAP_FORBIDDEN = new Set([
+  'version',
+  'collection',
+  'assignments',
+  'pause',
+  'camera',
+])
 
 function readRuntime(scope: RuntimeScope) {
   const raw = readPrivateJson(scope.runtimeConfigPath)
-  if (raw === null) throw new Error('Runtime configuration missing')
+  if (raw === null) {
+    if (!scope.bootstrap) throw new Error('Runtime configuration missing')
+    if (
+      Object.keys(scope.bootstrap).some((key) => BOOTSTRAP_FORBIDDEN.has(key))
+    )
+      throw new Error('Invalid zero-printer runtime template')
+    return LooseRuntime.parse({
+      ...scope.bootstrap,
+      version: 2,
+      collection: { version: 2, allowedOrigins: [], printers: [] },
+      assignments: [],
+    })
+  }
   return LooseRuntime.parse(raw)
 }
 

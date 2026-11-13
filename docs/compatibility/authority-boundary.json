@@ -1,0 +1,532 @@
+{
+  "id": "authority-boundary",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "e04c6dfeedf70b35f0323b817452790901251689",
+  "status": "DONE_WITH_CONCERNS",
+  "scope": "Source and documentation reading only; FDM; no tests, builds, simulators, browsers, hardware or credentials; no printer commands. 'Confirmed' means confirmed by reading source at the base, not observed at runtime.",
+  "findings": [
+    {
+      "id": "F1",
+      "level": "confirmed-by-source-reading",
+      "claim": "The only executable command contract is pause: capability actions is the literal tuple ['pause'], command v2 action is the literal 'pause' with purpose 'printer-pause'. Resume, cancel, start and upload have no schema, capability or driver.",
+      "evidence": [
+        "packages/farm-protocol/src/pause-capability.ts:84",
+        "packages/farm-protocol/src/command-v2.ts:16",
+        "packages/farm-protocol/src/command-v2.ts:25"
+      ],
+      "sources": ["S2", "S3"]
+    },
+    {
+      "id": "F2",
+      "level": "confirmed-by-source-reading",
+      "claim": "The v1 verifier authorizeCommand and PersistentReplayStore have no callers under packages, apps or scripts (tests only). It is the only place resume, cancel and emergency_stop exist as actions; project documentation describes it as a library prototype without driver or transport.",
+      "evidence": [
+        "packages/connector/src/auth/verify.ts:88",
+        "packages/connector/src/auth/replay.ts:23",
+        "packages/farm-protocol/src/command.ts:20",
+        "docs/COMMAND-SECURITY.md"
+      ],
+      "sources": ["S7", "S15"]
+    },
+    {
+      "id": "F3",
+      "level": "confirmed-by-source-reading",
+      "claim": "The Connector does not read the capability role field during admission; role is constrained by schema and issuer signature only. No role-per-action table exists in the Connector.",
+      "evidence": [
+        "packages/farm-protocol/src/pause-capability.ts:58",
+        "packages/connector/src/auth/pause-capability.ts:364-388"
+      ],
+      "sources": ["S2", "S4"]
+    },
+    {
+      "id": "F4",
+      "level": "confirmed-by-source-reading",
+      "claim": "Journal rows with status outcome-unknown have null retain_until and are never deleted; cleanup covers not-sent and applied only. A claimed, write-started or outcome-unknown row makes later commands for the same assignment or printer fail as assignment-busy. No reconciliation code was found.",
+      "evidence": [
+        "packages/connector/src/control/command-journal.ts:140",
+        "packages/connector/src/control/command-journal.ts:360",
+        "packages/connector/src/control/command-journal.ts:378",
+        "packages/connector/src/control/command-journal.ts:514",
+        "docs/MOONRAKER-PAUSE-DRIVER-CHECKPOINT.md"
+      ],
+      "sources": ["S5", "S16"]
+    },
+    {
+      "id": "F5",
+      "level": "confirmed-by-source-reading",
+      "claim": "The driver boundary is coupled to Moonraker in three places: the local assignment schema requires moonraker_origin, the router calls openFixedMoonrakerPause directly, and the runtime accepts a single control assignment. The PauseDriver interface itself does not mention Moonraker.",
+      "evidence": [
+        "packages/connector/src/control/printer-binding.ts:19",
+        "packages/connector/src/control/printer-binding.ts:61",
+        "packages/connector/src/runtime/pause-driver-router.ts:54",
+        "packages/connector/src/runtime/pause-control.ts:105",
+        "packages/connector/src/runtime/pause-control.ts:138",
+        "packages/connector/src/control/pause-dispatcher.ts:54"
+      ],
+      "sources": ["S6", "S9"]
+    },
+    {
+      "id": "F6",
+      "level": "confirmed-by-source-reading",
+      "claim": "Cached authority lives 30 s by default and 60 s at most, in memory only, and starts stale after restart. Only the credential-authenticated Connector inbox reaches confirm(); server_seq must strictly increase and a revocation raises the floor.",
+      "evidence": [
+        "packages/connector/src/auth/offline-authority.ts:8-9",
+        "packages/connector/src/auth/offline-authority.ts:92-113",
+        "packages/connector/src/runtime/agent.ts:244-320",
+        "packages/connector/src/cloud/authenticated-signalling-client.ts:389-416"
+      ],
+      "sources": ["S11", "S12"]
+    },
+    {
+      "id": "F7",
+      "level": "confirmed-by-source-reading",
+      "claim": "connector.authority-confirm and connector.authority-revoked frames carry no signature of their own; provenance rests on the TLS connection and credential admission. The server rereads authority every 5 s.",
+      "evidence": [
+        "packages/farm-protocol/src/signalling-socket.ts:97-109",
+        "apps/farm/server/services/signalling-runtime.ts:907-958"
+      ],
+      "sources": ["S13"]
+    },
+    {
+      "id": "F8",
+      "level": "confirmed-by-source-reading",
+      "claim": "Verifier and dispatcher latch a wall/monotonic baseline at the first sample; skew above 1000 ms sets clockBroken and no code path resets it.",
+      "evidence": [
+        "packages/connector/src/auth/pause-capability.ts:153-176",
+        "packages/connector/src/control/pause-dispatcher.ts:145-168"
+      ],
+      "sources": ["S4", "S6"]
+    },
+    {
+      "id": "F9",
+      "level": "confirmed-by-source-reading",
+      "claim": "Public printer state allows idle, printing, paused, error and offline; there is no unknown or unsupported value. The Moonraker reader maps webhooks.state startup to offline. The control observation has unknown but the pause driver never emits it: states other than printing, paused and error become idle.",
+      "evidence": [
+        "packages/farm-protocol/src/state.ts:5",
+        "packages/connector/src/moonraker/parse.ts:117",
+        "packages/connector/src/control/pause-dispatcher.ts:37",
+        "packages/connector/src/moonraker/pause-driver.ts:324-327"
+      ],
+      "sources": ["S17", "S8"]
+    },
+    {
+      "id": "F10",
+      "level": "confirmed-by-source-reading",
+      "claim": "WebRTC peers are created with iceServers: []. The control binding rejects SDP with a typ relay candidate and requires exactly one SHA-256 DTLS fingerprint. Role proofs use separate keys and algorithms (browser ECDSA P-256, Connector Ed25519) over a domain-separated payload that includes the role.",
+      "evidence": [
+        "packages/connector/src/webrtc/pause-control-peer.ts:135",
+        "packages/connector/src/webrtc/readonly-peer.ts:139",
+        "packages/farm-protocol/src/control-session-binding.ts:133-145",
+        "packages/farm-protocol/src/control-session-binding.ts:227-248"
+      ],
+      "sources": ["S10", "S1"]
+    },
+    {
+      "id": "F11",
+      "level": "confirmed-by-source-reading",
+      "claim": "The Connector private key is encapsulated in ConnectorIdentity; callers receive purpose-specific signing operations, not the key. Directory and files are created with modes 0o700 and 0o600.",
+      "evidence": [
+        "packages/connector/src/identity/store.ts:89-241",
+        "packages/connector/src/identity/store.ts:303-345"
+      ],
+      "sources": ["S18"]
+    },
+    {
+      "id": "F12",
+      "level": "confirmed-by-source-reading",
+      "claim": "The issuer keyring is local configuration, capped at eight entries, with an https origin; no issuer comes from the peer or the command.",
+      "evidence": [
+        "packages/connector/src/config/pause.ts:16",
+        "packages/connector/src/config/pause.ts:38",
+        "packages/connector/src/config/pause.ts:49",
+        "packages/connector/src/config/pause.ts:141"
+      ],
+      "sources": ["S19"]
+    },
+    {
+      "id": "F13",
+      "level": "confirmed-by-source-reading",
+      "claim": "The dispatcher never resends. Missing response, unconfirmed state, driver contract breach or failure to persist the result end as outcome-unknown.",
+      "evidence": [
+        "packages/connector/src/control/pause-dispatcher.ts:314-341",
+        "packages/connector/src/control/pause-dispatcher.ts:608-687",
+        "packages/connector/src/control/pause-dispatcher.ts:735-740"
+      ],
+      "sources": ["S6"]
+    },
+    {
+      "id": "F14",
+      "level": "confirmed-by-bounded-search",
+      "claim": "The pause driver and origin validation carry no Moonraker API header, token or login; a bounded search for api_key, oneshot, authorization and access_token in packages/connector/src/moonraker and related config files returned nothing. Official Moonraker documentation states untrusted clients need a JWT or API key.",
+      "evidence": ["packages/connector/src/config/moonraker.ts:28-65"],
+      "sources": ["S20", "S22"]
+    },
+    {
+      "id": "F15",
+      "level": "confirmed-by-bounded-search",
+      "claim": "No occurrence of Anycubic, Bambu or Creality in TypeScript files under packages, apps and tests (case-insensitive).",
+      "evidence": [],
+      "sources": []
+    },
+    {
+      "id": "F16",
+      "level": "confirmed-by-source-reading",
+      "claim": "Server issuance rereads session, membership and role, browser key, Connector enrollment, credential and assignment inside one transaction before signing a capability.",
+      "evidence": [
+        "apps/farm/server/storage/postgres-pause-authority.ts:240-323"
+      ],
+      "sources": ["S14"]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "from": ["F4", "F13"],
+      "risk": "One outcome-unknown result blocks further pause on that printer until manual intervention in local storage; no reconciliation procedure exists in code."
+    },
+    {
+      "id": "R2",
+      "from": ["F1", "F2"],
+      "risk": "The v1 schema lists resume, cancel and emergency stop, which may be mistaken for an authorized execution path; it has caller-supplied context and no transport or driver."
+    },
+    {
+      "id": "R3",
+      "from": ["F3"],
+      "risk": "Roles are equivalent for every action unless a role-per-action rule is added before a second command."
+    },
+    {
+      "id": "R4",
+      "from": ["F9"],
+      "risk": "The current contract cannot represent unknown or per-device unsupported; startup is reported as offline and other states as idle."
+    },
+    {
+      "id": "R5",
+      "from": ["F5"],
+      "risk": "The local printer assignment only describes an http or https Moonraker origin; a different local protocol does not fit without changing the component that anchors target authorization."
+    },
+    {
+      "id": "R6",
+      "from": ["F14"],
+      "risk": "Moonraker installations that require authorization are not served; there is no local store for printer credentials."
+    },
+    {
+      "id": "R7",
+      "from": ["F8"],
+      "risk": "Accumulated clock skew disables pause until the process restarts. The roughly 14 h figure in project documentation was not measured here."
+    },
+    {
+      "id": "R8",
+      "from": ["F5"],
+      "risk": "One control assignment per Connector: multi-printer farms have no pause path for every printer with the current composition."
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "H1",
+      "status": "unverified",
+      "claim": "Manufacturer local protocols may not allow the single-send-on-the-same-synchronous-stack guarantee required by PauseDriver."
+    },
+    {
+      "id": "H2",
+      "status": "unverified",
+      "claim": "Manufacturer protocols may not offer strictly ordered state reads comparable to eventtime, preventing the same applied confirmation rule."
+    },
+    {
+      "id": "H3",
+      "status": "unverified",
+      "claim": "Absence of Moonraker authentication may extend to modules outside the bounded search of F14."
+    },
+    {
+      "id": "H4",
+      "status": "unverified",
+      "claim": "A compromised TLS terminator between server and Connector could forge authority-confirm; not tested."
+    },
+    {
+      "id": "H5",
+      "status": "unverified",
+      "claim": "Claimed rows left by a process crash block the assignment like outcome-unknown; indicated by the SQL, not executed."
+    },
+    {
+      "id": "H6",
+      "status": "unverified",
+      "claim": "Browser-side behaviour and the unread parts of pause-command-relay.ts match project documentation."
+    },
+    {
+      "id": "H7",
+      "status": "unverified",
+      "claim": "Connector credential renewal and revocation behave as described in docs/CONNECTOR-REVOCATION-CHECKPOINT.md; code not read."
+    }
+  ],
+  "acceptance_constraints": [
+    {
+      "id": "AC1",
+      "rule": "Authority only over the browser-Connector WebRTC path: no TURN, no relay candidate, no HTTP or server command path; degraded mode is read-only."
+    },
+    {
+      "id": "AC2",
+      "rule": "The Connector-printer hop is separate: a local protocol is allowed there but never carries, replaces or extends browser-Connector authority."
+    },
+    {
+      "id": "AC3",
+      "rule": "One capability per action: start, upload, pause, resume and cancel are distinct, each with a versioned schema, its own purpose and its own signature domain prefix. No generic action, G-code or arbitrary payload."
+    },
+    {
+      "id": "AC4",
+      "rule": "The v1 verifier is not a production path; do not wire authorizeCommand to a driver without authenticated context, issued capability and journal equivalent to v2."
+    },
+    {
+      "id": "AC5",
+      "rule": "Role is decided at issuance and signed; every new action states which roles receive it and the Connector rejects a capability whose role is not allowed for the action."
+    },
+    {
+      "id": "AC6",
+      "rule": "Targets come only from local provisioning: no address, port, identifier or printer credential arrives by command, capability, WebRTC peer or server; targets pass a local allowlist."
+    },
+    {
+      "id": "AC7",
+      "rule": "Identity and capabilities are per device and firmware, never per brand; a missing feature is unsupported for that device."
+    },
+    {
+      "id": "AC8",
+      "rule": "Unknown is not offline: unknown, offline, stale and unsupported are distinct states; an adapter that cannot determine state publishes unknown and denies command eligibility."
+    },
+    {
+      "id": "AC9",
+      "rule": "Journal before effect: every command is durably claimed before any device write; journal and replay never grant authority."
+    },
+    {
+      "id": "AC10",
+      "rule": "At most one send, no retry: a timeout does not prove rejection; an uncertain result is outcome-unknown, visible and never resent automatically."
+    },
+    {
+      "id": "AC11",
+      "rule": "applied requires a later observation on the same connection and generation within the freshness bound; transport acknowledgement alone is insufficient."
+    },
+    {
+      "id": "AC12",
+      "rule": "Bounds preserved: capability 30 s, admission 8 s, command 5 s, fresh state 2 s, cached authority 60 s; an adapter must not widen them for a slow protocol."
+    },
+    {
+      "id": "AC13",
+      "rule": "Fail closed on outage: without recent server confirmation every command is refused; restart starts without authority; revocation is immediate and cannot be undone by an older confirmation."
+    },
+    {
+      "id": "AC14",
+      "rule": "Printer credentials never reach logs, public fixtures, diagnostics or browser DTOs; diagnostics use closed reason sets."
+    },
+    {
+      "id": "AC15",
+      "rule": "Bounded canonical input: every device or peer message has byte, depth and value limits and is rejected when malformed."
+    },
+    {
+      "id": "AC16",
+      "rule": "No command to a physical printer in automated tests; physical validation is a manual, authorized step identified by equipment and firmware."
+    }
+  ],
+  "gaps": [
+    "No execution: tests, aggregate checks, simulators and hardware were not run; nothing here certifies runtime behaviour.",
+    "Partial reads: pause-command-relay.ts, pause-signalling-client.ts, pause-control-session.ts, signalling-runtime.ts and postgres-pause-authority.ts were read by excerpts and searches, not in full.",
+    "Not read: browser code under apps/farm/app, credential renewal and revocation code, camera path, telemetry queue.",
+    "CodeGraph index was not initialized in this checkout and was not created for a research-only task; bounded reads and exact searches were used, so dynamic calls may have been missed.",
+    "Local protocols of Anycubic, Bambu Lab and Creality were not studied here; no access, support or model ranking claim follows from this report.",
+    "Moonraker documentation pages show no publication date or version; the driver pins a specific Moonraker commit that was not compared with the current page.",
+    "Formatter not run: prettier is not installed in this checkout and installs were not authorized; files were formatted by hand and checked with git diff --check only."
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "reference": "packages/farm-protocol/src/control-session-binding.ts",
+      "supports": "Session binding, role proofs, DTLS pins, relay candidate rejection",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S2",
+      "reference": "packages/farm-protocol/src/pause-capability.ts",
+      "supports": "Pause capability, policy maximums, admission proof",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S3",
+      "reference": "packages/farm-protocol/src/command-v2.ts",
+      "supports": "Signed command v2",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S4",
+      "reference": "packages/connector/src/auth/pause-capability.ts",
+      "supports": "Connector admission and capability inspection",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S5",
+      "reference": "packages/connector/src/control/command-journal.ts",
+      "supports": "Durable journal, replay, retention",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S6",
+      "reference": "packages/connector/src/control/pause-dispatcher.ts",
+      "supports": "Dispatch, PauseDriver interface, outcomes",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S7",
+      "reference": "packages/connector/src/auth/verify.ts; packages/connector/src/auth/replay.ts; packages/farm-protocol/src/command.ts",
+      "supports": "v1 verifier and replay store",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read and caller search"
+    },
+    {
+      "id": "S8",
+      "reference": "packages/connector/src/moonraker/pause-driver.ts",
+      "supports": "Fixed Moonraker pause driver",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S9",
+      "reference": "packages/connector/src/control/printer-binding.ts; packages/connector/src/runtime/pause-driver-router.ts; packages/connector/src/runtime/pause-control.ts",
+      "supports": "Local assignment, driver router, runtime composition",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S10",
+      "reference": "packages/connector/src/webrtc/pause-control-peer.ts; packages/connector/src/webrtc/readonly-peer.ts",
+      "supports": "WebRTC peer, data channel, iceServers",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "bounded search"
+    },
+    {
+      "id": "S11",
+      "reference": "packages/connector/src/auth/offline-authority.ts",
+      "supports": "Cached authority lifetime",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S12",
+      "reference": "packages/connector/src/runtime/agent.ts; packages/connector/src/cloud/authenticated-signalling-client.ts",
+      "supports": "Source of confirm and revoke",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "excerpt read"
+    },
+    {
+      "id": "S13",
+      "reference": "packages/farm-protocol/src/signalling-socket.ts; apps/farm/server/services/signalling-runtime.ts",
+      "supports": "Authority frames and server reread",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "excerpt read"
+    },
+    {
+      "id": "S14",
+      "reference": "apps/farm/server/storage/postgres-pause-authority.ts",
+      "supports": "Transactional capability issuance",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "bounded search"
+    },
+    {
+      "id": "S15",
+      "reference": "docs/COMMAND-SECURITY.md",
+      "supports": "Prototype status of v1",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "document read"
+    },
+    {
+      "id": "S16",
+      "reference": "docs/MOONRAKER-PAUSE-DRIVER-CHECKPOINT.md",
+      "supports": "No reconciliation and no retry",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "document read"
+    },
+    {
+      "id": "S17",
+      "reference": "packages/farm-protocol/src/state.ts; packages/connector/src/moonraker/parse.ts",
+      "supports": "Public states and mapping",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S18",
+      "reference": "packages/connector/src/identity/store.ts",
+      "supports": "Connector identity",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "bounded search"
+    },
+    {
+      "id": "S19",
+      "reference": "packages/connector/src/config/pause.ts",
+      "supports": "Issuer keyring",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "bounded search"
+    },
+    {
+      "id": "S20",
+      "reference": "packages/connector/src/config/moonraker.ts",
+      "supports": "Moonraker origin validation",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "source read"
+    },
+    {
+      "id": "S21",
+      "reference": "https://moonraker.readthedocs.io/en/latest/external_api/printer/",
+      "supports": "Methods printer.print.pause (returns ok) and printer.objects.query (eventtime, status)",
+      "published": "not shown",
+      "accessed": "2026-11-13",
+      "method": "web fetch summary"
+    },
+    {
+      "id": "S22",
+      "reference": "https://moonraker.readthedocs.io/en/latest/external_api/authorization/",
+      "supports": "Untrusted clients must use a JWT or API key",
+      "published": "not shown",
+      "accessed": "2026-11-13",
+      "method": "web fetch summary"
+    },
+    {
+      "id": "S23",
+      "reference": "AGENTS.md; docs/OFFLINE-AUTHORIZATION-LIFETIME.md",
+      "supports": "Project rules and offline authority bounds",
+      "published": "2026-11-12 (base commit)",
+      "accessed": "2026-11-13",
+      "method": "document read"
+    }
+  ],
+  "next_steps": [
+    "Decide and document the outcome-unknown reconciliation procedure before any new protocol (R1).",
+    "Propose a public state with unknown and per-device unsupported, preserving current Moonraker behaviour (R4).",
+    "Propose the smallest generalization of the local assignment: an explicit target type validated per adapter, keeping the local allowlist (R5).",
+    "Define the role-per-action table before a second command (R3).",
+    "For each candidate protocol family, answer H1 and H2 from primary documentation before designing a driver.",
+    "Mark the v1 verifier as non-production in code or remove it, as a separate task (R2).",
+    "Run the project's existing checks at the base in an authorized task and record results; this audit does not replace them.",
+    "Independent review of this report against source before using it as acceptance criteria."
+  ]
+}

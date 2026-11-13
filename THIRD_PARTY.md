@@ -2,23 +2,24 @@
 
 The application and test utilities in this repository are original MIT code. No application code was imported from another print-farm project or private repository. Dependencies retain their own licenses; the root MIT license does not replace them.
 
-| Component                                    | Use                                                   | License reported by package/project         |
-| -------------------------------------------- | ----------------------------------------------------- | ------------------------------------------- |
-| Nuxt, Vue, Vue Router                        | App runtime                                           | MIT                                         |
-| Zod                                          | Protocol validation                                   | MIT                                         |
-| Effect                                       | Typed simulator I/O failures                          | MIT                                         |
-| TypeScript                                   | Development                                           | Apache-2.0                                  |
-| Bun type definitions, Node type definitions  | Development                                           | MIT                                         |
-| Playwright                                   | Browser tests                                         | Apache-2.0                                  |
-| axe-core, @axe-core/playwright               | Accessibility tests                                   | MPL-2.0 (unmodified, dev only, not shipped) |
-| Prettier                                     | Formatting                                            | MIT                                         |
-| Vitest                                       | Test runner                                           | MIT                                         |
-| esbuild                                      | Connector/helper bundler                              | MIT                                         |
-| virtual-klipper-printer                      | Separate test container (derived image built locally) | GPL-3.0                                     |
-| simulavr (inside virtual-klipper-printer)    | Rebuilt in-image for tests                            | GPL-2.0                                     |
-| Spoolman                                     | Separate inventory simulator                          | MIT                                         |
-| MediaMTX                                     | Separate RTSP test container                          | MIT                                         |
-| FFmpeg 6.1.2 (bundled in the MediaMTX image) | Separate test-pattern publisher                       | GPL (build with `--enable-gpl`, libx264)    |
+| Component                                    | Use                                                   | License reported by package/project            |
+| -------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
+| Nuxt, Vue, Vue Router                        | App runtime                                           | MIT                                            |
+| Zod                                          | Protocol validation                                   | MIT                                            |
+| Effect                                       | Typed simulator I/O failures                          | MIT                                            |
+| TypeScript                                   | Development                                           | Apache-2.0                                     |
+| Bun type definitions, Node type definitions  | Development                                           | MIT                                            |
+| Playwright                                   | Browser tests                                         | Apache-2.0                                     |
+| axe-core, @axe-core/playwright               | Accessibility tests                                   | MPL-2.0 (unmodified, dev only, not shipped)    |
+| Prettier                                     | Formatting                                            | MIT                                            |
+| Vitest                                       | Test runner                                           | MIT                                            |
+| esbuild                                      | Connector/helper bundler                              | MIT                                            |
+| virtual-klipper-printer                      | Separate test container (derived image built locally) | GPL-3.0                                        |
+| simulavr (inside virtual-klipper-printer)    | Rebuilt in-image for tests                            | GPL-2.0                                        |
+| Spoolman                                     | Separate inventory simulator                          | MIT                                            |
+| MediaMTX                                     | Separate RTSP test container                          | MIT                                            |
+| FFmpeg 6.1.2 (bundled in the MediaMTX image) | Separate test-pattern publisher                       | GPL (build with `--enable-gpl`, libx264)       |
+| KobraLink                                    | Separate print bridge (built locally from upstream)   | GPL-3.0-only (upstream; certs license unknown) |
 
 Exact package versions and integrity values are in `pnpm-lock.yaml`. The Klipper simulator is built locally by `infra/sim/klipper/Dockerfile` from the digest-pinned upstream image. The build rebuilds the GPL-2.0 simulavr sources already shipped in that image (optimised, unmodified source) and edits the image's `supervisord.conf` to add avrsim's `-r` pacing option. Its builder stage uses a fixed Debian snapshot, exact package versions and a hash-locked setuptools wheel. The derived image is a local test artifact and is not published or distributed. No upstream source/configuration is vendored into this repository; the repository adds only the MIT build recipe. Follow upstream licensing if redistributing that image. The pinned MediaMTX image (`bluenviron/mediamtx@sha256:2356620b…92aa3`, tag 1.18.1-ffmpeg) also bundles a GPL FFmpeg build; it is a separate container, nothing is vendored, and redistributing it must follow those terms. Runtime Docker bases also retain their upstream notices.
 
@@ -1365,3 +1366,11 @@ from their versioned npm tarballs are retained under
 JSON-RPC license shipped in 7.0.2. Preserve these files when redistributing
 these compiler packages. These are development dependencies; this notice does
 not establish the contents of a runtime artifact.
+
+## KobraLink 0.5.0 provenance and licensing
+
+The [upstream KobraLink project](https://github.com/NatHacks/Kobralink) at pinned commit `5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1` (`v0.5.0`) is licensed under `GPL-3.0-only` (`LICENSE` at the repository root and `apps/api/package.json`). Open3DFarmManager interacts with KobraLink as a separately running local service over loopback HTTP API calls from the Connector.
+
+- **Original MIT client and recipe only:** All Open3DFarmManager client, Connector, and packaging recipe files (`infra/kobralink/docker-compose.yml`, `infra/kobralink/upstream.lock`, and `scripts/kobralink-source.mjs`) in this repository are original MIT code. No KobraLink source code, database schemas, container images, or build artifacts are vendored into or redistributed by this repository.
+- **No legal claim from process separation:** Running KobraLink in a separate container or process over local loopback is an architectural and operational boundary; this repository does not claim that process separation settles GPL-3.0 licensing obligations for combined deployments or distributions. Operators who fetch, build, run, or redistribute KobraLink must independently comply with `GPL-3.0-only`.
+- **Third-party certificate licensing uncertainty:** The upstream repository versions a client certificate and private key (`apps/api/certs/anycubic_slicer.crt` and `apps/api/certs/anycubic_slicer.key`) extracted from Anycubic Slicer Next and copies them into its Docker image for printer MQTT communication. Upstream describes this material as third-party material included for interoperability without declaring a license. Open3DFarmManager does not copy, commit, or redistribute those certificate or key bytes or any container image containing them, and their licensing status remains unknown.

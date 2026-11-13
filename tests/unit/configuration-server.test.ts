@@ -8,15 +8,21 @@ import {
   credentialProofPayload,
 } from '../../packages/farm-protocol/src/credential-proof.ts'
 import {
+  encodeConfigurationAdmissionProof,
+  signConfigurationAdmissionProof,
+  verifyConfigurationAuthorityEvidence,
+} from '../../packages/farm-protocol/src/configuration-capability.ts'
+import {
+  configurationBindingHash,
   connectorFingerprintFromSpki,
   encodeConfigurationSessionProof,
   signConfigurationSessionProof,
 } from '../../packages/farm-protocol/src/configuration-binding.ts'
 import {
-  encodeConfigurationAdmissionProof,
-  signConfigurationAdmissionProof,
-  verifyConfigurationAuthorityEvidence,
-} from '../../packages/farm-protocol/src/configuration-capability.ts'
+  decodeConfigurationInventoryAck,
+  deriveConfigurationAssignmentIdentity,
+  verifyConfigurationInventoryAck,
+} from '../../packages/farm-protocol/src/configuration-inventory.ts'
 import {
   configurationReceiptHash,
   encodeConfigurationReceipt,
@@ -205,14 +211,13 @@ function memoryStore() {
               state.assignments.has(key)
             )
               return { ok: false }
-            const assignmentId = randomUUID()
-            state.assignments.set(key, assignmentId)
+            state.assignments.set(key, r.assignment_id)
             state.receipts.set(r.operation_id, {
               operation_id: r.operation_id,
               receipt_sha256: r.receipt_sha256,
-              assignment_id: assignmentId,
+              assignment_id: r.assignment_id,
             })
-            return { ok: true, assignmentId }
+            return { ok: true, assignmentId: r.assignment_id }
           },
         })
       }
@@ -326,20 +331,22 @@ async function fixture() {
     timers,
   })
   const a = authFixture()
+  const issuerConfig = {
+    issuer: 'open3dfarm:configuration-issuer',
+    kid: 'config-test-1',
+    privateKey: issuer.privateKey,
+  }
   const runtime: ConfigurationHttpRuntime = {
     auth: a.auth,
     authority: createConfigurationAuthorityService({
       store,
       registry: coordinator,
-      issuer: {
-        issuer: 'open3dfarm:configuration-issuer',
-        kid: 'config-test-1',
-        privateKey: issuer.privateKey,
-      },
+      issuer: issuerConfig,
     }),
     registration: createConfigurationRegistrationService({
       store,
       registry: coordinator,
+      issuer: issuerConfig,
     }),
   }
   function socket(role: 'browser' | 'connector', id?: string) {
@@ -496,14 +503,18 @@ test('config-v1 routes fail closed until a runtime with a real store is installe
     } as never)
   // Exact config-v1 paths answer 404 while disabled; anything else falls through.
   for (const path of [
+    '/api/configuration-authority/issuer',
     '/api/configuration-authority/challenges',
     '/api/configuration-authority/capabilities',
     `/api/farms/${ids.farm}/configuration-receipts`,
     `/api/farms/${ids.farm}/connectors/${ids.agent}/configuration?keyId=${ids.key}`,
   ])
-    expect(() => dispatch(path)).toThrowError(
-      expect.objectContaining({ status: 404 }),
-    )
+    expect(() =>
+      dispatch(
+        path,
+        path === '/api/configuration-authority/issuer' ? 'GET' : 'POST',
+      ),
+    ).toThrowError(expect.objectContaining({ status: 404 }))
   for (const path of [
     '/api/configuration-authority/challenges/extra',
     '/api/configuration-authority/sign',
@@ -531,12 +542,30 @@ test('config-v1 routes fail closed until a runtime with a real store is installe
     cookie: cookieConfig,
     coordinator: f.coordinator,
   })
+  const publicJwk = await crypto.subtle.exportKey('jwk', f.issuer.publicKey)
+  const issuerMetadata = {
+    protocol: 'config-v1' as const,
+    issuerKid: 'config-test-1',
+    origin,
+    audience,
+    publicKeyJwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x },
+  }
   const uninstall = installConfigurationRuntime({
     http: f.runtime,
     signalling,
+    issuer: issuerMetadata,
   })
   try {
     expect(configurationHttpRuntime()).toBe(f.runtime)
+    expect(dispatch('/api/configuration-authority/issuer', 'GET')).toEqual(
+      issuerMetadata,
+    )
+    expect(() =>
+      dispatch('/api/configuration-authority/issuer', 'POST'),
+    ).toThrowError(expect.objectContaining({ status: 405 }))
+    expect(() =>
+      dispatch('/api/configuration-authority/issuer?kid=1', 'GET'),
+    ).toThrowError(expect.objectContaining({ status: 400 }))
     // Installed: the middleware reaches the real handler and its session boundary.
     await expect(
       dispatch('/api/configuration-authority/challenges'),
@@ -816,9 +845,61 @@ test('HTTP handlers issue a capability and register the committed receipt end to
   await expect(post(local)).rejects.toMatchObject({ status: 403 })
   await expect(post(prepared)).rejects.toMatchObject({ status: 403 })
   await admit('commit', preparedSha256)
+  const identity = await deriveConfigurationAssignmentIdentity({
+    account_id: 'account-owner',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    bridge_instance_id: 'bridge-synthetic-1',
+    device_id: target.device_id,
+  })
   const first = await post(local)
-  expect(first).toMatchObject({ status: 'active', replayed: false })
-  expect(await post(local)).toEqual({ ...first, replayed: true })
+  expect(first).toMatchObject({
+    assignmentId: identity.assignment_id,
+    printerKey: identity.printer_key,
+    status: 'active',
+    replayed: false,
+  })
+  const decodedAck = decodeConfigurationInventoryAck(first.inventoryAckWire)
+  expect(
+    await verifyConfigurationInventoryAck(
+      decodedAck,
+      f.issuer.publicKey,
+      {
+        context: {
+          account_id: 'account-owner',
+          farm_id: ids.farm,
+          agent_id: ids.agent,
+          key_id: ids.key,
+          transport_id: live.binding.transport_id,
+          browser_thumbprint: f.authority.browser_thumbprint,
+          connector_fingerprint: f.fingerprint,
+          credential_jti: ids.jti,
+          configuration_binding_sha256: await configurationBindingHash(
+            live.binding,
+          ),
+          origin,
+          audience,
+        },
+        kid: 'config-test-1',
+        issuer: 'open3dfarm:configuration-issuer',
+        operation_id: operationId,
+        committed_receipt_sha256: first.receiptSha256,
+        committed_revision: 1,
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+      },
+      decodedAck.issued_at,
+    ),
+  ).toBe(true)
+  const replayed = await post(local)
+  expect(replayed).toEqual({
+    ...first,
+    replayed: true,
+    inventoryAckWire: replayed.inventoryAckWire,
+  })
+  expect(
+    decodeConfigurationInventoryAck(replayed.inventoryAckWire).nonce,
+  ).not.toBe(decodedAck.nonce)
   await expect(post(await committed())).rejects.toMatchObject({ status: 409 })
   await expect(post(local, randomUUID())).rejects.toMatchObject({
     status: 403,

@@ -1,14 +1,22 @@
+import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import {
   BrowserDeviceTextId,
   BrowserDeviceUuid,
 } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { decodeBase64url } from '../../../../packages/farm-protocol/src/encoding.ts'
+import { PairingProofAudience } from '../../../../packages/farm-protocol/src/pairing-proof.ts'
 import {
   CONFIGURATION_HARD_MAXIMUMS,
   CONFIGURATION_PROTOCOL,
   MAX_CONFIGURATION_PROOF_WIRE_BYTES,
+  requireEd25519Private,
 } from '../../../../packages/farm-protocol/src/configuration-common.ts'
+import {
+  deriveConfigurationAssignmentIdentity,
+  encodeConfigurationInventoryAck,
+  signConfigurationInventoryAck,
+} from '../../../../packages/farm-protocol/src/configuration-inventory.ts'
 import {
   configurationReceiptHash,
   configurationReceiptMatchesContext,
@@ -23,6 +31,7 @@ import {
   type ConfigurationFailure,
   type ConfigurationLiveRegistry,
 } from './configuration-authority-contract.ts'
+import type { ConfigurationIssuerConfig } from './configuration-authority.ts'
 
 const RegistrationInput = z.strictObject({
   sessionRecordId: BrowserDeviceTextId,
@@ -38,14 +47,21 @@ const BootstrapInput = z.strictObject({
   agentId: BrowserDeviceUuid,
   keyId: BrowserDeviceUuid,
 })
+const Issuer = z.strictObject({
+  issuer: PairingProofAudience,
+  kid: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/),
+  privateKey: z.custom<CryptoKey>((value) => value instanceof CryptoKey),
+})
 export type ConfigurationRegistrationResult =
   | {
       ok: true
       assignmentId: string
+      printerKey: string
       receiptSha256: string
       status: 'active'
       /** True when this exact receipt had been registered before (lost acknowledgement). */
       replayed: boolean
+      inventoryAckWire: string
     }
   | ConfigurationFailure
 export type ConfigurationBootstrapResult =
@@ -83,8 +99,11 @@ function connectorKey(spki: string): Promise<CryptoKey> {
 export function createConfigurationRegistrationService(input: {
   store: ConfigurationAuthorityStore
   registry: ConfigurationLiveRegistry
+  issuer: ConfigurationIssuerConfig
 }) {
   const { store, registry } = input
+  const issuer = Object.freeze(Issuer.parse(input.issuer))
+  requireEd25519Private(issuer.privateKey, 'configuration inventory issuer')
   let active = 0
   async function operation<T>(
     action: () => Promise<T | ConfigurationFailure>,
@@ -153,6 +172,13 @@ export function createConfigurationRegistrationService(input: {
           const a = currentConfigurationAuthority(tx, scope)
           const now = tx.observedAt
           if (!a) return denied()
+          const identity = await deriveConfigurationAssignmentIdentity({
+            account_id: a.account_id,
+            farm_id: a.farm_id,
+            agent_id: a.agent_id,
+            bridge_instance_id: receipt.target.bridge_instance_id,
+            device_id: receipt.target.device_id,
+          })
           const op = await tx.operation(receipt.operation_id)
           if (
             !op ||
@@ -181,37 +207,90 @@ export function createConfigurationRegistrationService(input: {
             ))
           )
             return denied()
-          const existing = await tx.receipt(op.operation_id)
-          if (existing)
-            return existing.receipt_sha256 === receiptSha256
-              ? {
-                  ok: true as const,
-                  assignmentId: existing.assignment_id,
-                  receiptSha256,
-                  status: 'active' as const,
-                  replayed: true,
-                }
-              : configurationFailure('conflict')
-          const registered = await tx.registerReceipt({
-            operation_id: op.operation_id,
-            receipt_sha256: receiptSha256,
-            receipt_wire: parsed.data.request.receiptWire,
-            farm_id: a.farm_id,
-            agent_id: a.agent_id,
-            account_id: a.account_id,
-            printer_key: receipt.target.device_id,
-            committed_revision: committedRevision,
-            registered_at: now,
+          const context = registry.activeContext({
+            sessionRecordId: parsed.data.sessionRecordId,
+            farmId: a.farm_id,
+            agentId: a.agent_id,
+            keyId: a.key_id,
+            accountId: a.account_id,
+            credentialJti: a.credential_jti,
           })
-          return registered.ok
-            ? {
-                ok: true as const,
-                assignmentId: BrowserDeviceUuid.parse(registered.assignmentId),
-                receiptSha256,
-                status: 'active' as const,
-                replayed: false,
-              }
-            : configurationFailure('conflict')
+          if (!context) return denied()
+          const expiresAt = Math.min(
+            now + CONFIGURATION_HARD_MAXIMUMS.bindingMs,
+            context.expiresAt,
+            a.validUntil,
+          )
+          if (expiresAt <= now) return denied()
+          const existing = await tx.receipt(op.operation_id)
+          if (existing) {
+            if (
+              existing.receipt_sha256 !== receiptSha256 ||
+              existing.assignment_id !== identity.assignment_id
+            )
+              return configurationFailure('conflict')
+          } else {
+            const registered = await tx.registerReceipt({
+              operation_id: op.operation_id,
+              receipt_sha256: receiptSha256,
+              receipt_wire: parsed.data.request.receiptWire,
+              farm_id: a.farm_id,
+              agent_id: a.agent_id,
+              account_id: a.account_id,
+              bridge_instance_id: receipt.target.bridge_instance_id,
+              device_id: receipt.target.device_id,
+              assignment_id: identity.assignment_id,
+              printer_key: identity.printer_key,
+              committed_revision: committedRevision,
+              registered_at: now,
+            })
+            if (
+              !registered.ok ||
+              BrowserDeviceUuid.parse(registered.assignmentId) !==
+                identity.assignment_id
+            )
+              return configurationFailure('conflict')
+          }
+          const ack = await signConfigurationInventoryAck(
+            {
+              v: 1,
+              protocol: CONFIGURATION_PROTOCOL,
+              purpose: 'configuration-inventory-ack',
+              context: {
+                account_id: a.account_id,
+                farm_id: a.farm_id,
+                agent_id: a.agent_id,
+                key_id: a.key_id,
+                transport_id: context.transportId,
+                browser_thumbprint: a.browser_thumbprint,
+                connector_fingerprint: a.connector_fingerprint,
+                credential_jti: a.credential_jti,
+                configuration_binding_sha256: context.bindingSha256,
+                origin: a.origin,
+                audience: a.audience,
+              },
+              kid: issuer.kid,
+              issuer: issuer.issuer,
+              operation_id: op.operation_id,
+              committed_receipt_sha256: receiptSha256,
+              committed_revision: committedRevision,
+              assignment_id: identity.assignment_id,
+              printer_key: identity.printer_key,
+              nonce: randomBytes(32).toString('base64url'),
+              issued_at: now,
+              expires_at: expiresAt,
+            },
+            issuer.privateKey,
+          )
+          return {
+            ok: true as const,
+            assignmentId: identity.assignment_id,
+            printerKey: identity.printer_key,
+            receiptSha256,
+            status: 'active' as const,
+            replayed: existing !== null,
+            inventoryAckWire: encodeConfigurationInventoryAck(ack),
+          }
         })
       })
     },

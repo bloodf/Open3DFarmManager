@@ -98,7 +98,12 @@ export const ConfigurationReceiptRegistration = z.strictObject({
   farm_id: BrowserDeviceUuid,
   agent_id: BrowserDeviceUuid,
   account_id: BrowserDeviceTextId,
-  printer_key: configurationOpaqueId,
+  bridge_instance_id: configurationOpaqueId,
+  device_id: configurationOpaqueId,
+  assignment_id: BrowserDeviceUuid,
+  printer_key: z
+    .string()
+    .regex(/^kobra-x-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
   committed_revision: revision,
   registered_at: configurationTime,
 })
@@ -157,6 +162,19 @@ export interface ConfigurationLiveRegistry {
     farmId: string,
     agentId: string,
   ): Readonly<{ jti: string; revision: number }> | null
+  /** The open, unexpired bound RTC context for the caller's current authority. */
+  activeContext(scope: {
+    sessionRecordId: string
+    farmId: string
+    agentId: string
+    keyId: string
+    accountId: string
+    credentialJti: string
+  }): Readonly<{
+    transportId: string
+    bindingSha256: string
+    expiresAt: number
+  }> | null
 }
 
 export type ConfigurationFailureReason =

@@ -16,6 +16,7 @@
     "LAN and cloud behaviour (LAN mode disabling cloud, app and AI detection; firmware updates requiring account binding) comes from third-party summaries and community projects only; not proven by official documentation read here.",
     "Community MQTT ports 18910 and 9883 are reported for Kobra 3 and S1 stock firmware; not proven and not applied to the models in this report.",
     "Telemetry and privacy terms were not read from the primary policy; summaries conflict and are not evidence.",
+    "Upload, start, pause, resume and cancel are recorded separately per model. Only Kobra 3 Max V2 start has an unverified search-summary claim (cloud print initiation, S16); every other command for every model is unknown, not unsupported.",
     "No command was tested; no hardware, simulator, credentials or API access was used. Browser-Connector WebRTC and Connector safety checks are not affected by this research and were not evaluated."
   ],
   "gaps": [
@@ -26,36 +27,205 @@
     "Whether Kobra 3 Max V2 is a new base model or a revision of Kobra 3 Max (2024) is unresolved.",
     "Firmware versions for every model are unknown.",
     "LAN, cloud, authentication, MQTT and command protocol are not proven by official documentation.",
+    "Upload, pause, resume and cancel have no source for any model; start has only an unverified summary claim for Kobra 3 Max V2.",
     "Telemetry, privacy and data-retention terms were not verified from the primary policy.",
     "Licence of third-party firmware (Rinkhals) and access restrictions were not reviewed.",
     "Three store and regional product pages returned HTTP 429 during retrieval; price and shipping data for Kobra S1 Max and Kobra 3 V2 remain unverified.",
     "Search-summary sources were not opened as full pages; they support only the claims marked as third-party."
   ],
   "sources": [
-    {"id": "S1", "reference": "https://store.anycubic.com/products/kobra-4-3d-printer", "supports": "Kobra 4 price, build volume, 720P camera with AI monitoring, accelerometer, materials; no launch dates", "published": "undated", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S2", "reference": "https://store.anycubic.com/pages/kobra-x-new-launch", "supports": "Kobra X price, ships in 24 hours, build volume, materials; no launch dates", "published": "undated", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S3", "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer", "supports": "Kobra 3 Max V2 price, volume 420x420x500, Kobra OS, Live View Camera accessory; no launch date", "published": "undated", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S4", "reference": "https://store.anycubic.com/collections/kobra-series", "supports": "Catalog presence of Kobra 3 Max V2, Kobra 4, Kobra X, Kobra S1 Max; does not establish chronology", "published": "undated", "accessed": "2026-11-13", "method": "coordinator web read"},
-    {"id": "S5", "reference": "https://store.anycubic.com/blogs/news/anycubic-black-friday-3d-printer-deals-2026-early-bird-preview", "supports": "Store lists New Arrivals labels; no launch dates", "published": "2026-10-22", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S6", "reference": "https://www.manufacturingtomorrow.com/news/2025/12/26/anycubic-opens-deposits-for-kobra-x-following-formnext-debut-of-its-next-generation-entry-level-multicolor-fdm-printer/26773/", "supports": "Kobra X Formnext 2025 debut and deposit program opened 2025-12-26; closing date not given", "published": "2025-12-26", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S7", "reference": "https://www.prnewswire.com/news-releases/anycubic-showcases-next-generation-3d-printing-lineup-at-rapidtct-2026-highlighting-multicolor-fdm-and-large-format-resin-innovation-302743844.html", "supports": "Anycubic RAPID+TCT 2026 exhibit of Kobra X, Kobra 4, S1 Max Combo, S1 Combo, Kobra 3 Max Combo; does not say launch", "published": "2026-04-15", "accessed": "2026-11-13", "method": "direct read"},
-    {"id": "S8", "reference": "https://www.tomshardware.com/3d-printing/anycubic-kobra-4-combo-3d-printer-review", "supports": "Third-party claim of Kobra 4 release date May 18, 2026; not official", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S9", "reference": "https://all3dp.com/1/top-3d-printers-launched-at-rapid-tct-2026/", "supports": "Third-party table listing Kobra 4 date as TBD", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S10", "reference": "https://www.fabbaloo.com/news/anycubic-launches-kobra-s1-max-combo-with-larger-build-volume-and-enhanced-material-capabilities", "supports": "Third-party claim of Kobra S1 Max release 2025-11-25", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S11", "reference": "https://www.vertex3d.co/blog/anycubic-announcements-19/anycubic-kobra-s1-max-combo-launching-soon-big-build-volume-bigger-expectations-86", "supports": "Third-party claim of Kobra S1 Max launch 2025-11-05; conflicts with S10", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S12", "reference": "https://www.notebookcheck.net/Anycubic-Kobra-S1-ACE-2-Pro-3D-printer-launches-with-16-colors-filament-drying-and-discount.1277337.0.html", "supports": "Third-party report of Kobra S1 ACE 2 Pro Combo launch in April 2026 (variant of Kobra S1)", "published": "2026-04-19", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S13", "reference": "https://forum.drucktipps3d.de/forum/thread/49722-anycubic-kobra-3-max-v2/", "supports": "Community thread dated 2026-08-28 discussing a Kobra 3 Max V2 announcement; not official", "published": "2026-08-28", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S14", "reference": "https://simplyprint.io/compatibility/anycubic-kobra-3-max-v2-combo", "supports": "Third-party: launched September 2026; built-in camera no; Wi-Fi and USB", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S15", "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer", "supports": "Search summary of an estimated shipping window Nov 15-25 that conflicts with the direct read of S3", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S16", "reference": "https://eu.anycubic.com/products/kobra-3-max-v2-combo-3d-printer", "supports": "Search summary of manufacturer listing: WLAN local data, app with cloud for remote operation; not opened directly", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S17", "reference": "https://www.3djake.com/anycubic-3d-printer-and-accessories/kobra-3-max-v2-combo", "supports": "Third-party listing; conflicts on camera and connection; not reliable on those points", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S18", "reference": "https://github.com/jbatonnet/Rinkhals", "supports": "Community custom firmware listing Kobra S1 Max support; licence not verified", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S19", "reference": "https://github.com/rinkhals-community/Rinkhals/pull/219", "supports": "Community report that a touchscreen LAN toggle can unbind the printer from the account on recent firmware; not proven", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S20", "reference": "https://github.com/HoffmanEngineering/printlog-bridge/issues/96", "supports": "Community report of Kobra 3 and S1 MQTT over ports 18910 and 9883; not proven", "published": "undated", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S21", "reference": "https://www.anycubic.com/en/PrivacyPolicy", "supports": "Privacy policy URL identified; not opened; no claim relies on it", "published": "undated", "accessed": "2026-11-13", "method": "search result only"},
-    {"id": "S22", "reference": "https://m.media-amazon.com/images/I/61kd9mfoHoL.pdf", "supports": "Data information statement identified; not opened; no claim relies on it", "published": "undated", "accessed": "2026-11-13", "method": "search result only"},
-    {"id": "S23", "reference": "https://www.prnewswire.com/news-releases/anycubic-launches-2026-black-friday-and-cyber-monday-sale-across-13-global-markets-with-up-to-350-off-3d-printers-302927728.html", "supports": "Anycubic sale release naming Kobra 3 Max V2 Combo and S1 Max Combo as promoted products", "published": "2026-11-03", "accessed": "2026-11-13", "method": "search summary"},
-    {"id": "S24", "reference": "https://www.bradfordera.com/2025/01/03/the-new-disruptor-anycubic-unveils-pre-sale-of-the-s1-combo-its-first-fully-enclosed-multi-color-corexy-3d-printer/", "supports": "Kobra S1 Combo pre-sale reported 2025-01-03; used only as the alternative for ranking position 5", "published": "2025-01-03", "accessed": "2026-11-13", "method": "search summary"}
+    {
+      "id": "S1",
+      "reference": "https://store.anycubic.com/products/kobra-4-3d-printer",
+      "supports": "Kobra 4 price, build volume, 720P camera with AI monitoring, accelerometer, materials; no launch dates",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S2",
+      "reference": "https://store.anycubic.com/pages/kobra-x-new-launch",
+      "supports": "Kobra X price, ships in 24 hours, build volume, materials; no launch dates",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S3",
+      "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer",
+      "supports": "Kobra 3 Max V2 price, volume 420x420x500, Kobra OS, Live View Camera accessory; no launch date",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S4",
+      "reference": "https://store.anycubic.com/collections/kobra-series",
+      "supports": "Catalog presence of Kobra 3 Max V2, Kobra 4, Kobra X, Kobra S1 Max; does not establish chronology",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "coordinator web read"
+    },
+    {
+      "id": "S5",
+      "reference": "https://store.anycubic.com/blogs/news/anycubic-black-friday-3d-printer-deals-2026-early-bird-preview",
+      "supports": "Store lists New Arrivals labels; no launch dates",
+      "published": "2026-10-22",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S6",
+      "reference": "https://www.manufacturingtomorrow.com/news/2025/12/26/anycubic-opens-deposits-for-kobra-x-following-formnext-debut-of-its-next-generation-entry-level-multicolor-fdm-printer/26773/",
+      "supports": "Kobra X Formnext 2025 debut and deposit program opened 2025-12-26; closing date not given",
+      "published": "2025-12-26",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S7",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-showcases-next-generation-3d-printing-lineup-at-rapidtct-2026-highlighting-multicolor-fdm-and-large-format-resin-innovation-302743844.html",
+      "supports": "Anycubic RAPID+TCT 2026 exhibit of Kobra X, Kobra 4, S1 Max Combo, S1 Combo, Kobra 3 Max Combo; does not say launch",
+      "published": "2026-04-15",
+      "accessed": "2026-11-13",
+      "method": "direct read"
+    },
+    {
+      "id": "S8",
+      "reference": "https://www.tomshardware.com/3d-printing/anycubic-kobra-4-combo-3d-printer-review",
+      "supports": "Third-party claim of Kobra 4 release date May 18, 2026; not official",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S9",
+      "reference": "https://all3dp.com/1/top-3d-printers-launched-at-rapid-tct-2026/",
+      "supports": "Third-party table listing Kobra 4 date as TBD",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S10",
+      "reference": "https://www.fabbaloo.com/news/anycubic-launches-kobra-s1-max-combo-with-larger-build-volume-and-enhanced-material-capabilities",
+      "supports": "Third-party claim of Kobra S1 Max release 2025-11-25",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S11",
+      "reference": "https://www.vertex3d.co/blog/anycubic-announcements-19/anycubic-kobra-s1-max-combo-launching-soon-big-build-volume-bigger-expectations-86",
+      "supports": "Third-party claim of Kobra S1 Max launch 2025-11-05; conflicts with S10",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S12",
+      "reference": "https://www.notebookcheck.net/Anycubic-Kobra-S1-ACE-2-Pro-3D-printer-launches-with-16-colors-filament-drying-and-discount.1277337.0.html",
+      "supports": "Third-party report of Kobra S1 ACE 2 Pro Combo launch in April 2026 (variant of Kobra S1)",
+      "published": "2026-04-19",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S13",
+      "reference": "https://forum.drucktipps3d.de/forum/thread/49722-anycubic-kobra-3-max-v2/",
+      "supports": "Community thread dated 2026-08-28 discussing a Kobra 3 Max V2 announcement; not official",
+      "published": "2026-08-28",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S14",
+      "reference": "https://simplyprint.io/compatibility/anycubic-kobra-3-max-v2-combo",
+      "supports": "Third-party: launched September 2026; built-in camera no; Wi-Fi and USB",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S15",
+      "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer",
+      "supports": "Search summary of an estimated shipping window Nov 15-25 that conflicts with the direct read of S3",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S16",
+      "reference": "https://eu.anycubic.com/products/kobra-3-max-v2-combo-3d-printer",
+      "supports": "Search summary of manufacturer listing: WLAN local data, app with cloud for remote operation; not opened directly",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S17",
+      "reference": "https://www.3djake.com/anycubic-3d-printer-and-accessories/kobra-3-max-v2-combo",
+      "supports": "Third-party listing; conflicts on camera and connection; not reliable on those points",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S18",
+      "reference": "https://github.com/jbatonnet/Rinkhals",
+      "supports": "Community custom firmware listing Kobra S1 Max support; licence not verified",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S19",
+      "reference": "https://github.com/rinkhals-community/Rinkhals/pull/219",
+      "supports": "Community report that a touchscreen LAN toggle can unbind the printer from the account on recent firmware; not proven",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S20",
+      "reference": "https://github.com/HoffmanEngineering/printlog-bridge/issues/96",
+      "supports": "Community report of Kobra 3 and S1 MQTT over ports 18910 and 9883; not proven",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S21",
+      "reference": "https://www.anycubic.com/en/PrivacyPolicy",
+      "supports": "Privacy policy URL identified; not opened; no claim relies on it",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search result only"
+    },
+    {
+      "id": "S22",
+      "reference": "https://m.media-amazon.com/images/I/61kd9mfoHoL.pdf",
+      "supports": "Data information statement identified; not opened; no claim relies on it",
+      "published": "undated",
+      "accessed": "2026-11-13",
+      "method": "search result only"
+    },
+    {
+      "id": "S23",
+      "reference": "https://www.prnewswire.com/news-releases/anycubic-launches-2026-black-friday-and-cyber-monday-sale-across-13-global-markets-with-up-to-350-off-3d-printers-302927728.html",
+      "supports": "Anycubic sale release naming Kobra 3 Max V2 Combo and S1 Max Combo as promoted products",
+      "published": "2026-11-03",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    },
+    {
+      "id": "S24",
+      "reference": "https://www.bradfordera.com/2025/01/03/the-new-disruptor-anycubic-unveils-pre-sale-of-the-s1-combo-its-first-fully-enclosed-multi-color-corexy-3d-printer/",
+      "supports": "Kobra S1 Combo pre-sale reported 2025-01-03; used only as the alternative for ranking position 5",
+      "published": "2025-01-03",
+      "accessed": "2026-11-13",
+      "method": "search summary"
+    }
   ],
   "next_steps": [
     "Obtain dated official press or launch releases for Kobra 3 Max V2, Kobra 4 and Kobra S1 Max.",
@@ -64,7 +234,7 @@
     "Read official manuals for each model to confirm LAN/cloud behaviour, firmware version and command support.",
     "Review the licence of Rinkhals and any other third-party firmware before any use.",
     "Decide whether Kobra 3 Max V2 is a distinct base model and fix position 5.",
-    "Any integration, hardware or account work requires separate authorization."
+    "This report is documentary evidence for review and admission within the integration front the owner has already authorized; it does not by itself authorize hardware, account, credential or deployment work, which each require separate specific authorization."
   ],
   "models": [
     {
@@ -76,7 +246,30 @@
       "connection": "Not proven: search summary of manufacturer listing describes local WLAN and cloud-enabled remote operation; third-party lists Wi-Fi/USB and LAN",
       "capabilities": "Volume 420x420x500 mm; ACE 2 Pro four-colour bundle; no built-in camera per retailer and third-party sources (conflict); Live View Camera accessory listed; files and telemetry unknown",
       "evidence_level": "documentation",
-      "limits": "Launch date and connection unproven; camera conflicting; firmware version, command set and licence unknown; ranking position 1 provisional; may be a revision of Kobra 3 Max"
+      "limits": "Launch date and connection unproven; camera conflicting; firmware version, command set and licence unknown; ranking position 1 provisional; may be a revision of Kobra 3 Max",
+      "commands": {
+        "upload": {
+          "status": "unknown",
+          "evidence": "[S16] summary does not separate file upload from print start; no source for upload."
+        },
+        "start": {
+          "status": "unverified_claim",
+          "evidence": "Search summary of the manufacturer listing [S16] cites cloud 'remote operation and initiation of printing tasks'; not proven by official documentation and not tested.",
+          "sources": ["S16"]
+        },
+        "pause": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "resume": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "cancel": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        }
+      }
     },
     {
       "base_model": "Kobra 4",
@@ -87,7 +280,29 @@
       "connection": "Official page lists only Smart Device Remote Control; Wi-Fi and USB with LAN on Combo per reviews (not proven)",
       "capabilities": "Volume 260x260x260 mm; 720P camera with real-time AI monitoring (official); accelerometer (official); filament runout sensor per review; materials PLA, PLA+, PLA High Speed, PETG, PLA Special, PLA Matte, PLA Silk; a directory marks camera 'No' (conflict)",
       "evidence_level": "documentation",
-      "limits": "Launch date third-party only; connection and files unproven; firmware unknown; telemetry and commands unknown; position 2 provisional"
+      "limits": "Launch date third-party only; connection and files unproven; firmware unknown; telemetry and commands unknown; position 2 provisional",
+      "commands": {
+        "upload": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "start": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "pause": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "resume": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "cancel": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        }
+      }
     },
     {
       "base_model": "Kobra X",
@@ -98,7 +313,29 @@
       "connection": "Not proven: search summary cites dual-band Wi-Fi, LAN mode, USB, app and slicer; not verified on official page",
       "capabilities": "Volume 260x260x260 mm; four-channel ACE 2, up to 19 filaments with ACE 2 Pro (summary); materials PLA+, PETG, PLA High Speed, PETG-CF, PLA-CF, PLA Special, ASA, TPU; camera not stated (AI-assisted monitoring mentioned)",
       "evidence_level": "documentation",
-      "limits": "Launch and closing dates not official; connection, camera, firmware, telemetry and commands unproven; company speed and material-saving figures are claims"
+      "limits": "Launch and closing dates not official; connection, camera, firmware, telemetry and commands unproven; company speed and material-saving figures are claims",
+      "commands": {
+        "upload": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "start": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "pause": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "resume": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "cancel": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        }
+      }
     },
     {
       "base_model": "Kobra S1 Max",
@@ -109,7 +346,29 @@
       "connection": "Store summary: dual-band Wi-Fi 6 and Ethernet with local network support; third-party manual says LAN mode disables cloud, app and AI detection and firmware updates need account binding (not proven)",
       "capabilities": "Volume 350x350x350 mm; 720P camera with AI detection (summary); heated chamber up to 65 C (third-party); up to 16 colours with ACE 2 Pro per press release",
       "evidence_level": "unknown",
-      "limits": "Launch date unresolved; no official product page read; connection, camera, telemetry, commands and licence unproven"
+      "limits": "Launch date unresolved; no official product page read; connection, camera, telemetry, commands and licence unproven",
+      "commands": {
+        "upload": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "start": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "pause": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "resume": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "cancel": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        }
+      }
     },
     {
       "base_model": "Kobra 3 V2",
@@ -120,7 +379,33 @@
       "connection": "Unknown",
       "capabilities": "Unknown",
       "evidence_level": "unknown",
-      "limits": "Provisional ranking position 5 only; year, specs and connectivity not verified; Kobra S1 base (pre-sale 2025-01-03) is the alternative"
+      "limits": "Provisional ranking position 5 only; year, specs and connectivity not verified; Kobra S1 base (pre-sale 2025-01-03) is the alternative",
+      "commands": {
+        "upload": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "start": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "pause": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "resume": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        },
+        "cancel": {
+          "status": "unknown",
+          "evidence": "No source found; absence of evidence, not evidence of no support."
+        }
+      }
     }
-  ]
+  ],
+  "command_status_legend": {
+    "unknown": "No source found; not a claim that the command is unsupported.",
+    "unverified_claim": "Mentioned only in a search summary or third-party source; not proven by official documentation read here and not tested."
+  }
 }

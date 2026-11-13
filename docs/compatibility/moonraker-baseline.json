@@ -7,100 +7,72 @@
     {
       "id": "collect",
       "statement": "A CLI chama collectLocalTelemetry, que abre a fila local e chama collectIntoQueue. Este cria uma assinatura Moonraker por impressora, registra indisponibilidade apenas em diagnóstico e enfileira snapshots e transições. A primeira amostra após reinício não gera transição.",
-      "sources": [
-        "collect"
-      ]
+      "sources": ["collect"]
     },
     {
       "id": "callers",
       "statement": "O agente conecta onRawObservation a snapshots.observe e onRawUnavailable a snapshots.invalidate. A coleta compartilhada também alimenta a fila; os consumidores de exibição e persistência têm contratos diferentes.",
-      "sources": [
-        "callers"
-      ]
+      "sources": ["callers"]
     },
     {
       "id": "validation",
       "statement": "A validação exige origem HTTP(S) sem credenciais, caminho adicional, query ou fragmento, presente na allowlist. Limita mensagens a 256 KiB e valida tempos e ordem do backoff.",
-      "sources": [
-        "validation"
-      ]
+      "sources": ["validation"]
     },
     {
       "id": "local",
       "statement": "A configuração v1 admite de uma a 16 impressoras, rejeita chaves duplicadas e valida todas antes da rede/fila. A leitura privada limita bytes, verifica proprietário/permissões e rejeita symlink final e arquivos não regulares.",
-      "sources": [
-        "local"
-      ]
+      "sources": ["local"]
     },
     {
       "id": "runtime",
       "statement": "O runtime compara quantidade e pares printer_key/moonraker_origin com assignments provisionados, verifica farm/agent e mantém handles privados. Uma interface genérica de coleta não torna essa configuração multiprotocolo automaticamente.",
-      "sources": [
-        "runtime"
-      ]
+      "sources": ["runtime"]
     },
     {
       "id": "client",
       "statement": "A prontidão usa GET /server/info sem redirects e com credentials omit. A assinatura usa printer.objects.subscribe para webhooks.state, print_stats.state e virtual_sdcard.progress. O caminho completo opcional consulta também extruder.temperature e heater_bed.temperature. Falhas incluem offline, stale, not-ready e invalid-response; HTTP não exitoso também vira offline, portanto esse rótulo não certifica impressora fisicamente desligada.",
-      "sources": [
-        "client"
-      ]
+      "sources": ["client"]
     },
     {
       "id": "subscription",
       "statement": "A assinatura mantém baseline por conexão, época, tempos monotônicos por campo, ordenação por eventtime e invalidação. Deltas antigos são ignorados; conflitos no mesmo tempo invalidam. Observações brutas precedem deduplicação por estado/progresso; ausência de mudança não impede renovação da evidência completa. RawMoonrakerUnavailable transporta chave e época, sem motivo.",
-      "sources": [
-        "subscription"
-      ]
+      "sources": ["subscription"]
     },
     {
       "id": "parse",
       "statement": "A normalização exige objetos e progresso válidos. startup vira offline; shutdown/error de webhooks viram error; printing/paused/error são preservados e os demais estados conhecidos de impressão viram idle. Campo ausente ou enum desconhecido é rejeitado, não convertido em idle.",
-      "sources": [
-        "parse"
-      ]
+      "sources": ["parse"]
     },
     {
       "id": "state",
       "statement": "O DTO contém chave, estado idle/printing/paused/error/offline, progresso obrigatório, observedAt e temperaturas opcionais. Não representa unknown, stale, unsupported, versão de firmware ou capacidades por recurso.",
-      "sources": [
-        "state"
-      ]
+      "sources": ["state"]
     },
     {
       "id": "temperature",
       "statement": "A leitura distingue absent, invalid e reading para extruder e heater_bed. Isso não identifica unsupported por firmware; o caminho contínuo inspecionado não representa uma lista de múltiplos bicos.",
-      "sources": [
-        "temperature"
-      ]
+      "sources": ["temperature"]
     },
     {
       "id": "provider",
       "statement": "A fonte exige o conjunto completo de assignments e tempos válidos por campo. A validade é limitada a cinco segundos por campo e pelo deadline de admissão. Invalidação retira épocas; temperaturas usam carimbo próprio. Se falta um membro ou expira evidência, não fornece snapshot completo. O tipo importado ainda depende de RawMoonrakerObservation.",
-      "sources": [
-        "provider"
-      ]
+      "sources": ["provider"]
     },
     {
       "id": "discovery",
       "statement": "Existe descoberta separada com identify, server.info, printer.objects.list/query e webcams. identify registra conexão visível. Na busca limitada em packages/connector/src e tests, os chamadores encontrados de discoverMoonraker são testes; collectIntoQueue usa diretamente a assinatura. Descoberta de ferramentas não comprova integração multibico no fluxo contínuo.",
-      "sources": [
-        "discovery"
-      ]
+      "sources": ["discovery"]
     },
     {
       "id": "control",
       "statement": "PauseDriver é uma fronteira de operação fixa com beforeSend síncrono e confirmação posterior. ControlObservation admite unknown, mas pertence ao controle. Não deve ser reutilizado como autorização de telemetria nem ampliado para comandos arbitrários.",
-      "sources": [
-        "control"
-      ]
+      "sources": ["control"]
     },
     {
       "id": "pause",
       "statement": "O driver de pausa declara pin de contrato Moonraker v0.9.3, commit 71f9e677b81afcc6b99dd5002f595025c38edc7b. Esse comentário não comprova firmware instalado nem certifica a coleta em toda versão.",
-      "sources": [
-        "pause"
-      ]
+      "sources": ["pause"]
     }
   ],
   "gaps": [
@@ -267,9 +239,7 @@
     {
       "id": "test3",
       "reference": "tests/unit/moonraker-discovery.test.ts @ bad76165aa4fbe86949ae624ddedc973721d5fcf",
-      "supports": [
-        "Handshake, ferramentas, webcams, deadlines e erros."
-      ],
+      "supports": ["Handshake, ferramentas, webcams, deadlines e erros."],
       "publication_date": null,
       "access_date": "2026-11-13"
     },

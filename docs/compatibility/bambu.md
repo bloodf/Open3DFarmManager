@@ -6,13 +6,13 @@ Corte e acesso: 2026-11-13. Evidência documental; nenhuma certificação físic
 
 A lista abaixo ordena anúncios encontrados, não comprova os cinco modelos disponíveis mais recentes. AMS e Combo são pacotes, não modelos adicionais. O índice inclui R1 como laser, excluído do recorte FDM [S0].
 
-|Candidato|Anúncio/publicação|Pré-venda|Expedição|Evidência|
-|---|---|---|---|---|
-|H3C|2026-11-03|desconhecida|desconhecida|[S1]|
-|A2L|2026-06-01|desconhecida|desconhecida|[S2]|
-|X2D|2026-04-14|desconhecida|desconhecida|[S3]|
-|H2C|2025-11-14|desconhecida|desconhecida|[S4]|
-|P2S|2025-10-14|desconhecida|desconhecida|[S5]|
+| Candidato | Anúncio/publicação | Pré-venda    | Expedição    | Evidência |
+| --------- | ------------------ | ------------ | ------------ | --------- |
+| H3C       | 2026-11-03         | desconhecida | desconhecida | [S1]      |
+| A2L       | 2026-06-01         | desconhecida | desconhecida | [S2]      |
+| X2D       | 2026-04-14         | desconhecida | desconhecida | [S3]      |
+| H2C       | 2025-11-14         | desconhecida | desconhecida | [S4]      |
+| P2S       | 2025-10-14         | desconhecida | desconhecida | [S5]      |
 
 A2L declara venda global desde 2026-06-01, Japão/Coreia desde 2026-06-02 [S2]. H3C possui preços regionais e links de pedido; isto não prova primeira entrega [S1]. X2D tem oferta base e Combo [S3]. Diferenças elétricas e certificações regionais permanecem desconhecidas.
 

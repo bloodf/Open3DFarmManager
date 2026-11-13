@@ -1,6 +1,6 @@
 # Linha de base de instalação própria
 
-Data de corte: 2026-11-13. Produto base `bad76165aa4fbe86949ae624ddedc973721d5fcf`; HEAD inspecionado `ba9c2e6031dbea6793b6fb89e97242d5d19c7def`. Diagnóstico estático; runtime NOT_RUN. Produto em HOLD.
+Data de corte: 2026-11-13. Produto base `bad76165aa4fbe86949ae624ddedc973721d5fcf`; HEAD inspecionado `ba9c2e6031dbea6793b6fb89e97242d5d19c7def`. Diagnóstico estático; runtime NOT_RUN. Status de evidência: apenas fonte; este relatório não executou testes de produto. Qualificação sintética nesta frente autorizada permanece como próximo trabalho; hardware, deploy e credenciais exigem autorização separada.
 
 ## README.md
 
@@ -62,7 +62,7 @@ Firmware/hardware desconhecido; sem alegação de suporte.
 
 Definir retenção e restauração de banco, roles, configuração externa e identidade, incluindo invalidação de sessões.
 
-Qualificar em ambiente descartável somente após autorização; manter HOLD de produto.
+Qualificar com dados sintéticos em ambiente descartável nesta frente autorizada; hardware, deploy e credenciais mantêm autorização separada.
 
 CodeGraph 1.6.2 sem índice; query/explore tentados, fallback por buscas limitadas. Ledger privado registra observação atual de disco, Git e worktrees; ledger anterior ausente. Nenhum baseline histórico foi reconstruído. Nenhuma instalação, serviço, build ou hardware executado.
 

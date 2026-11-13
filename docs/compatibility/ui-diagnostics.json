@@ -3,15 +3,40 @@
   "cutoff": "2026-11-13",
   "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
   "findings": [
-    {"claim":"/impressoras separates farm, printer assignment, and connector inventory flows; assignment copy says it does not establish connection or command authorization.","evidence":"apps/farm/app/pages/impressoras.vue"},
-    {"claim":"/connectors describes pairing inventory as distinct from current connectivity and clears inventory on request failure.","evidence":"apps/farm/app/pages/connectors.vue"},
-    {"claim":"Recommend per-device/model/firmware capability status with documented, unknown, and unsupported states; stale and offline require separate evidence.","evidence":"Proposed acceptance; no implementation or runtime validation"}
+    {
+      "claim": "/impressoras separates farm, printer assignment, and connector inventory flows; assignment copy says it does not establish connection or command authorization.",
+      "evidence": "apps/farm/app/pages/impressoras.vue"
+    },
+    {
+      "claim": "/connectors describes pairing inventory as distinct from current connectivity and clears inventory on request failure.",
+      "evidence": "apps/farm/app/pages/connectors.vue"
+    },
+    {
+      "claim": "Recommend per-device/model/firmware capability status with documented, unknown, and unsupported states; stale and offline require separate evidence.",
+      "evidence": "Proposed acceptance; no implementation or runtime validation"
+    }
   ],
-  "gaps": ["CodeGraph 1.6.2 index unavailable (initialized:false); no index created.","No official manufacturer documentation checked; no model, release, availability, firmware, or compatibility claims.","Browser, keyboard, mobile, disconnection, tests, build, simulator, and hardware NOT_RUN.","Firmware and hardware unknown."],
+  "gaps": [
+    "CodeGraph 1.6.2 index unavailable (initialized:false); no index created.",
+    "No official manufacturer documentation checked; no model, release, availability, firmware, or compatibility claims.",
+    "Browser, keyboard, mobile, disconnection, tests, build, simulator, and hardware NOT_RUN.",
+    "Firmware and hardware unknown."
+  ],
   "sources": [
-    {"reference":"apps/farm/app/pages/impressoras.vue (checkout source, inspected 2026-11-13)","supports":"Assignment flow, explicit non-connection/non-authorization message, request error handling."},
-    {"reference":"apps/farm/app/pages/connectors.vue (checkout source, inspected 2026-11-13)","supports":"Pairing inventory distinction, error clearing and accessible error summary."}
+    {
+      "reference": "apps/farm/app/pages/impressoras.vue (checkout source, inspected 2026-11-13)",
+      "supports": "Assignment flow, explicit non-connection/non-authorization message, request error handling."
+    },
+    {
+      "reference": "apps/farm/app/pages/connectors.vue (checkout source, inspected 2026-11-13)",
+      "supports": "Pairing inventory distinction, error clearing and accessible error summary."
+    }
   ],
-  "next_steps": ["Attach model and firmware observations with provenance and timestamp per device.","Define capabilities only for exact documented model/firmware combinations.","Validate keyboard, mobile, and WebRTC loss/recovery behavior without physical commands.","Acquire dated official manufacturer documentation before support claims."],
+  "next_steps": [
+    "Attach model and firmware observations with provenance and timestamp per device.",
+    "Define capabilities only for exact documented model/firmware combinations.",
+    "Validate keyboard, mobile, and WebRTC loss/recovery behavior without physical commands.",
+    "Acquire dated official manufacturer documentation before support claims."
+  ],
   "models": []
 }

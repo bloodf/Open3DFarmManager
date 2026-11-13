@@ -13,22 +13,36 @@ O K3 tinha pré-venda anunciada para meados de outubro de 2026, mas o FAQ oficia
 
 ## Ranking provisório e etapas
 
-| Modelo-base | Evidência pública e estado em 2026-11-13 | Limite |
-|---|---|---|
-| Creality K3 | FAQ oficial, 2026-09-30: pré-venda prevista para meados de outubro; homepage oficial oferece “Preorder Now”. | Data de envio e prova de unidades expedidas não encontradas. |
-| Ender-3 V3 Neo | Evento oficial marca pré-venda em 2026-10-13; página oficial lista produto e compra. | Não foi estabelecida data de envio por região. |
-| Ender-3 V3 Mega | Mesmo evento Neo/Mega; página de produto e firmware datado de 2026-11-13. Loja dos EUA consultada mostrava ambos os modelos como esgotados. | Indício regional de oferta, não prova de disponibilidade global nem primeiro envio. |
-| SPARKX i8 | Página oficial traz especificações FFF e a wiki tem guia e firmware (V2.0.1.3, nota de 2026-11-05). | Campanha de crowdfunding, venda varejista e envio não datados nas fontes consultadas. |
-| Ender-3 V4 | Manual presente no índice oficial da Wiki. | Apenas presença de documentação; lançamento e disponibilidade não confirmados. Posição ilustrativa, não parte de ranking comprovado. |
+| Modelo-base     | Evidência pública e estado em 2026-11-13                                                                                                    | Limite                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Creality K3     | FAQ oficial, 2026-09-30: pré-venda prevista para meados de outubro; homepage oficial oferece “Preorder Now”.                                | Data de envio e prova de unidades expedidas não encontradas.                                                                         |
+| Ender-3 V3 Neo  | Evento oficial marca pré-venda em 2026-10-13; página oficial lista produto e compra.                                                        | Não foi estabelecida data de envio por região.                                                                                       |
+| Ender-3 V3 Mega | Mesmo evento Neo/Mega; página de produto e firmware datado de 2026-11-13. Loja dos EUA consultada mostrava ambos os modelos como esgotados. | Indício regional de oferta, não prova de disponibilidade global nem primeiro envio.                                                  |
+| SPARKX i8       | Página oficial traz especificações FFF e a wiki tem guia. Versão e data de firmware **não verificadas** (ver nota de firmware).             | Campanha de crowdfunding, venda varejista e envio não datados nas fontes consultadas.                                                |
+| Ender-3 V4      | Manual presente no índice oficial da Wiki.                                                                                                  | Apenas presença de documentação; lançamento e disponibilidade não confirmados. Posição ilustrativa, não parte de ranking comprovado. |
 
 SPARKX i7 também aparece na iniciativa aberta e documentação oficial, porém as fontes consultadas não estabelecem sua cronologia em relação ao grupo. Modelos acima não devem ser tratados como os cinco mais recentes até obter datas oficiais comparáveis de anúncio, pré-venda/crowdfunding e primeiro envio em cada região. CFS, CFS nano, CFS Lite e versões Combo são acessórios/pacotes, não modelos-base adicionais.
 
 ## Firmware, conectividade e capacidades
 
 - **K3:** FAQ oficial descreve firmware baseado em Klipper, publicação do código em fases e acesso root disponível de fábrica para usuários avançados. Não informa interface Moonraker nem endpoints. Impressora multicolor com troca de bicos e compatibilidade declarada com Creality Print 7+ e OrcaSlicer. Conexão LAN, nuvem, autenticação, comandos individuais e licença/código efetivamente publicado não foram verificados.
-- **SPARKX i7/i8:** iniciativa oficial de 20 de outubro afirma acesso a Fluidd, Moonraker e SSH em ambos. Isso é evidência documental de interfaces, não teste de acesso por unidade ou firmware. i8: firmware V2.0.1.3 listado em 5 de novembro; FFF, 260 × 260 × 255 mm, Wi-Fi 2,4 GHz, controle remoto web/app, cloud e OTA listados pela página de produto. FAQ recomenda PLA/PETG; quatro canais são coordenados pelo firmware. Comandos Moonraker por método, autorização/autenticação local e estado LAN sem nuvem não foram documentados nas fontes abertas. Não assumir que qualquer firmware derivado de Klipper expõe Moonraker.
+- **SPARKX i7/i8:** iniciativa oficial de 20 de outubro afirma acesso a Fluidd, Moonraker e SSH em ambos. Isso é evidência documental de interfaces, não teste de acesso por unidade ou firmware. i8: versão e data de firmware **não verificadas** — a nota anterior (V2.0.1.3, 2026-11-05) não foi reconfirmada em fonte primária; FFF, 260 × 260 × 255 mm, Wi-Fi 2,4 GHz, controle remoto web/app, cloud e OTA listados pela página de produto. FAQ recomenda PLA/PETG; quatro canais são coordenados pelo firmware. Comandos Moonraker por método, autorização/autenticação local e estado LAN sem nuvem não foram documentados nas fontes abertas. Não assumir que qualquer firmware derivado de Klipper expõe Moonraker.
 - **Ender-3 V3 Neo/Mega:** as páginas oficiais descrevem monitoramento e controle via Creality Cloud; Mega especifica Wi-Fi 2,4 GHz e transferência por USB/Wi-Fi/Cloud. Neo tem câmera integrada; Mega usa Nebula Camera opcional para visualização remota. Nenhuma interface local Moonraker, autenticação LAN ou comandos foi comprovada. Página de suporte lista firmware, mas não inspecionei imagem/binário, versão exata, licença nem modificação.
-- **Licenças e root/flash:** não foram verificados arquivos de licença completos para firmware dos modelos. Não executei root, flash, login, pareamento ou comandos. SPARKX Open Initiative menciona recursos técnicos publicados para i7 e planos faseados para i8; isso não demonstra licença permissiva do firmware inteiro. Não se deve inferir capacidade ou autorização de modificação a partir de “Klipper-based”.
+- **Licenças e root/flash:** não foram verificados arquivos de licença completos para firmware dos modelos. Não executei root, flash, login, pareamento ou comandos. A SPARKX Open Initiative (2026-10-20) publica arquivos estruturais (CAD) e especificações de interface PCBA da i7 sob Open Community License (OCL v1.1); a licença se aplica a esses recursos estruturais/de hardware, não ao firmware. Recursos de software e firmware de i7/i8 são descritos apenas como publicação futura em etapas, sem licença de firmware declarada. Não se deve inferir capacidade ou autorização de modificação a partir de “Klipper-based”.
+
+## Comandos (um por um)
+
+Cada capacidade é registrada separadamente por modelo. "Desconhecido" significa ausência de evidência, não ausência de suporte. Nenhum comando foi testado, e nenhum valor indica comando "não suportado".
+
+| Modelo          | Envio de arquivo                                                                                               | Iniciar impressão | Pausar       | Retomar      | Cancelar     |
+| --------------- | -------------------------------------------------------------------------------------------------------------- | ----------------- | ------------ | ------------ | ------------ |
+| Creality K3     | Desconhecido                                                                                                   | Desconhecido      | Desconhecido | Desconhecido | Desconhecido |
+| Ender-3 V3 Neo  | Desconhecido                                                                                                   | Desconhecido      | Desconhecido | Desconhecido | Desconhecido |
+| Ender-3 V3 Mega | Documentado, não testado: página oficial lista transferência por USB/Wi-Fi/Cloud; protocolo local desconhecido | Desconhecido      | Desconhecido | Desconhecido | Desconhecido |
+| SPARKX i8       | Desconhecido                                                                                                   | Desconhecido      | Desconhecido | Desconhecido | Desconhecido |
+| Ender-3 V4      | Desconhecido                                                                                                   | Desconhecido      | Desconhecido | Desconhecido | Desconhecido |
+
+Neo declara monitoramento e controle via Creality Cloud sem detalhar comandos. Para i8, a marca declara acesso a Moonraker, mas nenhuma fonte documenta métodos por comando nem autenticação; não se infere suporte a partir do Moonraker.
 
 ## Fontes oficiais consultadas
 
@@ -41,8 +55,8 @@ As datas de publicação abaixo são as informadas pela própria página quando 
 5. [Loja oficial Ender-3 V3 Mega](https://store.creality.com/products/ender-3-v3-mega-3d-printer), consultada 2026-11-13 — preço e estado “Sold Out” regional; página apresentava janela estimada de envio Oct 9–11 sem ano visível, portanto não usada como prova de expedição.
 6. [Suporte Mega](https://www.creality.com/support/ender-3-v3-mega) e [downloads Mega](https://www.creality.com/download/ender-3-v3-mega), consultados 2026-11-13 — firmware listado em 2026-11-13 e software.
 7. [SPARKX i8](https://store.creality.com/pages/sparkx-i8), consultada 2026-11-13 — FFF, especificações, Wi-Fi, cloud/app e OTA.
-8. [Iniciativa aberta SPARKX](https://www.creality.com/blog/sparkx-open-initiative), publicada 2026-10-20 — acesso declarado a Fluidd/Moonraker/SSH em i7/i8; publicação técnica gradual.
-9. [Notas de firmware i8](https://wiki.creality.com/en/sparkx/i8/firmware-update), nota V2.0.1.3 publicada 2026-11-05 — funções e correções listadas.
+8. [Iniciativa aberta SPARKX](https://www.creality.com/blog/sparkx-open-initiative), publicada 2026-10-20, reverificada em 2026-11-13 — acesso declarado a Fluidd/Moonraker/SSH em i7/i8; OCL v1.1 cobre arquivos estruturais e de hardware, não firmware; publicação de software/firmware em etapas futuras.
+9. [Notas de firmware i8](https://wiki.creality.com/en/sparkx/i8/firmware-update) — **não verificada**. Em 2026-11-13 o endereço retornou HTTP 404 em duas recuperações independentes, e nenhuma fonte primária alternativa foi encontrada. A versão V2.0.1.3 e a data 2026-11-05 registradas antes não são usadas como evidência. Falha de recuperação não prova que a nota seja falsa.
 10. [FAQ i8](https://wiki.creality.com/en/sparkx/i8/FAQ) e [guia i8](https://wiki.creality.com/en/sparkx/i8), consultados 2026-11-13 — materiais, canais e documentação do produto.
 11. [Índice oficial da série Ender](https://wiki.creality.com/en/ender-series), consultado 2026-11-13 — manuais Neo, Mega e V4; presença no índice não é lançamento.
 12. [Guia Neo/Mega](https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival), publicado 2026-10-21 — anúncio editorial, diferenças de hardware e CFS nano opcional.
@@ -54,5 +68,6 @@ As datas de publicação abaixo são as informadas pela própria página quando 
 - Pesquisar anúncios de outros modelos Creality FDM do período para completar cronologia e confirmar os cinco mais recentes sem duplicar combos.
 - Obter documentação oficial de LAN/autenticação e comandos por método/firmware; manter `unknown` onde não houver documentação ou teste autorizado.
 - Revisar licenças dos componentes e firmware publicados, sem root ou flash nesta pesquisa.
+- Localizar fonte primária atual para versão e data de firmware da i8 antes de citar qualquer versão.
 
-Nenhum hardware, conta, firmware, comando ou endpoint foi acessado. Nenhuma alegação de compatibilidade com Connector é feita.
+Nenhum hardware, conta, firmware, comando ou endpoint foi acessado. Nenhuma alegação de compatibilidade com Connector é feita. Este relatório é evidência documental para revisão e admissão dentro da frente de integração já autorizada pelo responsável; acesso a hardware, contas, credenciais, root/flash ou implantação exige autorização separada e específica.

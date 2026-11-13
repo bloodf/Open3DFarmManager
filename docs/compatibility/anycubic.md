@@ -28,13 +28,13 @@ Estado: pesquisa de fontes públicas. Não é certificação de compatibilidade 
 
 Ordem por evidência de lançamento público disponível. Nenhuma ordem é certificada.
 
-| # | Modelo base | Lançamento público mais forte | Situação da evidência |
-|---|---|---|---|
-| 1 | Kobra 3 Max V2 | Não confirmado. Anúncio citado em fórum em 2026-08-28; "September 2026" em SimplyPrint (terceiro) | Página oficial US lida (sem data); data de lançamento **não comprovada** |
-| 2 | Kobra 4 | Revelação em RAPID+TCT (Anycubic, 2026-04-15, sem a palavra "lançamento"); "May 18, 2026" em review da Tom's Hardware (terceiro) | Página oficial lida (sem data); data **não comprovada** |
-| 3 | Kobra X | Debut no Formnext 2025 (sem data exata); depósitos abertos em 2025-12-26 (ManufacturingTomorrow, reprodução de comunicado) | Página oficial lida (sem data de lançamento) |
-| 4 | Kobra S1 Max | Pré-venda em novembro de 2025. Conflito: 2025-11-05 (Vertex3D) e 2025-11-25 (Fabbaloo) | Data oficial **não encontrada**; conflito não resolvido |
-| 5 | Kobra 3 V2 | "Arrives May 15" (ALL3DP, título de busca; ano não confirmado no resultado) | Provisório; ano e dados **não comprovados** |
+| #   | Modelo base    | Lançamento público mais forte                                                                                                    | Situação da evidência                                                    |
+| --- | -------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1   | Kobra 3 Max V2 | Não confirmado. Anúncio citado em fórum em 2026-08-28; "September 2026" em SimplyPrint (terceiro)                                | Página oficial US lida (sem data); data de lançamento **não comprovada** |
+| 2   | Kobra 4        | Revelação em RAPID+TCT (Anycubic, 2026-04-15, sem a palavra "lançamento"); "May 18, 2026" em review da Tom's Hardware (terceiro) | Página oficial lida (sem data); data **não comprovada**                  |
+| 3   | Kobra X        | Debut no Formnext 2025 (sem data exata); depósitos abertos em 2025-12-26 (ManufacturingTomorrow, reprodução de comunicado)       | Página oficial lida (sem data de lançamento)                             |
+| 4   | Kobra S1 Max   | Pré-venda em novembro de 2025. Conflito: 2025-11-05 (Vertex3D) e 2025-11-25 (Fabbaloo)                                           | Data oficial **não encontrada**; conflito não resolvido                  |
+| 5   | Kobra 3 V2     | "Arrives May 15" (ALL3DP, título de busca; ano não confirmado no resultado)                                                      | Provisório; ano e dados **não comprovados**                              |
 
 Alternativa para a posição 5: Kobra S1 (base), pré-venda com publicação de 2025-01-03 (Bradford Era, terceiro). Não foi resolvido qual dos dois é mais recente.
 
@@ -124,17 +124,30 @@ Alternativa para a posição 5: Kobra S1 (base), pré-venda com publicação de 
 
 ## Comandos (um por um)
 
-| Comando | Situação |
-|---|---|
-| Envio de arquivo / iniciar impressão | Resumo cita "remote operation and initiation of printing tasks" via nuvem (Kobra 3 Max V2) [S16]. Não comprovado na documentação oficial. |
-| Pausar / retomar | Desconhecido |
-| Cancelar | Desconhecido |
-| Consultar status e progresso | Resumo cita progresso em LAN e stream de vídeo local (S1 Max, terceiro). Não comprovado. |
-| Stream de câmera | Câmera 720p citada para Kobra 4 e S1 Max (resumo). Não comprovada para Kobra 3 Max V2 e Kobra X. |
-| Calibração / homing | Desconhecido |
-| Temperatura e ventilação | Desconhecido |
-| Atualizar firmware | Resumo cita atualização via app/nuvem (S1 Max). Não comprovado. |
-| Ligar/desligar luz, ventilação, câmara | Desconhecido |
+Cada capacidade de comando é registrada separadamente por modelo. "Desconhecido" significa ausência de evidência, não ausência de suporte. Nenhum valor abaixo indica comando "não suportado".
+
+Legenda: **desconhecido** = sem fonte; **alegação não comprovada** = apenas resumo de busca ou fonte de terceiro; nenhum comando tem documentação oficial lida nem teste.
+
+| Modelo         | Envio de arquivo | Iniciar impressão                                                                                                    | Pausar       | Retomar      | Cancelar     |
+| -------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- | ------------ | ------------ | ------------ |
+| Kobra 3 Max V2 | Desconhecido     | Alegação não comprovada: resumo da listagem cita "remote operation and initiation of printing tasks" via nuvem [S16] | Desconhecido | Desconhecido | Desconhecido |
+| Kobra 4        | Desconhecido     | Desconhecido                                                                                                         | Desconhecido | Desconhecido | Desconhecido |
+| Kobra X        | Desconhecido     | Desconhecido                                                                                                         | Desconhecido | Desconhecido | Desconhecido |
+| Kobra S1 Max   | Desconhecido     | Desconhecido                                                                                                         | Desconhecido | Desconhecido | Desconhecido |
+| Kobra 3 V2     | Desconhecido     | Desconhecido                                                                                                         | Desconhecido | Desconhecido | Desconhecido |
+
+O resumo [S16] não separa envio de arquivo de início de impressão; por isso o envio de arquivo do Kobra 3 Max V2 permanece desconhecido.
+
+Outras funções (não fazem parte dos cinco comandos acima):
+
+| Função                                 | Situação                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Consultar status e progresso           | Resumo cita progresso em LAN e stream de vídeo local (S1 Max, terceiro). Não comprovado.         |
+| Stream de câmera                       | Câmera 720p citada para Kobra 4 e S1 Max (resumo). Não comprovada para Kobra 3 Max V2 e Kobra X. |
+| Calibração / homing                    | Desconhecido                                                                                     |
+| Temperatura e ventilação               | Desconhecido                                                                                     |
+| Atualizar firmware                     | Resumo cita atualização via app/nuvem (S1 Max). Não comprovado.                                  |
+| Ligar/desligar luz, ventilação, câmara | Desconhecido                                                                                     |
 
 Nenhum comando foi testado. Não há hardware, simulador ou acesso à API.
 
@@ -173,4 +186,4 @@ Nenhum comando foi testado. Não há hardware, simulador ou acesso à API.
 4. Ler manual oficial de cada modelo e confirmar conexão (LAN/nuvem), versão de firmware e comandos suportados.
 5. Verificar licença de firmware de terceiros (Rinkhals) antes de qualquer uso.
 6. Decidir se Kobra 3 Max V2 é modelo base novo ou revisão do Kobra 3 Max, e fixar a posição 5.
-7. Nenhuma ação de integração ou hardware deve partir deste relatório sem nova autorização.
+7. Este relatório é evidência documental para revisão e admissão dentro da frente de integração já autorizada pelo responsável. Ele não autoriza, por si só, acesso a hardware, contas, credenciais ou implantação; essas ações exigem autorização separada e específica.

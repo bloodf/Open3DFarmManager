@@ -90,6 +90,16 @@ type Candidate = {
   slotObservedAt: number | null
 }
 
+/** Single write boundary for jsonb record columns: the driver serializes the parsed
+ * record once as a structured jsonb parameter (oid 3802). Passing a pre-stringified value
+ * would persist a jsonb string scalar that strict record parsing correctly rejects. */
+function jsonbRecord(
+  tx: TransactionSql,
+  record: Parameters<TransactionSql['json']>[0],
+) {
+  return tx.json(record)
+}
+
 /** Reads authority and persists admission/registration in one serializable transaction.
  * The supplied pool must
  * run under reviewed farm_configuration_authority: a mutation-capable role, not read-only SQL.
@@ -151,7 +161,7 @@ export class PostgresConfigurationStore {
         createOperation: async (input) => {
           const r = ConfigurationOperationRecord.parse(input)
           const rows =
-            await tx`INSERT INTO farm.configuration_operations(operation_id,record) VALUES (${r.operation_id}::uuid,${JSON.stringify(r)}::jsonb) ON CONFLICT DO NOTHING RETURNING operation_id`
+            await tx`INSERT INTO farm.configuration_operations(operation_id,record) VALUES (${r.operation_id}::uuid,${jsonbRecord(tx, r)}) ON CONFLICT DO NOTHING RETURNING operation_id`
           return rows.length === 1
         },
         pinCommit: async (id, hash) => {
@@ -162,7 +172,7 @@ export class PostgresConfigurationStore {
         insertChallenge: async (input) => {
           const r = ConfigurationChallengeRecord.parse(input)
           const rows =
-            await tx`INSERT INTO farm.configuration_challenges(challenge_id,capability_id,admission_nonce,record) VALUES (${r.challenge.challenge_id}::uuid,${r.challenge.capability_id}::uuid,${r.challenge.admission_nonce},${JSON.stringify(r)}::jsonb) ON CONFLICT DO NOTHING RETURNING challenge_id`
+            await tx`INSERT INTO farm.configuration_challenges(challenge_id,capability_id,admission_nonce,record) VALUES (${r.challenge.challenge_id}::uuid,${r.challenge.capability_id}::uuid,${r.challenge.admission_nonce},${jsonbRecord(tx, r)}) ON CONFLICT DO NOTHING RETURNING challenge_id`
           return rows.length === 1
         },
         consumeChallenge: async (id) => {
@@ -226,7 +236,7 @@ export class PostgresConfigurationStore {
           const assigned =
             await tx`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${canonical.assignment_id}::uuid,${r.farm_id}::uuid,${r.agent_id}::uuid,${canonical.printer_key},${r.registered_at},${r.account_id}) ON CONFLICT DO NOTHING RETURNING id`
           if (!assigned.length) return { ok: false }
-          await tx`INSERT INTO farm.configuration_receipts(operation_id,receipt_sha256,assignment_id,record) VALUES (${r.operation_id}::uuid,${r.receipt_sha256},${canonical.assignment_id}::uuid,${JSON.stringify(r)}::jsonb)`
+          await tx`INSERT INTO farm.configuration_receipts(operation_id,receipt_sha256,assignment_id,record) VALUES (${r.operation_id}::uuid,${r.receipt_sha256},${canonical.assignment_id}::uuid,${jsonbRecord(tx, r)})`
           return { ok: true, assignmentId: canonical.assignment_id }
         },
       }

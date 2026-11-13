@@ -27,6 +27,8 @@ Uso:
                                     Estado local (JSON): impressão digital e validade da credencial; sem segredos
   collect --config <arquivo> --data-dir <dir>
                                     Coletar telemetria local somente para leitura
+  configure --provisioning <arquivo> --data-dir <dir> --credential-file <arquivo> [--check]
+                                    Aceitar configuração de impressoras pelo OpenFarm (também sem impressoras); --check apenas valida
 
 A consulta não cria uma identidade. O comando collect grava apenas localmente. O comando run exige uma identidade e uma credencial existentes para enviar telemetria autenticada. Somente o comando pair faz pareamento; ele exige uma identidade existente, aprovação no navegador em até 60 segundos após a exibição do código e nunca sobrescreve uma credencial existente.`
 
@@ -186,8 +188,64 @@ function status(args: string[]): number {
     return 1
   }
 }
+async function configure(args: string[]): Promise<number> {
+  const controller = new AbortController()
+  const stop = () => controller.abort()
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  try {
+    const { values, positionals } = parseArgs({
+      args,
+      options: {
+        provisioning: { type: 'string' },
+        'data-dir': { type: 'string' },
+        'credential-file': { type: 'string' },
+        check: { type: 'boolean' },
+      },
+      allowPositionals: true,
+    })
+    if (
+      positionals.length ||
+      !values.provisioning ||
+      !values['data-dir'] ||
+      !values['credential-file']
+    ) {
+      console.error('Argumentos inválidos. Use --help.')
+      return 1
+    }
+    const command = await import('./runtime/configuration-command.ts')
+    const paths = {
+      provisioningPath: values.provisioning,
+      dataDirectory: values['data-dir'],
+      credentialPath: values['credential-file'],
+    }
+    if (values.check) {
+      console.log(JSON.stringify(await command.configurationReadiness(paths)))
+      return 0
+    }
+    await command.runConfigurationConnector({
+      ...paths,
+      signal: controller.signal,
+      onDiagnostic(diagnostic) {
+        console.log(JSON.stringify(diagnostic))
+      },
+    })
+    return 0
+  } catch {
+    // No paths, tokens, keys or server bodies in terminal output.
+    console.error(
+      'Não foi possível iniciar a configuração de impressoras. Verifique o arquivo de provisionamento, a identidade, a credencial e as permissões.',
+    )
+    return 1
+  } finally {
+    controller.abort()
+    process.off('SIGINT', stop)
+    process.off('SIGTERM', stop)
+  }
+}
 async function dispatch(args: string[]): Promise<number> {
   if (args[0] === 'pair') return pair(args.slice(1))
+  if (args[0] === 'configure') return configure(args.slice(1))
   if (args[0] === 'status') return status(args.slice(1))
   if (args[0] !== 'collect' && args[0] !== 'run') return main(args)
   const running = args[0] === 'run'

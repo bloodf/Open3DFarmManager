@@ -1,0 +1,25 @@
+{
+  "id": "kobralink-upstream-integration",
+  "base": "70504a5ee18578af3ca4ca8f8a73c6e5d71db3e2",
+  "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+  "scenarios": [],
+  "results": {
+    "status": "blocked",
+    "reason": "Exclusive VM custody transfer to this unit is not present in inspected handoff records. Session hardening returned the stopped profile to the coordinator.",
+    "actual_integration": "not-run",
+    "fixture_gate": "not-run"
+  },
+  "limits": [
+    "No synthetic device fixture implemented or qualified.",
+    "No installation, provisioning, MQTT or Connector integration acceptance established.",
+    "No physical printer or firmware support claim."
+  ],
+  "resources": {
+    "created": [
+      "private baseline and blocker evidence"
+    ],
+    "runtime_started": false,
+    "removed": [],
+    "retained": "Existing stopped profile and pinned image remain under coordinator custody; not modified."
+  }
+}

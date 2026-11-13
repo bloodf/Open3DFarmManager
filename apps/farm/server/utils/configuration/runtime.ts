@@ -3,6 +3,13 @@ import type { ConfigurationHttpRuntime } from '../../services/configuration-http
 import type { ConfigurationSignallingRuntime } from '../../services/configuration-signalling-runtime.ts'
 
 export interface ConfigurationRuntime {
+  readonly issuer?: {
+    protocol: string
+    issuerKid: string
+    origin: string
+    audience: string
+    publicKeyJwk: object
+  }
   readonly http: ConfigurationHttpRuntime
   readonly signalling: ConfigurationSignallingRuntime
 }
@@ -36,4 +43,11 @@ export function configurationHttpRuntime(): ConfigurationHttpRuntime {
       message: 'Configuração de impressoras indisponível.',
     })
   return installed.http
+}
+
+export function configurationIssuerMetadata() {
+  const value = installed?.issuer
+  if (!value)
+    throw createError({ status: 404, message: 'Emissor indisponível.' })
+  return value
 }

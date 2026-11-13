@@ -554,6 +554,33 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
       ? Object.freeze({ jti: inbox.jti, revision: inbox.revision })
       : null
   }
+  activeContext(scope: {
+    sessionRecordId: string
+    farmId: string
+    agentId: string
+    keyId: string
+    accountId: string
+    credentialJti: string
+  }) {
+    for (const c of this.contexts)
+      if (
+        c.bindingSha256 !== null &&
+        this.live(c) &&
+        c.scope.sessionRecordId === scope.sessionRecordId &&
+        c.authority.farm_id === scope.farmId &&
+        c.authority.agent_id === scope.agentId &&
+        c.authority.key_id === scope.keyId &&
+        c.authority.account_id === scope.accountId &&
+        c.authority.credential_jti === scope.credentialJti &&
+        c.inbox.jti === scope.credentialJti
+      )
+        return Object.freeze({
+          transportId: c.id,
+          bindingSha256: c.bindingSha256,
+          expiresAt: c.deadline,
+        })
+    return null
+  }
 
   private currentInbox(farmId: string, agentId: string): Inbox | null {
     for (const inbox of this.inboxes)

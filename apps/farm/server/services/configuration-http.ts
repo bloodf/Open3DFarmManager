@@ -227,9 +227,11 @@ export function configurationReceiptRequest(
     if (!result.ok) return serviceFailure(result)
     return {
       assignmentId: result.assignmentId,
+      printerKey: result.printerKey,
       receiptSha256: result.receiptSha256,
       status: result.status,
       replayed: result.replayed,
+      inventoryAckWire: result.inventoryAckWire,
     }
   })
 }

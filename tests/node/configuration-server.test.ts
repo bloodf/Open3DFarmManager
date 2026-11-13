@@ -23,6 +23,11 @@ import {
   type SignedConfigurationCapabilityV1,
 } from '../../packages/farm-protocol/src/configuration-capability.ts'
 import {
+  decodeConfigurationInventoryAck,
+  deriveConfigurationAssignmentIdentity,
+  verifyConfigurationInventoryAck,
+} from '../../packages/farm-protocol/src/configuration-inventory.ts'
+import {
   configurationReceiptHash,
   encodeConfigurationReceipt,
   signConfigurationReceipt,
@@ -161,16 +166,15 @@ function memoryStore(clock: { wall(): number }) {
               state.assignments.has(key)
             )
               return { ok: false }
-            const assignmentId = randomUUID()
-            state.assignments.set(key, assignmentId)
+            state.assignments.set(key, r.assignment_id)
             state.receipts.set(r.operation_id, {
               operation_id: r.operation_id,
               receipt_sha256: r.receipt_sha256,
-              assignment_id: assignmentId,
+              assignment_id: r.assignment_id,
               wire: r.receipt_wire,
               printerKey: r.printer_key,
             })
-            return { ok: true, assignmentId }
+            return { ok: true, assignmentId: r.assignment_id }
           },
         }
         try {
@@ -261,11 +265,14 @@ async function fixture() {
     async issue(input: unknown): Promise<CredentialAcceptanceDecision> {
       const request = CredentialProofRequest.parse(input)
       if (request.token !== token) return { ok: false, reason: 'denied' }
+      const currentJti =
+        (state.authority as ConfigurationAuthority | null)?.credential_jti ??
+        ids.jti
       const challenge: CredentialProofChallenge = {
         v: 1,
         agent_id: request.agentId,
         farm_id: request.farmId,
-        jti: ids.jti,
+        jti: currentJti,
         connection_id: request.connectionId,
         public_key_spki: spki,
         fingerprint,
@@ -317,18 +324,20 @@ async function fixture() {
     clock,
     timers: { after: () => () => {} },
   })
+  const issuerConfig = {
+    issuer: 'open3dfarm:configuration-issuer',
+    kid: 'config-test-1',
+    privateKey: issuer.privateKey,
+  }
   const authorityService = createConfigurationAuthorityService({
     store,
     registry: coordinator,
-    issuer: {
-      issuer: 'open3dfarm:configuration-issuer',
-      kid: 'config-test-1',
-      privateKey: issuer.privateKey,
-    },
+    issuer: issuerConfig,
   })
   const registration = createConfigurationRegistrationService({
     store,
     registry: coordinator,
+    issuer: issuerConfig,
   })
   const scope = {
     sessionRecordId,
@@ -337,10 +346,16 @@ async function fixture() {
     keyId: ids.key,
   }
 
-  async function connectInbox(options: { advertise?: boolean } = {}) {
+  async function connectInbox(
+    options: { advertise?: boolean; jti?: string } = {},
+  ) {
     const ep = endpoint()
+    const currentJti =
+      options.jti ??
+      (state.authority as ConfigurationAuthority | null)?.credential_jti ??
+      ids.jti
     const begun = await coordinator.connectorBegin(
-      { farmId: ids.farm, agentId: ids.agent, jti: ids.jti, token },
+      { farmId: ids.farm, agentId: ids.agent, jti: currentJti, token },
       ep.port,
     )
     assert.equal(begun?.kind, 'challenge')
@@ -921,19 +936,71 @@ test('a committed Connector receipt registers the assignment idempotently', asyn
   const f = await fixture()
   const session = await f.negotiate()
   const op = await f.committed(session)
+  const identity = await deriveConfigurationAssignmentIdentity({
+    account_id: f.authority.account_id,
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    bridge_instance_id: 'bridge-synthetic-1',
+    device_id: target.device_id,
+  })
   const first = await f.register(op.local)
   assert.equal(first.ok, true)
   if (!first.ok) return
   assert.equal(first.replayed, false)
   assert.equal(first.status, 'active')
+  assert.equal(first.assignmentId, identity.assignment_id)
+  assert.equal(first.printerKey, identity.printer_key)
   assert.equal(first.receiptSha256, await configurationReceiptHash(op.local))
-  // Lost acknowledgement: the same receipt returns the same assignment.
+  const firstAck = decodeConfigurationInventoryAck(first.inventoryAckWire)
+  assert.equal(
+    await verifyConfigurationInventoryAck(
+      firstAck,
+      f.issuer.publicKey,
+      {
+        context: {
+          account_id: f.authority.account_id,
+          farm_id: ids.farm,
+          agent_id: ids.agent,
+          key_id: ids.key,
+          transport_id: session.binding.transport_id,
+          browser_thumbprint: f.authority.browser_thumbprint,
+          connector_fingerprint: f.authority.connector_fingerprint,
+          credential_jti: f.authority.credential_jti,
+          configuration_binding_sha256: await configurationBindingHash(
+            session.binding,
+          ),
+          origin,
+          audience,
+        },
+        kid: 'config-test-1',
+        issuer: 'open3dfarm:configuration-issuer',
+        operation_id: op.operationId,
+        committed_receipt_sha256: first.receiptSha256,
+        committed_revision: 1,
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+      },
+      f.now(),
+    ),
+    true,
+  )
+  // Lost acknowledgement: the same receipt returns the same assignment and a fresh signed ack.
   const retry = await f.register(op.local)
-  assert.deepEqual(retry, { ...first, replayed: true })
+  assert.equal(retry.ok, true)
+  if (!retry.ok) return
+  assert.deepEqual(retry, {
+    ...first,
+    replayed: true,
+    inventoryAckWire: retry.inventoryAckWire,
+  })
+  assert.notEqual(
+    decodeConfigurationInventoryAck(retry.inventoryAckWire).nonce,
+    firstAck.nonce,
+  )
   assert.equal(f.state.assignments.size, 1)
   // Only nonsecret evidence is stored: no address, cookie or password.
   const stored = f.state.receipts.get(op.operationId)
-  assert.equal(stored?.printerKey, target.device_id)
+  assert.equal(stored?.printerKey, identity.printer_key)
   assert.equal(stored?.wire.includes(target.endpoint.ipv4), false)
   assert.doesNotMatch(stored?.wire ?? '', /password|cookie|token|secret/i)
   // A different committed receipt for the same operation conflicts.
@@ -966,10 +1033,61 @@ test('a committed Connector receipt registers the assignment idempotently', asyn
     ok: false,
     reason: 'conflict',
   })
-  // Retry still works after the Connector credential rotated and it went offline.
-  f.coordinator.dispose()
-  f.state.authority = { ...f.authority, credential_jti: randomUUID() }
-  assert.deepEqual(await f.register(op.local), { ...first, replayed: true })
+  // After the 30s binding expires and the Connector credential rotates, an offline
+  // or revoked caller is denied, while a fresh authenticated session re-issues the
+  // signed inventory ack for the new transport without creating a second printer.
+  f.advance(30_001)
+  const rotatedJti = randomUUID()
+  f.state.authority = { ...f.authority, credential_jti: rotatedJti }
+  assert.deepEqual(await f.register(op.local), { ok: false, reason: 'denied' })
+  const freshSession = await f.negotiate()
+  f.state.authority = {
+    ...f.authority,
+    credential_jti: rotatedJti,
+    role: 'viewer',
+  }
+  assert.deepEqual(await f.register(op.local), { ok: false, reason: 'denied' })
+  f.state.authority = { ...f.authority, credential_jti: rotatedJti }
+  const freshRetry = await f.register(op.local)
+  assert.equal(freshRetry.ok, true)
+  if (!freshRetry.ok) return
+  assert.equal(freshRetry.replayed, true)
+  assert.equal(freshRetry.assignmentId, identity.assignment_id)
+  assert.equal(freshRetry.printerKey, identity.printer_key)
+  assert.equal(f.state.assignments.size, 1)
+  const freshAck = decodeConfigurationInventoryAck(freshRetry.inventoryAckWire)
+  assert.equal(
+    await verifyConfigurationInventoryAck(
+      freshAck,
+      f.issuer.publicKey,
+      {
+        context: {
+          account_id: f.authority.account_id,
+          farm_id: ids.farm,
+          agent_id: ids.agent,
+          key_id: ids.key,
+          transport_id: freshSession.binding.transport_id,
+          browser_thumbprint: f.authority.browser_thumbprint,
+          connector_fingerprint: f.authority.connector_fingerprint,
+          credential_jti: rotatedJti,
+          configuration_binding_sha256: await configurationBindingHash(
+            freshSession.binding,
+          ),
+          origin,
+          audience,
+        },
+        kid: 'config-test-1',
+        issuer: 'open3dfarm:configuration-issuer',
+        operation_id: op.operationId,
+        committed_receipt_sha256: first.receiptSha256,
+        committed_revision: 1,
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+      },
+      f.now(),
+    ),
+    true,
+  )
 })
 
 test('receipt registration rejects everything except current, matching, committed evidence', async () => {

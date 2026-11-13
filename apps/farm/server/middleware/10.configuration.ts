@@ -1,11 +1,14 @@
-import { defineEventHandler } from 'nuxt/server'
+import { createError, defineEventHandler } from 'nuxt/server'
 import {
   configurationAuthorityRequest,
   configurationBootstrapRequest,
   configurationReceiptRequest,
 } from '../services/configuration-http.ts'
 import { authResponse } from '../services/authenticated-session.ts'
-import { configurationHttpRuntime } from '../utils/configuration/runtime.ts'
+import {
+  configurationHttpRuntime,
+  configurationIssuerMetadata,
+} from '../utils/configuration/runtime.ts'
 
 const uuid = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
 const authority = /^\/api\/configuration-authority\/(challenges|capabilities)$/
@@ -26,6 +29,14 @@ const bootstrap = new RegExp(
  */
 export default defineEventHandler((event) => {
   const path = new URL(event.req.url).pathname
+  if (path === '/api/configuration-authority/issuer') {
+    authResponse(event)
+    if (event.req.method !== 'GET')
+      throw createError({ status: 405, message: 'Método não permitido.' })
+    if (new URL(event.req.url).search)
+      throw createError({ status: 400, message: 'Solicitação inválida.' })
+    return configurationIssuerMetadata()
+  }
   const operation = authority.exec(path)?.[1]
   const receipt = receipts.exec(path)
   const metadata = bootstrap.exec(path)

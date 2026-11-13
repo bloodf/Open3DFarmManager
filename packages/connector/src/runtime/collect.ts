@@ -1,3 +1,7 @@
+import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
+import { parseLocalCollectorConfig } from '../config/local.ts'
+import type { MoonrakerEvent } from '../moonraker/subscription.ts'
+import type { KobraLinkFetch } from '../kobralink/client.ts'
 import {
   createSpoolmanProvider,
   type SpoolmanSnapshot,
@@ -70,15 +74,20 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  kobraFetch?: KobraLinkFetch
   config: LocalCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
-  onRawObservation?: (observation: RawMoonrakerObservation) => void
+  onRawObservation?: (
+    observation: Omit<RawMoonrakerObservation, 'status'> &
+      Partial<Pick<RawMoonrakerObservation, 'status'>>,
+  ) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   queue: TelemetryQueue
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const { config, queue } = input
+  const config = parseLocalCollectorConfig(input.config)
+  const { queue } = input
   const { createMoonrakerSubscription } =
     await import('../moonraker/subscription.ts')
   const controller = new AbortController()
@@ -111,6 +120,39 @@ export async function collectIntoQueue(input: {
     failure ??= { error }
     controller.abort()
   }
+  function onEvent(event: MoonrakerEvent) {
+    if (signal.aborted) return
+    try {
+      if (event.kind === 'unavailable') {
+        totals.unavailable++
+        diagnostic({ kind: 'unavailable', reason: event.reason })
+      } else {
+        const now = Date.now()
+        const previous = lastState.get(event.printer.printerKey)
+        lastState.set(event.printer.printerKey, event.printer.state)
+        if (previous !== undefined && previous !== event.printer.state) {
+          const transition = queue.enqueueTransition(
+            {
+              printerKey: event.printer.printerKey,
+              from: previous,
+              to: event.printer.state,
+              observedAt: event.printer.observedAt,
+            },
+            now,
+          )
+          totals.queued++
+          loss(transition.loss, 'retention')
+        }
+        const receipt = queue.enqueue(event.printer, now)
+        totals.queued++
+        loss(receipt.loss, 'retention')
+        // enqueue returns only after its append/compaction and fsync succeed.
+        diagnostic({ kind: 'queued', depth: queue.depth })
+      }
+    } catch (error) {
+      fail(error)
+    }
+  }
   try {
     if (queue.recoveredStaleLock) diagnostic({ kind: 'queue-lock-recovered' })
     loss(queue.recovery, 'recovery')
@@ -135,42 +177,87 @@ export async function collectIntoQueue(input: {
         ...(input.onRawUnavailable
           ? { onRawUnavailable: input.onRawUnavailable }
           : {}),
-        onEvent(event) {
-          if (signal.aborted) return
-          try {
-            if (event.kind === 'unavailable') {
-              totals.unavailable++
-              diagnostic({ kind: 'unavailable', reason: event.reason })
-            } else {
-              const now = Date.now()
-              const previous = lastState.get(event.printer.printerKey)
-              lastState.set(event.printer.printerKey, event.printer.state)
-              if (previous !== undefined && previous !== event.printer.state) {
-                const transition = queue.enqueueTransition(
-                  {
-                    printerKey: event.printer.printerKey,
-                    from: previous,
-                    to: event.printer.state,
-                    observedAt: event.printer.observedAt,
-                  },
-                  now,
-                )
-                totals.queued++
-                loss(transition.loss, 'retention')
-              }
-              const receipt = queue.enqueue(event.printer, now)
-              totals.queued++
-              loss(receipt.loss, 'retention')
-              // enqueue returns only after its append/compaction and fsync succeed.
-              diagnostic({ kind: 'queued', depth: queue.depth })
-            }
-          } catch (error) {
-            fail(error)
-          }
-        },
+        onEvent,
       })
       // Attach rejection handling immediately, before starting another printer.
       subscriptions.push({ done: subscription.done.catch(fail) })
+    }
+    if (config.version === 2) {
+      for (const binding of config.kobralink.printers) {
+        let epoch = 1
+        let sourceTime = -1
+        let observedMono = -1
+        const unavailable = () => {
+          input.onRawUnavailable?.({
+            printerKey: binding.printerKey,
+            epoch: epoch++,
+          })
+          onEvent({
+            kind: 'unavailable',
+            printerKey: binding.printerKey,
+            reason: 'offline',
+          })
+        }
+        const sub = createKobraLinkRuntimeSubscription({
+          binding,
+          allowedOrigins: config.kobralink.allowedOrigins,
+          signal,
+          ...(input.kobraFetch ? { fetch: input.kobraFetch } : {}),
+          onUnavailable: unavailable,
+          onStatus(status) {
+            const now = performance.now()
+            const age =
+              status.observedAt === null
+                ? Infinity
+                : Date.now() - status.observedAt
+            if (
+              status.availability !== 'available' ||
+              status.progress === null ||
+              status.observedAt === null ||
+              age < 0 ||
+              age >= 5000 ||
+              status.observedAt < sourceTime ||
+              status.printState === 'unknown' ||
+              status.printState === 'pausing'
+            ) {
+              unavailable()
+              return
+            }
+            if (status.observedAt > sourceTime) {
+              sourceTime = status.observedAt
+              observedMono = now - age
+            }
+            if (observedMono < 0 || now - observedMono >= 5000) {
+              unavailable()
+              return
+            }
+            const state =
+              status.printState === 'standby' ||
+              status.printState === 'complete'
+                ? 'idle'
+                : status.printState
+            const printer: PrinterState = {
+              printerKey: binding.printerKey,
+              state,
+              progress: status.progress,
+              observedAt: status.observedAt,
+            }
+            input.onRawObservation?.({
+              printerKey: binding.printerKey,
+              epoch,
+              printer,
+              receivedAtMonoMs: now,
+              fieldObservedAtMonoMs: {
+                webhooks: observedMono,
+                printState: observedMono,
+                progress: observedMono,
+              },
+            })
+            onEvent({ kind: 'snapshot', printer, sourceEventtime: sourceTime })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
     }
     await Promise.all(subscriptions.map((subscription) => subscription.done))
   } catch (error) {

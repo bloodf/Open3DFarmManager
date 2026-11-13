@@ -3,7 +3,7 @@ import { readPrivateJsonFile } from '../config/local.ts'
 import {
   createKobraLinkClient,
   type KobraLinkOptions,
-  type PrinterStatus,
+  type PrinterObservation,
 } from './client.ts'
 
 export const KobraLinkRuntimeBinding = z.strictObject({
@@ -40,30 +40,19 @@ export function createKobraLinkRuntimeSubscription(input: {
   allowedOrigins: readonly string[]
   signal: AbortSignal
   fetch?: KobraLinkOptions['fetch']
-  onStatus: (status: PrinterStatus) => void
+  onStatus: (status: PrinterObservation) => void
   onUnavailable: () => void
 }) {
   const binding = KobraLinkRuntimeBinding.parse(input.binding)
+  const controller = new AbortController()
+  const signal = AbortSignal.any([input.signal, controller.signal])
   const client = createKobraLinkClient({
+    signal,
     origin: binding.origin,
     allowedOrigins: input.allowedOrigins,
     ...(input.fetch ? { fetch: input.fetch } : {}),
   })
-  const credential = Credential.parse(
-    readPrivateJsonFile(binding.credentialFile, { maxBytes: 4096 }),
-  )
-  for (const key of [
-    'bridgeInstance',
-    'origin',
-    'deviceId',
-    'id',
-    'printerKey',
-    'revision',
-  ] as const)
-    if (credential[key] !== binding[key])
-      throw Error('KobraLink credential context mismatch')
-  const controller = new AbortController()
-  const signal = AbortSignal.any([input.signal, controller.signal])
+  const credential = readKobraLinkCredential(binding)
   const close = () => {
     controller.abort()
     client.clearSession()
@@ -85,7 +74,7 @@ export function createKobraLinkRuntimeSubscription(input: {
             authenticated = true
           }
           if (signal.aborted) break
-          const status = await client.getPrinter({
+          const status = await client.getPrinterObservation({
             id: binding.id,
             deviceId: binding.deviceId,
           })
@@ -121,4 +110,21 @@ export function createKobraLinkRuntimeSubscription(input: {
     }
   })()
   return { done, close }
+}
+
+export function readKobraLinkCredential(binding: KobraLinkRuntimeBinding) {
+  const credential = Credential.parse(
+    readPrivateJsonFile(binding.credentialFile, { maxBytes: 4096 }),
+  )
+  for (const key of [
+    'bridgeInstance',
+    'origin',
+    'deviceId',
+    'id',
+    'printerKey',
+    'revision',
+  ] as const)
+    if (credential[key] !== binding[key])
+      throw Error('KobraLink credential context mismatch')
+  return credential
 }

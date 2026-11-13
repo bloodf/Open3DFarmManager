@@ -34,7 +34,11 @@ export function createFarmSnapshotSource(input: {
     input.assignmentRefs[0]!.agentId,
   )
   const nowMono = input.nowMono ?? (() => performance.now())
-  const entries = new Map<string, RawMoonrakerObservation>()
+  const entries = new Map<
+    string,
+    Omit<RawMoonrakerObservation, 'status'> &
+      Partial<Pick<RawMoonrakerObservation, 'status'>>
+  >()
   const epochs = new Map<string, number>()
   const retired = new Map<string, number>()
   let spoolState: { value: SpoolSummaryState; receivedMono: number } | undefined
@@ -146,7 +150,10 @@ export function createFarmSnapshotSource(input: {
     entries.delete(event.printerKey)
     notify()
   }
-  function observe(value: RawMoonrakerObservation) {
+  function observe(
+    value: Omit<RawMoonrakerObservation, 'status'> &
+      Partial<Pick<RawMoonrakerObservation, 'status'>>,
+  ) {
     if (closed) return
     const now = clock()
     if (!refs.some((ref) => ref.printerKey === value.printerKey)) {

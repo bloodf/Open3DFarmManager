@@ -2,7 +2,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createDecipheriv } from 'node:crypto'
+import { once } from 'node:events'
+import { connect } from 'node:tls'
 import { createSyntheticDevice } from '../fixtures/kobralink-integration/device.ts'
+import { createSyntheticMqtt } from '../fixtures/kobralink-integration/mqtt.ts'
+import {
+  mqttField,
+  mqttPacket,
+} from '../fixtures/kobralink-integration/mqtt-wire.ts'
+import { createSyntheticTls } from '../fixtures/kobralink-integration/tls.ts'
 
 test('synthetic discovery returns fresh encrypted identity and refuses actuator routes', async () => {
   const fixture = createSyntheticDevice()
@@ -53,5 +61,46 @@ test('synthetic discovery returns fresh encrypted identity and refuses actuator 
     await new Promise<void>((resolve, reject) =>
       fixture.server.close((error) => (error ? reject(error) : resolve())),
     )
+  }
+})
+
+test('discovered synthetic credentials open the synthetic MQTT session', async () => {
+  const device = createSyntheticDevice()
+  const mqtt = createSyntheticMqtt(createSyntheticTls(), {
+    identity: device.credentials,
+  })
+  const { port } = await mqtt.start()
+  try {
+    const socket = connect({
+      port,
+      host: '127.0.0.1',
+      rejectUnauthorized: false,
+    })
+    socket.on('error', () => {})
+    const { username, password } = device.credentials
+    socket.write(
+      mqttPacket(
+        0x10,
+        Buffer.concat([
+          mqttField('MQTT'),
+          Buffer.from([4, 0xc2, 0, 60]),
+          mqttField('kobrax_node'),
+          mqttField(username),
+          mqttField(password),
+        ]),
+      ),
+    )
+    const [connack] = await once(socket, 'data', {
+      signal: AbortSignal.timeout(3000),
+    })
+    assert.deepEqual(connack, Buffer.from([0x20, 2, 0, 0]))
+    assert.equal(
+      mqtt.subscribeFilter,
+      `anycubic/anycubicCloud/v1/printer/public/${device.credentials.modeId}/${device.credentials.deviceId}/#`,
+    )
+    socket.destroy()
+    await mqtt.whenSessions(0, 3000)
+  } finally {
+    await mqtt.stop()
   }
 })

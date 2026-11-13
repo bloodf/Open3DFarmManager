@@ -1,0 +1,570 @@
+{
+  "id": "install-baseline",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "ba9c2e6031dbea6793b6fb89e97242d5d19c7def",
+  "findings": [
+    {
+      "claim": "Node 24.22.2, engine >=24.22.2 <25; pnpm 12.18.0. Instalação: pnpm install --frozen-lockfile --ignore-scripts; interface: pnpm run dev. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente.",
+      "reference": "README.md; package.json; apps/farm/Dockerfile"
+    },
+    {
+      "claim": "Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; pnpm run check:all; pnpm exec playwright install chromium; pnpm run test:e2e após build. Ubuntu CI usa pnpm exec playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados.",
+      "reference": "docs/LOCAL-CI.md; scripts/local-ci.sh; .github/workflows/ci.yml"
+    },
+    {
+      "claim": "Banco dedicado: docker compose -f infra/app/docker-compose.yml up -d, somente com configuração e autorização futuras. O3DFM_DB_PASSWORD obrigatório; volume nomeado app-db-data em /var/lib/postgresql/data, nome derivado de COMPOSE_PROJECT_NAME. PostgreSQL 17 fixado em sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b. Recriar container preserva volume quando mantido; remover volume perde dados. Bootstrap superuser exige criação separada de migrator e login restrito.",
+      "reference": "infra/app/docker-compose.yml; docs/DATABASE-MIGRATIONS.md"
+    },
+    {
+      "claim": "Catálogo pareado e checksums; journal public.open3dfarm_migrations; advisory lock e SQL/journal na mesma transação. CLI node scripts/migrate-disposable-db.ts up exige MIGRATION_SYNTHETIC_TEST_DISPOSABLE=yes e MIGRATION_SYNTHETIC_TEST_PORT, host loopback e fixture. down EXACT_LAST_ID pode destruir dados. Não é procedimento de produção.",
+      "reference": "scripts/db/migrations.ts: migrationCatalog, runMigrations; scripts/migrate-disposable-db.ts"
+    },
+    {
+      "claim": "Plugin chama beginDatabaseStartup, que valida configuração e mesmo destino dos bancos antes de startDatabaseRuntime. Falha encerra com código 1; build/prerender não toca banco. NUXT_DATABASE_ENABLED=true, NUXT_DATABASE_DATABASE_URL, NUXT_DATABASE_MIGRATIONS=verify ou apply e NUXT_DATABASE_MIGRATIONS_DIR configuram startup. Verify é padrão; apply requer migration owner. Documentação admite journal ahead sob pressuposto expand/contract, não prova compatibilidade de todo upgrade.",
+      "reference": "apps/farm/server/plugins/database-lifecycle.ts; apps/farm/server/utils/database/lifecycle.ts: beginDatabaseStartup; docs/DATABASE-MIGRATIONS.md"
+    },
+    {
+      "claim": "CLI init-identity --data-dir cria ou reutiliza; identity --data-dir apenas lê. Identidade existente não é sobrescrita; publicação usa hard link, fsync e lock. Diretório 0700 e arquivos 0600, usuário atual; corrupção falha sem regenerar chave. Preservar data-dir; recuperação de lock/pending requer análise, não remoção automática.",
+      "reference": "packages/connector/src/cli.ts; packages/connector/src/identity/store.ts: loadOrCreateIdentity; docs/CONNECTOR-IDENTITY.md"
+    },
+    {
+      "claim": "run --config <arquivo> --credential-file <segredo> --data-dir <dir> recebe caminhos explícitos. Leitura privada rejeita links, proprietário/permissões inválidos e Windows; não regrava configuração. Credencial deve coincidir com fingerprint e não estar expirada. Preservar configuração e envelope não dispensa validade/revogação.",
+      "reference": "packages/connector/src/config/local.ts: readPrivateJsonFile; packages/connector/src/config/credential.ts: readRuntimeCredential; packages/connector/src/cli.ts"
+    },
+    {
+      "claim": "Backup/restore exige impedir reativação de sessões revogadas; contrato aponta epoch separado ou invalidação obrigatória, mas procedimento permanece pendente. Persistência normal e transação não equivalem a backup ou garantia contra perda de energia.",
+      "reference": "docs/SESSION-PERSISTENCE-CONTRACT.md; docs/CONNECTOR-IDENTITY.md"
+    }
+  ],
+  "gaps": [
+    "Resta qualificar instalação limpa, preparação nativa por SO e arquitetura, upgrade e restauração com dados sintéticos. Nenhum comando de runtime foi executado.",
+    "Não foi identificado procedimento operacional completo de backup/restore nas buscas limitadas em docs e scripts. Existem migração e persistência implementadas.",
+    "Documentos antigos de identidade dizem que pareamento não existe; CLI atual contém pair. Não usar esse texto histórico como inventário atual.",
+    "Firmware/hardware desconhecido; sem alegação de suporte."
+  ],
+  "sources": [
+    {
+      "reference": "README.md; package.json; apps/farm/Dockerfile",
+      "supports": "Node 24.22.2, engine >=24.22.2 <25; pnpm 12.18.0. Instalação: pnpm install --frozen-lockfile --ignore-scripts; interface: pnpm run dev. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente."
+    },
+    {
+      "reference": "docs/LOCAL-CI.md; scripts/local-ci.sh; .github/workflows/ci.yml",
+      "supports": "Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; pnpm run check:all; pnpm exec playwright install chromium; pnpm run test:e2e após build. Ubuntu CI usa pnpm exec playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados."
+    },
+    {
+      "reference": "infra/app/docker-compose.yml; docs/DATABASE-MIGRATIONS.md",
+      "supports": "Banco dedicado: docker compose -f infra/app/docker-compose.yml up -d, somente com configuração e autorização futuras. O3DFM_DB_PASSWORD obrigatório; volume nomeado app-db-data em /var/lib/postgresql/data, nome derivado de COMPOSE_PROJECT_NAME. PostgreSQL 17 fixado em sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b. Recriar container preserva volume quando mantido; remover volume perde dados. Bootstrap superuser exige criação separada de migrator e login restrito."
+    },
+    {
+      "reference": "scripts/db/migrations.ts: migrationCatalog, runMigrations; scripts/migrate-disposable-db.ts",
+      "supports": "Catálogo pareado e checksums; journal public.open3dfarm_migrations; advisory lock e SQL/journal na mesma transação. CLI node scripts/migrate-disposable-db.ts up exige MIGRATION_SYNTHETIC_TEST_DISPOSABLE=yes e MIGRATION_SYNTHETIC_TEST_PORT, host loopback e fixture. down EXACT_LAST_ID pode destruir dados. Não é procedimento de produção."
+    },
+    {
+      "reference": "apps/farm/server/plugins/database-lifecycle.ts; apps/farm/server/utils/database/lifecycle.ts: beginDatabaseStartup; docs/DATABASE-MIGRATIONS.md",
+      "supports": "Plugin chama beginDatabaseStartup, que valida configuração e mesmo destino dos bancos antes de startDatabaseRuntime. Falha encerra com código 1; build/prerender não toca banco. NUXT_DATABASE_ENABLED=true, NUXT_DATABASE_DATABASE_URL, NUXT_DATABASE_MIGRATIONS=verify ou apply e NUXT_DATABASE_MIGRATIONS_DIR configuram startup. Verify é padrão; apply requer migration owner. Documentação admite journal ahead sob pressuposto expand/contract, não prova compatibilidade de todo upgrade."
+    },
+    {
+      "reference": "packages/connector/src/cli.ts; packages/connector/src/identity/store.ts: loadOrCreateIdentity; docs/CONNECTOR-IDENTITY.md",
+      "supports": "CLI init-identity --data-dir cria ou reutiliza; identity --data-dir apenas lê. Identidade existente não é sobrescrita; publicação usa hard link, fsync e lock. Diretório 0700 e arquivos 0600, usuário atual; corrupção falha sem regenerar chave. Preservar data-dir; recuperação de lock/pending requer análise, não remoção automática."
+    },
+    {
+      "reference": "packages/connector/src/config/local.ts: readPrivateJsonFile; packages/connector/src/config/credential.ts: readRuntimeCredential; packages/connector/src/cli.ts",
+      "supports": "run --config <arquivo> --credential-file <segredo> --data-dir <dir> recebe caminhos explícitos. Leitura privada rejeita links, proprietário/permissões inválidos e Windows; não regrava configuração. Credencial deve coincidir com fingerprint e não estar expirada. Preservar configuração e envelope não dispensa validade/revogação."
+    },
+    {
+      "reference": "docs/SESSION-PERSISTENCE-CONTRACT.md; docs/CONNECTOR-IDENTITY.md",
+      "supports": "Backup/restore exige impedir reativação de sessões revogadas; contrato aponta epoch separado ou invalidação obrigatória, mas procedimento permanece pendente. Persistência normal e transação não equivalem a backup ou garantia contra perda de energia."
+    }
+  ],
+  "next_steps": [
+    "Definir retenção e restauração de banco, roles, configuração externa e identidade, incluindo invalidação de sessões.",
+    "Qualificar com dados sintéticos em ambiente descartável nesta frente autorizada; hardware, deploy e credenciais mantêm autorização separada."
+  ],
+  "models": [],
+  "open_prs": [
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/155",
+      "head": "49d98d13bc1b968a4176b32c5ae2de6f5f559c7f",
+      "title": "test(signalling): record why an HTTPS harness cleanup step failed",
+      "paths": ["scripts/test-signalling-https.ts"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/154",
+      "head": "a9c526419ad2b14787b90adbcc7f6302449189e6",
+      "title": "feat(farm): accept renewed Connector credentials on signalling",
+      "paths": [
+        "apps/farm/server/storage/postgres-connector-credential-acceptance.ts",
+        "apps/farm/server/storage/postgres-connector-credential-record.ts",
+        "apps/farm/server/storage/postgres-signalling-authorization.ts",
+        "docs/DATABASE-MIGRATIONS.md",
+        "docs/SIGNALLING-RUNTIME-CHECKPOINT.md",
+        "infra/db/migrations/0026_signalling_successor_credentials.down.sql",
+        "infra/db/migrations/0026_signalling_successor_credentials.up.sql",
+        "scripts/test-postgres-signalling-successors.ts",
+        "tests/helpers/postgres-signalling-successors-integration.ts",
+        "tests/unit/migration-catalog.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/152",
+      "head": "4b677a4b85dbb7711a5e1d7c25ab5e00a7ec4107",
+      "title": "fix(connector): release queue locks on failed publish and keep the lock error",
+      "paths": [
+        "docs/TELEMETRY-QUEUE.md",
+        "packages/connector/src/cloud/queue-lock.ts",
+        "packages/connector/src/cloud/queue.ts",
+        "packages/connector/src/runtime/collect.ts",
+        "tests/node/telemetry-queue-lock.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/151",
+      "head": "a0f7387d4d75c2db80f49eadbf1409b8c696f222",
+      "title": "test(rtc): farm-page row against genuine simulators and Spoolman",
+      "paths": [
+        "docs/RTC-FARM-SIMULATOR-ROW-CHECKPOINT.md",
+        "tests/helpers/rtc-farm-acceptance-scenarios.ts",
+        "tests/helpers/rtc-farm-acceptance-sim-scenarios.ts",
+        "tests/helpers/signalling-authenticated-rtc.ts",
+        "tests/helpers/signalling-runtime-moonraker.ts",
+        "tests/helpers/signalling-sim-farm-page.ts",
+        "tests/node/rtc-farm-sim-scenarios.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/148",
+      "head": "28dfe6eac8d581567bd260c29eddd75753e6aa15",
+      "title": "feat(sim): network fault harness and two-printer simulator acceptance",
+      "paths": [
+        "docs/SIMULATOR-NETWORK-FAULTS-CHECKPOINT.md",
+        "infra/sim/netfault/README.md",
+        "infra/sim/netfault/docker-compose.yml",
+        "infra/sim/netfault/router/Dockerfile",
+        "infra/sim/netfault/rtc-probe.mjs",
+        "infra/sim/netfault/run.sh",
+        "package.json",
+        "scripts/test-connector-outage-recovery.ts",
+        "scripts/test-sim-farm-acceptance.ts",
+        "tests/helpers/connector-enrollment.ts",
+        "tests/helpers/connector-outage-scenarios.ts",
+        "tests/helpers/disposable-postgres.ts",
+        "tests/helpers/sim-farm-acceptance.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/123",
+      "head": "f08b108949fb9feec4203cf9a12944d249f5a532",
+      "title": "chore(deps): update postgres:17 docker digest to 846a7dd",
+      "paths": ["infra/app/docker-compose.yml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/122",
+      "head": "0a5d7dbe02c0e6a5d0b76c8e5014fb5abc772b69",
+      "title": "chore(deps): update bluenviron/mediamtx docker digest to 59e4355",
+      "paths": ["infra/sim/docker-compose.yml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/114",
+      "head": "1ca2714834a92a5c0b1f99adf354bd306cd6d549",
+      "title": "chore: bump pinned Node.js to 24.22.3",
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml",
+        ".nvmrc",
+        "README.md",
+        "apps/farm/Dockerfile",
+        "docs/IMPLEMENTATION-QUEUE.md",
+        "docs/LOCAL-CI.md",
+        "docs/PHASE-0.md",
+        "packages/sim-cams/Dockerfile",
+        "packages/webrtc-experiment/README.md",
+        "scripts/local-ci.sh",
+        "scripts/test-telemetry-http-built-client.ts",
+        "tests/helpers/telemetry-built-harness.ts",
+        "tests/node/pause-control-rtc.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/103",
+      "head": "b19ad7c2277acfa59abb12d0ae8e9dafc29f27a3",
+      "title": "chore(deps): update dependency prettier to v3.10.1",
+      "paths": ["package.json", "pnpm-lock.yaml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/102",
+      "head": "e6479f7985a67b1c86a5f604b4851ccd5a69fd82",
+      "title": "chore(deps): update node.js to v24.22.3",
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml",
+        ".nvmrc",
+        "apps/farm/Dockerfile",
+        "packages/sim-cams/Dockerfile"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/101",
+      "head": "1bc1be699e5d34440bb7749969c1191a383e08db",
+      "title": "fix(deps): update dependency postgres to v4.1.1",
+      "paths": ["apps/farm/package.json", "package.json", "pnpm-lock.yaml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/100",
+      "head": "097533db47d1f499cd91058c24a902a688bb54e3",
+      "title": "fix(deps): update dependency vue-router to v5.5.0",
+      "paths": ["apps/farm/package.json", "pnpm-lock.yaml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/99",
+      "head": "2a2268b3b7a3654a1a4aa1c50507818a66997645",
+      "title": "fix(deps): update dependency effect to v4.1.4",
+      "paths": [
+        "package.json",
+        "packages/connector/package.json",
+        "packages/sim-tools/package.json",
+        "pnpm-lock.yaml"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/98",
+      "head": "c0f5a69130ea4148e48dd98db1cb4e09c769e0c7",
+      "title": "chore(deps): update ghcr.io/mainsail-crew/virtual-klipper-printer docker digest to 27ea11e",
+      "paths": ["infra/sim/klipper/Dockerfile"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/96",
+      "head": "f03b6bb3d78775cfd295a899e8532b85e8378546",
+      "title": "chore: preserve paused mac 55f15eee28ec for review",
+      "paths": [
+        "docs/SIMULATOR-IDENTIFY-RUNNER.md",
+        "scripts/simulator-identify-diagnostic.mjs",
+        "tests/node/simulator-identify-diagnostic.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/95",
+      "head": "bc5ec3bf2c6018010b150dff9c25bdae67824537",
+      "title": "chore: preserve paused mac e1ebdf35fe1a for review",
+      "paths": ["tests/node/telemetry-routes.test.ts"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/94",
+      "head": "33c0201ae08ee9c3e7af1289e1e2a0ff18c6bd73",
+      "title": "chore: preserve paused mac 75c3f492c761 for review",
+      "paths": [
+        "docs/HTTP-TELEMETRY-CHECKPOINT.md",
+        "docs/POSTGRES-TELEMETRY-CHECKPOINT.md",
+        "docs/TELEMETRY-INGESTION-CHECKPOINT.md"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/93",
+      "head": "78c085da7c8d9e03c10ec77aebd3dd62f19178c5",
+      "title": "chore: preserve paused mac c221ce8cf589 for review",
+      "paths": ["renovate.json"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/92",
+      "head": "7bf46202996ec4d81a6524bae07a40b5228e81fc",
+      "title": "chore: preserve paused mac 66cb33a4dc0b for review",
+      "paths": ["renovate.json"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/91",
+      "head": "46fff855fc004cfcf2a9bb8d357be7aeadafba4e",
+      "title": "chore: preserve paused mac e5de8131b6ee for review",
+      "paths": [
+        "tests/helpers/pause-execution-rtc-browser.ts",
+        "tests/helpers/pause-execution-rtc-connector-child.ts",
+        "tests/helpers/pause-execution-rtc.ts",
+        "tests/node/pause-execution-rtc.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/90",
+      "head": "22c2404c034fb2b8ec3fc52412d4f823a8554454",
+      "title": "chore: preserve paused mac 6c69aa9807fe for review",
+      "paths": [
+        "apps/farm/app/pages/entrar.vue",
+        "apps/farm/app/pages/sair.vue",
+        "docs/FARM-VIEW-CHECKPOINT.md"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/89",
+      "head": "5cc39e875074c728909f6882d54bfb42896bea6b",
+      "title": "chore: preserve paused mac 93532f51e7ce for review",
+      "paths": [".github/workflows/ci.yml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/88",
+      "head": "f9797021b11994747191fc0674f3671eba403a02",
+      "title": "chore: preserve paused mac bd5a48092b88 for review",
+      "paths": [
+        ".github/workflows/ci.yml",
+        "apps/farm/app/composables/useFarmView.ts",
+        "apps/farm/app/pages/entrar.vue",
+        "apps/farm/app/pages/sair.vue",
+        "apps/farm/app/utils/auth-invalidation.ts",
+        "docs/FARM-VIEW-CHECKPOINT.md",
+        "docs/HTTP-TELEMETRY-CHECKPOINT.md",
+        "docs/LOCAL-CI.md",
+        "docs/POSTGRES-TELEMETRY-CHECKPOINT.md",
+        "docs/TELEMETRY-INGESTION-CHECKPOINT.md",
+        "renovate.json",
+        "tests/node/telemetry-routes.test.ts",
+        "tests/unit/farm-view.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/87",
+      "head": "d591f1ecd30f86a75cb73016d4cb0740fbed6497",
+      "title": "chore: preserve paused mac 609f0bfcaeb6 for review",
+      "paths": [".github/workflows/ci.yml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/86",
+      "head": "63af2c11dfd55e9ca63e60b2ea18f31f78ec53e3",
+      "title": "chore: preserve paused mac beceb9f49057 for review",
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml",
+        "README.md",
+        "apps/farm/Dockerfile",
+        "docs/LOCAL-CI.md",
+        "package.json",
+        "scripts/local-ci.sh",
+        "scripts/test-local-ci.sh"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/85",
+      "head": "612e6b116d3c6c3c78adc664ac3c0f9aeb7c5c54",
+      "title": "chore: preserve paused mac 0a7d899535da for review",
+      "paths": [
+        "apps/farm/app/composables/useFarmView.ts",
+        "apps/farm/app/pages/entrar.vue",
+        "apps/farm/app/pages/sair.vue",
+        "apps/farm/app/utils/auth-invalidation.ts",
+        "docs/FARM-VIEW-CHECKPOINT.md",
+        "tests/unit/farm-view.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/84",
+      "head": "e22f9a49078e9f453594fa65e163eb63c578f4d9",
+      "title": "chore: preserve paused mac 3f5dd3da0b62 for review",
+      "paths": ["tests/node/farm-status-sender.test.ts"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/83",
+      "head": "86b3605a05c49415413720c5a3ad78fc9c4db4cf",
+      "title": "chore: preserve paused mac 0631f078f1db for review",
+      "paths": ["docs/LOCAL-CI.md"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/82",
+      "head": "a1a6bab3ed79667ce06e3dea6659ad8c02c66407",
+      "title": "chore: preserve paused mac eaebddbb5028 for review",
+      "paths": [
+        "packages/connector/src/moonraker/temperature-observation.ts",
+        "tests/unit/moonraker-temperature-observation.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/81",
+      "head": "a1095feb8299c89137fefd4ba583acdfd3936c37",
+      "title": "chore: preserve paused cortex 3269cf585c90 for review",
+      "paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml",
+        ".nvmrc",
+        ".prettierignore",
+        "AGENTS.md",
+        "README.md",
+        "THIRD_PARTY.md",
+        "apps/farm/Dockerfile",
+        "apps/farm/server/storage/postgres-browser-device-registry.ts",
+        "apps/farm/server/storage/postgres-connector-credential-acceptance.ts",
+        "apps/farm/server/storage/postgres-connector-revocation.ts",
+        "apps/farm/server/storage/postgres-pairing-proof.ts",
+        "apps/farm/server/storage/postgres-pairing.ts",
+        "apps/farm/server/storage/postgres-printer-ownership.ts",
+        "bun.lock",
+        "docs/LOCAL-CI.md",
+        "docs/SIMULATOR-IDENTIFY-RUNNER.md",
+        "package.json",
+        "packages/connector/README.md",
+        "packages/connector/build.mjs",
+        "packages/connector/package.json",
+        "packages/sim-cams/Dockerfile",
+        "packages/webrtc-experiment/README.md",
+        "packages/webrtc-experiment/interop-child.ts",
+        "packages/webrtc-experiment/interop.test.ts",
+        "packages/webrtc-experiment/package.json",
+        "packages/webrtc-experiment/real-identity/child.ts",
+        "packages/webrtc-experiment/real-identity/interop.test.ts",
+        "packages/webrtc-experiment/real-identity/native-media-harness.ts",
+        "packages/webrtc-experiment/session.test.ts",
+        "packages/webrtc-experiment/transport.test.ts",
+        "packages/webrtc-experiment/vitest.config.ts",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts/audit-task-resources.ts",
+        "scripts/local-ci.sh",
+        "scripts/simulator-identify-diagnostic.mjs",
+        "scripts/test-local-ci.sh",
+        "tests/e2e/browser-device-proof.spec.ts",
+        "tests/e2e/command-boundaries.spec.ts",
+        "tests/e2e/command-signing.spec.ts",
+        "tests/e2e/device-key.spec.ts",
+        "tests/helpers/browser-bundle.ts",
+        "tests/helpers/pause-authenticated-rtc.ts",
+        "tests/helpers/pause-control-rtc.ts",
+        "tests/helpers/signalling-authenticated-rtc.ts",
+        "tests/helpers/telemetry-built-harness.ts",
+        "tests/node/finite-media-lifecycle.test.ts",
+        "tests/node/pause-control-rtc.test.ts",
+        "tests/node/simulator-identify-diagnostic.test.ts",
+        "tests/unit/auth-boundary.test.ts",
+        "tests/unit/bounded-json.test.ts",
+        "tests/unit/browser-device-http.test.ts",
+        "tests/unit/browser-device-proof.test.ts",
+        "tests/unit/camera.test.ts",
+        "tests/unit/canonical.test.ts",
+        "tests/unit/command-fail-closed.test.ts",
+        "tests/unit/command-signing.test.ts",
+        "tests/unit/connector-agent-runtime.test.ts",
+        "tests/unit/connector-inventory-query.test.ts",
+        "tests/unit/connector-pairing-http.test.ts",
+        "tests/unit/farm-view.test.ts",
+        "tests/unit/integrated-decoders.test.ts",
+        "tests/unit/memory-session-repository.test.ts",
+        "tests/unit/messages.test.ts",
+        "tests/unit/migration-catalog.test.ts",
+        "tests/unit/moonraker-client.test.ts",
+        "tests/unit/moonraker-collect.test.ts",
+        "tests/unit/moonraker-parser.test.ts",
+        "tests/unit/node-fixtures.test.ts",
+        "tests/unit/pairing-http-catalog.test.ts",
+        "tests/unit/pairing-proof.test.ts",
+        "tests/unit/pairing.test.ts",
+        "tests/unit/password-login-body.test.ts",
+        "tests/unit/password-login-cookie.test.ts",
+        "tests/unit/printer-assignments-http.test.ts",
+        "tests/unit/printer-ownership-key.test.ts",
+        "tests/unit/protocol.test.ts",
+        "tests/unit/reconnect.test.ts",
+        "tests/unit/serve.ts",
+        "tests/unit/session-contract.test.ts",
+        "tests/unit/sim-verification.test.ts",
+        "tests/unit/simulator-body.test.ts",
+        "tests/unit/simulator.test.ts",
+        "tests/unit/spoolman-inventory.test.ts",
+        "tests/unit/spoolman-read.test.ts",
+        "tests/unit/spoolman-seed.test.ts",
+        "tests/unit/streams.ts",
+        "tests/unit/task-resource-audit.test.ts",
+        "tests/unit/telemetry-runtime-bootstrap.test.ts",
+        "tests/unit/ws-serve.ts",
+        "tsconfig.json",
+        "vitest.config.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/80",
+      "head": "dee9add8c292401dd2ebcda4c5fa7b1edc2a547e",
+      "title": "chore: preserve paused cortex 7d258abb4c1b for review",
+      "paths": [
+        "docs/SIMULATOR-IDENTIFY-RUNNER.md",
+        "scripts/simulator-identify-diagnostic.mjs",
+        "tests/node/simulator-identify-diagnostic.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/79",
+      "head": "04b61fbcd2ab8bbf265be17a4225d3e655edcf61",
+      "title": "chore: preserve paused cortex 645c9d5cd25e for review",
+      "paths": [
+        ".github/workflows/ci.yml",
+        "README.md",
+        "apps/farm/app/composables/useFarmView.ts",
+        "apps/farm/app/pages/entrar.vue",
+        "apps/farm/app/pages/sair.vue",
+        "apps/farm/app/utils/auth-invalidation.ts",
+        "docs/FARM-VIEW-CHECKPOINT.md",
+        "docs/HTTP-TELEMETRY-CHECKPOINT.md",
+        "docs/POSTGRES-TELEMETRY-CHECKPOINT.md",
+        "docs/TELEMETRY-INGESTION-CHECKPOINT.md",
+        "docs/images/README.md",
+        "docs/images/app-home.png",
+        "docs/images/app-login.png",
+        "docs/images/app-pairing.png",
+        "renovate.json",
+        "tests/node/telemetry-routes.test.ts",
+        "tests/unit/farm-view.test.ts"
+      ],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/78",
+      "head": "badf9d8a21bbc713de93ca8455aff2d7a7d6ea8a",
+      "title": "chore: preserve paused cortex 718f8f1cbad2 for review",
+      "paths": ["tests/node/telemetry-routes.test.ts"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/77",
+      "head": "2a94dd285f84cb24e2feccb4aa54d431492ca102",
+      "title": "fix(deps): update dependency jose to v6.2.17",
+      "paths": ["apps/farm/package.json", "pnpm-lock.yaml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    },
+    {
+      "url": "https://github.com/bloodf/Open3DFarmManager/pull/76",
+      "head": "667b1d477dc8817927d4054086eb4546d376987d",
+      "title": "fix(deps): update dependency ws to v8.23.0",
+      "paths": ["packages/connector/package.json", "pnpm-lock.yaml"],
+      "overlap": "Dependências, runtime, instalação ou evidência de integração; inventário de arquivos, sem revisão de diff ou custody."
+    }
+  ],
+  "evidence": {
+    "kind": "source-only",
+    "runtime": "NOT_RUN",
+    "graph": "CodeGraph 1.6.2 query/explore: not initialized; bounded rg fallback; no index created",
+    "pr_inventory": "gh pr list --state open --limit 100 --json number,title,url,headRefOid,files; 2026-11-13; includes preservation branches because titles alone do not exclude runtime overlap",
+    "ledger": "Private current-observation ledger exists; previous ledger missing; no retroactive baseline"
+  }
+}

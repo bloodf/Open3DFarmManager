@@ -1,0 +1,169 @@
+{
+  "id": "fixture-plan",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "fcc9c962b27041f1be4934cd61bc5239298f86f8",
+  "findings": [
+    {
+      "id": "S1",
+      "claim": "Fixture local registra requests/RPCs, encerra timers e sockets; testes declaram reconnect, stale e mensagens inválidas.",
+      "source": "tests/unit/moonraker-client.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L37-114,259-319,461-542",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S2",
+      "claim": "Testes declaram seleção limitada de ferramentas, temperatura inválida nula e webcam ausente não fatal.",
+      "source": "tests/unit/moonraker-discovery.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L96-128,347-364",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S3",
+      "claim": "Casos declarados para ausência, estados desconhecidos, limites e framing.",
+      "source": "tests/unit/moonraker-parser.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L19-119",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S4",
+      "claim": "Casos declarados para guarda final, ACK incerto, expiração e binding diferente.",
+      "source": "tests/node/moonraker-pause-driver.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L130-154,204-236,445-473",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S5",
+      "claim": "Fixture exige opt-in explícito e apenas uma assignment; requests estritos separam pausa de coleta.",
+      "source": "tests/helpers/signalling-runtime-moonraker.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L19-125",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S6",
+      "claim": "Proxy sintético possui modos pass/reset e registra eventos de ingestão. Não é fallback de comandos.",
+      "source": "tests/helpers/connector-outage-fixtures.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L148-185",
+      "evidence_level": "source_inspection"
+    },
+    {
+      "id": "S7",
+      "claim": "Casos declarados de persistência, falha de fila e mensagens excessivas.",
+      "source": "tests/unit/moonraker-collect.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L220-238,406-445,535",
+      "evidence_level": "source_inspection"
+    }
+  ],
+  "gaps": [
+    "Testes não executados nesta entrega; nomes de testes são evidência de intenção, não aprovação runtime.",
+    "Contrato multimarcas de capabilities, epochs e ausência ainda precisa ser admitido antes de exigir semântica uniforme.",
+    "Fixture RTC inspecionada aceita uma assignment; não prova isolamento simultâneo entre duas impressoras.",
+    "Firmware, hardware e acesso a protocolos de fabricantes desconhecidos. Nenhum ranking ou suporte físico declarado."
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "reference": "tests/unit/moonraker-client.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L37-114,259-319,461-542",
+      "supports": "Fixture local registra requests/RPCs, encerra timers e sockets; testes declaram reconnect, stale e mensagens inválidas.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S2",
+      "reference": "tests/unit/moonraker-discovery.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L96-128,347-364",
+      "supports": "Testes declaram seleção limitada de ferramentas, temperatura inválida nula e webcam ausente não fatal.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S3",
+      "reference": "tests/unit/moonraker-parser.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L19-119",
+      "supports": "Casos declarados para ausência, estados desconhecidos, limites e framing.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S4",
+      "reference": "tests/node/moonraker-pause-driver.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L130-154,204-236,445-473",
+      "supports": "Casos declarados para guarda final, ACK incerto, expiração e binding diferente.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S5",
+      "reference": "tests/helpers/signalling-runtime-moonraker.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L19-125",
+      "supports": "Fixture exige opt-in explícito e apenas uma assignment; requests estritos separam pausa de coleta.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S6",
+      "reference": "tests/helpers/connector-outage-fixtures.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L148-185",
+      "supports": "Proxy sintético possui modos pass/reset e registra eventos de ingestão. Não é fallback de comandos.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S7",
+      "reference": "tests/unit/moonraker-collect.test.ts@fcc9c962b27041f1be4934cd61bc5239298f86f8:L220-238,406-445,535",
+      "supports": "Casos declarados de persistência, falha de fila e mensagens excessivas.",
+      "access_date": "2026-11-13",
+      "publication_date": null
+    }
+  ],
+  "next_steps": [
+    "Revisar independentemente as fontes no HEAD registrado e admitir os oráculos propostos.",
+    "Atribuir cada caminho a um único responsável; separar telemetria de autoridade e reservar tests/unit/adapter-isolation.test.ts como arquivo futuro, ainda inexistente.",
+    "Implementar primeiro casos puros, depois loopback limitado; só em autorização futura executar integração RTC/simulador com ledger e cleanup.",
+    "Registrar SHA, comando, exit, logs e recursos por execução; hardware requer autorização e evidência própria."
+  ],
+  "cases": [
+    {
+      "name": "Reconexão",
+      "ownership_path": "tests/unit/moonraker-client.test.ts",
+      "source": "S1",
+      "proposal": "Fechar socket após baseline t=100; reabrir com t=1. Exigir baseline novo, descarte do epoch anterior e nenhum callback após abort. Duas conexões, deadline 5 s."
+    },
+    {
+      "name": "Expiração",
+      "ownership_path": "tests/unit/moonraker-client.test.ts",
+      "source": "S1",
+      "proposal": "Baseline válido seguido apenas de evento antigo; cruzar prazo configurado. Exigir stale sem renovar freshness, sem converter unknown em offline. Cobrir imediatamente antes/no/depois do prazo."
+    },
+    {
+      "name": "Ordem e ausência",
+      "ownership_path": "tests/unit/moonraker-parser.test.ts",
+      "source": "S3",
+      "proposal": "Enviar delta antigo, duplicado, conflito com mesmo tempo e snapshot sem campo obrigatório. Exigir ausência explícita, sem estado idle inventado; política de conflito deve ser definida por contrato."
+    },
+    {
+      "name": "Malformados",
+      "ownership_path": "tests/unit/moonraker-client.test.ts",
+      "source": "S1",
+      "proposal": "Corpus finito: JSON inválido, envelope errado, id desconhecido, binário e resposta prematura. Exigir rejeição, diagnóstico sem conteúdo remoto e nenhuma atualização aceita."
+    },
+    {
+      "name": "Múltiplos bicos",
+      "ownership_path": "tests/unit/moonraker-discovery.test.ts",
+      "source": "S2",
+      "proposal": "Usar extruder e extruder1 com temperaturas distintas; alternar ativo, remover leitura e exceder MAX_TOOLS em um. Exigir identidade estável, nulo para leitura inválida e limite respeitado. Não inferir AMS/ACE/CFS."
+    },
+    {
+      "name": "Limites",
+      "ownership_path": "tests/unit/moonraker-collect.test.ts",
+      "source": "S7",
+      "proposal": "Testar N-1/N/N+1 bytes e fragmentos conforme constantes atuais; incluir UTF-8 multibyte. Exigir rejeição antes de callback/fila, sem crescimento ilimitado. Não inventar limites de fabricante."
+    },
+    {
+      "name": "Capacidade indisponível",
+      "ownership_path": "tests/unit/moonraker-discovery.test.ts",
+      "source": "S2",
+      "proposal": "Simular webcam ausente e capability desconhecida versus explicitamente não suportada para dispositivo/firmware sintético. Coleta restante continua; comando indisponível produz zero writes. Enumeração genérica depende de contrato futuro."
+    },
+    {
+      "name": "Isolamento",
+      "ownership_path": "tests/node/moonraker-pause-driver.test.ts",
+      "source": "S4",
+      "proposal": "Dois bindings sintéticos A/B; trocar endpoint, identidade e resposta, um campo por caso. Exigir zero envio ao destino errado. Telemetria A não altera B; queda de A não invalida B. Parte de telemetria exige teste novo separado."
+    },
+    {
+      "name": "Autoridade e ACK",
+      "ownership_path": "tests/node/moonraker-pause-driver.test.ts",
+      "source": "S4",
+      "proposal": "Expirar validade antes do envio, falhar guarda final, perder ACK após envio. Exigir zero write nos dois primeiros; resultado incerto sem retry no último. Manter autoridade no Connector."
+    }
+  ]
+}

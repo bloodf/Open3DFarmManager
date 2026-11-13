@@ -1,0 +1,178 @@
+{
+  "id": "bambu",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "fcc9c962b27041f1be4934cd61bc5239298f86f8",
+  "findings": [
+    "Cinco candidatos por anúncio: H3C, A2L, X2D, H2C, P2S; ranking de disponibilidade permanece aberto.",
+    "A2L declara disponibilidade global em 1 junho; Japão/Coreia em 2 junho."
+  ],
+  "gaps": [
+    "Ranking provisório por anúncio: disponibilidade regional e primeira expedição não integralmente comprovadas; verificar omissões no catálogo, incluindo variantes Pro.",
+    "Pré-venda e primeira entrega desconhecidas para os cinco candidatos.",
+    "Firmware instalado, protocolos, portas, autenticação e suporte por dispositivo desconhecidos.",
+    "Licença SDK, redistribuição do plugin proprietário e API de integração não verificadas; nenhuma autorização de uso inferida.",
+    "Pausa, retomada, cancelamento, emergência, upload, listagem e exclusão de arquivos: contratos por firmware não documentados nesta coleta."
+  ],
+  "sources": [
+    {
+      "id": "S0",
+      "reference": "https://blog.bambulab.com/tag/press-release/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": null
+    },
+    {
+      "id": "S1",
+      "reference": "https://blog.bambulab.com/tool-changer-game-changer-bambu-lab-presents-h3c-the-defining-new-generation-of-3d-printers/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2026-11-03"
+    },
+    {
+      "id": "S2",
+      "reference": "https://blog.bambulab.com/bambu-lab-a2l-creative-playground-extra-large/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2026-06-01"
+    },
+    {
+      "id": "S3",
+      "reference": "https://blog.bambulab.com/xcellence-made-simple-bambu-lab-presents-the-x2d/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2026-04-14"
+    },
+    {
+      "id": "S4",
+      "reference": "https://blog.bambulab.com/bambu-lab-h2c-where-multi-material-vortek-system-meets-engineering-precision/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2025-11-14"
+    },
+    {
+      "id": "S5",
+      "reference": "https://blog.bambulab.com/the-icon-redefined-meet-the-p2s-a-completely-reengineered-version-of-the-ultra-productive-p1-series/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2025-10-14"
+    },
+    {
+      "id": "S6",
+      "reference": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
+      "supports": [
+        "cronologia e documentação; ver relatório"
+      ],
+      "accessed": "2026-11-13",
+      "publication_date": "2025-01-16"
+    }
+  ],
+  "models": [
+    {
+      "base_model": "H3C",
+      "region": "não verificada",
+      "release": {
+        "announcement": "2026-11-03",
+        "preorder": null,
+        "shipping": null
+      },
+      "availability": "documentação comercial; estoque e expedição não certificados",
+      "firmware": "unknown",
+      "connection": "unknown",
+      "capabilities": "documentação de produto; API não verificada",
+      "evidence_level": "documentation",
+      "limits": [
+        "Sem teste físico; sem garantia de integração",
+        "Combo/AMS não contado separadamente"
+      ]
+    },
+    {
+      "base_model": "A2L",
+      "region": "não verificada; A2L global com Japão/Coreia em 2026-06-02",
+      "release": {
+        "announcement": "2026-06-01",
+        "preorder": null,
+        "shipping": null
+      },
+      "availability": "documentação comercial; estoque e expedição não certificados",
+      "firmware": "unknown",
+      "connection": "unknown",
+      "capabilities": "documentação de produto; API não verificada",
+      "evidence_level": "documentation",
+      "limits": [
+        "Sem teste físico; sem garantia de integração",
+        "Combo/AMS não contado separadamente"
+      ]
+    },
+    {
+      "base_model": "X2D",
+      "region": "não verificada",
+      "release": {
+        "announcement": "2026-04-14",
+        "preorder": null,
+        "shipping": null
+      },
+      "availability": "documentação comercial; estoque e expedição não certificados",
+      "firmware": "unknown",
+      "connection": "unknown",
+      "capabilities": "documentação de produto; API não verificada",
+      "evidence_level": "documentation",
+      "limits": [
+        "Sem teste físico; sem garantia de integração",
+        "Combo/AMS não contado separadamente"
+      ]
+    },
+    {
+      "base_model": "H2C",
+      "region": "não verificada",
+      "release": {
+        "announcement": "2025-11-14",
+        "preorder": null,
+        "shipping": null
+      },
+      "availability": "documentação comercial; estoque e expedição não certificados",
+      "firmware": "unknown",
+      "connection": "unknown",
+      "capabilities": "documentação de produto; API não verificada",
+      "evidence_level": "documentation",
+      "limits": [
+        "Sem teste físico; sem garantia de integração",
+        "Combo/AMS não contado separadamente"
+      ]
+    },
+    {
+      "base_model": "P2S",
+      "region": "não verificada",
+      "release": {
+        "announcement": "2025-10-14",
+        "preorder": null,
+        "shipping": null
+      },
+      "availability": "documentação comercial; estoque e expedição não certificados",
+      "firmware": "unknown",
+      "connection": "unknown",
+      "capabilities": "documentação de produto; API não verificada",
+      "evidence_level": "documentation",
+      "limits": [
+        "Sem teste físico; sem garantia de integração",
+        "Combo/AMS não contado separadamente"
+      ]
+    }
+  ],
+  "next_steps": [
+    "Confirmar catálogo regional e primeira expedição antes de fechar ranking.",
+    "Obter documentação e licença oficial para cada operação e firmware; depois qualificar em simulador."
+  ]
+}

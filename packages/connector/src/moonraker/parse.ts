@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { normalizeMoonrakerSnapshot } from './normalize.ts'
 import {
   PrinterState,
   parseBoundedJson,
@@ -41,6 +42,7 @@ const Status = z.object({
   virtual_sdcard: z.object({ progress: z.number().finite().min(0).max(1) }),
 })
 const Snapshot = z.object({ eventtime: nonnegative, status: Status })
+export type ValidatedMoonrakerSnapshot = z.infer<typeof Snapshot>
 const Context = z.strictObject({
   printerKey: z.string().min(1).max(128),
   observedAt: z.number().int().nonnegative(),
@@ -112,31 +114,5 @@ export function parseMoonrakerSnapshot(
   const parsedContext = Context.safeParse(input)
   if (!parsedContext.success) throw new MoonrakerReadError('invalid-context')
   const snapshot = validate(Snapshot, result(wire))
-  const { webhooks, print_stats, virtual_sdcard } = snapshot.status
-  let state: PrinterState['state']
-  if (webhooks.state === 'startup') state = 'offline'
-  else if (webhooks.state !== 'ready') state = 'error'
-  else {
-    switch (print_stats.state) {
-      case 'printing':
-        state = 'printing'
-        break
-      case 'paused':
-        state = 'paused'
-        break
-      case 'error':
-        state = 'error'
-        break
-      default:
-        state = 'idle'
-    }
-  }
-  return {
-    sourceEventtime: snapshot.eventtime,
-    printer: PrinterState.parse({
-      ...parsedContext.data,
-      state,
-      progress: virtual_sdcard.progress,
-    }),
-  }
+  return normalizeMoonrakerSnapshot(snapshot, parsedContext.data)
 }

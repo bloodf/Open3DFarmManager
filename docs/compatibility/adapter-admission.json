@@ -1,0 +1,91 @@
+{
+  "id": "adapter-admission",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "c0c988c9151099aaaaefbe4c4378819ee5a43983",
+  "findings": [
+    "Proposta única: extrair somente a projeção pura de snapshot Moonraker já validado para PrinterState, mantendo parseMoonrakerSnapshot como entrada pública e todas as validações na ordem atual.",
+    "Os relatórios de marcas e consolidação deixam evidência insuficiente para admitir protocolo novo. Não resolver divergências de ranking por inferência; esta decisão não depende de ranking.",
+    "A baseline sugere separação de assinatura e observação; esta decisão reduz a primeira fatia à normalização pura para evitar tocar epochs, freshness, configuração e autoridade simultaneamente."
+  ],
+  "gaps": [
+    "Firmware, hardware e contratos de fabricantes não qualificados. Não há alegação de suporte nem ranking novo.",
+    "CodeGraph 1.6.2 sem índice: sync/query/explore falharam; status initialized:false. Usadas leituras e buscas delimitadas.",
+    "Testes de produto, check:all, integração e hardware NOT_RUN.",
+    "Admissão de código depende da revisão do coordenador; não há impedimento técnico identificado para a extração proposta."
+  ],
+  "sources": [
+    {
+      "reference": "docs/compatibility/anycubic.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/bambu.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/creality.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/matrix-consolidation.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/moonraker-baseline.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/authority-boundary.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/fixture-plan.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/ui-diagnostics.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "docs/compatibility/install-baseline.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Entrada documental considerada; não certifica runtime ou hardware."
+    },
+    {
+      "reference": "packages/connector/src/moonraker/parse.ts@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Validação, precedência, normalização e erros atuais."
+    },
+    {
+      "reference": "packages/connector/src/moonraker/subscription.ts@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Caller de produção; epochs e merge permanecem fora da extração."
+    },
+    {
+      "reference": "tests/unit/moonraker-parser.test.ts@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Oráculos existentes de projeção e rejeição."
+    },
+    {
+      "reference": "package.json@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Comandos e ferramentas fixados."
+    },
+    {
+      "reference": "vitest.config.ts@c0c988c9151099aaaaefbe4c4378819ee5a43983",
+      "supports": "Seleção dos testes unitários."
+    },
+    {
+      "reference": "https://moonraker.readthedocs.io/en/latest/external_api/printer/",
+      "supports": "Objetos ausentes são omitidos; subscribe requer conexão persistente.",
+      "publication_date": null,
+      "access_date": "2026-11-13"
+    }
+  ],
+  "next_steps": [
+    "Coordenador revisar esta decisão e admitir os três caminhos futuros.",
+    "Implementador registrar baseline dos testes antes de editar; extrair projeção sem mudar validações ou contrato público.",
+    "Executar regressões no candidato, revisar diff e executar check:all antes de publicar."
+  ],
+  "proposed_owned_paths": [
+    "packages/connector/src/moonraker/normalize.ts",
+    "packages/connector/src/moonraker/parse.ts",
+    "tests/unit/moonraker-parser.test.ts"
+  ]
+}

@@ -593,7 +593,9 @@ function dateLabel(time: number) {
                   </template>
                   <section
                     v-if="isKobraXAssignment(row.assignment)"
-                    :aria-labelledby="'capabilities-' + row.assignment.assignmentId"
+                    :aria-labelledby="
+                      'capabilities-' + row.assignment.assignmentId
+                    "
                   >
                     <h4 :id="'capabilities-' + row.assignment.assignmentId">
                       Capacidades admitidas deste dispositivo (Anycubic Kobra X)

@@ -160,10 +160,7 @@ export const ConfigurationRegistrationResponseDto = z.strictObject({
   receiptSha256: configurationDigest,
   status: z.literal('active'),
   replayed: z.boolean(),
-  inventoryAckWire: z
-    .string()
-    .min(1)
-    .max(MAX_CONFIGURATION_PROOF_WIRE_BYTES),
+  inventoryAckWire: z.string().min(1).max(MAX_CONFIGURATION_PROOF_WIRE_BYTES),
 })
 export type ConfigurationRegistrationResponseDto = z.infer<
   typeof ConfigurationRegistrationResponseDto
@@ -386,7 +383,12 @@ export async function readConfigurationBootstrap(input: {
   const query = new URLSearchParams({ keyId: input.keyId }).toString()
   const [rawBootstrap, rawIssuer] = await Promise.all([
     requestConfigurationJson(
-      '/api/farms/' + input.farmId + '/connectors/' + input.agentId + '/configuration?' + query,
+      '/api/farms/' +
+        input.farmId +
+        '/connectors/' +
+        input.agentId +
+        '/configuration?' +
+        query,
       { method: 'GET', signal: input.signal },
     ),
     requestConfigurationJson('/api/configuration-authority/issuer', {
@@ -492,20 +494,19 @@ export async function openConfigurationBrowserSession(
   input: ConfigurationBrowserSessionInput,
 ) {
   const requestTimeoutMs = input.requestTimeoutMs ?? 12_000
-  let proofs: (ConfigurationProofsReady & { advertisedRevision: number }) | null =
-    null
+  let proofs:
+    (ConfigurationProofsReady & { advertisedRevision: number }) | null = null
+  let admittedAuthority: { issuer: string; expiresAt: number } | null = null
   let terminalReason: string | null = null
-  let pendingWaiter:
-    | {
-        resolve: (
-          msg: Extract<
-            import('../../../../packages/connector/src/webrtc/configuration-channel.ts').ConnectorChannelMessage,
-            { t: 'response' | 'inventory-result' }
-          >,
-        ) => void
-        reject: (err: Error) => void
-      }
-    | null = null
+  let pendingWaiter: {
+    resolve: (
+      msg: Extract<
+        import('../../../../packages/connector/src/webrtc/configuration-channel.ts').ConnectorChannelMessage,
+        { t: 'response' | 'inventory-result' }
+      >,
+    ) => void
+    reject: (err: Error) => void
+  } | null = null
 
   let resolveReady!: (
     value: ConfigurationProofsReady & { advertisedRevision: number },
@@ -520,7 +521,8 @@ export async function openConfigurationBrowserSession(
 
   const createClient =
     input.createSignalling ??
-    ((scope, options) => new ConfigurationBrowserSignallingClient(scope, options))
+    ((scope, options) =>
+      new ConfigurationBrowserSignallingClient(scope, options))
 
   const client = createClient(
     {
@@ -674,11 +676,32 @@ export async function openConfigurationBrowserSession(
       )) ||
       capability.capability_id !== challenge.capability_id ||
       capability.operation_id !== frame.operation_id ||
-      capability.action !== frame.type
+      capability.action !== frame.type ||
+      capability.kid !== input.bootstrap.issuer.issuerKid ||
+      capability.account_id !== input.accountId ||
+      capability.farm_id !== input.farmId ||
+      capability.agent_id !== input.agentId ||
+      capability.key_id !== input.keyId ||
+      capability.transport_id !== current.binding.transport_id ||
+      capability.configuration_binding_sha256 !== current.bindingHash ||
+      capability.browser_thumbprint !== input.localKey.thumbprint ||
+      capability.connector_fingerprint !==
+        input.bootstrap.bootstrap.connectorFingerprint ||
+      capability.credential_jti !== current.binding.credential_jti ||
+      capability.origin !== input.bootstrap.issuer.origin ||
+      capability.audience !== input.bootstrap.issuer.audience ||
+      capability.admission_nonce !== admissionNonce ||
+      capability.expected_revision !== frame.expected_revision ||
+      capability.target_sha256 !== targetSha256 ||
+      !configurationFresh(capability, Date.now(), 5000)
     ) {
       throw new Error('Invalid configuration capability signature')
     }
     ensureAlive(signal)
+    admittedAuthority = {
+      issuer: capability.issuer,
+      expiresAt: capability.expires_at,
+    }
     const waitResponse = awaitChannelMessage(signal)
     const sent = client.sendMessage({
       v: 1,
@@ -755,7 +778,8 @@ export async function openConfigurationBrowserSession(
       account_id: input.accountId,
       farm_id: input.farmId,
       agent_id: input.agentId,
-      bridge_instance_id: params.localCommittedReceipt.target.bridge_instance_id,
+      bridge_instance_id:
+        params.localCommittedReceipt.target.bridge_instance_id,
       device_id: params.localCommittedReceipt.target.device_id,
     })
     const rawReg = await requestConfigurationJson(
@@ -777,6 +801,8 @@ export async function openConfigurationBrowserSession(
     ) {
       throw new Error('Server registration identity mismatch')
     }
+    if (!admittedAuthority || admittedAuthority.expiresAt <= Date.now())
+      throw new Error('Fresh configuration authority required for inventory')
     const decodedAck = decodeConfigurationInventoryAck(
       registration.inventoryAckWire,
     )
@@ -800,7 +826,7 @@ export async function openConfigurationBrowserSession(
             audience: input.bootstrap.bootstrap.audience,
           },
           kid: input.bootstrap.issuer.issuerKid,
-          issuer: decodedAck.issuer,
+          issuer: admittedAuthority.issuer,
           operation_id: params.operationId,
           committed_receipt_sha256: localReceiptSha256,
           committed_revision: params.localCommittedReceipt.committed_revision,

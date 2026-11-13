@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+} from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import type { SignedConfigurationReceipt } from '../../../../packages/farm-protocol/src/configuration-receipt.ts'
-import { configurationTargetHash, type ConfigurationTarget } from '../../../../packages/farm-protocol/src/configuration-target.ts'
+import {
+  configurationTargetHash,
+  type ConfigurationTarget,
+} from '../../../../packages/farm-protocol/src/configuration-target.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation.ts'
 import { readBrowserDeviceScope } from '../utils/browser-device-enrollment.ts'
 import { listDeviceKeys, type LocalDeviceKey } from '../utils/device-key.ts'
@@ -48,7 +58,13 @@ type KobraKeyState =
   | { kind: 'loading' }
   | {
       kind: 'unavailable'
-      reason: 'storage' | 'registry' | 'incomplete' | 'missing' | 'pending' | 'revoked'
+      reason:
+        | 'storage'
+        | 'registry'
+        | 'incomplete'
+        | 'missing'
+        | 'pending'
+        | 'revoked'
     }
   | {
       kind: 'available'
@@ -63,6 +79,7 @@ type KobraBootstrapState =
   | { kind: 'ready'; data: LoadedConfigurationBootstrap }
 
 type KobraOperationContext = {
+  accountId: string
   operationId: string
   farmId: string
   agentId: string
@@ -136,7 +153,10 @@ const kobraDisplayLabels = ref<Record<string, string>>({})
 
 // Live WebRTC read-only status for active assignments on this page
 const liveConnections = ref<
-  Record<string, 'unavailable' | 'connecting' | 'verifying' | 'authenticated' | 'closed'>
+  Record<
+    string,
+    'unavailable' | 'connecting' | 'verifying' | 'authenticated' | 'closed'
+  >
 >({})
 const liveObservations = shallowRef<Record<string, FarmObservation>>({})
 const liveTick = ref({ wall: Date.now(), mono: performance.now() })
@@ -191,6 +211,7 @@ function persistPendingOperation(
     window.sessionStorage.setItem(
       PENDING_OP_SESSION_KEY,
       JSON.stringify({
+        accountId: op.accountId,
         operationId: op.operationId,
         farmId: op.farmId,
         agentId: op.agentId,
@@ -229,6 +250,7 @@ function restorePersistedOperation(
     const raw = window.sessionStorage.getItem(PENDING_OP_SESSION_KEY)
     if (!raw) return
     const parsed = JSON.parse(raw) as {
+      accountId?: string
       operationId?: string
       farmId?: string
       agentId?: string
@@ -243,6 +265,8 @@ function restorePersistedOperation(
     }
     if (
       !parsed ||
+      kobraKeyState.value.kind !== 'available' ||
+      parsed.accountId !== kobraKeyState.value.accountId ||
       parsed.farmId !== currentFarm ||
       parsed.agentId !== currentAgent ||
       parsed.keyId !== currentKey ||
@@ -253,6 +277,7 @@ function restorePersistedOperation(
     )
       return
     kobraOperation.value = {
+      accountId: parsed.accountId,
       operationId: parsed.operationId,
       farmId: parsed.farmId,
       agentId: parsed.agentId,
@@ -467,7 +492,8 @@ function startLiveStatusFeed() {
   })
   for (const [targetAgentId, group] of byAgent.entries()) {
     const setAgentConnection = (
-      status: 'unavailable' | 'connecting' | 'verifying' | 'authenticated' | 'closed',
+      status:
+        'unavailable' | 'connecting' | 'verifying' | 'authenticated' | 'closed',
     ) => {
       const next = { ...liveConnections.value }
       for (const item of group) next[item.assignmentId] = status
@@ -495,7 +521,8 @@ function startLiveStatusFeed() {
           const nextObs = { ...liveObservations.value }
           for (const item of group) {
             const existing = nextObs[item.assignmentId]
-            if (existing) nextObs[item.assignmentId] = { ...existing, historical: true }
+            if (existing)
+              nextObs[item.assignmentId] = { ...existing, historical: true }
           }
           liveObservations.value = nextObs
         }
@@ -526,7 +553,11 @@ function startLiveStatusFeed() {
   }
 }
 
-async function loadKobraBrowserKeys(selectedFarm: string, token: number, signal: AbortSignal) {
+async function loadKobraBrowserKeys(
+  selectedFarm: string,
+  token: number,
+  signal: AbortSignal,
+) {
   kobraKeyState.value = { kind: 'loading' }
   let scopePage
   try {
@@ -568,7 +599,8 @@ async function loadKobraBrowserKeys(selectedFarm: string, token: number, signal:
     clear()
     farms.value = []
     farmId.value = ''
-    error.value = 'A conta mudou. Entre novamente e atualize a página antes de continuar.'
+    error.value =
+      'A conta mudou. Entre novamente e atualize a página antes de continuar.'
     await nextTick()
     errorSummary.value?.focus()
     return
@@ -912,7 +944,10 @@ async function prepareKobraX() {
   let opContext: KobraOperationContext | null = null
   try {
     const targetSha256 = await configurationTargetHash(validated.target)
+    if (kobraKeyState.value.kind !== 'available')
+      throw new Error('Approved browser key required')
     opContext = {
+      accountId: kobraKeyState.value.accountId,
       operationId: crypto.randomUUID(),
       farmId: farmId.value,
       agentId: kobraAgentId.value,
@@ -1155,7 +1190,11 @@ async function revoke() {
   if (!target || !revokeConfirmed.value || !canManage.value) return
   await run(async (signal, current) => {
     await $fetch(
-      '/api/farms/' + farmId.value + '/printers/' + target.assignmentId + '/revoke',
+      '/api/farms/' +
+        farmId.value +
+        '/printers/' +
+        target.assignmentId +
+        '/revoke',
       {
         ...options(signal),
         method: 'POST',
@@ -1369,7 +1408,9 @@ onBeforeRouteLeave(clear)
         {{ kobraError }}
       </p>
       <p role="status" aria-live="polite">
-        {{ kobraBusy && !kobraStatus ? 'Processando configuração…' : kobraStatus }}
+        {{
+          kobraBusy && !kobraStatus ? 'Processando configuração…' : kobraStatus
+        }}
       </p>
 
       <fieldset :disabled="kobraBusy">
@@ -1441,9 +1482,10 @@ onBeforeRouteLeave(clear)
           class="exact-key"
           role="status"
         >
-          Connector apto (protocolo {{ kobraBootstrap.data.bootstrap.protocol }}
-          · revisão {{ kobraBootstrap.data.bootstrap.revision }} · impressão
-          digital {{ kobraBootstrap.data.bootstrap.connectorFingerprint }}).
+          Connector apto (protocolo
+          {{ kobraBootstrap.data.bootstrap.protocol }} · revisão
+          {{ kobraBootstrap.data.bootstrap.revision }} · impressão digital
+          {{ kobraBootstrap.data.bootstrap.connectorFingerprint }}).
         </p>
       </fieldset>
 
@@ -1451,9 +1493,7 @@ onBeforeRouteLeave(clear)
         v-if="kobraStage === 'idle' || kobraStage === 'preparing'"
         @submit.prevent="prepareKobraX"
       >
-        <fieldset
-          :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'"
-        >
+        <fieldset :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'">
           <legend>2. Preparar descoberta na rede local (Modo LAN)</legend>
           <label for="kobra-ip">Endereço IPv4 da Kobra X na LAN</label>
           <input
@@ -1520,7 +1560,10 @@ onBeforeRouteLeave(clear)
       </div>
 
       <section
-        v-if="(kobraStage === 'prepared' || kobraStage === 'committing') && kobraPrepared"
+        v-if="
+          (kobraStage === 'prepared' || kobraStage === 'committing') &&
+          kobraPrepared
+        "
         aria-labelledby="kobra-prepared-heading"
         class="kobra-card"
       >
@@ -1549,7 +1592,9 @@ onBeforeRouteLeave(clear)
           <dt>Firmware observado</dt>
           <dd>
             <template
-              v-if="kobraPrepared.receipt.observed.firmware.status === 'observed'"
+              v-if="
+                kobraPrepared.receipt.observed.firmware.status === 'observed'
+              "
             >
               Versão observada:
               {{ kobraPrepared.receipt.observed.firmware.version }} — suporte
@@ -1609,7 +1654,9 @@ onBeforeRouteLeave(clear)
           Estado da operação não confirmado — reconciliação segura
         </h3>
         <p>
-          Operação: <span class="exact-key">{{ kobraOperation.operationId }}</span>.
+          Operação:
+          <span class="exact-key">{{ kobraOperation.operationId }}</span
+          >.
           {{ kobraUnknownNotice }}
         </p>
         <p>
@@ -1636,12 +1683,11 @@ onBeforeRouteLeave(clear)
         aria-labelledby="kobra-recovery-heading"
         class="kobra-card"
       >
-        <h3 id="kobra-recovery-heading">
-          Recuperação pendente no Connector
-        </h3>
+        <h3 id="kobra-recovery-heading">Recuperação pendente no Connector</h3>
         <p>
-          Operação: <span class="exact-key">{{ kobraOperation.operationId }}</span>.
-          Motivo: {{ describeRecoveryReason(kobraRecoveryReason) }}
+          Operação:
+          <span class="exact-key">{{ kobraOperation.operationId }}</span
+          >. Motivo: {{ describeRecoveryReason(kobraRecoveryReason) }}
         </p>
         <p>
           A ativação automática desta impressora foi bloqueada para proteger as

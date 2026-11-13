@@ -1,0 +1,208 @@
+{
+  "id": "matrix-consolidation",
+  "cutoff": "2026-11-13",
+  "base_sha": "bad76165aa4fbe86949ae624ddedc973721d5fcf",
+  "inspected_head": "c7feac52fda5e344df670cfff1b2be484bc7678b",
+  "ancestry_verified": true,
+  "status": "DONE_WITH_CONCERNS",
+  "findings": [
+    "Não há base suficiente para aceitar ranking de 15 modelos disponíveis. As posições permanecem abertas; anúncios e oferta não equivalem a envio.",
+    "Bambu: sequência documental de anúncios H3C 2026-11-03, A2L 2026-06-01, X2D 2026-04-14, H2C 2025-11-14, P2S 2025-10-14 confirmada no índice B1; ranking de disponibilidade não confirmado.",
+    "SPARKX i7 tem estreia oficial no CES e oferta atual documentadas. Deve entrar na investigação de elegíveis antes de preencher posições com futuros dispositivos.",
+    "S1 Max tem LAN e transferência local documentadas em A3; o desconhecimento do relatório anterior não deve ser propagado como ausência de LAN.",
+    "Versão V2.0.1.3 e data 2026-11-05 do i8 não verificadas: C2 retorna 404. OCL v1.1 em C1 não comprova licença de firmware."
+  ],
+  "gaps": [
+    {
+      "brand": "Bambu Lab",
+      "positions": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "detail": "Ordem de anúncios confirmada, mas primeira expedição regional e completude do conjunto não confirmadas. A2L tem disponibilidade declarada, sem prova de primeira entrega."
+    },
+    {
+      "brand": "Anycubic",
+      "positions": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "detail": "Kobra 3 Max V2 versus Kobra 4 sem datas oficiais comparáveis; Kobra X sem marco oficial datado revalidado; S1 Max com conflito anterior 5/25 novembro não resolvido; quinto Kobra 3 V2 versus S1 sem data primária recuperada. Revisões V2 exigem regra de identidade explícita."
+    },
+    {
+      "brand": "Creality",
+      "positions": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "detail": "K3, Neo, Mega, i8 e V4 não formam cinco disponíveis comprovados. i7 é candidato adicional com estreia e oferta documentadas. Datas comparáveis de envio e exclusão de omissões pendentes."
+    }
+  ],
+  "sources": [
+    {
+      "id": "B1",
+      "reference": "https://blog.bambulab.com/tag/press-release/",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Datas dos cinco anúncios Bambu; índice não prova disponibilidade nem exaustividade."
+    },
+    {
+      "id": "B2",
+      "reference": "https://blog.bambulab.com/bambu-lab-a2l-creative-playground-extra-large/",
+      "publication_date": "2026-06-01",
+      "access_date": "2026-11-13",
+      "supports": "Venda global A2L em 1 junho; Japão/Coreia em 2 junho."
+    },
+    {
+      "id": "B3",
+      "reference": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
+      "publication_date": "2025-01-16",
+      "access_date": "2026-11-13",
+      "supports": "Autorização de comandos, MQTT status e Bambu Connect; escopo inicial X1, não firmware dos candidatos."
+    },
+    {
+      "id": "A1",
+      "reference": "https://store.anycubic.com/products/kobra-4-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Catálogo e oferta Kobra 4, sem cronologia comprovada."
+    },
+    {
+      "id": "A2",
+      "reference": "https://us.anycubic3d.com/products/kobra-3-max-v2-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Página regional US Kobra 3 Max V2, sem data de lançamento comprovada."
+    },
+    {
+      "id": "A3",
+      "reference": "https://store.anycubic.com/products/kobra-s1-max",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Kobra OS, Wi-Fi 6, Ethernet, LAN e transferência de arquivos anunciados; sem contrato de API."
+    },
+    {
+      "id": "A4",
+      "reference": "https://store.anycubic.com/pages/kobra-3-v2-combo-global-new-launch",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Tentativa falhou: URL não acessível pela ferramenta; não valida data."
+    },
+    {
+      "id": "C1",
+      "reference": "https://www.creality.com/blog/sparkx-open-initiative",
+      "publication_date": "2026-10-20",
+      "access_date": "2026-11-13",
+      "supports": "Declara Fluidd/Moonraker/SSH i7/i8; OCL v1.1 restrita aos recursos estruturais/hardware descritos."
+    },
+    {
+      "id": "C2",
+      "reference": "https://wiki.creality.com/en/sparkx/i8/firmware-update",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Retornou 404; V2.0.1.3 e 2026-11-05 não verificados."
+    },
+    {
+      "id": "C3",
+      "reference": "https://www.prnewswire.com/news-releases/from-idea-to-print-creality-sparkx-i7-debuts-at-ces-2026-for-everyday-creators-302655772.html",
+      "publication_date": "2026-01-07",
+      "access_date": "2026-11-13",
+      "supports": "Comunicado Creality: estreia i7 CES, pré-venda América do Norte; corpo datado 8 janeiro. V4 exibida, não envio."
+    },
+    {
+      "id": "C4",
+      "reference": "https://store.creality.com/products/sparkx-i7-3d-printer",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Oferta i7, Color/Nano Combo identificam mesma base; janela Nov 5-7 sem ano não prova envio."
+    },
+    {
+      "id": "C5",
+      "reference": "https://store.creality.com/pages/sparkx-i8",
+      "publication_date": null,
+      "access_date": "2026-11-13",
+      "supports": "Redireciona a produto i8, Sold Out; janela Nov 5-7 sem ano não prova expedição."
+    },
+    {
+      "id": "C6",
+      "reference": "https://www.creality.com/blog/k3-questions-answered",
+      "publication_date": "2026-09-30",
+      "access_date": "2026-11-13",
+      "supports": "Pré-venda K3; firmware baseado em Klipper e root declarados, sem contrato Moonraker."
+    },
+    {
+      "id": "C7",
+      "reference": "https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival",
+      "publication_date": "2026-10-21",
+      "access_date": "2026-11-13",
+      "supports": "Anúncio editorial Neo/Mega no Reino Unido; não comprova primeira entrega."
+    }
+  ],
+  "next_steps": [
+    "Obter anúncios e registros oficiais regionais de envio dos candidatos, sem usar posição no catálogo como cronologia.",
+    "Pesquisar Kobra 3 V2/S1 e Creality i7, K2/K2 Pro e Ender-5 Max como candidatos alternativos; só admitir com cronologia primária e identidade comprovadas.",
+    "Localizar notas oficiais válidas do i8 e identificar versão, autenticação e licença por firmware.",
+    "Documentar upload, start, pause, resume e cancel individualmente antes de qualquer adaptador; qualificação simulada e física permanecem pendentes."
+  ],
+  "accepted_fifteen_model_ranking": false,
+  "future_or_unproven_queue": [
+    "K3",
+    "Ender-3 V3 Neo",
+    "Ender-3 V3 Mega",
+    "SPARKX i8",
+    "Ender-3 V4"
+  ],
+  "capabilities": {
+    "upload": {
+      "Anycubic": "unknown API; LAN file transfer advertised for S1 Max only",
+      "Bambu Lab": "unknown API for candidate firmware",
+      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
+    },
+    "start": {
+      "Anycubic": "unknown API",
+      "Bambu Lab": "authorization documented historically; candidate firmware unknown",
+      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
+    },
+    "pause": {
+      "Anycubic": "unknown API",
+      "Bambu Lab": "unknown API for candidate firmware",
+      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
+    },
+    "resume": {
+      "Anycubic": "unknown API",
+      "Bambu Lab": "unknown API for candidate firmware",
+      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
+    },
+    "cancel": {
+      "Anycubic": "unknown API",
+      "Bambu Lab": "unknown API for candidate firmware",
+      "Creality SPARKX i7/i8": "Moonraker access declared; method and firmware qualification unknown"
+    }
+  },
+  "implementability_ranking": [
+    {
+      "rank": 1,
+      "scope": "SPARKX i7; i8 condicionado à elegibilidade",
+      "reason": "Acesso Moonraker explicitamente declarado C1; firmware e métodos ainda desconhecidos."
+    },
+    {
+      "rank": 2,
+      "scope": "Anycubic S1 Max e Bambu, sem ordem entre eles",
+      "reason": "LAN documentada A3 e autorização documentada B3, mas contratos por firmware insuficientes."
+    },
+    {
+      "rank": null,
+      "scope": "K3, Neo/Mega, demais Anycubic",
+      "reason": "Evidência insuficiente para ordenar integração local; Klipper ou controle remoto não provam API acessível."
+    }
+  ]
+}

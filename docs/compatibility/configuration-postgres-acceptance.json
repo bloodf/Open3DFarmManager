@@ -1,0 +1,31 @@
+{
+  "status": "pass",
+  "database": "PostgreSQL 17, disposable digest-pinned instance",
+  "qualifications": {
+    "migrations_and_grants": "pass",
+    "current_authority": "pass",
+    "atomic_registration": "pass",
+    "replay_after_reconnect": "pass",
+    "conflict_isolation": "pass",
+    "rollback": "pass",
+    "concurrency": "pass",
+    "resource_cleanup": "pass"
+  },
+  "evidence": {
+    "database": "Actual disposable PostgreSQL 17 with complete migration catalog including 0026 and production PostgresConfigurationStore.",
+    "authority": "Owner/admin allowed; viewer, cross-account, revoked browser and revoked credential rejected with preserved database state.",
+    "transactions": "Atomic registration, exact replay after reconnect, canonical conflicts, rollback and concurrent conflicting registration passed database row assertions.",
+    "cleanup": "Harness container and tmpfs removed; restart-created API container and volume removed; VM returned stopped. Pinned images and existing isolated network retained."
+  },
+  "boundaries": [
+    "Actual PostgreSQL evidence; synthetic SQL tests do not substitute for these checks.",
+    "No enabled Nuxt, browser or RTC qualification.",
+    "No deployment or physical printer commands.",
+    "Product files were not modified."
+  ],
+  "evidence_basis": {
+    "candidate": "de231c20c89186ace8fa34a0bc55e7b365aa8376",
+    "scope": "Actual database execution on committed harness with integrated JSONB parameter fix. Report-only follow-up commit.",
+    "command": "node scripts/test-configuration-postgres-acceptance.ts (explicit admission, owned context, pinned image, external evidence directory and loopback port required)"
+  }
+}

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-import { createServer, type Socket } from 'node:net'
+import { type Socket } from 'node:net'
+import { createServer, type TlsOptions } from 'node:tls'
 
 /** Original bounded MQTT 3.1.1 synthetic broker. No actuator support. */
-export function createSyntheticMqtt() {
+export function createSyntheticMqtt(tls: TlsOptions) {
   const clients = new Map<Socket, Set<string>>()
   let telemetry = {
     model: 'SYNTHETIC Kobra X',
@@ -29,19 +30,30 @@ export function createSyntheticMqtt() {
   const publish = () => {
     for (const [socket, topics] of clients)
       for (const topic of topics) {
-        if (!topic.includes('+') && !topic.includes('#'))
+        if (!topic.includes('+'))
           socket.write(
             packet(
               0x30,
               Buffer.concat([
-                field(topic),
-                Buffer.from(JSON.stringify(telemetry)),
+                field(
+                  topic.endsWith('/#')
+                    ? topic.slice(0, -1) + 'status/report'
+                    : topic,
+                ),
+                Buffer.from(
+                  JSON.stringify({
+                    type: 'status',
+                    action: 'query',
+                    state: 'done',
+                    data: telemetry,
+                  }),
+                ),
               ]),
             ),
           )
       }
   }
-  const server = createServer((socket) => {
+  const server = createServer({ ...tls, handshakeTimeout: 3000 }, (socket) => {
     clients.set(socket, new Set())
     socket.setTimeout(3000, () => socket.destroy())
     socket.on('error', () => {})

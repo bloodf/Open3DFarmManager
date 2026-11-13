@@ -73,7 +73,7 @@
     {
       "id": "atualizacoes",
       "kind": "medido",
-      "statement": "updateCheck é true por padrão e não há variável de ambiente para desligar; a consulta externa ocorre em GET /api/v1/system. Foi desativado por PATCH settings {updateCheck:false} antes do primeiro GET system (update null), com a saída de rede bloqueada como segunda barreira."
+      "statement": "updateCheck é true por padrão. Correção baseada na fonte fixada 5a5e5d9, system.service.ts:43-44: KOBRALINK_UPDATE_REPO é lida e, quando vazia, retorna null; isto não foi medido em runtime. A consulta externa ocorre em GET /api/v1/system. Foi desativado por PATCH settings {updateCheck:false} antes do primeiro GET system (update null), com a saída de rede bloqueada como segunda barreira."
     },
     {
       "id": "cliente-real",

@@ -34,7 +34,10 @@ async function ready(transport: KobraLinkFetch) {
     fetch: async (url, init) =>
       url.includes('/api/auth/')
         ? new Response('{}', {
-            headers: { 'set-cookie': 'session=secret; HttpOnly; Path=/' },
+            headers: {
+              'set-cookie':
+                'better-auth.session_token=secret; HttpOnly; Path=/',
+            },
           })
         : transport(url, init),
   })

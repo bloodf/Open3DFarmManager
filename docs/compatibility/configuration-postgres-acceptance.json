@@ -1,39 +1,31 @@
 {
-  "status": "blocked",
+  "status": "pass",
   "database": "PostgreSQL 17, disposable digest-pinned instance",
   "qualifications": {
     "migrations_and_grants": "pass",
-    "current_authority": "partial",
-    "atomic_registration": "blocked",
-    "replay_after_reconnect": "not_run",
-    "conflict_isolation": "not_run",
-    "rollback": "not_run",
-    "concurrency": "not_run",
+    "current_authority": "pass",
+    "atomic_registration": "pass",
+    "replay_after_reconnect": "pass",
+    "conflict_isolation": "pass",
+    "rollback": "pass",
+    "concurrency": "pass",
     "resource_cleanup": "pass"
   },
-  "blocker": {
-    "path": "apps/farm/server/storage/postgres-configuration.ts",
-    "write": "createOperation serializes the record with JSON.stringify before binding it to jsonb; PostgreSQL stores a JSON string.",
-    "read": "operation parses the returned record as ConfigurationOperationRecord. registerReceipt calls operation and fails with Invalid input: expected object, received string.",
-    "reproducer": "scripts/test-configuration-postgres-acceptance.ts",
-    "expected": "The persisted operation record is a JSON object and registration creates exactly one receipt and assignment atomically.",
-    "observed": "The real store rejects its persisted operation while registering the receipt. Qualification stops at this product failure."
-  },
   "evidence": {
-    "migrations": "The complete migration catalog including 0026 applied successfully and its history matched.",
-    "grants": "A nonsuperuser login inheriting only farm_configuration_authority could read authority; deleting receipts, elevating memberships and inserting accounts failed with SQLSTATE 42501.",
-    "authority_partial": "Owner and admin reads succeeded. Viewer and cross-account reads were denied. Revoked browser and credential cases remain unrun after the registration blocker.",
-    "cleanup": "Disposable database containers and their data were removed. The temporary API container and volume were removed. VM custody returns stopped; pinned images and the existing isolated network are retained for downstream qualification."
+    "database": "Actual disposable PostgreSQL 17 with complete migration catalog including 0026 and production PostgresConfigurationStore.",
+    "authority": "Owner/admin allowed; viewer, cross-account, revoked browser and revoked credential rejected with preserved database state.",
+    "transactions": "Atomic registration, exact replay after reconnect, canonical conflicts, rollback and concurrent conflicting registration passed database row assertions.",
+    "cleanup": "Harness container and tmpfs removed; restart-created API container and volume removed; VM returned stopped. Pinned images and existing isolated network retained."
   },
   "boundaries": [
     "Actual PostgreSQL evidence; synthetic SQL tests do not substitute for these checks.",
     "No enabled Nuxt, browser or RTC qualification.",
     "No deployment or physical printer commands.",
-    "Product files were not modified; downstream scenarios remain unqualified until the product blocker is fixed."
+    "Product files were not modified."
   ],
   "evidence_basis": {
-    "candidate": "8d9feeba7404950fbb24e69d5402b5ded77e03a5",
-    "scope": "Retained actual database evidence from the prior candidate. Harness restored unchanged; product store is unchanged. No new database execution in this recovery attempt.",
-    "current_gate": "FAIL: Actual PostgreSQL acceptance is not qualified"
+    "candidate": "de231c20c89186ace8fa34a0bc55e7b365aa8376",
+    "scope": "Actual database execution on committed harness with integrated JSONB parameter fix. Report-only follow-up commit.",
+    "command": "node scripts/test-configuration-postgres-acceptance.ts (explicit admission, owned context, pinned image, external evidence directory and loopback port required)"
   }
 }

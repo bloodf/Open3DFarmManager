@@ -141,3 +141,69 @@ test('server readiness requires both a connection and ready state', () => {
     parseMoonrakerServerInfo('{"result":{"klippy_connected":true}}'),
   ).toThrow('invalid-result')
 })
+
+test('projects the complete webhook and print-state matrix at progress boundaries', () => {
+  const rows = [
+    ['ready', ['idle', 'printing', 'paused', 'error', 'idle', 'idle']],
+    [
+      'startup',
+      ['offline', 'offline', 'offline', 'offline', 'offline', 'offline'],
+    ],
+    ['shutdown', ['error', 'error', 'error', 'error', 'error', 'error']],
+    ['error', ['error', 'error', 'error', 'error', 'error', 'error']],
+  ] as const
+  const printStates = [
+    'standby',
+    'printing',
+    'paused',
+    'error',
+    'complete',
+    'cancelled',
+  ] as const
+  for (const [webhook, expected] of rows) {
+    for (const [index, printState] of printStates.entries()) {
+      for (const progress of [0, 1]) {
+        expect(
+          parseMoonrakerSnapshot(
+            snapshot({
+              webhooks: { state: webhook, secret: 'remote' },
+              print_stats: { state: printState, filename: 'remote' },
+              virtual_sdcard: { progress, extra: 'remote' },
+            }),
+            context,
+          ),
+        ).toEqual({
+          sourceEventtime: 42.5,
+          printer: {
+            printerKey: 'sim-1',
+            observedAt: 1_800_000_000_000,
+            state: expected[index],
+            progress,
+          },
+        })
+      }
+    }
+  }
+})
+
+test('preserves error codes and context precedence without mutating inputs', () => {
+  const beforeFixture = structuredClone(fixture)
+  const beforeContext = structuredClone(context)
+  for (const [frame, input, code] of [
+    ['{', context, 'invalid-frame'],
+    [JSON.stringify({ error: {} }), context, 'remote-error'],
+    [snapshot({ webhooks: null }), context, 'invalid-result'],
+    ['{', { ...context, observedAt: -1 }, 'invalid-context'],
+  ] as const) {
+    try {
+      parseMoonrakerSnapshot(frame, input)
+      throw new Error('Unexpected success')
+    } catch (error) {
+      expect(error).toBeInstanceOf(MoonrakerReadError)
+      expect((error as MoonrakerReadError).code).toBe(code)
+    }
+  }
+  parseMoonrakerSnapshot(wire, context)
+  expect(fixture).toEqual(beforeFixture)
+  expect(context).toEqual(beforeContext)
+})

@@ -1,33 +1,38 @@
 {
   "id": "kobralink-upstream-integration",
-  "base": "70504a5ee18578af3ca4ca8f8a73c6e5d71db3e2",
+  "base": "77d169d",
   "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
   "scenarios": [
     "safe isolated restart",
     "pinned image inspection",
-    "unchanged Compose create",
-    "synthetic discovery responder unit test"
+    "unchanged Compose create and healthcheck",
+    "client authentication preflight",
+    "synthetic discovery fixture gate"
   ],
   "results": {
     "status": "blocked",
-    "reason": "Unchanged Compose recipe rejected: services.kobralink.healthcheck.test.3 must be a string",
-    "actual_integration": "failed before service creation; exit 1",
-    "fixture_gate": "blocked during install: ERR_PNPM_IGNORED_BUILDS esbuild@0.28.2",
-    "direct_checks": {
-      "node_fixture": "pass (1 test)",
-      "typescript": "pass",
-      "prettier": "pass"
-    }
+    "reason": "Client preflight exited 1 before authentication: ERR_MODULE_NOT_FOUND, package zod absent in worker checkout.",
+    "actual_integration": "Compose up --no-build --wait passed; service healthy. Client/provisioning/MQTT/telemetry not qualified.",
+    "fixture_gate": "PASS upstream-fixture at 13d82511268562b35b138746226e1aa9ba9cfaf5",
+    "image_digest": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3"
   },
   "limits": [
-    "Synthetic HTTP discovery only; MQTT fixture not implemented.",
-    "Authentication, provisioning, persistence, Connector telemetry and reconnect scenarios not reached because accepted recipe fails validation.",
-    "No physical printer or firmware support claim."
+    "Synthetic HTTP discovery only; MQTT fixture remains unimplemented.",
+    "Stopped at first runtime preflight failure. Subsequent fixture gate passed; integration was not retried.",
+    "No physical printer, firmware, provisioning, persistence or telemetry support claim."
   ],
   "resources": {
     "runtime_started": true,
-    "created": ["safe-harness container and fresh data volume"],
-    "removed": ["safe-harness container and fresh data volume"],
-    "retained": "Pinned image, stopped profile and existing network for downstream qualification."
+    "created": [
+      "isolated internal network",
+      "Compose service and data volume",
+      "safe restart service and volume"
+    ],
+    "removed": [
+      "Compose service and data volume",
+      "isolated internal network",
+      "safe restart service and volume"
+    ],
+    "retained": "Stopped profile, pinned image, pre-existing network and private evidence for coordinator."
   }
 }

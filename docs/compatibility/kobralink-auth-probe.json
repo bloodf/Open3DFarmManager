@@ -50,9 +50,7 @@
       "reason": "Nenhum backend, filho, instalação, cópia runtime, credencial, container ou worktree criado; somente evidência limitada e relatório."
     }
   ],
-  "owned_paths": [
-    "docs/compatibility/kobralink-auth-probe.json"
-  ],
+  "owned_paths": ["docs/compatibility/kobralink-auth-probe.json"],
   "risks": [
     "As lacunas A3/A6/A7 continuam abertas. Inferência de fonte não substitui medição HTTP.",
     "Não houve chamadas de hardware ou declaração de suporte físico.",

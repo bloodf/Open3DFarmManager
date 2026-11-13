@@ -1,0 +1,17 @@
+{
+  "schema": "open3dfarmmanager.kobralink-pin.v1",
+  "upstream": {
+    "repository": "https://github.com/NatHacks/Kobralink.git",
+    "ref": "v0.5.0",
+    "commit": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+    "version": "0.5.0",
+    "license": "GPL-3.0-only",
+    "dockerfile": "infra/Dockerfile"
+  },
+  "policy": {
+    "vendorUpstream": false,
+    "commitArtifactsOrCertificates": false,
+    "redistributeImages": false,
+    "processSeparationSettlesLicensing": false
+  }
+}

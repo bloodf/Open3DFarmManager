@@ -11,48 +11,323 @@
     "desconhecido": "Não determinável pelo código; depende de firmware, hardware ou execução."
   },
   "findings": [
-    {"id": "A1", "area": "bootstrap", "kind": "fato", "statement": "GET /api/v1/setup/status é anônimo e responde {needsSetup: boolean}, verdadeiro somente quando não existe usuário. É o único endpoint marcado como anônimo fora de /api/auth.", "sources": ["up-setup"]},
-    {"id": "A2", "area": "bootstrap", "kind": "fato", "statement": "O primeiro usuário é criado pelo fluxo e-mail/senha do Better Auth em /api/auth. Um hook de banco rejeita qualquer criação externa quando já existe usuário (FORBIDDEN, mensagem localizada). O papel nasce 'admin' e não é aceito como entrada; senha mínima de 8 caracteres; a criação já abre sessão.", "sources": ["up-auth"]},
-    {"id": "A3", "area": "bootstrap", "kind": "inferencia", "statement": "As rotas concretas seriam POST /api/auth/sign-up/email {name,email,password} e POST /api/auth/sign-in/email {email,password}, com sessão em cookie. Elas vêm da biblioteca e não estão declaradas no repositório; nomes de cookie e exigência de cabeçalho Origin compatível com BETTER_AUTH_URL precisam ser medidos contra o serviço local.", "sources": ["up-auth", "up-env"]},
-    {"id": "A4", "area": "bootstrap", "kind": "fato", "statement": "Não há token de instalação: quem alcançar a porta 7100 primeiro vira proprietário. A verificação (contagem) e a criação não são atômicas. A repetição não é idempotente: a segunda tentativa recebe proibição, então o cliente precisa reconciliar por needsSetup=false seguido de login.", "sources": ["up-auth", "up-setup", "up-main"]},
-    {"id": "A5", "area": "sessao", "kind": "fato", "statement": "Sessão dura 30 dias, renova a cada 1 dia e usa cache de cookie de 5 minutos; cookies seguros só quando a URL base é https. Origens confiáveis são a URL base e as extras configuradas. O segredo de sessão é gerado em arquivo no diretório de dados quando não informado.", "sources": ["up-auth", "up-env"]},
-    {"id": "A6", "area": "sessao", "kind": "inferencia", "statement": "Todo /api/v1 exige sessão por guarda global da biblioteca de integração (o módulo é registrado sem exceções além do status de setup e a documentação do próprio upstream descreve /api/v1 como protegido). O guarda de escrita local só valida papel: métodos diferentes de GET/HEAD/OPTIONS exigem 'admin' ou 'operator'; sem sessão ele delega e retorna verdadeiro.", "sources": ["up-app", "up-writeguard", "up-claude"]},
-    {"id": "A7", "area": "servico", "kind": "desconhecido", "statement": "Não há credencial de serviço confirmada para /api/v1. O plugin de chave de API (prefixo kl_, cabeçalho x-api-key, sem expiração e sem limite de taxa) é usado no código apenas pela emulação Moonraker; se uma chave também abre sessão em /api/v1 depende do padrão da versão da biblioteca e não foi verificado. Até prova em contrário, o cliente headless depende de e-mail e senha.", "sources": ["up-auth", "up-mauth"]},
-    {"id": "A8", "area": "servico", "kind": "fato", "statement": "Administradores podem criar contas via POST /api/v1/users {name,email,password,role} com papel 'operator' ou 'viewer'. Isso permite uma conta operadora dedicada ao adaptador, mas ainda é senha de usuário com autoridade sobre todas as impressoras; não existe escopo por impressora na API de gestão.", "sources": ["up-users", "up-shared-users"]},
-    {"id": "P1", "area": "impressoras", "kind": "fato", "statement": "GET /api/v1/printers e GET /api/v1/printers/:id devolvem id, name, ip, mqttPort, username, deviceId, modeId, model, httpPort, settings, createdAt e 'live' (estado vivo ou null quando não há ponte). A senha MQTT nunca é devolvida, mas o usuário MQTT é.", "sources": ["up-pctl", "up-psvc", "up-shared-printer"]},
-    {"id": "P2", "area": "impressoras", "kind": "fato", "statement": "POST /api/v1/printers aceita {ip: IPv4 obrigatório, name?: 1..64, httpPort?: 1024..65535}. O servidor recupera credenciais na impressora, recusa duplicata por deviceId e conflito de porta (409), grava e só depois inicia a ponte. Falha de recuperação vira 503; credenciais vazias viram 409; validação vira 400 com lista de campos.", "sources": ["up-pctl", "up-psvc", "up-shared-printer", "up-zod"]},
-    {"id": "P3", "area": "impressoras", "kind": "fato", "statement": "Falha parcial na criação: a linha é persistida antes de iniciar a ponte. Se os certificados não forem encontrados a chamada falha com a linha já gravada, e a nova tentativa recebe 409. Se a porta Moonraker não puder ser aberta o erro é apenas registrado em log e a criação responde sucesso; nenhum campo expõe se o listener está ativo.", "sources": ["up-pctl", "up-registry", "up-mhost"]},
-    {"id": "P4", "area": "impressoras", "kind": "fato", "statement": "Não há chave de idempotência. O 409 de duplicata traz só texto localizado com o nome existente, sem id. Erros não têm código de máquina e o idioma padrão do serviço é francês; o cliente deve decidir por status HTTP e reconciliar listando e comparando deviceId.", "sources": ["up-psvc", "up-zod", "up-shared-settings"]},
-    {"id": "P5", "area": "impressoras", "kind": "inferencia", "statement": "Duas criações simultâneas podem escolher a mesma porta livre; a unicidade do banco faria a segunda falhar com erro não mapeado. O adaptador deve serializar criações.", "sources": ["up-psvc", "up-schema"]},
-    {"id": "P6", "area": "impressoras", "kind": "fato", "statement": "PATCH /api/v1/printers/:id aceita {name?, ip?, httpPort?, settings? parcial}; settings é mesclado de forma rasa e revalidado. A gravação ocorre antes de atualizar a ponte; mudança de ip ou credencial derruba e reabre a sessão MQTT, mudança de porta reinicia o listener (com a mesma falha silenciosa de P3). Corpo vazio é um no-op.", "sources": ["up-pctl", "up-psvc", "up-registry", "up-bridge-life"]},
-    {"id": "P7", "area": "impressoras", "kind": "fato", "statement": "DELETE /api/v1/printers/:id encerra a ponte e depois apaga a linha (204); repetir devolve 404. Arquivos, trabalhos, fila, timelapses e atribuições da impressora são apagados em cascata.", "sources": ["up-pctl", "up-psvc", "up-schema"]},
-    {"id": "P8", "area": "ssrf", "kind": "fato", "statement": "O campo ip aceita qualquer IPv4 (inclusive loopback, link-local e público) e provoca requisições do servidor à porta fixa 18910 desse endereço. As URLs de tomada (powerOnUrl, powerOffUrl, powerStatusUrl) são strings livres na API e são buscadas pelo servidor em POST/GET :id/power. Quem tem sessão operadora obtém assim um primitivo de requisição arbitrária.", "sources": ["up-shared-printer", "up-pctl", "up-creds"]},
-    {"id": "C1", "area": "credenciais", "kind": "fato", "statement": "A recuperação usa HTTP sem autenticação na impressora: GET :18910/info devolve um token; POST :18910/ctrl com ts, nonce e assinatura derivada do token devolve dados cifrados cuja chave também deriva do token. Cada chamada tem limite de 10 s. Resultado: usuário, senha, deviceId, modeId, modelo e ip. Depende do modo LAN ativado na impressora.", "sources": ["up-creds"]},
-    {"id": "C2", "area": "credenciais", "kind": "fato", "statement": "A senha MQTT fica em texto claro no SQLite do serviço. Toda falha de recuperação (modo LAN desligado, tempo esgotado, resposta inválida) chega ao cliente como 503 com texto localizado; não é possível distinguir as causas por máquina.", "sources": ["up-schema", "up-psvc", "up-creds"]},
-    {"id": "C3", "area": "recuperacao", "kind": "fato", "statement": "POST /api/v1/printers/:id/refresh-credentials refaz a recuperação no ip atual e sobrescreve usuário, senha, deviceId, modeId e modelo sem comparar com o deviceId anterior e sem recusar valores vazios; não atualiza o ip. Se o endereço passou a pertencer a outro equipamento, a identidade do registro muda silenciosamente.", "sources": ["up-psvc"]},
-    {"id": "C4", "area": "modelo", "kind": "fato", "statement": "Não existe filtro de modelo: qualquer equipamento que responda ao protocolo é aceito. Os padrões são modelo 'Anycubic Kobra', modeId '20030' e nome 'Anycubic Kobra X'. Isso não prova suporte a outros modelos Anycubic.", "sources": ["up-creds", "up-psvc", "up-schema"]},
-    {"id": "C5", "area": "modelo", "kind": "desconhecido", "statement": "O texto exato de modelo e o modeId que uma Kobra X real informa, e a faixa de firmware compatível, não constam no código nem em amostras do pin. O firmware do proprietário é desconhecido.", "sources": ["up-creds", "up-bridge-info"]},
-    {"id": "C6", "area": "licenca", "kind": "fato", "statement": "A sessão MQTT (porta 9883, TLS sem validação do servidor) apresenta um certificado de cliente e chave privada de terceiro que o upstream distribui no próprio repositório e copia para a imagem; o upstream documenta que são extraídos do fatiador do fabricante e que o broker só aceita esse certificado. API e pacote de protocolo declaram GPL-3.0-only.", "sources": ["up-registry", "up-mqtt", "up-claude", "up-license", "up-infra"]},
-    {"id": "L1", "area": "reconexao", "kind": "fato", "statement": "Ao iniciar ou perder a sessão, a ponte tenta reconectar por uma janela de 30 s (sonda TCP a cada 10 s). Depois disso marca 'unreachable_ip' e espera pedido manual. Uma impressora desligada por mais de 30 s não volta sozinha: é preciso POST /api/v1/printers/:id/reconnect (204), que abre nova janela.", "sources": ["up-bridge-life"]},
-    {"id": "L2", "area": "reconexao", "kind": "fato", "statement": "POST :id/reconnect derruba a sessão mesmo quando está saudável. POST :id/disconnect pausa a ponte (erro 'manual', manualOffline=true) e só POST :id/connect a retoma. As três chamadas devolvem 404 quando a ponte não existe, por exemplo após falha de inicialização.", "sources": ["up-bridge-life", "up-pctl", "up-registry"]},
-    {"id": "L3", "area": "estado", "kind": "fato", "statement": "O estado vivo traz connected, connectionError{code: mqtt_auth|mqtt_refused|unreachable|unreachable_ip|lost|reconnecting|manual|other}, firmwareVersion ('unknown' até a primeira resposta), printState, kobraState, temperaturas, progress (0..1, derivado de percentual), camadas, taskId, pauseMsg, errorCode e updatedAt. Desconectado, printState fica 'error' e kobraState 'offline'.", "sources": ["up-shared-state", "up-bridge-life", "up-bridge-info"]},
-    {"id": "L4", "area": "estado", "kind": "fato", "statement": "Há três leituras autenticadas por sessão: a lista com 'live', GET /api/v1/printers/:id/state e o SSE GET /api/v1/events/multiplexed?channels=printers (eventos state, notification, refused e heartbeat a cada 25 s; no máximo 32 canais). O upstream consulta a impressora por sondagem, padrão de 3 s.", "sources": ["up-pctl", "up-core", "up-sse", "up-shared-printer"]},
-    {"id": "M1", "area": "moonraker", "kind": "fato", "statement": "Cada impressora ganha um servidor HTTP+WS próprio em 0.0.0.0:httpPort (primeira porta 7125, única por impressora, CORS aberto). A URL por impressora é http://<host do serviço>:<httpPort>. Por padrão não há autenticação e essas portas aceitam pausa, cancelamento, envio de arquivo e início de impressão.", "sources": ["up-mhost", "up-psvc", "up-mctl"]},
-    {"id": "M2", "area": "moonraker-chave", "kind": "fato", "statement": "A exigência de chave é global: settings.moonrakerApiKey, alterado por PATCH /api/v1/settings. A chave é aceita em X-Api-Key, Authorization: Bearer ou ?api_key=, além de token de uso único de 5 s. Ficam abertos '/', /access/info, /access/login, /access/refresh_jwt e /serve/* (download de G-code por nome). No WebSocket a recusa fecha com código 4401; em HTTP devolve 401.", "sources": ["up-mauth", "up-mguard", "up-mgw", "up-settings"]},
-    {"id": "M3", "area": "moonraker-chave", "kind": "fato", "statement": "O escopo vem de metadata.printerId da chave; chave sem esse metadado vale para todas as impressoras. A validação fica em cache por 30 s e nada no código invalida esse cache, então a revogação pode demorar até 30 s. O serviço de autorização é um só para todas as portas e o token de uso único não guarda impressora: um token emitido na porta de uma impressora é aceito na porta de outra.", "sources": ["up-mauth", "up-mapp", "up-mhost"]},
-    {"id": "M4", "area": "moonraker-chave", "kind": "inferencia", "statement": "A interface web do upstream cria chaves pelo cliente da biblioteca com {name, metadata:{printerId}} sob sessão de operador ou administrador; a rota REST equivalente em /api/auth/api-key não está no repositório e deve ser medida. O valor da chave só é conhecido na criação.", "sources": ["up-web-keys", "up-auth"]},
-    {"id": "M5", "area": "openfarm", "kind": "fato", "statement": "O cliente Moonraker do OpenFarm não envia cabeçalho de chave em HTTP nem no handshake WS, usa credentials:'omit' e a validação de origem proíbe usuário, caminho, query e fragmento. Com a exigência de chave ligada ele veria 401 e classificaria como offline.", "sources": ["of-client", "of-socket", "of-config"]},
-    {"id": "M6", "area": "incompatibilidade", "kind": "fato", "statement": "Ao aceitar um WebSocket, a emulação envia imediatamente notify_klippy_ready e um notify_status_update completo, antes de qualquer assinatura. O cliente de telemetria do OpenFarm encerra a conexão como 'not-ready' ao receber notify_klippy_ready e trata status antes da linha de base como resposta inválida. A assinatura atual não se estabelece contra o upstream sem alteração.", "sources": ["up-mgw", "of-client"]},
-    {"id": "M7", "area": "incompatibilidade", "kind": "fato", "statement": "O driver de pausa do OpenFarm aceita somente respostas com id, limita a 16 quadros e 4096 bytes e valida o snapshot com objetos estritos {state}. A emulação envia notificações sem id, repete o estado completo a cada mudança e devolve objetos inteiros ignorando a lista de campos pedida (webhooks traz state_message; print_stats traz vários campos). O driver atual aborta antes de enviar a pausa.", "sources": ["up-mgw", "up-msvc", "of-pause"]},
-    {"id": "M8", "area": "compatibilidade", "kind": "fato", "statement": "A consulta HTTP GET /printer/objects/query?webhooks&print_stats&virtual_sdcard responde {result:{status,eventtime}} e passa pelo analisador HTTP existente do OpenFarm: os estados emitidos (standby, printing, paused, complete, error) pertencem ao conjunto aceito e campos extras são descartados. GET /server/info também é aceito.", "sources": ["up-mctl", "up-msvc", "up-shared-state", "of-parse"]},
-    {"id": "M9", "area": "campo-ausente", "kind": "fato", "statement": "A emulação declara sempre klippy_connected=true, klippy_state='ready' e webhooks.state='ready'. Impressora desligada, sem rede ou com credencial recusada aparece só como print_stats.state='error', que o OpenFarm normaliza para 'error'. Offline e falha de impressão são indistinguíveis pela porta Moonraker.", "sources": ["up-msvc", "up-bridge-life", "of-normalize"]},
-    {"id": "M10", "area": "campo-ausente", "kind": "fato", "statement": "eventtime é relógio de parede em segundos, não monotônico. Métodos WS desconhecidos devolvem {} e rotas HTTP desconhecidas devolvem 200 {result:{}}, logo sondagem não detecta recurso ausente. Firmware, modelo, deviceId e erro de conexão não existem nos objetos Moonraker.", "sources": ["up-mctl", "up-mgw", "up-mfallback", "up-msvc"]},
-    {"id": "U1", "area": "pausa", "kind": "fato", "statement": "Pausa existe em três formas: POST /printer/print/pause na porta Moonraker ({result:'ok'}), método WS printer.print.pause ('ok' ou erro -32603) e POST /api/v1/printers/:id/print/pause (204; 503 quando a ponte está offline). Na porta Moonraker HTTP a exceção de ponte offline não é mapeada.", "sources": ["up-mctl", "up-mgw", "up-core", "up-bridge-cmd"]},
-    {"id": "U2", "area": "pausa", "kind": "fato", "statement": "'ok' e 204 não provam aceitação: o pedido MQTT resolve nulo após 5 s sem resposta e o resultado não é inspecionado; uma recusa da impressora só gera o evento 'refused' no SSE. Além disso 'pausing' já é projetado como 'paused'. O taskId usado é o último observado, com padrão '-1'.", "sources": ["up-bridge-cmd", "up-mqtt", "up-shared-state", "up-bridge-info"]},
-    {"id": "U3", "area": "pausa", "kind": "desconhecido", "statement": "Quais valores de estado a Kobra X emite durante e depois da pausa ('pausing', 'paused' ou 'pause'), o tempo até confirmar e o efeito de taskId '-1' dependem do firmware e não foram observados.", "sources": ["up-shared-state"]},
-    {"id": "V1", "area": "camera", "kind": "fato", "statement": "Câmera existe em /api/camera/{stream,snapshot,h264} na porta Moonraker e em /api/v1/printers/:id/camera/* na gestão: MJPEG multipart, JPEG e fluxo H.264; 503 com {message} quando não há URL ou quadro. Depende de ffmpeg no serviço, da URL RTSP anunciada pela impressora e de um comando de início de captura. A lista de webcams monta URLs a partir do cabeçalho Host da requisição.", "sources": ["up-camera", "up-mctl", "up-core", "up-msvc", "up-bridge-info"]},
-    {"id": "V2", "area": "versao", "kind": "fato", "statement": "GET /api/v1/system devolve a versão do serviço (sessão exigida); o healthcheck do compose usa /api/auth/ok. A emulação anuncia versões fixas de Moonraker e Klipper que não descrevem a impressora.", "sources": ["up-system", "up-infra", "up-msvc"]},
-    {"id": "O1", "area": "openfarm", "kind": "fato", "statement": "No OpenFarm, coleta, vínculo local e roteador de pausa são indexados por moonraker_origin com allowlist; o estado público tem apenas idle, printing, paused, error e offline, sem 'unknown' nem versão de firmware.", "sources": ["of-collect", "of-binding", "of-router", "of-state", "of-runtime"]}
+    {
+      "id": "A1",
+      "area": "bootstrap",
+      "kind": "fato",
+      "statement": "GET /api/v1/setup/status é anônimo e responde {needsSetup: boolean}, verdadeiro somente quando não existe usuário. É o único endpoint marcado como anônimo fora de /api/auth.",
+      "sources": ["up-setup"]
+    },
+    {
+      "id": "A2",
+      "area": "bootstrap",
+      "kind": "fato",
+      "statement": "O primeiro usuário é criado pelo fluxo e-mail/senha do Better Auth em /api/auth. Um hook de banco rejeita qualquer criação externa quando já existe usuário (FORBIDDEN, mensagem localizada). O papel nasce 'admin' e não é aceito como entrada; senha mínima de 8 caracteres; a criação já abre sessão.",
+      "sources": ["up-auth"]
+    },
+    {
+      "id": "A3",
+      "area": "bootstrap",
+      "kind": "inferencia",
+      "statement": "As rotas concretas seriam POST /api/auth/sign-up/email {name,email,password} e POST /api/auth/sign-in/email {email,password}, com sessão em cookie. Elas vêm da biblioteca e não estão declaradas no repositório; nomes de cookie e exigência de cabeçalho Origin compatível com BETTER_AUTH_URL precisam ser medidos contra o serviço local.",
+      "sources": ["up-auth", "up-env"]
+    },
+    {
+      "id": "A4",
+      "area": "bootstrap",
+      "kind": "fato",
+      "statement": "Não há token de instalação: quem alcançar a porta 7100 primeiro vira proprietário. A verificação (contagem) e a criação não são atômicas. A repetição não é idempotente: a segunda tentativa recebe proibição, então o cliente precisa reconciliar por needsSetup=false seguido de login.",
+      "sources": ["up-auth", "up-setup", "up-main"]
+    },
+    {
+      "id": "A5",
+      "area": "sessao",
+      "kind": "fato",
+      "statement": "Sessão dura 30 dias, renova a cada 1 dia e usa cache de cookie de 5 minutos; cookies seguros só quando a URL base é https. Origens confiáveis são a URL base e as extras configuradas. O segredo de sessão é gerado em arquivo no diretório de dados quando não informado.",
+      "sources": ["up-auth", "up-env"]
+    },
+    {
+      "id": "A6",
+      "area": "sessao",
+      "kind": "inferencia",
+      "statement": "Todo /api/v1 exige sessão por guarda global da biblioteca de integração (o módulo é registrado sem exceções além do status de setup e a documentação do próprio upstream descreve /api/v1 como protegido). O guarda de escrita local só valida papel: métodos diferentes de GET/HEAD/OPTIONS exigem 'admin' ou 'operator'; sem sessão ele delega e retorna verdadeiro.",
+      "sources": ["up-app", "up-writeguard", "up-claude"]
+    },
+    {
+      "id": "A7",
+      "area": "servico",
+      "kind": "desconhecido",
+      "statement": "Não há credencial de serviço confirmada para /api/v1. O plugin de chave de API (prefixo kl_, cabeçalho x-api-key, sem expiração e sem limite de taxa) é usado no código apenas pela emulação Moonraker; se uma chave também abre sessão em /api/v1 depende do padrão da versão da biblioteca e não foi verificado. Até prova em contrário, o cliente headless depende de e-mail e senha.",
+      "sources": ["up-auth", "up-mauth"]
+    },
+    {
+      "id": "A8",
+      "area": "servico",
+      "kind": "fato",
+      "statement": "Administradores podem criar contas via POST /api/v1/users {name,email,password,role} com papel 'operator' ou 'viewer'. Isso permite uma conta operadora dedicada ao adaptador, mas ainda é senha de usuário com autoridade sobre todas as impressoras; não existe escopo por impressora na API de gestão.",
+      "sources": ["up-users", "up-shared-users"]
+    },
+    {
+      "id": "P1",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "GET /api/v1/printers e GET /api/v1/printers/:id devolvem id, name, ip, mqttPort, username, deviceId, modeId, model, httpPort, settings, createdAt e 'live' (estado vivo ou null quando não há ponte). A senha MQTT nunca é devolvida, mas o usuário MQTT é.",
+      "sources": ["up-pctl", "up-psvc", "up-shared-printer"]
+    },
+    {
+      "id": "P2",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "POST /api/v1/printers aceita {ip: IPv4 obrigatório, name?: 1..64, httpPort?: 1024..65535}. O servidor recupera credenciais na impressora, recusa duplicata por deviceId e conflito de porta (409), grava e só depois inicia a ponte. Falha de recuperação vira 503; credenciais vazias viram 409; validação vira 400 com lista de campos.",
+      "sources": ["up-pctl", "up-psvc", "up-shared-printer", "up-zod"]
+    },
+    {
+      "id": "P3",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "Falha parcial na criação: a linha é persistida antes de iniciar a ponte. Se os certificados não forem encontrados a chamada falha com a linha já gravada, e a nova tentativa recebe 409. Se a porta Moonraker não puder ser aberta o erro é apenas registrado em log e a criação responde sucesso; nenhum campo expõe se o listener está ativo.",
+      "sources": ["up-pctl", "up-registry", "up-mhost"]
+    },
+    {
+      "id": "P4",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "Não há chave de idempotência. O 409 de duplicata traz só texto localizado com o nome existente, sem id. Erros não têm código de máquina e o idioma padrão do serviço é francês; o cliente deve decidir por status HTTP e reconciliar listando e comparando deviceId.",
+      "sources": ["up-psvc", "up-zod", "up-shared-settings"]
+    },
+    {
+      "id": "P5",
+      "area": "impressoras",
+      "kind": "inferencia",
+      "statement": "Duas criações simultâneas podem escolher a mesma porta livre; a unicidade do banco faria a segunda falhar com erro não mapeado. O adaptador deve serializar criações.",
+      "sources": ["up-psvc", "up-schema"]
+    },
+    {
+      "id": "P6",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "PATCH /api/v1/printers/:id aceita {name?, ip?, httpPort?, settings? parcial}; settings é mesclado de forma rasa e revalidado. A gravação ocorre antes de atualizar a ponte; mudança de ip ou credencial derruba e reabre a sessão MQTT, mudança de porta reinicia o listener (com a mesma falha silenciosa de P3). Corpo vazio é um no-op.",
+      "sources": ["up-pctl", "up-psvc", "up-registry", "up-bridge-life"]
+    },
+    {
+      "id": "P7",
+      "area": "impressoras",
+      "kind": "fato",
+      "statement": "DELETE /api/v1/printers/:id encerra a ponte e depois apaga a linha (204); repetir devolve 404. Arquivos, trabalhos, fila, timelapses e atribuições da impressora são apagados em cascata.",
+      "sources": ["up-pctl", "up-psvc", "up-schema"]
+    },
+    {
+      "id": "P8",
+      "area": "ssrf",
+      "kind": "fato",
+      "statement": "O campo ip aceita qualquer IPv4 (inclusive loopback, link-local e público) e provoca requisições do servidor à porta fixa 18910 desse endereço. As URLs de tomada (powerOnUrl, powerOffUrl, powerStatusUrl) são strings livres na API e são buscadas pelo servidor em POST/GET :id/power. Quem tem sessão operadora obtém assim um primitivo de requisição arbitrária.",
+      "sources": ["up-shared-printer", "up-pctl", "up-creds"]
+    },
+    {
+      "id": "C1",
+      "area": "credenciais",
+      "kind": "fato",
+      "statement": "A recuperação usa HTTP sem autenticação na impressora: GET :18910/info devolve um token; POST :18910/ctrl com ts, nonce e assinatura derivada do token devolve dados cifrados cuja chave também deriva do token. Cada chamada tem limite de 10 s. Resultado: usuário, senha, deviceId, modeId, modelo e ip. Depende do modo LAN ativado na impressora.",
+      "sources": ["up-creds"]
+    },
+    {
+      "id": "C2",
+      "area": "credenciais",
+      "kind": "fato",
+      "statement": "A senha MQTT fica em texto claro no SQLite do serviço. Toda falha de recuperação (modo LAN desligado, tempo esgotado, resposta inválida) chega ao cliente como 503 com texto localizado; não é possível distinguir as causas por máquina.",
+      "sources": ["up-schema", "up-psvc", "up-creds"]
+    },
+    {
+      "id": "C3",
+      "area": "recuperacao",
+      "kind": "fato",
+      "statement": "POST /api/v1/printers/:id/refresh-credentials refaz a recuperação no ip atual e sobrescreve usuário, senha, deviceId, modeId e modelo sem comparar com o deviceId anterior e sem recusar valores vazios; não atualiza o ip. Se o endereço passou a pertencer a outro equipamento, a identidade do registro muda silenciosamente.",
+      "sources": ["up-psvc"]
+    },
+    {
+      "id": "C4",
+      "area": "modelo",
+      "kind": "fato",
+      "statement": "Não existe filtro de modelo: qualquer equipamento que responda ao protocolo é aceito. Os padrões são modelo 'Anycubic Kobra', modeId '20030' e nome 'Anycubic Kobra X'. Isso não prova suporte a outros modelos Anycubic.",
+      "sources": ["up-creds", "up-psvc", "up-schema"]
+    },
+    {
+      "id": "C5",
+      "area": "modelo",
+      "kind": "desconhecido",
+      "statement": "O texto exato de modelo e o modeId que uma Kobra X real informa, e a faixa de firmware compatível, não constam no código nem em amostras do pin. O firmware do proprietário é desconhecido.",
+      "sources": ["up-creds", "up-bridge-info"]
+    },
+    {
+      "id": "C6",
+      "area": "licenca",
+      "kind": "fato",
+      "statement": "A sessão MQTT (porta 9883, TLS sem validação do servidor) apresenta um certificado de cliente e chave privada de terceiro que o upstream distribui no próprio repositório e copia para a imagem; o upstream documenta que são extraídos do fatiador do fabricante e que o broker só aceita esse certificado. API e pacote de protocolo declaram GPL-3.0-only.",
+      "sources": [
+        "up-registry",
+        "up-mqtt",
+        "up-claude",
+        "up-license",
+        "up-infra"
+      ]
+    },
+    {
+      "id": "L1",
+      "area": "reconexao",
+      "kind": "fato",
+      "statement": "Ao iniciar ou perder a sessão, a ponte tenta reconectar por uma janela de 30 s (sonda TCP a cada 10 s). Depois disso marca 'unreachable_ip' e espera pedido manual. Uma impressora desligada por mais de 30 s não volta sozinha: é preciso POST /api/v1/printers/:id/reconnect (204), que abre nova janela.",
+      "sources": ["up-bridge-life"]
+    },
+    {
+      "id": "L2",
+      "area": "reconexao",
+      "kind": "fato",
+      "statement": "POST :id/reconnect derruba a sessão mesmo quando está saudável. POST :id/disconnect pausa a ponte (erro 'manual', manualOffline=true) e só POST :id/connect a retoma. As três chamadas devolvem 404 quando a ponte não existe, por exemplo após falha de inicialização.",
+      "sources": ["up-bridge-life", "up-pctl", "up-registry"]
+    },
+    {
+      "id": "L3",
+      "area": "estado",
+      "kind": "fato",
+      "statement": "O estado vivo traz connected, connectionError{code: mqtt_auth|mqtt_refused|unreachable|unreachable_ip|lost|reconnecting|manual|other}, firmwareVersion ('unknown' até a primeira resposta), printState, kobraState, temperaturas, progress (0..1, derivado de percentual), camadas, taskId, pauseMsg, errorCode e updatedAt. Desconectado, printState fica 'error' e kobraState 'offline'.",
+      "sources": ["up-shared-state", "up-bridge-life", "up-bridge-info"]
+    },
+    {
+      "id": "L4",
+      "area": "estado",
+      "kind": "fato",
+      "statement": "Há três leituras autenticadas por sessão: a lista com 'live', GET /api/v1/printers/:id/state e o SSE GET /api/v1/events/multiplexed?channels=printers (eventos state, notification, refused e heartbeat a cada 25 s; no máximo 32 canais). O upstream consulta a impressora por sondagem, padrão de 3 s.",
+      "sources": ["up-pctl", "up-core", "up-sse", "up-shared-printer"]
+    },
+    {
+      "id": "M1",
+      "area": "moonraker",
+      "kind": "fato",
+      "statement": "Cada impressora ganha um servidor HTTP+WS próprio em 0.0.0.0:httpPort (primeira porta 7125, única por impressora, CORS aberto). A URL por impressora é http://<host do serviço>:<httpPort>. Por padrão não há autenticação e essas portas aceitam pausa, cancelamento, envio de arquivo e início de impressão.",
+      "sources": ["up-mhost", "up-psvc", "up-mctl"]
+    },
+    {
+      "id": "M2",
+      "area": "moonraker-chave",
+      "kind": "fato",
+      "statement": "A exigência de chave é global: settings.moonrakerApiKey, alterado por PATCH /api/v1/settings. A chave é aceita em X-Api-Key, Authorization: Bearer ou ?api_key=, além de token de uso único de 5 s. Ficam abertos '/', /access/info, /access/login, /access/refresh_jwt e /serve/* (download de G-code por nome). No WebSocket a recusa fecha com código 4401; em HTTP devolve 401.",
+      "sources": ["up-mauth", "up-mguard", "up-mgw", "up-settings"]
+    },
+    {
+      "id": "M3",
+      "area": "moonraker-chave",
+      "kind": "fato",
+      "statement": "O escopo vem de metadata.printerId da chave; chave sem esse metadado vale para todas as impressoras. A validação fica em cache por 30 s e nada no código invalida esse cache, então a revogação pode demorar até 30 s. O serviço de autorização é um só para todas as portas e o token de uso único não guarda impressora: um token emitido na porta de uma impressora é aceito na porta de outra.",
+      "sources": ["up-mauth", "up-mapp", "up-mhost"]
+    },
+    {
+      "id": "M4",
+      "area": "moonraker-chave",
+      "kind": "inferencia",
+      "statement": "A interface web do upstream cria chaves pelo cliente da biblioteca com {name, metadata:{printerId}} sob sessão de operador ou administrador; a rota REST equivalente em /api/auth/api-key não está no repositório e deve ser medida. O valor da chave só é conhecido na criação.",
+      "sources": ["up-web-keys", "up-auth"]
+    },
+    {
+      "id": "M5",
+      "area": "openfarm",
+      "kind": "fato",
+      "statement": "O cliente Moonraker do OpenFarm não envia cabeçalho de chave em HTTP nem no handshake WS, usa credentials:'omit' e a validação de origem proíbe usuário, caminho, query e fragmento. Com a exigência de chave ligada ele veria 401 e classificaria como offline.",
+      "sources": ["of-client", "of-socket", "of-config"]
+    },
+    {
+      "id": "M6",
+      "area": "incompatibilidade",
+      "kind": "fato",
+      "statement": "Ao aceitar um WebSocket, a emulação envia imediatamente notify_klippy_ready e um notify_status_update completo, antes de qualquer assinatura. O cliente de telemetria do OpenFarm encerra a conexão como 'not-ready' ao receber notify_klippy_ready e trata status antes da linha de base como resposta inválida. A assinatura atual não se estabelece contra o upstream sem alteração.",
+      "sources": ["up-mgw", "of-client"]
+    },
+    {
+      "id": "M7",
+      "area": "incompatibilidade",
+      "kind": "fato",
+      "statement": "O driver de pausa do OpenFarm aceita somente respostas com id, limita a 16 quadros e 4096 bytes e valida o snapshot com objetos estritos {state}. A emulação envia notificações sem id, repete o estado completo a cada mudança e devolve objetos inteiros ignorando a lista de campos pedida (webhooks traz state_message; print_stats traz vários campos). O driver atual aborta antes de enviar a pausa.",
+      "sources": ["up-mgw", "up-msvc", "of-pause"]
+    },
+    {
+      "id": "M8",
+      "area": "compatibilidade",
+      "kind": "fato",
+      "statement": "A consulta HTTP GET /printer/objects/query?webhooks&print_stats&virtual_sdcard responde {result:{status,eventtime}} e passa pelo analisador HTTP existente do OpenFarm: os estados emitidos (standby, printing, paused, complete, error) pertencem ao conjunto aceito e campos extras são descartados. GET /server/info também é aceito.",
+      "sources": ["up-mctl", "up-msvc", "up-shared-state", "of-parse"]
+    },
+    {
+      "id": "M9",
+      "area": "campo-ausente",
+      "kind": "fato",
+      "statement": "A emulação declara sempre klippy_connected=true, klippy_state='ready' e webhooks.state='ready'. Impressora desligada, sem rede ou com credencial recusada aparece só como print_stats.state='error', que o OpenFarm normaliza para 'error'. Offline e falha de impressão são indistinguíveis pela porta Moonraker.",
+      "sources": ["up-msvc", "up-bridge-life", "of-normalize"]
+    },
+    {
+      "id": "M10",
+      "area": "campo-ausente",
+      "kind": "fato",
+      "statement": "eventtime é relógio de parede em segundos, não monotônico. Métodos WS desconhecidos devolvem {} e rotas HTTP desconhecidas devolvem 200 {result:{}}, logo sondagem não detecta recurso ausente. Firmware, modelo, deviceId e erro de conexão não existem nos objetos Moonraker.",
+      "sources": ["up-mctl", "up-mgw", "up-mfallback", "up-msvc"]
+    },
+    {
+      "id": "U1",
+      "area": "pausa",
+      "kind": "fato",
+      "statement": "Pausa existe em três formas: POST /printer/print/pause na porta Moonraker ({result:'ok'}), método WS printer.print.pause ('ok' ou erro -32603) e POST /api/v1/printers/:id/print/pause (204; 503 quando a ponte está offline). Na porta Moonraker HTTP a exceção de ponte offline não é mapeada.",
+      "sources": ["up-mctl", "up-mgw", "up-core", "up-bridge-cmd"]
+    },
+    {
+      "id": "U2",
+      "area": "pausa",
+      "kind": "fato",
+      "statement": "'ok' e 204 não provam aceitação: o pedido MQTT resolve nulo após 5 s sem resposta e o resultado não é inspecionado; uma recusa da impressora só gera o evento 'refused' no SSE. Além disso 'pausing' já é projetado como 'paused'. O taskId usado é o último observado, com padrão '-1'.",
+      "sources": [
+        "up-bridge-cmd",
+        "up-mqtt",
+        "up-shared-state",
+        "up-bridge-info"
+      ]
+    },
+    {
+      "id": "U3",
+      "area": "pausa",
+      "kind": "desconhecido",
+      "statement": "Quais valores de estado a Kobra X emite durante e depois da pausa ('pausing', 'paused' ou 'pause'), o tempo até confirmar e o efeito de taskId '-1' dependem do firmware e não foram observados.",
+      "sources": ["up-shared-state"]
+    },
+    {
+      "id": "V1",
+      "area": "camera",
+      "kind": "fato",
+      "statement": "Câmera existe em /api/camera/{stream,snapshot,h264} na porta Moonraker e em /api/v1/printers/:id/camera/* na gestão: MJPEG multipart, JPEG e fluxo H.264; 503 com {message} quando não há URL ou quadro. Depende de ffmpeg no serviço, da URL RTSP anunciada pela impressora e de um comando de início de captura. A lista de webcams monta URLs a partir do cabeçalho Host da requisição.",
+      "sources": [
+        "up-camera",
+        "up-mctl",
+        "up-core",
+        "up-msvc",
+        "up-bridge-info"
+      ]
+    },
+    {
+      "id": "V2",
+      "area": "versao",
+      "kind": "fato",
+      "statement": "GET /api/v1/system devolve a versão do serviço (sessão exigida); o healthcheck do compose usa /api/auth/ok. A emulação anuncia versões fixas de Moonraker e Klipper que não descrevem a impressora.",
+      "sources": ["up-system", "up-infra", "up-msvc"]
+    },
+    {
+      "id": "O1",
+      "area": "openfarm",
+      "kind": "fato",
+      "statement": "No OpenFarm, coleta, vínculo local e roteador de pausa são indexados por moonraker_origin com allowlist; o estado público tem apenas idle, printing, paused, error e offline, sem 'unknown' nem versão de firmware.",
+      "sources": [
+        "of-collect",
+        "of-binding",
+        "of-router",
+        "of-state",
+        "of-runtime"
+      ]
+    }
   ],
   "proposed_slice": {
     "decision": "Recomendação (inferência): não adaptar o cliente Moonraker. Criar um cliente original e mínimo da API de gestão do serviço (origem única, porta 7100) dentro do Connector, porque M6, M7, M5 e M9 exigiriam afrouxar analisadores estritos usados com Moonraker real e, mesmo assim, o estado offline só existe na API de gestão.",
@@ -74,10 +349,18 @@
     },
     "slice_2_pause": {
       "goal": "Pausa única por comando já autorizado pelo fluxo existente do OpenFarm.",
-      "calls": ["POST /api/v1/printers/:id/print/pause", "GET /api/v1/printers/:id/state"],
+      "calls": [
+        "POST /api/v1/printers/:id/print/pause",
+        "GET /api/v1/printers/:id/state"
+      ],
       "rule": "204 é apenas envio. Confirmar somente com kobraState 'paused' ou 'pause' observado depois do envio e com connected=true; 'pausing' continua pendente; 503, tempo esgotado ou estado diferente de impressão encerram como falha sem repetir."
     },
-    "deferred": ["Câmera (V1) e qualquer mídia fora do WebRTC existente", "SSE como substituto da sondagem", "refresh-credentials automático (C3) até existir comparação de deviceId no adaptador", "Caminho pela porta Moonraker com chave por impressora"],
+    "deferred": [
+      "Câmera (V1) e qualquer mídia fora do WebRTC existente",
+      "SSE como substituto da sondagem",
+      "refresh-credentials automático (C3) até existir comparação de deviceId no adaptador",
+      "Caminho pela porta Moonraker com chave por impressora"
+    ],
     "implementation_paths": [
       "packages/connector/src/kobralink/management-client.ts",
       "packages/connector/src/kobralink/live-state.ts",
@@ -96,27 +379,99 @@
     ]
   },
   "acceptance": [
-    {"id": "T1", "tier": "sintetico", "check": "Serviço sintético original reproduz os formatos de A1, P1, P2, L3 e U1; o cliente cobre needsSetup verdadeiro e falso, 409 de duplicata reconciliado por deviceId, 503 de recuperação e 400 de validação sem depender do texto da mensagem."},
-    {"id": "T2", "tier": "sintetico", "check": "Projeção de estado: live=null, connected=false com cada código de erro, printState 'error' conectado, 'complete', progresso fora de 0..1 e updatedAt antigo produzem offline, error, idle, rejeição e indisponível, respectivamente."},
-    {"id": "T3", "tier": "sintetico", "check": "Limites: redirecionamento, corpo acima do limite, JSON profundo, origem fora da allowlist e resposta lenta são rejeitados; nenhuma rota fora do conjunto fechado é chamada (asserção sobre o registro do serviço sintético)."},
-    {"id": "T4", "tier": "sintetico", "check": "Pausa: 204 seguido de 'pausing' permanece pendente; 'paused' ou 'pause' confirma; 503, queda de conexão e ausência de transição falham uma única vez; o comando nunca é reenviado."},
-    {"id": "T5", "tier": "sintetico", "check": "Reconexão: nunca é chamada com connected=true, 'manual' ou 'reconnecting'; respeita recuo máximo; mudança de deviceId na lista invalida o vínculo."},
-    {"id": "T6", "tier": "upstream-local", "check": "Com a imagem do upstream fixada por digest e sem modificação, medir: rotas e cookies reais de cadastro e login (A3), exigência de Origin, se x-api-key abre sessão em /api/v1 (A7), status de POST de criação e formato dos erros 400/409/503, e efeito de moonrakerApiKey=true nas portas 7125+."},
-    {"id": "T7", "tier": "upstream-local", "check": "Impressora sintética original em endereço próprio com as portas fixas 18910 (HTTP) e 9883 (MQTT sobre TLS), pois a API não permite configurar essas portas: criar, observar connected=true, derrubar por mais de 30 s, confirmar que só volta após reconnect (L1) e que pausa sem resposta ainda devolve 204 (U2)."},
-    {"id": "T8", "tier": "upstream-local", "check": "Confirmar M6 e M7 contra a emulação real para registrar a incompatibilidade como evidência executada, sem alterar o cliente Moonraker."},
-    {"id": "T9", "tier": "nao-executavel-aqui", "check": "Modelo e modeId informados por uma Kobra X real, estados de pausa do firmware e versão de firmware (C5, U3) só podem ser fechados com captura do equipamento do proprietário; até lá a lista de modelos permitidos fica vazia e o suporte não é declarado."}
+    {
+      "id": "T1",
+      "tier": "sintetico",
+      "check": "Serviço sintético original reproduz os formatos de A1, P1, P2, L3 e U1; o cliente cobre needsSetup verdadeiro e falso, 409 de duplicata reconciliado por deviceId, 503 de recuperação e 400 de validação sem depender do texto da mensagem."
+    },
+    {
+      "id": "T2",
+      "tier": "sintetico",
+      "check": "Projeção de estado: live=null, connected=false com cada código de erro, printState 'error' conectado, 'complete', progresso fora de 0..1 e updatedAt antigo produzem offline, error, idle, rejeição e indisponível, respectivamente."
+    },
+    {
+      "id": "T3",
+      "tier": "sintetico",
+      "check": "Limites: redirecionamento, corpo acima do limite, JSON profundo, origem fora da allowlist e resposta lenta são rejeitados; nenhuma rota fora do conjunto fechado é chamada (asserção sobre o registro do serviço sintético)."
+    },
+    {
+      "id": "T4",
+      "tier": "sintetico",
+      "check": "Pausa: 204 seguido de 'pausing' permanece pendente; 'paused' ou 'pause' confirma; 503, queda de conexão e ausência de transição falham uma única vez; o comando nunca é reenviado."
+    },
+    {
+      "id": "T5",
+      "tier": "sintetico",
+      "check": "Reconexão: nunca é chamada com connected=true, 'manual' ou 'reconnecting'; respeita recuo máximo; mudança de deviceId na lista invalida o vínculo."
+    },
+    {
+      "id": "T6",
+      "tier": "upstream-local",
+      "check": "Com a imagem do upstream fixada por digest e sem modificação, medir: rotas e cookies reais de cadastro e login (A3), exigência de Origin, se x-api-key abre sessão em /api/v1 (A7), status de POST de criação e formato dos erros 400/409/503, e efeito de moonrakerApiKey=true nas portas 7125+."
+    },
+    {
+      "id": "T7",
+      "tier": "upstream-local",
+      "check": "Impressora sintética original em endereço próprio com as portas fixas 18910 (HTTP) e 9883 (MQTT sobre TLS), pois a API não permite configurar essas portas: criar, observar connected=true, derrubar por mais de 30 s, confirmar que só volta após reconnect (L1) e que pausa sem resposta ainda devolve 204 (U2)."
+    },
+    {
+      "id": "T8",
+      "tier": "upstream-local",
+      "check": "Confirmar M6 e M7 contra a emulação real para registrar a incompatibilidade como evidência executada, sem alterar o cliente Moonraker."
+    },
+    {
+      "id": "T9",
+      "tier": "nao-executavel-aqui",
+      "check": "Modelo e modeId informados por uma Kobra X real, estados de pausa do firmware e versão de firmware (C5, U3) só podem ser fechados com captura do equipamento do proprietário; até lá a lista de modelos permitidos fica vazia e o suporte não é declarado."
+    }
   ],
   "owned_paths": ["docs/compatibility/kobralink-contract.json"],
   "risks": [
-    {"id": "R1", "risk": "Tomada de posse: sem token de instalação, qualquer cliente na rede pode criar o primeiro usuário antes do OpenFarm (A4).", "mitigation": "Publicar a porta 7100 apenas em loopback ou rede interna do Connector e executar o bootstrap imediatamente após a subida; tratar needsSetup=false sem credencial conhecida como instalação comprometida."},
-    {"id": "R2", "risk": "Portas Moonraker abertas em todas as interfaces e sem autenticação por padrão permitem pausa, cancelamento e impressão por qualquer host da LAN, fora das verificações do OpenFarm (M1).", "mitigation": "Não publicar 7125+ e ligar moonrakerApiKey sem emitir chaves; validar em T6."},
-    {"id": "R3", "risk": "A sessão do adaptador tem autoridade de operador sobre todas as impressoras e alcança os primitivos de requisição arbitrária de P8.", "mitigation": "Cliente com rotas fechadas, conta operadora dedicada, cookie só em memória, nenhuma passagem de URL ou settings vinda do usuário."},
-    {"id": "R4", "risk": "Troca silenciosa de identidade por refresh-credentials ou por reaproveitamento de IP (C3).", "mitigation": "Não chamar a rota na primeira fatia; fixar deviceId e comparar em toda leitura."},
-    {"id": "R5", "risk": "Falso positivo de pausa e de disponibilidade (U2, M9).", "mitigation": "Confirmação por estado posterior ao envio e uso exclusivo de connected para offline."},
-    {"id": "R6", "risk": "Licença e distribuição: o serviço é GPL-3.0-only e carrega certificado e chave privada de terceiro (C6). Separar processos não é, por si só, conclusão jurídica.", "mitigation": "Nenhum código, esquema, certificado ou texto do upstream entra no repositório MIT; fixtures e serviço sintético são escritos do zero; redistribuir a imagem do upstream exige avaliação própria de obrigações da GPL e do direito de redistribuir o certificado."},
-    {"id": "R7", "risk": "Deriva de contrato: a API de gestão não é versionada nem documentada como pública; rotas da biblioteca de autenticação podem mudar entre versões.", "mitigation": "Fixar imagem por digest, comparar a versão de /api/v1/system e repetir T6 a cada atualização."},
-    {"id": "R8", "risk": "Senha MQTT em texto claro e segredo de sessão em arquivo no volume de dados do serviço (C2, A5).", "mitigation": "Tratar o volume como segredo no empacotamento; fora do escopo deste documento."},
-    {"id": "R9", "risk": "Suporte presumido: o upstream aceita qualquer equipamento que responda ao protocolo (C4).", "mitigation": "Lista de modelos permitidos vazia por padrão e nenhuma declaração além da Kobra X qualificada."}
+    {
+      "id": "R1",
+      "risk": "Tomada de posse: sem token de instalação, qualquer cliente na rede pode criar o primeiro usuário antes do OpenFarm (A4).",
+      "mitigation": "Publicar a porta 7100 apenas em loopback ou rede interna do Connector e executar o bootstrap imediatamente após a subida; tratar needsSetup=false sem credencial conhecida como instalação comprometida."
+    },
+    {
+      "id": "R2",
+      "risk": "Portas Moonraker abertas em todas as interfaces e sem autenticação por padrão permitem pausa, cancelamento e impressão por qualquer host da LAN, fora das verificações do OpenFarm (M1).",
+      "mitigation": "Não publicar 7125+ e ligar moonrakerApiKey sem emitir chaves; validar em T6."
+    },
+    {
+      "id": "R3",
+      "risk": "A sessão do adaptador tem autoridade de operador sobre todas as impressoras e alcança os primitivos de requisição arbitrária de P8.",
+      "mitigation": "Cliente com rotas fechadas, conta operadora dedicada, cookie só em memória, nenhuma passagem de URL ou settings vinda do usuário."
+    },
+    {
+      "id": "R4",
+      "risk": "Troca silenciosa de identidade por refresh-credentials ou por reaproveitamento de IP (C3).",
+      "mitigation": "Não chamar a rota na primeira fatia; fixar deviceId e comparar em toda leitura."
+    },
+    {
+      "id": "R5",
+      "risk": "Falso positivo de pausa e de disponibilidade (U2, M9).",
+      "mitigation": "Confirmação por estado posterior ao envio e uso exclusivo de connected para offline."
+    },
+    {
+      "id": "R6",
+      "risk": "Licença e distribuição: o serviço é GPL-3.0-only e carrega certificado e chave privada de terceiro (C6). Separar processos não é, por si só, conclusão jurídica.",
+      "mitigation": "Nenhum código, esquema, certificado ou texto do upstream entra no repositório MIT; fixtures e serviço sintético são escritos do zero; redistribuir a imagem do upstream exige avaliação própria de obrigações da GPL e do direito de redistribuir o certificado."
+    },
+    {
+      "id": "R7",
+      "risk": "Deriva de contrato: a API de gestão não é versionada nem documentada como pública; rotas da biblioteca de autenticação podem mudar entre versões.",
+      "mitigation": "Fixar imagem por digest, comparar a versão de /api/v1/system e repetir T6 a cada atualização."
+    },
+    {
+      "id": "R8",
+      "risk": "Senha MQTT em texto claro e segredo de sessão em arquivo no volume de dados do serviço (C2, A5).",
+      "mitigation": "Tratar o volume como segredo no empacotamento; fora do escopo deste documento."
+    },
+    {
+      "id": "R9",
+      "risk": "Suporte presumido: o upstream aceita qualquer equipamento que responda ao protocolo (C4).",
+      "mitigation": "Lista de modelos permitidos vazia por padrão e nenhuma declaração além da Kobra X qualificada."
+    }
   ],
   "sources": {
     "up-setup": "upstream apps/api/src/auth/setup.controller.ts:5-14",

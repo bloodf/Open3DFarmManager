@@ -6,51 +6,32 @@
     {
       "kind": "fact",
       "text": "Login usa completeAuth e retorna ao início; pareamento aprova Connector por farm, código e impressão digital. Aprovação incerta exige consultar inventário e revogar antes de repetir.",
-      "sources": [
-        "S1",
-        "S2"
-      ]
+      "sources": ["S1", "S2"]
     },
     {
       "kind": "fact",
       "text": "Inventário de impressoras consulta atribuições e Connectors aprovados. register envia agentId, printerKey e confirmedLocalConfiguration=true. A própria UI informa que cadastro não confirma conexão nem autoriza comandos.",
-      "sources": [
-        "S3"
-      ]
+      "sources": ["S3"]
     },
     {
       "kind": "fact",
       "text": "Configuração do Connector é arquivo privado limitado a 64 KiB. Runtime exige ao menos uma atribuição e correspondência completa com collection; valida farm/agent da credencial e origem Moonraker. Não é configuração genérica de bridge.",
-      "sources": [
-        "S4",
-        "S5"
-      ]
+      "sources": ["S4", "S5"]
     },
     {
       "kind": "fact",
       "text": "Há canais RTC de prova/status e pausa. A tela farm distingue conexão autenticada, verificação e indisponibilidade, além de dispositivos ausentes, pendentes e revogados.",
-      "sources": [
-        "S6",
-        "S7"
-      ]
+      "sources": ["S6", "S7"]
     },
     {
       "kind": "inference",
       "text": "Não foi encontrado canal autenticado de configuração nos peers e leitores de configuração examinados. Reutilizar identidade e transporte exige novo contrato autorizado de provisionamento, não enviar configuração pelo canal de pausa. Ausência é conclusão limitada ao fluxo inspecionado.",
-      "sources": [
-        "S4",
-        "S5",
-        "S6"
-      ]
+      "sources": ["S4", "S5", "S6"]
     },
     {
       "kind": "fact",
       "text": "device-key guarda CryptoKey no IndexedDB e exige chave privada não exportável; enrollment confirma conta/farm, origem, audiência, thumbprint e expiração. auth-invalidation oferece invalidação entre abas. Estes helpers não armazenam segredos da impressora.",
-      "sources": [
-        "S8",
-        "S9",
-        "S10"
-      ]
+      "sources": ["S8", "S9", "S10"]
     },
     {
       "kind": "unknown",
@@ -103,9 +84,7 @@
     "Validar teclado, foco, anúncios assíncronos, 375 px, cancelamento e respostas fora de ordem; executar check:all antes de publicar implementação.",
     "Gate atual: DONE_WITH_CONCERNS. Revisão de fonte não comprova suporte ao produto, interoperabilidade, hardware ou firmware."
   ],
-  "owned_paths": [
-    "docs/compatibility/kobralink-onboarding.json"
-  ],
+  "owned_paths": ["docs/compatibility/kobralink-onboarding.json"],
   "risks": [
     "Canal de configuração e bootstrap sem atribuição ainda são pré-requisitos; não estimar onboarding completo como simples formulário.",
     "Contrato da bridge deve fornecer identidade, recibo idempotente e compensação; sem isso, manter recurso indisponível.",

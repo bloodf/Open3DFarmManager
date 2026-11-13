@@ -26,6 +26,10 @@ import {
   type FarmPauseControlState,
 } from '../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
+import {
+  KOBRA_X_DEVICE_CAPABILITIES,
+  isKobraXAssignment,
+} from '../utils/kobralink-onboarding.ts'
 
 definePageMeta({ middleware: 'farm-flag' })
 const {
@@ -587,10 +591,33 @@ function dateLabel(time: number) {
                       >
                     </p>
                   </template>
+                  <section
+                    v-if="isKobraXAssignment(row.assignment)"
+                    :aria-labelledby="'capabilities-' + row.assignment.assignmentId"
+                  >
+                    <h4 :id="'capabilities-' + row.assignment.assignmentId">
+                      Capacidades admitidas deste dispositivo (Anycubic Kobra X)
+                    </h4>
+                    <p>
+                      Qualificação provisória de modelo; firmware não
+                      qualificado. Nenhum painel KobraLink, segundo login ou
+                      comando remoto é exposto.
+                    </p>
+                    <dl>
+                      <div
+                        v-for="cap in KOBRA_X_DEVICE_CAPABILITIES"
+                        :key="cap.id"
+                      >
+                        <dt>{{ cap.label }}</dt>
+                        <dd>{{ cap.statusText }} — {{ cap.reason }}</dd>
+                      </div>
+                    </dl>
+                  </section>
                   <CameraDisplay
                     v-if="
                       row.assignment.status === 'active' &&
-                      row.assignment.connectorStatus === 'approved'
+                      row.assignment.connectorStatus === 'approved' &&
+                      !isKobraXAssignment(row.assignment)
                     "
                     :stream="cameraFor(row.assignment.assignmentId)"
                     :printer-name="row.assignment.printerKey"
@@ -598,7 +625,8 @@ function dateLabel(time: number) {
                   <template
                     v-if="
                       row.assignment.status === 'active' &&
-                      row.assignment.connectorStatus !== 'revoked'
+                      row.assignment.connectorStatus !== 'revoked' &&
+                      !isKobraXAssignment(row.assignment)
                     "
                   >
                     <template v-if="row.localOrigin">
@@ -681,24 +709,26 @@ function dateLabel(time: number) {
                       novamente após recarregar.
                     </p>
                   </template>
-                  <p
-                    v-if="!availability(row).available"
-                    :id="`pause-help-${row.assignment.assignmentId}`"
-                  >
-                    {{ (availability(row) as { reason: string }).reason }}
-                  </p>
-                  <p v-else :id="`pause-help-${row.assignment.assignmentId}`">
-                    Abre uma confirmação. Nada é enviado antes de você
-                    confirmar.
-                  </p>
-                  <button
-                    type="button"
-                    :aria-disabled="!availability(row).available"
-                    :aria-describedby="`pause-help-${row.assignment.assignmentId}`"
-                    @click="openPause(row, $event)"
-                  >
-                    Pausar impressão
-                  </button>
+                  <template v-if="!isKobraXAssignment(row.assignment)">
+                    <p
+                      v-if="!availability(row).available"
+                      :id="`pause-help-${row.assignment.assignmentId}`"
+                    >
+                      {{ (availability(row) as { reason: string }).reason }}
+                    </p>
+                    <p v-else :id="`pause-help-${row.assignment.assignmentId}`">
+                      Abre uma confirmação. Nada é enviado antes de você
+                      confirmar.
+                    </p>
+                    <button
+                      type="button"
+                      :aria-disabled="!availability(row).available"
+                      :aria-describedby="`pause-help-${row.assignment.assignmentId}`"
+                      @click="openPause(row, $event)"
+                    >
+                      Pausar impressão
+                    </button>
+                  </template>
                 </article>
               </li>
             </ul>

@@ -4,8 +4,10 @@ import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 export type KobraLinkErrorCode =
   'unavailable' | 'unauthorized' | 'invalid' | 'identity_changed' | 'timeout'
 export class KobraLinkError extends Error {
-  constructor(readonly code: KobraLinkErrorCode) {
+  readonly code: KobraLinkErrorCode
+  constructor(code: KobraLinkErrorCode) {
     super(`KobraLink: ${code}`)
+    this.code = code
   }
 }
 const fail = (code: KobraLinkErrorCode): never => {
@@ -19,6 +21,7 @@ const bindingSchema = z.strictObject({
 export type PrinterBinding = z.infer<typeof bindingSchema>
 const liveSchema = z.object({
   connected: z.boolean().optional(),
+  progress: z.number().finite().min(0).max(1).optional(),
   updatedAt: z.number().finite().optional(),
   firmwareVersion: text.optional(),
   printState: text.optional(),
@@ -46,6 +49,10 @@ export interface PrinterStatus extends PrinterBinding {
   model: 'Kobra X'
   modelEvidence: 'user_declared_unverified'
 }
+export interface PrinterObservation extends PrinterStatus {
+  progress: number | null
+  observedAt: number | null
+}
 export type KobraLinkFetch = (
   url: string,
   init: RequestInit,
@@ -55,6 +62,7 @@ export interface KobraLinkOptions {
   allowedOrigins: readonly string[]
   timeoutMs?: number
   staleAfterMs?: number
+  signal?: AbortSignal
   fetch?: KobraLinkFetch
 }
 function originOnly(value: string): string {
@@ -110,11 +118,19 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
     body?: unknown,
     auth = false,
   ): Promise<unknown> {
+    if (options.signal?.aborted) fail('unavailable')
     if (!auth && path !== '/api/v1/setup/status' && !cookie)
       fail('unauthorized')
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
+    let cancel: () => void = () => {}
     const deadline = new Promise<never>((_, reject) => {
+      cancel = () => {
+        controller.abort()
+        reject(new KobraLinkError('unavailable'))
+      }
+      options.signal?.addEventListener('abort', cancel, { once: true })
+      if (options.signal?.aborted) cancel()
       timer = setTimeout(() => {
         controller.abort()
         reject(new KobraLinkError('timeout'))
@@ -210,11 +226,15 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       if (error instanceof KobraLinkError) throw error
       return fail('unavailable')
     } finally {
+      options.signal?.removeEventListener('abort', cancel)
       clearTimeout(timer)
       controller.abort()
     }
   }
-  function sanitize(value: unknown, expected?: PrinterBinding): PrinterStatus {
+  function observe(
+    value: unknown,
+    expected?: PrinterBinding,
+  ): PrinterObservation {
     const p = parse(printerSchema, value)
     if (
       (expected &&
@@ -251,6 +271,8 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       name: p.name,
       availability,
       printState,
+      progress: live?.progress ?? null,
+      observedAt: live?.updatedAt ?? null,
       firmware:
         live?.firmwareVersion && live.firmwareVersion !== 'unknown'
           ? live.firmwareVersion
@@ -258,6 +280,23 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       model: 'Kobra X',
       modelEvidence: 'user_declared_unverified',
     }
+  }
+  function sanitize(value: unknown, expected?: PrinterBinding): PrinterStatus {
+    const {
+      progress: _progress,
+      observedAt: _observedAt,
+      ...status
+    } = observe(value, expected)
+    return status
+  }
+  async function getPrinterObservation(
+    binding: PrinterBinding,
+  ): Promise<PrinterObservation> {
+    const b = parse(bindingSchema, binding)
+    return observe(
+      await request(`/api/v1/printers/${encodeURIComponent(b.id)}`, 'GET'),
+      b,
+    )
   }
   async function listPrinters(): Promise<PrinterStatus[]> {
     return parse(
@@ -322,6 +361,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
     },
     listPrinters,
     getPrinter,
+    getPrinterObservation,
     async createOrReconcile(input: {
       ip: string
       deviceId: string

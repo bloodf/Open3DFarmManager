@@ -9,6 +9,10 @@ import {
 
 export const SIGNALLING_SUBPROTOCOL = 'open3dfarm.signalling.v1'
 export const PAUSE_SIGNALLING_SUBPROTOCOL = 'open3dfarm.pause-signalling.v1'
+export const CONFIGURATION_SIGNALLING_SUBPROTOCOL =
+  'open3dfarm.config-signalling.v1'
+/** config-v1 has its own endpoints, subprotocol and runtime; it is never a SignallingMode. */
+export type SignallingUpgradeMode = SignallingMode | 'configuration'
 export const SIGNALLING_NATIVE_MAX_PAYLOAD = 12 * 1024
 export const SIGNALLING_PENDING_BYTE_LIMIT = 32 * 1024
 export const SIGNALLING_PREAUTH_LIMIT = 16
@@ -23,6 +27,15 @@ const paths = {
     browser: '/api/signalling/pause-browser',
     connector: '/api/signalling/pause-connector',
   },
+  configuration: {
+    browser: '/api/signalling/config-browser',
+    connector: '/api/signalling/config-connector',
+  },
+}
+const subprotocols = {
+  'read-only': SIGNALLING_SUBPROTOCOL,
+  pause: PAUSE_SIGNALLING_SUBPROTOCOL,
+  configuration: CONFIGURATION_SIGNALLING_SUBPROTOCOL,
 }
 function object(value: unknown): value is object {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -151,11 +164,11 @@ export function inspectSignallingUpgrade(
   input: unknown,
   role: SignallingSocketRole,
   configuredOrigin: string,
-  mode: SignallingMode = 'read-only',
+  mode: SignallingUpgradeMode = 'read-only',
 ): { request: IncomingMessage; headers: Headers; origin: string } {
   if (
     (role !== 'browser' && role !== 'connector') ||
-    (mode !== 'read-only' && mode !== 'pause')
+    !Object.hasOwn(paths, mode)
   )
     throw new Error('Invalid signalling role')
   const origin = configuredAuthOrigin(configuredOrigin)
@@ -187,10 +200,7 @@ export function inspectSignallingUpgrade(
     values.get('host') !== new URL(origin).host ||
     values.get('upgrade')?.toLowerCase() !== 'websocket' ||
     values.get('sec-websocket-version') !== '13' ||
-    values.get('sec-websocket-protocol') !==
-      (mode === 'pause'
-        ? PAUSE_SIGNALLING_SUBPROTOCOL
-        : SIGNALLING_SUBPROTOCOL) ||
+    values.get('sec-websocket-protocol') !== subprotocols[mode] ||
     !/^[A-Za-z0-9+/]{21}[AQgw]==$/.test(values.get('sec-websocket-key') ?? '')
   )
     throw new Error('Invalid signalling handshake')
@@ -244,7 +254,7 @@ export async function signallingBrowserSession(
   input: unknown,
   configuredOrigin: string,
   cookie: SessionConfig,
-  mode: SignallingMode = 'read-only',
+  mode: SignallingUpgradeMode = 'read-only',
 ): Promise<{ request: IncomingMessage; sessionRecordId: string }> {
   const inspected = inspectSignallingUpgrade(
     input,

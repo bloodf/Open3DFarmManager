@@ -34,6 +34,10 @@ const printerSchema = z.object({
   name: z.string().max(128),
   live: liveSchema.nullable().optional(),
 })
+const identityWireSchema = printerSchema.extend({
+  ip: z.string().max(64).optional(),
+  model: z.string().max(128).nullable().optional(),
+})
 export interface PrinterStatus extends PrinterBinding {
   name: string
   availability: 'available' | 'unavailable' | 'disconnected'
@@ -48,6 +52,16 @@ export interface PrinterStatus extends PrinterBinding {
   firmware: string | null
   model: 'Kobra X'
   modelEvidence: 'user_declared_unverified'
+}
+/**
+ * Sanitized onboarding identity. No MQTT user, password, URL, settings or
+ * camera fields. `ip` is the address the bridge stores; `model` is the raw
+ * bridge label (evidence only, never a support claim).
+ */
+export interface PrinterIdentity extends PrinterBinding {
+  ip: string | null
+  model: string | null
+  firmware: string | null
 }
 export interface PrinterObservation extends PrinterStatus {
   progress: number | null
@@ -115,7 +129,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
   const identities = new Map<string, string>()
   async function request(
     path: string,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     body?: unknown,
     auth = false,
     expectedGeneration = generation,
@@ -317,6 +331,18 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       b,
     )
   }
+  function identify(value: unknown): PrinterIdentity {
+    const wire = parse(identityWireSchema, value)
+    const status = sanitize(wire)
+    const ip = z.ipv4().safeParse(wire.ip)
+    return {
+      id: status.id,
+      deviceId: status.deviceId,
+      ip: ip.success ? ip.data : null,
+      model: wire.model ?? null,
+      firmware: status.firmware,
+    }
+  }
   async function listPrinters(): Promise<PrinterStatus[]> {
     return parse(
       z.array(z.unknown()).max(256),
@@ -383,6 +409,54 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       )
     },
     listPrinters,
+    /** Read-only discovery snapshot used before any onboarding write. */
+    async listPrinterIdentities(): Promise<PrinterIdentity[]> {
+      return parse(
+        z.array(z.unknown()).max(256),
+        await request('/api/v1/printers', 'GET'),
+      ).map(identify)
+    },
+    /**
+     * Exactly one create request for first discovery: never retried, never
+     * reconciled here and never sends a port (upstream uses its fixed printer
+     * port). A lost response must be reconciled by the durable caller.
+     */
+    async createPrinter(input: {
+      ip: string
+      name: string
+    }): Promise<PrinterIdentity> {
+      const data = parse(
+        z.strictObject({ ip: z.ipv4(), name: z.string().min(1).max(64) }),
+        input,
+      )
+      originOnly(`http://${data.ip}`)
+      if (creating) fail('unavailable')
+      creating = true
+      try {
+        return identify(
+          await request('/api/v1/printers', 'POST', {
+            ip: data.ip,
+            name: data.name,
+          }),
+        )
+      } finally {
+        creating = false
+      }
+    },
+    /**
+     * Compensation for a printer row the caller proved it created. Identity is
+     * rechecked first; the delete itself is sent at most once.
+     */
+    async deleteOwnedPrinter(
+      binding: PrinterBinding,
+    ): Promise<{ deleted: true }> {
+      const current = await getPrinter(binding)
+      await request(
+        `/api/v1/printers/${encodeURIComponent(current.id)}`,
+        'DELETE',
+      )
+      return { deleted: true }
+    },
     getPrinter,
     getPrinterObservation,
     async createOrReconcile(input: {

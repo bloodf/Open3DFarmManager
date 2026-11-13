@@ -47,14 +47,21 @@ export type ConfigurationBridgeSelection = z.infer<
   typeof ConfigurationBridgeSelection
 >
 
-/** Browser-supplied intent. Contains no password, cookie, key, URL, method or header. */
+/**
+ * Browser-supplied prepare intent. Contains no password, cookie, key, URL,
+ * method or header. `device_id` is an optional expectation: first discovery
+ * omits it because the identity is only known after the Connector observes
+ * the printer. The observed identity is pinned by the signed prepared receipt
+ * (`ConfigurationImmutableTarget` always requires it) and commit binds that
+ * receipt's hash, so an omitted expectation never weakens commit.
+ */
 export const ConfigurationTarget = z.strictObject({
   v: z.literal(1),
   protocol: z.literal(CONFIGURATION_PROTOCOL),
   backend: z.literal('kobralink-anycubic'),
   model: ConfigurationModelSelection,
   endpoint: ConfigurationEndpoint,
-  device_id: configurationOpaqueId,
+  device_id: configurationOpaqueId.optional(),
   bridge: ConfigurationBridgeSelection,
 })
 export type ConfigurationTarget = z.infer<typeof ConfigurationTarget>

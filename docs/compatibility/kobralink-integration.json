@@ -2,24 +2,32 @@
   "id": "kobralink-upstream-integration",
   "base": "70504a5ee18578af3ca4ca8f8a73c6e5d71db3e2",
   "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
-  "scenarios": [],
+  "scenarios": [
+    "safe isolated restart",
+    "pinned image inspection",
+    "unchanged Compose create",
+    "synthetic discovery responder unit test"
+  ],
   "results": {
     "status": "blocked",
-    "reason": "Exclusive VM custody transfer to this unit is not present in inspected handoff records. Session hardening returned the stopped profile to the coordinator.",
-    "actual_integration": "not-run",
-    "fixture_gate": "not-run"
+    "reason": "Unchanged Compose recipe rejected: services.kobralink.healthcheck.test.3 must be a string",
+    "actual_integration": "failed before service creation; exit 1",
+    "fixture_gate": "blocked during install: ERR_PNPM_IGNORED_BUILDS esbuild@0.28.2",
+    "direct_checks": {
+      "node_fixture": "pass (1 test)",
+      "typescript": "pass",
+      "prettier": "pass"
+    }
   },
   "limits": [
-    "No synthetic device fixture implemented or qualified.",
-    "No installation, provisioning, MQTT or Connector integration acceptance established.",
+    "Synthetic HTTP discovery only; MQTT fixture not implemented.",
+    "Authentication, provisioning, persistence, Connector telemetry and reconnect scenarios not reached because accepted recipe fails validation.",
     "No physical printer or firmware support claim."
   ],
   "resources": {
-    "created": [
-      "private baseline and blocker evidence"
-    ],
-    "runtime_started": false,
-    "removed": [],
-    "retained": "Existing stopped profile and pinned image remain under coordinator custody; not modified."
+    "runtime_started": true,
+    "created": ["safe-harness container and fresh data volume"],
+    "removed": ["safe-harness container and fresh data volume"],
+    "retained": "Pinned image, stopped profile and existing network for downstream qualification."
   }
 }

@@ -79,7 +79,7 @@
   ],
   "next_steps": [
     "Definir retenção e restauração de banco, roles, configuração externa e identidade, incluindo invalidação de sessões.",
-    "Qualificar em ambiente descartável somente após autorização; manter HOLD de produto."
+    "Qualificar com dados sintéticos em ambiente descartável nesta frente autorizada; hardware, deploy e credenciais mantêm autorização separada."
   ],
   "models": [],
   "open_prs": [

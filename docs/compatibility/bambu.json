@@ -18,63 +18,49 @@
     {
       "id": "S0",
       "reference": "https://blog.bambulab.com/tag/press-release/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": null
     },
     {
       "id": "S1",
       "reference": "https://blog.bambulab.com/tool-changer-game-changer-bambu-lab-presents-h3c-the-defining-new-generation-of-3d-printers/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2026-11-03"
     },
     {
       "id": "S2",
       "reference": "https://blog.bambulab.com/bambu-lab-a2l-creative-playground-extra-large/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2026-06-01"
     },
     {
       "id": "S3",
       "reference": "https://blog.bambulab.com/xcellence-made-simple-bambu-lab-presents-the-x2d/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2026-04-14"
     },
     {
       "id": "S4",
       "reference": "https://blog.bambulab.com/bambu-lab-h2c-where-multi-material-vortek-system-meets-engineering-precision/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2025-11-14"
     },
     {
       "id": "S5",
       "reference": "https://blog.bambulab.com/the-icon-redefined-meet-the-p2s-a-completely-reengineered-version-of-the-ultra-productive-p1-series/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2025-10-14"
     },
     {
       "id": "S6",
       "reference": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
-      "supports": [
-        "cronologia e documentação; ver relatório"
-      ],
+      "supports": ["cronologia e documentação; ver relatório"],
       "accessed": "2026-11-13",
       "publication_date": "2025-01-16"
     }

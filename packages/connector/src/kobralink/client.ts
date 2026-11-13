@@ -110,6 +110,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
   )
   const transport = options.fetch ?? fetch
   let cookie = ''
+  let generation = 0
   let creating = false
   const identities = new Map<string, string>()
   async function request(
@@ -117,7 +118,9 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
     method: 'GET' | 'POST',
     body?: unknown,
     auth = false,
+    expectedGeneration = generation,
   ): Promise<unknown> {
+    if (expectedGeneration !== generation) fail('unauthorized')
     if (options.signal?.aborted) fail('unavailable')
     if (!auth && path !== '/api/v1/setup/status' && !cookie)
       fail('unauthorized')
@@ -152,6 +155,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
       if (controller.signal.aborted) fail('timeout')
+      if (expectedGeneration !== generation) fail('unauthorized')
       if (
         response.redirected ||
         (response.status >= 300 && response.status < 400)
@@ -159,6 +163,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
         fail('invalid')
       if (response.status === 401 || response.status === 403) {
         cookie = ''
+        generation++
         fail('unauthorized')
       }
       if (!response.ok)
@@ -166,14 +171,28 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       if (auth) {
         void response.body?.cancel().catch(() => {})
         const cookies = response.headers.getSetCookie()
-        const pairs = cookies.map((c) => c.split(';')[0] ?? '')
+        const secure = origin.startsWith('https:')
+        const name = `${secure ? '__Secure-' : ''}better-auth.session_token`
+        const tokens = cookies.filter((value) =>
+          /^(?:__Secure-|__Host-)?better-auth\.session_token=/.test(value),
+        )
+        if (cookies.join('; ').length > 8192 || tokens.length !== 1)
+          fail('invalid')
+        const token = tokens[0] ?? ''
+        const [pair = '', ...attributes] = token.split(';')
+        const attrs = attributes.map((value) => value.trim().toLowerCase())
         if (
-          !pairs.length ||
-          pairs.join('; ').length > 8192 ||
-          pairs.some((c) => !/^[A-Za-z0-9_.-]+=[\x21-\x3A\x3C-\x7E]+$/.test(c))
+          !pair.startsWith(`${name}=`) ||
+          !/^[A-Za-z0-9_.-]+=[\x21-\x2B\x2D-\x3A\x3C-\x7E]+$/.test(pair) ||
+          attrs.some((value) => value.startsWith('domain=')) ||
+          attrs.some(
+            (value) => value.startsWith('path=') && value !== 'path=/',
+          ) ||
+          attrs.includes('secure') !== secure ||
+          (response.url && new URL(response.url).origin !== origin)
         )
           fail('invalid')
-        if (!controller.signal.aborted) cookie = pairs.join('; ')
+        cookie = pair
         return { contract: 'unverified' }
       }
       if (response.status === 204) return null
@@ -314,6 +333,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
   return {
     authContract: 'unverified' as const,
     clearSession() {
+      generation++
       cookie = ''
     },
     async setupStatus() {
@@ -329,6 +349,8 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       email: string
       password: string
     }) {
+      const authGeneration = ++generation
+      cookie = ''
       const data = parse(
         z.strictObject({
           ownership: z.literal('fresh_owned'),
@@ -357,6 +379,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
           ...(data.mode === 'signup' ? { name: data.name } : {}),
         },
         true,
+        authGeneration,
       )
     },
     listPrinters,

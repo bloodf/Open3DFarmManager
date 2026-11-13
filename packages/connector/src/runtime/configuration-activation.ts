@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
-import { readPrivateJson } from '../provisioning/private-fs.ts'
+import {
+  readPrivateJson,
+  writePrivateJsonAtomic,
+} from '../provisioning/private-fs.ts'
+import { collectableRuntime } from './configuration-snapshot.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 
 export type ActivationResult =
-  'absent' | 'invalid' | 'unchanged' | 'activated' | 'stopped'
+  'absent' | 'invalid' | 'unchanged' | 'activated' | 'stopped' | 'unconfirmed'
 
 export interface RuntimeActivatorOptions {
   runtimeConfigPath: string
@@ -14,7 +18,13 @@ export interface RuntimeActivatorOptions {
    * Must run until `signal` aborts. It is the accepted runtime entry, not a
    * second configuration path.
    */
-  start: (signal: AbortSignal) => Promise<void>
+  start: (signal: AbortSignal, configPath: string) => Promise<void>
+  /**
+   * Private file the collection snapshot is published to; `start` receives
+   * it. Required whenever a reload carries unconfirmed assignments: without
+   * it nothing starts (fail closed) rather than collecting them.
+   */
+  snapshotPath?: string
   onDiagnostic?: (event: {
     kind: 'runtime-activation'
     result: ActivationResult | 'runtime-exited'
@@ -47,7 +57,9 @@ export function createRuntimeActivator(options: RuntimeActivatorOptions) {
     await current.done
   }
 
-  async function reloadNow(): Promise<ActivationResult> {
+  async function reloadNow(
+    unconfirmed: ReadonlySet<string>,
+  ): Promise<ActivationResult> {
     if (stopped) return 'stopped'
     let raw: unknown
     try {
@@ -61,15 +73,35 @@ export function createRuntimeActivator(options: RuntimeActivatorOptions) {
     } catch {
       return 'invalid'
     }
+    let snapshot: Record<string, unknown> | null
+    try {
+      snapshot = collectableRuntime(raw, unconfirmed)
+    } catch {
+      return 'invalid'
+    }
+    // Only confirmed assignments may collect. Nothing confirmed: do not start,
+    // and leave whatever already runs untouched.
+    if (snapshot === null) return 'unconfirmed'
+    if (unconfirmed.size > 0 && !options.snapshotPath) return 'invalid'
+    const configPath = options.snapshotPath ?? options.runtimeConfigPath
     const digest = createHash('sha256')
-      .update(canonicalize(raw))
+      .update(canonicalize(snapshot))
       .digest('base64url')
     if (running && digest === activeDigest) return 'unchanged'
+    if (options.snapshotPath) {
+      try {
+        writePrivateJsonAtomic(options.snapshotPath, snapshot, (temporary) => {
+          readAgentRuntimeConfig(temporary, options.scope)
+        })
+      } catch {
+        return 'invalid'
+      }
+    }
     await halt()
     if (stopped) return 'stopped'
     const controller = new AbortController()
     const done = Promise.resolve()
-      .then(() => options.start(controller.signal))
+      .then(() => options.start(controller.signal, configPath))
       .catch(() => undefined)
       .then(() => {
         if (running?.controller === controller && !controller.signal.aborted) {
@@ -90,9 +122,11 @@ export function createRuntimeActivator(options: RuntimeActivatorOptions) {
   }
 
   return Object.freeze({
-    reload(): Promise<ActivationResult> {
+    reload(
+      unconfirmed: ReadonlySet<string> = new Set(),
+    ): Promise<ActivationResult> {
       return serialized(async () => {
-        const result = await reloadNow()
+        const result = await reloadNow(unconfirmed)
         report(result)
         return result
       })

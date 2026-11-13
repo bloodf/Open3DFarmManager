@@ -91,6 +91,13 @@ export function bindingFor(
 export function existingKobraBindings(scope: RuntimeScope) {
   const runtime = readRuntime(scope)
   return {
+    assignmentIds: new Set(
+      runtime.assignments.flatMap((a) =>
+        typeof a === 'object' && a && 'assignment_id' in a
+          ? [String(a.assignment_id)]
+          : [],
+      ),
+    ),
     printerKeys: new Set(
       runtime.assignments.flatMap((a) =>
         typeof a === 'object' && a && 'printer_key' in a

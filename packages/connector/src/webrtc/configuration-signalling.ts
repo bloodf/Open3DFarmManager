@@ -1,13 +1,11 @@
 import { createHash, createPublicKey } from 'node:crypto'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { CONFIGURATION_PROTOCOL } from '../../../farm-protocol/src/configuration-common.ts'
-// TEMPORARY (coordinator-approved): pure wire schemas of the accepted server
-// unit. Replace with the shared farm-protocol module once it is published.
 import {
   decodeConfigurationSignallingServerFrame,
   encodeConfigurationSignallingClientFrame,
   type ConfigurationSignallingServerFrame,
-} from '../../../../apps/farm/server/services/configuration-signalling-wire.ts'
+} from '../../../farm-protocol/src/configuration-signalling.ts'
 import { ConnectorIdentity } from '../identity/store.ts'
 import type { ConfigurationRuntime } from '../runtime/configuration.ts'
 import { ConfigurationConnectorPeer } from './configuration-peer.ts'
@@ -17,6 +15,7 @@ export const CONFIGURATION_SIGNALLING_PATH = '/api/signalling/config-connector'
 export const CONFIGURATION_SIGNALLING_SUBPROTOCOL =
   'open3dfarm.config-signalling.v1'
 const MAX_SOCKET_BYTES = 12_288
+const MAX_IGNORED_CANDIDATES = 64
 
 export interface ConfigurationSocket {
   send(wire: string): void
@@ -58,6 +57,8 @@ interface Context {
   transportId: string
   peer: ConfigurationPeerLike
   seq: number
+  /** Trickle candidates seen for this context (bounded like the server relay). */
+  ice: number
   resolveBinding: (value: unknown) => void
   rejectBinding: (error: Error) => void
   bound: boolean
@@ -223,6 +224,7 @@ export function createConfigurationSignallingClient(
         transportId: frame.transport_id,
         peer,
         seq: 0,
+        ice: 0,
         resolveBinding,
         rejectBinding,
         bound: false,
@@ -311,9 +313,20 @@ export function createConfigurationSignallingClient(
             closeContext('rtc-closed')
           return
         case 'rtc.ice':
-          // Candidates travel in the complete SDP; trickle is not accepted.
+          // Trickle is deliberately not consumed. The Connector offer is sent
+          // only after ICE gathering completed (every candidate is inside the
+          // SDP the binding pins, and node-datachannel gets no ICE servers),
+          // and the browser must answer with its complete SDP: the binding
+          // hashes both descriptions and the peer closes on any description
+          // change, so a late candidate cannot be applied without breaking
+          // that pin. Candidates are counted (server relays at most 64 per
+          // direction), never forwarded to the peer, and reported once.
           if (!context || frame.transport_id !== context.transportId)
             throw new Error('Foreign candidate')
+          if (++context.ice > MAX_IGNORED_CANDIDATES)
+            throw new Error('Candidate limit')
+          if (context.ice === 1)
+            report({ kind: 'configuration-signalling', state: 'ice-ignored' })
           return
         default:
           throw new Error('Unexpected configuration signalling frame')

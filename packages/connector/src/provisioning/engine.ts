@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { configurationOpaqueId } from '../../../farm-protocol/src/configuration-common.ts'
@@ -11,6 +11,7 @@ import {
   configurationReceiptHash,
   type SignedConfigurationReceipt,
 } from '../../../farm-protocol/src/configuration-receipt.ts'
+import { deriveConfigurationAssignmentIdentity } from '../../../farm-protocol/src/configuration-inventory.ts'
 import { configurationTargetHash } from '../../../farm-protocol/src/configuration-target.ts'
 import {
   createKobraLinkClient,
@@ -21,7 +22,7 @@ import {
 import {
   ProvisioningContext,
   isTrustedProvisioningAuthority,
-  type InventoryAcknowledgement,
+  type InventoryConfirmationInput,
   type TrustedProvisioningAuthority,
 } from './authority.ts'
 import { createBridgeCustody, type BridgeRecord } from './bridge-custody.ts'
@@ -576,15 +577,27 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       )
     )
       return errorFrame(frame.request_id, 'identity-conflict')
+    // Canonical identity: exactly what the server derives from the stable
+    // account/farm/agent/bridge/device. Never random, never operation-scoped.
+    const identity = await deriveConfigurationAssignmentIdentity({
+      account_id: context.account_id,
+      farm_id: context.farm_id,
+      agent_id: context.agent_id,
+      bridge_instance_id: bridge.bridge_instance_id,
+      device_id: op.printer.device_id,
+    })
+    // A foreign, manual or unqualified mapping is never taken over or renamed.
+    if (
+      current.assignmentIds.has(identity.assignment_id) ||
+      current.printerKeys.has(identity.printer_key)
+    )
+      return errorFrame(frame.request_id, 'identity-conflict')
     if (!(await stillCurrent(context)))
       return errorFrame(frame.request_id, 'capability-rejected')
-    const base = `kobra-x-${op.printer.id}`.slice(0, 120)
-    let key = base
-    for (let n = 2; current.printerKeys.has(key); n++) key = `${base}-${n}`
-    const assignmentId = randomUUID()
+    const assignmentId = identity.assignment_id
     const plan = {
       assignment_id: assignmentId,
-      printer_key: key,
+      printer_key: identity.printer_key,
       credential_file: join(
         options.stateDirectory,
         'credentials',
@@ -757,41 +770,107 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       )
     },
     /**
-     * Records an inventory acknowledgement accepted by the trusted adapter.
-     * Idempotent: a repeated acknowledgement returns the same receipt.
+     * Assignments committed locally whose server inventory acknowledgement is
+     * not durable yet (also a commit interrupted before its journal record).
+     * They must not collect. A read failure throws so callers fail closed.
+     */
+    async unconfirmedAssignmentIds(): Promise<ReadonlySet<string>> {
+      return serialized(async () => {
+        const pending = new Set<string>()
+        for (const id of journal.readState().operations) {
+          const op = journal.readOperation(id)
+          if (
+            op?.plan &&
+            (op.stage === 'committing' || op.stage === 'local-committed')
+          )
+            pending.add(op.plan.assignment_id)
+        }
+        return pending
+      })
+    },
+    /**
+     * Records a server inventory acknowledgement. Requires the same stable
+     * owner/key as the operation, current authority for this session, the
+     * exact committed receipt/revision, the canonical local identity and an
+     * acknowledgement the trusted adapter authenticated. Idempotent only after
+     * all of those checks: a repeated confirmation returns the same receipt.
      */
     async confirmInventory(
-      ack: InventoryAcknowledgement,
+      request: InventoryConfirmationInput,
     ): Promise<InventoryConfirmation> {
       return locked<InventoryConfirmation>(
         { ok: false, reason: 'busy' },
         async () => {
           try {
-            const op = journal.readOperation(ack.operation_id)
-            if (!op || !op.plan || !op.latest)
-              return { ok: false, reason: 'unknown' }
-            if (op.stage === 'inventory-confirmed') {
-              return op.latest.prior_receipt_sha256 ===
-                ack.local_committed_receipt_sha256
-                ? { ok: true, receipt: op.latest }
-                : { ok: false, reason: 'mismatch' }
-            }
-            if (op.stage !== 'local-committed')
-              return { ok: false, reason: 'unknown' }
+            const { ack, attestation } = request
+            const parsed = ProvisioningContext.safeParse(request.context)
             if (
-              (await configurationReceiptHash(op.latest)) !==
-                ack.local_committed_receipt_sha256 ||
+              !parsed.success ||
+              parsed.data.farm_id !== options.runtime.farm_id ||
+              parsed.data.agent_id !== options.runtime.agent_id ||
+              parsed.data.connector_fingerprint !==
+                options.connector.fingerprint
+            )
+              return { ok: false, reason: 'rejected' }
+            const context = parsed.data
+            const op = journal.readOperation(ack.operation_id)
+            if (!op || !op.plan || !op.latest || !op.printer)
+              return { ok: false, reason: 'unknown' }
+            if (!sameBinding(op, context) || !(await stillCurrent(context)))
+              return { ok: false, reason: 'rejected' }
+            const confirmed = op.stage === 'inventory-confirmed'
+            if (!confirmed && op.stage !== 'local-committed')
+              return { ok: false, reason: 'unknown' }
+            const committedHash = confirmed
+              ? op.latest.prior_receipt_sha256
+              : await configurationReceiptHash(op.latest)
+            if (
+              committedHash !== ack.local_committed_receipt_sha256 ||
               ack.committed_revision !== op.plan.committed_revision
+            )
+              return { ok: false, reason: 'mismatch' }
+            const bridge = op.bridge_instance_id
+              ? custody.find(op.bridge_instance_id)
+              : null
+            const identity = bridge
+              ? await deriveConfigurationAssignmentIdentity({
+                  account_id: context.account_id,
+                  farm_id: context.farm_id,
+                  agent_id: context.agent_id,
+                  bridge_instance_id: bridge.bridge_instance_id,
+                  device_id: op.printer.device_id,
+                })
+              : null
+            // The committed runtime must still hold exactly this assignment.
+            if (
+              !bridge ||
+              !identity ||
+              identity.assignment_id !== op.plan.assignment_id ||
+              identity.printer_key !== op.plan.printer_key ||
+              !runtimeContains(
+                options.runtime,
+                bindingFor(op.plan, bridge, op.printer),
+                op.plan,
+              )
             )
               return { ok: false, reason: 'mismatch' }
             let accepted = false
             try {
               accepted =
-                (await authority.acceptsInventoryAck({ ...ack })) === true
+                (await authority.acceptsInventoryAck({
+                  ack: { ...ack },
+                  attestation,
+                  context,
+                  expected: {
+                    assignment_id: identity.assignment_id,
+                    printer_key: identity.printer_key,
+                  },
+                })) === true
             } catch {
               accepted = false
             }
             if (!accepted) return { ok: false, reason: 'rejected' }
+            if (confirmed) return { ok: true, receipt: op.latest }
             const latest = await signOperationReceipt(
               options.connector,
               op,

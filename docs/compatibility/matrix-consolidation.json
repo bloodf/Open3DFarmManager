@@ -26,8 +26,8 @@
   "findings": [
     "Critério corrigido: disponibilidade documental vale com declaração datada e explícita de venda do fabricante ou listagem oficial em estoque no corte, com região declarada. Prova de primeira expedição, estoque mundial e teste de hardware não são exigidos.",
     "Bambu Lab: cinco posições nominais sustentadas, A2L, X2D, H2C, P2S e H2S. H3C fica na fila de futuros porque a loja US só aceita backorder com datas estimadas a partir de 2026-11-30.",
-    "Creality: Ender-3 V3 Neo, Ender-3 V3 Mega e K3 estão sustentados por comunicados datados do fabricante. As duas vagas restantes ficam entre Ender-3 V4, K2 SE e SPARKX i7; mBox entra na primeira posição se a tecnologia FDM for confirmada.",
-    "Anycubic: Kobra X e Kobra S1 Max têm anúncio oficial de 2025-11-19 e venda declarada. Kobra 3 Max V2 tem venda declarada sem data oficial de lançamento; Kobra 4 tem anúncio datado sem frase de estoque recuperada.",
+    "Creality: mBox admitido na posição 1: C12 traz venda datada do fabricante (TikTok Shop EUA, 2026-11-09 a 2026-12-10) e C18, guia oficial do wiki, descreve filamento PLA de 1,75 mm, bico aquecido a cerca de 220 ℃ e extrusora, ou seja, extrusão de material. Ender-3 V3 Neo e Mega ficam empatados em 2–3 e K3 em 4. A quinta vaga fica entre Ender-3 V4, K2 SE e SPARKX i7.",
+    "Anycubic: Kobra X e Kobra S1 Max têm anúncio oficial de 2025-11-19 e venda declarada. Kobra 3 Max V2 tem venda declarada sem data oficial de lançamento; Kobra 4 tem anúncio datado sem frase de estoque recuperada. Ano 2025 do Kobra 3 V2 sustentado só por evidência indexada A10 (post oficial com datePublished 2025-05-19); leitura direta retornou 404 em 2026-11-13. O par Kobra X/S1 Max fica em 3–4; 2025-05-19 não é tratado como primeiro anúncio.",
     "Nenhuma linha é compatibilidade com OpenFarm. Firmware exato é desconhecido para todos os candidatos; hardware e integração são NOT_RUN.",
     "Versão V2.0.1.3 e data 2026-11-05 do i8 não verificadas: C2 retorna 404. OCL v1.1 em C1 não comprova licença de firmware."
   ],
@@ -48,25 +48,19 @@
       "brand": "Anycubic",
       "positions": [3, 4],
       "strongest_candidate": "Kobra X e Kobra S1 Max, empatados em 2025-11-19",
-      "detail": "Par sustentado por anúncio oficial e declarações de venda. A posição 3–4 só vale se o Kobra 3 V2 for de 2025; se for de 2026, o par desce para 4–5."
+      "detail": "Par sustentado por anúncio oficial e declarações de venda. A condição de ano foi atendida: o Kobra 3 V2 é de 2025 segundo evidência indexada A10, anterior a 2025-11-19. Se uma leitura direta contradisser A10, reavaliar."
     },
     {
       "brand": "Anycubic",
       "positions": [5],
       "strongest_candidate": "Kobra 3 V2",
-      "detail": "Falta o ano e a fonte oficial da data '15 de maio' do Kobra 3 V2 e sua declaração de disponibilidade. Alternativa: Kobra S1, com venda declarada em 2026-11-03 via Combo e pré-venda de 2025-01 só em terceiros."
+      "detail": "Falta declaração oficial de disponibilidade do Kobra 3 V2 e leitura direta da fonte de data. Ano 2025 do Kobra 3 V2 sustentado só por evidência indexada A10 (post oficial com datePublished 2025-05-19); leitura direta retornou 404 em 2026-11-13. Essa data não é tratada como primeiro anúncio, e a data '15 de maio' segue sem fonte oficial. Alternativa: Kobra S1, com venda declarada em 2026-11-03 via Combo e pré-venda de 2025-01 só em terceiros."
     },
     {
       "brand": "Creality",
-      "positions": [4, 5],
+      "positions": [5],
       "strongest_candidate": "Ender-3 V4",
-      "detail": "Falta data oficial de abertura de pedidos do Ender-3 V4 e do K2 SE para ordená-los contra o i7 (2026-01-07). Se o mBox for FDM, ocupa a posição 1, os demais descem uma posição e só a quinta fica em disputa."
-    },
-    {
-      "brand": "Creality",
-      "positions": [1],
-      "strongest_candidate": "mBox",
-      "detail": "Falta declaração do fabricante de que o mBox usa filamento FDM. Sem ela, Neo e Mega ocupam 1–2 e K3 a posição 3."
+      "detail": "Falta data oficial de abertura de pedidos do Ender-3 V4 e do K2 SE para ordená-los contra o i7 (2026-01-07). Com o mBox admitido na posição 1, só a quinta vaga fica em disputa."
     }
   ],
   "candidates": [
@@ -270,7 +264,7 @@
       "brand": "Anycubic",
       "base_model": "Kobra X",
       "nominal_position": "3–4 (empate)",
-      "position_status": "conditional",
+      "position_status": "supported",
       "region": "Reino Unido, Alemanha, França, Países Baixos; loja global",
       "announcement": "2025-11-19",
       "preorder": "depósito 2025-12-26, só em reprodução de comunicado",
@@ -289,8 +283,8 @@
         "cancel": "desconhecido"
       },
       "evidence_level": "documentation",
-      "limits": "Empate de anúncio com o S1 Max. Posição depende do ano do Kobra 3 V2.",
-      "citations": ["A5", "A7", "A8", "A9"],
+      "limits": "Empate de anúncio com o S1 Max. Kobra 3 V2 é de 2025 segundo evidência indexada A10; leitura direta retornou 404.",
+      "citations": ["A5", "A7", "A8", "A9", "A10"],
       "hardware": "NOT_RUN",
       "integration": "NOT_RUN"
     },
@@ -298,7 +292,7 @@
       "brand": "Anycubic",
       "base_model": "Kobra S1 Max",
       "nominal_position": "3–4 (empate)",
-      "position_status": "conditional",
+      "position_status": "supported",
       "region": "Promoção em 13 mercados; região por estoque não confirmada",
       "announcement": "2025-11-19",
       "preorder": "novembro de 2025, datas conflitantes só em terceiros",
@@ -317,16 +311,16 @@
         "cancel": "desconhecido"
       },
       "evidence_level": "documentation",
-      "limits": "Declaração de venda é promocional e sem região por modelo. Conflito de pré-venda 5 ou 25 de novembro de 2025 segue aberto.",
-      "citations": ["A3", "A5", "A8"],
+      "limits": "Declaração de venda é promocional e sem região por modelo. Conflito de pré-venda 5 ou 25 de novembro de 2025 segue aberto. Kobra 3 V2 é de 2025 segundo evidência indexada A10.",
+      "citations": ["A3", "A5", "A8", "A10"],
       "hardware": "NOT_RUN",
       "integration": "NOT_RUN"
     },
     {
       "brand": "Creality",
       "base_model": "mBox",
-      "nominal_position": "1 se FDM confirmado",
-      "position_status": "conditional",
+      "nominal_position": "1",
+      "position_status": "supported",
       "region": "EUA, só TikTok Shop",
       "announcement": "2026-11-09",
       "preorder": "desconhecido",
@@ -336,7 +330,7 @@
       "telemetry": "notificação ao responsável via aplicativo",
       "files": "desconhecido",
       "camera": "câmera embutida para detecção por IA",
-      "material": "não declarado",
+      "material": "filamento 1,75 mm; Hyper PLA ou CR silk PLA recomendados; bico cerca de 220 ℃, máximo 250 ℃ C18",
       "commands": {
         "upload": "desconhecido",
         "start": "desconhecido",
@@ -345,15 +339,15 @@
         "cancel": "desconhecido"
       },
       "evidence_level": "documentation",
-      "limits": "Comunicado não declara FDM nem filamento; recorte é só FDM. Produto infantil em canal de terceiros.",
-      "citations": ["C12"],
+      "limits": "Tecnologia de extrusão de material descrita no guia oficial C18; o termo 'FDM' não aparece. Venda só na TikTok Shop dos EUA, janela 2026-11-09 a 2026-12-10. Produto infantil em canal de terceiros.",
+      "citations": ["C12", "C18"],
       "hardware": "NOT_RUN",
       "integration": "NOT_RUN"
     },
     {
       "brand": "Creality",
       "base_model": "Ender-3 V3 Neo",
-      "nominal_position": "1–2 (empate)",
+      "nominal_position": "2–3 (empate)",
       "position_status": "supported",
       "region": "EUA e Europa",
       "announcement": "2026-10-15",
@@ -381,7 +375,7 @@
     {
       "brand": "Creality",
       "base_model": "Ender-3 V3 Mega",
-      "nominal_position": "1–2 (empate)",
+      "nominal_position": "2–3 (empate)",
       "position_status": "supported",
       "region": "EUA e Europa",
       "announcement": "2026-10-15",
@@ -409,7 +403,7 @@
     {
       "brand": "Creality",
       "base_model": "K3",
-      "nominal_position": "3",
+      "nominal_position": "4",
       "position_status": "supported",
       "region": "EUA; Europa esperada para dezembro de 2026",
       "announcement": "anúncio anterior a 2026-09-30; data exata não recuperada",
@@ -437,7 +431,7 @@
     {
       "brand": "Creality",
       "base_model": "Ender-3 V4",
-      "nominal_position": "4–5 em disputa",
+      "nominal_position": "5 em disputa",
       "position_status": "unproven_rank",
       "region": "EUA (loja US)",
       "announcement": "2025-11-19, Formnext 2025 segundo resumo de busca; exibida no CES 2026 [C3]",
@@ -465,7 +459,7 @@
     {
       "brand": "Creality",
       "base_model": "K2 SE",
-      "nominal_position": "4–5 em disputa",
+      "nominal_position": "5 em disputa",
       "position_status": "unproven_rank",
       "region": "EUA (loja US)",
       "announcement": "não recuperado",
@@ -493,7 +487,7 @@
     {
       "brand": "Creality",
       "base_model": "SPARKX i7",
-      "nominal_position": "4–5 em disputa",
+      "nominal_position": "5 em disputa",
       "position_status": "unproven_rank",
       "region": "América do Norte na pré-venda; EUA na loja",
       "announcement": "2026-01-07",
@@ -513,7 +507,7 @@
         "cancel": "Moonraker declarado [C1]; método, autenticação e firmware não qualificados"
       },
       "evidence_level": "documentation",
-      "limits": "Mais antigo dos três em disputa pela data conhecida. Color e Nano Combo são pacotes da mesma base.",
+      "limits": "Mais antigo dos três em disputa pela quinta vaga pela data conhecida. Color e Nano Combo são pacotes da mesma base.",
       "citations": ["C3", "C4", "C1"],
       "hardware": "NOT_RUN",
       "integration": "NOT_RUN"
@@ -705,6 +699,13 @@
       "supports": "Página global Kobra X: preço e 'Ships in 24 hours' registrados na coleta da marca; não relida nesta rodada."
     },
     {
+      "id": "A10",
+      "reference": "https://store.anycubic.com/blogs/news/kobra-3-v2-we-heard-you-key-fixes-upgrades-inside",
+      "publication_date": "2025-05-19",
+      "access_date": "2026-11-13",
+      "supports": "Post oficial 'Kobra 3 V2: We Heard You! Key Fixes & Upgrades Inside', listado na tag kobra-3-v2. Data e texto só por índice de busca: datePublished 2025-05-19T16:09:45Z, editor ANYCUBIC-STORE, apresenta o Kobra 3 V2. Leitura direta em 2026-11-13: post, tag global e tag DE retornaram HTTP 404. Sustenta o ano 2025; não é primeiro anúncio nem declaração de disponibilidade."
+    },
+    {
       "id": "C1",
       "reference": "https://www.creality.com/blog/sparkx-open-initiative",
       "publication_date": "2026-10-20",
@@ -822,11 +823,18 @@
       "publication_date": null,
       "access_date": "2026-11-13",
       "supports": "Loja US: K3 com oferta InStock, envio estimado 'Early December' e rótulo de menu '(Pre-order)'."
+    },
+    {
+      "id": "C18",
+      "reference": "https://wiki.creality.com/zh/mBox-series/mBox/filament-replacement-guide",
+      "publication_date": "2026-08-18",
+      "access_date": "2026-11-13",
+      "supports": "Guia oficial Creality em chinês, leitura direta HTTP 200 com texto completo (criado 2026-08-18, atualizado 2026-11-05). Filamento de 1,75 mm, Hyper PLA ou CR silk PLA; bico a cerca de 220 ℃, máximo 250 ℃; extrusora com engrenagens e tubo de PTFE. Descreve extrusão de material sem usar o termo FDM. Não trata de firmware, API ou rede."
     }
   ],
   "next_steps": [
     "Reler as páginas oficiais Anycubic após o limite de requisições e registrar frase de estoque do Kobra 4 e do Kobra S1 Max por região.",
-    "Obter data oficial de lançamento de Kobra 3 Max V2, Kobra 3 V2, Ender-3 V4 e K2 SE; confirmar a tecnologia do mBox.",
+    "Obter data oficial de lançamento de Kobra 3 Max V2, Ender-3 V4 e K2 SE; obter leitura direta e declaração de disponibilidade do Kobra 3 V2.",
     "Revalidar H3C e SPARKX i8 quando houver declaração datada de venda ou listagem em estoque.",
     "Localizar notas oficiais de firmware por modelo e identificar versão, autenticação e licença.",
     "Documentar upload, start, pause, resume e cancel individualmente antes de qualquer adaptador; qualificação simulada e física permanecem pendentes."

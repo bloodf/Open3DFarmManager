@@ -1,38 +1,67 @@
 {
-  "id": "kobralink-upstream-integration",
-  "base": "77d169d",
+  "id": "kobralink-upstream-qualified",
+  "base": "3ffbd54cbd2a7d0068680f4fe8a96f2fa2761a60",
   "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
   "scenarios": [
-    "safe isolated restart",
-    "pinned image inspection",
-    "unchanged Compose create and healthcheck",
-    "client authentication preflight",
-    "synthetic discovery fixture gate"
+    "unchanged compose healthy; exact image; egress-denied network; loopback management only",
+    "egress probe denied; owned host listeners loopback only",
+    "first prepare without deviceId and verified signed receipt",
+    "identity committed with verified receipt",
+    "real upstream MQTT and client observation",
+    "Connector runtime authenticated subscription with synthetic firmware",
+    "normalized Connector observation and persisted telemetry",
+    "reconcile preserves identity",
+    "restart identity authentication runtime configuration and custody persistence",
+    "changed identity rejected",
+    "stale observation is unavailable and unknown",
+    "offline observation is disconnected and unknown",
+    "reconnect with unchanged synthetic credentials",
+    "real create reconciled after injected response loss without duplicate",
+    "malformed discovered identity refused; established device remains readable",
+    "wrong authentication rejected",
+    "owned containers volumes network and private temporary credentials removed"
   ],
   "results": {
-    "status": "blocked",
-    "reason": "Client preflight exited 1 before authentication: ERR_MODULE_NOT_FOUND, package zod absent in worker checkout.",
-    "actual_integration": "Compose up --no-build --wait passed; service healthy. Client/provisioning/MQTT/telemetry not qualified.",
-    "fixture_gate": "PASS upstream-fixture at 13d82511268562b35b138746226e1aa9ba9cfaf5",
-    "image_digest": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3"
+    "status": "pass",
+    "actual_integration": "Unmodified pinned KobraLink, original HTTP/MQTT synthetic devices, production provisioning/client/runtime/collector and snapshot source. Final execution exited 0.",
+    "image_digest": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3",
+    "fixture_gate": "Two reusable HTTP/MQTT fixture tests passed.",
+    "receipt": "Bounded private final runtime log, source checks and resource audit retained by the integration owner."
+  },
+  "qualifications": {
+    "first_prepare_without_device_id": "pass",
+    "identity_confirmation": "pass",
+    "repeat_after_restart": "pass",
+    "telemetry_through_connector": "pass",
+    "auth_failure": "pass",
+    "stale_unknown_offline": "pass",
+    "malformed_identity_isolation": "pass",
+    "resource_cleanup": "pass"
   },
   "limits": [
-    "Synthetic HTTP discovery only; MQTT fixture remains unimplemented.",
-    "Stopped at first runtime preflight failure. Subsequent fixture gate passed; integration was not retried.",
-    "No physical printer, firmware, provisioning, persistence or telemetry support claim."
+    "Synthetic Kobra X only. No physical printer, firmware, manufacturer cloud, actuator, upload or camera qualification.",
+    "Configuration receipts prove local prepare and commit. Production server inventory acknowledgement and browser WebRTC remain separate acceptance units.",
+    "Response loss is injected after a real successful upstream POST; discovery, storage and reconciliation use the real upstream.",
+    "Malformed device identity is rejected by the client; the established device remains readable. This does not claim tolerant whole-inventory parsing.",
+    "The client retains cached progress while offline; availability is disconnected and printState unknown. Missing/null response handling also has separate fixture/unit coverage.",
+    "Full repository check:all and publication checks remain pending; this worker does not publish."
   ],
   "resources": {
     "runtime_started": true,
     "created": [
-      "isolated internal network",
-      "Compose service and data volume",
-      "safe restart service and volume"
+      "Owned Compose service, named data volume and isolated network",
+      "Three original synthetic device containers with anonymous data volumes",
+      "Private generated TLS and machine credentials",
+      "Task subnet egress firewall rule"
     ],
     "removed": [
-      "Compose service and data volume",
-      "isolated internal network",
-      "safe restart service and volume"
+      "All task containers, named and anonymous volumes, network, private temporary fixture and provisioning files",
+      "Task subnet egress firewall rule"
     ],
-    "retained": "Stopped profile, pinned image, pre-existing network and private evidence for coordinator."
+    "retained": [
+      "Stopped dedicated VM profile",
+      "Pre-existing pinned KobraLink and PostgreSQL images and baseline network",
+      "Workspace dependencies and bounded private diagnostic evidence"
+    ]
   }
 }

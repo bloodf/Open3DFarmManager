@@ -152,7 +152,9 @@ for (const mode of [
           if (url.includes('/api/auth/'))
             return new Response(null, {
               status: mode === 'auth' ? 401 : 200,
-              headers: { 'set-cookie': 'better-auth.session_token=synthetic; HttpOnly' },
+              headers: {
+                'set-cookie': 'better-auth.session_token=synthetic; HttpOnly',
+              },
             })
           return Response.json({
             id: 'printer',
@@ -333,7 +335,9 @@ test('serial recovery preserves source freshness and restart reauthenticates', a
               if (url.includes('/api/auth/')) {
                 auth++
                 return new Response(null, {
-                  headers: { 'set-cookie': 'better-auth.session_token=synthetic' },
+                  headers: {
+                    'set-cookie': 'better-auth.session_token=synthetic',
+                  },
                 })
               }
               calls++

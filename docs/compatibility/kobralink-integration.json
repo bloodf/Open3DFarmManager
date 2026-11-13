@@ -1,0 +1,38 @@
+{
+  "id": "kobralink-upstream-integration",
+  "base": "77d169d",
+  "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+  "scenarios": [
+    "safe isolated restart",
+    "pinned image inspection",
+    "unchanged Compose create and healthcheck",
+    "client authentication preflight",
+    "synthetic discovery fixture gate"
+  ],
+  "results": {
+    "status": "blocked",
+    "reason": "Client preflight exited 1 before authentication: ERR_MODULE_NOT_FOUND, package zod absent in worker checkout.",
+    "actual_integration": "Compose up --no-build --wait passed; service healthy. Client/provisioning/MQTT/telemetry not qualified.",
+    "fixture_gate": "PASS upstream-fixture at 13d82511268562b35b138746226e1aa9ba9cfaf5",
+    "image_digest": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3"
+  },
+  "limits": [
+    "Synthetic HTTP discovery only; MQTT fixture remains unimplemented.",
+    "Stopped at first runtime preflight failure. Subsequent fixture gate passed; integration was not retried.",
+    "No physical printer, firmware, provisioning, persistence or telemetry support claim."
+  ],
+  "resources": {
+    "runtime_started": true,
+    "created": [
+      "isolated internal network",
+      "Compose service and data volume",
+      "safe restart service and volume"
+    ],
+    "removed": [
+      "Compose service and data volume",
+      "isolated internal network",
+      "safe restart service and volume"
+    ],
+    "retained": "Stopped profile, pinned image, pre-existing network and private evidence for coordinator."
+  }
+}

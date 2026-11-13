@@ -274,4 +274,67 @@ describe('bounded Connector management client', () => {
       code: 'unavailable',
     })
   })
+  it('discovers sanitized identities without secrets', async () => {
+    const client = await ready(async () =>
+      json([{ ...printer(null), model: 'Kobra X', ip: '192.168.1.20' }]),
+    )
+    const [identity] = await client.listPrinterIdentities()
+    expect(identity).toEqual({
+      ...binding,
+      ip: '192.168.1.20',
+      model: 'Kobra X',
+      firmware: null,
+    })
+    expect(JSON.stringify(identity)).not.toContain('secret')
+  })
+  it('creates an unknown printer once with ip and name only', async () => {
+    const bodies: string[] = []
+    const client = await ready(async (_url, init) => {
+      bodies.push(String(init.body))
+      return init.method === 'POST'
+        ? json({ ...printer(null), ip: '192.168.1.20', model: 'Kobra X' })
+        : json([])
+    })
+    expect(
+      (await client.createPrinter({ ip: '192.168.1.20', name: 'Kobra X' }))
+        .deviceId,
+    ).toBe(binding.deviceId)
+    expect(bodies).toEqual(['{"ip":"192.168.1.20","name":"Kobra X"}'])
+    await expect(
+      client.createPrinter({
+        ip: '192.168.1.20',
+        name: 'Kobra X',
+        httpPort: 18910,
+      } as never),
+    ).rejects.toMatchObject({ code: 'invalid' })
+    await expect(
+      client.createPrinter({ ip: '8.8.8.8', name: 'Kobra X' }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+    expect(bodies).toHaveLength(1)
+  })
+  it('never resends a create whose response was lost', async () => {
+    let writes = 0
+    const client = await ready(async (_url, init) => {
+      if (init.method === 'POST') writes++
+      throw new Error('lost')
+    })
+    await expect(
+      client.createPrinter({ ip: '192.168.1.20', name: 'Kobra X' }),
+    ).rejects.toMatchObject({ code: 'unavailable' })
+    expect(writes).toBe(1)
+  })
+  it('deletes an owned printer only after rechecking its identity', async () => {
+    const methods: string[] = []
+    const client = await ready(async (_url, init) => {
+      methods.push(String(init.method))
+      return init.method === 'DELETE'
+        ? new Response(null, { status: 204 })
+        : json(printer(null))
+    })
+    expect(await client.deleteOwnedPrinter(binding)).toEqual({ deleted: true })
+    await expect(
+      client.deleteOwnedPrinter({ ...binding, deviceId: 'other-device' }),
+    ).rejects.toMatchObject({ code: 'identity_changed' })
+    expect(methods).toEqual(['GET', 'DELETE', 'GET'])
+  })
 })

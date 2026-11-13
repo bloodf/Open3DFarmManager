@@ -1234,6 +1234,38 @@ describe('configuration receipts and frames', () => {
       ).rejects.toThrow()
   })
 
+  it('accepts first-discovery prepare intent without an expected device id', async () => {
+    const f = await fixture()
+    const { device_id: _expected, ...discovery } = target
+    const discoveryHash = await configurationTargetHash(discovery)
+    expect(discoveryHash).not.toBe(await configurationTargetHash(target))
+    const frame = { ...prepareFrame, target: discovery }
+    expect(
+      decodeConfigurationRequest(encodeConfigurationRequest(frame)),
+    ).toEqual(frame)
+    for (const device_id of ['', null, undefined, 'bad id', 7])
+      await expect(
+        configurationTargetHash({ ...discovery, device_id }),
+      ).rejects.toThrow()
+    // The observed identity stays mandatory in every signed receipt.
+    const receipt = await signConfigurationReceipt(
+      receiptClaims(f, discoveryHash, 'prepared'),
+      f.connector.privateKey,
+    )
+    expect(receipt.target).toMatchObject({
+      target_sha256: discoveryHash,
+      device_id: 'kobra-x-0001',
+    })
+    const claims = receiptClaims(f, discoveryHash, 'prepared')
+    const { device_id: _pinned, ...unpinned } = claims.target
+    await expect(
+      signConfigurationReceipt(
+        { ...claims, target: unpinned },
+        f.connector.privateKey,
+      ),
+    ).rejects.toThrow()
+  })
+
   it('hashes targets deterministically and distinctly', async () => {
     const a = await configurationTargetHash(target)
     expect(

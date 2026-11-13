@@ -5,8 +5,11 @@ import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.t
 
 /**
  * Trusted config-v1 capability issuer key, fetched only from the enrolled farm
- * origin over authenticated HTTPS (`GET /api/configuration-authority/issuer`).
- * Neither the browser nor a signalling frame can supply or replace it.
+ * origin over HTTPS (`GET /api/configuration-authority/issuer`). The public
+ * endpoint takes no query, credential or Bearer header and answers exactly the
+ * metadata DTO below; trust comes from TLS to the pinned origin plus an exact
+ * origin match, never from the response alone. Neither the browser nor a
+ * signalling frame can supply or replace it.
  */
 const IssuerKid = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/)
 export const ConfigurationIssuerMetadata = z.strictObject({
@@ -32,8 +35,6 @@ export type IssuerFetch = (url: string, init: RequestInit) => Promise<Response>
 
 export interface IssuerSourceOptions {
   farmOrigin: string
-  /** Current Connector credential; read on every fetch so renewal applies. */
-  credential: () => { token: string; agentId: string; farmId: string } | null
   fetch?: IssuerFetch
   timeoutMs?: number
   /** Minimum interval between refreshes triggered by an unknown kid. */
@@ -119,8 +120,6 @@ export function createConfigurationIssuerSource(options: IssuerSourceOptions) {
   let inflight: Promise<TrustedConfigurationIssuer | null> | null = null
 
   async function load(): Promise<TrustedConfigurationIssuer | null> {
-    const credential = options.credential()
-    if (!credential) return null
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
@@ -130,12 +129,7 @@ export function createConfigurationIssuerSource(options: IssuerSourceOptions) {
         credentials: 'omit',
         cache: 'no-store',
         signal: controller.signal,
-        headers: {
-          accept: 'application/json',
-          authorization: 'Bearer ' + credential.token,
-          'x-connector-agent': credential.agentId,
-          'x-connector-farm': credential.farmId,
-        },
+        headers: { accept: 'application/json' },
       })
       current = await trustedIssuerFromMetadata(
         await readBounded(response),

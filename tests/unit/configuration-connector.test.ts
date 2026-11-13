@@ -34,9 +34,15 @@ import {
   configurationReceiptHash,
   decodeConfigurationReceipt,
   verifyConfigurationReceipt,
+  type SignedConfigurationReceipt,
 } from '../../packages/farm-protocol/src/configuration-receipt.ts'
 import { configurationTargetHash } from '../../packages/farm-protocol/src/configuration-target.ts'
-import { encodeConfigurationSignallingServerFrame } from '../../apps/farm/server/services/configuration-signalling-wire.ts'
+import {
+  deriveConfigurationAssignmentIdentity,
+  encodeConfigurationInventoryAck,
+  signConfigurationInventoryAck,
+} from '../../packages/farm-protocol/src/configuration-inventory.ts'
+import { encodeConfigurationSignallingServerFrame } from '../../packages/farm-protocol/src/configuration-signalling.ts'
 import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
 import { parseProvisioningConfig } from '../../packages/connector/src/config/provisioning.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
@@ -277,17 +283,20 @@ async function world(
     now: T0,
     online: true,
     jti: ids.jti as string | null,
-    attest: true,
     starts: 0,
     stops: 0,
+    /** Runtime file each start received (the collection snapshot). */
+    startedFrom: [] as string[],
   }
   const activator = () =>
     createRuntimeActivator({
       runtimeConfigPath,
       scope: { agent_id: ids.agent, farm_id: ids.farm },
-      start: (signal) =>
+      snapshotPath: join(dir, 'state', 'collection-snapshot.json'),
+      start: (signal, configPath) =>
         new Promise<void>((resolve) => {
           env.starts++
+          env.startedFrom.push(configPath)
           signal.addEventListener('abort', () => {
             env.stops++
             resolve()
@@ -304,8 +313,6 @@ async function world(
       credentialJti: () => env.jti,
       clock: () => env.now,
       fetch: bridge.fetch,
-      inventoryVerifier: async ({ attestation }) =>
-        env.attest && attestation === 'synthetic-server-attestation',
     })
     runtimes.push(runtime)
     return runtime
@@ -496,6 +503,78 @@ async function world(
     return { session, binding: b, authorize, request, next, inbox }
   }
 
+  /**
+   * Server-signed inventory acknowledgement, built exactly like the accepted
+   * server registration (same helpers, same context fields) for a transport.
+   */
+  async function inventoryAck(
+    t: { binding: Record<string, unknown> },
+    receipt: SignedConfigurationReceipt,
+    over: Record<string, unknown> = {},
+    key: CryptoKey = issuerKeys.privateKey,
+  ): Promise<string> {
+    const b = t.binding
+    const identity = await deriveConfigurationAssignmentIdentity({
+      account_id: b.account_id,
+      farm_id: ids.farm,
+      agent_id: ids.agent,
+      bridge_instance_id: receipt.target.bridge_instance_id,
+      device_id: receipt.target.device_id,
+    })
+    return encodeConfigurationInventoryAck(
+      await signConfigurationInventoryAck(
+        {
+          v: 1,
+          protocol: 'config-v1',
+          purpose: 'configuration-inventory-ack',
+          context: {
+            account_id: b.account_id,
+            farm_id: ids.farm,
+            agent_id: ids.agent,
+            key_id: b.key_id,
+            transport_id: b.transport_id,
+            browser_thumbprint: b.browser_thumbprint,
+            connector_fingerprint: identity_fingerprint(),
+            credential_jti: b.credential_jti,
+            configuration_binding_sha256: await configurationBindingHash(b),
+            origin: FARM_ORIGIN,
+            audience: AUDIENCE,
+          },
+          kid: KID,
+          issuer: 'open3dfarm/config-issuer',
+          operation_id: receipt.operation_id,
+          committed_receipt_sha256: await configurationReceiptHash(receipt),
+          committed_revision: receipt.committed_revision,
+          assignment_id: identity.assignment_id,
+          printer_key: identity.printer_key,
+          nonce: nonce(),
+          issued_at: env.now,
+          expires_at: env.now + 25_000,
+          ...over,
+        },
+        key,
+      ),
+    )
+  }
+  const identity_fingerprint = () => identity.fingerprint
+  /** Browser inventory message for a committed receipt with a signed ack. */
+  async function inventoryMessage(
+    t: { binding: Record<string, unknown> },
+    receipt: SignedConfigurationReceipt,
+    attestation?: string,
+    over: Record<string, unknown> = {},
+  ) {
+    return encodeBrowserChannelMessage({
+      v: 1,
+      t: 'inventory',
+      operation_id: receipt.operation_id,
+      local_committed_receipt_sha256: await configurationReceiptHash(receipt),
+      committed_revision: receipt.committed_revision,
+      attestation: attestation ?? (await inventoryAck(t, receipt)),
+      ...over,
+    })
+  }
+
   const target = (ip = '192.168.1.50') => ({
     v: 1,
     protocol: 'config-v1',
@@ -548,6 +627,8 @@ async function world(
     prepareFrame,
     commitFrame,
     statusFrame,
+    inventoryAck,
+    inventoryMessage,
     runtimeConfigPath,
   }
 }
@@ -599,23 +680,13 @@ describe('configuration-connector: zero-printer bootstrap to activation', () => 
       farm_id: w.ids.farm,
     })
     expect(runtimeConfig.assignments).toHaveLength(1)
-    expect(w.env.starts).toBe(1)
-    expect(runtime.diagnostics().runtimeActive).toBe(true)
+    // A new unconfirmed assignment never starts collecting by itself.
+    expect(w.env.starts).toBe(0)
+    expect(runtime.diagnostics().runtimeActive).toBe(false)
     const raw = readFileSync(w.runtimeConfigPath, 'utf8')
     expect(raw).not.toContain('password')
 
-    t.session.receive(
-      encodeBrowserChannelMessage({
-        v: 1,
-        t: 'inventory',
-        operation_id: op,
-        local_committed_receipt_sha256: await configurationReceiptHash(
-          committed.receipt,
-        ),
-        committed_revision: 1,
-        attestation: 'synthetic-server-attestation',
-      }),
-    )
+    t.session.receive(await w.inventoryMessage(t, committed.receipt))
     const ack = await t.next()
     expect(ack?.t).toBe('inventory-result')
     if (ack?.t !== 'inventory-result') throw new Error('no ack')
@@ -623,8 +694,9 @@ describe('configuration-connector: zero-printer bootstrap to activation', () => 
     expect(decodeConfigurationReceipt(ack.receipt).phase).toBe(
       'inventory-confirmed',
     )
-    // Same file: reload is a no-op, no restart.
+    // Durable authenticated confirmation starts the collector exactly once.
     expect(w.env.starts).toBe(1)
+    expect(runtime.diagnostics().runtimeActive).toBe(true)
     expect(await runtime.engine.pendingInventoryConfirmations()).toEqual([])
     expect(runtime.revision()).toBe(1)
   })
@@ -645,11 +717,17 @@ describe('configuration-connector: zero-printer bootstrap to activation', () => 
       agent_id: w.ids.agent,
       farm_id: w.ids.farm,
     })
-    expect(config.assignments.map((a) => a.printer_key).sort()).toEqual(
-      ['kobra-x-p1', 'voron'].sort(),
-    )
+    const kobra = config.assignments.find((a) => a.printer_key !== 'voron')
+    expect(kobra?.printer_key).toMatch(/^kobra-x-[A-Za-z0-9_-]{43}$/)
+    expect(config.assignments.map((a) => a.printer_key)).toContain('voron')
     expect(config.telemetry.endpoint).toBe(FARM_ORIGIN + '/telemetry')
-    // The changed file restarted the runtime once (stop old, start new).
+    // The existing confirmed Moonraker collector keeps running untouched while
+    // the new assignment waits for its authenticated confirmation.
+    expect(w.env.starts).toBe(1)
+    expect(w.env.stops).toBe(0)
+    if (committed?.type !== 'result') throw new Error('commit failed')
+    t.session.receive(await w.inventoryMessage(t, committed.receipt))
+    expect(await t.next()).toMatchObject({ t: 'inventory-result', ok: true })
     expect(w.env.starts).toBe(2)
     expect(w.env.stops).toBe(1)
   })
@@ -699,7 +777,7 @@ describe('configuration-connector: human-time boundary and reauthentication', ()
       'local-committed',
     )
     expect(w.bridge.state.creates).toBe(1)
-    expect(w.env.starts).toBe(1)
+    expect(w.env.starts).toBe(0)
   })
 
   it('cross-owner, other browser key and revoked credential stay rejected on a new transport', async () => {
@@ -867,13 +945,14 @@ describe('configuration-connector: authority, replay and recovery', () => {
     const lost = await t.request(commit)
     expect(lost?.type === 'result' && lost.state).toBe('local-committed')
     await first.shutdown()
-    expect(w.env.stops).toBe(1)
+    expect(w.env.stops).toBe(0)
 
-    // Connector restarts; the browser reconnects on a new transport.
+    // Connector restarts; the browser reconnects on a new transport. The only
+    // assignment is still unconfirmed, so nothing collects yet.
     w.env.now += 60_000
     const second = w.boot()
     expect(await second.start()).toEqual({ pendingInventory: 1 })
-    expect(w.env.starts).toBe(2)
+    expect(w.env.starts).toBe(0)
     const u = await w.connect(second, browser)
     const retried = await u.request({ ...commit, request_id: randomUUID() })
     expect(retried?.type === 'result' && retried.state).toBe('local-committed')
@@ -885,7 +964,7 @@ describe('configuration-connector: authority, replay and recovery', () => {
     expect(w.bridge.state.printers).toHaveLength(1)
   })
 
-  it('inventory acknowledgement fails closed without a verified attestation', async () => {
+  it('inventory acknowledgement fails closed unless the server-signed ack verifies', async () => {
     const w = await world()
     const runtime = w.boot()
     await runtime.start()
@@ -894,25 +973,73 @@ describe('configuration-connector: authority, replay and recovery', () => {
     const prepared = await t.request(w.prepareFrame(op))
     const committed = await t.request(await w.commitFrame(op, prepared!))
     if (committed?.type !== 'result') throw new Error('commit failed')
-    const sha = await configurationReceiptHash(committed.receipt)
-    for (const [attestation, revision, expected] of [
-      ['forged', 1, 'rejected'],
-      ['synthetic-server-attestation', 2, 'mismatch'],
-    ] as const) {
-      t.session.receive(
-        encodeBrowserChannelMessage({
-          v: 1,
-          t: 'inventory',
-          operation_id: op,
-          local_committed_receipt_sha256: sha,
-          committed_revision: revision,
-          attestation,
+    const receipt = committed.receipt
+    const wrongKey = await crypto.subtle.generateKey('Ed25519', false, ['sign'])
+    for (const [attestation, over, expected] of [
+      ['forged', {}, 'rejected'],
+      [
+        await w.inventoryAck(t, receipt, {}, wrongKey.privateKey),
+        {},
+        'rejected',
+      ],
+      [await w.inventoryAck(t, receipt, { kid: 'other-kid' }), {}, 'rejected'],
+      [
+        await w.inventoryAck(t, receipt, { issuer: 'open3dfarm/foreign' }),
+        {},
+        'rejected',
+      ],
+      [
+        await w.inventoryAck(t, receipt, {
+          printer_key: 'kobra-x-' + 'A'.repeat(42) + 'A',
         }),
-      )
-      const result = await t.next()
-      expect(result).toMatchObject({ ok: false, reason: expected })
+        {},
+        'rejected',
+      ],
+      [
+        await w.inventoryAck(t, receipt, { assignment_id: randomUUID() }),
+        {},
+        'rejected',
+      ],
+      [
+        await w.inventoryAck(t, receipt, { operation_id: randomUUID() }),
+        {},
+        'rejected',
+      ],
+      [
+        await w.inventoryAck(t, receipt, {
+          committed_receipt_sha256: nonce(),
+        }),
+        {},
+        'rejected',
+      ],
+      [
+        await w.inventoryAck(t, receipt, {
+          issued_at: w.env.now - 40_000,
+          expires_at: w.env.now - 10_000,
+        }),
+        {},
+        'rejected',
+      ],
+      [undefined, { committed_revision: 2 }, 'mismatch'],
+    ] as const) {
+      t.session.receive(await w.inventoryMessage(t, receipt, attestation, over))
+      expect(await t.next()).toMatchObject({ ok: false, reason: expected })
     }
+    // Another transport's acknowledgement is bound to its own context.
+    const other = await w.connect(runtime, await browserKey())
+    const foreignAck = await w.inventoryAck(other, receipt)
+    t.session.receive(await w.inventoryMessage(t, receipt, foreignAck))
+    expect(await t.next()).toMatchObject({ ok: false, reason: 'rejected' })
     expect(await runtime.engine.pendingInventoryConfirmations()).toHaveLength(1)
+    expect(w.env.starts).toBe(0)
+    // Server outage refuses even a genuine acknowledgement.
+    w.env.online = false
+    t.session.receive(await w.inventoryMessage(t, receipt))
+    expect(await t.next()).toMatchObject({ ok: false, reason: 'rejected' })
+    w.env.online = true
+    t.session.receive(await w.inventoryMessage(t, receipt))
+    expect(await t.next()).toMatchObject({ ok: true })
+    expect(w.env.starts).toBe(1)
   })
 
   it('shutdown closes sessions, revokes authority and stops the runtime', async () => {
@@ -979,7 +1106,6 @@ describe('configuration-connector: issuer metadata and signalling', () => {
     let now = 0
     const source = createConfigurationIssuerSource({
       farmOrigin: FARM_ORIGIN,
-      credential: () => ({ token: 'a.b.c', agentId: 'agent', farmId: 'farm' }),
       clock: () => now,
       fetch: async (url, init) => {
         requests.push({ url, init })
@@ -995,13 +1121,15 @@ describe('configuration-connector: issuer metadata and signalling', () => {
       FARM_ORIGIN + '/api/configuration-authority/issuer',
     )
     expect(requests[0]?.init.redirect).toBe('error')
+    // Public endpoint contract: GET only, no Bearer, no connector headers.
+    expect(requests[0]?.init.method).toBe('GET')
+    expect(requests[0]?.init.headers).toEqual({ accept: 'application/json' })
     now += 31_000
     expect(await source.forKid('other')).toBeNull()
     expect(requests).toHaveLength(2)
     expect(() =>
       createConfigurationIssuerSource({
         farmOrigin: 'http://farm.example.com',
-        credential: () => null,
       }),
     ).toThrow()
   })
@@ -1020,6 +1148,7 @@ describe('configuration-connector: issuer metadata and signalling', () => {
       },
     }
     const answers: string[] = []
+    const diagnostics: Record<string, unknown>[] = []
     let bindingSeen: unknown
     const peer: ConfigurationPeerFactory = (input) => {
       void input.binding.then((b) => (bindingSeen = b)).catch(() => {})
@@ -1045,6 +1174,7 @@ describe('configuration-connector: issuer metadata and signalling', () => {
       peer,
       clock: () => w.env.now,
       retryMinMs: 60_000,
+      onDiagnostic: (event) => diagnostics.push(event),
     })
     const controller = new AbortController()
     const running = client.run(controller.signal)
@@ -1136,6 +1266,21 @@ describe('configuration-connector: issuer metadata and signalling', () => {
     })
     await until(() => answers.length > 0)
     expect(answers).toEqual([sdp(0xbb)])
+    // Trickle is not consumed: complete SDP in both peers carries every
+    // candidate, and a late candidate cannot change the pinned descriptions.
+    // A bounded, valid candidate stream is observed once and never relayed.
+    const candidate = {
+      candidate: 'candidate:1 1 udp 2122252543 192.168.1.5 50000 typ host',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+    }
+    for (let seq = 1; seq <= 3; seq++)
+      serve({ v: 1, t: 'rtc.ice', transport_id: transport, seq, p: candidate })
+    await until(
+      () => diagnostics.filter((e) => e.state === 'ice-ignored').length > 0,
+    )
+    expect(diagnostics.filter((e) => e.state === 'ice-ignored')).toHaveLength(1)
+    expect(answers).toEqual([sdp(0xbb)])
     expect(runtime.diagnostics().sessions).toBe(1)
     // A close notice for another transport is ignored; a socket close takes
     // the Connector offline and nothing stays current.
@@ -1144,9 +1289,18 @@ describe('configuration-connector: issuer metadata and signalling', () => {
       t: 'config.context-closed',
       transport_id: randomUUID(),
     })
-    handlers?.close()
+    // A candidate for another transport is a protocol violation: the link
+    // drops and nothing stays current.
+    serve({
+      v: 1,
+      t: 'rtc.ice',
+      transport_id: randomUUID(),
+      seq: 4,
+      p: candidate,
+    })
     await until(() => !client.online())
     expect(client.online()).toBe(false)
+    handlers?.close()
     expect(bindingSeen).toBeUndefined()
     expect(runtime.diagnostics()).toMatchObject({
       sessions: 0,

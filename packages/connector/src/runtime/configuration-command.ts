@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { readRuntimeCredential } from '../config/credential.ts'
 import { readProvisioningConfig } from '../config/provisioning.ts'
 import { credentialLookupId } from '../config/signalling.ts'
@@ -30,7 +31,7 @@ export interface ConfigurationCommandInput {
   /** Test seams; production uses the real HTTPS fetch, `ws` and telemetry runtime. */
   issuerFetch?: IssuerFetch
   socket?: () => Promise<ConfigurationSocket>
-  startRuntime?: (signal: AbortSignal) => Promise<void>
+  startRuntime?: (signal: AbortSignal, configPath: string) => Promise<void>
   clock?: () => number
 }
 
@@ -106,10 +107,10 @@ export async function runConfigurationConnector(
     throw new Error('Credential does not match provisioning scope')
   const startRuntime =
     input.startRuntime ??
-    (async (signal: AbortSignal) => {
+    (async (signal: AbortSignal, configPath: string) => {
       const { runConnectorAgent } = await import('./agent.ts')
       await runConnectorAgent({
-        configPath: config.runtimeConfigPath,
+        configPath,
         credentialPath: input.credentialPath,
         dataDirectory: input.dataDirectory,
         signal,
@@ -120,16 +121,11 @@ export async function runConfigurationConnector(
     runtimeConfigPath: config.runtimeConfigPath,
     scope: { agent_id: config.agent_id, farm_id: config.farm_id },
     start: startRuntime,
+    snapshotPath: join(config.stateDirectory, 'collection-snapshot.json'),
     onDiagnostic: input.onDiagnostic,
   })
   const issuers = createConfigurationIssuerSource({
     farmOrigin: config.farmOrigin,
-    credential: () => {
-      const value = credential()
-      return value
-        ? { token: value.token, agentId: value.agentId, farmId: value.farmId }
-        : null
-    },
     ...(input.issuerFetch ? { fetch: input.issuerFetch } : {}),
     clock,
   })

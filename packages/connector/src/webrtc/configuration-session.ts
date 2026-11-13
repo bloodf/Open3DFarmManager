@@ -23,7 +23,7 @@ import {
   type SignedConfigurationReceipt,
 } from '../../../farm-protocol/src/configuration-receipt.ts'
 import { ConnectorIdentity } from '../identity/store.ts'
-import type { InventoryAcknowledgement } from '../provisioning/authority.ts'
+import type { InventoryConfirmationInput } from '../provisioning/authority.ts'
 import { errorFrame } from '../provisioning/receipts.ts'
 import type { ConfigurationAuthority } from '../runtime/configuration-authority.ts'
 import type { ConfigurationIssuerSource } from '../runtime/configuration-issuer.ts'
@@ -58,8 +58,7 @@ export interface ConfigurationRequestHandler {
     context: unknown
   }): Promise<ConfigurationResponseFrame>
   confirmInventory(
-    ack: InventoryAcknowledgement,
-    attestation: string,
+    request: InventoryConfirmationInput,
   ): Promise<InventoryOutcome>
 }
 
@@ -256,15 +255,20 @@ export class ConfigurationConnectorSession {
         this.#ownProof,
         { role: 'connector', ...descriptions },
       )
+      const verifiedHash = verified
+        ? await configurationBindingHash(verified)
+        : undefined
       if (
         this.#terminal ||
         !verified ||
-        (await configurationBindingHash(verified)) !== this.#bindingHash ||
+        verifiedHash === undefined ||
+        verifiedHash !== this.#bindingHash ||
         !configurationFresh(this.#binding, this.#clock(), this.skew())
       )
         return this.close('proof-rejected')
       this.#closeTransport = this.#options.authority.openTransport(
         this.#binding,
+        verifiedHash,
       )
       this.#state = 'authenticated'
       clearTimeout(this.#authTimer)
@@ -340,17 +344,34 @@ export class ConfigurationConnectorSession {
     if (!this.#terminal) this.respond(response)
   }
 
+  /**
+   * Server inventory confirmation. The context comes from a capability this
+   * very transport already admitted (commit, or a fresh status after a lost
+   * acknowledgement or restart); the signed acknowledgement is only verified
+   * evidence and never opens authority by itself.
+   */
   private async inventory(
     message: Extract<BrowserChannelMessage, { t: 'inventory' }>,
   ): Promise<void> {
-    const outcome = await this.#options.handler.confirmInventory(
-      {
-        operation_id: message.operation_id,
-        local_committed_receipt_sha256: message.local_committed_receipt_sha256,
-        committed_revision: message.committed_revision,
-      },
-      message.attestation,
-    )
+    const binding = this.#binding
+    const context = binding
+      ? this.#options.authority.inventoryContext(
+          binding.transport_id,
+          message.operation_id,
+        )
+      : null
+    const outcome: InventoryOutcome = context
+      ? await this.#options.handler.confirmInventory({
+          ack: {
+            operation_id: message.operation_id,
+            local_committed_receipt_sha256:
+              message.local_committed_receipt_sha256,
+            committed_revision: message.committed_revision,
+          },
+          attestation: message.attestation,
+          context,
+        })
+      : { ok: false, reason: 'rejected' }
     if (this.#terminal) return
     this.transmit({
       v: 1,

@@ -20,6 +20,7 @@ import {
   configurationReceiptHash,
   verifyConfigurationReceipt,
 } from '../../packages/farm-protocol/src/configuration-receipt.ts'
+import { deriveConfigurationAssignmentIdentity } from '../../packages/farm-protocol/src/configuration-inventory.ts'
 import { configurationTargetHash } from '../../packages/farm-protocol/src/configuration-target.ts'
 import type { ConfigurationResponseFrame } from '../../packages/farm-protocol/src/configuration-frames.ts'
 import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
@@ -288,6 +289,17 @@ async function fixture(
     expected_revision: 0,
     ...extra,
   })
+  /** Engine confirmation input (authority context + signed ack wire placeholder). */
+  const inventory = (
+    operation_id: string,
+    local_committed_receipt_sha256: string,
+    committed_revision: number,
+    ctx: Record<string, unknown> = {},
+  ) => ({
+    ack: { operation_id, local_committed_receipt_sha256, committed_revision },
+    attestation: 'verified-by-the-injected-adapter-in-this-engine-unit',
+    context: context('commit', ctx) as never,
+  })
   const responses: ConfigurationResponseFrame[] = []
   const call = async (
     e: ReturnType<typeof engine>,
@@ -363,6 +375,7 @@ async function fixture(
     context,
     target,
     frame,
+    inventory,
     call,
     prepare,
     commit,
@@ -466,20 +479,19 @@ describe('KobraLink provisioning engine (synthetic bridge, mock-only)', () => {
     })
     const pending = await e.pendingInventoryConfirmations()
     expect(pending.map((p) => p.operation_id)).toEqual([op])
-    const ack = {
-      operation_id: op,
-      local_committed_receipt_sha256: await configurationReceiptHash(
-        committed.receipt,
-      ),
-      committed_revision: 1,
-    }
+    const ack = f.inventory(
+      op,
+      await configurationReceiptHash(committed.receipt),
+      1,
+    )
     const confirmed = await e.confirmInventory(ack)
     expect(confirmed).toMatchObject({
       ok: true,
       receipt: { phase: 'inventory-confirmed' },
     })
+    // Idempotent replay is re-authenticated, never answered from the journal alone.
     expect(await e.confirmInventory(ack)).toEqual(confirmed)
-    expect(f.authority.acks).toBe(1)
+    expect(f.authority.acks).toBe(2)
     expect(await e.pendingInventoryConfirmations()).toEqual([])
     expect(posts(f)).toBe(1)
     expectNoSecrets(f)
@@ -920,28 +932,18 @@ describe('KobraLink provisioning engine (synthetic bridge, mock-only)', () => {
       (await restarted.pendingInventoryConfirmations())[0]?.receipt,
     ).toEqual(committed.receipt)
     const hash = await configurationReceiptHash(committed.receipt)
-    expect(
-      await restarted.confirmInventory({
-        operation_id: op,
-        local_committed_receipt_sha256: hash,
-        committed_revision: 2,
-      }),
-    ).toEqual({ ok: false, reason: 'mismatch' })
+    expect(await restarted.confirmInventory(f.inventory(op, hash, 2))).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    })
     f.authority.ackOk = false
-    expect(
-      await restarted.confirmInventory({
-        operation_id: op,
-        local_committed_receipt_sha256: hash,
-        committed_revision: 1,
-      }),
-    ).toEqual({ ok: false, reason: 'rejected' })
+    expect(await restarted.confirmInventory(f.inventory(op, hash, 1))).toEqual({
+      ok: false,
+      reason: 'rejected',
+    })
     f.authority.ackOk = true
     expect(
-      await restarted.confirmInventory({
-        operation_id: op,
-        local_committed_receipt_sha256: hash,
-        committed_revision: 1,
-      }),
+      await restarted.confirmInventory(f.inventory(op, hash, 1)),
     ).toMatchObject({ ok: true })
     expect(await f.simple(restarted, 'cancel', op)).toMatchObject({
       code: 'invalid-request',
@@ -1081,6 +1083,145 @@ describe('KobraLink provisioning engine (synthetic bridge, mock-only)', () => {
     ).toBe(false)
   })
 
+  it('commits the canonical server-derived identity and preserves other assignments exactly', async () => {
+    const f = await fixture()
+    const e = f.engine()
+    const before = f.runtime()
+    const op = randomUUID()
+    const committed = await f.commit(e, op, await f.prepare(e, op))
+    expect(committed).toMatchObject({ state: 'local-committed' })
+    const bridge = f.custody().bridges[0].bridge_instance_id
+    const canonical = await deriveConfigurationAssignmentIdentity({
+      account_id: 'account_1',
+      farm_id: ids.farm,
+      agent_id: ids.agent,
+      bridge_instance_id: bridge,
+      device_id: 'kx-0001',
+    })
+    const runtime = f.runtime()
+    expect(runtime.assignments[0]).toEqual(before.assignments[0])
+    expect(runtime.collection.printers).toEqual(before.collection.printers)
+    expect(runtime.assignments[1]).toMatchObject(canonical)
+    expect(runtime.collection.kobralink.printers[0].printerKey).toBe(
+      canonical.printer_key,
+    )
+    expect([...(await e.unconfirmedAssignmentIds())]).toEqual([
+      canonical.assignment_id,
+    ])
+    // The same stable tuple always yields the same identity, whatever the operation.
+    const again = await deriveConfigurationAssignmentIdentity({
+      account_id: 'account_1',
+      farm_id: ids.farm,
+      agent_id: ids.agent,
+      bridge_instance_id: bridge,
+      device_id: 'kx-0001',
+    })
+    expect(again).toEqual(canonical)
+  })
+
+  it('never takes over or renames a foreign mapping that holds the canonical identity', async () => {
+    const f = await fixture()
+    const e = f.engine()
+    const op = randomUUID()
+    const prepared = await f.prepare(e, op)
+    const canonical = await deriveConfigurationAssignmentIdentity({
+      account_id: 'account_1',
+      farm_id: ids.farm,
+      agent_id: ids.agent,
+      bridge_instance_id: f.custody().bridges[0].bridge_instance_id,
+      device_id: 'kx-0001',
+    })
+    for (const foreign of [
+      { printer_key: canonical.printer_key, assignment_id: randomUUID() },
+      { printer_key: 'manual-key', assignment_id: canonical.assignment_id },
+    ]) {
+      const seeded = f.runtime()
+      seeded.assignments.push({
+        ...seeded.assignments[0],
+        ...foreign,
+      })
+      writeFileSync(f.runtimePath, JSON.stringify(seeded), { mode: 0o600 })
+      const bytes = readFileSync(f.runtimePath, 'utf8')
+      expect(await f.commit(e, op, prepared)).toMatchObject({
+        type: 'error',
+        code: 'identity-conflict',
+      })
+      expect(readFileSync(f.runtimePath, 'utf8')).toBe(bytes)
+      writeFileSync(
+        f.runtimePath,
+        JSON.stringify({ ...seeded, assignments: [seeded.assignments[0]] }),
+        { mode: 0o600 },
+      )
+    }
+  })
+
+  it('confirms only for the same stable owner and key under current authority', async () => {
+    const f = await fixture()
+    const e = f.engine()
+    const op = randomUUID()
+    const committed = await f.commit(e, op, await f.prepare(e, op))
+    if (committed.type !== 'result') throw new Error()
+    const hash = await configurationReceiptHash(committed.receipt)
+    for (const over of [
+      { account_id: 'account_other' },
+      { key_id: randomUUID() },
+      { farm_id: randomUUID() },
+    ])
+      expect(await e.confirmInventory(f.inventory(op, hash, 1, over))).toEqual({
+        ok: false,
+        reason: 'rejected',
+      })
+    f.authority.current = false
+    expect(await e.confirmInventory(f.inventory(op, hash, 1))).toEqual({
+      ok: false,
+      reason: 'rejected',
+    })
+    f.authority.current = true
+    expect((await e.pendingInventoryConfirmations()).length).toBe(1)
+    // A later session of the same owner/key (new credential, new transport) works.
+    expect(
+      await e.confirmInventory(
+        f.inventory(op, hash, 1, {
+          credential_jti: randomUUID(),
+          transport_id: randomUUID(),
+        }),
+      ),
+    ).toMatchObject({ ok: true })
+    expect([...(await e.unconfirmedAssignmentIds())]).toEqual([])
+    // Replay needs authority again and still binds to the owner.
+    f.authority.current = false
+    expect(await e.confirmInventory(f.inventory(op, hash, 1))).toEqual({
+      ok: false,
+      reason: 'rejected',
+    })
+    f.authority.current = true
+    expect(
+      await e.confirmInventory(
+        f.inventory(op, hash, 1, { account_id: 'account_other' }),
+      ),
+    ).toEqual({ ok: false, reason: 'rejected' })
+  })
+
+  it('refuses confirmation when the committed assignment left the runtime file', async () => {
+    const f = await fixture()
+    const e = f.engine()
+    const op = randomUUID()
+    const committed = await f.commit(e, op, await f.prepare(e, op))
+    if (committed.type !== 'result') throw new Error()
+    const hash = await configurationReceiptHash(committed.receipt)
+    const runtime = f.runtime()
+    writeFileSync(
+      f.runtimePath,
+      JSON.stringify({ ...runtime, assignments: [runtime.assignments[0]] }),
+      { mode: 0o600 },
+    )
+    expect(await e.confirmInventory(f.inventory(op, hash, 1))).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    })
+    expect(f.authority.acks).toBe(0)
+  })
+
   it('exposes no arbitrary command, power, upload or camera method', async () => {
     const f = await fixture()
     const e = f.engine()
@@ -1088,6 +1229,7 @@ describe('KobraLink provisioning engine (synthetic bridge, mock-only)', () => {
       'confirmInventory',
       'handle',
       'pendingInventoryConfirmations',
+      'unconfirmedAssignmentIds',
     ])
     expect(vi.isMockFunction(globalThis.fetch)).toBe(false)
   })

@@ -3,18 +3,15 @@ import { runtimeBootstrap } from '../config/provisioning.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { createProvisioningEngine } from '../provisioning/engine.ts'
+import type { InventoryConfirmationInput } from '../provisioning/authority.ts'
 import { readDurableRevision } from '../provisioning/revision.ts'
-import type { InventoryAcknowledgement } from '../provisioning/authority.ts'
 import {
   ConfigurationConnectorSession,
   type ConfigurationExpectedContext,
   type InventoryOutcome,
 } from '../webrtc/configuration-session.ts'
 import type { RuntimeActivator } from './configuration-activation.ts'
-import {
-  createConfigurationAuthority,
-  type InventoryAttestationVerifier,
-} from './configuration-authority.ts'
+import { createConfigurationAuthority } from './configuration-authority.ts'
 import type { ConfigurationIssuerSource } from './configuration-issuer.ts'
 
 export interface ConfigurationRuntimeOptions {
@@ -26,7 +23,6 @@ export interface ConfigurationRuntimeOptions {
   serverOnline: () => boolean
   /** Current unexpired credential JTI, or null. */
   credentialJti: () => string | null
-  inventoryVerifier?: InventoryAttestationVerifier
   fetch?: KobraLinkFetch
   clock?: () => number
   onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void
@@ -60,9 +56,7 @@ export function createConfigurationRuntime(
     clock,
     serverOnline: options.serverOnline,
     credentialJti: options.credentialJti,
-    ...(options.inventoryVerifier
-      ? { inventoryVerifier: options.inventoryVerifier }
-      : {}),
+    issuers: options.issuers,
   })
   const engine = createProvisioningEngine({
     stateDirectory: config.stateDirectory,
@@ -90,9 +84,16 @@ export function createConfigurationRuntime(
     return true
   }
 
+  /**
+   * Starts only confirmed assignments. A new local commit stays out of the
+   * collection snapshot until its authenticated inventory acknowledgement is
+   * durable; if the pending set cannot be read, nothing is (re)started.
+   */
   async function activate(reason: string): Promise<void> {
     try {
-      const result = await options.activator.reload()
+      const result = await options.activator.reload(
+        await engine.unconfirmedAssignmentIds(),
+      )
       report({ kind: 'configuration-activation', reason, result })
     } catch {
       report({ kind: 'configuration-activation', reason, result: 'failed' })
@@ -111,15 +112,10 @@ export function createConfigurationRuntime(
       return response
     },
     async confirmInventory(
-      ack: InventoryAcknowledgement,
-      attestation: string,
+      request: InventoryConfirmationInput,
     ): Promise<InventoryOutcome> {
       try {
-        const outcome = await authority.withAttestation(
-          ack.operation_id,
-          attestation,
-          () => engine.confirmInventory(ack),
-        )
+        const outcome = await engine.confirmInventory(request)
         if (outcome.ok) await activate('inventory-confirmed')
         return outcome
       } catch {

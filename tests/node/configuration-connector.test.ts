@@ -201,6 +201,7 @@ async function setup() {
     activator: createRuntimeActivator({
       runtimeConfigPath: config.runtimeConfigPath,
       scope: { agent_id: ids.agent, farm_id: ids.farm },
+      snapshotPath: join(dir, 'state', 'collection-snapshot.json'),
       start: (signal) =>
         new Promise<void>((resolve) => {
           starts++
@@ -464,7 +465,8 @@ test('real loopback config RTC: proofs, prepare, commit and runtime activation',
       'local-committed',
     )
     assert.equal(s.service.state.creates, 1)
-    assert.equal(s.starts(), 1)
+    // Unconfirmed: the local commit alone never starts collection.
+    assert.equal(s.starts(), 0)
     const runtimeConfig = readAgentRuntimeConfig(s.config.runtimeConfigPath, {
       agent_id: s.ids.agent,
       farm_id: s.ids.farm,

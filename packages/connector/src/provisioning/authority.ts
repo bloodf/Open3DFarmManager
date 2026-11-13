@@ -39,15 +39,33 @@ export interface InventoryAcknowledgement {
 }
 
 /**
+ * Everything the adapter needs to authenticate one server inventory
+ * acknowledgement. `attestation` is the server-signed `inventoryAckWire`.
+ * `context` comes from the authenticated session and admitted capability, never
+ * from the browser message; `expected` is the canonical local identity of the
+ * committed assignment. The signed acknowledgement is not command authority.
+ */
+export interface InventoryConfirmationInput {
+  ack: InventoryAcknowledgement
+  attestation: string
+  context: ProvisioningContext
+}
+export interface InventoryAcknowledgementRequest extends InventoryConfirmationInput {
+  expected: { assignment_id: string; printer_key: string }
+}
+
+/**
  * Narrow adapter supplied by the Connector integration. `isCurrent` must
  * check live role (owner/admin), revocation of account, key, credential and
- * RTC session. `acceptsInventoryAck` must authenticate the server-side
- * inventory confirmation. Neither is implemented here: production wiring is
- * the next unit and this module makes no claim about a deployed authority.
+ * RTC session. `acceptsInventoryAck` must authenticate the server-signed
+ * inventory confirmation against trusted issuer state. This module makes no
+ * claim about a deployed authority; the Connector runtime supplies it.
  */
 export interface ProvisioningAuthorityAdapter {
   isCurrent(context: ProvisioningContext): Promise<boolean>
-  acceptsInventoryAck(ack: InventoryAcknowledgement): Promise<boolean>
+  acceptsInventoryAck(
+    request: InventoryAcknowledgementRequest,
+  ): Promise<boolean>
 }
 
 const trusted = new WeakSet<object>()

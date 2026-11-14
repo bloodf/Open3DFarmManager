@@ -14,6 +14,7 @@ import {
   type FarmSort,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
+import { farmJobView } from '../utils/farm-job-view.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
@@ -707,9 +708,34 @@ function dateLabel(time: number) {
                         </dd>
                       </div>
                     </dl>
+                    <dl aria-label="Trabalho atual">
+                      <div v-if="farmJobView(row.observation.state).filename">
+                        <dt>Arquivo</dt>
+                        <dd>
+                          {{ farmJobView(row.observation.state).filename }}
+                        </dd>
+                      </div>
+                      <div v-if="farmJobView(row.observation.state).layer">
+                        <dt>Camada</dt>
+                        <dd>{{ farmJobView(row.observation.state).layer }}</dd>
+                      </div>
+                      <div v-if="farmJobView(row.observation.state).elapsed">
+                        <dt>Tempo decorrido</dt>
+                        <dd>
+                          {{ farmJobView(row.observation.state).elapsed }}
+                        </dd>
+                      </div>
+                      <div v-if="farmJobView(row.observation.state).remaining">
+                        <dt>Tempo restante estimado</dt>
+                        <dd>
+                          {{ farmJobView(row.observation.state).remaining }}
+                        </dd>
+                      </div>
+                    </dl>
                     <p
                       v-if="
-                        row.observation.state.state === 'printing' &&
+                        (row.observation.state.state === 'printing' ||
+                          row.observation.state.state === 'paused') &&
                         row.observation.state.progress !== undefined
                       "
                     >
@@ -724,9 +750,6 @@ function dateLabel(time: number) {
                           Math.round(row.observation.state.progress * 100)
                         }}%</span
                       >
-                    </p>
-                    <p v-else-if="row.observation.state.progress === undefined">
-                      Progresso indisponível.
                     </p>
                   </template>
                   <section

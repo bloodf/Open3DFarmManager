@@ -1,3 +1,4 @@
+import { AnycubicBinding } from '../config/anycubic.ts'
 import { CrealityBinding } from '../config/creality.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
@@ -186,5 +187,33 @@ export function provisionCrealityPrinter(
 export function readCrealityPrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding)
     ? (crealityBindings.get(binding) ?? null)
+    : null
+}
+
+const anycubicBindings = new WeakMap<
+  PrinterBinding,
+  z.infer<typeof AnycubicBinding>
+>()
+export function provisionAnycubicPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(AnycubicBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw Error('Anycubic assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  anycubicBindings.set(binding, local)
+  return binding
+}
+export function readAnycubicPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (anycubicBindings.get(binding) ?? null)
     : null
 }

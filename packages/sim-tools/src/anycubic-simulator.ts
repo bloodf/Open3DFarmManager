@@ -74,7 +74,7 @@ export async function startAnycubicSimulator({
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
   confirmCommands?: boolean
 } = {}) {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
+  if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
   let gcodeState = initialState
@@ -163,8 +163,10 @@ export async function startAnycubicSimulator({
               const length = body.readUInt16BE(2)
               if (body.length !== length + 5 || body.at(-1) !== 0)
                 throw new Error('Only QoS 0 supported')
-              const accepted =
-                body.subarray(4, 4 + length).toString() === reportTopic
+              const accepted = [
+                reportTopic,
+                reportTopic.replace('/info/report', '/+/report'),
+              ].includes(body.subarray(4, 4 + length).toString())
               if (accepted) subscribed.add(socket)
               socket.write(
                 Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),

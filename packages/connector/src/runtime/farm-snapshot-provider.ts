@@ -1,7 +1,4 @@
-import {
-  controlsForBackend,
-  type ExtendedControlAction,
-} from '../../../farm-protocol/src/control-actions.ts'
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -112,15 +109,8 @@ export function createFarmSnapshotSource(input: {
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
       const controls = input.controlsFor?.(ref.assignmentId)
-      const advertisedControls = controls
-        ? controls.length > 0
-          ? { controls: [...controls] }
-          : {}
-        : entry.status
-          ? { controls: controlsForBackend('moonraker') }
-          : entry.printer.state === 'offline'
-            ? {}
-            : { controls: controlsForBackend('readonly') }
+      const advertisedControls =
+        controls && controls.length > 0 ? { controls: [...controls] } : {}
       const { controls: _untrustedControls, ...printer } = entry.printer
       printers.push(
         PrinterState.parse({

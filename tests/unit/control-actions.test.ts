@@ -133,6 +133,11 @@ test('snapshots expose backend controls and strip untrusted advertised controls'
   }))
   const source = createFarmSnapshotSource({
     assignmentRefs: refs,
+    controlsFor: (assignmentId) =>
+      controlsForBackend(
+        refs.find((ref) => ref.assignmentId === assignmentId)?.printerKey ??
+          'unknown',
+      ),
     nowMono: () => 100,
   })
   const base = { epoch: 1, receivedAtMonoMs: 100 }

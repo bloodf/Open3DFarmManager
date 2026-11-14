@@ -19,10 +19,17 @@ function snapshot(overrides: Record<string, unknown>) {
 test('synthetic complete snapshot projects only supported fields with the local observation clock', () => {
   expect(parseMoonrakerSnapshot(wire, context)).toEqual({
     sourceEventtime: 42.5,
-    printer: { ...context, state: 'printing', progress: 0.25 },
+    printer: {
+      ...context,
+      state: 'printing',
+      progress: 0.25,
+      filename: 'synthetic-test.gcode',
+      printDuration: 120,
+      estimatedRemainingSeconds: 360,
+    },
   })
-  expect(JSON.stringify(parseMoonrakerSnapshot(wire, context))).not.toContain(
-    'filename',
+  expect(JSON.stringify(parseMoonrakerSnapshot(wire, context))).toContain(
+    '"filename":"synthetic-test.gcode"',
   )
   expect(fixture.result.status.print_stats.state).toBe('printing')
 })

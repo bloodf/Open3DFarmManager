@@ -7,6 +7,7 @@ const { WebSocketServer } = await import('ws')
 export async function pauseFixture(
   input: {
     query?: (index: number, socket: WebSocket, id: number) => boolean
+    initialState?: 'printing' | 'paused'
     pause?: (socket: WebSocket, id: number) => boolean
   } = {},
 ) {
@@ -26,6 +27,7 @@ export async function pauseFixture(
     method: string
     params?: unknown
   }> = []
+  let printState: string = input.initialState ?? 'printing'
   let connections = 0,
     queries = 0,
     pauses = 0,
@@ -66,17 +68,27 @@ export async function pauseFixture(
               eventtime: index,
               status: {
                 webhooks: { state: 'ready' },
-                print_stats: { state: pauses ? 'paused' : 'printing' },
+                print_stats: { state: printState },
               },
             },
           }),
         )
       } else if (request.method === 'printer.print.pause') {
         pauses++
+        printState = 'paused'
         if (!input.pause?.(socket, request.id))
           socket.send(
             JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
           )
+      } else if (
+        request.method === 'printer.print.resume' ||
+        request.method === 'printer.print.cancel'
+      ) {
+        printState =
+          request.method === 'printer.print.resume' ? 'printing' : 'cancelled'
+        socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
+        )
       } else socket.terminate()
     })
   })

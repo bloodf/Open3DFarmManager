@@ -1,3 +1,5 @@
+import { MOONRAKER_CONTROLS } from '../../../farm-protocol/src/control-actions.ts'
+import type { ControlDriver } from '../control/control-driver.ts'
 import { openFixedMoonrakerPause } from '../moonraker/pause-driver.ts'
 import {
   readPrinterBinding,
@@ -18,7 +20,7 @@ export function createPauseDriverRouter(config: {
     binding: PrinterBinding,
     observation: ControlObservation | null,
   ): boolean
-}): PreparedPauseDriver {
+}): ControlDriver {
   type Attempt = {
     driver: ReturnType<typeof openFixedMoonrakerPause>
     detach(): void
@@ -26,6 +28,8 @@ export function createPauseDriverRouter(config: {
   const generations = new Map<PrinterBinding, number>()
   const attempts = new Map<PrinterBinding, Attempt>()
   return Object.freeze({
+    controls: (binding: PrinterBinding) =>
+      readPrinterBinding(binding) ? MOONRAKER_CONTROLS : [],
     async prepare({
       binding,
       signal,

@@ -13,7 +13,7 @@ export const MAX_COMMAND_V2_LIFETIME_MS = 5000
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const fields = {
   v: z.literal(2),
-  purpose: z.literal('printer-pause'),
+  purpose: z.enum(['printer-pause', 'printer-control']),
   cmd_id: BrowserDeviceUuid,
   farm_id: BrowserDeviceUuid,
   agent_id: BrowserDeviceUuid,
@@ -22,7 +22,7 @@ const fields = {
   transport_id: BrowserDeviceUuid,
   capability_id: BrowserDeviceUuid,
   assignment_id: BrowserDeviceUuid,
-  action: z.literal('pause'),
+  action: z.enum(['pause', 'resume', 'cancel']),
   args: z.strictObject({}),
   issued_at: time,
   expires_at: time,
@@ -31,7 +31,14 @@ const fields = {
 const lifetime = (value: { issued_at: number; expires_at: number }) =>
   value.expires_at > value.issued_at &&
   value.expires_at - value.issued_at <= MAX_COMMAND_V2_LIFETIME_MS
-export const UnsignedCommandV2 = z.strictObject(fields).refine(lifetime)
+const validActionPurpose = (value: { purpose: string; action: string }) =>
+  value.action === 'pause'
+    ? value.purpose === 'printer-pause'
+    : value.purpose === 'printer-control'
+export const UnsignedCommandV2 = z
+  .strictObject(fields)
+  .refine(lifetime)
+  .refine(validActionPurpose)
 export type UnsignedCommandV2 = z.infer<typeof UnsignedCommandV2>
 export const SignedCommandV2 = z
   .strictObject({
@@ -39,6 +46,7 @@ export const SignedCommandV2 = z
     sig: z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/),
   })
   .refine(lifetime)
+  .refine(validActionPurpose)
 export type SignedCommandV2 = z.infer<typeof SignedCommandV2>
 export const CommandV2 = UnsignedCommandV2
 export type CommandV2 = UnsignedCommandV2

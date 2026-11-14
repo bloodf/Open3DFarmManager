@@ -9,7 +9,7 @@ import {
   provisionReadonlyPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
-import { readPrivateJsonFile } from './local.ts'
+import { readVersionedRuntimeConfig } from './version.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
 import { parsePauseRuntimeConfig } from './pause.ts'
@@ -56,9 +56,7 @@ export function readAgentRuntimeConfig(
   path: string,
   credential: Pick<RuntimeCredential, 'agent_id' | 'farm_id'>,
 ) {
-  const input = Runtime.parse(
-    readPrivateJsonFile(path, { maxBytes: 64 * 1024 }),
-  )
+  const input = Runtime.parse(readVersionedRuntimeConfig(path))
   const collection = parseCollectorConfig(input.collection)
   if (input.version !== collection.version)
     throw Error('Runtime collection version mismatch')

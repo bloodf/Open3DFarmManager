@@ -175,6 +175,10 @@ export function createBambuRuntimeSubscription(input: {
             }
             observed.materials = [...merged.values()]
           }
+          if (observed.fans)
+            observed.fans = { ...fields.fans, ...observed.fans }
+          if (observed.light)
+            observed.light = { ...fields.light, ...observed.light }
           fields = { ...fields, ...observed }
           publish()
         },

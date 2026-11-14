@@ -335,6 +335,8 @@ describe('Bambu Report Decoder', () => {
         toolTemperatureCelsius: 24.5,
         bedTemperatureCelsius: 23.0,
         filename: 'test_print.gcode',
+        fans: { part: 0 },
+        light: { chamber: true },
       })
 
       // Check that extraneous keys are not attached to observation
@@ -342,6 +344,8 @@ describe('Bambu Report Decoder', () => {
         [
           'bedTemperatureCelsius',
           'filename',
+          'fans',
+          'light',
           'kind',
           'progress',
           'state',

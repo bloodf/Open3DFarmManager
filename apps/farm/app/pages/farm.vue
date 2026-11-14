@@ -602,8 +602,7 @@ function dateLabel(time: number) {
                     </h4>
                     <p>
                       Qualificação provisória de modelo; firmware não
-                      qualificado. Nenhum painel KobraLink, segundo login ou
-                      comando remoto é exposto.
+                      qualificado. Comandos remotos não estão disponíveis.
                     </p>
                     <dl>
                       <div

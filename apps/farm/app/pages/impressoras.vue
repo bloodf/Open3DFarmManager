@@ -1389,14 +1389,10 @@ onBeforeRouteLeave(clear)
     >
       <h2 id="kobra-x-heading">Adicionar Anycubic Kobra X</h2>
       <p id="kobra-x-intro">
-        Configure uma Anycubic Kobra X diretamente no OpenFarm por sessão WebRTC
-        autenticada (config-v1) com o Connector, sem abrir o KobraLink e sem
-        segundo login ou painel externo. A impressora precisa estar com o
-        <strong>Modo LAN</strong> ativado (porta TCP 18910) na rede local do
-        Connector. A qualificação do modelo Anycubic Kobra X é
-        <strong>provisória</strong> e o firmware permanece
-        <strong>não qualificado</strong>: o dispositivo opera exclusivamente em
-        modo somente leitura.
+        Adicione sua Anycubic Kobra X aqui no OpenFarm. Ative o
+        <strong>Modo LAN</strong> e use a rede local do Connector (porta TCP
+        18910). A compatibilidade do modelo, firmware e hardware permanece em
+        validação. Este adaptador opera somente em modo de leitura.
       </p>
       <p
         v-if="kobraError"
@@ -1456,7 +1452,8 @@ onBeforeRouteLeave(clear)
         </template>
         <p v-else-if="kobraKeyMessage">
           {{ kobraKeyMessage }}
-          <NuxtLink to="/dispositivos"
+          {{ ' '
+          }}<NuxtLink to="/dispositivos"
             >Gerenciar dispositivos do navegador</NuxtLink
           >
         </p>
@@ -1506,8 +1503,7 @@ onBeforeRouteLeave(clear)
             aria-describedby="kobra-x-intro kobra-ip-help"
           />
           <p id="kobra-ip-help">
-            Somente IPv4 privado na LAN (ex.: 192.168.1.50). A porta 18910 é
-            fixa; a URL de gerenciamento da ponte fica restrita ao Connector.
+            Informe um IPv4 privado na LAN (ex.: 192.168.1.50).
           </p>
           <label for="kobra-label"
             >Apelido local para identificação (opcional)</label
@@ -1520,8 +1516,7 @@ onBeforeRouteLeave(clear)
             aria-describedby="kobra-label-help"
           />
           <p id="kobra-label-help">
-            De 0 a 64 caracteres visíveis. A chave canônica (kobra-x-…) será
-            gerada a partir da identidade verificada da impressora.
+            Apelido opcional com até 64 caracteres visíveis.
           </p>
           <label for="kobra-device-id"
             >Identidade esperada do dispositivo — device_id (opcional)</label
@@ -1535,9 +1530,7 @@ onBeforeRouteLeave(clear)
             aria-describedby="kobra-device-id-help"
           />
           <p id="kobra-device-id-help">
-            Opcional na primeira configuração. Quando preenchido, exige que a
-            impressora encontrada no IP informado tenha exatamente este
-            device_id.
+            Se já conhecer a identidade esperada, informe-a para conferência.
           </p>
           <div class="kobra-actions">
             <button

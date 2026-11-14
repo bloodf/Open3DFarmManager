@@ -18,21 +18,31 @@ import {
  * browser -> Connector
  *   { v:1, t:'proof', proof }                         browser session proof
  *   { v:1, t:'request', frame, capability, admission } one config-v1 action
+ *   { v:1, t:'discovery', frame, capability, admission } scan with a status
+ *     capability whose target is the domain-separated discovery intent hash
  *   { v:1, t:'inventory', operation_id, local_committed_receipt_sha256,
  *     committed_revision, attestation }               server inventory confirmation
  * Connector -> browser
  *   { v:1, t:'proof', proof }                         Connector session proof
- *   { v:1, t:'response', frame }                      config-v1 response frame
+ *   { v:1, t:'response', frame }                      config-v1 or discovery result
  *   { v:1, t:'inventory-result', operation_id, ok, reason, receipt }
  */
 export const CONFIGURATION_CHANNEL_LABEL = 'configuration-v1'
-export const MAX_CONFIGURATION_CHANNEL_BYTES = 40_000
+// Includes worst-case JSON escaping of 64 bounded discovery records.
+export const MAX_CONFIGURATION_CHANNEL_BYTES = 128_000
 const revision = z.number().int().min(1).max(2_147_483_646)
 const proofWire = z.string().min(1).max(MAX_CONFIGURATION_PROOF_WIRE_BYTES)
 const frameWire = z.string().min(1).max(MAX_CONFIGURATION_FRAME_WIRE_BYTES)
 
 export const BrowserChannelMessage = z.discriminatedUnion('t', [
   z.strictObject({ v: z.literal(1), t: z.literal('proof'), proof: proofWire }),
+  z.strictObject({
+    v: z.literal(1),
+    t: z.literal('discovery'),
+    frame: frameWire,
+    capability: proofWire,
+    admission: proofWire,
+  }),
   z.strictObject({
     v: z.literal(1),
     t: z.literal('request'),
@@ -63,7 +73,7 @@ export const ConnectorChannelMessage = z.discriminatedUnion('t', [
   z.strictObject({
     v: z.literal(1),
     t: z.literal('response'),
-    frame: frameWire,
+    frame: z.string().min(1).max(60_000),
   }),
   z.strictObject({
     v: z.literal(1),
@@ -80,7 +90,7 @@ const limits = {
   maxBytes: MAX_CONFIGURATION_CHANNEL_BYTES,
   maxDepth: 2,
   maxValues: 16,
-  maxStringChars: MAX_CONFIGURATION_FRAME_WIRE_BYTES,
+  maxStringChars: 60_000,
 }
 
 function codec<T>(schema: z.ZodType<T>) {

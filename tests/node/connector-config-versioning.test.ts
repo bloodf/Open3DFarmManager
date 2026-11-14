@@ -41,3 +41,26 @@ test('backs up original bytes, migrates once, and refuses newer versions', () =>
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('current bytes and ordinary legacy runtime reads stay unchanged', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'connector-version-'))
+  try {
+    const path = join(dir, 'config.json')
+    for (const original of [
+      '{"version":1}',
+      '{"version":1,"schemaVersion":2}',
+    ]) {
+      writeFileSync(path, original, { mode: 0o600 })
+      assert.deepEqual(readVersionedRuntimeConfig(path, false), { version: 1 })
+      assert.equal(readFileSync(path, 'utf8'), original)
+    }
+    readVersionedRuntimeConfig(path)
+    assert.equal(readFileSync(path, 'utf8'), '{"version":1,"schemaVersion":2}')
+    for (let i = 0; i < 2; i++) {
+      writeFileSync(path, '{"version":1}')
+      assert.deepEqual(readVersionedRuntimeConfig(path), { version: 1 })
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

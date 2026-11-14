@@ -53,7 +53,7 @@ const commandWire = (action: ControlAction) =>
       pause: 'printer.print.pause',
       resume: 'printer.print.resume',
       cancel: 'printer.print.cancel',
-    }[action],
+    }[action as 'pause' | 'resume' | 'cancel'],
   })
 const queryWire = (id: number) =>
   JSON.stringify({

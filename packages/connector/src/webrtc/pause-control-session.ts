@@ -1,3 +1,4 @@
+import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import { z } from 'zod'
 import {
@@ -10,6 +11,7 @@ import {
 } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
   ControlSessionBinding,
+  controlBindingHash,
   decodeControlProof,
   encodeControlProof,
   signControlSessionProof,
@@ -93,6 +95,7 @@ type Identity =
   | { role: 'browser'; privateKey: CryptoKey }
 export type PauseSessionOptions = Identity & {
   expected: PauseExpectedContext
+  getAdmittedHandle?(transportId: string): PauseCapabilityHandle | undefined
   authDeadline?: number
   lifetimeDeadline?: number
   send(wire: string): void
@@ -170,6 +173,7 @@ export class PauseControlSession {
   #queue: BoundedReceive
   #work = new Set<Promise<unknown>>()
   #admitting = 0
+  #bindingHash: string | undefined
   #binding: ControlSessionBinding | undefined
   #terminal: string | undefined
   #activated = false
@@ -233,6 +237,15 @@ export class PauseControlSession {
       () => this.close('expired'),
       Math.max(0, this.#lifetimeDeadline - now),
     )
+  }
+  get admittedHandle(): PauseCapabilityHandle | undefined {
+    if (!this.current() || !this.#notified || !this.#binding) return undefined
+    const handle = this.#options.getAdmittedHandle?.(this.#binding.transport_id)
+    const capability = handle?.current
+    return capability?.transport_id === this.#binding.transport_id &&
+      capability.control_binding_sha256 === this.#bindingHash
+      ? handle
+      : undefined
   }
   get active(): boolean {
     return this.current()
@@ -300,6 +313,8 @@ export class PauseControlSession {
     assertPauseExpected(binding, this.#options.expected)
     Object.freeze(binding.browser_public_key)
     this.#binding = Object.freeze(binding)
+    this.#bindingHash = await controlBindingHash(binding)
+    if (!this.current()) return
     this.#lifetimeDeadline = Math.min(
       this.#lifetimeDeadline,
       performance.now() + binding.expires_at - Date.now(),

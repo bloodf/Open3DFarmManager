@@ -1,4 +1,4 @@
-import { ControlAction, ControlArguments } from './control-actions.ts'
+import { ExtendedControlAction, ControlArguments } from './control-actions.ts'
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
@@ -23,7 +23,7 @@ const fields = {
   transport_id: BrowserDeviceUuid,
   capability_id: BrowserDeviceUuid,
   assignment_id: BrowserDeviceUuid,
-  action: ControlAction,
+  action: ExtendedControlAction,
   args: z.record(z.string(), z.unknown()),
   issued_at: time,
   expires_at: time,

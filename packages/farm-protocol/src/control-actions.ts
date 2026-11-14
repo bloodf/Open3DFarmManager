@@ -1,9 +1,11 @@
 import { z } from 'zod'
 
-export const ControlAction = z.enum([
-  'pause',
-  'resume',
-  'cancel',
+/** Lifecycle actions; the dashboard labels and state machine cover exactly these. */
+export const ControlAction = z.enum(['pause', 'resume', 'cancel'])
+export type ControlAction = z.infer<typeof ControlAction>
+/** Every action a signed 'printer-control' command may carry. */
+export const ExtendedControlAction = z.enum([
+  ...ControlAction.options,
   'emergency_stop',
   'set_temperature',
   'set_fan',
@@ -13,7 +15,7 @@ export const ControlAction = z.enum([
   'start_print',
   'firmware_restart',
 ])
-export type ControlAction = z.infer<typeof ControlAction>
+export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
   'pause',
   'resume',
@@ -26,7 +28,7 @@ export function controlRoleAllowed(role: string): boolean {
   return ['owner', 'admin', 'operator'].includes(role)
 }
 export function controlSourceState(
-  action: ControlAction,
+  action: ExtendedControlAction,
   state: string,
 ): boolean {
   if (!['pause', 'resume', 'cancel'].includes(action))
@@ -38,7 +40,7 @@ export function controlSourceState(
       : state === 'printing'
 }
 export function controlTargetState(
-  action: ControlAction,
+  action: ExtendedControlAction,
 ): 'paused' | 'printing' | 'cancelled' {
   return action === 'pause'
     ? 'paused'

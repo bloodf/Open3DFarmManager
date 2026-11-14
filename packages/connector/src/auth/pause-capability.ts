@@ -52,7 +52,7 @@ export type PauseCapabilitySnapshot = Readonly<
   readonly browser_public_key: Readonly<
     SignedPauseCapabilityV1['browser_public_key']
   >
-  readonly actions: readonly import('../../../farm-protocol/src/control-actions.ts').ControlAction[]
+  readonly actions: readonly import('../../../farm-protocol/src/control-actions.ts').ExtendedControlAction[]
 }
 type ClockSample = Readonly<{ wall: number; mono: number }>
 class PeerHandle {

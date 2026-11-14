@@ -1,4 +1,4 @@
-import { ControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   encodeCommandV2,
@@ -112,7 +112,7 @@ export type PauseCommandClient = Readonly<{
   /** Requests the single pause command of this session. */
   pause(): Promise<PauseCommandOutcome>
   issueControlCommand(
-    action: ControlAction,
+    action: ExtendedControlAction,
     args?: Record<string, unknown>,
   ): Promise<PauseCommandOutcome>
   /** Ends the client. Every later send is permanently sealed. */
@@ -371,7 +371,7 @@ export function createPauseCommandClient(
     return issued
   }
   async function runPause(
-    action: ControlAction,
+    action: ExtendedControlAction,
     args: Record<string, unknown> = {},
   ): Promise<PauseCommandOutcome> {
     try {
@@ -472,10 +472,10 @@ export function createPauseCommandClient(
   }
   armSession()
   function issueControlCommand(
-    action: ControlAction,
+    action: ExtendedControlAction,
     args: Record<string, unknown> = {},
   ): Promise<PauseCommandOutcome> {
-    if (aborted || reserved || !ControlAction.safeParse(action).success)
+    if (aborted || reserved || !ExtendedControlAction.safeParse(action).success)
       return Promise.resolve('rejected')
     reserved = true
     return track(runPause(action, args))

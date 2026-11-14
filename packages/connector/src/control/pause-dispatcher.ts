@@ -6,6 +6,7 @@ import {
   controlSourceState,
   controlTargetState,
   type ControlAction,
+  type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -69,7 +70,7 @@ export type PauseRpcResult = { acknowledged: boolean }
  */
 export interface PauseDriver {
   execute?(
-    action: ControlAction,
+    action: ExtendedControlAction,
     args: Record<string, unknown>,
     input: {
       binding: PrinterBinding
@@ -77,17 +78,17 @@ export interface PauseDriver {
       signal: AbortSignal
     },
   ): Promise<PauseRpcResult>
-  controls?(binding: PrinterBinding): readonly ControlAction[]
+  controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   pauseOnce(input: {
     args?: Record<string, unknown>
-    action?: 'pause' | 'resume' | 'cancel'
+    action?: ControlAction
     binding: PrinterBinding
     beforeSend(): boolean
     signal: AbortSignal
   }): Promise<PauseRpcResult>
   waitForPaused(input: {
     args?: Record<string, unknown>
-    action?: 'pause' | 'resume' | 'cancel'
+    action?: ControlAction
     binding: PrinterBinding
     after: ObservationCursor
     signal: AbortSignal
@@ -655,7 +656,7 @@ export function createPauseDispatcher(config: {
                 signal: controller.signal,
               })
             : driver.pauseOnce({
-                action: command.action as 'pause' | 'resume' | 'cancel',
+                action: command.action as ControlAction,
                 args: command.args,
                 binding: printerBinding,
                 beforeSend,
@@ -693,7 +694,7 @@ export function createPauseDispatcher(config: {
             return
           }
           const paused = await driver.waitForPaused({
-            action: command.action as 'pause' | 'resume' | 'cancel',
+            action: command.action as ControlAction,
             args: command.args,
             binding: printerBinding,
             after: cursor,

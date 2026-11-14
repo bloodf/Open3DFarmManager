@@ -8,20 +8,29 @@ export const DISCOVERY_TIMEOUT_MS = 5000
 export const MAX_DISCOVERY_RESULTS = 64
 
 // A status capability for an ordinary printer target cannot authorize a scan.
-export async function discoveryTargetHash(): Promise<string> {
+export const ProbeHost = z.ipv4()
+
+export async function discoveryTargetHash(host?: string): Promise<string> {
+  if (host !== undefined) ProbeHost.parse(host)
   return base64url(
     new Uint8Array(
       await crypto.subtle.digest(
         'SHA-256',
         new TextEncoder().encode(
-          'Open3DFarmManager/configuration-discovery/v1\0',
+          host === undefined
+            ? 'Open3DFarmManager/configuration-discovery/v1\0'
+            : 'Open3DFarmManager/configuration-probe/v1\0' + host,
         ),
       ),
     ),
   )
 }
 
-export async function discoveryRequest(requestId: string, operationId: string) {
+export async function discoveryRequest(
+  requestId: string,
+  operationId: string,
+  host?: string,
+) {
   return ConfigurationStatusRequest.parse({
     v: 1,
     protocol: 'config-v1',
@@ -29,7 +38,7 @@ export async function discoveryRequest(requestId: string, operationId: string) {
     request_id: requestId,
     operation_id: operationId,
     expected_revision: 0,
-    target_sha256: await discoveryTargetHash(),
+    target_sha256: await discoveryTargetHash(host),
   })
 }
 
@@ -39,7 +48,7 @@ const text = z
   .max(128)
   .regex(/^[\x20-\x7e]+$/)
 export const DiscoveryPrinter = z.object({
-  vendor: z.enum(['bambu', 'moonraker']),
+  vendor: z.enum(['bambu', 'moonraker', 'creality', 'anycubic']),
   host: z.ipv4(),
   port: z.number().int().min(1).max(65535).optional(),
   serial: text.optional(),

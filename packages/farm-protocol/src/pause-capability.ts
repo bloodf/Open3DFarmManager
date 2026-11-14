@@ -85,7 +85,7 @@ const fields = {
   actions: z
     .array(ControlAction)
     .min(1)
-    .max(3)
+    .max(11)
     .refine((actions) => new Set(actions).size === actions.length),
 }
 const lifetime = (value: { issued_at: number; expires_at: number }) =>

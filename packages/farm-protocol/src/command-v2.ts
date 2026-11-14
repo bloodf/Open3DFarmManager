@@ -1,3 +1,4 @@
+import { ControlAction, ControlArguments } from './control-actions.ts'
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
@@ -22,8 +23,8 @@ const fields = {
   transport_id: BrowserDeviceUuid,
   capability_id: BrowserDeviceUuid,
   assignment_id: BrowserDeviceUuid,
-  action: z.enum(['pause', 'resume', 'cancel']),
-  args: z.strictObject({}),
+  action: ControlAction,
+  args: z.record(z.string(), z.unknown()),
   issued_at: time,
   expires_at: time,
   nonce: z.string().regex(/^[A-Za-z0-9_-]{21}[AQgw]$/),
@@ -37,6 +38,11 @@ const validActionPurpose = (value: { purpose: string; action: string }) =>
     : value.purpose === 'printer-control'
 export const UnsignedCommandV2 = z
   .strictObject(fields)
+  .refine(
+    (value) =>
+      ControlArguments.safeParse({ action: value.action, args: value.args })
+        .success,
+  )
   .refine(lifetime)
   .refine(validActionPurpose)
 export type UnsignedCommandV2 = z.infer<typeof UnsignedCommandV2>
@@ -45,6 +51,11 @@ export const SignedCommandV2 = z
     ...fields,
     sig: z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/),
   })
+  .refine(
+    (value) =>
+      ControlArguments.safeParse({ action: value.action, args: value.args })
+        .success,
+  )
   .refine(lifetime)
   .refine(validActionPurpose)
 export type SignedCommandV2 = z.infer<typeof SignedCommandV2>
@@ -62,9 +73,9 @@ export function decodeCommandV2(wire: unknown): SignedCommandV2 {
   const parsed = SignedCommandV2.parse(
     parseBoundedJson(wire, {
       maxBytes: MAX_COMMAND_V2_WIRE_BYTES,
-      maxDepth: 3,
+      maxDepth: 4,
       maxValues: 32,
-      maxStringChars: 128,
+      maxStringChars: 255,
     }),
   )
   if (encodeCommandV2(parsed) !== wire)

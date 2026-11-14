@@ -77,13 +77,20 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
     connection: 'Ponte local KobraLink testada somente em simulação',
-    capabilities: { ...unknownCapabilities, telemetry: 'simulated' },
+    capabilities: {
+      ...unknownCapabilities,
+      telemetry: 'simulated',
+      pause: 'simulated',
+      resume: 'simulated',
+      cancel: 'simulated',
+    },
     sources: [
       'https://www.prnewswire.com/apac/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620524.html',
     ],
     limitations: [
       'A simulação não comprova suporte ao equipamento físico ou ao firmware.',
-      'Câmera e comandos não foram qualificados.',
+      'Comandos simulados pela ponte KobraLink; não comprovado em hardware.',
+      'Câmera não foi qualificada.',
     ],
   },
   {

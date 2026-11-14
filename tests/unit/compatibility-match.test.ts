@@ -147,8 +147,8 @@ describe('compatibility-match', () => {
       expect(match.identified).toBe(true)
       if (match.identified) {
         expect(match.product.id).toBe('bambu-p2s')
-        expect(match.capabilityStatuses.telemetry).toBe('unknown')
-        expect(match.statusLabels.telemetry).toBe('Desconhecido')
+        expect(match.capabilityStatuses.telemetry).toBe('simulated')
+        expect(match.statusLabels.telemetry).toBe('Simulado')
       }
     })
   })

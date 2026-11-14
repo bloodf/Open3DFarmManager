@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { captureBodies, type BodyFacts } from './cdp-body.ts'
 import {
   classifyBody,
   findSecrets,
@@ -400,7 +401,11 @@ export async function instrumentPage(input: {
     truncated: false,
   }
   type BodyEntry = { method: string; path: string; status: number }
-  const pending = new Map<Promise<unknown>, BodyEntry>()
+  const pending = new Map<
+    Promise<unknown>,
+    { entry: BodyEntry; capture: Promise<{ read(): { facts: BodyFacts } }> }
+  >()
+  const network = await captureBodies(page, input.origin)
   /** Lets a later `requestfailed` settle the body task of the same request. */
   const failing = new WeakMap<object, (error: string) => void>()
   const failed = new WeakMap<object, string>()
@@ -497,6 +502,16 @@ export async function instrumentPage(input: {
           if (known) resolve(known)
           else failing.set(request, resolve)
         })
+        // Network-level capture of the same response: a body the page never
+        // consumes is still read once Chromium finished loading it.
+        const capture = network.take(
+          request.method(),
+          res.url(),
+          res.status(),
+          request.timing().startTime,
+        )
+        let facts: BodyFacts | null = null
+        const NETWORK = Symbol('network-finished')
         const task = Promise.race([
           res
             .finished()
@@ -506,13 +521,25 @@ export async function instrumentPage(input: {
                 : null,
             ),
           failure,
+          capture.then((c) => c.finished).then(() => NETWORK),
         ])
-          .then(async (error) => {
+          .then(async (outcome) => {
+            const error = typeof outcome === 'symbol' ? null : outcome
             // Even after a failure the browser may still hold what arrived.
-            const body = await Promise.race([
-              res.text().catch(() => null),
-              new Promise<null>((resolve) => setTimeout(resolve, 2000, null)),
-            ])
+            let body =
+              outcome === NETWORK
+                ? null
+                : await Promise.race([
+                    res.text().catch(() => null),
+                    new Promise<null>((resolve) =>
+                      setTimeout(resolve, 2000, null),
+                    ),
+                  ])
+            if (body === null) {
+              const captured = (await capture).read()
+              facts = captured.facts
+              body = captured.body
+            }
             if (body !== null) keep(retained.responses, body)
             return classifyBody({
               ...entry,
@@ -524,9 +551,13 @@ export async function instrumentPage(input: {
           .then((outcome) => {
             bodies[outcome]++
             if (outcome === 'aborted' || outcome === 'unread')
-              void record({ side: `browser-body-${outcome}`, ...entry })
+              void record({
+                side: `browser-body-${outcome}`,
+                ...entry,
+                ...(facts ? { network: facts } : {}),
+              })
           })
-        pending.set(task, entry)
+        pending.set(task, { entry, capture })
         void task.then(() => pending.delete(task))
       }
     } catch {
@@ -619,12 +650,18 @@ export async function instrumentPage(input: {
         Promise.allSettled([...pending.keys()]),
         new Promise<void>((resolve) => setTimeout(resolve, 8000)),
       ])
-      for (const entry of pending.values())
+      for (const { entry, capture } of pending.values()) {
+        const live = await Promise.race([
+          capture,
+          new Promise<null>((resolve) => setTimeout(resolve, 100, null)),
+        ])
         await record({
           side: 'browser-body-unread',
           ...entry,
           error: 'body-read-deadline',
+          ...(live ? { network: live.read().facts } : {}),
         })
+      }
       const unread = pending.size + bodies.unread
       let inspected = !page.isClosed()
       const state = page.isClosed()

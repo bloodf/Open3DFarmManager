@@ -103,7 +103,11 @@ export async function pagePost(
   )
 }
 
-/** Same-origin request from the page's own session; only the status returns. */
+/**
+ * Same-origin request from the page's own session; only the status returns.
+ * The probe drains the response body (bounded, never aborted) so the denial
+ * it provokes completes and stays inside the browser secret audit.
+ */
 export async function pageStatus(
   page: Page,
   method: 'GET' | 'POST',
@@ -122,6 +126,10 @@ export async function pageStatus(
             : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
           cache: 'no-store',
         })
+        await Promise.race([
+          response.text().catch(() => null),
+          new Promise((resolve) => setTimeout(resolve, 5000)),
+        ])
         return response.status
       } catch {
         return 0

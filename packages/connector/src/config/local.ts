@@ -61,16 +61,26 @@ const LegacyCollectorConfigSchema = z.strictObject({
   spoolman: SpoolmanConfig.optional(),
 })
 const BambuSection = z.strictObject({
-  printers: z.array(z.unknown().transform((value) => {
-    const binding = parseBambuBinding(value)
-    return { ...binding, allowedEndpoints: [{ host: binding.host, port: binding.port }] }
-  })).min(1).max(16),
+  printers: z
+    .array(
+      z.unknown().transform((value) => {
+        const binding = parseBambuBinding(value)
+        return {
+          ...binding,
+          allowedEndpoints: [{ host: binding.host, port: binding.port }],
+        }
+      }),
+    )
+    .min(1)
+    .max(16),
 })
 export const LocalCollectorConfigSchema = z.union([
   LegacyCollectorConfigSchema.extend({
     version: z.literal(3),
     allowedOrigins: z.array(z.string().min(1).max(2048)).max(16),
-    printers: z.array(LegacyCollectorConfigSchema.shape.printers.element).max(16),
+    printers: z
+      .array(LegacyCollectorConfigSchema.shape.printers.element)
+      .max(16),
     bambu: BambuSection,
   }),
   LegacyCollectorConfigSchema,
@@ -201,7 +211,11 @@ export function parseLocalCollectorConfig(
     const endpoints = new Set<string>()
     for (const binding of config.bambu.printers) {
       const endpoint = JSON.stringify([binding.host, binding.port])
-      if (keys.has(binding.printerKey) || serials.has(binding.serial) || endpoints.has(endpoint))
+      if (
+        keys.has(binding.printerKey) ||
+        serials.has(binding.serial) ||
+        endpoints.has(endpoint)
+      )
         throw Error('Duplicate collector target')
       keys.add(binding.printerKey)
       serials.add(binding.serial)

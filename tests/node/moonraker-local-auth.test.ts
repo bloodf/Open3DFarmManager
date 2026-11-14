@@ -12,9 +12,10 @@ import {
 import { readMoonrakerReady } from '../../packages/connector/src/moonraker/client.ts'
 import { createMoonrakerSocket } from '../../packages/connector/src/moonraker/socket.ts'
 import { createRequire } from 'node:module'
+import type * as Ws from '../../packages/connector/node_modules/@types/ws/index.d.ts'
 const { WebSocketServer } = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
-)('ws')
+)('ws') as typeof Ws
 const limits = {
   maxMessageBytes: 4096,
   connectTimeoutMs: 1000,

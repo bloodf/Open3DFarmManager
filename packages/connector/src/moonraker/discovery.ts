@@ -57,7 +57,7 @@ function checkedOrigin(origin: string, limits: MoonrakerLimits): string {
  */
 export async function discoverMoonraker(input: {
   origin: string
-  apiKeyFile?: string
+  apiKeyFile?: string | undefined
   webcamOrigin?: string
   limits: MoonrakerLimits
   signal: AbortSignal

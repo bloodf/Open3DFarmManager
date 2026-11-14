@@ -283,18 +283,31 @@ export async function collectIntoQueue(input: {
         if (signal.aborted) break
         let epoch = 1
         const sub = createBambuRuntimeSubscription({
-          binding, signal, staleAfterMs: 5000,
+          binding,
+          signal,
+          staleAfterMs: 5000,
           ...(input.bambuTransport ? { transport: input.bambuTransport } : {}),
           onEvent(event) {
             if (event.kind === 'unavailable') {
-              input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch: epoch++ })
-              onEvent({ kind: 'unavailable', printerKey: binding.printerKey, reason: 'offline' })
+              input.onRawUnavailable?.({
+                printerKey: binding.printerKey,
+                epoch: epoch++,
+              })
+              onEvent({
+                kind: 'unavailable',
+                printerKey: binding.printerKey,
+                reason: 'offline',
+              })
               return
             }
             input.onRawObservation?.({
-              printerKey: binding.printerKey, epoch, printer: event.printer,
+              printerKey: binding.printerKey,
+              epoch,
+              printer: event.printer,
               receivedAtMonoMs: performance.now(),
-              fieldObservedAtMonoMs: { bambu: event.source.fieldObservedAtMonoMs },
+              fieldObservedAtMonoMs: {
+                bambu: event.source.fieldObservedAtMonoMs,
+              },
             })
             onEvent(event)
           },

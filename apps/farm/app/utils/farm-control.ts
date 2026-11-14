@@ -1,4 +1,7 @@
-import type { ControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  ControlAction,
+  ExtendedControlAction,
+} from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   controlSourceState,
   controlTargetState,
@@ -45,13 +48,14 @@ export const ACTION_NOUNS: Record<ControlAction, string> = {
  * are read-only and disable commands.
  */
 export function controlActionAvailability(
-  action: ControlAction,
+  action: ExtendedControlAction,
   row: FarmRow,
   keys: FarmKeyState,
   controlEnabled: boolean,
   now: Clock,
 ): ActionAvailability {
-  const noun = ACTION_NOUNS[action]
+  const noun =
+    action in ACTION_NOUNS ? ACTION_NOUNS[action as ControlAction] : 'Comando'
   if (isKobraXPrinterKey(row.assignment.printerKey)) {
     return {
       available: false,
@@ -112,7 +116,7 @@ export function controlActionAvailability(
   // Check state compatibility via controlSourceState
   const currentState = observation.state.state
   if (!controlSourceState(action, currentState)) {
-    let stateReason = ''
+    let stateReason = 'O estado da impressora não permite esta ação.'
     switch (action) {
       case 'pause':
         stateReason = 'A impressora não está imprimindo.'
@@ -136,7 +140,7 @@ export function controlActionAvailability(
 const sampleClock = (): Clock => ({ wall: Date.now(), mono: performance.now() })
 
 export function liveControlActionAvailability(
-  action: ControlAction,
+  action: ExtendedControlAction,
   row: FarmRow,
   keys: FarmKeyState,
   controlEnabled: boolean,

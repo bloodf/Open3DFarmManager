@@ -1,3 +1,4 @@
+export { controlRoleAllowed } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type { Sql } from 'postgres'
 
 /** Validate both the effective 0018 role and everything the login can SET ROLE into. */

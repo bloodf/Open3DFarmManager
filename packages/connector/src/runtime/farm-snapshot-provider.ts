@@ -1,3 +1,4 @@
+import { controlsForBackend } from '../../../farm-protocol/src/control-actions.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -102,6 +103,7 @@ export function createFarmSnapshotSource(input: {
       printers.push(
         PrinterState.parse({
           ...entry.printer,
+          controls: controlsForBackend(entry.status ? 'moonraker' : 'readonly'),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),

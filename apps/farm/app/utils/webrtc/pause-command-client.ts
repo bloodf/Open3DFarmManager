@@ -1,3 +1,4 @@
+import { ControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   encodeCommandV2,
@@ -110,6 +111,7 @@ export type PauseCommandClient = Readonly<{
   data(frame: Readonly<PauseDataFrame>): void
   /** Requests the single pause command of this session. */
   pause(): Promise<PauseCommandOutcome>
+  issueControlCommand(action: ControlAction): Promise<PauseCommandOutcome>
   /** Ends the client. Every later send is permanently sealed. */
   abort(): void
   readonly state: PauseCommandClientState
@@ -365,7 +367,7 @@ export function createPauseCommandClient(
     admitted = true
     return issued
   }
-  async function runPause(): Promise<PauseCommandOutcome> {
+  async function runPause(action: ControlAction): Promise<PauseCommandOutcome> {
     try {
       if (aborted) return 'rejected'
       const gate = admissionGate
@@ -373,7 +375,7 @@ export function createPauseCommandClient(
       // The gate ends with the admission itself or with its own deadline.
       await gate
       const issued = admissionIssued
-      if (!issued) return 'rejected'
+      if (!issued || !issued.actions.includes(action)) return 'rejected'
       if (aborted) return 'rejected'
       const issuedAt = now()
       if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) return 'rejected'
@@ -385,7 +387,10 @@ export function createPauseCommandClient(
       if (expiresAt <= issuedAt) return 'rejected'
       const unsigned = {
         v: 2 as const,
-        purpose: 'printer-pause' as const,
+        purpose:
+          action === 'pause'
+            ? ('printer-pause' as const)
+            : ('printer-control' as const),
         cmd_id: crypto.randomUUID(),
         farm_id: issued.farm_id,
         agent_id: issued.agent_id,
@@ -394,7 +399,7 @@ export function createPauseCommandClient(
         transport_id: issued.transport_id,
         capability_id: issued.capability_id,
         assignment_id: issued.assignment_id,
-        action: 'pause' as const,
+        action,
         args: {},
         issued_at: issuedAt,
         expires_at: expiresAt,
@@ -460,7 +465,16 @@ export function createPauseCommandClient(
     if (signal.aborted) onAbort()
   }
   armSession()
+  function issueControlCommand(
+    action: ControlAction,
+  ): Promise<PauseCommandOutcome> {
+    if (aborted || reserved || !ControlAction.safeParse(action).success)
+      return Promise.resolve('rejected')
+    reserved = true
+    return track(runPause(action))
+  }
   return Object.freeze({
+    issueControlCommand,
     proofsReady(ready: PauseProofsReady): void {
       if (aborted) return
       if (binding !== undefined) {
@@ -514,7 +528,7 @@ export function createPauseCommandClient(
       // One operation per session, reserved before any await.
       if (reserved) return Promise.resolve('rejected')
       reserved = true
-      return track(runPause())
+      return track(runPause('pause'))
     },
     abort,
     get state(): PauseCommandClientState {

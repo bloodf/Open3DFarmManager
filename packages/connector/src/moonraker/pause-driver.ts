@@ -1,3 +1,8 @@
+import {
+  controlTargetState,
+  controlSourceState,
+  type ControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 import {
@@ -40,11 +45,16 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
-const PAUSE = JSON.stringify({
-  jsonrpc: '2.0',
-  id: 2,
-  method: 'printer.print.pause',
-})
+const commandWire = (action: ControlAction) =>
+  JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: {
+      pause: 'printer.print.pause',
+      resume: 'printer.print.resume',
+      cancel: 'printer.print.cancel',
+    }[action],
+  })
 const queryWire = (id: number) =>
   JSON.stringify({
     jsonrpc: '2.0',
@@ -322,7 +332,10 @@ export function openFixedMoonrakerPause(input: {
         sequence: ++sequence,
         ready: snapshot.status.webhooks.state === 'ready',
         printState:
-          state === 'printing' || state === 'paused' || state === 'error'
+          state === 'printing' ||
+          state === 'paused' ||
+          state === 'cancelled' ||
+          state === 'error'
             ? state
             : 'idle',
         readyObservedMono: started,
@@ -356,6 +369,7 @@ export function openFixedMoonrakerPause(input: {
   }
   const driver: PauseDriver = Object.freeze({
     pauseOnce({
+      action = 'pause',
       binding: requested,
       beforeSend,
       signal,
@@ -380,7 +394,7 @@ export function openFixedMoonrakerPause(input: {
           throw failure()
         })
       }
-      return request(2, PAUSE, operationDeadline, beforeSend)
+      return request(2, commandWire(action), operationDeadline, beforeSend)
         .then((result) => {
           current()
           if (now() >= operationDeadline || result !== 'ok') throw failure()
@@ -395,6 +409,7 @@ export function openFixedMoonrakerPause(input: {
         })
     },
     async waitForPaused({
+      action = 'pause',
       binding: requested,
       after,
       signal,
@@ -417,7 +432,7 @@ export function openFixedMoonrakerPause(input: {
           const observation = await query(i, operationDeadline)
           if (
             observation.ready &&
-            observation.printState === 'paused' &&
+            observation.printState === controlTargetState(action) &&
             observation.readyObservedMono > after.sentMono &&
             observation.printStateObservedMono > after.sentMono
           ) {
@@ -426,7 +441,10 @@ export function openFixedMoonrakerPause(input: {
             detachCommand()
             return observation
           }
-          if (!observation.ready || observation.printState !== 'printing')
+          if (
+            !observation.ready ||
+            !controlSourceState(action, observation.printState)
+          )
             throw failure()
         }
         throw failure()

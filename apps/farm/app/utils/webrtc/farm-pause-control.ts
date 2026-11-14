@@ -1,3 +1,4 @@
+import type { ControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandOutcome,
   PauseProofsReady,
@@ -185,22 +186,26 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
       }, remaining)
     })
   }
+  async function issueControlCommand(
+    action: ControlAction,
+  ): Promise<PauseCommandOutcome | undefined> {
+    if (state.kind !== 'ready' || !command) return undefined
+    if (now() >= state.expiresAt - PAUSE_CAPABILITY_MARGIN_MS) {
+      fail('expired')
+      return undefined
+    }
+    clearTimeout(expiry)
+    set({ kind: 'sending' })
+    const outcome = await command.issueControlCommand(action)
+    set({ kind: 'settled', outcome })
+    close()
+    return outcome
+  }
   void start()
   return Object.freeze({
     /** Sends the single signed pause. Only valid in the `ready` state. */
-    async pause(): Promise<PauseCommandOutcome | undefined> {
-      if (state.kind !== 'ready' || !command) return undefined
-      if (now() >= state.expiresAt - PAUSE_CAPABILITY_MARGIN_MS) {
-        fail('expired')
-        return undefined
-      }
-      clearTimeout(expiry)
-      set({ kind: 'sending' })
-      const outcome = await command.pause()
-      set({ kind: 'settled', outcome })
-      close()
-      return outcome
-    },
+    issueControlCommand,
+    pause: () => issueControlCommand('pause'),
     close() {
       if (state.kind === 'connecting' || state.kind === 'ready') fail('closed')
       else close()

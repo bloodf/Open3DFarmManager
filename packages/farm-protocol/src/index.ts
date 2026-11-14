@@ -16,3 +16,5 @@ export {
   telemetryPrinterKey,
 } from './telemetry.ts'
 export * from './configuration-signalling.ts'
+
+export * from './control-actions.ts'

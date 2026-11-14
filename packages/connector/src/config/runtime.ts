@@ -1,5 +1,8 @@
-import { parseCollectorConfig } from './creality.ts'
-import { provisionCrealityPrinter } from '../control/printer-binding.ts'
+import { parseCollectorConfig } from './anycubic.ts'
+import {
+  provisionAnycubicPrinter,
+  provisionCrealityPrinter,
+} from '../control/printer-binding.ts'
 import { z } from 'zod'
 import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
@@ -18,7 +21,7 @@ import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 
 const Runtime = z.strictObject({
-  version: z.union([z.literal(1), z.literal(2), z.literal(4)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(5)]),
   collection: z.unknown(),
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
@@ -88,11 +91,23 @@ export function readAgentRuntimeConfig(
               value.printer_key === p.printerKey,
           )
         : undefined
-    const binding = creality
-      ? provisionCrealityPrinter(value, creality)
-      : isKobra
-        ? provisionReadonlyPrinter(value)
-        : registry?.provision(value)
+    const anycubic =
+      collection.version === 5
+        ? collection.anycubic.printers.find(
+            (p) =>
+              typeof value === 'object' &&
+              value !== null &&
+              'printer_key' in value &&
+              value.printer_key === p.printerKey,
+          )
+        : undefined
+    const binding = anycubic
+      ? provisionAnycubicPrinter(value, anycubic)
+      : creality
+        ? provisionCrealityPrinter(value, creality)
+        : isKobra
+          ? provisionReadonlyPrinter(value)
+          : registry?.provision(value)
     if (!binding) throw Error('Moonraker assignment requires local allowlist')
     const assignment = readRuntimePrinterBinding(binding)
     if (
@@ -109,11 +124,13 @@ export function readAgentRuntimeConfig(
   if (
     assignments.length !==
     collection.printers.length +
-      (collection.version === 4
-        ? collection.creality.printers.length
-        : collection.version === 2
-          ? collection.kobralink.printers.length
-          : 0)
+      (collection.version === 5
+        ? collection.anycubic.printers.length
+        : collection.version === 4
+          ? collection.creality.printers.length
+          : collection.version === 2
+            ? collection.kobralink.printers.length
+            : 0)
   )
     throw new Error('Runtime assignment mapping is incomplete')
   for (const printer of collection.printers) {

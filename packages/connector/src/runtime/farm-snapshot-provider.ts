@@ -36,14 +36,19 @@ export type RawPrinterObservation = Omit<
       | Readonly<{
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
+      | Readonly<{
+          anycubic: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
-  return 'bambu' in timing
-    ? timing.bambu
-    : 'creality' in timing
-      ? timing.creality
-      : timing
+  return 'anycubic' in timing
+    ? timing.anycubic
+    : 'bambu' in timing
+      ? timing.bambu
+      : 'creality' in timing
+        ? timing.creality
+        : timing
 }
 
 const FRAME_LIMIT = 'Application frame limit'
@@ -199,7 +204,8 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
     }
     const timing = value.fieldObservedAtMonoMs
-    const fieldStamped = 'bambu' in timing || 'creality' in timing
+    const fieldStamped =
+      'anycubic' in timing || 'bambu' in timing || 'creality' in timing
     const times = fieldTimes(timing)
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
@@ -243,8 +249,9 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('bambu' in previousTiming || 'creality' in previousTiming)) !==
-              fieldStamped)
+              ('anycubic' in previousTiming ||
+                'bambu' in previousTiming ||
+                'creality' in previousTiming)) !== fieldStamped)
             ? Math.max(...Object.values(previousTimes))
             : previousTime
         return (
@@ -309,13 +316,15 @@ export function createFarmSnapshotSource(input: {
         ...observation,
         printer: Object.freeze(printer),
         fieldObservedAtMonoMs:
-          'bambu' in timing
-            ? Object.freeze({ bambu: Object.freeze({ ...timing.bambu }) })
-            : 'creality' in timing
-              ? Object.freeze({
-                  creality: Object.freeze({ ...timing.creality }),
-                })
-              : Object.freeze({ ...timing }),
+          'anycubic' in timing
+            ? Object.freeze({ anycubic: Object.freeze({ ...timing.anycubic }) })
+            : 'bambu' in timing
+              ? Object.freeze({ bambu: Object.freeze({ ...timing.bambu }) })
+              : 'creality' in timing
+                ? Object.freeze({
+                    creality: Object.freeze({ ...timing.creality }),
+                  })
+                : Object.freeze({ ...timing }),
         ...(temperature
           ? {
               temperatureObservation: Object.freeze({

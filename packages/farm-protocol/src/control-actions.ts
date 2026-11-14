@@ -31,6 +31,9 @@ export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (action === 'emergency_stop') return true
+  if (action === 'firmware_restart')
+    return state === 'error' || state === 'idle'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
   return action === 'resume'

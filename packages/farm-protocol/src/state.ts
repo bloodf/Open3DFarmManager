@@ -1,11 +1,11 @@
 import { z } from 'zod'
-import { ControlAction } from './control-actions.ts'
+import { ExtendedControlAction } from './control-actions.ts'
 
 export const PrinterState = z
   .strictObject({
     controls: z
-      .array(ControlAction)
-      .max(3)
+      .array(ExtendedControlAction)
+      .max(ExtendedControlAction.options.length)
       .refine((actions) => new Set(actions).size === actions.length)
       .optional(),
     identity: z

@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
   closeCommandJournal,
   openCommandJournal,
@@ -89,6 +90,10 @@ export async function runPauseControl(input: {
   dataDirectory: string
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
+  /** Read-only capabilities from the same router used by the relay. */
+  onControls?: (
+    read: (assignmentId: string) => readonly ExtendedControlAction[],
+  ) => void
   /**
    * Required offline lifetime gate: the frozen read-only view from
    * `createOfflineAuthority()`. Stale authority rejects every command.
@@ -130,6 +135,23 @@ export async function runPauseControl(input: {
       clock,
       observe: (binding, observation) => relay.observe(binding, observation),
     })
+    if (input.onControls) {
+      input.onControls((id) => {
+        const binding = config.bindingFor(id)
+        return binding ? router.controls(binding) : []
+      })
+      await Promise.all(
+        config.assignments.map(async (assignment) => {
+          const binding = config.bindingFor(assignment.assignment_id)
+          if (!binding) return
+          try {
+            await router.detect(binding, input.signal)
+          } catch {
+            // Failed detection retains the driver's conservative capabilities.
+          }
+        }),
+      )
+    }
     relay = createPauseCommandRelay({
       authority: { issuers, freshness: input.freshness },
       clock,
@@ -139,6 +161,7 @@ export async function runPauseControl(input: {
     })
   } catch (error) {
     // Nothing reached the journal yet: release it before failing.
+    input.onControls?.(() => [])
     closeCommandJournal(journal)
     throw error
   }
@@ -254,6 +277,7 @@ export async function runPauseControl(input: {
       },
     })
   } finally {
+    input.onControls?.(() => [])
     relay.close()
     // A stalled driver close retains the journal; it is never force-closed.
     const stall = setTimeout(

@@ -1,4 +1,4 @@
-import { ControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   encodeCommandV2,
@@ -111,7 +111,10 @@ export type PauseCommandClient = Readonly<{
   data(frame: Readonly<PauseDataFrame>): void
   /** Requests the single pause command of this session. */
   pause(): Promise<PauseCommandOutcome>
-  issueControlCommand(action: ControlAction): Promise<PauseCommandOutcome>
+  issueControlCommand(
+    action: ExtendedControlAction,
+    args?: Record<string, unknown>,
+  ): Promise<PauseCommandOutcome>
   /** Ends the client. Every later send is permanently sealed. */
   abort(): void
   readonly state: PauseCommandClientState
@@ -367,7 +370,10 @@ export function createPauseCommandClient(
     admitted = true
     return issued
   }
-  async function runPause(action: ControlAction): Promise<PauseCommandOutcome> {
+  async function runPause(
+    action: ExtendedControlAction,
+    args: Record<string, unknown> = {},
+  ): Promise<PauseCommandOutcome> {
     try {
       if (aborted) return 'rejected'
       const gate = admissionGate
@@ -400,7 +406,7 @@ export function createPauseCommandClient(
         capability_id: issued.capability_id,
         assignment_id: issued.assignment_id,
         action,
-        args: {},
+        args,
         issued_at: issuedAt,
         expires_at: expiresAt,
         nonce: base64url(crypto.getRandomValues(new Uint8Array(16))),
@@ -466,12 +472,13 @@ export function createPauseCommandClient(
   }
   armSession()
   function issueControlCommand(
-    action: ControlAction,
+    action: ExtendedControlAction,
+    args: Record<string, unknown> = {},
   ): Promise<PauseCommandOutcome> {
-    if (aborted || reserved || !ControlAction.safeParse(action).success)
+    if (aborted || reserved || !ExtendedControlAction.safeParse(action).success)
       return Promise.resolve('rejected')
     reserved = true
-    return track(runPause(action))
+    return track(runPause(action, args))
   }
   return Object.freeze({
     issueControlCommand,

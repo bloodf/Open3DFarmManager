@@ -175,7 +175,7 @@ export function moonrakerPrinters(records: RecordData[]): Printer[] {
         result.push({
           vendor: 'moonraker',
           host: a.value,
-          port: srv.port,
+          ...(srv.port !== undefined && { port: srv.port }),
           ...(name && { name }),
         })
       }

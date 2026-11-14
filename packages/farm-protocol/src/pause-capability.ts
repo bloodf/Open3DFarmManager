@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ControlAction } from './control-actions.ts'
+import { ExtendedControlAction } from './control-actions.ts'
 import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
@@ -83,9 +83,9 @@ const fields = {
   control_binding_sha256: digest,
   admission_nonce: digest,
   actions: z
-    .array(ControlAction)
+    .array(ExtendedControlAction)
     .min(1)
-    .max(3)
+    .max(11)
     .refine((actions) => new Set(actions).size === actions.length),
 }
 const lifetime = (value: { issued_at: number; expires_at: number }) =>

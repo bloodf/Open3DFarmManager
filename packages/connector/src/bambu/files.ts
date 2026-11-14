@@ -33,14 +33,15 @@ export async function listBambuFiles(
   signal.addEventListener('abort', abort, { once: true })
   async function socket(port: number): Promise<TLSSocket> {
     return new Promise((resolve, reject) => {
-      const s = connect({
+      const connectionOptions = {
         host,
         port,
-        ca: trust.caPem,
-        minVersion: 'TLSv1.2',
+        ...(trust.caPem === undefined ? {} : { ca: trust.caPem }),
+        minVersion: 'TLSv1.2' as const,
         rejectUnauthorized: !trust.pinSha256,
         signal: controller.signal,
-      })
+      }
+      const s = connect(connectionOptions)
       sockets.add(s)
       s.on('error', () => reject(new Error('Bambu FTPS connection failed')))
       s.once('secureConnect', () => {
@@ -147,7 +148,7 @@ export function parseBambuListing(listing: string): BambuFile[] {
     const match = /^((?:[^;\s]+=[^;]*;)+) (.+)$/.exec(line)
     if (!match) continue
     const facts = new Map(
-      match[1]
+      match[1]!
         .split(';')
         .filter(Boolean)
         .map((fact) => {
@@ -155,7 +156,7 @@ export function parseBambuListing(listing: string): BambuFile[] {
           return [fact.slice(0, pos).toLowerCase(), fact.slice(pos + 1)]
         }),
     )
-    const name = match[2]
+    const name = match[2]!
     const size = facts.get('size')
     const date = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.\d+)?$/.exec(
       facts.get('modify') ?? '',

@@ -24,7 +24,9 @@ try {
         compose: values.compose ?? '',
         backup: values.backup ?? '',
         ready: values.ready!,
-        dryRun: values['dry-run'],
+        ...(values['dry-run'] === undefined
+          ? {}
+          : { dryRun: values['dry-run'] }),
       },
       async (args, output) => {
         if (args[0] === 'ready') {

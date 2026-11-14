@@ -40,14 +40,15 @@ export async function uploadBambuFile(
   signal.addEventListener('abort', abort, { once: true })
   async function socket(port: number): Promise<TLSSocket> {
     return new Promise((resolve, reject) => {
-      const s = connect({
+      const connectionOptions = {
         host,
         port,
-        ca: trust.caPem,
-        minVersion: 'TLSv1.2',
+        ...(trust.caPem === undefined ? {} : { ca: trust.caPem }),
+        minVersion: 'TLSv1.2' as const,
         rejectUnauthorized: !trust.pinSha256,
         signal: controller.signal,
-      })
+      }
+      const s = connect(connectionOptions)
       sockets.add(s)
       s.on('error', () => reject(new Error('Bambu FTPS connection failed')))
       s.once('secureConnect', () => {

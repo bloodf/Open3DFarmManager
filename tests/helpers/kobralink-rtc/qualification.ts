@@ -318,8 +318,8 @@ export function expectsBody(method: string, status: number): boolean {
 
 /**
  * Classifies one observed response for the browser audit. Only a browser
- * abort (`net::ERR_ABORTED`, a superseded load) excuses a body that could not
- * be read; every other body-bearing response that was not read stays `unread`
+ * abort (`net::ERR_ABORTED`, a superseded load) bound to this same request
+ * excuses a body that could not be read, and never for a 3xx redirect; every other body-bearing response that was not read stays `unread`
  * and fails the audit.
  */
 export function classifyBody(input: {
@@ -330,6 +330,8 @@ export function classifyBody(input: {
 }): BodyOutcome {
   if (input.bodyRead) return 'read'
   if (!expectsBody(input.method, input.status)) return 'bodyless'
+  // A redirect hop is never the superseded load itself: its body stays owed.
+  if (input.status >= 300 && input.status < 400) return 'unread'
   return input.failure === 'net::ERR_ABORTED' ? 'aborted' : 'unread'
 }
 

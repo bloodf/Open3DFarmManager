@@ -1,0 +1,92 @@
+{
+  "status": "fail",
+  "blocked": true,
+  "complete": false,
+  "candidate": "78605aa (harness) on integration f663f3c plus 5fce499 fixed-category signalling diagnostic; no complete seven-world run exists on this candidate",
+  "qualifications": {
+    "first_registration_without_device_id": "pass",
+    "single_ui": "pass",
+    "inventory_before_live": "pass",
+    "reload_reconnect_no_duplicate": "pass",
+    "lost_ack_recovery": "not-executed",
+    "late_ack_fresh_authority": "not-executed",
+    "revoked_authority_refused": "not-executed",
+    "account_switch_isolated": "not-executed",
+    "browser_secrets_absent": "fail",
+    "mobile_keyboard_accessibility": "not-executed",
+    "stale_error_capabilities": "fail",
+    "resource_cleanup": "pass"
+  },
+  "additional": {
+    "think_time_lease_renewal": "pass"
+  },
+  "product_findings": [
+    {
+      "id": "offline-printer-ends-direct-session",
+      "severity": "blocking",
+      "summary": "With the synthetic printer offline the Connector admits a read-only direct session and ends it at once (readonly-admitted then readonly-terminal source-unavailable within 1 ms, three fresh admissions). The page never receives an offline observation and shows \"Conexão direta indisponível / Nenhum estado recebido\" instead of \"Indisponível segundo o Connector\". The fix is owned by a separate unit; positive and full runs wait for its accepted SHA.",
+      "reproduce": "KOBRALINK_RTC_WORLDS=positive node scripts/test-kobralink-rtc-acceptance.ts (check offline-reported-truthfully)"
+    },
+    {
+      "id": "configuration-bootstrap-503",
+      "severity": "open",
+      "summary": "One GET /api/farms/:id/connectors/:id/configuration answered 503 (\"Configuração de impressoras indisponível\") during back-to-back navigations in run 86da29db, 68 ms before the browser aborted the same request. The route collapses capacity, storage and unknown failures into one 503 and logs no cause, so it is neither attributed nor allowlisted; it keeps failing no-unexpected-network-errors if it recurs. Seen in 1 of 6 retained runs."
+    },
+    {
+      "id": "prepare-refusal-dead-end",
+      "severity": "resolved",
+      "summary": "Resolved on the integrated product by 917fbe1 and 48f4c1b; runs 86bed2cb and a90e81cc pass prepare-near-rotation-recoverable and the fresh preparation that follows."
+    },
+    {
+      "id": "refused-session-unhandled-rejection",
+      "severity": "resolved",
+      "summary": "Resolved by 48f4c1b; zero page errors in runs 86bed2cb and a90e81cc."
+    }
+  ],
+  "open_harness_items": [
+    "stale-after-connector-stop now requires a live idle observation after the printer returns before the Connector is stopped (78605aa); not yet exercised because positive waits for the offline product fix.",
+    "browser_inspection_complete: a response whose request the browser aborts after headers never reported finished and stayed unread. 78605aa settles it from the request failure and classifies every body as read, bodyless, aborted or unread; only net::ERR_ABORTED excuses an unread body. Proven on think-time (81 read, 0 unread); the aborted path is covered by a unit test and awaits a positive run."
+  ],
+  "limits": {
+    "printer": "synthetic MQTT printer; no physical printer, firmware or hardware is qualified",
+    "controls": "no physical command, camera, TURN or HTTP command fallback was exercised or is available for Kobra X",
+    "credential_revocation": "isolated credential revocation is unreachable: the schema rejects a credential tombstone while the enrollment is approved (asserted on the real database and rolled back). Qualified instead: combined Connector and credential revocation, and natural credential expiry with the enrollment still approved",
+    "fault_injection": "lost reply, lost acknowledgement and replays are produced inside the page by dropping or repeating its own messages; no response or authority is fabricated",
+    "review": "coordinator rerun and review remain required before publication"
+  },
+  "configuration": {
+    "upstream_revision": "5a5e5d9",
+    "kobralink_image": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3",
+    "postgres_migrations": 27,
+    "proof_ttl_ms": 10000,
+    "min_context_ms": 5000,
+    "token_ttl_seconds": 300,
+    "worlds": [
+      "positive",
+      "think-time",
+      "lost-reply",
+      "late-ack",
+      "authority",
+      "account-switch",
+      "credential-expiry"
+    ]
+  },
+  "evidence_runs": [
+    {
+      "run": "a90e81cc-7de3-4761-972a-eab548281523",
+      "head": "78605aa",
+      "worlds": ["think-time"],
+      "checks": 26,
+      "failed": 0,
+      "note": "refused near-rotation prepare returns to the form with no writes, the second fresh preparation and the commit after a real inbox renewal confirm; 81 response bodies read, 0 unread, 0 page errors"
+    },
+    {
+      "run": "86da29db-24a7-41ee-96bd-b29c07b7e665",
+      "head": "5fce499",
+      "worlds": ["positive"],
+      "checks": 31,
+      "failed": 4,
+      "note": "offline-reported-truthfully, stale-after-connector-stop, browser-inspection-complete, no-unexpected-network-errors"
+    }
+  ]
+}

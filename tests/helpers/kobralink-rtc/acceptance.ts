@@ -1,140 +1,12 @@
-import assert from 'node:assert/strict'
-import type {
-  FixtureIdentityHandles,
-  SignallingFixtureExtension,
-} from '../signalling-https-fixture-contract.ts'
-import { randomBytes } from 'node:crypto'
-import { connect as tlsConnect } from 'node:tls'
-
-/** Bounded raw handshake through the fixture proxy to the actual Nitro listener. */
-export async function rawUpgrade(input: {
-  port: number
-  ca: Buffer
-  path: string
-  headers?: readonly (readonly [string, string])[]
-}): Promise<{ response: string; closed: boolean }> {
-  if (
-    !Number.isInteger(input.port) ||
-    input.port < 1024 ||
-    input.port > 65535 ||
-    !input.path.startsWith('/') ||
-    /[\r\n]/.test(input.path)
-  )
-    throw new Error('Invalid synthetic upgrade target')
-  const fields = input.headers ?? []
-  if (
-    fields.length > 64 ||
-    fields.some(
-      ([name, value]) =>
-        !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value),
-    )
-  )
-    throw new Error('Invalid synthetic upgrade headers')
-  const socket = tlsConnect({
-    host: '127.0.0.1',
-    port: input.port,
-    ca: input.ca,
-    servername: 'localhost',
-    rejectUnauthorized: true,
-  })
-  const request = [
-    `GET ${input.path} HTTP/1.1`,
-    `Host: 127.0.0.1:${input.port}`,
-    'Connection: Upgrade',
-    'Upgrade: websocket',
-    'Sec-WebSocket-Version: 13',
-    `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}`,
-    'Sec-WebSocket-Protocol: open3dfarm.signalling.v1',
-    ...fields.map(([name, value]) => `${name}: ${value}`),
-    '',
-    '',
-  ].join('\r\n')
-  return await new Promise((resolve, reject) => {
-    let response = ''
-    let settled = false
-    const finish = (error?: Error) => {
-      if (settled) return
-      settled = true
-      socket.destroy()
-      if (error) reject(error)
-      else resolve({ response, closed: true })
-    }
-    socket.setTimeout(5000, () =>
-      finish(new Error('Fixture upgrade timed out')),
-    )
-    socket.once('secureConnect', () => socket.write(request))
-    socket.on('data', (chunk: Buffer) => {
-      response += chunk.toString('latin1')
-      if (Buffer.byteLength(response, 'latin1') > 16384)
-        finish(new Error('Upgrade response exceeded bound'))
-      else if (/^HTTP\/1\.[01] 101\b/.test(response))
-        finish(new Error('Unexpected accepted raw upgrade'))
-    })
-    socket.once('error', (error: Error) => {
-      // Rejected upgrades may be reset without a response by the native boundary.
-      if (
-        'code' in error &&
-        ['ECONNRESET', 'EPIPE'].includes(String(error.code))
-      )
-        finish()
-      else finish(error)
-    })
-    socket.once('close', () => finish())
-  })
-}
-
-/** These malformed paths/headers must fail closed while Nitro remains live. */
-export async function testRawUpgradeRejection(input: {
-  port: number
-  ca: Buffer
-  origin: string
-}) {
-  const cases = [
-    { path: '/api/signalling/missing' },
-    { path: '/api/signalling/connector?unexpected=1' },
-    {
-      path: '/api/signalling/connector',
-      headers: [
-        ['Origin', input.origin],
-        ['Origin', input.origin],
-      ] as const,
-    },
-    {
-      path: '/api/signalling/connector',
-      headers: [['Cookie', 'synthetic=1']] as const,
-    },
-  ]
-  for (const item of cases) {
-    const result = await rawUpgrade({ port: input.port, ca: input.ca, ...item })
-    assert.equal(result.closed, true)
-    assert.doesNotMatch(result.response, /^HTTP\/1\.[01] 101\b/)
-  }
-}
-
-import { createRequire } from 'node:module'
-import type WebSocketType from '../../../packages/connector/node_modules/@types/ws'
-const WebSocket: typeof WebSocketType = createRequire(
-  new URL('../../../packages/connector/package.json', import.meta.url),
-)('ws')
-export function createFixtureSocket(
-  url: string,
-  options: { ca: Buffer; origin?: string; cookie?: string },
-) {
-  return new WebSocket(url, 'open3dfarm.signalling.v1', {
-    ca: options.ca,
-    rejectUnauthorized: true,
-    handshakeTimeout: 5000,
-    perMessageDeflate: false,
-    ...(options.origin ? { origin: options.origin } : {}),
-    ...(options.cookie ? { headers: { cookie: options.cookie } } : {}),
-  })
-}
-
-import { generateKeyPairSync } from 'node:crypto'
-import { once } from 'node:events'
-import { chromium, type Page } from '@playwright/test'
-import { ConnectorIdentity } from '../../../packages/connector/src/identity/store.ts'
-import { connectorSocket } from '../../../packages/connector/src/cloud/authenticated-signalling-client.ts'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from '@playwright/test'
+import { loadOrCreateIdentity } from '../../../packages/connector/src/identity/store.ts'
 import {
   PairingStartResponse,
   PairingPollResponse,
@@ -144,108 +16,27 @@ import {
   BrowserDeviceHttpChallengeResponse,
   BrowserDeviceHttpMutationResponse,
 } from '../../../packages/farm-protocol/src/browser-device-http.ts'
-import { signBrowserDeviceProof } from '../../../packages/farm-protocol/src/browser-device-proof.ts'
-import { signBrowserTransportProof } from '../../../packages/farm-protocol/src/browser-transport-proof.ts'
+import { browserBundle } from '../browser-bundle.ts'
 import {
-  decodeSignallingServerFrame,
-  encodeSignallingClientFrame,
-  type SignallingClientFrame,
-  type SignallingServerFrame,
-} from '../../../packages/farm-protocol/src/signalling-socket.ts'
+  bridgePrinterCount,
+  collectSecrets,
+  createChecks,
+  createDatabaseAudit,
+  readHarnessSecrets,
+  runtimePrinterCount,
+  type Checks,
+  type DatabaseAudit,
+  type HarnessSecrets,
+} from './audit.ts'
+import {
+  createConnectorHost,
+  writeConnectorFiles,
+  type ConnectorHost,
+} from './extension.ts'
+import { instrumentPage, type PageObserver } from './observe.ts'
+import type { Secret, World } from './qualification.ts'
 
-class FixturePeer {
-  readonly socket: WebSocketType
-  readonly #queue: SignallingServerFrame[] = []
-  /** Authority confirmations arrive independently of the handshake order. */
-  readonly confirms: Array<{
-    at: number
-    frame: Extract<SignallingServerFrame, { t: 'connector.authority-confirm' }>
-  }> = []
-  readonly revocations: number[] = []
-  #wake: (() => void) | undefined
-  #error: Error | undefined
-  constructor(socket: WebSocketType) {
-    this.socket = socket
-    socket.on('message', (data, binary) => {
-      try {
-        if (binary || !Buffer.isBuffer(data) || data.byteLength > 12288)
-          throw new Error('Invalid fixture frame')
-        if (this.#queue.length >= 64)
-          throw new Error('Fixture queue exceeded bound')
-        const frame = decodeSignallingServerFrame(data.toString('utf8'))
-        if ('t' in frame && frame.t === 'connector.authority-confirm') {
-          if (this.confirms.length >= 64)
-            throw new Error('Fixture confirmations exceeded bound')
-          this.confirms.push({ at: performance.now(), frame })
-        } else if ('t' in frame && frame.t === 'connector.authority-revoked')
-          this.revocations.push(frame.server_seq)
-        else this.#queue.push(frame)
-      } catch {
-        this.#error = new Error('Invalid server signalling frame')
-      }
-      this.#wake?.()
-    })
-    socket.on('error', () => {
-      this.#error = new Error('Fixture socket error')
-      this.#wake?.()
-    })
-    socket.on('close', () => this.#wake?.())
-  }
-  send(frame: SignallingClientFrame) {
-    this.socket.send(encodeSignallingClientFrame(frame))
-  }
-  async next(): Promise<SignallingServerFrame> {
-    const deadline = Date.now() + 8000
-    while (!this.#queue.length) {
-      if (this.#error || this.socket.readyState >= WebSocket.CLOSING)
-        throw new Error('Signalling closed before response')
-      const remaining = deadline - Date.now()
-      if (remaining <= 0) throw new Error('Signalling response timed out')
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          this.#wake = undefined
-          resolve()
-        }, remaining)
-        this.#wake = () => {
-          clearTimeout(timer)
-          this.#wake = undefined
-          resolve()
-        }
-      })
-    }
-    const frame = this.#queue.shift()
-    if (!frame) throw new Error('Signalling queue empty')
-    return frame
-  }
-  close() {
-    this.socket.terminate()
-  }
-}
-async function waitSocket(
-  socket: WebSocketType,
-  event: 'open' | 'close',
-  timeoutMs: number,
-) {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    await Promise.race([
-      once(socket, event),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Socket ${event} timed out`)),
-          timeoutMs,
-        )
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-async function opened(socket: WebSocketType) {
-  if (socket.readyState === WebSocket.OPEN) return
-  await waitSocket(socket, 'open', 5000)
-}
-async function browserLogin(
+export async function browserLogin(
   page: Page,
   origin: string,
   username: string,
@@ -272,7 +63,23 @@ async function browserLogin(
     { timeout: 10000 },
   )
 }
-async function pagePost(
+
+/** Signs out through the real page, as a user switching accounts would. */
+export async function browserLogout(page: Page, origin: string) {
+  await page.goto(origin + '/sair', { timeout: 10000 })
+  await page.waitForFunction(
+    () => {
+      const root = document.querySelector('#__nuxt')
+      return root !== null && '__vue_app__' in root
+    },
+    undefined,
+    { timeout: 10000 },
+  )
+  await page.getByRole('button', { name: 'Sair da conta', exact: true }).click()
+  await page.waitForURL((url) => url.pathname === '/', { timeout: 10000 })
+}
+
+export async function pagePost(
   page: Page,
   path: string,
   body: unknown,
@@ -291,6 +98,35 @@ async function pagePost(
     { path, body },
   )
 }
+
+/** Same-origin request from the page's own session; only the status returns. */
+export async function pageStatus(
+  page: Page,
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+): Promise<number> {
+  return await page.evaluate(
+    async ({ method, path, body }) => {
+      try {
+        const response = await fetch(path, {
+          method,
+          headers:
+            body === undefined ? {} : { 'content-type': 'application/json' },
+          ...(body === undefined
+            ? {}
+            : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+          cache: 'no-store',
+        })
+        return response.status
+      } catch {
+        return 0
+      }
+    },
+    { method, path, body },
+  )
+}
+
 async function machinePost(
   origin: string,
   path: string,
@@ -307,80 +143,100 @@ async function machinePost(
     throw new Error(`Synthetic machine HTTP rejected: ${response.status}`)
   return await response.json()
 }
-async function closed(socket: WebSocketType, timeoutMs: number) {
-  if (socket.readyState === WebSocket.CLOSED) return
-  await waitSocket(socket, 'close', timeoutMs)
+
+async function currentAccount(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const response = await fetch('/api/auth/me')
+    if (!response.ok) throw new Error('Fixture account lookup denied')
+    const data: unknown = await response.json()
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      !('accountId' in data) ||
+      typeof data.accountId !== 'string'
+    )
+      throw new Error('Invalid fixture account')
+    return data.accountId
+  })
 }
-async function actualConnectorHandshake(origin: string) {
-  const socket = await connectorSocket(
-    origin.replace('https:', 'wss:') + '/api/signalling/connector',
-  )
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let unbind: (() => void) | undefined
-  try {
-    await new Promise<void>((resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error('Integrated Connector handshake timed out')),
-        5000,
-      )
-      unbind = socket.bind({
-        open: resolve,
-        message: () => {},
-        error: () =>
-          reject(new Error('Integrated Connector handshake rejected')),
-        close: () =>
-          reject(new Error('Integrated Connector closed before open')),
-      })
-      if (socket.isOpen()) resolve()
-    })
-  } finally {
-    clearTimeout(timer)
-    unbind?.()
-    socket.close()
-  }
-}
-async function controlBounds(origin: string, ca: Buffer) {
-  const url = origin.replace('https:', 'wss:') + '/api/signalling/connector'
-  for (const kind of ['ping', 'oversize', 'idle'] as const) {
-    console.error(`[fixture-stage] control-${kind}`)
-    const socket = createFixtureSocket(url, { ca })
-    socket.on('error', () => {})
-    try {
-      const start = performance.now()
-      await opened(socket)
-      let pong = false
-      socket.on('pong', () => {
-        pong = true
-      })
-      if (kind === 'ping') socket.ping(Buffer.from('fixture'))
-      if (kind === 'oversize') socket.send('x'.repeat(12289))
-      await closed(socket, kind === 'idle' ? 10500 : 5000)
-      if (kind === 'ping' && pong)
-        throw new Error('Ping unexpectedly produced pong')
-      if (kind === 'idle') {
-        const elapsed = performance.now() - start
-        if (elapsed < 7000 || elapsed > 10500)
-          throw new Error('Admission deadline outside original bound')
-      }
-    } finally {
-      socket.terminate()
-    }
-  }
-}
-/** Real HTTPS login, registry, pairing, and WSS proof path. No WebRTC claim. */
-export async function runSignallingHttpsAcceptance(input: {
+
+export type Enrolled = Readonly<{
+  accountId: string
+  keyId: string
+  thumbprint: string
+}>
+export type Actor = Enrolled &
+  Readonly<{
+    username: string
+    context: BrowserContext
+    page: Page
+    observer: PageObserver
+  }>
+export type Counts = Readonly<{
+  assignments: number
+  receipts: number
+  operations: number
+  bridgePrinters: number
+  bridgeCreates: number
+  bridgeDeletes: number
+  runtimePrinters: number
+  activated: number
+}>
+
+export type WorldContext = Readonly<{
+  world: World
   origin: string
-  ca: Buffer
   farmId: string
-  owner: string
-  admin: string
+  agentId: string
+  root: string
   password: string
-  caPath?: string
-  extension?: SignallingFixtureExtension
-  extensionKind?:
-    'rtc' | 'pause-authority' | 'pause-rtc' | 'pause-execution-rtc'
-  signal?: AbortSignal
-  disconnectSignalling?: () => Promise<void>
+  usernames: Readonly<Record<'owner' | 'admin' | 'viewer' | 'member', string>>
+  browser: Browser
+  owner: Actor
+  admin: Actor
+  host: ConnectorHost
+  db: DatabaseAudit
+  checks: Checks
+  harness: HarnessSecrets
+  observers: PageObserver[]
+  /** Expected refusals; anything else at or above 400 is unexpected. */
+  allowHttp(method: string, path: RegExp, statuses: readonly number[]): void
+  allowConsole(pattern: RegExp): void
+  /** A further signed-in page with its own persisted, approved browser key. */
+  actor(
+    name: string,
+    username: string,
+    approver: Page,
+    options?: { enroll?: boolean },
+  ): Promise<Actor>
+  observe(page: Page, label: string): Promise<PageObserver>
+  /** Creates and approves a key for whoever is signed in on `page`. */
+  enroll(page: Page, approver: Page): Promise<Enrolled>
+  counts(): Promise<Counts>
+  secrets(): Promise<Secret[]>
+  disconnectSignalling(): Promise<void>
+  revokeConnector(): Promise<void>
+}>
+
+type Allowed = { method: string; path: RegExp; statuses: readonly number[] }
+
+/**
+ * Real HTTPS login, browser-key registration, Connector pairing and the native
+ * `configure` runtime, then one qualification world. Nothing in this chain is
+ * stubbed: the pages, the session cookies, the database and the Connector are
+ * the ones the built application serves.
+ */
+export async function runQualificationWorld(input: {
+  world: World
+  origin: string
+  farmId: string
+  usernames: WorldContext['usernames']
+  password: string
+  root: string
+  databasePort: number
+  kobraPort: number
+  disconnectSignalling: () => Promise<void>
+  run: (context: WorldContext) => Promise<void>
 }) {
   const parsedOrigin = new URL(input.origin)
   if (
@@ -389,108 +245,123 @@ export async function runSignallingHttpsAcceptance(input: {
     parsedOrigin.hostname !== '127.0.0.1'
   )
     throw new Error('Fixture requires canonical HTTPS loopback')
-  const port = Number(parsedOrigin.port),
-    audience = 'open3dfarmmanager:signalling'
-  if (!input.extension) {
-    console.error('[fixture-stage] raw-negative-upgrades')
-    await testRawUpgradeRejection({ port, ca: input.ca, origin: input.origin })
-    console.error('[fixture-stage] health-after-negatives')
-    const health = await fetch(input.origin + '/healthz', {
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!health.ok)
-      throw new Error('Nitro listener unavailable after rejected upgrades')
-    console.error('[fixture-stage] integrated-connector-handshake')
-    await actualConnectorHandshake(input.origin)
-    await controlBounds(input.origin, input.ca)
-  }
-  console.error('[fixture-stage] chromium-launch')
+  const audience = 'open3dfarmmanager:signalling'
+  const t0 = performance.now()
+  const stage = (name: string) => console.error(`[fixture-stage] ${name}`)
+  const checks = createChecks(input.root, input.world)
+  const harness = await readHarnessSecrets(input.root)
+  const db = createDatabaseAudit(input.databasePort)
+  const observers: PageObserver[] = []
+  const allowed: Allowed[] = []
+  const allowedConsole: RegExp[] = []
+  let host: ConnectorHost | undefined
+  stage('chromium-launch')
   const browser = await chromium.launch({ headless: true })
-  const sockets: FixturePeer[] = []
-  let identities: FixtureIdentityHandles | undefined
+  let failed: unknown
   try {
-    // The synthetic browser fixture trusts its private test certificate; the native child validates the supplied CA.
-    const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true })
-    const adminContext = await browser.newContext({ ignoreHTTPSErrors: true })
-    const owner = await ownerContext.newPage(),
-      admin = await adminContext.newPage()
-    console.error('[fixture-stage] owner-login')
-    await browserLogin(owner, input.origin, input.owner, input.password)
-    console.error('[fixture-stage] admin-login')
-    await browserLogin(admin, input.origin, input.admin, input.password)
-    const extensionInput =
-      input.extension && input.caPath && input.disconnectSignalling
-        ? {
+    const bundle = await browserBundle(
+      new URL('../signalling-rtc-browser.ts', import.meta.url).pathname,
+      AbortSignal.timeout(30_000),
+    )
+    const observe = async (page: Page, label: string) => {
+      const observer = await instrumentPage({
+        page,
+        label,
+        evidence: input.root,
+        origin: input.origin,
+        t0,
+      })
+      observers.push(observer)
+      return observer
+    }
+    const enroll = async (page: Page, approver: Page): Promise<Enrolled> => {
+      const accountId = await currentAccount(page)
+      const path = input.origin + '/__registration_fixture__.js'
+      await page.route(path, (route) =>
+        route.fulfill({ contentType: 'text/javascript', body: bundle }),
+      )
+      const actor = await page.evaluateHandle(
+        async ({ path, scope }) => {
+          const module: typeof import('../signalling-rtc-browser.ts') =
+            await import(path)
+          return module.createSignallingRtcBrowserActor(scope)
+        },
+        {
+          path,
+          scope: {
+            accountId,
+            farmId: input.farmId,
             origin: input.origin,
             audience,
-            caPath: input.caPath,
-            ownerPage: owner,
-            ownerContext,
-            adminPage: admin,
-            accountId: await owner.evaluate(async () => {
-              const response = await fetch('/api/auth/me')
-              if (!response.ok) throw new Error('Fixture account lookup denied')
-              const data: unknown = await response.json()
-              if (
-                !data ||
-                typeof data !== 'object' ||
-                !('accountId' in data) ||
-                typeof data.accountId !== 'string'
-              )
-                throw new Error('Invalid fixture account')
-              return data.accountId
-            }),
-            farmId: input.farmId,
-            signal: input.signal ?? AbortSignal.timeout(180000),
-          }
-        : undefined
-    if (input.extension && !extensionInput)
-      throw new Error('Incomplete extension fixture')
-    if (input.extension && extensionInput)
-      identities = await input.extension.identityHandles(extensionInput)
-    if (input.extension && !identities)
-      throw new Error('Fixture identity handles unavailable')
-    console.error('[fixture-stage] browser-registration')
-    const keyPair = identities
-      ? undefined
-      : await crypto.subtle.generateKey(
-          { name: 'ECDSA', namedCurve: 'P-256' },
-          false,
-          ['sign', 'verify'],
+            persistKey: true,
+          },
+        },
+      )
+      try {
+        const jwk = await actor.evaluate((a) => a.publicJwk)
+        const challenge = BrowserDeviceHttpChallengeResponse.parse(
+          await pagePost(page, '/api/browser-devices/challenges', {
+            farm_id: input.farmId,
+            public_key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+          }),
+        ).challenge
+        const signature = await actor.evaluate(
+          (a, c) => a.signEnrollment(c),
+          challenge,
         )
-    const jwk = identities
-      ? identities.browser.publicJwk
-      : await crypto.subtle.exportKey('jwk', keyPair!.publicKey)
-    const challenge = BrowserDeviceHttpChallengeResponse.parse(
-      await pagePost(owner, '/api/browser-devices/challenges', {
-        farm_id: input.farmId,
-        public_key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
-      }),
-    ).challenge
-    const signature = identities
-      ? await identities.browser.signEnrollment(challenge)
-      : await signBrowserDeviceProof(challenge, keyPair!.privateKey)
-    BrowserDeviceHttpMutationResponse.parse(
-      await pagePost(owner, '/api/browser-devices/proofs', {
-        challenge_id: challenge.challenge_id,
-        signature,
-      }),
-    )
-    BrowserDeviceHttpMutationResponse.parse(
-      await pagePost(admin, '/api/browser-devices/approve', {
-        farm_id: input.farmId,
-        key_id: challenge.key_id,
-        expected_thumbprint: challenge.thumbprint,
-      }),
-    )
-    console.error('[fixture-stage] connector-pairing')
-    const identity = identities
-      ? undefined
-      : new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
-    const connector = identities?.connector ?? identity!
+        BrowserDeviceHttpMutationResponse.parse(
+          await pagePost(page, '/api/browser-devices/proofs', {
+            challenge_id: challenge.challenge_id,
+            signature,
+          }),
+        )
+        BrowserDeviceHttpMutationResponse.parse(
+          await pagePost(approver, '/api/browser-devices/approve', {
+            farm_id: input.farmId,
+            key_id: challenge.key_id,
+            expected_thumbprint: challenge.thumbprint,
+          }),
+        )
+        return {
+          accountId,
+          keyId: challenge.key_id,
+          thumbprint: challenge.thumbprint,
+        }
+      } finally {
+        await actor.evaluate((a) => a.close()).catch(() => {})
+        await actor.dispose().catch(() => {})
+        await page.unroute(path)
+      }
+    }
+    // The synthetic browser trusts its private test certificate; the native
+    // Connector validates the supplied CA.
+    const signIn = async (name: string, username: string) => {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true })
+      const page = await context.newPage()
+      const observer = await observe(page, name)
+      await browserLogin(page, input.origin, username, input.password)
+      return { username, context, page, observer }
+    }
+    stage('owner-login')
+    const ownerSession = await signIn('owner', input.usernames.owner)
+    stage('admin-login')
+    const adminSession = await signIn('admin', input.usernames.admin)
+    stage('browser-registration')
+    const owner: Actor = {
+      ...ownerSession,
+      ...(await enroll(ownerSession.page, adminSession.page)),
+    }
+    const admin: Actor = {
+      ...adminSession,
+      ...(await enroll(adminSession.page, ownerSession.page)),
+    }
+    stage('connector-pairing')
+    const dataDirectory = join(input.root, 'identity')
+    await mkdir(dataDirectory, { mode: 0o700 })
+    const identity = loadOrCreateIdentity(dataDirectory)
     const started = PairingStartResponse.parse(
       await machinePost(input.origin, '/api/connector-pairing/start', {
-        public_key_spki: connector.publicKeySpki,
+        public_key_spki: identity.publicKeySpki,
         platform: 'linux',
         version: '0.0.1',
       }),
@@ -503,23 +374,17 @@ export async function runSignallingHttpsAcceptance(input: {
     await machinePost(input.origin, '/api/connector-pairing/proof', {
       device_code: started.device_code,
       challenge: pairing,
-      signature: identities
-        ? await identities.connector.signPairing(
-            pairing,
-            input.origin,
-            audience,
-          )
-        : identity!.signPairingProof({
-            challenge: pairing,
-            expectedOrigin: input.origin,
-            expectedAudience: audience,
-            now: Date.now(),
-          }),
+      signature: identity.signPairingProof({
+        challenge: pairing,
+        expectedOrigin: input.origin,
+        expectedAudience: audience,
+        now: Date.now(),
+      }),
     })
-    await pagePost(owner, '/api/connector-pairing/approve', {
+    await pagePost(owner.page, '/api/connector-pairing/approve', {
       user_code: started.user_code,
       farm_id: input.farmId,
-      expected_fingerprint: connector.fingerprint,
+      expected_fingerprint: identity.fingerprint,
     })
     const claim = PairingPollResponse.parse(
       await machinePost(input.origin, '/api/connector-pairing/claim', {
@@ -528,52 +393,240 @@ export async function runSignallingHttpsAcceptance(input: {
     )
     if (claim.status !== 'approved' || claim.farm_id !== input.farmId)
       throw new Error('Synthetic pairing did not complete')
-    if (
-      input.extension &&
-      extensionInput &&
-      identities &&
-      input.disconnectSignalling
-    ) {
-      await input.extension.afterProvisioned({
-        ...extensionInput,
-        identities,
-        claim,
-        browserKeyId: challenge.key_id,
-        browserThumbprint: challenge.thumbprint,
-        assignmentRefs: [],
-        disconnectSignalling: input.disconnectSignalling,
-        revokeConnector: async () => {
-          await pagePost(
-            owner,
-            `/api/farms/${input.farmId}/connectors/${claim.agent_id}/revoke`,
-            { expected_fingerprint: connector.fingerprint },
-          )
-        },
-      })
-      if (input.extensionKind === 'pause-authority')
+    const files = await writeConnectorFiles({
+      root: input.root,
+      origin: input.origin,
+      audience,
+      farmId: input.farmId,
+      fingerprint: identity.fingerprint,
+      claim,
+      kobraPort: input.kobraPort,
+    })
+    stage('connector-start')
+    const connector = createConnectorHost({
+      root: input.root,
+      origin: input.origin,
+      dataDirectory,
+      t0,
+      ...files,
+    })
+    host = connector
+    connector.start()
+    const context: WorldContext = {
+      world: input.world,
+      origin: input.origin,
+      farmId: input.farmId,
+      agentId: claim.agent_id,
+      root: input.root,
+      password: input.password,
+      usernames: input.usernames,
+      browser,
+      owner,
+      admin,
+      host: connector,
+      db,
+      checks,
+      harness,
+      observers,
+      allowHttp: (method, path, statuses) => {
+        allowed.push({ method, path, statuses })
+      },
+      allowConsole: (pattern) => {
+        allowedConsole.push(pattern)
+      },
+      observe,
+      enroll,
+      async actor(name, username, approver, options) {
+        const session = await signIn(name, username)
+        const enrolled =
+          options?.enroll === false
+            ? {
+                accountId: await currentAccount(session.page),
+                keyId: '',
+                thumbprint: '',
+              }
+            : await enroll(session.page, approver)
+        return { ...session, ...enrolled }
+      },
+      async counts() {
+        const rows = await db.counts(input.farmId)
         return {
-          pauseIssuerHttpCompleted: true,
-          syntheticControlProofs: true,
-          rtcExecuted: false,
-          commandsExecuted: false,
+          ...rows,
+          bridgePrinters: await bridgePrinterCount(harness.bridgeContainer),
+          bridgeCreates: connector.bridgeCalls('POST', /^\/api\/v1\/printers$/),
+          bridgeDeletes: connector.bridgeCalls(
+            'DELETE',
+            /^\/api\/v1\/printers\//,
+          ),
+          runtimePrinters: await runtimePrinterCount(input.root),
+          activated: connector.count(
+            (event) =>
+              event.kind === 'runtime-activation' &&
+              event.result === 'activated',
+          ),
         }
-      if (input.extensionKind === 'pause-execution-rtc')
-        return {
-          pauseExecutionRtcFixtureCompleted: true,
-          syntheticMoonraker: true,
-          realKlipperAccepted: false,
-        }
-      if (input.extensionKind === 'pause-rtc')
-        return { pauseRtcFixtureCompleted: true, commandsExecuted: false }
-      return { firstRegistrationCompleted: true }
+      },
+      secrets: () =>
+        collectSecrets({
+          root: input.root,
+          harness,
+          kobraPort: input.kobraPort,
+        }),
+      disconnectSignalling: input.disconnectSignalling,
+      async revokeConnector() {
+        await pagePost(
+          owner.page,
+          `/api/farms/${input.farmId}/connectors/${claim.agent_id}/revoke`,
+          { expected_fingerprint: identity.fingerprint },
+        )
+      },
     }
-    throw new Error('Real registration extension required')
-  } finally {
-    for (const peer of sockets) peer.close()
+    stage(`world-${input.world}`)
     try {
-      await identities?.dispose()
+      await input.run(context)
+    } catch (error) {
+      failed = error
+      console.error(error)
+      for (const observer of observers)
+        await observer.page
+          .screenshot({
+            path: join(input.root, `failure-${observer.label}.png`),
+            fullPage: true,
+          })
+          .catch(() => {})
+    }
+    stage('browser-evidence-audit')
+    const secrets = await context.secrets()
+    const found = {
+      responses: new Set<string>(),
+      storage: new Set<string>(),
+      console: new Set<string>(),
+      dom: new Set<string>(),
+      websocket: new Set<string>(),
+    }
+    let responses = 0
+    let frames = 0
+    let truncated = false
+    const uninspected: string[] = []
+    let unread = 0
+    let aborted = 0
+    let bodyless = 0
+    let read = 0
+    for (const observer of observers) {
+      const scan = await observer.scan(secrets)
+      if (!scan.inspected) uninspected.push(observer.label)
+      unread += scan.unread
+      aborted += scan.aborted
+      bodyless += scan.bodyless
+      read += scan.read
+      for (const key of [
+        'responses',
+        'storage',
+        'console',
+        'dom',
+        'websocket',
+      ] as const)
+        for (const label of scan[key]) found[key].add(label)
+      responses += scan.retainedResponses
+      frames += scan.retainedFrames
+      truncated ||= scan.truncated
+    }
+    const q = 'browser_secrets_absent'
+    const connectorSecrets = secrets.filter(
+      (secret) =>
+        !secret.label.startsWith('bridge:') &&
+        !secret.label.startsWith('printer:'),
+    ).length
+    await checks.record(
+      q,
+      'secret-set-non-empty',
+      secrets.length >= 4 && !truncated,
+      `secrets=${secrets.length} connector-state=${connectorSecrets} responses=${responses} frames=${frames} truncated=${truncated}`,
+    )
+    await checks.record(
+      q,
+      'browser-inspection-complete',
+      uninspected.length === 0 && unread === 0 && !truncated,
+      `pages=${observers.length} storage/DOM unread on: ${uninspected.join(',') || 'none'}; response bodies read: ${read}; unread: ${unread}; bodyless by protocol: ${bodyless}; aborted by the browser before completion: ${aborted}`,
+    )
+    for (const key of [
+      'responses',
+      'storage',
+      'console',
+      'dom',
+      'websocket',
+    ] as const)
+      await checks.record(
+        q,
+        `${key}-clean`,
+        found[key].size === 0,
+        found[key].size ? [...found[key]].join(',') : `searched ${key}`,
+      )
+    const httpIssues = observers.flatMap((observer) => observer.httpIssues)
+    const unexpectedHttp = httpIssues.filter(
+      (issue) =>
+        !allowed.some(
+          (rule) =>
+            rule.method === issue.method &&
+            rule.path.test(issue.path) &&
+            rule.statuses.includes(issue.status),
+        ),
+    )
+    const failedRequests = observers.flatMap(
+      (observer) => observer.failedRequests,
+    )
+    // Client-side aborts of superseded loads are the only tolerated failures.
+    const unexpectedFailed = failedRequests.filter(
+      (entry) => entry.error !== 'net::ERR_ABORTED',
+    )
+    await checks.record(
+      q,
+      'no-unexpected-network-errors',
+      unexpectedHttp.length === 0 && unexpectedFailed.length === 0,
+      `http>=400: ${httpIssues.length} (unexpected ${unexpectedHttp
+        .slice(0, 6)
+        .map((i) => `${i.page} ${i.method} ${i.path} ${i.status}`)
+        .join(
+          '; ',
+        )}); failed: ${failedRequests.length} (unexpected ${unexpectedFailed
+        .slice(0, 6)
+        .map((i) => `${i.page} ${i.method} ${i.path} ${i.error}`)
+        .join('; ')})`,
+    )
+    const consoleIssues = observers.flatMap(
+      (observer) => observer.consoleIssues,
+    )
+    // Chromium mirrors every HTTP error as a console error; those are judged above.
+    const unexpectedConsole = consoleIssues.filter(
+      (issue) =>
+        !/^Failed to load resource: the server responded with a status of/.test(
+          issue.text,
+        ) && !allowedConsole.some((pattern) => pattern.test(issue.text)),
+    )
+    await checks.record(
+      q,
+      'no-unexpected-console-errors',
+      unexpectedConsole.length === 0,
+      `console issues: ${consoleIssues.length} (unexpected ${unexpectedConsole
+        .slice(0, 6)
+        .map((i) => `${i.page} ${i.type} ${i.text.slice(0, 80)}`)
+        .join('; ')})`,
+    )
+    await writeFile(
+      join(input.root, 'browser-issues.json'),
+      JSON.stringify({ httpIssues, failedRequests, consoleIssues }, null, 1),
+      { mode: 0o600 },
+    )
+    const connectorFailure = connector.failure()
+    if (connectorFailure && !failed) failed = connectorFailure
+  } finally {
+    try {
+      await host?.dispose()
     } finally {
+      await db.close().catch(() => {})
       await browser.close()
     }
   }
+  if (failed) throw failed
+  return { world: input.world, checks: checks.records.length }
 }

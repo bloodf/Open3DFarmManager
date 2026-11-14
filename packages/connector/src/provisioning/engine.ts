@@ -677,7 +677,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
               frame.target,
             )
           : frame.target.backend === 'moonraker'
-            ? (({ api_key: _key, ...safe }) => safe)(frame.target)
+            ? (({
+                api_key: _key,
+                username: _username,
+                password: _password,
+                ...safe
+              }) => safe)(frame.target)
             : frame.target.backend === 'bambu'
               ? (({ access_code: _code, ...safe }) => safe)(frame.target)
               : frame.target,

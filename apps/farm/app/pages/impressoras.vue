@@ -209,6 +209,8 @@ function selectDiscovery(
   } else {
     moonrakerOrigin.value = prefill.origin
     moonrakerApiKey.value = ''
+    moonrakerUsername.value = ''
+    moonrakerPassword.value = ''
   }
 }
 const onboardingFamily = ref<
@@ -274,6 +276,8 @@ const describeBackendError = (code: string) =>
   (isCrealityOnboarding.value ? describeCrealityConfigurationError(code) : null)
 const moonrakerOrigin = ref('')
 const moonrakerApiKey = ref('')
+const moonrakerUsername = ref('')
+const moonrakerPassword = ref('')
 const isMoonrakerOnboarding = computed(
   () =>
     kobraOperation.value?.target.backend === 'moonraker' ||
@@ -495,6 +499,8 @@ function clearKobraContext(
   preserveUnresolvedOp = false,
 ) {
   moonrakerApiKey.value = ''
+  moonrakerUsername.value = ''
+  moonrakerPassword.value = ''
   bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
@@ -1184,6 +1190,8 @@ async function prepareMoonrakerPrinter() {
   const validated = validateMoonrakerTargetInput({
     origin: moonrakerOrigin.value,
     apiKey: moonrakerApiKey.value,
+    username: moonrakerUsername.value,
+    password: moonrakerPassword.value,
     displayLabel: kobraLabel.value,
   })
   if (!validated.ok) {
@@ -1239,6 +1247,8 @@ async function prepareMoonrakerPrinter() {
         if (token !== kobraGeneration || opController.signal.aborted)
           throw new Error('Configuration context changed before dispatch')
         moonrakerApiKey.value = ''
+        moonrakerUsername.value = ''
+        moonrakerPassword.value = ''
         // Persist before handing the frame to the transport; send failures stay uncertain.
         persistPendingOperation(candidate, 'awaiting-reconcile')
         opContext = candidate
@@ -1586,6 +1596,8 @@ async function cancelKobraX() {
 function abortLocalKobraWait() {
   if (!kobraBusy.value) return
   moonrakerApiKey.value = ''
+  moonrakerUsername.value = ''
+  moonrakerPassword.value = ''
   bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
@@ -2101,6 +2113,23 @@ onBeforeRouteLeave(clear)
                   : 'Chave não configurada.'
               }}
             </p>
+            <label for="moonraker-username"
+              >Usuário (alternativa à chave)</label
+            >
+            <input
+              id="moonraker-username"
+              v-model="moonrakerUsername"
+              maxlength="256"
+              autocomplete="off"
+            />
+            <label for="moonraker-password">Senha</label>
+            <input
+              id="moonraker-password"
+              v-model="moonrakerPassword"
+              type="password"
+              maxlength="4096"
+              autocomplete="new-password"
+            />
             <p>
               Suporte não qualificado. O Connector verifica o Moonraker em modo
               somente leitura antes de aceitar.
@@ -2177,6 +2206,23 @@ onBeforeRouteLeave(clear)
                   : 'Informe as credenciais LAN.'
               }}
             </p>
+            <label for="moonraker-username"
+              >Usuário (alternativa à chave)</label
+            >
+            <input
+              id="moonraker-username"
+              v-model="moonrakerUsername"
+              maxlength="256"
+              autocomplete="off"
+            />
+            <label for="moonraker-password">Senha</label>
+            <input
+              id="moonraker-password"
+              v-model="moonrakerPassword"
+              type="password"
+              maxlength="4096"
+              autocomplete="new-password"
+            />
             <p>
               Suporte não qualificado. O Connector verifica a conexão LAN sem
               enviar comandos.

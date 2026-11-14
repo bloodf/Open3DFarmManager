@@ -2,7 +2,12 @@ import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
-import { parseLocalCollectorConfig } from '../config/local.ts'
+import {
+  parseCollectorConfig,
+  readCollectorConfig,
+  type CrealityCollectorConfig,
+} from '../config/creality.ts'
+import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import {
@@ -13,10 +18,7 @@ import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
-import {
-  readLocalCollectorConfig,
-  type LocalCollectorConfig,
-} from '../config/local.ts'
+import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
 
 export type Diagnostic =
@@ -50,7 +52,7 @@ export async function collectLocalTelemetry(input: {
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const config = readLocalCollectorConfig(input.configPath)
+  const config = readCollectorConfig(input.configPath)
   if (input.signal.aborted) return
   const directory = join(input.dataDirectory, 'telemetry')
   assertUnscopedCollection(directory)
@@ -78,7 +80,7 @@ export async function collectIntoQueue(input: {
     options: Parameters<typeof createBambuTransport>[0],
   ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
   kobraFetch?: KobraLinkFetch
-  config: LocalCollectorConfig
+  config: LocalCollectorConfig | CrealityCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -86,7 +88,7 @@ export async function collectIntoQueue(input: {
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const config = parseLocalCollectorConfig(input.config)
+  const config = parseCollectorConfig(input.config)
   const { queue } = input
   const { createMoonrakerSubscription } =
     await import('../moonraker/subscription.ts')
@@ -312,6 +314,28 @@ export async function collectIntoQueue(input: {
               },
             })
             onEvent(event)
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 4) {
+      for (const binding of config.creality.printers) {
+        if (signal.aborted) break
+        const sub = createCrealityCollection({
+          binding,
+          signal,
+          onObservation(observation) {
+            input.onRawObservation?.(observation)
+            onEvent({ kind: 'snapshot', printer: observation.printer })
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
           },
         })
         subscriptions.push({ done: sub.done.catch(fail) })

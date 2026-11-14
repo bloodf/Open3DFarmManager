@@ -4,12 +4,12 @@ Catalog entries for the Klipper/Moonraker family. Source of truth:
 `apps/farm/app/utils/compatibility/klipper.ts`. Shown on `/compatibilidade`.
 Labels never grant authority; they do not enable commands.
 
-| Entry                                    | Telemetry | Files   | Camera    | Materials | Pause/Resume/Cancel |
-| ---------------------------------------- | --------- | ------- | --------- | --------- | ------------------- |
-| Generic Klipper + Moonraker              | simulated | unknown | simulated | unknown   | simulated           |
-| Creality K1 series (rooted Moonraker)    | simulated | unknown | simulated | unknown   | simulated           |
-| Voron 2.4 (self-built kit)               | simulated | unknown | simulated | unknown   | simulated           |
-| Sovol SV08                               | simulated | unknown | simulated | unknown   | simulated           |
+| Entry                                 | Telemetry | Files   | Camera    | Materials | Pause/Resume/Cancel |
+| ------------------------------------- | --------- | ------- | --------- | --------- | ------------------- |
+| Generic Klipper + Moonraker           | simulated | unknown | simulated | unknown   | simulated           |
+| Creality K1 series (rooted Moonraker) | simulated | unknown | simulated | unknown   | simulated           |
+| Voron 2.4 (self-built kit)            | simulated | unknown | simulated | unknown   | simulated           |
+| Sovol SV08                            | simulated | unknown | simulated | unknown   | simulated           |
 
 `simulated` means exercised against the loopback Klipper/Moonraker simulators in
 `infra/sim` and the unit tests, never against physical hardware. Camera follows

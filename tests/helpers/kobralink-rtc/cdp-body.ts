@@ -4,15 +4,16 @@ import type { CDPSession, Page } from '@playwright/test'
  * Network-level body capture for one page, independent of whether the page
  * script ever consumes a response. Chromium streams the bytes it receives to
  * this session (`Network.streamResourceContent`). A body counts as captured
- * only when it is complete by HTTP framing: exactly the declared
- * Content-Length bytes arrived, or, without a declared length, Chromium
- * reported `Network.loadingFinished`. Chromium does not report a body the
+ * only when it is complete: for an unencoded, unchunked response exactly the
+ * declared Content-Length bytes arrived; otherwise Chromium reported
+ * `Network.loadingFinished`. Chromium does not report a body the
  * page never drains as finished even when every declared byte arrived.
  * Partial, overflowing or unframed unfinished bodies are never read.
  */
 export interface BodyFacts {
   declaredLength: number | null
   chunked: boolean
+  encoded: boolean
   receivedBytes: number
   finished: boolean
   failed: boolean
@@ -35,6 +36,7 @@ type Entry = {
   bytes: number
   declaredLength: number | null
   chunked: boolean
+  encoded: boolean
   finished: boolean
   failed: boolean
   streamed: boolean
@@ -80,9 +82,11 @@ function settle(entry: Entry) {
 
 function complete(entry: Entry): boolean {
   if (!entry.streamed || entry.truncated || entry.failed) return false
-  return entry.declaredLength === null
-    ? entry.finished
-    : entry.bytes === entry.declaredLength
+  // Exact wire framing proves completeness only for untransformed bodies:
+  // decoded bytes are not comparable with a compressed or chunked length.
+  if (entry.declaredLength !== null && !entry.encoded && !entry.chunked)
+    return entry.bytes === entry.declaredLength
+  return entry.finished
 }
 
 function view(entry: Entry | null): CapturedBody {
@@ -93,6 +97,7 @@ function view(entry: Entry | null): CapturedBody {
     facts: {
       declaredLength: entry?.declaredLength ?? null,
       chunked: entry?.chunked ?? false,
+      encoded: entry?.encoded ?? false,
       receivedBytes: received.length,
       finished: entry?.finished ?? false,
       failed: entry?.failed ?? false,
@@ -114,6 +119,9 @@ function newEntry(headers: Record<string, unknown>, startMs: number): Entry {
     chunked: (header(headers, 'transfer-encoding') ?? '')
       .toLowerCase()
       .includes('chunked'),
+    encoded: !['', 'identity'].includes(
+      (header(headers, 'content-encoding') ?? '').trim().toLowerCase(),
+    ),
     finished: false,
     failed: false,
     streamed: false,

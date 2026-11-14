@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { chromium } from '@playwright/test'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
@@ -409,6 +410,17 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
     if (req.url === '/api/complete') return res.end('{"denied":"complete"}')
+    if (req.url === '/api/encoded') {
+      // The declared length counts compressed wire bytes. Here it equals the
+      // decoded size while the wire is still short of it: unfinished, so the
+      // decoded bytes must never be taken as the complete body.
+      const decoded = '{"denied":"' + 'e'.repeat(400) + '"}'
+      const wire = gzipSync(decoded)
+      res.setHeader('content-encoding', 'gzip')
+      res.setHeader('content-length', String(decoded.length))
+      res.write(wire)
+      return
+    }
     if (req.url === '/api/short') {
       res.setHeader('content-length', '100')
       res.write('{"partial":')
@@ -440,7 +452,12 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
       if (path === '/api/complete') twice.push(network.take(...args))
     })
     // The page reads only statuses: no body is ever drained by page code.
-    for (const path of ['/api/complete', '/api/short', '/api/overflow'])
+    for (const path of [
+      '/api/complete',
+      '/api/encoded',
+      '/api/short',
+      '/api/overflow',
+    ])
       void page
         .evaluate(async (u) => (await fetch(u)).status, origin + path)
         .catch(() => 0)
@@ -448,6 +465,10 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     const read = async (path: string) => (await takes.get(path))!.read()
     const done = await read('/api/complete')
     assert.equal(done.body, '{"denied":"complete"}')
+    const encoded = await read('/api/encoded')
+    assert.equal(encoded.facts.encoded, true)
+    assert.equal(encoded.facts.finished, false)
+    assert.equal(encoded.body, null)
     const short = await read('/api/short')
     assert.equal(short.body, null)
     assert.equal(short.facts.declaredLength, 100)

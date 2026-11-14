@@ -2,12 +2,16 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
   uniqueMatch,
 } from '../helpers/kobralink-rtc/cdp-body.ts'
+import { instrumentPage } from '../helpers/kobralink-rtc/observe.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 const env = {
@@ -541,5 +545,52 @@ test('network capture keeps a finished body the page navigated away from', async
     await browser.close()
     server.closeAllConnections()
     server.close()
+  }
+})
+
+test('a body read in the same tick as a reload is still captured whole', async () => {
+  // Run b83850cd: /api/auth/me finished, the page reloaded at once and
+  // Chromium had dropped the body before `getResponseBody` reached it.
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith('/page')) return res.end('<html>ok</html>')
+    res.setHeader('content-type', 'application/json')
+    res.end('{"me":"read-then-reloaded"}')
+  }).listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const evidence = await mkdtemp(join(tmpdir(), 'kobralink-observe-'))
+  const browser = await chromium.launch({ headless: true })
+  try {
+    for (let round = 0; round < 5; round++) {
+      const page = await browser.newPage()
+      await page.goto(origin + '/page')
+      const observer = await instrumentPage({
+        page,
+        label: 'owner',
+        evidence,
+        origin,
+        t0: Date.now(),
+      })
+      await page
+        .evaluate(async () => {
+          const reads = [1, 2, 3, 4].map(() =>
+            fetch('/api/me').then((r) => r.text()),
+          )
+          await Promise.all(reads)
+          location.reload()
+        })
+        .catch(() => {})
+      await page.waitForLoadState('load')
+      const scan = await observer.scan([])
+      assert.equal(scan.unread, 0, `round ${round}: a finished body was lost`)
+      assert.equal(scan.aborted, 0)
+      assert.ok(scan.read >= 4)
+      await page.close()
+    }
+  } finally {
+    await browser.close()
+    server.closeAllConnections()
+    server.close()
+    await rm(evidence, { recursive: true, force: true })
   }
 })

@@ -324,3 +324,53 @@ start passed 31/31 with no 403. This is the same mixed database/host clock
 domain as the Connector `context-window` refusal fixed in `d5a2e48`, here on
 the server side. It needs a product fix that compares the session touch and
 the authority observation in one clock domain without widening expiry; a deterministic store-level reproduction is still required before that fix. The harness does not change production authority to pass it.
+
+## Qualification checkpoint (2026-11-14, candidate 0266cf1)
+
+Status: **blocked**. `--verify-report` must fail. The committed JSON is still
+the actual report of failed full run `e5d289c7-f654-4483-b4b4-2519c5741e34`;
+no seven-world run exists on this candidate and none was started.
+
+Candidate `0266cf19eab417c2d809fb7254b22a4d0514599a` carries the cumulative
+harness plus the integrated session-clock fix `6a3eb2d`
+(`PostgresConfigurationStore` now judges the session against the application
+clock). Source checks passed: 38 runner and packaging tests, 63
+configuration, diagnostic and clock tests, TypeScript and formatting.
+
+Selected positive run `358797f6-593e-4a35-9908-c73e0fa8f27e` (source SHA-256
+`147be59c…785274`, output SHA-256 `1078f24a…f05c91`) exited 1 with 12 world
+checks, none false, and resource cleanup passing. The owner bootstrap 403 did
+not recur with the database clock 97 ms ahead of the host. The run stopped on
+a 60 s wait for the confirmed heading in `driveFirstRegistration`: the page
+showed the unconfirmed-operation reconciliation region instead.
+
+Observed sequence: `commit` returned `local-committed`; the browser's
+`POST /api/farms/:id/configuration-receipts` returned 200 about 36 ms later;
+the browser then closed its configuration socket and data channel without
+sending `inventory`, and the Connector logged `channel-closed` with the
+activation left `unconfirmed`. In passing run `ddf34ac2` the same receipt was
+followed by `inventory` and `inventory-result ok`.
+
+Bounded cause, read from source, outside the owned files:
+`verifyConfigurationInventoryAck` (`packages/farm-protocol/src/configuration-inventory.ts`)
+calls `configurationFresh(ack, now)` with zero skew. The server stamps the
+acknowledgement `issued_at` with the database transaction time
+(`apps/farm/server/services/configuration-receipt-registration.ts`), and the
+browser verifies it with `Date.now()`
+(`apps/farm/app/utils/kobralink-onboarding.ts`). With the database ahead of
+the browser by more than the receipt latency, `issued_at > now`, the valid
+acknowledgement is rejected as an invalid signature and the session is closed
+before inventory. Every other browser freshness check already passes the
+published skew (2000 or 5000 ms); the Connector calls the same verifier in
+`packages/connector/src/runtime/configuration-authority.ts`. This also fits
+the retained `e17fe67a` late-ack failure, where the first context closed
+before inventory. Not yet proved by a deterministic test: the rejection is
+caught in the page and leaves no console or network trace, so the run shows
+the sequence and the clock offset, not the thrown message.
+
+Required product change, not made here: verify the inventory acknowledgement
+not-before with a bounded published skew in the browser and the Connector (or
+stamp it in the verifier's clock domain), leaving `expires_at`, proof TTL and
+`MIN_CONTEXT_MS` unchanged, with a unit test that rejects today at
+`now = issued_at - 1`. The harness does not synchronise clocks or retry to
+hide it. After that fix: selected positive, then one full run.

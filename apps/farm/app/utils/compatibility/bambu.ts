@@ -26,13 +26,13 @@ export interface BambuCatalogProduct {
 }
 
 const capabilities = {
-  telemetry: 'unknown',
-  files: 'unknown',
+  telemetry: 'simulated',
+  files: 'simulated',
   camera: 'unknown',
   materials: 'unknown',
-  pause: 'unknown',
-  resume: 'unknown',
-  cancel: 'unknown',
+  pause: 'simulated',
+  resume: 'simulated',
+  cancel: 'simulated',
 } satisfies BambuCatalogProduct['capabilities']
 
 const common = {
@@ -45,7 +45,7 @@ const common = {
   limitations: [
     'A data indica a publicação do anúncio, não a disponibilidade em cada região.',
     'Recursos comerciais não comprovam acesso por terceiros ou compatibilidade com o OpenFarm.',
-    'Firmware, comandos e integração com hardware não foram verificados para este modelo.',
+    'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',
   ],
 } satisfies Omit<
   BambuCatalogProduct,
@@ -73,6 +73,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   },
   {
     ...common,
+    capabilities: { ...capabilities, camera: 'simulated' },
     id: 'bambu-h2c',
     model: 'H2C',
     releaseDate: '2025-11-14',
@@ -82,6 +83,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   },
   {
     ...common,
+    capabilities: { ...capabilities, camera: 'simulated' },
     id: 'bambu-p2s',
     model: 'P2S',
     releaseDate: '2025-10-14',
@@ -91,6 +93,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   },
   {
     ...common,
+    capabilities: { ...capabilities, camera: 'simulated' },
     id: 'bambu-h2s',
     model: 'H2S',
     releaseDate: '2025-08-26',

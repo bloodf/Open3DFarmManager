@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PrinterIdentity from '../components/printer-identity/PrinterIdentity.vue'
 import {
   CREALITY_SUPPORT_NOTE,
   validateCrealityTargetInput,
@@ -1675,6 +1676,9 @@ onBeforeRouteLeave(clear)
       </p>
       <ul>
         <li v-for="printer in printers" :key="printer.assignmentId">
+          <PrinterIdentity
+            :identity="liveObservations[printer.assignmentId]?.state.identity"
+          />
           <dl>
             <dt>Chave exata</dt>
             <dd class="exact-key">{{ printer.printerKey }}</dd>

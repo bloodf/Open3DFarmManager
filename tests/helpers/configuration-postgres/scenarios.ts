@@ -1,3 +1,5 @@
+import { loadMigrationCatalog } from '../../../scripts/db/migrations.ts'
+import { schemaState } from '../../../apps/farm/server/utils/database/schema.ts'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
@@ -316,6 +318,77 @@ export async function qualifyConfiguration(
     status: 'pass',
     outcomes,
     rows: await snapshot(),
+  })
+  const catalog = await loadMigrationCatalog()
+  const readiness = catalog.find(
+    (entry) => entry.id === '0027_configuration_schema_readiness',
+  )
+  assert.ok(readiness)
+  const unchanged = async () =>
+    JSON.stringify({
+      journal: [
+        ...(await admin`SELECT * FROM public.open3dfarm_migrations ORDER BY position`),
+      ],
+      assignments: [
+        ...(await admin`SELECT * FROM farm.printer_assignments ORDER BY id`),
+      ],
+      memberships: [
+        ...(await admin`SELECT * FROM pg_auth_members ORDER BY roleid,member`),
+      ],
+      grants: [
+        ...(await admin`SELECT c.oid,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('farm','public') AND c.relname <> 'open3dfarm_migrations' ORDER BY c.oid`),
+      ],
+    })
+  const baseline = await unchanged()
+  const guard = async () =>
+    assert.equal(
+      (
+        await sql`SELECT pg_has_role(current_user,${'farm_configuration_authority'},'USAGE') AND NOT EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user,r.oid,'MEMBER') AND (r.rolsuper OR r.rolcreaterole OR r.rolbypassrls OR r.rolcreatedb OR r.rolreplication OR r.rolname NOT IN (current_user,${'farm_configuration_authority'}))) AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname=current_database() AND pg_has_role(current_user,datdba,'MEMBER')) AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='farm' AND pg_has_role(current_user,c.relowner,'MEMBER')) AS allowed`
+      )[0]?.allowed,
+      true,
+    )
+  const denied = async () => {
+    for (const privilege of [
+      'INSERT',
+      'UPDATE',
+      'DELETE',
+      'TRUNCATE',
+      'REFERENCES',
+      'TRIGGER',
+    ])
+      assert.equal(
+        (
+          await sql`SELECT has_table_privilege(current_user,'public.open3dfarm_migrations',${privilege}) AS allowed`
+        )[0]?.allowed,
+        false,
+      )
+    for (const statement of [
+      'INSERT INTO public.open3dfarm_migrations SELECT * FROM public.open3dfarm_migrations WHERE false',
+      'UPDATE public.open3dfarm_migrations SET checksum=checksum WHERE false',
+      'DELETE FROM public.open3dfarm_migrations WHERE false',
+    ])
+      await assert.rejects(sql.unsafe(statement), state('42501'))
+  }
+  await guard()
+  await denied()
+  await admin.unsafe(readiness.down).simple()
+  await guard()
+  await assert.rejects(schemaState(sql, catalog), state('42501'))
+  await denied()
+  assert.equal(await unchanged(), baseline)
+  await record({
+    stage: 'configuration_schema_readiness_without_grant',
+    sqlstate: '42501',
+    roleGuard: true,
+  })
+  await admin.unsafe(readiness.up).simple()
+  await guard()
+  assert.equal(await schemaState(sql, catalog), 'current')
+  await denied()
+  assert.equal(await unchanged(), baseline)
+  await record({
+    qualification: 'configuration_schema_readiness',
+    status: 'pass',
   })
   const beforeRevocation = await snapshot()
   await admin`UPDATE farm.browser_device_keys SET status='revoked',revoked_at=${Date.now()},revoked_by=${account} WHERE key_id=${keyId}::uuid`

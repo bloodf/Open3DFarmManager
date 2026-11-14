@@ -20,6 +20,17 @@ import {
   type SpoolSummaryState,
 } from './spool-inventory.ts'
 
+/** A disconnected response observes connection only, never print telemetry. */
+export type RawPrinterObservation = Omit<
+  RawMoonrakerObservation,
+  'status' | 'fieldObservedAtMonoMs'
+> &
+  Partial<Pick<RawMoonrakerObservation, 'status'>> & {
+    fieldObservedAtMonoMs:
+      | RawMoonrakerObservation['fieldObservedAtMonoMs']
+      | Readonly<{ connection: number }>
+  }
+
 const FRAME_LIMIT = 'Application frame limit'
 
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
@@ -34,7 +45,7 @@ export function createFarmSnapshotSource(input: {
     input.assignmentRefs[0]!.agentId,
   )
   const nowMono = input.nowMono ?? (() => performance.now())
-  const entries = new Map<string, RawMoonrakerObservation>()
+  const entries = new Map<string, RawPrinterObservation>()
   const epochs = new Map<string, number>()
   const retired = new Map<string, number>()
   let spoolState: { value: SpoolSummaryState; receivedMono: number } | undefined
@@ -146,7 +157,7 @@ export function createFarmSnapshotSource(input: {
     entries.delete(event.printerKey)
     notify()
   }
-  function observe(value: RawMoonrakerObservation) {
+  function observe(value: RawPrinterObservation) {
     if (closed) return
     const now = clock()
     if (!refs.some((ref) => ref.printerKey === value.printerKey)) {
@@ -167,29 +178,43 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
     }
     const times = value.fieldObservedAtMonoMs
+    const connectionOnly = 'connection' in times
+    const previousTimes = previous?.fieldObservedAtMonoMs
     if (
-      Object.keys(times).sort().join(',') !== 'printState,progress,webhooks' ||
+      Object.keys(times).sort().join(',') !==
+        (connectionOnly ? 'connection' : 'printState,progress,webhooks') ||
+      (connectionOnly &&
+        (value.printer.state !== 'offline' ||
+          value.printer.progress !== undefined)) ||
       !Number.isFinite(value.receivedAtMonoMs) ||
       value.receivedAtMonoMs > now ||
-      (['webhooks', 'printState', 'progress'] as const).some((field) => {
-        const time = times[field]
+      Object.entries(times).some(([field, time]) => {
+        const previousTime =
+          previousTimes &&
+          Object.entries(previousTimes).find(([key]) => key === field)?.[1]
+        const boundaryTime =
+          previousTimes && 'connection' in previousTimes !== connectionOnly
+            ? Math.max(...Object.values(previousTimes))
+            : previousTime
         return (
           !Number.isFinite(time) ||
           time < 0 ||
           time > value.receivedAtMonoMs ||
           (previous?.epoch === value.epoch &&
-            time < previous.fieldObservedAtMonoMs[field])
+            boundaryTime !== undefined &&
+            time < boundaryTime)
         )
       })
     ) {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid observation time')
     }
-    const temperature =
-      value.temperatureObservation ??
-      (previous?.epoch === value.epoch
-        ? previous.temperatureObservation
-        : undefined)
+    const temperature = connectionOnly
+      ? undefined
+      : (value.temperatureObservation ??
+        (previous?.epoch === value.epoch
+          ? previous.temperatureObservation
+          : undefined))
     if (
       temperature &&
       (!Number.isFinite(temperature.observedAtMonoMs) ||
@@ -212,17 +237,20 @@ export function createFarmSnapshotSource(input: {
     const printer = PrinterState.parse({
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
-      progress: parsedPrinter.data.progress,
+      ...(parsedPrinter.data.progress === undefined
+        ? {}
+        : { progress: parsedPrinter.data.progress }),
       observedAt: parsedPrinter.data.observedAt,
     })
     if (printer.printerKey !== value.printerKey) {
       close()
       throw Error('Printer mismatch')
     }
+    const { temperatureObservation: _temperature, ...observation } = value
     entries.set(
       value.printerKey,
       Object.freeze({
-        ...value,
+        ...observation,
         printer: Object.freeze(printer),
         fieldObservedAtMonoMs: Object.freeze({ ...times }),
         ...(temperature

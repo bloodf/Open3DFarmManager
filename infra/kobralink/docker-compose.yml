@@ -1,0 +1,63 @@
+# Original Compose recipe for local standalone execution of unmodified KobraLink.
+# Built locally from external source pinned in infra/kobralink/upstream.lock.
+#
+# Security & Exposure constraints:
+# - Loopback-only management port (127.0.0.1:KOBRALINK_MGMT_PORT -> 7100)
+# - No Moonraker port publishing (7125-7140 omitted) to prevent unauthenticated LAN access
+# - Dedicated named volume for SQLite and auth state (openfarm-kobralink-data)
+# - No host networking, no privileged containers, no Docker socket mounts
+# - no-new-privileges enabled; capabilities dropped (ALL)
+# - KOBRALINK_UPDATE_REPO and KOBRALINK_EXTRA_ORIGINS set empty
+# - Dedicated separate auth secret & SQLite database from Open3DFarmManager
+# - Manual operator invocation only; no container engine auto-start
+name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-kobralink}
+
+services:
+  kobralink:
+    image: ${KOBRALINK_IMAGE:-kobralink-local:5a5e5d9b1e3b}
+    build:
+      context: ${KOBRALINK_SRC:?set KOBRALINK_SRC to the verified external checkout}
+      dockerfile: infra/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-kobralink}-service
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      NODE_ENV: production
+      KOBRALINK_DATA_DIR: /data
+      DATABASE_URL: file:/data/kobralink.db
+      KOBRALINK_PORT: 7100
+      KOBRALINK_UPDATE_REPO: ''
+      KOBRALINK_EXTRA_ORIGINS: ''
+      BETTER_AUTH_SECRET: ${KOBRALINK_AUTH_SECRET:?set KOBRALINK_AUTH_SECRET to an independent secret}
+      BETTER_AUTH_URL: http://127.0.0.1:${KOBRALINK_MGMT_PORT:-7100}
+    ports:
+      - '127.0.0.1:${KOBRALINK_MGMT_PORT:-7100}:7100'
+    volumes:
+      - openfarm-kobralink-data:/data
+    networks:
+      - kobralink-net
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 256
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:7100/api/auth/ok').then(r => process.exit(r.ok ? 0: 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+networks:
+  kobralink-net:
+    name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-kobralink}-net
+
+volumes:
+  openfarm-kobralink-data:
+    name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-kobralink}-data

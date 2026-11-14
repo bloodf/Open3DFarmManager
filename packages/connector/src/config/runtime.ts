@@ -2,7 +2,9 @@ import { z } from 'zod'
 import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
   createPrinterBindingRegistry,
+  readRuntimePrinterBinding,
   readPrinterBinding,
+  provisionReadonlyPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -18,7 +20,7 @@ import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 
 const Runtime = z.strictObject({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   collection: LocalCollectorConfigSchema,
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
@@ -60,18 +62,31 @@ export function readAgentRuntimeConfig(
     readPrivateJsonFile(path, { maxBytes: 64 * 1024 }),
   )
   const collection = parseLocalCollectorConfig(input.collection)
+  if (input.version !== collection.version)
+    throw Error('Runtime collection version mismatch')
   if (collection.spoolman && collection.spoolman.farmId !== credential.farm_id)
     throw new Error('Spoolman scope does not match local credential')
-  const registry = createPrinterBindingRegistry({
-    allowedOrigins: collection.allowedOrigins,
-  })
+  const registry = collection.allowedOrigins.length
+    ? createPrinterBindingRegistry({
+        allowedOrigins: collection.allowedOrigins,
+      })
+    : null
   const ids = new Set<string>()
   // The exact provisioned handles are retained privately. They are the only
   // source of a printer binding and are never reconstructed or serialized.
   const provisioned = new Map<string, PrinterBinding>()
   const assignments = input.assignments.map((value) => {
-    const binding = registry.provision(value)
-    const assignment = readPrinterBinding(binding)
+    const isKobra =
+      collection.version === 2 &&
+      typeof value === 'object' &&
+      value !== null &&
+      'backend' in value &&
+      value.backend === 'kobralink'
+    const binding = isKobra
+      ? provisionReadonlyPrinter(value)
+      : registry?.provision(value)
+    if (!binding) throw Error('Moonraker assignment requires local allowlist')
+    const assignment = readRuntimePrinterBinding(binding)
     if (
       !assignment ||
       ids.has(assignment.assignment_id) ||
@@ -83,7 +98,11 @@ export function readAgentRuntimeConfig(
     provisioned.set(assignment.assignment_id, binding)
     return assignment
   })
-  if (assignments.length !== collection.printers.length)
+  if (
+    assignments.length !==
+    collection.printers.length +
+      (collection.version === 2 ? collection.kobralink.printers.length : 0)
+  )
     throw new Error('Runtime assignment mapping is incomplete')
   for (const printer of collection.printers) {
     const selected = validateMoonrakerInput({
@@ -95,6 +114,7 @@ export function readAgentRuntimeConfig(
       !assignments.some(
         (assignment) =>
           assignment.printer_key === selected.printerKey &&
+          'moonraker_origin' in assignment &&
           assignment.moonraker_origin === selected.origin,
       )
     )
@@ -102,16 +122,38 @@ export function readAgentRuntimeConfig(
         'Runtime assignment mapping does not match local collection',
       )
   }
+  if (collection.version === 2) {
+    for (const printer of collection.kobralink.printers) {
+      const matches = assignments.filter(
+        (a) =>
+          'backend' in a &&
+          a.printer_key === printer.printerKey &&
+          a.origin === printer.origin &&
+          a.bridgeInstance === printer.bridgeInstance &&
+          a.deviceId === printer.deviceId &&
+          a.id === printer.id &&
+          a.revision === printer.revision,
+      )
+      if (matches.length !== 1) throw Error('KobraLink assignment mismatch')
+    }
+  }
   const pause =
     input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
   if (pause?.control && !provisioned.has(pause.control.assignmentId))
     throw new Error('Pause control assignment is not provisioned locally')
+  if (pause?.control) {
+    const binding = provisioned.get(pause.control.assignmentId)
+    if (!binding || !readPrinterBinding(binding))
+      throw Error('Backend does not support pause control')
+  }
   const camera =
     input.camera === undefined
       ? null
       : parseCameraRuntimeConfig(
           input.camera,
-          assignments.map((assignment) => assignment.assignment_id),
+          assignments
+            .filter((assignment) => 'moonraker_origin' in assignment)
+            .map((assignment) => assignment.assignment_id),
         )
   // Strict: an invalid address fails startup before any task starts.
   const rtc = parseRtcRuntimeConfig(input.rtc)

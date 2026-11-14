@@ -1,3 +1,9 @@
+import {
+  KOBRALINK_CREDENTIAL_MAX_BYTES,
+  KobraLinkRuntimeBinding,
+  parseKobraLinkCredential,
+} from '../kobralink/configuration.ts'
+import { createKobraLinkClient } from '../kobralink/client.ts'
 import { SpoolmanConfig } from '../spoolman/config.ts'
 import {
   constants,
@@ -37,7 +43,7 @@ const Limits = z
     reconnectMinMs: 1000,
     reconnectMaxMs: 30_000,
   })
-export const LocalCollectorConfigSchema = z.strictObject({
+const LegacyCollectorConfigSchema = z.strictObject({
   version: z.literal(1),
   allowedOrigins: z.array(z.string().min(1).max(2048)).min(1).max(16),
   printers: z
@@ -52,6 +58,20 @@ export const LocalCollectorConfigSchema = z.strictObject({
   limits: Limits,
   spoolman: SpoolmanConfig.optional(),
 })
+export const LocalCollectorConfigSchema = z.union([
+  LegacyCollectorConfigSchema,
+  LegacyCollectorConfigSchema.extend({
+    version: z.literal(2),
+    allowedOrigins: z.array(z.string().min(1).max(2048)).max(16),
+    printers: z
+      .array(LegacyCollectorConfigSchema.shape.printers.element)
+      .max(16),
+    kobralink: z.strictObject({
+      allowedOrigins: z.array(z.string().min(1).max(2048)).min(1).max(16),
+      printers: z.array(KobraLinkRuntimeBinding).min(1).max(16),
+    }),
+  }),
+])
 export type LocalCollectorConfig = z.infer<typeof LocalCollectorConfigSchema>
 
 function privateFile(stat: Stats) {
@@ -126,6 +146,39 @@ export function parseLocalCollectorConfig(
     if (keys.has(assignment.printerKey))
       throw new Error('Duplicate collector printer key')
     keys.add(assignment.printerKey)
+  }
+  if (config.version === 2) {
+    if (config.printers.length + config.kobralink.printers.length > 16)
+      throw Error('Collector capacity exceeded')
+    const targets = new Set<string>()
+    const devices = new Set<string>()
+    const bridges = new Map<string, string>()
+    for (const binding of config.kobralink.printers) {
+      createKobraLinkClient({
+        origin: binding.origin,
+        allowedOrigins: config.kobralink.allowedOrigins,
+      })
+      parseKobraLinkCredential(
+        binding,
+        readPrivateJsonFile(binding.credentialFile, {
+          maxBytes: KOBRALINK_CREDENTIAL_MAX_BYTES,
+        }),
+      )
+      const target = JSON.stringify([binding.origin, binding.id])
+      if (keys.has(binding.printerKey) || targets.has(target))
+        throw Error('Duplicate collector target')
+      const device = JSON.stringify([binding.bridgeInstance, binding.deviceId])
+      if (
+        devices.has(device) ||
+        (bridges.has(binding.origin) &&
+          bridges.get(binding.origin) !== binding.bridgeInstance)
+      )
+        throw Error('Ambiguous KobraLink identity')
+      devices.add(device)
+      bridges.set(binding.origin, binding.bridgeInstance)
+      keys.add(binding.printerKey)
+      targets.add(target)
+    }
   }
   return config
 }

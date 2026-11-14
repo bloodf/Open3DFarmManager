@@ -1,0 +1,168 @@
+{
+  "id": "kobralink-onboarding",
+  "base_sha": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373",
+  "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+  "findings": [
+    {
+      "kind": "fact",
+      "text": "Login usa completeAuth e retorna ao início; pareamento aprova Connector por farm, código e impressão digital. Aprovação incerta exige consultar inventário e revogar antes de repetir.",
+      "sources": ["S1", "S2"]
+    },
+    {
+      "kind": "fact",
+      "text": "Inventário de impressoras consulta atribuições e Connectors aprovados. register envia agentId, printerKey e confirmedLocalConfiguration=true. A própria UI informa que cadastro não confirma conexão nem autoriza comandos.",
+      "sources": ["S3"]
+    },
+    {
+      "kind": "fact",
+      "text": "Configuração do Connector é arquivo privado limitado a 64 KiB. Runtime exige ao menos uma atribuição e correspondência completa com collection; valida farm/agent da credencial e origem Moonraker. Não é configuração genérica de bridge.",
+      "sources": ["S4", "S5"]
+    },
+    {
+      "kind": "fact",
+      "text": "Há canais RTC de prova/status e pausa. A tela farm distingue conexão autenticada, verificação e indisponibilidade, além de dispositivos ausentes, pendentes e revogados.",
+      "sources": ["S6", "S7"]
+    },
+    {
+      "kind": "inference",
+      "text": "Não foi encontrado canal autenticado de configuração nos peers e leitores de configuração examinados. Reutilizar identidade e transporte exige novo contrato autorizado de provisionamento, não enviar configuração pelo canal de pausa. Ausência é conclusão limitada ao fluxo inspecionado.",
+      "sources": ["S4", "S5", "S6"]
+    },
+    {
+      "kind": "fact",
+      "text": "device-key guarda CryptoKey no IndexedDB e exige chave privada não exportável; enrollment confirma conta/farm, origem, audiência, thumbprint e expiração. auth-invalidation oferece invalidação entre abas. Estes helpers não armazenam segredos da impressora.",
+      "sources": ["S8", "S9", "S10"]
+    },
+    {
+      "kind": "unknown",
+      "text": "Firmware, identidade verificável da Kobra X, capacidades reais, API de provisionamento/remoção e comportamento transacional da bridge dependem do proprietário do contrato. Transporte upstream e empacotamento não foram inspecionados."
+    }
+  ],
+  "proposed_slice": {
+    "entry": "Adicionar ação “Adicionar Anycubic Kobra X” em apps/farm/app/pages/impressoras.vue junto ao cadastro atual. Manter farm e Connector selecionados; usar /parear e /dispositivos existentes como etapas internas de preparação. Nenhum segundo login, painel, iframe ou link para dashboard KobraLink.",
+    "flow": [
+      "Confirmar conta autorizada, farm, Connector aprovado e chave de navegador aprovada; carregar capacidade versionada de provisionamento.",
+      "Abrir sessão RTC direta autenticada específica para configuração. Connector sem capacidade mostra “Configuração não disponível neste Connector”.",
+      "Selecionar um dispositivo por identidade estável verificada; endereço ou nome não bastam. Confirmar modelo, identidade e firmware observado; firmware desconhecido permanece não qualificado.",
+      "Preparar configuração local; verificar bridge por consulta sem comando físico. Somente após recibo local confirmado publicar atribuição consistente e exibir estado RTC."
+    ],
+    "bootstrap": "Resolver antes da UI funcional: readAgentRuntimeConfig exige assignments e collection não vazios. Um Connector recém-pareado sem impressoras precisa de modo de configuração autenticado independente de atribuição operacional. Não criar impressora fictícia nem relaxar validação dos runtimes existentes.",
+    "channel": "Novo protocolo config-v1 com esquema estrito, tamanho/tempo/fila limitados, requestId idempotente, nonce, expiração e revisão esperada. Autoridade de configuração própria, validada no Connector; sessão web isoladamente não autoriza escrita. Revalidar conta, papel, dispositivo e revogação antes de preparar/confirmar. Sem TURN ou fallback HTTP browser-servidor-Connector; HTTP/WS local Connector-bridge requer contrato separado.",
+    "binding": "Vincular account/farm/agent/browser-device/session à operação; atribuição vincula assignmentId, printerKey, identidade imutável da impressora, instância da bridge e revisão. Recusar resposta de outro alvo, identidade duplicada, reassociação e origem inesperada. Capacidade por dispositivo, não por modelo global. Reutilizar regra de handle opaco de printer-binding, mas criar variante explícita de backend; não disfarçar KobraLink como moonraker_origin.",
+    "secrets": "Credenciais ficam no Connector/bridge. Se entrada pelo OpenFarm for indispensável, manter apenas memória transitória e transmitir exclusivamente por RTC autenticado; limpar em saída, falha e invalidação. Nunca URL, SSR, API central, logs, IndexedDB ou localStorage para segredos da bridge. Servidor recebe somente identificadores e recibo não secreto.",
+    "rollback": "Diário local durável por operationId e revisão: preparado, bridge-criada, local-confirmado, inventário-confirmado ou recuperação-pendente. Guardar configuração anterior e IDs dos recursos criados pela operação. Compensar apenas esses recursos e restaurar revisão anterior se ainda for a atual. Timeout após escrita é resultado desconhecido: consultar recibo antes de repetir. Se rollback falhar, bloquear ativação, preservar diário e mostrar recuperação no mesmo OpenFarm. Nunca remover configuração preexistente nem declarar sucesso parcial.",
+    "states": [
+      "carregando capacidade",
+      "sem Connector ou chave aprovada",
+      "sem dispositivos encontrados",
+      "conectando/verificando RTC",
+      "preparando",
+      "confirmando",
+      "sucesso com recibo",
+      "firmware desconhecido/não suportado",
+      "permissão ou dispositivo revogado",
+      "bridge indisponível",
+      "timeout com resultado desconhecido",
+      "conflito de revisão/identidade",
+      "rollback em andamento",
+      "recuperação pendente"
+    ],
+    "ui": "Reusar padrões Vue existentes de form, labels, pending, AbortController/generation, role=status/alert e foco no resumo. Não adicionar biblioteca. Cancelar respostas antigas após troca de conta/farm/Connector; cancelamento da UI não prova rollback remoto. Verificar teclado, leitor de tela, largura 375 px e nomes longos na implementação.",
+    "caller_impacts": [
+      "apps/farm/app/pages/impressoras.vue:146-170 e apps/farm/server/services/printer-assignments.ts:167-170: manter cadastro legado; novo fluxo exige recibo antes de ativar atribuição, sem tratar confirmação do usuário como prova local.",
+      "apps/farm/app/composables/useFarmView.ts:61-85 e apps/farm/app/pages/farm.vue:31-40: consumir atribuição confirmada e invalidar feed/chaves no contexto alterado; não adicionar canal HTTP de comando.",
+      "packages/connector/src/runtime/agent.ts:112 e packages/connector/src/runtime/collect.ts:49: leitores atuais são de inicialização; nova persistência precisa aplicar configuração validada e controlar ciclo de vida sem afetar outras impressoras.",
+      "packages/connector/src/config/runtime.ts:65-104 e packages/connector/src/control/printer-binding.ts:50-98: introduzir vínculo de backend tipado com exclusividade e revogação; preservar callers Moonraker.",
+      "packages/connector/src/webrtc/readonly-peer.ts:146-152 e packages/connector/src/webrtc/pause-control-peer.ts:167-175: novo canal necessita negociação e autorização próprias em ambos os lados; status/pausa não ganham autoridade de configuração."
+    ]
+  },
+  "acceptance": [
+    "Simuladores apenas: uma Kobra X configurada dentro de OpenFarm, recibo e atribuição do mesmo alvo, status direto autenticado; nenhum comando físico.",
+    "Negativos: conta/farm/agent/dispositivo divergentes, replay, revogação durante preparo, origem não permitida, firmware desconhecido e versão incompatível falham fechados.",
+    "Injetar falha em cada etapa, perda do ack, reinício e repetição: nenhuma duplicação; rollback só de recursos próprios; resultado desconhecido permanece explícito.",
+    "Capturar tráfego/logs de fixture sem segredos: nada sensível chega ao servidor central ou armazenamento web persistente.",
+    "Validar teclado, foco, anúncios assíncronos, 375 px, cancelamento e respostas fora de ordem; executar check:all antes de publicar implementação.",
+    "Gate atual: DONE_WITH_CONCERNS. Revisão de fonte não comprova suporte ao produto, interoperabilidade, hardware ou firmware."
+  ],
+  "owned_paths": ["docs/compatibility/kobralink-onboarding.json"],
+  "risks": [
+    "Canal de configuração e bootstrap sem atribuição ainda são pré-requisitos; não estimar onboarding completo como simples formulário.",
+    "Contrato da bridge deve fornecer identidade, recibo idempotente e compensação; sem isso, manter recurso indisponível.",
+    "Serviço GPL separado e cliente original são decisão de arquitetura, não conclusão legal. Obrigações de distribuição, avisos e código-fonte ficam pendentes do proprietário de empacotamento; nenhum código/certificado upstream foi copiado.",
+    "CodeGraph 1.6.2 informou índice inexistente; usadas buscas limitadas e leitura exata, sem build de índice. HEAD inspecionado f8963fe3a314af8cad0651174b1de5d567cea211 difere da base apenas pelo relatório kobralink-contract.json."
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "path": "apps/farm/app/pages/entrar.vue",
+      "lines": "10-43",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S2",
+      "path": "apps/farm/app/pages/parear.vue",
+      "lines": "89-148",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S3",
+      "path": "apps/farm/app/pages/impressoras.vue",
+      "lines": "90-180",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S4",
+      "path": "packages/connector/src/config/local.ts",
+      "lines": "40-136",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S5",
+      "path": "packages/connector/src/config/runtime.ts",
+      "lines": "20-135",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S6",
+      "path": "packages/connector/src/webrtc/readonly-peer.ts",
+      "lines": "140-152",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S7",
+      "path": "apps/farm/app/pages/farm.vue",
+      "lines": "82-149",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S8",
+      "path": "apps/farm/app/utils/device-key.ts",
+      "lines": "30-96",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S9",
+      "path": "apps/farm/app/utils/browser-device-enrollment.ts",
+      "lines": "22-97",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S10",
+      "path": "apps/farm/app/utils/auth-invalidation.ts",
+      "lines": "12-52",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S11",
+      "path": "packages/connector/src/control/printer-binding.ts",
+      "lines": "50-98",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    },
+    {
+      "id": "S12",
+      "path": "packages/connector/src/webrtc/pause-control-peer.ts",
+      "lines": "149-175",
+      "pin": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373"
+    }
+  ]
+}

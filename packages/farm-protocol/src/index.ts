@@ -15,3 +15,4 @@ export {
   PrinterTransition,
   telemetryPrinterKey,
 } from './telemetry.ts'
+export * from './configuration-signalling.ts'

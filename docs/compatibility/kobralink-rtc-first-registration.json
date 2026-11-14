@@ -1,0 +1,21 @@
+{
+  "status": "pass",
+  "qualifications": {
+    "first_registration_without_device_id": "pass",
+    "single_ui": "pass",
+    "inventory_before_live": "pass",
+    "resource_cleanup": "pass",
+    "recovery": "pending",
+    "revocation": "pending",
+    "account_switching": "pending",
+    "mobile": "pending"
+  },
+  "configuration": {
+    "upstream_revision": "5a5e5d9",
+    "kobralink_image": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3",
+    "postgres_migrations": 27,
+    "proof_ttl_ms": 10000,
+    "min_context_ms": 5000,
+    "short_remaining_lease_refused_at_8000ms": true
+  }
+}

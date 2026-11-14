@@ -107,3 +107,26 @@ export function readPrinterBinding(
   const row = bindings.get(binding)
   return row?.active ? row.assignment : null
 }
+
+const ReadonlyAssignment = Assignment.omit({ moonraker_origin: true }).extend({
+  backend: z.literal('kobralink'),
+  bridgeInstance: z.string().min(1).max(128),
+  origin: z.string().max(2048),
+  deviceId: z.string().min(1).max(128),
+  id: z.string().min(1).max(128),
+  revision: z.number().int().positive(),
+})
+const readonlyBindings = new WeakMap<
+  PrinterBinding,
+  z.infer<typeof ReadonlyAssignment>
+>()
+/** Read-only handles deliberately have no Moonraker command mapping. */
+export function provisionReadonlyPrinter(input: unknown): PrinterBinding {
+  const value = Object.freeze(ReadonlyAssignment.parse(input))
+  const binding = new BoundPrinter()
+  readonlyBindings.set(binding, value)
+  return binding
+}
+export function readRuntimePrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding) ?? readonlyBindings.get(binding) ?? null
+}

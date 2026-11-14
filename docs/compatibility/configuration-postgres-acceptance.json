@@ -1,0 +1,47 @@
+{
+  "status": "pass",
+  "database": "PostgreSQL 17, disposable digest-pinned instance",
+  "qualifications": {
+    "migrations_and_grants": "pass",
+    "atomic_registration": "pass",
+    "replay_after_reconnect": "pass",
+    "conflict_isolation": "pass",
+    "rollback": "pass",
+    "concurrency": "pass",
+    "configuration_schema_readiness": "pass",
+    "current_authority": "pass",
+    "configuration_serialization_recovery": "pass",
+    "resource_cleanup": "pass"
+  },
+  "evidence": {
+    "database": "Actual disposable PostgreSQL 17 with complete migration catalog including 0026 and production PostgresConfigurationStore.",
+    "authority": "Owner/admin allowed; viewer, cross-account, revoked browser and revoked credential rejected with preserved database state.",
+    "transactions": "Atomic registration, exact replay after reconnect, canonical conflicts, rollback and concurrent conflicting registration passed database row assertions.",
+    "cleanup": "Harness container and tmpfs removed; VM returned stopped. Baseline images, volumes and networks retained.",
+    "schema_readiness": "Exact lifecycle role guard passed with only farm_configuration_authority membership. Reverting only 0027 reproduced SQLSTATE 42501; reapplying returned current against the real catalog. Journal DML and unwanted privileges remained denied. Historical journal rows, populated assignments, role memberships and other table grants were unchanged.",
+    "serialization_recovery": "A session touch committed while the store waited in farm.observe_signalling_session_expiry reproduced SQLSTATE 40001 on the unchanged store (one attempt, callback never ran). With the bounded retry the same ordered overlap succeeded on a fresh serializable transaction. A 40001 inside the callback replayed from a fresh snapshot without the rolled-back insert; three conflicting attempts surfaced 40001 with no operation persisted; lock_timeout 55P03 and a terminated backend 57P01 ran once and were not retried. Session revocation, absolute session expiry and membership downgrade committed between attempts were denied by the fresh authorization. Challenges, receipts and assignments were unchanged. Overlaps were ordered by observed lock waits, not sleeps."
+  },
+  "boundaries": [
+    "Actual PostgreSQL evidence; synthetic SQL tests do not substitute for these checks.",
+    "No enabled Nuxt, browser or RTC qualification.",
+    "No deployment or physical printer commands.",
+    "Configuration receipts remain synthetic store-boundary inputs; this does not qualify receipt signatures or final browser RTC.",
+    "Full browser/RTC qualification remains pending; this does not establish the cause of the browser configuration timeout."
+  ],
+  "evidence_basis": {
+    "base": "5b6f3dc5034770e186df718ba416115c98f2ecc8",
+    "scope": "Bounded serialization-failure recovery in PostgresConfigurationStore plus actual PostgreSQL execution of all ten qualifications (baseline reproduction, fixed run and one repeat).",
+    "source_sha256": {
+      "apps/farm/server/storage/postgres-configuration.ts": "f25b365838acac01f4cd50d2add445709bd9fd4c1f75173e12f2bbabc7657fde",
+      "tests/helpers/configuration-postgres/serialization.ts": "951196fbaaede8ac26de335e83485b95ec2f688e547f321bc2bfb9f7979ca5aa",
+      "tests/helpers/configuration-postgres/scenarios.ts": "806194278b595be7f7aa626e3a5c8c65a6fb0f2975b550cb52a60e137d889c07"
+    },
+    "command": "node scripts/test-configuration-postgres-acceptance.ts (explicit admission, owned context, pinned image, external evidence directory and loopback port required)"
+  },
+  "service_free_gate": {
+    "status": "pass",
+    "runner_test": "pass",
+    "typescript": "pass",
+    "formatting": "pass"
+  }
+}

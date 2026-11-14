@@ -1,0 +1,144 @@
+{
+  "id": "kobralink-isolated-auth",
+  "cutoff": "2026-11-13",
+  "base_sha": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373",
+  "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+  "method": "Medição runtime do upstream não modificado (git archive do pin, Dockerfile e lock originais, bun 1.4.2) em VM Colima nova, de propriedade da tarefa, sem montagens, sem agente SSH, sem endereço alcançável e sem ativar contexto Docker. Banco vazio, credenciais sintéticas aleatórias mantidas só em memória, saída do container bloqueada por regra de firewall na VM, somente a porta de gestão publicada em loopback. Nenhuma impressora, MQTT, câmera, upload ou endpoint de hardware foi chamado. Registros contêm apenas status, nomes de cabeçalho e formas de corpo.",
+  "legend": {
+    "medido": "Observado por HTTP contra o runtime nesta tarefa.",
+    "fonte": "Lido no código do pin; citado para contraste.",
+    "nao-medido": "Fora do alcance desta execução."
+  },
+  "findings": [
+    {
+      "id": "isolamento",
+      "kind": "medido",
+      "statement": "O bind literal 0.0.0.0 do upstream ficou contido: listener do host somente em 127.0.0.1 na porta de gestão; conexão pelo endereço LAN do host recusada; portas Moonraker 7125-7140 não publicadas; saída do container bloqueada (fetch externo expira). Contexto Docker ativo, configuração SSH e demais VMs/contextos permaneceram intactos."
+    },
+    {
+      "id": "exposicao-dns",
+      "kind": "medido",
+      "statement": "Falha material diagnosticada antes de qualquer build: o Lima encaminha o DNS de loopback do convidado (dnsmasq em 127.0.0.1:53) para o host e, por ser porta privilegiada, abre socket TCP curinga *:53 com filtro de loopback em nível de aplicação; o endereço LAN do host aceitou a conexão TCP. A opção de encaminhador 'none' do Colima não remove esse encaminhamento (ignora apenas binds 0.0.0.0 do convidado). Correção aplicada só na instância própria: regra 'ignore' para a porta 53 do convidado na configuração Lima; depois disso nenhum listener curinga. 'colima start' regenera a configuração e reabre o socket; o reinício seguro usa o Lima diretamente e aborta se houver curinga."
+    },
+    {
+      "id": "versao",
+      "kind": "medido",
+      "statement": "Build concluído sem alterações. /api/v1/system reporta version 0.5.0, packaged docker; oito migrações aplicadas em banco novo; log 'No printer configured'; lista de impressoras com 0 itens no início e no fim. Imagens base resolvidas: oven/bun:1.4.2@sha256:9114c058…6895 e 1.4.2-slim@sha256:cb3bbbb0…fc61 (tags não fixadas por digest no upstream)."
+    },
+    {
+      "id": "A6-protecao-global",
+      "kind": "medido",
+      "statement": "Sem sessão: GET /api/auth/ok 200 {ok}; GET /api/v1/setup/status 200 {needsSetup}; GET /api/auth/get-session 200 com corpo null; todo o restante de /api/v1 testado (printers, settings, users, spools, macros, stats, PATCH settings) responde 401 {message, statusCode}. Há guarda global de sessão; setup/status é a única rota /api/v1 anônima observada."
+    },
+    {
+      "id": "A3-signup",
+      "kind": "medido",
+      "statement": "POST /api/auth/sign-up/email com JSON {name,email,password}: 200 {token, user{id,name,email,emailVerified,image,role,createdAt,updatedAt}}, role admin, e sessão automática. Aceito sem cabeçalho Origin quando não há cookies; Origin fora da lista 403 {code INVALID_ORIGIN}; senha curta 400 {code PASSWORD_TOO_SHORT}; corpo form-urlencoded é analisado (não rejeitado por tipo). needsSetup passa a false. Segundo signup, anônimo ou com cookies de admin: 403 {message} sem campo code."
+    },
+    {
+      "id": "A3-signin",
+      "kind": "medido",
+      "statement": "POST /api/auth/sign-in/email {email,password}: 200 {redirect, token, user}; senha errada ou usuário inexistente 401 {code INVALID_EMAIL_OR_PASSWORD}; Origin estranho 403; sem Origin e sem cookies 200. A origem padrão extra http://localhost:5173 é aceita mesmo em produção."
+    },
+    {
+      "id": "A3-cookies",
+      "kind": "medido",
+      "statement": "Dois cookies: better-auth.session_token (HttpOnly, Path=/, SameSite=Lax, Max-Age=2592000) e better-auth.session_data (mesmos atributos, Max-Age=300, cache assinado). Sem Secure com baseURL http, conforme a fonte. Só o token basta para get-session e /api/v1; a resposta reemite session_data. Sign-out responde 200 {success} e expira os cookies com Max-Age=0."
+    },
+    {
+      "id": "origin-com-cookies",
+      "kind": "medido",
+      "statement": "Rotas /api/auth com cookies exigem Origin: sign-out e api-key/create sem Origin retornam 403 {code MISSING_OR_NULL_ORIGIN}. Já as rotas Nest /api/v1 não validam Origin: PATCH settings autenticado por cookie foi aceito (200) sem Origin e com Origin estranho; a única barreira CSRF ali é SameSite=Lax. O preflight CORS só devolve allow-origin para origens listadas."
+    },
+    {
+      "id": "sessao-apos-signout",
+      "kind": "medido",
+      "statement": "Após sign-out real, o token sozinho deixa de autenticar (/api/v1 401, get-session null). Porém um cliente que retenha o cookie session_data continua autenticado: get-session 200 com sessão, GET printers 200, PATCH settings 200 e GET users (só admin) 200 imediatamente após o sign-out. A revogação só vale ao expirar o cache (até 300 s) ou se o cliente descartar ambos os cookies."
+    },
+    {
+      "id": "limite-de-taxa",
+      "kind": "medido",
+      "statement": "sign-up e sign-in: três requisições aceitas e a seguinte 429 {message} com x-retry-after em segundos (valores observados de 2 a 10). O runtime registra que não determinou IP do cliente e usa um único balde compartilhado por rota; tentativas inválidas de qualquer chamador bloqueiam logins legítimos. A janela exata não foi caracterizada."
+    },
+    {
+      "id": "A7-chave-api",
+      "kind": "medido",
+      "statement": "POST /api/auth/api-key/create {name} com sessão de admin ou operator: 200 com key de 43 caracteres e prefixo kl_, expiresAt null, permissions null; list devolve {apiKeys:[…]} sem o segredo; delete {keyId} 200. A chave NÃO autentica a API de gestão: x-api-key em /api/v1 (GET e PATCH) 401, get-session 200 null, api-key/list e create 401, Authorization Bearer 401; POST /api/auth/api-key/verify 404. Nesta rota a chave serve apenas a outros consumidores; a suposição de autenticação máquina-a-máquina por chave em /api/v1 está refutada."
+    },
+    {
+      "id": "papeis",
+      "kind": "medido",
+      "statement": "Admin cria usuários por POST /api/v1/users (201 {id,name,email,role,createdAt}). Operator: leituras 200, PATCH settings 200, users 403 {error Forbidden, message, statusCode}, api-key create/list 200. Viewer: leituras 200 (inclusive settings completo e system/backup/info), PATCH settings 403, POST users 403, api-key create e list 403 {message}. Corpo inválido em settings 400 {message, issues[{path,message}]}."
+    },
+    {
+      "id": "atualizacoes",
+      "kind": "medido",
+      "statement": "updateCheck é true por padrão. Correção baseada na fonte fixada 5a5e5d9, system.service.ts:43-44: KOBRALINK_UPDATE_REPO é lida e, quando vazia, retorna null; isto não foi medido em runtime. A consulta externa ocorre em GET /api/v1/system. Foi desativado por PATCH settings {updateCheck:false} antes do primeiro GET system (update null), com a saída de rede bloqueada como segunda barreira."
+    },
+    {
+      "id": "cliente-real",
+      "kind": "medido",
+      "statement": "Cliente original aceito no commit 4328bf649a9497634e7dd9bba80d23f84097016f, importado sem edição contra o mesmo backend com zero impressoras: setupStatus true e depois false; authenticate signin 200 com cookies aceitos pelo filtro do cliente; listPrinters devolve [] e reutiliza a sessão; antes de autenticar, com senha errada, signup com setup fechado e após clearSession o cliente retorna unauthorized. Nenhuma divergência de contrato nos caminhos exercitados. Criação/reconciliação e getPrinter não foram chamados."
+    }
+  ],
+  "proposed_slice": {
+    "next": "Qualificar a receita de instalação e os caminhos de impressora do cliente contra o mesmo pin usando comportamento sintético, reutilizando o perfil parado e a imagem retidos.",
+    "client_handback": [
+      "Autenticação de máquina deve ser sessão por cookie (signin), não chave de API.",
+      "Enviar Origin igual à baseURL em toda chamada com cookies; a baseURL configurada precisa coincidir com a origem usada pelo Connector.",
+      "429 hoje vira 'unavailable' no cliente; considerar respeitar x-retry-after e nunca repetir login em laço, pois o balde é global.",
+      "clearSession não revoga a sessão no servidor (30 dias); para revogar, chamar sign-out com Origin e descartar os dois cookies.",
+      "O cliente só captura cookies no login; comportamento após 300 s com session_data vencido não foi medido.",
+      "Segundo signup retorna 403 sem code; distinguir pelo setup/status, como o cliente já faz."
+    ],
+    "scope": "Somente leitura e autenticação; nenhum comando de impressora."
+  },
+  "acceptance": [
+    {
+      "check": "Runtime A3/A6/A7",
+      "status": "concluido",
+      "reason": "Medido contra o upstream exato; A7 resolvido negativamente."
+    },
+    {
+      "check": "Zero linhas de impressoras",
+      "status": "concluido",
+      "reason": "Lista vazia no início e no fim de cada execução; nenhuma rota de criação chamada."
+    },
+    {
+      "check": "Loopback apenas",
+      "status": "concluido",
+      "reason": "Listeners do host verificados antes das sondas; socket curinga do DNS diagnosticado e eliminado."
+    },
+    {
+      "check": "Custódia e limpeza",
+      "status": "concluido",
+      "reason": "Containers e volumes de dados de teste removidos, backend e VM parados, nenhum processo ou listener remanescente. Perfil parado e imagem fixada retidos a pedido do coordenador para o consumidor seguinte; evidência limitada e redigida mantida fora do repositório."
+    },
+    {
+      "check": "Verificador estrutural",
+      "status": "concluido",
+      "reason": "Não prova comportamento; as medições acima são a evidência."
+    }
+  ],
+  "owned_paths": ["docs/compatibility/kobralink-isolated-auth.json"],
+  "risks": [
+    "Sessão permanece utilizável por até 300 s após sign-out para quem retiver o cookie de cache; /api/v1 aceita escrita com Origin estranho.",
+    "Limite de taxa global por rota permite negação de login por terceiros na mesma rede do serviço.",
+    "Viewer lê settings completo; a resposta contém campos de integração (por exemplo senha de MQTT), valores não inspecionados.",
+    "A primeira execução da sonda esbarrou no limite de taxa antes de criar usuário; corrigida no harness (espera por x-retry-after) e repetida em banco ainda vazio.",
+    "Não medidos: expiração e renovação de sessão (30 d/1 d), cookie Secure com HTTPS, proxies confiáveis, SSE/WebSocket, backup/restore, rotas Moonraker, qualquer caminho com impressora, firmware ou hardware.",
+    "Imagens base e dependências foram resolvidas em rede no build; apenas o lock e o pin são reprodutíveis.",
+    "O perfil retido reabre o socket curinga de DNS se iniciado pelo comando padrão do Colima; usar o procedimento de reinício seguro registrado na custódia privada."
+  ],
+  "sources": {
+    "listener": "upstream apps/api/src/main.ts:42-44",
+    "auth": "upstream apps/api/src/auth/auth.ts:13-81",
+    "guard": "upstream apps/api/src/common/write.guard.ts:20-40",
+    "setup": "upstream apps/api/src/auth/setup.controller.ts",
+    "users": "upstream apps/api/src/users/users.controller.ts; users.service.ts",
+    "update": "upstream apps/api/src/system/system.service.ts:38-60; packages/shared/src/settings.ts:72",
+    "build": "upstream infra/Dockerfile; bun.lock; infra/docker-compose.yml",
+    "prior": "docs/compatibility/kobralink-auth-probe.json; kobralink-contract.json; kobralink-packaging.json",
+    "runtime": "Evidência privada da tarefa: baseline, custódia, logs redigidos, resultados das sondas e verificação do cliente."
+  }
+}

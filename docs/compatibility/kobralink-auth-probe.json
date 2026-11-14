@@ -1,0 +1,67 @@
+{
+  "id": "kobralink-auth-probe",
+  "base_sha": "a5b9202cc7b7cdf8d884efa8f1f2121210d0a373",
+  "upstream_sha": "5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1",
+  "findings": [
+    {
+      "id": "prerequisito",
+      "kind": "fonte",
+      "statement": "O listener usa app.listen(env.port, 0.0.0.0) com endereço literal. A configuração expõe porta e baseURL, mas não endereço de bind. Executar diretamente não atende ao loopback exigido. Docker indisponível por condição da tarefa; nenhum isolamento de rede alternativo foi qualificado. Execução interrompida antes de instalar ou iniciar."
+    },
+    {
+      "id": "ambiente",
+      "kind": "medido",
+      "statement": "Upstream SHA confirmado; manifesto 0.5.0, Bun instalado 1.4.2, Node instalado v24.22.2. Nenhum build produzido. Checkout OpenFarm inspecionado em f8963fe3a314af8cad0651174b1de5d567cea211; base_sha identifica a avaliação herdada. CodeGraph sem índice inicializado; usados arquivos exatos."
+    },
+    {
+      "id": "A3",
+      "kind": "nao-executado",
+      "statement": "Signup/signin, corpos, status, Origin, Content-Type, nomes e flags de cookies e reutilização de sessão permanecem sem prova runtime. A fonte configura e-mail/senha, autoSignIn, papel inicial admin, bloqueio de novo cadastro externo após existir usuário e cookies seguros quando baseURL é HTTPS."
+    },
+    {
+      "id": "A6",
+      "kind": "nao-executado",
+      "statement": "Proteção efetiva de /api/v1 e papéis não foram medidos. WriteGuard permite leituras e delega ausência de sessão; rejeita escrita quando canOperate falha. Isso não prova autenticação global."
+    },
+    {
+      "id": "A7",
+      "kind": "nao-executado",
+      "statement": "Plugin configura prefixo kl_ e x-api-key. Não foi comprovado que a chave autentica /api/v1. Nenhuma credencial foi criada."
+    }
+  ],
+  "proposed_slice": {
+    "next": "Qualificar isolamento externo que exponha somente loopback sem alterar upstream nem serviços globais; depois extrair o pin para diretório próprio, instalar lock congelado sem hooks, inspecionar geração Prisma e dependências locais e executar matriz de autenticação.",
+    "scope": "Somente auth/setup e leituras autorizadas; nenhuma integração de impressora."
+  },
+  "acceptance": [
+    {
+      "check": "Runtime A3/A6/A7",
+      "status": "pendente",
+      "reason": "Isolamento de rede necessário antes de executar listener wildcard."
+    },
+    {
+      "check": "Zero linhas de impressoras",
+      "status": "nao-executado",
+      "reason": "Nenhum banco criado ou aberto."
+    },
+    {
+      "check": "Custódia",
+      "status": "concluido",
+      "reason": "Nenhum backend, filho, instalação, cópia runtime, credencial, container ou worktree criado; somente evidência limitada e relatório."
+    }
+  ],
+  "owned_paths": ["docs/compatibility/kobralink-auth-probe.json"],
+  "risks": [
+    "As lacunas A3/A6/A7 continuam abertas. Inferência de fonte não substitui medição HTTP.",
+    "Não houve chamadas de hardware ou declaração de suporte físico.",
+    "Checks estruturais não validam comportamento; check:all não executado nesta alteração exclusivamente documental."
+  ],
+  "sources": {
+    "listener": "upstream apps/api/src/main.ts:42-44",
+    "environment": "upstream apps/api/src/config/env.ts:53-88",
+    "auth": "upstream apps/api/src/auth/auth.ts:13-87",
+    "roles": "upstream apps/api/src/common/write.guard.ts:20-40",
+    "build": "upstream package.json; apps/api/package.json",
+    "baseline": "Recibo privado baseline.json; versões e SHA medidos nesta tarefa."
+  }
+}

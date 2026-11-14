@@ -28,14 +28,18 @@ export function migrateConfig(input: unknown): Record<string, unknown> {
   return { ...config, schemaVersion: CURRENT_CONFIG_SCHEMA_VERSION }
 }
 
-export function readVersionedRuntimeConfig(path: string): unknown {
+export function readVersionedRuntimeConfig(
+  path: string,
+  persist = true,
+): unknown {
   const original = readPrivateJsonFile(path, { maxBytes: 64 * 1024 })
   const migrated = migrateConfig(original)
   if (
-    !original ||
-    typeof original !== 'object' ||
-    !('schemaVersion' in original) ||
-    original.schemaVersion !== CURRENT_CONFIG_SCHEMA_VERSION
+    persist &&
+    (!original ||
+      typeof original !== 'object' ||
+      !('schemaVersion' in original) ||
+      original.schemaVersion !== CURRENT_CONFIG_SCHEMA_VERSION)
   ) {
     const temp = `${path}.${randomUUID()}.tmp`
     try {
@@ -43,7 +47,21 @@ export function readVersionedRuntimeConfig(path: string): unknown {
         mode: 0o600,
         flag: 'wx',
       })
-      copyFileSync(path, `${path}.bak`, constants.COPYFILE_EXCL)
+      try {
+        copyFileSync(path, `${path}.bak`, constants.COPYFILE_EXCL)
+      } catch (error) {
+        if (!(
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'EEXIST'
+        ))
+          throw error
+        copyFileSync(
+          path,
+          `${path}.${randomUUID()}.bak`,
+          constants.COPYFILE_EXCL,
+        )
+      }
       renameSync(temp, path)
     } finally {
       try {

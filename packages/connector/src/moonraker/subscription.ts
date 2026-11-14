@@ -193,7 +193,15 @@ export function createMoonrakerSubscription(input: {
           client?.close()
         }, limits.staleAfterMs)
         const parsed = parseMoonrakerSnapshot(
-          JSON.stringify({ result: value }),
+          JSON.stringify({
+            result: {
+              ...value,
+              status: {
+                ...value.status,
+                print_stats: { state: value.status.print_stats.state },
+              },
+            },
+          }),
           {
             printerKey,
             observedAt: Date.now(),
@@ -239,7 +247,6 @@ export function createMoonrakerSubscription(input: {
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
-          parsed.printer,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint

@@ -56,7 +56,7 @@ export function readAgentRuntimeConfig(
   path: string,
   credential: Pick<RuntimeCredential, 'agent_id' | 'farm_id'>,
 ) {
-  const input = Runtime.parse(readVersionedRuntimeConfig(path))
+  const input = Runtime.parse(readVersionedRuntimeConfig(path, false))
   const collection = parseCollectorConfig(input.collection)
   if (input.version !== collection.version)
     throw Error('Runtime collection version mismatch')

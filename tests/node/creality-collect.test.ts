@@ -31,7 +31,7 @@ function fixture(
   let now = 100
   const source = createFarmSnapshotSource({
     assignmentRefs: refs,
-    controlsFor,
+    ...(controlsFor === undefined ? {} : { controlsFor }),
     nowMono: () => now,
   })
   const received: CompleteFarmSnapshot[] = []

@@ -194,6 +194,23 @@ export function aggregate(records: readonly CheckRecord[]) {
   return { status, results, failures, missing }
 }
 
+/**
+ * The report sections `verifyReport` reads: the twelve qualifications and,
+ * separately, the think-time addition.
+ */
+export function reportSections(
+  results: Readonly<Record<Qualification | Additional, QualificationResult>>,
+) {
+  return {
+    qualifications: Object.fromEntries(
+      QUALIFICATIONS.map((name) => [name, results[name]]),
+    ) as Record<Qualification, QualificationResult>,
+    additional: Object.fromEntries(
+      ADDITIONAL.map((name) => [name, results[name]]),
+    ) as Record<Additional, QualificationResult>,
+  }
+}
+
 export type Lease = Readonly<{ issuedAt: number; expiresAt: number }>
 
 /**

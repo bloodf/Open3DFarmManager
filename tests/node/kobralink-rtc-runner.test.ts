@@ -73,6 +73,7 @@ import {
   sensitiveLeaves,
   unexplainedConsoleIssues,
   verifyReport,
+  reportSections,
   type CheckRecord,
 } from '../helpers/kobralink-rtc/qualification.ts'
 
@@ -277,6 +278,20 @@ test('verify-report accepts only twelve passes plus the think-time addition', ()
     report.qualifications[name] = 'not-executed'
     assert.deepEqual(verifyReport(report), [`${name} is not-executed`])
   }
+})
+
+test('a report built from a complete passing run verifies', () => {
+  const summary = aggregate(everyCheck())
+  assert.equal(summary.status, 'pass')
+  const report = {
+    status: summary.status,
+    complete: true,
+    ...reportSections(summary.results),
+  }
+  assert.deepEqual(verifyReport(report), [])
+  // The think-time addition is never folded into the twelve.
+  assert.equal('think_time_lease_renewal' in report.qualifications, false)
+  assert.equal(report.additional.think_time_lease_renewal, 'pass')
 })
 
 test('verify-report refuses a think-time refusal that is not recoverable', () => {

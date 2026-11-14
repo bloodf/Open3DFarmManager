@@ -19,6 +19,7 @@ import postgres from 'postgres'
 import { registrationAdmission } from '../tests/helpers/kobralink-rtc/admission.ts'
 import {
   aggregate,
+  reportSections,
   selectWorlds,
   verifyReport,
   WORLDS,
@@ -630,7 +631,7 @@ try {
     sourceSha256: receipt.sourceSha256 ?? null,
     outputSha256: receipt.outputSha256 ?? null,
     worlds: worldResults,
-    qualifications: summary.results,
+    ...reportSections(summary.results),
     failures: summary.failures,
     missing: summary.missing,
     checks: records.length,

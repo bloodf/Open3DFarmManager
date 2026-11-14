@@ -1,114 +1,296 @@
 {
   "status": "fail",
-  "blocked": true,
-  "complete": false,
-  "candidate": "00c060dde1e12cde1805a508461e38682840efa3",
+  "complete": true,
+  "head": "0be57e799c48151dc611bca66fa154b2464b5222",
+  "run": "e2ea6f07-917b-45ab-bb46-a73ff4763fea",
+  "sourceSha256": null,
+  "outputSha256": null,
+  "worlds": {},
   "qualifications": {
-    "first_registration_without_device_id": "pass",
-    "single_ui": "pass",
-    "inventory_before_live": "pass",
-    "reload_reconnect_no_duplicate": "pass",
+    "first_registration_without_device_id": "not-executed",
+    "single_ui": "not-executed",
+    "inventory_before_live": "not-executed",
+    "reload_reconnect_no_duplicate": "not-executed",
     "lost_ack_recovery": "not-executed",
     "late_ack_fresh_authority": "not-executed",
     "revoked_authority_refused": "not-executed",
     "account_switch_isolated": "not-executed",
-    "browser_secrets_absent": "fail",
+    "browser_secrets_absent": "not-executed",
     "mobile_keyboard_accessibility": "not-executed",
-    "stale_error_capabilities": "fail",
-    "resource_cleanup": "pass"
-  },
-  "additional": {
+    "stale_error_capabilities": "not-executed",
+    "resource_cleanup": "pass",
     "think_time_lease_renewal": "not-executed"
   },
-  "product_findings": [
+  "failures": [],
+  "missing": [
     {
-      "id": "printer-return-does-not-restore-idle",
-      "severity": "blocking",
-      "summary": "Current positive run: after SIGUSR2 synthetic MQTT listens again but sessions/subscribed stay zero, accepted stays one and queries stay 34. Three restoration observations never regain idle. Runtime subscription only polls and explicitly does not reconnect. Restored-live-before-stop remains false. No speculative product patch applied."
+      "qualification": "first_registration_without_device_id",
+      "id": "device-id-left-empty"
     },
     {
-      "id": "browser-socket-closed-before-established",
-      "severity": "open",
-      "summary": "Current positive run recorded one browser warning at 23555ms on /api/signalling/browser: socket closed before connection established. No allowlist added. 354 response bodies read; zero unread and zero HTTP errors; all secret searches clean."
+      "qualification": "first_registration_without_device_id",
+      "id": "identity-observed-before-commit"
     },
     {
-      "id": "offline-printer-ends-direct-session",
-      "severity": "resolved",
-      "summary": "Resolved by integrated 7b1718a: current positive run received a truthful offline observation on its first fresh admission.",
-      "reproduce": "KOBRALINK_RTC_WORLDS=positive node scripts/test-kobralink-rtc-acceptance.ts (check offline-reported-truthfully)"
+      "qualification": "first_registration_without_device_id",
+      "id": "confirmed-heading"
     },
     {
-      "id": "configuration-bootstrap-503",
-      "severity": "open",
-      "summary": "One GET /api/farms/:id/connectors/:id/configuration answered 503 (\"Configura\u00e7\u00e3o de impressoras indispon\u00edvel\") during back-to-back navigations in run 86da29db, 68 ms before the browser aborted the same request. The route collapses capacity, storage and unknown failures into one 503 and logs no cause, so it is neither attributed nor allowlisted; it keeps failing no-unexpected-network-errors if it recurs. Seen in 1 of 6 retained runs."
+      "qualification": "single_ui",
+      "id": "no-foreign-pages"
     },
     {
-      "id": "prepare-refusal-dead-end",
-      "severity": "resolved",
-      "summary": "Resolved on the integrated product by 917fbe1 and 48f4c1b; runs 86bed2cb and a90e81cc pass prepare-near-rotation-recoverable and the fresh preparation that follows."
+      "qualification": "single_ui",
+      "id": "no-iframe"
     },
     {
-      "id": "refused-session-unhandled-rejection",
-      "severity": "resolved",
-      "summary": "Resolved by 48f4c1b; zero page errors in runs 86bed2cb and a90e81cc."
+      "qualification": "inventory_before_live",
+      "id": "collector-stopped-before-inventory"
+    },
+    {
+      "qualification": "inventory_before_live",
+      "id": "local-commit-unconfirmed-then-activated"
+    },
+    {
+      "qualification": "inventory_before_live",
+      "id": "live-authenticated-idle"
+    },
+    {
+      "qualification": "reload_reconnect_no_duplicate",
+      "id": "reload-preserves-counts"
+    },
+    {
+      "qualification": "reload_reconnect_no_duplicate",
+      "id": "reconnect-preserves-counts"
+    },
+    {
+      "qualification": "reload_reconnect_no_duplicate",
+      "id": "connector-restart-preserves-counts"
+    },
+    {
+      "qualification": "reload_reconnect_no_duplicate",
+      "id": "repeat-registration-refused-without-duplicate"
+    },
+    {
+      "qualification": "lost_ack_recovery",
+      "id": "reply-lost-unconfirmed"
+    },
+    {
+      "qualification": "lost_ack_recovery",
+      "id": "reload-restores-pending-operation"
+    },
+    {
+      "qualification": "lost_ack_recovery",
+      "id": "reconcile-confirms-same-operation"
+    },
+    {
+      "qualification": "lost_ack_recovery",
+      "id": "no-duplicate-after-lost-reply"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "server-registered-connector-unconfirmed"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "expired-transport-proof-refused"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "old-ack-without-admitted-status-refused"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "old-ack-on-new-transport-refused"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "fresh-status-then-ack-confirms"
+    },
+    {
+      "qualification": "late_ack_fresh_authority",
+      "id": "no-duplicate-after-late-ack"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "owner-write-succeeds"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "admin-write-succeeds"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "viewer-refused"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "revoked-membership-refused"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "revoked-browser-key-refused"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "revoked-connector-refused"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "expired-credential-refused-enrollment-approved"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "credential-only-revocation-unreachable-by-schema"
+    },
+    {
+      "qualification": "revoked_authority_refused",
+      "id": "denied-cases-add-nothing"
+    },
+    {
+      "qualification": "account_switch_isolated",
+      "id": "pending-restored-for-owner"
+    },
+    {
+      "qualification": "account_switch_isolated",
+      "id": "pending-hidden-from-other-account"
+    },
+    {
+      "qualification": "account_switch_isolated",
+      "id": "forged-restore-refused"
+    },
+    {
+      "qualification": "account_switch_isolated",
+      "id": "owner-keeps-own-operation"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "secret-set-non-empty"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "responses-clean"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "storage-clean"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "console-clean"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "dom-clean"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "websocket-clean"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "browser-inspection-complete"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "no-unexpected-console-errors"
+    },
+    {
+      "qualification": "browser_secrets_absent",
+      "id": "no-unexpected-network-errors"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "mobile-form-keyboard-only"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "mobile-identity-confirm-commit"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "mobile-live-view"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "mobile-error-state"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "desktop-error-state"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "focus-visible"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "controls-labelled"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "no-horizontal-overflow"
+    },
+    {
+      "qualification": "mobile_keyboard_accessibility",
+      "id": "screenshots-captured"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "unknown-before-first-state"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "offline-reported-truthfully"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "stale-after-connector-stop"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "kobra-controls-absent"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "kobra-camera-absent"
+    },
+    {
+      "qualification": "stale_error_capabilities",
+      "id": "capabilities-declared-unavailable"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "renewal-observed-during-think-time"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "prepare-near-rotation-safe"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "prepare-refusal-never-reached-connector"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "prepare-near-rotation-recoverable"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "commit-near-rotation-safe"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "commit-near-rotation-recoverable"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "fresh-admission-after-renewal"
+    },
+    {
+      "qualification": "think_time_lease_renewal",
+      "id": "no-duplicate-after-think-time"
     }
   ],
-  "open_harness_items": [
-    "stale-after-connector-stop now requires a live idle observation after the printer returns before the Connector is stopped (78605aa); not yet exercised because positive waits for the offline product fix.",
-    "browser_inspection_complete: a response whose request the browser aborts after headers never reported finished and stayed unread. 78605aa settles it from the request failure and classifies every body as read, bodyless, aborted or unread; only net::ERR_ABORTED excuses an unread body. Proven on think-time (81 read, 0 unread); the aborted path is covered by a unit test and awaits a positive run."
-  ],
-  "limits": {
-    "printer": "synthetic MQTT printer; no physical printer, firmware or hardware is qualified",
-    "controls": "no physical command, camera, TURN or HTTP command fallback was exercised or is available for Kobra X",
-    "credential_revocation": "isolated credential revocation is unreachable: the schema rejects a credential tombstone while the enrollment is approved (asserted on the real database and rolled back). Qualified instead: combined Connector and credential revocation, and natural credential expiry with the enrollment still approved",
-    "fault_injection": "lost reply, lost acknowledgement and replays are produced inside the page by dropping or repeating its own messages; no response or authority is fabricated",
-    "review": "coordinator rerun and review remain required before publication"
-  },
-  "configuration": {
-    "upstream_revision": "5a5e5d9",
-    "kobralink_image": "sha256:9865baa7346eb87d8860ced1881c30a1e5600b979d618c44757228407dce22e3",
-    "postgres_migrations": 27,
-    "proof_ttl_ms": 10000,
-    "min_context_ms": 5000,
-    "token_ttl_seconds": 300,
-    "worlds": [
-      "positive",
-      "think-time",
-      "lost-reply",
-      "late-ack",
-      "authority",
-      "account-switch",
-      "credential-expiry"
-    ]
-  },
-  "evidence_runs": [
-    {
-      "run": "a90e81cc-7de3-4761-972a-eab548281523",
-      "head": "78605aa",
-      "worlds": ["think-time"],
-      "checks": 26,
-      "failed": 0,
-      "note": "refused near-rotation prepare returns to the form with no writes, the second fresh preparation and the commit after a real inbox renewal confirm; 81 response bodies read, 0 unread, 0 page errors"
-    },
-    {
-      "run": "86da29db-24a7-41ee-96bd-b29c07b7e665",
-      "head": "5fce499",
-      "worlds": ["positive"],
-      "checks": 31,
-      "failed": 4,
-      "note": "offline-reported-truthfully, stale-after-connector-stop, browser-inspection-complete, no-unexpected-network-errors"
-    }
-  ],
-  "current_run": {
-    "run": "de3c89dd-3d38-4713-b523-a2ce57d83657",
-    "head": "00c060dde1e12cde1805a508461e38682840efa3",
-    "sourceSha256": "5cf63c7a6eb46d140cc9b1c9f388c78a2981a86f00607f26082fba7f338ea69e",
-    "outputSha256": "c3e83ed4ddcf8dd0c6be42c59f9b3905994b41cceda680288e414da3897754b3",
-    "worlds": {
-      "positive": {
-        "exit": 0,
-        "checks": 31
-      }
-    }
-  }
+  "checks": 5
 }

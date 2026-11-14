@@ -235,3 +235,11 @@ yet.
 Repeat using the environment above and the reviewed v3 restart, then
 `KOBRALINK_RTC_WORLDS=positive node scripts/test-kobralink-rtc-acceptance.ts`.
 `--verify-report` must continue rejecting this incomplete report.
+
+## Current qualification checkpoint (2026-11-14)
+
+Candidate `0be57e799c48151dc611bca66fa154b2464b5222` preserves the offline and telemetry reconnect fixes and the cumulative harness. Adopted positive run `bd6f99fd-182c-4d15-8fbd-eb25ba0b4cd4` completed with exit 0, 31 checks, no failures, and resource cleanup passing. Its aggregate report is intentionally incomplete because only positive ran. Browser secret audit and stale/error capabilities passed.
+
+The subsequent full-suite attempt `e2ea6f07-917b-45ab-bb46-a73ff4763fea` failed before any world executed: Docker refused creation of the isolated subnet with `invalid pool request: Pool overlaps with other one on this address space`. Inspection identified a pre-existing network labelled for run `c8d96f0a-2317-403c-8fd7-7714c3aac973`, with three think-time container endpoints. These resources were outside the transferred run custody and were preserved. No full-suite retry was made. The owned VM was stopped after inspection. This is an infrastructure custody blocker, not evidence of a product defect or full qualification.
+
+The committed JSON is the actual failed full-attempt report. Its `complete` field describes selection of all worlds, not successful execution; worlds and qualifications remain authoritative. `--verify-report` must fail. Runner tests, 22 configuration/diagnostic tests, TypeScript and formatting passed. Unread 302/307 rejection remains covered. No physical printer or production service was used.

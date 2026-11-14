@@ -201,6 +201,10 @@ export function createFarmSnapshotSource(input: {
           ...(
             [
               'progress',
+              'filename',
+              'currentLayer',
+              'totalLayer',
+              'estimatedRemainingSeconds',
               'toolTemperatureCelsius',
               'bedTemperatureCelsius',
             ] as const

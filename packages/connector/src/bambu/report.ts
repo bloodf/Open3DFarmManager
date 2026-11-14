@@ -9,6 +9,10 @@ export type BambuReportResult =
       kind: 'observation'
       state?: PrinterState['state']
       progress?: number
+      filename?: string
+      currentLayer?: number
+      totalLayer?: number
+      estimatedRemainingSeconds?: number
       toolTemperatureCelsius?: number
       bedTemperatureCelsius?: number
     }
@@ -171,6 +175,13 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
     const hasTelemetryFields =
       'gcode_state' in printRecord ||
       'mc_percent' in printRecord ||
+      [
+        'subtask_name',
+        'gcode_file',
+        'layer_num',
+        'total_layer_num',
+        'mc_remaining_time',
+      ].some((key) => key in printRecord) ||
       'nozzle_temper' in printRecord ||
       'bed_temper' in printRecord
 
@@ -216,6 +227,30 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
   if (bedTemperatureCelsius !== undefined) {
     observation.bedTemperatureCelsius = bedTemperatureCelsius
   }
+
+  const filename = [printRecord.subtask_name, printRecord.gcode_file].find(
+    (value): value is string =>
+      typeof value === 'string' &&
+      value.trim().length > 0 &&
+      value.length <= 255,
+  )
+  if (filename !== undefined) observation.filename = filename
+  for (const [source, target] of [
+    ['layer_num', 'currentLayer'],
+    ['total_layer_num', 'totalLayer'],
+  ] as const) {
+    const value = printRecord[source]
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+      observation[target] = value
+  }
+  const remaining = printRecord.mc_remaining_time
+  if (
+    typeof remaining === 'number' &&
+    Number.isFinite(remaining) &&
+    remaining >= 0 &&
+    Number.isFinite(remaining * 60)
+  )
+    observation.estimatedRemainingSeconds = remaining * 60
 
   return observation
 }

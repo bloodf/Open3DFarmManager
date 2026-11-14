@@ -3,11 +3,15 @@ import { computed, ref } from 'vue'
 import {
   capabilityLabels,
   capabilityStatusLabels,
+  compatibilityPageCatalog,
   filterCompatibility,
+  klipperFamilyIds,
 } from '../utils/compatibility/index'
 
 const search = ref('')
-const products = computed(() => filterCompatibility(search.value))
+const products = computed(() =>
+  filterCompatibility(search.value, compatibilityPageCatalog),
+)
 </script>
 
 <template>
@@ -33,6 +37,10 @@ const products = computed(() => filterCompatibility(search.value))
       :aria-labelledby="product.id"
     >
       <h2 :id="product.id">{{ product.brand }} {{ product.model }}</h2>
+      <p v-if="klipperFamilyIds.has(product.id)">
+        Família Klipper/Moonraker. Simulado indica teste contra simuladores, não
+        contra hardware.
+      </p>
       <dl>
         <dt>Lançamento</dt>
         <dd>

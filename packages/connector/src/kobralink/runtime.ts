@@ -12,7 +12,7 @@ import {
 
 export { KobraLinkRuntimeBinding }
 
-/** Read-only polling. No signup, reconnect, provisioning or printer commands. */
+/** Poll telemetry and recover only explicitly transient disconnected sessions. */
 export function createKobraLinkRuntimeSubscription(input: {
   binding: KobraLinkRuntimeBinding
   allowedOrigins: readonly string[]
@@ -38,6 +38,8 @@ export function createKobraLinkRuntimeSubscription(input: {
   const done = (async () => {
     let authenticated = false
     let delay = 1000
+    let reconnectDelay = 30_000
+    let reconnectAt: number | undefined
     try {
       while (!signal.aborted) {
         try {
@@ -59,6 +61,22 @@ export function createKobraLinkRuntimeSubscription(input: {
           if (signal.aborted) break
           input.onStatus(status)
           delay = 1000
+          if (status.availability === 'available') {
+            reconnectDelay = 30_000
+            reconnectAt = undefined
+          } else if (status.connectionReason) {
+            const now = performance.now()
+            reconnectAt ??= now + reconnectDelay
+            if (now >= reconnectAt && !signal.aborted) {
+              // Reserve the next slot before awaiting, including failed attempts.
+              reconnectDelay = Math.min(reconnectDelay * 2, 300_000)
+              reconnectAt = now + reconnectDelay
+              await client.reconnect({
+                id: binding.id,
+                deviceId: binding.deviceId,
+              })
+            }
+          }
         } catch (error) {
           if (signal.aborted) break
           input.onUnavailable()

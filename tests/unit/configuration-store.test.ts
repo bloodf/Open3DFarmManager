@@ -151,17 +151,21 @@ function jsonbParameters(values: unknown[]) {
 describe('production configuration store through synthetic SQL', () => {
   it('denies a missing/revoked session rather than granting a default role', async () => {
     const db = database()
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     expect(await store.read(scope)).toBeNull()
     expect(db.statements.some((s) => s.includes('session_accounts'))).toBe(true)
   })
   it('persists operations across adapter restart and rejects reused identity', async () => {
     const db = database()
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     await store.transaction(scope, async (tx) => {
       expect(await tx.createOperation(operation)).toBe(true)
     })
-    const restarted = new PostgresConfigurationStore(db.pool, config)
+    const restarted = new PostgresConfigurationStore(
+      db.pool,
+      config,
+      () => 1000,
+    )
     await restarted.transaction(scope, async (tx) => {
       expect(await tx.operation(operation.operation_id)).toEqual(operation)
       expect(await tx.createOperation(operation)).toBe(false)
@@ -169,7 +173,7 @@ describe('production configuration store through synthetic SQL', () => {
   })
   it('binds operation records as structured jsonb and round-trips the commit pin', async () => {
     const db = database()
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     await store.transaction(scope, async (tx) => {
       expect(await tx.createOperation(operation)).toBe(true)
     })
@@ -189,7 +193,11 @@ describe('production configuration store through synthetic SQL', () => {
         false,
       )
     })
-    const restarted = new PostgresConfigurationStore(db.pool, config)
+    const restarted = new PostgresConfigurationStore(
+      db.pool,
+      config,
+      () => 1000,
+    )
     await restarted.transaction(scope, async (tx) => {
       expect(await tx.operation(operation.operation_id)).toEqual({
         ...operation,
@@ -203,14 +211,14 @@ describe('production configuration store through synthetic SQL', () => {
         { record: JSON.stringify(operation) },
       ],
     })
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     await expect(
       store.transaction(scope, (tx) => tx.operation(operation.operation_id)),
     ).rejects.toThrow()
   })
   it('rolls back writes when callback rejects', async () => {
     const db = database()
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     await expect(
       store.transaction(scope, async (tx) => {
         await tx.createOperation(operation)
@@ -223,7 +231,7 @@ describe('production configuration store through synthetic SQL', () => {
   })
   it('rejects malformed scope before SQL', async () => {
     const db = database()
-    const store = new PostgresConfigurationStore(db.pool, config)
+    const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
     await expect(store.read({ ...scope, farmId: 'invalid' })).rejects.toThrow()
     expect(db.statements).toHaveLength(0)
   })
@@ -300,7 +308,7 @@ async function authorityFixture() {
 }
 it('checks current durable role, account, credential and revocation on each transaction', async () => {
   const db = await authorityFixture()
-  const store = new PostgresConfigurationStore(db.pool, config)
+  const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
   expect((await store.read(scope))?.authority.role).toBe('owner')
   db.rows['SELECT role,revoked_at'] = [{ role: 'viewer', revoked_at: null }]
   expect(await store.read(scope)).toBeNull()
@@ -325,7 +333,7 @@ it('checks current durable role, account, credential and revocation on each tran
 })
 it('rejects expired credentials and revoked browser keys', async () => {
   const db = await authorityFixture()
-  const store = new PostgresConfigurationStore(db.pool, config)
+  const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
   db.rows['SELECT observed_at'] = [
     { observed_at: 1000, credential_expired_at: 1000 },
   ]
@@ -337,7 +345,7 @@ it('rejects expired credentials and revoked browser keys', async () => {
 
 it('registers one canonical assignment, preserves Moonraker rows, and returns the same assignment after restart; conflicts do not create printers', async () => {
   const db = await authorityFixture()
-  const store = new PostgresConfigurationStore(db.pool, config)
+  const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
   const identity = await deriveConfigurationAssignmentIdentity({
     account_id: operation.account_id,
     farm_id: scope.farmId,
@@ -373,7 +381,7 @@ it('registers one canonical assignment, preserves Moonraker rows, and returns th
   expect(jsonbParameters(db.parameters)).toContainEqual(
     new JsonbParameter(record),
   )
-  const restarted = new PostgresConfigurationStore(db.pool, config)
+  const restarted = new PostgresConfigurationStore(db.pool, config, () => 1000)
   expect(
     await restarted.transaction(scope, (tx) =>
       tx.registerReceipt({ ...record, registered_at: 1001 }),
@@ -444,7 +452,7 @@ it('registers one canonical assignment, preserves Moonraker rows, and returns th
 })
 it('rolls back assignment and receipt together after a transaction failure', async () => {
   const db = await authorityFixture()
-  const store = new PostgresConfigurationStore(db.pool, config)
+  const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
   await store.transaction(scope, async (tx) => {
     await tx.createOperation({ ...operation, commit_sha256: 'A'.repeat(43) })
   })
@@ -507,7 +515,7 @@ it('executes the production plugin disabled path without opening pools', async (
 
 it('retains challenge replay identities across adapter restart', async () => {
   const db = database()
-  const store = new PostgresConfigurationStore(db.pool, config)
+  const store = new PostgresConfigurationStore(db.pool, config, () => 1000)
   const record = ConfigurationChallengeRecord.parse({
     pins: 'synthetic-pins',
     challenge: {
@@ -547,7 +555,7 @@ it('retains challenge replay identities across adapter restart', async () => {
       .admission_nonce,
   ).toBe(record.challenge.admission_nonce)
   expect(jsonbParameters(db.parameters)).toEqual([new JsonbParameter(record)])
-  const restarted = new PostgresConfigurationStore(db.pool, config)
+  const restarted = new PostgresConfigurationStore(db.pool, config, () => 1000)
   await restarted.transaction(scope, async (tx) => {
     expect(await tx.consumeChallenge(record.challenge.challenge_id)).toBeNull()
     expect(await tx.insertChallenge(record)).toBe(false)
@@ -586,7 +594,7 @@ describe('serialization failure recovery', () => {
   it('reruns a rolled-back 40001 attempt in a fresh transaction without partial writes', async () => {
     const db = await authorityFixture()
     const run = attempts(db, (n) => (n === 1 ? serialization() : null))
-    const store = new PostgresConfigurationStore(run.pool, config)
+    const store = new PostgresConfigurationStore(run.pool, config, () => 1000)
     const created: boolean[] = []
     const result = await store.transaction(scope, async (tx) => {
       created.push(await tx.createOperation(operation))
@@ -604,7 +612,7 @@ describe('serialization failure recovery', () => {
   it('stops after a finite number of serialization failures', async () => {
     const db = await authorityFixture()
     const run = attempts(db, () => serialization())
-    const store = new PostgresConfigurationStore(run.pool, config)
+    const store = new PostgresConfigurationStore(run.pool, config, () => 1000)
     const work = vi.fn(async (tx: ConfigurationAuthorityTransaction) =>
       tx.createOperation(operation),
     )
@@ -625,7 +633,7 @@ describe('serialization failure recovery', () => {
   ])('never retries %s', async (_name, error) => {
     const db = await authorityFixture()
     const run = attempts(db, () => error())
-    const store = new PostgresConfigurationStore(run.pool, config)
+    const store = new PostgresConfigurationStore(run.pool, config, () => 1000)
     await expect(
       store.transaction(scope, (tx) => tx.createOperation(operation)),
     ).rejects.toBeDefined()
@@ -639,7 +647,7 @@ describe('serialization failure recovery', () => {
       db.rows['SELECT role,revoked_at'] = [{ role: 'viewer', revoked_at: null }]
       return serialization()
     })
-    const store = new PostgresConfigurationStore(run.pool, config)
+    const store = new PostgresConfigurationStore(run.pool, config, () => 1000)
     const seen: (string | null)[] = []
     const result = await store.transaction(scope, async (tx) => {
       seen.push(tx.authority?.role ?? null)

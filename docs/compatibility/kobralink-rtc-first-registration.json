@@ -1,0 +1,20 @@
+{
+  "status": "blocked",
+  "qualifications": {
+    "first_registration_without_device_id": "blocked",
+    "single_ui": "pending",
+    "inventory_before_live": "pending",
+    "resource_cleanup": "pass",
+    "recovery": "pending",
+    "revocation": "pending",
+    "account_switching": "pending",
+    "mobile": "pending"
+  },
+  "blocker": {
+    "stage": "real configuration authority / prepare",
+    "database_error": "could not serialize access due to concurrent update",
+    "statement": "SELECT farm.observe_signalling_session_expiry($1)::float8 AS now",
+    "http_status": 503,
+    "product_modified": false
+  }
+}

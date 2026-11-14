@@ -13,9 +13,9 @@ import {
 } from './configuration-target.ts'
 
 /**
- * Closed config-v1 frames. There is deliberately no URL, method, header,
- * password, cookie, key or free-form payload field anywhere: strict objects
- * reject them, so they cannot be proxied through this channel.
+ * Closed config-v1 frames. Moonraker prepare carries only an origin and an
+ * optional Connector-local API key. Methods, arbitrary headers, cookies and
+ * free-form proxy payloads remain forbidden by the backend-specific schemas.
  */
 const revision = z.number().int().nonnegative().max(2_147_483_646)
 const common = {
@@ -71,6 +71,9 @@ export const ConfigurationErrorCode = z.enum([
   'identity-conflict',
   'firmware-unsupported',
   'bridge-unavailable',
+  'moonraker-unavailable',
+  'moonraker-not-ready',
+  'moonraker-invalid-response',
   'busy',
   'expired',
 ])

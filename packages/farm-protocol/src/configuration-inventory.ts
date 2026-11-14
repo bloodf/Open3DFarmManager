@@ -56,7 +56,13 @@ export async function deriveConfigurationAssignmentIdentity(input: unknown) {
       '-' +
       hex.slice(20, 32),
   )
-  return { assignment_id, printer_key: 'kobra-x-' + digest }
+  return {
+    assignment_id,
+    printer_key:
+      (stable.bridge_instance_id.startsWith('moonraker-')
+        ? 'moonraker-'
+        : 'kobra-x-') + digest,
+  }
 }
 
 export const ConfigurationInventoryContext = z
@@ -91,7 +97,7 @@ const fields = {
   assignment_id: BrowserDeviceUuid,
   printer_key: z
     .string()
-    .regex(/^kobra-x-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+    .regex(/^(?:kobra-x|moonraker)-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
   nonce: configurationDigest,
   issued_at: configurationTime,
   expires_at: configurationTime,

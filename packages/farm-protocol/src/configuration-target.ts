@@ -55,7 +55,7 @@ export type ConfigurationBridgeSelection = z.infer<
  * (`ConfigurationImmutableTarget` always requires it) and commit binds that
  * receipt's hash, so an omitted expectation never weakens commit.
  */
-export const ConfigurationTarget = z.strictObject({
+const KobraConfigurationTarget = z.strictObject({
   v: z.literal(1),
   protocol: z.literal(CONFIGURATION_PROTOCOL),
   backend: z.literal('kobralink-anycubic'),
@@ -64,6 +64,54 @@ export const ConfigurationTarget = z.strictObject({
   device_id: configurationOpaqueId.optional(),
   bridge: ConfigurationBridgeSelection,
 })
+/** Origin only: reject URL normalization that could hide credentials or a path. */
+export const ConfigurationMoonrakerOrigin = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => {
+    try {
+      if (
+        !/^https?:\/\/[^/?#]+\/?$/i.test(value) ||
+        /[\u0000-\u0020\u007f\\@]/u.test(value)
+      )
+        return false
+      const url = new URL(value)
+      return (
+        ['http:', 'https:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        url.pathname === '/' &&
+        !url.search &&
+        !url.hash
+      )
+    } catch {
+      return false
+    }
+  }, 'Expected an HTTP(S) origin')
+export const MoonrakerConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('moonraker'),
+  model: z.strictObject({
+    family: z.literal('klipper-moonraker'),
+    provisional: z.literal(true),
+  }),
+  origin: ConfigurationMoonrakerOrigin,
+  api_key: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,256}$/)
+    .optional(),
+  device_id: configurationOpaqueId.optional(),
+})
+export type MoonrakerConfigurationTarget = z.infer<
+  typeof MoonrakerConfigurationTarget
+>
+export const ConfigurationTarget = z.discriminatedUnion('backend', [
+  KobraConfigurationTarget,
+  MoonrakerConfigurationTarget,
+])
+
 export type ConfigurationTarget = z.infer<typeof ConfigurationTarget>
 
 const observedText = (max: number) =>

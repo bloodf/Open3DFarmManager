@@ -4,6 +4,7 @@ import {
   CredentialProofPurpose,
   credentialProofPayload,
 } from '../../../farm-protocol/src/credential-proof.ts'
+import { CONFIGURATION_HARD_MAXIMUMS } from '../../../farm-protocol/src/configuration-common.ts'
 import { PairingProofOrigin } from '../../../farm-protocol/src/pairing-proof.ts'
 
 /** Narrow proof signing only; the local identity key never leaves its owner. */
@@ -16,7 +17,15 @@ export function signCredentialProof(input: {
   expectedPurpose: CredentialProofPurpose
   expectedConnectionId: string
   now: number
+  notBeforeSkewMs?: number
 }): string {
+  const skew = input.notBeforeSkewMs === undefined ? 0 : input.notBeforeSkewMs
+  if (
+    !Number.isSafeInteger(skew) ||
+    skew < 0 ||
+    skew > CONFIGURATION_HARD_MAXIMUMS.skewMs
+  )
+    throw new Error('Invalid credential proof not-before skew')
   const challenge = CredentialProofChallenge.parse(input.challenge)
   if (
     input.privateKey.type !== 'private' ||
@@ -41,7 +50,7 @@ export function signCredentialProof(input: {
     challenge.fingerprint !==
       'SHA256:' + createHash('sha256').update(der).digest('base64url') ||
     !Number.isSafeInteger(input.now) ||
-    input.now < challenge.issued_at ||
+    input.now < challenge.issued_at - skew ||
     input.now >= challenge.expires_at
   )
     throw new Error('Credential proof is not current or trusted')

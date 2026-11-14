@@ -70,7 +70,7 @@ async function fixture() {
 // Host session timestamps -> PostgresConfigurationStore: host clock (session-clock suite).
 // Connector receipt -> DB registration: DB now, published 5000 ms both directions.
 // DB inventory acknowledgement -> browser Date.now / Connector clock: shared verifier.
-// Host credential challenge -> Connector validChallenge: manual zero-skew comparison.
+// Host credential challenge -> Connector validChallenge: published 5000 ms not-before skew.
 // Host connector-ready -> Connector signalling: published 5000 ms.
 // Proof TTL 10000, minimum context 5000 and monotonic deadlines are unchanged.
 it.each([1, 97, 5000])(
@@ -162,6 +162,7 @@ async function drive(lease: {
   issuedAt: number
   expiresAt: number
   challengeAhead?: number
+  challengeExpiry?: number
 }) {
   const ids = {
     farm: randomUUID(),
@@ -259,8 +260,23 @@ async function drive(lease: {
     generation: 1,
     nonce: nonce(),
     issued_at: T0 + (lease.challengeAhead ?? 0),
-    expires_at: T0 + 30_000,
+    expires_at: T0 + (lease.challengeExpiry ?? 30_000),
   }
+  const proofInput = {
+    challenge,
+    token: TOKEN,
+    expectedOrigin: FARM_ORIGIN,
+    expectedAudience: AUDIENCE,
+    expectedPurpose: 'signalling' as const,
+    expectedConnectionId: challenge.connection_id,
+    now: T0,
+  }
+  if ((lease.challengeAhead ?? 0) > 0)
+    expect(() => identity.signCredentialProof(proofInput)).toThrow()
+  for (const notBeforeSkewMs of [-1, 0.5, NaN, Infinity, 5001])
+    expect(() =>
+      identity.signCredentialProof({ ...proofInput, notBeforeSkewMs }),
+    ).toThrow()
   serve({ v: 1, t: 'config.connector-challenge', challenge })
   await until(() => sent.length > 1)
   serve({
@@ -305,7 +321,7 @@ async function drive(lease: {
   return { before, after: snapshot(), transportId }
 }
 
-it.each([0, 1, 97])(
+it.each([0, 1, 97, 5000, 5001])(
   'censuses Host credential challenge at +%i ms through real Connector handler',
   async (challengeAhead) => {
     const { before } = await drive({
@@ -314,9 +330,9 @@ it.each([0, 1, 97])(
       challengeAhead,
     })
     expect(before.sent.includes('config.connector-proof')).toBe(
-      challengeAhead === 0,
+      challengeAhead <= 5000,
     )
-    expect(before.socketCloses).toBe(challengeAhead === 0 ? 0 : 1)
+    expect(before.socketCloses).toBe(challengeAhead <= 5000 ? 0 : 1)
   },
 )
 
@@ -383,7 +399,10 @@ it.each([
   [
     'Connector credential validator',
     'packages/connector/src/identity/credential-proof.ts',
-    ['input.now < challenge.issued_at', 'input.now >= challenge.expires_at'],
+    [
+      'input.now < challenge.issued_at - skew',
+      'input.now >= challenge.expires_at',
+    ],
   ],
 ] as const)(
   'records %s clock policy at its actual caller',
@@ -393,5 +412,19 @@ it.each([
       'utf8',
     )
     for (const policy of policies) expect(source).toContain(policy)
+  },
+)
+
+it.each([0, -1])(
+  'refuses challenge expiry offset %i in actual handler',
+  async (challengeExpiry) => {
+    const { before } = await drive({
+      issuedAt: 0,
+      expiresAt: 9000,
+      challengeAhead: -10000,
+      challengeExpiry,
+    })
+    expect(before.sent).not.toContain('config.connector-proof')
+    expect(before.socketCloses).toBe(1)
   },
 )

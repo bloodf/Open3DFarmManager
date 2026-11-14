@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { BrowserDeviceUuid } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PauseCapabilityV1 } from '../../packages/farm-protocol/src/pause-capability.ts'
 import {
+  CONFIGURATION_HARD_MAXIMUMS,
   configurationPayload,
   CONFIGURATION_DOMAINS,
 } from '../../packages/farm-protocol/src/configuration-common.ts'
@@ -112,7 +113,16 @@ it('round trips and requires exact trusted expectations and current time', async
   expect(
     await verifyConfigurationInventoryAck(ack, keys.publicKey, expected, 1000),
   ).toBe(true)
-  for (const now of [999, 31000, 32000, NaN])
+  for (const now of [999, 903, 1000 - CONFIGURATION_HARD_MAXIMUMS.skewMs])
+    expect(
+      await verifyConfigurationInventoryAck(ack, keys.publicKey, expected, now),
+    ).toBe(true)
+  for (const now of [
+    1000 - CONFIGURATION_HARD_MAXIMUMS.skewMs - 1,
+    31000,
+    32000,
+    NaN,
+  ])
     expect(
       await verifyConfigurationInventoryAck(ack, keys.publicKey, expected, now),
     ).toBe(false)

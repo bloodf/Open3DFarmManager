@@ -746,7 +746,7 @@ if (mode === '--prepare-layer') {
       publicKeyRegistryPath: registry,
       proofDatabaseUrl: dbUrl(7),
       tokenTtlSeconds: 300,
-      proofTtlMs: 8000,
+      proofTtlMs: 10000,
       databaseUrl: dbUrl(9),
       issuerKeyPath,
       issuerPublicKeySpki: configKeys.publicKey

@@ -104,6 +104,65 @@ export async function pagePost(
 }
 
 /**
+ * On a world failure, before cleanup: what the owner page asked the bootstrap
+ * for, correlated with the persisted authority inputs. Only booleans, counts
+ * and deltas reach the evidence.
+ */
+async function recordAuthoritySnapshot(context: WorldContext, root: string) {
+  const target = join(root, 'authority-snapshot.json')
+  try {
+    const page = context.owner.page
+    const value = (label: RegExp) =>
+      page
+        .getByLabel(label)
+        .first()
+        .inputValue({ timeout: 1000 })
+        .catch(() => null)
+    const selectedConnector = await value(/Connector aprovado para a Kobra X/)
+    const selectedKey = await value(/Dispositivo aprovado deste navegador/)
+    const snapshot = await context.db.authoritySnapshot({
+      farmId: context.farmId,
+      agentId: context.agentId,
+      accountId: context.owner.accountId,
+      keyId: context.owner.keyId,
+    })
+    const selected = {
+      connectorSelected: !!selectedConnector,
+      connectorIsWorldAgent: selectedConnector === context.agentId,
+      keySelected: !!selectedKey,
+      keyIsOwnerEnrolledKey: selectedKey === context.owner.keyId,
+    }
+    const other =
+      selectedKey && selectedKey !== context.owner.keyId
+        ? await context.db.authoritySnapshot({
+            farmId: context.farmId,
+            agentId: context.agentId,
+            accountId: context.owner.accountId,
+            keyId: selectedKey,
+          })
+        : null
+    const selectedKeySnapshot = other && {
+      keyRows: other.keyRows,
+      keyFarmMatches: other.keyFarmMatches,
+      keyAccountMatches: other.keyAccountMatches,
+      keyApproved: other.keyApproved,
+      keyRevoked: other.keyRevoked,
+    }
+    await writeFile(
+      target,
+      JSON.stringify({ selected, snapshot, selectedKeySnapshot }, null, 2) +
+        '\n',
+      { mode: 0o600 },
+    )
+  } catch (error) {
+    const category = error instanceof Error ? error.name : 'non-error'
+    await writeFile(target, JSON.stringify({ error: category }) + '\n', {
+      mode: 0o600,
+    }).catch(() => {})
+  }
+}
+
+/**
  * Same-origin request from the page's own session; only the status returns.
  * The probe drains the response body (bounded, never aborted) so the denial
  * it provokes completes and stays inside the browser secret audit.
@@ -499,6 +558,7 @@ export async function runQualificationWorld(input: {
     } catch (error) {
       failed = error
       console.error(error)
+      await recordAuthoritySnapshot(context, input.root)
       for (const observer of observers)
         await observer.page
           .screenshot({

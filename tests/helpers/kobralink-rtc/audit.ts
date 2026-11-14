@@ -225,6 +225,82 @@ export function createDatabaseAudit(port: number) {
         ),
       }
     },
+    /**
+     * Failure-only snapshot of the persisted inputs the configuration
+     * bootstrap authority reads, as fixed booleans, counts and millisecond
+     * deltas against the database clock. Never a key, token, fingerprint,
+     * cookie or body value.
+     */
+    async authoritySnapshot(input: {
+      farmId: string
+      agentId: string
+      accountId: string
+      keyId: string
+    }) {
+      const hostBefore = Date.now()
+      const clock =
+        await sql`SELECT floor(extract(epoch FROM clock_timestamp())*1000)::float8 AS now`
+      const hostAfter = Date.now()
+      const dbNow = Number(clock[0]?.now ?? NaN)
+      const ms = (value: unknown, scale = 1) =>
+        value === null || value === undefined
+          ? null
+          : Math.round(Number(value) * scale - dbNow)
+      const members =
+        await sql`SELECT role,revoked_at FROM farm.memberships WHERE farm_id=${input.farmId}::uuid AND account_id=${input.accountId}`
+      const keys = input.keyId
+        ? await sql`SELECT farm_id,account_id,status,approved_at,revoked_at FROM farm.browser_device_keys WHERE key_id=${input.keyId}::uuid`
+        : []
+      const enrollments =
+        await sql`SELECT farm_id,status,fingerprint FROM farm.connector_enrollments WHERE agent_id=${input.agentId}::uuid`
+      const credentials =
+        await sql`SELECT jti,farm_id,fingerprint,issued_at::float8 AS issued_at,expires_at::float8 AS expires_at FROM farm.connector_credentials WHERE agent_id=${input.agentId}::uuid`
+      const credential = credentials[0]
+      const slots = credential
+        ? await sql`SELECT observed_at::float8 AS observed_at,credential_expired_at FROM farm.connector_credential_proofs WHERE jti=${credential.jti}::uuid`
+        : []
+      const key = keys[0]
+      const member = members[0]
+      const enrollment = enrollments[0]
+      return {
+        dbMinusHostMs: Math.round(dbNow - (hostBefore + hostAfter) / 2),
+        hostRoundTripMs: hostAfter - hostBefore,
+        members: members.length,
+        memberRoleAllowed: member?.role === 'owner' || member?.role === 'admin',
+        memberRevoked: member ? member.revoked_at !== null : null,
+        keyRows: keys.length,
+        keyFarmMatches: key ? key.farm_id === input.farmId : null,
+        keyAccountMatches: key ? key.account_id === input.accountId : null,
+        keyApproved: key ? key.status === 'approved' : null,
+        keyApprovedAtMs: ms(key?.approved_at),
+        keyRevoked: key ? key.revoked_at !== null : null,
+        enrollments: enrollments.length,
+        enrollmentApproved: enrollment
+          ? enrollment.status === 'approved'
+          : null,
+        enrollmentFarmMatches: enrollment
+          ? enrollment.farm_id === input.farmId
+          : null,
+        credentials: credentials.length,
+        credentialFarmMatches: credential
+          ? credential.farm_id === input.farmId
+          : null,
+        credentialFingerprintMatchesEnrollment:
+          credential && enrollment
+            ? credential.fingerprint === enrollment.fingerprint
+            : null,
+        credentialIssuedAtMs: ms(credential?.issued_at, 1000),
+        credentialExpiresAtMs: ms(credential?.expires_at, 1000),
+        credentialSlots: slots.length,
+        credentialSlotObservedAtMs: ms(slots[0]?.observed_at),
+        credentialExpiredRecorded: slots[0]
+          ? slots[0].credential_expired_at !== null
+          : null,
+        revocations: await count(
+          sql`SELECT count(*)::int AS n FROM farm.connector_revocations WHERE agent_id=${input.agentId}::uuid OR credential_jti=${credential?.jti ?? null}::uuid`,
+        ),
+      }
+    },
     async browserKeyStatus(keyId: string) {
       const rows =
         await sql`SELECT status FROM farm.browser_device_keys WHERE key_id=${keyId}::uuid`

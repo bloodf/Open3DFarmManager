@@ -294,6 +294,9 @@ export async function driveFirstRegistration(input: {
   await expect(page.locator('#kobra-confirm-checkbox')).toBeVisible({
     timeout: 30_000,
   })
+  await expect(
+    page.getByText('OPENFARM_SYNTHETIC_KOBRA_X_001', { exact: true }),
+  ).toBeVisible()
   await page.screenshot({
     path: join(input.evidence, 'prepared-desktop1280.png'),
     fullPage: true,
@@ -314,6 +317,22 @@ export async function driveFirstRegistration(input: {
       name: 'Anycubic Kobra X confirmada e ativa em modo somente leitura',
     }),
   ).toBeVisible({ timeout: 60_000 })
+  const localCommitIdx = input.events.findIndex(
+    (e) =>
+      e.kind === 'configuration-activation' &&
+      e.reason === 'local-commit' &&
+      e.result === 'unconfirmed',
+  )
+  const confirmedIdx = input.events.findIndex(
+    (e) =>
+      e.kind === 'configuration-activation' &&
+      e.reason === 'inventory-confirmed' &&
+      e.result === 'activated',
+  )
+  assert.ok(
+    localCommitIdx >= 0 && confirmedIdx > localCommitIdx,
+    'Local commit must remain unconfirmed until signed inventory acknowledgement activates collection',
+  )
   await page.screenshot({
     path: join(input.evidence, 'confirmed-desktop1280.png'),
     fullPage: true,
@@ -330,7 +349,12 @@ export async function driveFirstRegistration(input: {
   await expect(
     page.getByText('Conexão direta autenticada', { exact: true }),
   ).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByRole('article')).toHaveCount(1)
+  const articles = page.getByRole('article')
+  await expect(articles).toHaveCount(1)
+  await expect(
+    articles.first().getByText('Ociosa', { exact: true }),
+  ).toBeVisible()
+  assert.equal(await page.locator('iframe, video').count(), 0)
   await page.screenshot({
     path: join(input.evidence, 'live-desktop1280.png'),
     fullPage: true,

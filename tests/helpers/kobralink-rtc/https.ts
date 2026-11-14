@@ -34,7 +34,6 @@ import {
   requestProxyDisconnect,
   serveProxyDisconnect,
 } from '../signalling-https-disconnect-ipc.ts'
-import type { SignallingFixtureExtension } from '../signalling-https-fixture-contract.ts'
 import {
   ARTIFACT_HEAD,
   assertArtifactSeal,
@@ -60,22 +59,23 @@ import {
   servePauseAudit,
   type PauseAuditPort,
 } from '../pause-authority-https-audit.ts'
-import { runSignallingHttpsAcceptance } from './acceptance.ts'
+import { runQualificationWorld } from './acceptance.ts'
+import { parseWorld } from './qualification.ts'
+import { worldRunner } from './worlds.ts'
 import { loadMigrationCatalog } from '../../../scripts/db/migrations.ts'
+import { admitEvidenceChild } from './admission.ts'
 
 const checkout = await realpath(new URL('../../..', import.meta.url))
-function outside(path: string) {
-  const r = relative(checkout, path)
-  return r.startsWith('../') || isAbsolute(r)
+function validateAdmittedFixture(path: string) {
+  admitEvidenceChild(path, checkout)
+  return path
 }
 async function absoluteOutside(path: string) {
   if (!isAbsolute(path))
     throw new Error('An absolute private fixture path is required')
   const parent = await realpath(dirname(path))
   const resolved = join(parent, basename(path))
-  if (!outside(resolved))
-    throw new Error('Fixture path must be outside the checkout')
-  return resolved
+  return validateAdmittedFixture(resolved)
 }
 const Prebuild = Receipt.omit({ outputSha256: true, outputFiles: true })
 function git(args: string[]) {
@@ -277,8 +277,7 @@ if (mode === '--prepare-layer') {
 } else if (mode === '--seal-build') {
   if (process.argv.length !== 4 || !process.argv[3])
     throw new Error('Provide the prepared private layer')
-  const layer = await realpath(process.argv[3])
-  if (!outside(layer)) throw new Error('Layer must be outside checkout')
+  const layer = validateAdmittedFixture(await realpath(process.argv[3]))
   const initial = Prebuild.parse(
     JSON.parse(await readFile(join(layer, 'prebuild.json'), 'utf8')),
   )
@@ -316,97 +315,57 @@ if (mode === '--prepare-layer') {
     throw new Error('Explicit disposable fixture required')
   const {
     SIGNALLING_HTTPS_ORIGIN: origin,
-    SIGNALLING_HTTPS_CA: ca,
     SIGNALLING_HTTPS_FARM: farmId,
     SIGNALLING_HTTPS_OWNER: owner,
     SIGNALLING_HTTPS_ADMIN: admin,
+    SIGNALLING_HTTPS_VIEWER: viewer,
+    SIGNALLING_HTTPS_MEMBER: member,
     SIGNALLING_HTTPS_PASSWORD: password,
+    KOBRALINK_RTC_RUN_DIRECTORY: root,
   } = process.env
-  if (!origin || !ca || !farmId || !owner || !admin || !password)
+  const databasePort = Number(process.env.KOBRALINK_RTC_DB_PORT)
+  const kobraPort = Number(process.env.KOBRALINK_RTC_KOBRA_PORT)
+  if (
+    !origin ||
+    !farmId ||
+    !owner ||
+    !admin ||
+    !viewer ||
+    !member ||
+    !password ||
+    !root ||
+    !Number.isInteger(databasePort) ||
+    !Number.isInteger(kobraPort)
+  )
     throw new Error('Missing disposable acceptance fixture')
-  const { rtcFixture, pauseFixture, pauseRtcFixture } = fixtureMode()
-  const extensionPath = './extension.ts'
-  const extensionModule:
-    | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
-    | undefined = rtcFixture ? await import(extensionPath) : undefined
-  const executionModule =
-    process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE === 'yes'
-      ? await import('../pause-execution-rtc.ts')
-      : undefined
-  const pauseRtcModule =
-    pauseRtcFixture && !executionModule
-      ? await import('../pause-authenticated-rtc.ts')
-      : undefined
-  const pauseAudit = pauseFixture
-    ? createPauseAuditClient(auditPort(process))
-    : undefined
-  const pauseExtension = pauseAudit
-    ? createPauseAuthorityHttpsFixtureExtension({
-        ...PauseHttpsIssuer.parse({
-          issuer: origin,
-          kid: 'pause-fixture',
-          audience: 'open3dfarmmanager:pause',
-          publicKeySpki: process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY,
-        }),
-        audit: (request) => pauseAudit.request(request),
-      })
-    : undefined
+  const { rtcFixture } = fixtureMode()
+  if (!rtcFixture) throw new Error('Real registration fixture required')
+  const world = parseWorld(process.env.KOBRALINK_RTC_WORLD)
   try {
     console.log(
       JSON.stringify(
-        await runSignallingHttpsAcceptance({
+        await runQualificationWorld({
+          world,
           origin,
-          ca: await readFile(ca),
           farmId,
-          owner,
-          admin,
+          usernames: { owner, admin, viewer, member },
           password,
-          ...(pauseExtension
-            ? {
-                extension: pauseExtension,
-                extensionKind: 'pause-authority' as const,
-                caPath: ca,
-                disconnectSignalling: async () => {
-                  throw new Error('Pause fixture must not use signalling')
-                },
-              }
-            : {}),
-          ...(executionModule
-            ? {
-                extension:
-                  executionModule.createPauseExecutionRtcFixtureExtension({
-                    closure: pauseExecutionClosure(),
-                    testReplay: true,
-                  }),
-                extensionKind: 'pause-execution-rtc' as const,
-                caPath: ca,
-                disconnectSignalling: requestProxyDisconnect,
-              }
-            : {}),
-          ...(pauseRtcModule
-            ? {
-                extension:
-                  pauseRtcModule.createPauseAuthenticatedRtcFixtureExtension(),
-                extensionKind: 'pause-rtc' as const,
-                caPath: ca,
-                disconnectSignalling: requestProxyDisconnect,
-              }
-            : {}),
-          ...(extensionModule
-            ? {
-                extension:
-                  extensionModule.createAuthenticatedRtcFixtureExtension(),
-                caPath: ca,
-                disconnectSignalling: requestProxyDisconnect,
-              }
-            : {}),
+          root,
+          databasePort,
+          kobraPort,
+          disconnectSignalling: requestProxyDisconnect,
+          run: worldRunner(world),
         }),
       ),
     )
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
   } finally {
-    pauseAudit?.close()
-    if ((rtcFixture || pauseFixture || pauseRtcFixture) && process.connected)
-      process.disconnect()
+    if (process.connected) process.disconnect()
+    // The outcome is already recorded. A Connector runtime timer left behind
+    // after shutdown must not keep the world alive until its deadline.
+    setTimeout(() => process.exit(), 3000).unref()
   }
 } else if (mode === '--run') {
   if (
@@ -428,8 +387,7 @@ if (mode === '--prepare-layer') {
     !requestedLayer
   )
     throw new Error('Missing explicit disposable fixture or sealed build')
-  const layer = await realpath(requestedLayer)
-  if (!outside(layer)) throw new Error('Layer must be outside checkout')
+  const layer = validateAdmittedFixture(await realpath(requestedLayer))
   const receipt = Receipt.parse(
     JSON.parse(
       await readFile(join(layer, 'fixture-build-receipt.json'), 'utf8'),
@@ -488,9 +446,18 @@ if (mode === '--prepare-layer') {
   const password = randomBytes(24).toString('hex'),
     ownerId = randomUUID(),
     adminId = randomUUID(),
+    viewerId = randomUUID(),
+    memberId = randomUUID(),
     farmId = randomUUID()
   const owner = 'owner_' + randomBytes(8).toString('hex'),
-    admin = 'admin_' + randomBytes(8).toString('hex')
+    admin = 'admin_' + randomBytes(8).toString('hex'),
+    viewer = 'viewer_' + randomBytes(8).toString('hex'),
+    member = 'member_' + randomBytes(8).toString('hex')
+  const world = parseWorld(process.env.KOBRALINK_RTC_WORLD)
+  // Connector credential lifetime: the documented 300 s, except in the one
+  // world that qualifies what happens once that credential has expired.
+  const tokenTtlSeconds = world === 'credential-expiry' ? 45 : 300
+  const worldTimeoutMs = 420_000
   const created: string[] = []
   let directory: string | undefined,
     app: ChildProcess | undefined,
@@ -508,8 +475,12 @@ if (mode === '--prepare-layer') {
     password,
     owner,
     admin,
+    viewer,
+    member,
     ownerId,
     adminId,
+    viewerId,
+    memberId,
     farmId,
   ]
   const interrupt = () => {
@@ -627,12 +598,14 @@ if (mode === '--prepare-layer') {
     for (const [id, name] of [
       [ownerId, owner],
       [adminId, admin],
+      [viewerId, viewer],
+      [memberId, member],
     ] as const) {
       await sql`INSERT INTO farm.session_accounts(id) VALUES(${id})`
       await sql`INSERT INTO farm.password_credentials(account_id,username,password_hash) VALUES(${id},${name},${hash})`
     }
     await sql`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
-    await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${ownerId},'owner'),(${farmId}::uuid,${adminId},'admin')`
+    await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${ownerId},'owner'),(${farmId}::uuid,${adminId},'admin'),(${farmId}::uuid,${viewerId},'viewer'),(${farmId}::uuid,${memberId},'admin')`
     await note(`Owned restricted fixture roles ${roles.join(',')}`)
     directory = await mkdtemp(join(tmpdir(), 'o3dfarm-signal-https-'))
     await chmod(directory, 0o700)
@@ -745,7 +718,7 @@ if (mode === '--prepare-layer') {
       enabled: true,
       publicKeyRegistryPath: registry,
       proofDatabaseUrl: dbUrl(7),
-      tokenTtlSeconds: 300,
+      tokenTtlSeconds,
       proofTtlMs: 10000,
       databaseUrl: dbUrl(9),
       issuerKeyPath,
@@ -810,7 +783,7 @@ if (mode === '--prepare-layer') {
         NUXT_CONNECTOR_PAIRING_ISSUER: origin,
         NUXT_CONNECTOR_PAIRING_SIGNING_KEY_ID: 'fixture',
         NUXT_CONNECTOR_PAIRING_SIGNING_KEY_PATH: signingKey,
-        NUXT_CONNECTOR_PAIRING_TOKEN_TTL_SECONDS: '300',
+        NUXT_CONNECTOR_PAIRING_TOKEN_TTL_SECONDS: String(tokenTtlSeconds),
         NUXT_CONNECTOR_SIGNALLING_ENABLED: pauseFixture ? 'false' : 'true',
         NUXT_CONNECTOR_SIGNALLING_ORIGIN: origin,
         NUXT_CONNECTOR_SIGNALLING_ISSUER: origin,
@@ -818,7 +791,7 @@ if (mode === '--prepare-layer') {
         NUXT_CONNECTOR_SIGNALLING_READER_DATABASE_URL: dbUrl(6),
         NUXT_CONNECTOR_SIGNALLING_PROOF_DATABASE_URL: dbUrl(7),
         NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH: registry,
-        NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: '300',
+        NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: String(tokenTtlSeconds),
         NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '8000',
       },
     })
@@ -877,7 +850,11 @@ if (mode === '--prepare-layer') {
           SIGNALLING_HTTPS_FARM: farmId,
           SIGNALLING_HTTPS_OWNER: owner,
           SIGNALLING_HTTPS_ADMIN: admin,
+          SIGNALLING_HTTPS_VIEWER: viewer,
+          SIGNALLING_HTTPS_MEMBER: member,
           SIGNALLING_HTTPS_PASSWORD: password,
+          KOBRALINK_RTC_WORLD: world,
+          KOBRALINK_RTC_DB_PORT: String(port),
           ...(rtcFixture ? { SIGNALLING_HTTPS_RTC_FIXTURE: 'yes' } : {}),
           ...(farmPause ? { SIGNALLING_HTTPS_FARM_PAUSE: 'yes' } : {}),
           ...(pauseRtcFixture
@@ -935,7 +912,7 @@ if (mode === '--prepare-layer') {
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error('Acceptance timed out')),
-            180000,
+            worldTimeoutMs,
           )
         }),
       ])

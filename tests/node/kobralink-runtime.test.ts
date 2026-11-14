@@ -358,6 +358,7 @@ test('serial recovery preserves source freshness and restart reauthenticates', a
             }
           },
           onRawObservation(value) {
+            assert.ok('progress' in value.fieldObservedAtMonoMs)
             times.push(value.fieldObservedAtMonoMs.progress)
             if (times.length === 2) controller.abort()
           },

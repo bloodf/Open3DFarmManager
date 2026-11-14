@@ -577,7 +577,12 @@ function dateLabel(time: number) {
                         </dd>
                       </div>
                     </dl>
-                    <p v-if="row.observation.state.state === 'printing'">
+                    <p
+                      v-if="
+                        row.observation.state.state === 'printing' &&
+                        row.observation.state.progress !== undefined
+                      "
+                    >
                       <progress
                         :value="row.observation.state.progress"
                         :max="1"
@@ -589,6 +594,9 @@ function dateLabel(time: number) {
                           Math.round(row.observation.state.progress * 100)
                         }}%</span
                       >
+                    </p>
+                    <p v-else-if="row.observation.state.progress === undefined">
+                      Progresso indisponível.
                     </p>
                   </template>
                   <section

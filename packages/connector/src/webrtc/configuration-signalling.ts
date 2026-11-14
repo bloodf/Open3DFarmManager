@@ -218,7 +218,7 @@ export function createConfigurationSignallingClient(
         c.public_key_spki !== identity.publicKeySpki ||
         c.fingerprint !== identity.fingerprint ||
         c.thumbprint !== thumbprint ||
-        now < c.issued_at ||
+        now < c.issued_at - LEASE_SKEW_MS ||
         now >= c.expires_at
       )
         return null
@@ -230,6 +230,7 @@ export function createConfigurationSignallingClient(
         expectedPurpose: 'signalling',
         expectedConnectionId: c.connection_id,
         now,
+        notBeforeSkewMs: LEASE_SKEW_MS,
       })
     }
 

@@ -6,6 +6,7 @@ import type { KobraLinkFetch } from '../../../packages/connector/src/kobralink/c
 export function createControlFixture() {
   const token = 'synthetic-control-token'
   const commands: string[] = []
+  const extended: { path: string; body: unknown }[] = []
   const state = {
     printState: 'printing',
     connected: true,
@@ -46,6 +47,19 @@ export function createControlFixture() {
           printState: state.printState,
         },
       })
+    if (
+      init.method === 'POST' &&
+      /^\/api\/v1\/printers\/printer-1\/(temperature|fan|light|speed|axis|axis\/off|ams\/(slot|feed)|ace\/(auto-feed|dry)|printer-files\/print)$/.test(
+        path,
+      )
+    ) {
+      extended.push({ path, body: JSON.parse(String(init.body)) })
+      return state.status === 204
+        ? state.malformed
+          ? json({ result: 'ok' })
+          : new Response(null, { status: 204 })
+        : json({ error: token }, state.status)
+    }
     const match =
       /^\/api\/v1\/printers\/printer-1\/print\/(pause|resume|cancel)$/.exec(
         path,
@@ -60,5 +74,5 @@ export function createControlFixture() {
     }
     return json({}, 404)
   }
-  return { fetch, state, commands, token }
+  return { fetch, state, commands, extended, token }
 }

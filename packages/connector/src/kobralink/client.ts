@@ -64,6 +64,7 @@ export interface PrinterIdentity extends PrinterBinding {
   firmware: string | null
 }
 export interface PrinterObservation extends PrinterStatus {
+  connectionReason?: 'lost' | 'unreachable' | 'unreachable_ip'
   progress: number | null
   observedAt: number | null
 }
@@ -303,6 +304,12 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       deviceId: p.deviceId,
       name: p.name,
       availability,
+      ...(live?.connected === false &&
+      (live.connectionError?.code === 'lost' ||
+        live.connectionError?.code === 'unreachable' ||
+        live.connectionError?.code === 'unreachable_ip')
+        ? { connectionReason: live.connectionError.code }
+        : {}),
       printState,
       progress: live?.progress ?? null,
       observedAt: live?.updatedAt ?? null,
@@ -316,6 +323,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
   }
   function sanitize(value: unknown, expected?: PrinterBinding): PrinterStatus {
     const {
+      connectionReason: _connectionReason,
       progress: _progress,
       observedAt: _observedAt,
       ...status
@@ -523,8 +531,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       )
       sanitize(wire, binding)
       if (
-        wire.live?.connectionError?.code === 'manual' ||
-        wire.live?.connectionError?.code === 'reconnecting' ||
+        !observe(wire, binding).connectionReason ||
         wire.live?.connected !== false
       )
         fail('unavailable')

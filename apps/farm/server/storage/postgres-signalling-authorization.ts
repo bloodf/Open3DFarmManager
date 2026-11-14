@@ -1,4 +1,7 @@
-import { readSignallingCredentialRecords } from './postgres-connector-credential-record.ts'
+import {
+  readSignallingCredentialRecords,
+  readSignallingSuccessorRecords,
+} from './postgres-connector-credential-record.ts'
 import {
   assignmentSetDigest,
   RtcAssignmentRef,
@@ -144,6 +147,7 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
           parsed.data.agentId,
           parsed.data.farmId,
           first,
+          parsed.data.jti,
         )
         const observedAt = await this.databaseTime(tx)
         if (
@@ -334,6 +338,9 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
     agentId: string,
     farmId: string,
     observedAt: number,
+    // The Connector's presented credential. Omitted on the browser side, which
+    // selects the newest currently valid credential (see below).
+    jti?: string,
   ): Promise<ConnectorCurrentIdentity | null> {
     // Same enrollment -> credential order as revocation and proof acceptance.
     const enrollments =
@@ -346,9 +353,39 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
     )
       return null
     const issued = await readSignallingCredentialRecords(tx, agentId)
-    const parsed = Credential.safeParse(issued[0])
-    if (!parsed.success) return null
-    const credential = parsed.data
+    const root = Credential.safeParse(issued[0])
+    if (
+      !root.success ||
+      root.data.farm_id !== farmId ||
+      root.data.fingerprint !== enrollment.fingerprint
+    )
+      return null
+    // Root and successors share one farm/key binding, and each stays valid until
+    // its own expiry (no revocation on renewal). An exact jti selects that
+    // credential. Without one, the newest valid successor is chosen, because
+    // the Connector switches to it right after renewal; until it reconnects a
+    // browser binding to it is refused (fail closed) and the view retries.
+    let credential = root.data
+    if (jti !== root.data.jti) {
+      // Before 0026 (or for a role without its grant) only the root resolves.
+      const readable =
+        (
+          await tx`SELECT CASE WHEN to_regclass('farm.connector_credential_successors') IS NULL THEN false ELSE has_table_privilege(current_user,'farm.connector_credential_successors','SELECT') END AS allowed`
+        )[0]?.allowed === true
+      const successors = readable
+        ? await readSignallingSuccessorRecords(
+            tx,
+            root.data.jti,
+            jti ?? null,
+            observedAt,
+          )
+        : []
+      if (successors.length) {
+        const successor = Credential.safeParse(successors[0])
+        if (!successor.success) return null
+        credential = successor.data
+      } else if (jti !== undefined) return null
+    }
     if (
       credential.farm_id !== farmId ||
       credential.fingerprint !== enrollment.fingerprint ||
@@ -359,7 +396,7 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
     )
       return null
     const revoked =
-      await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id = ${agentId}::uuid OR credential_jti = ${credential.jti}::uuid`
+      await tx`SELECT agent_id FROM farm.connector_revocations WHERE agent_id = ${agentId}::uuid OR credential_jti = ${root.data.jti}::uuid OR credential_jti = ${credential.jti}::uuid`
     if (revoked.length) return null
     const connector = await connectorKeyBinding(enrollment.public_key_spki)
     if (

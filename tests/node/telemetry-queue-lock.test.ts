@@ -246,7 +246,13 @@ test('collection reports a recovered lock as a diagnostic', async () => {
     const { collectIntoQueue } =
       await import('../../packages/connector/src/runtime/collect.ts')
     await collectIntoQueue({
-      config: { version: 1, allowedOrigins: [], printers: [] } as never,
+      config: {
+        version: 1,
+        allowedOrigins: ['http://127.0.0.1:7125'],
+        printers: [
+          { printerKey: 'printer-1', origin: 'http://127.0.0.1:7125/' },
+        ],
+      },
       queue,
       signal: AbortSignal.abort(),
       onDiagnostic: (value) => diagnostics.push(value),

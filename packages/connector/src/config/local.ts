@@ -1,3 +1,4 @@
+import { parseBambuBinding } from '../bambu/configuration.ts'
 import {
   KOBRALINK_CREDENTIAL_MAX_BYTES,
   KobraLinkRuntimeBinding,
@@ -59,7 +60,19 @@ const LegacyCollectorConfigSchema = z.strictObject({
   limits: Limits,
   spoolman: SpoolmanConfig.optional(),
 })
+const BambuSection = z.strictObject({
+  printers: z.array(z.unknown().transform((value) => {
+    const binding = parseBambuBinding(value)
+    return { ...binding, allowedEndpoints: [{ host: binding.host, port: binding.port }] }
+  })).min(1).max(16),
+})
 export const LocalCollectorConfigSchema = z.union([
+  LegacyCollectorConfigSchema.extend({
+    version: z.literal(3),
+    allowedOrigins: z.array(z.string().min(1).max(2048)).max(16),
+    printers: z.array(LegacyCollectorConfigSchema.shape.printers.element).max(16),
+    bambu: BambuSection,
+  }),
   LegacyCollectorConfigSchema,
   LegacyCollectorConfigSchema.extend({
     version: z.literal(2),
@@ -179,6 +192,20 @@ export function parseLocalCollectorConfig(
       bridges.set(binding.origin, binding.bridgeInstance)
       keys.add(binding.printerKey)
       targets.add(target)
+    }
+  }
+  if (config.version === 3) {
+    if (config.printers.length + config.bambu.printers.length > 16)
+      throw Error('Collector capacity exceeded')
+    const serials = new Set<string>()
+    const endpoints = new Set<string>()
+    for (const binding of config.bambu.printers) {
+      const endpoint = JSON.stringify([binding.host, binding.port])
+      if (keys.has(binding.printerKey) || serials.has(binding.serial) || endpoints.has(endpoint))
+        throw Error('Duplicate collector target')
+      keys.add(binding.printerKey)
+      serials.add(binding.serial)
+      endpoints.add(endpoint)
     }
   }
   return config

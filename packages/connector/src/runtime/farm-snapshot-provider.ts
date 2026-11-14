@@ -29,6 +29,7 @@ export type RawPrinterObservation = Omit<
     fieldObservedAtMonoMs:
       | RawMoonrakerObservation['fieldObservedAtMonoMs']
       | Readonly<{ connection: number }>
+      | Readonly<{ bambu: Readonly<Partial<Record<keyof PrinterState, number>>> }>
   }
 
 const FRAME_LIMIT = 'Application frame limit'
@@ -81,7 +82,7 @@ export function createFarmSnapshotSource(input: {
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
       if (!entry) return
-      const times = Object.values(entry.fieldObservedAtMonoMs)
+      const times = Object.values('bambu' in entry.fieldObservedAtMonoMs ? entry.fieldObservedAtMonoMs.bambu : entry.fieldObservedAtMonoMs)
       captured = Math.min(captured, ...times)
       until = Math.min(until, ...times.map((time) => time + 5000))
       const temperature = entry.temperatureObservation
@@ -176,6 +177,10 @@ export function createFarmSnapshotSource(input: {
       return
     if (previous && value.epoch > previous.epoch) {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
+    }
+    if ('bambu' in value.fieldObservedAtMonoMs) {
+      invalidate({ printerKey: value.printerKey, epoch: value.epoch })
+      return
     }
     const times = value.fieldObservedAtMonoMs
     const connectionOnly = 'connection' in times

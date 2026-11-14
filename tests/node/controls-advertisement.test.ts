@@ -208,7 +208,7 @@ test('Bambu snapshot follows local control opt-in without opening a connection',
             'set_speed',
             'start_print',
           ]
-        : [],
+        : undefined,
     )
   }
 })
@@ -224,7 +224,8 @@ test('KobraLink snapshot preserves the registered read-only driver capabilities'
     revision: 1,
   })
   const driver = router()
-  assert.deepEqual(snapshot(t, () => driver.controls(binding)).controls, [])
+  const printer = snapshot(t, () => driver.controls(binding))
+  assert.equal(Object.hasOwn(printer, 'controls'), false)
 })
 
 test('controls schema accepts all protocol actions, omission and legacy lists but rejects duplicates and unknown actions', () => {
@@ -281,6 +282,6 @@ test('advertisement is scoped to each snapshot assignment and overrides observat
   f.open()
   assert.deepEqual(
     f.received.at(-1)?.printers.map((printer) => printer.controls),
-    [['home'], []],
+    [['home'], undefined],
   )
 })

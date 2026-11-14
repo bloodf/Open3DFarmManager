@@ -111,15 +111,21 @@ export function createFarmSnapshotSource(input: {
         captured = Math.min(captured, temperature.observedAtMonoMs)
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
+      const controls = input.controlsFor?.(ref.assignmentId)
+      const advertisedControls = controls
+        ? controls.length > 0
+          ? { controls: [...controls] }
+          : {}
+        : entry.status
+          ? { controls: controlsForBackend('moonraker') }
+          : entry.printer.state === 'offline'
+            ? {}
+            : { controls: controlsForBackend('readonly') }
+      const { controls: _untrustedControls, ...printer } = entry.printer
       printers.push(
         PrinterState.parse({
-          ...entry.printer,
-          // Legacy Moonraker snapshots imply its three controls; readonly must deny them explicitly.
-          ...(input.controlsFor
-            ? { controls: [...input.controlsFor(ref.assignmentId)] }
-            : entry.status
-              ? {}
-              : { controls: controlsForBackend('readonly') }),
+          ...printer,
+          ...advertisedControls,
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),

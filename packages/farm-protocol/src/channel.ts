@@ -4,6 +4,13 @@ import { SpoolInventory } from './inventory.ts'
 
 export const StatusMessage = z.strictObject({
   t: z.literal('snapshot'),
+  connectorVersion: z.string().min(1).max(128).optional(),
+  protocolRevision: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
   seq: z.number().int().nonnegative(),
   printers: z.array(PrinterState).max(100),
   // Optional so snapshots from Connectors without Spoolman stay valid.

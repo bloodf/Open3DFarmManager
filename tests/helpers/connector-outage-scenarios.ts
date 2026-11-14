@@ -7,9 +7,7 @@ import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'
-import { PostgresPairing } from '../../apps/farm/server/storage/postgres-pairing.ts'
-import { PostgresPairingProof } from '../../apps/farm/server/storage/postgres-pairing-proof.ts'
-import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgres-printer-ownership.ts'
+import { ENROLLMENT, enrollConnector } from './connector-enrollment.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   handlerErrors,
@@ -77,18 +75,7 @@ export async function runConnectorOutageScenarios(input: {
     const pairSql = connect(prefix + '_pair'),
       ownerSql = connect(prefix + '_owner')
 
-    // Keys, TLS and Connector identity, all inside the private work directory.
-    const keyFile = join(workDir, 'keys.json')
-    const keys = await crypto.subtle.generateKey('Ed25519', true, [
-      'sign',
-      'verify',
-    ])
-    if (!('privateKey' in keys)) throw new Error('Expected key pair')
-    const spki = Buffer.from(
-      await crypto.subtle.exportKey('spki', keys.publicKey),
-    ).toString('base64')
-    const pem = `-----BEGIN PUBLIC KEY-----\n${spki.match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----\n`
-    writeFileSync(keyFile, JSON.stringify({ fixture: pem }), { mode: 0o600 })
+    // TLS and Connector identity, all inside the private work directory.
     const cert = join(workDir, 'tls-cert.pem'),
       tlsKey = join(workDir, 'tls-key.pem')
     execFileSync(
@@ -122,79 +109,19 @@ export async function runConnectorOutageScenarios(input: {
     ledger({ resource: 'loopback-moonraker', port: ports.moonraker })
 
     // Real enrollment: pairing, proof, approval, credential claim and printer assignment.
-    const issuer = 'https://farm.example',
-      audience = 'open3dfarmmanager:connector',
-      ttlSeconds = 3600
-    const now = Date.now(),
-      actor = randomUUID(),
-      farmId = randomUUID()
-    await admin`INSERT INTO farm.session_accounts(id) VALUES(${actor})`
-    await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES(${actor},${actor},0,${now},${now},${now + 3_600_000})`
-    await admin`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
-    await admin`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${actor},'owner')`
-    const binding = {
-      origin: proxy.origin,
-      audience: 'open3dfarmmanager:pairing',
-    }
-    const pairing = new PostgresPairing(pairSql, binding)
-    const proof = new PostgresPairingProof(admin, binding)
-    const started = await pairing.start({
-      public_key_spki: identity.publicKeySpki,
-      platform: 'linux',
-      version: '0.0.1',
-    })
-    if (!started.ok) throw new Error('Pairing fixture failed')
-    const challenge = await proof.issue({
-      device_code: started.response.device_code,
-    })
-    if (!challenge.ok) throw new Error('Pairing challenge failed')
-    const completion = await proof.complete({
-      device_code: started.response.device_code,
-      challenge: challenge.challenge,
-      signature: identity.signPairingProof({
-        challenge: challenge.challenge,
-        expectedOrigin: proxy.origin,
-        expectedAudience: binding.audience,
-        now: Date.now(),
-      }),
-    })
-    assert.equal(completion.ok, true)
-    const subject = {
-      sessionRecordId: actor,
-      policy: { idleTimeoutMs: 3_600_000 },
-      farmId,
-    }
-    const decision = await pairing.decide({
-      ...subject,
-      decision: 'approve',
-      request: {
-        user_code: started.response.user_code,
-        farm_id: farmId,
-        expected_fingerprint: identity.fingerprint,
-      },
-    })
-    assert.equal(decision.ok, true)
-    const claimed = await pairing.claim(
-      { device_code: started.response.device_code },
-      {
-        issuer,
-        audience,
-        kid: 'fixture',
-        privateKey: keys.privateKey,
-        ttlSeconds,
-      },
-    )
-    if (!claimed.ok || claimed.status !== 'approved')
-      throw new Error('Credential fixture failed')
-    const { ok: _ok, ...approval } = claimed
-    const agentId = claimed.agent_id
+    const { issuer, audience, ttlSeconds } = ENROLLMENT
     const printerKey = 'outage-printer'
-    const registered = await new PostgresPrinterOwnership(ownerSql).register({
-      ...subject,
-      agentId: claimed.agent_id,
-      printerKey,
+    const enrolled = await enrollConnector({
+      admin,
+      pairSql,
+      ownerSql,
+      identity,
+      origin: proxy.origin,
+      workDir,
+      printerKeys: [printerKey],
     })
-    if (!registered.ok) throw new Error('Printer assignment fixture failed')
+    const { keyFile, farmId, agentId, approval } = enrolled
+    const registered = enrolled.assignments[0]!
 
     const configPath = join(workDir, 'runtime.json'),
       credentialPath = join(workDir, 'credential.json')
@@ -213,7 +140,7 @@ export async function runConnectorOutageScenarios(input: {
           {
             assignment_id: registered.assignmentId,
             farm_id: farmId,
-            agent_id: claimed.agent_id,
+            agent_id: agentId,
             printer_key: printerKey,
             moonraker_origin: moon.origin,
           },

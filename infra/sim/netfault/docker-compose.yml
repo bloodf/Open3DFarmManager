@@ -1,0 +1,81 @@
+# Opt-in network fault harness (issue #2). Run through ./run.sh only.
+# Two internal networks with no host egress: "wan" (browser/server side) and
+# "lan" (Connector side). The router NATs lan -> wan and applies netem/UDP faults
+# inside its own namespace. lan-gw only sets the lan default route; the probes
+# run with no capabilities. Nothing here modifies host networking.
+name: o3dfm-netfault
+x-probe: &probe
+  image: node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+  platform: linux/amd64
+  user: '1000:1000'
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  volumes:
+    - ../../..:/repo:ro
+    - ${NETFAULT_NDC:?run through run.sh}:/opt/ndc:ro
+  working_dir: /repo
+  cpus: 1.0
+  mem_limit: 256m
+  pids_limit: 64
+services:
+  router:
+    build: ./router
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    sysctls:
+      net.ipv4.ip_forward: 1
+    networks:
+      lan: { ipv4_address: '10.${NETFAULT_OCTET:-231}.32.2' }
+      wan: { ipv4_address: '10.${NETFAULT_OCTET:-231}.31.2' }
+    cpus: 0.5
+    mem_limit: 64m
+    pids_limit: 32
+  lan-gw:
+    build: ./router
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    command:
+      [
+        'sh',
+        '-c',
+        'ip route replace default via 10.${NETFAULT_OCTET:-231}.32.2 && iptables -A OUTPUT -d 10.${NETFAULT_OCTET:-231}.32.1 -j DROP && exec sleep infinity',
+      ]
+    networks:
+      lan: { ipv4_address: '10.${NETFAULT_OCTET:-231}.32.10' }
+    cpus: 0.25
+    mem_limit: 32m
+    pids_limit: 16
+  browser:
+    <<: *probe
+    command: ['node', 'infra/sim/netfault/rtc-probe.mjs']
+    environment:
+      PROBE_ROLE: answer
+    networks:
+      wan: { ipv4_address: '10.${NETFAULT_OCTET:-231}.31.20' }
+  connector:
+    <<: *probe
+    profiles: [probe]
+    network_mode: service:lan-gw
+    command: ['node', 'infra/sim/netfault/rtc-probe.mjs']
+    environment:
+      PROBE_ROLE: offer
+      PROBE_PEER: '10.${NETFAULT_OCTET:-231}.31.20'
+networks:
+  # Not "internal": Docker's internal-network rules drop frames whose
+  # destination is outside the subnet, which is all routed lan traffic (and
+  # the isolated gateway mode requires internal). Masquerade is off, so the
+  # bridge never NATs lan traffic to the host's networks; lan probes route only
+  # via the router, whose FORWARD policy drops everything except lan -> wan.
+  lan:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: 'false'
+    ipam: { config: [{ subnet: '10.${NETFAULT_OCTET:-231}.32.0/24' }] }
+  # Internal with an isolated gateway: the bridge has no host address.
+  wan:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam: { config: [{ subnet: '10.${NETFAULT_OCTET:-231}.31.0/24' }] }

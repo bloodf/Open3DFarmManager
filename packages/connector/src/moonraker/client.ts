@@ -1,3 +1,4 @@
+import { moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
@@ -37,6 +38,7 @@ export async function readMoonrakerReady(input: {
       signal,
       redirect: 'error',
       credentials: 'omit',
+      headers: moonrakerAuthHeaders(input.origin, input.limits),
     })
     if (!response.ok || !response.body)
       throw new MoonrakerClientError('offline')

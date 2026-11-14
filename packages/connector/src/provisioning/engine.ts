@@ -6,6 +6,17 @@ import {
   moonrakerRuntimeContains,
   commitMoonraker,
 } from './moonraker.ts'
+import {
+  bambuCredentialPath,
+  bambuIdentity,
+  bambuRuntimeContains,
+  bambuTrustPath,
+  commitBambu,
+  discardStagedBambu,
+  existingBambuCredential,
+  prepareBambu,
+  type BambuProbe,
+} from './bambu.ts'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
@@ -81,6 +92,8 @@ export interface ProvisioningEngineOptions {
   /** Operator-configured RFC 1918 CIDRs where printers may live. */
   printerNetworks: readonly string[]
   fetch?: KobraLinkFetch
+  /** Read-only Bambu LAN probe. Tests inject a fixture; default opens TLS/MQTT. */
+  bambuProbe?: BambuProbe
   timeoutMs?: number
   clock?: () => number
   /** Observability hook after each durable stage write. Never an authority. */
@@ -251,6 +264,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             return finalizeCommit(op)
           return save(op, 'prepared', { plan: null })
         }
+        if (op.target.backend === 'bambu') {
+          if (!op.plan) return toRecovery(op, 'journal-inconsistent')
+          if (bambuRuntimeContains(options.runtime, op.target.serial, op.plan))
+            return finalizeCommit(op)
+          return save(op, 'prepared', { plan: null })
+        }
         const bridge = op.bridge_instance_id
           ? custody.find(op.bridge_instance_id)
           : null
@@ -367,6 +386,8 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       removePrivateFile(
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
       )
+    if (op.target.backend === 'bambu')
+      discardStagedBambu(options.stateDirectory, op.operation_id)
     const failed = save(op, 'failed', { failure: code })
     finish(failed)
     return failed
@@ -528,8 +549,27 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       )
         return errorFrame(frame.request_id, 'busy')
     }
+    if (frame.target.backend === 'bambu') {
+      const serial = frame.target.serial
+      if (
+        state.operations.some((id) => {
+          const prior = journal.readOperation(id)
+          return (
+            prior?.target.backend === 'bambu' &&
+            prior.target.serial === serial &&
+            prior.stage === 'local-committed'
+          )
+        })
+      )
+        return errorFrame(frame.request_id, 'busy')
+    }
     if (frame.expected_revision !== state.revision)
       return errorFrame(frame.request_id, 'revision-conflict')
+    if (
+      frame.target.backend === 'bambu' &&
+      (!frame.target.access_code || !policy.allows(frame.target.ipv4))
+    )
+      return errorFrame(frame.request_id, 'invalid-request')
     if (
       frame.target.backend === 'kobralink-anycubic' &&
       (frame.target.endpoint.port !== KOBRA_X_PRINTER_PORT ||
@@ -558,7 +598,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       target:
         frame.target.backend === 'moonraker'
           ? (({ api_key: _key, ...safe }) => safe)(frame.target)
-          : frame.target,
+          : frame.target.backend === 'bambu'
+            ? (({ access_code: _code, ...safe }) => safe)(frame.target)
+            : frame.target,
       target_sha256: targetHash,
       expected_revision: frame.expected_revision,
       bridge_instance_id: null,
@@ -589,6 +631,44 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       if (!(await stillCurrent(context)))
         return describe(frame, await fail(op, 'capability-rejected'))
       const identity = moonrakerIdentity(origin)
+      if (
+        frame.target.device_id &&
+        frame.target.device_id !== identity.device_id
+      )
+        return describe(frame, await fail(op, 'identity-conflict'))
+      op = save(op, 'discovering', {
+        bridge_instance_id: identity.bridge_instance_id,
+        printer: {
+          id: identity.device_id,
+          device_id: identity.device_id,
+          ip: null,
+          model: null,
+          firmware: null,
+          ownership: 'preexisting',
+        },
+      })
+      const prepared = await signOperationReceipt(
+        options.connector,
+        op,
+        'prepared',
+        clock(),
+      )
+      return describe(
+        frame,
+        save(op, 'prepared', { prepared, latest: prepared }),
+      )
+    }
+    if (frame.target.backend === 'bambu') {
+      const probe = await prepareBambu(
+        options.stateDirectory,
+        op.operation_id,
+        frame.target,
+        options.bambuProbe,
+      )
+      if (!probe.ok) return describe(frame, await fail(op, probe.code))
+      if (!(await stillCurrent(context)))
+        return describe(frame, await fail(op, 'capability-rejected'))
+      const identity = bambuIdentity(frame.target.serial)
       if (
         frame.target.device_id &&
         frame.target.device_id !== identity.device_id
@@ -702,6 +782,55 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       if (credentialFile !== stagedPath) removePrivateFile(stagedPath)
       return describe(frame, await finalizeCommit(committing))
     }
+    if (op.target.backend === 'bambu') {
+      if (!op.printer || !op.bridge_instance_id)
+        return errorFrame(frame.request_id, 'identity-conflict')
+      const { serial } = op.target
+      const identity = await deriveConfigurationAssignmentIdentity({
+        account_id: context.account_id,
+        farm_id: context.farm_id,
+        agent_id: context.agent_id,
+        bridge_instance_id: op.bridge_instance_id,
+        device_id: op.printer.device_id,
+      })
+      const stagedPath = bambuCredentialPath(
+        options.stateDirectory,
+        op.operation_id,
+      )
+      const trustPath = bambuTrustPath(options.stateDirectory, op.operation_id)
+      let credentialFile: string
+      try {
+        credentialFile =
+          existingBambuCredential(
+            options.runtime,
+            op.target,
+            identity,
+            stagedPath,
+          ) ?? stagedPath
+      } catch {
+        return errorFrame(frame.request_id, 'identity-conflict')
+      }
+      if (!(await stillCurrent(context)))
+        return errorFrame(frame.request_id, 'capability-rejected')
+      const plan = {
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+        credential_file: credentialFile,
+        committed_revision: op.expected_revision + 1,
+      }
+      const committing = save(op, 'committing', { plan })
+      try {
+        commitBambu(options.runtime, serial, plan, trustPath)
+      } catch {
+        if (!bambuRuntimeContains(options.runtime, serial, plan)) {
+          save(committing, 'prepared', { plan: null })
+          return errorFrame(frame.request_id, 'not-available')
+        }
+      }
+      removePrivateFile(trustPath)
+      if (credentialFile !== stagedPath) removePrivateFile(stagedPath)
+      return describe(frame, await finalizeCommit(committing))
+    }
     const bridge = op.bridge_instance_id
       ? custody.find(op.bridge_instance_id)
       : null
@@ -779,6 +908,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       removePrivateFile(
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
       )
+    if (
+      op.target.backend === 'bambu' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      discardStagedBambu(options.stateDirectory, op.operation_id)
     switch (op.stage) {
       case 'local-committed':
       case 'inventory-confirmed':
@@ -980,8 +1115,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
               ? custody.find(op.bridge_instance_id)
               : null
             const moonraker = op.target.backend === 'moonraker'
+            const bambu = op.target.backend === 'bambu'
             const identity =
-              (bridge || moonraker) && op.bridge_instance_id
+              (bridge || moonraker || bambu) && op.bridge_instance_id
                 ? await deriveConfigurationAssignmentIdentity({
                     account_id: context.account_id,
                     farm_id: context.farm_id,
@@ -992,7 +1128,7 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
                 : null
             // The committed runtime must still hold exactly this assignment.
             if (
-              (!bridge && !moonraker) ||
+              (!bridge && !moonraker && !bambu) ||
               !identity ||
               identity.assignment_id !== op.plan.assignment_id ||
               identity.printer_key !== op.plan.printer_key ||
@@ -1002,12 +1138,18 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
                     new URL(op.target.origin).origin,
                     op.plan,
                   )
-                : bridge &&
-                  runtimeContains(
-                    options.runtime,
-                    bindingFor(op.plan, bridge, op.printer),
-                    op.plan,
-                  ))
+                : op.target.backend === 'bambu'
+                  ? bambuRuntimeContains(
+                      options.runtime,
+                      op.target.serial,
+                      op.plan,
+                    )
+                  : bridge &&
+                    runtimeContains(
+                      options.runtime,
+                      bindingFor(op.plan, bridge, op.printer),
+                      op.plan,
+                    ))
             )
               return { ok: false, reason: 'mismatch' }
             let accepted = false

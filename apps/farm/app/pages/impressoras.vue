@@ -6,6 +6,13 @@ import {
   describeMoonrakerConfigurationError,
 } from '../utils/moonraker-onboarding.ts'
 import {
+  BAMBU_LAN_COMMAND_NOTE,
+  BAMBU_SUPPORT_NOTE,
+  validateBambuTargetInput,
+  withoutBambuAccessCode,
+  describeBambuConfigurationError,
+} from '../utils/bambu-onboarding.ts'
+import {
   computed,
   nextTick,
   onBeforeUnmount,
@@ -122,9 +129,28 @@ const heading = ref<HTMLElement | null>(null),
   errorSummary = ref<HTMLElement | null>(null),
   kobraErrorSummary = ref<HTMLElement | null>(null)
 
-const onboardingFamily = ref<'anycubic-kobra-x' | 'klipper-moonraker'>(
-  'anycubic-kobra-x',
+const onboardingFamily = ref<
+  'anycubic-kobra-x' | 'klipper-moonraker' | 'bambu-lan'
+>('anycubic-kobra-x')
+const bambuIp = ref('')
+const bambuSerial = ref('')
+const bambuAccessCode = ref('')
+const bambuControl = ref(false)
+const isBambuOnboarding = computed(
+  () =>
+    kobraOperation.value?.target.backend === 'bambu' ||
+    (kobraStage.value === 'idle' && onboardingFamily.value === 'bambu-lan'),
 )
+const onboardingFamilyLabel = computed(() =>
+  isMoonrakerOnboarding.value
+    ? 'Klipper / Moonraker'
+    : isBambuOnboarding.value
+      ? 'Bambu Lab (LAN)'
+      : 'Anycubic Kobra X',
+)
+const describeBackendError = (code: string) =>
+  describeMoonrakerConfigurationError(code) ??
+  (isBambuOnboarding.value ? describeBambuConfigurationError(code) : null)
 const moonrakerOrigin = ref('')
 const moonrakerApiKey = ref('')
 const isMoonrakerOnboarding = computed(
@@ -236,7 +262,9 @@ function persistPendingOperation(
         target:
           op.target.backend === 'moonraker'
             ? withoutMoonrakerKey(op.target)
-            : op.target,
+            : op.target.backend === 'bambu'
+              ? withoutBambuAccessCode(op.target)
+              : op.target,
         targetSha256: op.targetSha256,
         expectedRevision: op.expectedRevision,
         displayLabel: op.displayLabel,
@@ -342,6 +370,7 @@ function clearKobraContext(
   preserveUnresolvedOp = false,
 ) {
   moonrakerApiKey.value = ''
+  bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
   kobraController = undefined
@@ -885,13 +914,13 @@ async function applySessionOutcome(
         await loadKobraBootstrap(token, signal)
       }
       kobraError.value =
-        describeMoonrakerConfigurationError(outcome.code) ??
+        describeBackendError(outcome.code) ??
         describeConfigurationError(outcome.code)
       if (kobraStage.value === 'preparing') kobraStage.value = 'idle'
       else if (kobraStage.value === 'committing') {
         kobraStage.value = 'awaiting-reconcile'
         kobraUnknownNotice.value =
-          describeMoonrakerConfigurationError(outcome.code) ??
+          describeBackendError(outcome.code) ??
           describeConfigurationError(outcome.code)
         persistPendingOperation(opContext, 'awaiting-reconcile')
       }
@@ -1095,6 +1124,82 @@ async function prepareMoonrakerPrinter() {
   }
 }
 
+async function prepareBambuPrinter() {
+  if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
+  kobraError.value = ''
+  kobraStatus.value = ''
+  const validated = validateBambuTargetInput({
+    ipv4: bambuIp.value.trim(),
+    serial: bambuSerial.value.trim(),
+    accessCode: bambuAccessCode.value,
+    control: bambuControl.value,
+    displayLabel: kobraLabel.value,
+  })
+  if (!validated.ok) {
+    kobraError.value = validated.error
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const expectedRevision = kobraBootstrap.value.data.bootstrap.revision
+  if (expectedRevision === null) {
+    kobraError.value = 'Configuração não disponível neste Connector.'
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const token = kobraGeneration
+  const opController = new AbortController()
+  kobraController = opController
+  kobraBusy.value = true
+  kobraStage.value = 'preparing'
+  kobraStatus.value =
+    'Conectando via WebRTC config-v1 e verificando a Bambu Lab na LAN do Connector…'
+  let opContext: KobraOperationContext | null = null
+  try {
+    // The access code is bound by the signed hash, then leaves browser state.
+    const targetSha256 = await configurationTargetHash(validated.target)
+    if (kobraKeyState.value.kind !== 'available')
+      throw new Error('Approved browser key required')
+    if (token !== kobraGeneration || opController.signal.aborted) return
+    const candidate: KobraOperationContext = {
+      accountId: kobraKeyState.value.accountId,
+      operationId: crypto.randomUUID(),
+      farmId: farmId.value,
+      agentId: kobraAgentId.value,
+      keyId: kobraKeyId.value,
+      target: withoutBambuAccessCode(validated.target),
+      targetSha256,
+      expectedRevision,
+      displayLabel: validated.displayLabel,
+      preparedReceipt: null,
+      preparedReceiptSha256: null,
+    }
+    const session = await ensureKobraSession(opController.signal)
+    if (token !== kobraGeneration) return
+    const outcome = await session.prepare({
+      operationId: candidate.operationId,
+      target: validated.target,
+      expectedRevision: candidate.expectedRevision,
+      signal: opController.signal,
+      beforeDispatch: () => {
+        if (token !== kobraGeneration || opController.signal.aborted)
+          throw new Error('Configuration context changed before dispatch')
+        bambuAccessCode.value = ''
+        // Persist before handing the frame to the transport; send failures stay uncertain.
+        persistPendingOperation(candidate, 'awaiting-reconcile')
+        opContext = candidate
+        kobraOperation.value = candidate
+      },
+    })
+    await applySessionOutcome(outcome, candidate, token, opController.signal)
+  } catch (cause) {
+    await handleKobraException(cause, opContext, token, opContext !== null)
+  } finally {
+    if (token === kobraGeneration) kobraBusy.value = false
+  }
+}
+
 async function commitKobraX() {
   const opContext = kobraOperation.value
   if (
@@ -1202,6 +1307,7 @@ async function cancelKobraX() {
 function abortLocalKobraWait() {
   if (!kobraBusy.value) return
   moonrakerApiKey.value = ''
+  bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
   kobraController = undefined
@@ -1637,7 +1743,9 @@ onBeforeRouteLeave(clear)
         @submit.prevent="
           onboardingFamily === 'klipper-moonraker'
             ? prepareMoonrakerPrinter()
-            : prepareKobraX()
+            : onboardingFamily === 'bambu-lan'
+              ? prepareBambuPrinter()
+              : prepareKobraX()
         "
       >
         <fieldset :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'">
@@ -1650,6 +1758,7 @@ onBeforeRouteLeave(clear)
           >
             <option value="anycubic-kobra-x">Anycubic Kobra X</option>
             <option value="klipper-moonraker">Klipper / Moonraker</option>
+            <option value="bambu-lan">Bambu Lab (LAN)</option>
           </select>
           <template v-if="onboardingFamily === 'klipper-moonraker'">
             <label for="moonraker-origin">Origem HTTP(S) do Moonraker</label>
@@ -1689,6 +1798,67 @@ onBeforeRouteLeave(clear)
               Suporte não qualificado. O Connector verifica o Moonraker em modo
               somente leitura antes de aceitar.
             </p>
+          </template>
+          <template v-else-if="onboardingFamily === 'bambu-lan'">
+            <label for="bambu-ip">Endereço IPv4 da Bambu Lab na LAN</label>
+            <input
+              id="bambu-ip"
+              v-model="bambuIp"
+              required
+              maxlength="15"
+              inputmode="decimal"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="bambu-ip-help"
+            />
+            <p id="bambu-ip-help">
+              Ex.: 192.168.1.60. Somente IPv4, sem nome de host, porta ou URL.
+            </p>
+            <label for="bambu-serial">Número de série</label>
+            <input
+              id="bambu-serial"
+              v-model="bambuSerial"
+              required
+              maxlength="20"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              aria-describedby="bambu-serial-help"
+            />
+            <p id="bambu-serial-help">
+              Como aparece em Configurações → Dispositivo: letras maiúsculas e
+              números.
+            </p>
+            <label for="bambu-access-code">Código de acesso LAN</label>
+            <input
+              id="bambu-access-code"
+              v-model="bambuAccessCode"
+              required
+              type="password"
+              maxlength="32"
+              autocomplete="off"
+              aria-describedby="bambu-access-code-help"
+            />
+            <p id="bambu-access-code-help">
+              O código será guardado somente na configuração privada do
+              Connector e nunca é exibido de volta.
+
+              {{
+                bambuAccessCode
+                  ? 'Código configurado.'
+                  : 'Código não configurado.'
+              }}
+            </p>
+            <label for="bambu-control">
+              <input
+                id="bambu-control"
+                v-model="bambuControl"
+                type="checkbox"
+              />
+              Habilitar comandos (pausar, retomar e cancelar) nesta impressora
+            </label>
+            <p>{{ BAMBU_LAN_COMMAND_NOTE }}</p>
+            <p>{{ BAMBU_SUPPORT_NOTE }}</p>
           </template>
           <template v-else>
             <label for="kobra-ip">Endereço IPv4 da Kobra X na LAN</label>
@@ -1744,7 +1914,9 @@ onBeforeRouteLeave(clear)
                   ? 'Preparando no Connector…'
                   : onboardingFamily === 'klipper-moonraker'
                     ? 'Preparar Klipper / Moonraker'
-                    : 'Preparar Anycubic Kobra X'
+                    : onboardingFamily === 'bambu-lan'
+                      ? 'Preparar Bambu Lab (LAN)'
+                      : 'Preparar Anycubic Kobra X'
               }}
             </button>
           </div>
@@ -1778,7 +1950,9 @@ onBeforeRouteLeave(clear)
             {{
               isMoonrakerOnboarding
                 ? 'Identidade da origem no Connector'
-                : 'Instância da ponte no Connector'
+                : isBambuOnboarding
+                  ? 'Identidade da impressora no Connector'
+                  : 'Instância da ponte no Connector'
             }}
           </dt>
           <dd class="exact-key">
@@ -1790,11 +1964,7 @@ onBeforeRouteLeave(clear)
               kobraPrepared.receipt.observed.model ??
               'Modelo não informado pela impressora'
             }}
-            — Suporte não qualificado ({{
-              isMoonrakerOnboarding
-                ? 'Klipper / Moonraker'
-                : 'Anycubic Kobra X'
-            }})
+            — Suporte não qualificado ({{ onboardingFamilyLabel }})
           </dd>
           <dt>Firmware observado</dt>
           <dd>
@@ -1819,9 +1989,26 @@ onBeforeRouteLeave(clear)
         <p v-if="isMoonrakerOnboarding">
           Telemetria somente leitura. Comandos e câmera não qualificados.
         </p>
+        <template
+          v-else-if="
+            isBambuOnboarding && kobraOperation?.target.backend === 'bambu'
+          "
+        >
+          <p>
+            Telemetria pela LAN. Código de acesso: configurado (guardado somente
+            no Connector).
+
+            {{
+              kobraOperation.target.control
+                ? 'Comandos habilitados por opção explícita.'
+                : 'Comandos desabilitados: somente telemetria.'
+            }}
+          </p>
+          <p>{{ BAMBU_LAN_COMMAND_NOTE }}</p>
+        </template>
         <dl>
           <div
-            v-for="cap in isMoonrakerOnboarding
+            v-for="cap in isMoonrakerOnboarding || isBambuOnboarding
               ? []
               : KOBRA_X_DEVICE_CAPABILITIES"
             :key="cap.id"

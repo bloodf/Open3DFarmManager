@@ -14,6 +14,7 @@ const Runtime = z.looseObject({
   version: z.union([z.literal(1), z.literal(2)]),
   collection: z.looseObject({
     version: z.union([z.literal(1), z.literal(2)]),
+    printers: z.array(Loose).optional(),
     kobralink: z
       .looseObject({
         allowedOrigins: z.array(z.string()),
@@ -39,6 +40,13 @@ export function collectableRuntime(
   })
   if (assignments.length === 0) return null
   if (hidden.size === 0) return { ...runtime }
+  const moonrakerPrinters = runtime.collection.printers?.filter(
+    (printer) => !hidden.has(String(printer.printerKey)),
+  )
+  const filteredCollection = {
+    ...runtime.collection,
+    ...(moonrakerPrinters ? { printers: moonrakerPrinters } : {}),
+  }
   const kobralink = runtime.collection.kobralink
   const printers = (kobralink?.printers ?? []).filter(
     (printer) => !hidden.has(String(printer.printerKey)),
@@ -47,14 +55,14 @@ export function collectableRuntime(
     return {
       ...runtime,
       collection: {
-        ...runtime.collection,
+        ...filteredCollection,
         kobralink: { ...kobralink, printers },
       },
       assignments,
     }
   // No confirmed KobraLink printer remains: the collector reader requires a
   // version 1 collection without the KobraLink section in that case.
-  const { kobralink: _removed, ...collection } = runtime.collection
+  const { kobralink: _removed, ...collection } = filteredCollection
   return {
     ...runtime,
     version: 1,

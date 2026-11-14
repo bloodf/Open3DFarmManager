@@ -71,7 +71,7 @@ export const ObservedPrinter = z.strictObject({
     .regex(/^[A-Za-z0-9_-]+$/)
     .max(128),
   device_id: configurationOpaqueId,
-  ip: z.ipv4(),
+  ip: z.ipv4().nullable(),
   model: z.string().max(128).nullable(),
   firmware: z.string().max(128).nullable(),
   /** `created`: this operation's create response proved it. Only those may be compensated. */

@@ -276,7 +276,13 @@ export class PostgresConfigurationStore {
           }
           const assigned =
             await tx`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${canonical.assignment_id}::uuid,${r.farm_id}::uuid,${r.agent_id}::uuid,${canonical.printer_key},${r.registered_at},${r.account_id}) ON CONFLICT DO NOTHING RETURNING id`
-          if (!assigned.length) return { ok: false }
+          if (!assigned.length) {
+            if (!canonical.printer_key.startsWith('moonraker-'))
+              return { ok: false }
+            const retained =
+              await tx`SELECT id FROM farm.printer_assignments WHERE id=${canonical.assignment_id}::uuid AND farm_id=${r.farm_id}::uuid AND agent_id=${r.agent_id}::uuid AND printer_key=${canonical.printer_key} AND created_by=${r.account_id} AND revoked_at IS NULL FOR SHARE`
+            if (retained.length !== 1) return { ok: false }
+          }
           await tx`INSERT INTO farm.configuration_receipts(operation_id,receipt_sha256,assignment_id,record) VALUES (${r.operation_id}::uuid,${r.receipt_sha256},${canonical.assignment_id}::uuid,${jsonbRecord(tx, r)})`
           return { ok: true, assignmentId: canonical.assignment_id }
         },

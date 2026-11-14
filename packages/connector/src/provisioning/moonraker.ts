@@ -24,6 +24,8 @@ const limits = {
 const Staged = z.strictObject({
   origin: z.string(),
   apiKey: z.string().optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
 })
 const Runtime = z.looseObject({
   version: z.union([z.literal(1), z.literal(2)]),
@@ -66,11 +68,14 @@ export async function prepareMoonraker(
   writePrivateJsonAtomic(path, {
     origin,
     ...(target.api_key ? { apiKey: target.api_key } : {}),
+    ...(target.username
+      ? { username: target.username, password: target.password }
+      : {}),
   })
   try {
     await discoverMoonraker({
       origin,
-      ...(target.api_key ? { apiKeyFile: path } : {}),
+      ...(target.api_key || target.username ? { apiKeyFile: path } : {}),
       limits,
       signal: new AbortController().signal,
       client: {
@@ -129,7 +134,12 @@ export function existingMoonrakerCredential(
   const previous = printer.apiKeyFile
     ? Staged.parse(readPrivateJson(printer.apiKeyFile))
     : { origin }
-  if (previous.origin !== origin || previous.apiKey !== staged.apiKey)
+  if (
+    previous.origin !== origin ||
+    previous.apiKey !== staged.apiKey ||
+    previous.username !== staged.username ||
+    previous.password !== staged.password
+  )
     throw new Error('Moonraker credential conflict')
   return printer.apiKeyFile ?? stagedPath
 }
@@ -187,7 +197,9 @@ export function commitMoonraker(
         {
           origin,
           printerKey: plan.printer_key,
-          ...(credential.apiKey ? { apiKeyFile: plan.credential_file } : {}),
+          ...(credential.apiKey || credential.username
+            ? { apiKeyFile: plan.credential_file }
+            : {}),
         },
       ],
     },

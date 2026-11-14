@@ -89,21 +89,29 @@ export const ConfigurationMoonrakerOrigin = z
       return false
     }
   }, 'Expected an HTTP(S) origin')
-export const MoonrakerConfigurationTarget = z.strictObject({
-  v: z.literal(1),
-  protocol: z.literal(CONFIGURATION_PROTOCOL),
-  backend: z.literal('moonraker'),
-  model: z.strictObject({
-    family: z.literal('klipper-moonraker'),
-    provisional: z.literal(true),
-  }),
-  origin: ConfigurationMoonrakerOrigin,
-  api_key: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{1,256}$/)
-    .optional(),
-  device_id: configurationOpaqueId.optional(),
-})
+export const MoonrakerConfigurationTarget = z
+  .strictObject({
+    v: z.literal(1),
+    protocol: z.literal(CONFIGURATION_PROTOCOL),
+    backend: z.literal('moonraker'),
+    model: z.strictObject({
+      family: z.literal('klipper-moonraker'),
+      provisional: z.literal(true),
+    }),
+    origin: ConfigurationMoonrakerOrigin,
+    api_key: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,256}$/)
+      .optional(),
+    username: z.string().min(1).max(256).optional(),
+    password: z.string().min(1).max(4096).optional(),
+    device_id: configurationOpaqueId.optional(),
+  })
+  .refine(
+    (v) =>
+      Boolean(v.username) === Boolean(v.password) && !(v.api_key && v.username),
+    { message: 'Choose one Moonraker credential method' },
+  )
 export type MoonrakerConfigurationTarget = z.infer<
   typeof MoonrakerConfigurationTarget
 >

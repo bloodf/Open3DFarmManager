@@ -7,6 +7,7 @@ import {
 } from './browser-device-proof.ts'
 import { ConfigurationCapabilityV1 } from './configuration-capability.ts'
 import {
+  CONFIGURATION_HARD_MAXIMUMS,
   configurationCodec,
   configurationDigest,
   configurationFresh,
@@ -193,7 +194,7 @@ export async function verifyConfigurationInventoryAck(
       ...actual
     } = ack
     if (
-      !configurationFresh(ack, now) ||
+      !configurationFresh(ack, now, CONFIGURATION_HARD_MAXIMUMS.skewMs) ||
       canonicalize(actual) !== canonicalize(expectation)
     )
       return false

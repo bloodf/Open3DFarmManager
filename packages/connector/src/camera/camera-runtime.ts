@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: MIT
+import {
+  selectCrealityCamera,
+  streamCrealityJpegs,
+} from '../creality/camera.ts'
 import { openBambuCameraSource } from '../bambu/camera-media.ts'
 import type { BambuCameraSource } from '../bambu/camera.ts'
 import type { HelperExecutable } from '../../../../tools/rtsp-ingest/supervisor/process.ts'
@@ -16,6 +20,14 @@ export async function createCameraMediaFactory(input: {
   farmId: string
   assignmentRefs: readonly AssignmentRef[]
   /** Trusted local configuration; never supplied by a browser. */
+  creality?: {
+    ffmpeg: HelperExecutable
+    cameras: readonly {
+      cameraId: string
+      assignmentId: string
+      source: { host: string; port?: number }
+    }[]
+  }
   bambu?: {
     ffmpeg: HelperExecutable
     cameras: readonly {
@@ -53,6 +65,21 @@ export async function createCameraMediaFactory(input: {
       return [handle, Object.freeze({ ...camera.source })] as const
     }),
   )
+  const creality = new Map(
+    (input.creality?.cameras ?? []).map((camera, index) => {
+      selectCrealityCamera(camera.source)
+      const handle = 'creality-camera-' + index
+      cameras.push({
+        cameraId: camera.cameraId,
+        scope: { farmId, agentId, printerId: camera.assignmentId },
+        sourceHandle: handle,
+      })
+      return [handle, Object.freeze({ ...camera.source })] as const
+    }),
+  )
+  const crealityFfmpeg = input.creality
+    ? Object.freeze({ ...input.creality.ffmpeg })
+    : undefined
   const ffmpeg = input.bambu
     ? Object.freeze({ ...input.bambu.ffmpeg })
     : undefined
@@ -69,6 +96,33 @@ export async function createCameraMediaFactory(input: {
           expectedAgentId: agentId,
         }),
       openSource: (handle, signal, expiresAtMonoMs, isCurrent) => {
+        const crealitySource = creality.get(handle)
+        if (crealitySource && crealityFfmpeg) {
+          if (
+            !isCurrent() ||
+            signal.aborted ||
+            expiresAtMonoMs <= performance.now() ||
+            expiresAtMonoMs - performance.now() > 30000
+          )
+            throw Error('Creality camera admission expired')
+          return openBambuCameraSource({
+            source: {
+              model: 'A1',
+              host: crealitySource.host,
+              accessCode: 'unused',
+            },
+            ffmpeg: crealityFfmpeg,
+            isCurrent,
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(
+                Math.max(1, Math.ceil(expiresAtMonoMs - performance.now())),
+              ),
+            ]),
+            jpegStream: ({ signal: jpegSignal }) =>
+              streamCrealityJpegs({ ...crealitySource, signal: jpegSignal }),
+          })
+        }
         const source = bambu.get(handle)
         if (source && ffmpeg) {
           if (

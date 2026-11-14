@@ -207,6 +207,7 @@ export function createFarmSnapshotSource(input: {
           'state',
           ...(
             [
+              'identity',
               'progress',
               'filename',
               'materials',
@@ -288,6 +289,9 @@ export function createFarmSnapshotSource(input: {
       ...(parsedPrinter.data.progress === undefined
         ? {}
         : { progress: parsedPrinter.data.progress }),
+      ...(parsedPrinter.data.identity
+        ? { identity: Object.freeze({ ...parsedPrinter.data.identity }) }
+        : {}),
       observedAt: parsedPrinter.data.observedAt,
     })
     if (printer.printerKey !== value.printerKey) {

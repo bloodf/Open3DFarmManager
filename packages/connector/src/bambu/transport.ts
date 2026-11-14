@@ -65,12 +65,13 @@ export function createBambuTransport(options: BambuTransportOptions) {
   const done = new Promise<void>((resolve) => {
     settle = resolve
   })
-  let remaining = 0
-  let multiplier = 1
-  let body = 0
-  let header = true
   const client = new MqttClient(
     () => {
+      let remaining = 0
+      let multiplier = 1
+      let body = 0
+      let header = true
+      inflight = 0
       const socket = tlsConnect({
         host,
         port,
@@ -153,6 +154,8 @@ export function createBambuTransport(options: BambuTransportOptions) {
         void close()
         return
       }
+      if (stopped) return
+      retries = 0
       try {
         onConnection('connected')
       } catch {

@@ -106,12 +106,22 @@ export async function startBambuSimulator({
                 header !== 16 ||
                 body.length < 12 ||
                 body.subarray(0, 7).toString('hex') !== '00044d51545404' ||
-                body[7] !== 2
+                (body[7] !== 2 && body[7] !== 194)
               )
                 throw new Error('CONNECT required')
-              const idLength = body.readUInt16BE(10)
-              if (!idLength || body.length !== 12 + idLength)
-                throw new Error('Invalid client ID')
+              let cursor = 10
+              const fields = body[7] === 194 ? 3 : 1
+              for (let field = 0; field < fields; field++) {
+                if (cursor + 2 > body.length)
+                  throw new Error('Missing CONNECT field')
+                const length = body.readUInt16BE(cursor)
+                cursor += 2
+                if (!length || cursor + length > body.length)
+                  throw new Error('Invalid CONNECT field')
+                cursor += length
+              }
+              if (cursor !== body.length)
+                throw new Error('Trailing CONNECT bytes')
               connected = true
               socket.write(Buffer.from([32, 2, 0, 0]))
             } else if (header === 130) {

@@ -202,6 +202,7 @@ export function createFarmSnapshotSource(input: {
             [
               'progress',
               'filename',
+              'materials',
               'currentLayer',
               'totalLayer',
               'estimatedRemainingSeconds',

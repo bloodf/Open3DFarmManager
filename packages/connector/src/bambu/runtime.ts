@@ -165,6 +165,16 @@ export function createBambuRuntimeSubscription(input: {
           const now = performance.now()
           for (const key of Object.keys(observed) as (keyof Fields)[])
             times[key] = now
+          if (observed.materials) {
+            const merged = new Map(
+              (fields.materials ?? []).map((item) => [item.slot, item]),
+            )
+            for (const item of observed.materials) {
+              const previous = merged.get(item.slot)
+              merged.set(item.slot, { ...previous, ...item })
+            }
+            observed.materials = [...merged.values()]
+          }
           fields = { ...fields, ...observed }
           publish()
         },

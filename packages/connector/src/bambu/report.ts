@@ -9,6 +9,7 @@ export type BambuReportResult =
       kind: 'observation'
       state?: PrinterState['state']
       progress?: number
+      materials?: PrinterState['materials']
       filename?: string
       currentLayer?: number
       totalLayer?: number
@@ -252,5 +253,71 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
   )
     observation.estimatedRemainingSeconds = remaining * 60
 
+  const materials = decodeMaterials(printRecord)
+  if (materials.length) observation.materials = materials
   return observation
+}
+
+function decodeMaterials(
+  print: Record<string, unknown>,
+): NonNullable<PrinterState['materials']> {
+  const result: NonNullable<PrinterState['materials']> = []
+  const object = (v: unknown): Record<string, unknown> =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : {}
+  const ams = object(print.ams)
+  const id = (v: unknown) =>
+    typeof v === 'string' && /^[0-3]$/.test(v)
+      ? Number(v)
+      : typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 3
+        ? v
+        : undefined
+  function tray(raw: unknown, slot: string, index: number) {
+    const t = object(raw)
+    const item: NonNullable<PrinterState['materials']>[number] = { slot }
+    if (
+      typeof t.tray_type === 'string' &&
+      t.tray_type.length > 0 &&
+      t.tray_type.length <= 64
+    )
+      item.materialType = t.tray_type
+    if (typeof t.tray_color === 'string' && /^[0-9a-f]{8}$/i.test(t.tray_color))
+      item.colorHex = t.tray_color.toUpperCase()
+    if (
+      typeof t.remain === 'number' &&
+      Number.isFinite(t.remain) &&
+      t.remain >= 0 &&
+      t.remain <= 100
+    )
+      item.remainingPercent = t.remain
+    const active = ams.tray_now
+    if (
+      (typeof active === 'string' &&
+        /^(?:[0-9]|1[0-5]|254|255)$/.test(active)) ||
+      (typeof active === 'number' &&
+        Number.isInteger(active) &&
+        ((active >= 0 && active <= 15) || active === 254 || active === 255))
+    )
+      item.active = Number(active) === index
+    if (!result.some((v) => v.slot === slot)) result.push(item)
+  }
+  if (Array.isArray(ams.ams))
+    for (const raw of ams.ams.slice(0, 4)) {
+      const unit = object(raw),
+        unitId = id(unit.id)
+      if (unitId === undefined || !Array.isArray(unit.tray)) continue
+      for (const rawTray of unit.tray.slice(0, 4)) {
+        const trayId = id(object(rawTray).id)
+        if (trayId !== undefined)
+          tray(rawTray, `ams:${unitId}:${trayId}`, unitId * 4 + trayId)
+      }
+    }
+  if (
+    print.vt_tray &&
+    typeof print.vt_tray === 'object' &&
+    !Array.isArray(print.vt_tray)
+  )
+    tray(print.vt_tray, 'external', 254)
+  return result
 }

@@ -1,3 +1,9 @@
+import {
+  FileListRequest,
+  FileListResponse,
+  MAX_FILE_LIST_WIRE_BYTES,
+  type FileListResult,
+} from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { z } from 'zod'
 import {
   CHUNK_SIZE,
@@ -403,6 +409,66 @@ export class PauseBrowserPeer {
     if (!this.#options.onData) return false
     return this.current() && this.#session.sendCommand(command)
   }
+  async listFiles(printerKey: string): Promise<FileListResult> {
+    const request = FileListRequest.parse({
+      type: 'files.list',
+      request_id: crypto.randomUUID(),
+      printer_key: printerKey,
+    })
+    const channel = this.#fileChannel
+    if (
+      !this.current() ||
+      !this.#binding ||
+      !this.#certificateMatched ||
+      !this.#session.diagnostics().proofsReady ||
+      !channel ||
+      channel.readyState !== 'open' ||
+      this.#fileReply ||
+      this.#fileUsed
+    )
+      throw Error('File list unavailable')
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer)
+        this.#fileReply = undefined
+        this.#fileReject = undefined
+      }
+      const failed = () => {
+        cleanup()
+        channel.close()
+        reject(Error('File list closed'))
+      }
+      const timer = setTimeout(failed, 35000)
+      this.#fileReject = failed
+      this.#fileReply = (raw) => {
+        try {
+          if (
+            !this.current() ||
+            typeof raw !== 'string' ||
+            new TextEncoder().encode(raw).byteLength > MAX_FILE_LIST_WIRE_BYTES
+          )
+            throw Error('Invalid file list')
+          const result = FileListResponse.parse(JSON.parse(raw))
+          if (
+            result.request_id !== request.request_id ||
+            result.printer_key !== printerKey
+          )
+            throw Error('Invalid file list correlation')
+          cleanup()
+          resolve(result)
+        } catch {
+          failed()
+        }
+      }
+      try {
+        if (channel.bufferedAmount > CHUNK_SIZE * 4)
+          throw Error('File channel unavailable')
+        channel.send(JSON.stringify(request))
+      } catch {
+        failed()
+      }
+    })
+  }
   async sendFile(
     input: unknown,
     file: Blob,
@@ -418,6 +484,7 @@ export class PauseBrowserPeer {
       !channel ||
       channel.readyState !== 'open' ||
       this.#fileUsed ||
+      !!this.#fileReply ||
       file.size !== offer.size
     )
       throw Error('File transfer unavailable')

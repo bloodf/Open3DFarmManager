@@ -11,10 +11,11 @@ import { z } from 'zod'
  */
 const Loose = z.record(z.string(), z.unknown())
 const Runtime = z.looseObject({
-  version: z.union([z.literal(1), z.literal(2)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(5)]),
   collection: z.looseObject({
-    version: z.union([z.literal(1), z.literal(2)]),
+    version: z.union([z.literal(1), z.literal(2), z.literal(5)]),
     printers: z.array(Loose).optional(),
+    anycubic: z.strictObject({ printers: z.array(Loose) }).optional(),
     kobralink: z
       .looseObject({
         allowedOrigins: z.array(z.string()),
@@ -46,6 +47,24 @@ export function collectableRuntime(
   const filteredCollection = {
     ...runtime.collection,
     ...(moonrakerPrinters ? { printers: moonrakerPrinters } : {}),
+  }
+  if (runtime.collection.anycubic) {
+    const printers = runtime.collection.anycubic.printers.filter(
+      (p) => !hidden.has(String(p.printerKey)),
+    )
+    if (printers.length)
+      return {
+        ...runtime,
+        collection: { ...filteredCollection, anycubic: { printers } },
+        assignments,
+      }
+    const { anycubic: _removed, ...collection } = filteredCollection
+    return {
+      ...runtime,
+      version: 1,
+      collection: { ...collection, version: 1 },
+      assignments,
+    }
   }
   const kobralink = runtime.collection.kobralink
   const printers = (kobralink?.printers ?? []).filter(

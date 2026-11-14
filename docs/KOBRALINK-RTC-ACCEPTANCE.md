@@ -197,3 +197,29 @@ committed report says `fail` and `--verify-report` rejects it.
 
 Limits are unchanged: synthetic printer only, unknown firmware, no physical
 qualification.
+
+## Current integration positive run
+
+Candidate `00c060dde1e12cde1805a508461e38682840efa3` on `f248e94` ran
+positive world `de3c89dd-3d38-4713-b523-a2ce57d83657`. Offline observation
+passed with the integrated fix. Registration, inventory ordering, reload,
+reconnect and Connector restart preserved one bridge and device. All 354
+response bodies were read; no secret search or HTTP status check failed.
+
+Qualification remains BLOCKED: after synthetic MQTT resumed listening, no
+new MQTT session/subscription appeared (accepted=1, queries=34 unchanged).
+Three restoration checks did not regain idle before Connector stop. The
+read-only runtime explicitly polls without reconnecting. A separate browser
+warning reported /api/signalling/browser closed before establishment. Neither
+failure is allowlisted. Full seven-world execution was therefore not started.
+The report does not carry historical think-time passes onto this candidate.
+
+The runner removed three containers, its network, private credentials and
+build layer; the owned VM is STOPPED and global context remains orbstack.
+Baseline images/network remain. Diagnostic logs and screenshots are retained
+in the ignored evidence directory under the run ID. Desktop live screenshot
+was inspected. Mobile qualification was not executed.
+
+Repeat using the environment above and the reviewed v3 restart, then
+`KOBRALINK_RTC_WORLDS=positive node scripts/test-kobralink-rtc-acceptance.ts`.
+`--verify-report` must continue rejecting this incomplete report.

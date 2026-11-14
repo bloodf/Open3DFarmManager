@@ -159,6 +159,7 @@ export function createSyntheticMqtt(
   const rawSockets = new Set<Socket>()
   const changes = new EventEmitter()
   let telemetry: SyntheticTelemetry = structuredClone(SYNTHETIC_TELEMETRY)
+  let stopping = false
   let accepted = 0
   let queries = 0
   let pushes = 0
@@ -401,6 +402,10 @@ export function createSyntheticMqtt(
   const server = createServer(
     { key: tls.key, cert: tls.cert, handshakeTimeout: handshakeTimeoutMs },
     (socket: TLSSocket) => {
+      if (stopping) {
+        socket.destroy()
+        return
+      }
       if (sessions.size >= maxClients) {
         reject(socket, 'too-many-clients')
         return
@@ -440,9 +445,12 @@ export function createSyntheticMqtt(
   server.on('connection', (socket: Socket) => {
     rawSockets.add(socket)
     socket.on('close', () => rawSockets.delete(socket))
+    if (stopping) socket.destroy()
   })
   server.on('tlsClientError', (_error: Error, socket: TLSSocket) => {
-    reject(socket, 'tls-handshake')
+    // Destroying a pending handshake during shutdown is intentional.
+    if (stopping) socket.destroy()
+    else reject(socket, 'tls-handshake')
   })
 
   return {
@@ -470,6 +478,7 @@ export function createSyntheticMqtt(
         )
       }
       if (server.listening) throw new Error('Synthetic MQTT already started')
+      stopping = false
       await new Promise<void>((resolve, fail) => {
         const onError = (error: Error): void => fail(error)
         server.once('error', onError)
@@ -527,6 +536,7 @@ export function createSyntheticMqtt(
     },
     /** Idempotent: drops every client and releases the listener. */
     async stop(): Promise<void> {
+      stopping = true
       const listening = server.listening
       const done = listening
         ? new Promise<void>((resolve, fail) => {

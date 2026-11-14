@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
-import { controlTargetState } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  controlTargetState,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
 import {
   readBambuPrinterBinding,
   readPrinterBinding,
@@ -12,8 +15,11 @@ import type {
   PauseDriver,
 } from '../control/pause-dispatcher.ts'
 import { readBambuCredentials } from './credentials.ts'
-import { createBambuTransport } from './transport.ts'
+import { buildBambuCommand } from './commands.ts'
+import { createBambuControlTransport } from './control-transport.ts'
 
+const lifecycle = (action: ExtendedControlAction | undefined) =>
+  action === undefined || ['pause', 'resume', 'cancel'].includes(action)
 const Report = z.object({
   print: z.object({
     gcode_state: z.enum(['RUNNING', 'PAUSE', 'IDLE', 'FINISH', 'FAILED']),
@@ -47,7 +53,7 @@ export function openFixedBambuControl(input: {
   let attempted = false
   let prepared = false
   let stopped = false
-  let action: 'pause' | 'resume' | 'cancel' | undefined
+  let action: ExtendedControlAction | undefined
   let sentSequence = 0
   let sentMono = 0
   let notify: (() => void) | undefined
@@ -72,9 +78,9 @@ export function openFixedBambuControl(input: {
     notify?.()
   }
   const lifetime = setTimeout(stop, 30000)
-  let transport: ReturnType<typeof createBambuTransport>
+  let transport: ReturnType<typeof createBambuControlTransport>
   try {
-    transport = createBambuTransport({
+    transport = createBambuControlTransport({
       host: local.host,
       port: local.port,
       serial: local.serial,
@@ -156,36 +162,53 @@ export function openFixedBambuControl(input: {
       check()
     })
   }
-  const driver: PauseDriver = {
-    async pauseOnce(request) {
+  /**
+   * The single request of this attempt. Lifecycle actions are confirmed by their
+   * target print state; an extended action has no print-state target, so it is
+   * acknowledged by the first report received after the send. That proves the
+   * printer kept serving this connection, not that the setting took effect.
+   */
+  async function send(
+    next: ExtendedControlAction,
+    args: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ): Promise<{ acknowledged: boolean }> {
+    current()
+    if (
+      !prepared ||
+      attempted ||
+      request.binding !== input.binding ||
+      request.signal.aborted
+    )
+      throw failure()
+    attempted = true
+    let payload: unknown
+    try {
+      payload = buildBambuCommand(next, {
+        ...args,
+        sequence_id: String(input.connectionGeneration),
+      })
+    } catch {
+      throw failure()
+    }
+    action = next
+    sentSequence = sequence
+    sentMono = input.clock.monotonicNow()
+    await transport.publish(payload, () => {
       current()
-      if (
-        !prepared ||
-        attempted ||
-        request.binding !== input.binding ||
-        request.signal.aborted
-      )
-        throw failure()
-      action = request.action ?? 'pause'
-      attempted = true
-      sentSequence = sequence
-      sentMono = input.clock.monotonicNow()
-      await transport.publish(
-        action === 'cancel' ? 'stop' : action,
-        String(input.connectionGeneration),
-        () => {
-          current()
-          return !request.signal.aborted && request.beforeSend()
-        },
-      )
-      await wait(
-        () =>
-          !!latest &&
-          latest.sequence > sentSequence &&
-          latest.printState === controlTargetState(action ?? 'pause'),
-      )
-      return { acknowledged: true }
-    },
+      return !request.signal.aborted && request.beforeSend()
+    })
+    await wait(
+      () =>
+        !!latest &&
+        latest.sequence > sentSequence &&
+        (!lifecycle(next) || latest.printState === controlTargetState(next)),
+    )
+    return { acknowledged: true }
+  }
+  const driver: PauseDriver = {
+    execute: (next, args, request) => send(next, args, request),
+    pauseOnce: (request) => send(request.action ?? 'pause', {}, request),
     async waitForPaused(request) {
       current()
       if (
@@ -195,7 +218,8 @@ export function openFixedBambuControl(input: {
         !latest ||
         latest.sequence <= request.after.sequence ||
         latest.connectionGeneration !== request.after.connectionGeneration ||
-        latest.printState !== controlTargetState(action ?? 'pause') ||
+        (lifecycle(action) &&
+          latest.printState !== controlTargetState(action ?? 'pause')) ||
         latest.receivedMono <= request.after.sentMono ||
         latest.receivedMono < sentMono
       )

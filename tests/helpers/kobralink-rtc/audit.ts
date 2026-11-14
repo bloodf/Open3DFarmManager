@@ -259,12 +259,19 @@ export function createDatabaseAudit(port: number) {
       const slots = credential
         ? await sql`SELECT observed_at::float8 AS observed_at,credential_expired_at FROM farm.connector_credential_proofs WHERE jti=${credential.jti}::uuid`
         : []
+      const sessions =
+        await sql`SELECT last_seen_at::float8 AS last_seen_at,revoked_at FROM farm.account_sessions WHERE account_id=${input.accountId} ORDER BY last_seen_at DESC`
       const key = keys[0]
       const member = members[0]
       const enrollment = enrollments[0]
       return {
         dbMinusHostMs: Math.round(dbNow - (hostBefore + hostAfter) / 2),
         hostRoundTripMs: hostAfter - hostBefore,
+        ownerSessions: sessions.length,
+        ownerLiveSessions: sessions.filter((row) => row.revoked_at === null)
+          .length,
+        /** Positive: the newest session touch is ahead of the database clock. */
+        ownerLastSeenAtMs: ms(sessions[0]?.last_seen_at),
         members: members.length,
         memberRoleAllowed: member?.role === 'owner' || member?.role === 'admin',
         memberRevoked: member ? member.revoked_at !== null : null,

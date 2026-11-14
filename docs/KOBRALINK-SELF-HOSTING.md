@@ -77,4 +77,4 @@ Não há segundo painel ou login KobraLink para usuários OpenFarm, iframe ou fa
 
 ## Limites de validação
 
-A integração não qualifica câmera nem controles físicos para este adaptador. Firmware e hardware Kobra X ainda não foram qualificados; também permanecem pendentes a qualificação final da interface e do RTC. Não interprete a arquitetura genérica de transporte como validação desses recursos. Confira [avisos de terceiros](../THIRD_PARTY.md) e avisos de origem/licença upstream; este guia não faz conclusão jurídica.
+A integração não qualifica câmera nem controles físicos para este adaptador. Firmware e hardware Kobra X ainda não foram qualificados. A evidência atual da interface e do RTC, com seus limites, está no [registro de aceitação RTC](KOBRALINK-RTC-ACCEPTANCE.md). Não interprete a arquitetura genérica de transporte como validação desses recursos. Confira [avisos de terceiros](../THIRD_PARTY.md) e avisos de origem/licença upstream; este guia não faz conclusão jurídica.

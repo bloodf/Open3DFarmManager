@@ -15,8 +15,13 @@ import type {
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { parseCollectorConfig } from '../../packages/connector/src/config/creality.ts'
+import { provisionCrealityPrinter } from '../../packages/connector/src/control/printer-binding.ts'
+import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
-function fixture(keys = ['a', 'b']) {
+function fixture(
+  keys = ['a', 'b'],
+  controlsFor?: Parameters<typeof createFarmSnapshotSource>[0]['controlsFor'],
+) {
   const agent = randomUUID()
   const refs = keys.map((printerKey) => ({
     assignmentId: randomUUID(),
@@ -26,6 +31,7 @@ function fixture(keys = ['a', 'b']) {
   let now = 100
   const source = createFarmSnapshotSource({
     assignmentRefs: refs,
+    controlsFor,
     nowMono: () => now,
   })
   const received: CompleteFarmSnapshot[] = []
@@ -155,7 +161,6 @@ test(
       await first
       f.open(performance.now() + 10000)
       assert.deepEqual(f.received[0]?.printers[0], {
-        controls: [],
         printerKey: 'creality',
         state: 'printing',
         progress: 0.42,
@@ -213,7 +218,7 @@ test('Creality field provenance expires independently and cannot grant controls'
       fieldObservedAtMonoMs: { creality: stamps },
     })
     f.open()
-    assert.deepEqual(f.received[0]?.printers[0]?.controls, [])
+    assert.equal(f.received[0]?.printers[0]?.controls, undefined)
     assert.equal(f.received[0]?.validUntilMonoMs, 5050)
     stamps.toolTemperatureCelsius = 100
     f.setNow(5050)
@@ -239,5 +244,54 @@ test('Creality field provenance expires independently and cannot grant controls'
   } finally {
     f.source.close()
     t.mock.timers.reset()
+  }
+})
+
+test('Creality snapshots advertise only the wired driver actions', () => {
+  const binding = provisionCrealityPrinter(
+    {
+      assignment_id: randomUUID(),
+      farm_id: randomUUID(),
+      agent_id: randomUUID(),
+      printer_key: 'creality',
+    },
+    { printerKey: 'creality', host: '127.0.0.1', port: 9999 },
+  )
+  const router = createPauseDriverRouter({
+    allowedOrigins: [],
+    limits: {} as never,
+    clock: { monotonicNow: () => 100 },
+    observe: () => true,
+  })
+  const f = fixture(['creality'], (assignmentId) => {
+    assert.equal(assignmentId, f.refs[0]?.assignmentId)
+    return router.controls(binding)
+  })
+  try {
+    f.source.observe({
+      printerKey: 'creality',
+      epoch: 1,
+      printer: {
+        printerKey: 'creality',
+        state: 'printing',
+        progress: 0.42,
+        observedAt: 10,
+        controls: ['emergency_stop'],
+      },
+      receivedAtMonoMs: 100,
+      fieldObservedAtMonoMs: { creality: { state: 100, progress: 100 } },
+    })
+    f.open()
+    assert.deepEqual(f.received[0]?.printers[0]?.controls, [
+      'pause',
+      'resume',
+      'cancel',
+      'set_temperature',
+      'set_fan',
+      'home',
+      'set_light',
+    ])
+  } finally {
+    f.source.close()
   }
 })

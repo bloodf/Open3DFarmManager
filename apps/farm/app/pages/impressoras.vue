@@ -1183,15 +1183,17 @@ async function prepareKobraX() {
   }
 }
 
-async function prepareMoonrakerPrinter() {
+async function prepareMoonrakerPrinter(
+  login: { username?: string; password?: string; clear?: () => void } = {},
+) {
   if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
   kobraError.value = ''
   kobraStatus.value = ''
   const validated = validateMoonrakerTargetInput({
     origin: moonrakerOrigin.value,
     apiKey: moonrakerApiKey.value,
-    username: moonrakerUsername.value,
-    password: moonrakerPassword.value,
+    username: login.username,
+    password: login.password,
     displayLabel: kobraLabel.value,
   })
   if (!validated.ok) {
@@ -1247,8 +1249,7 @@ async function prepareMoonrakerPrinter() {
         if (token !== kobraGeneration || opController.signal.aborted)
           throw new Error('Configuration context changed before dispatch')
         moonrakerApiKey.value = ''
-        moonrakerUsername.value = ''
-        moonrakerPassword.value = ''
+        login.clear?.()
         // Persist before handing the frame to the transport; send failures stay uncertain.
         persistPendingOperation(candidate, 'awaiting-reconcile')
         opContext = candidate
@@ -2055,7 +2056,14 @@ onBeforeRouteLeave(clear)
           onboardingFamily === 'anycubic-lan'
             ? prepareAnycubicPrinter()
             : onboardingFamily === 'klipper-moonraker'
-              ? prepareMoonrakerPrinter()
+              ? prepareMoonrakerPrinter({
+                  username: moonrakerUsername,
+                  password: moonrakerPassword,
+                  clear: () => {
+                    moonrakerUsername = ''
+                    moonrakerPassword = ''
+                  },
+                })
               : onboardingFamily === 'bambu-lan'
                 ? prepareBambuPrinter()
                 : onboardingFamily === 'creality-native'

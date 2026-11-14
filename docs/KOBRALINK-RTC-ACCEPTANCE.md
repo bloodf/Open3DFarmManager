@@ -288,3 +288,10 @@ Owner and admin use separate browser contexts. The exact store predicate was
 not identified: the run's database was removed by cleanup, and no fixture
 readiness ordering or clock window explains a 28 s refusal. No physical
 printer or production service was used; the owned VM is stopped.
+
+Report shape: `e5d289c7` (above) still lists `think_time_lease_renewal` under
+`qualifications`, where `--verify-report` never looked; it reads the
+think-time addition from `additional`. Since `06b679b` the runner
+writes the twelve qualifications and the addition as separate sections, so a
+complete passing run can verify. The committed JSON is kept exactly as that
+run produced it.

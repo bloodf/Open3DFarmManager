@@ -1,3 +1,4 @@
+import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import { parseLocalCollectorConfig } from '../config/local.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
@@ -6,10 +7,7 @@ import {
   createSpoolmanProvider,
   type SpoolmanSnapshot,
 } from './spoolman-provider.ts'
-import type {
-  RawMoonrakerObservation,
-  RawMoonrakerUnavailable,
-} from '../moonraker/subscription.ts'
+import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
@@ -77,10 +75,7 @@ export async function collectIntoQueue(input: {
   kobraFetch?: KobraLinkFetch
   config: LocalCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
-  onRawObservation?: (
-    observation: Omit<RawMoonrakerObservation, 'status'> &
-      Partial<Pick<RawMoonrakerObservation, 'status'>>,
-  ) => void
+  onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   queue: TelemetryQueue
   signal: AbortSignal
@@ -120,7 +115,9 @@ export async function collectIntoQueue(input: {
     failure ??= { error }
     controller.abort()
   }
-  function onEvent(event: MoonrakerEvent) {
+  function onEvent(
+    event: MoonrakerEvent | { kind: 'snapshot'; printer: PrinterState },
+  ) {
     if (signal.aborted) return
     try {
       if (event.kind === 'unavailable') {
@@ -187,6 +184,7 @@ export async function collectIntoQueue(input: {
         let epoch = 1
         let sourceTime = -1
         let observedMono = -1
+        let disconnectedMono = -1
         const unavailable = () => {
           input.onRawUnavailable?.({
             printerKey: binding.printerKey,
@@ -206,6 +204,23 @@ export async function collectIntoQueue(input: {
           onUnavailable: unavailable,
           onStatus(status) {
             const now = performance.now()
+            if (status.availability === 'disconnected') {
+              disconnectedMono = now
+              const printer: PrinterState = {
+                printerKey: binding.printerKey,
+                state: 'offline',
+                observedAt: Date.now(),
+              }
+              input.onRawObservation?.({
+                printerKey: binding.printerKey,
+                epoch,
+                printer,
+                receivedAtMonoMs: now,
+                fieldObservedAtMonoMs: { connection: now },
+              })
+              onEvent({ kind: 'snapshot', printer })
+              return
+            }
             const age =
               status.observedAt === null
                 ? Infinity
@@ -216,6 +231,7 @@ export async function collectIntoQueue(input: {
               status.observedAt === null ||
               age < 0 ||
               age >= 5000 ||
+              now - age < disconnectedMono ||
               status.observedAt < sourceTime ||
               status.printState === 'unknown' ||
               status.printState === 'pausing'

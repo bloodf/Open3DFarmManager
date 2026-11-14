@@ -1337,16 +1337,25 @@ onBeforeRouteLeave(clear)
                 <template
                   v-if="
                     liveObservations[printer.assignmentId]?.state.state ===
-                    'printing'
+                      'printing' &&
+                    liveObservations[printer.assignmentId]?.state.progress !==
+                      undefined
                   "
                 >
                   ({{
                     Math.round(
-                      liveObservations[printer.assignmentId]!.state.progress *
+                      liveObservations[printer.assignmentId]!.state.progress! *
                         100,
                     )
                   }}%)
                 </template>
+                <span
+                  v-if="
+                    liveObservations[printer.assignmentId]?.state.progress ===
+                    undefined
+                  "
+                  >Progresso indisponível.</span
+                >
               </dd>
             </template>
           </dl>

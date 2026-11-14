@@ -111,8 +111,19 @@ for (const failure of [
       onRawObservation(value) {
         expect(value.printer.printerKey).toBe(value.printerKey)
         if (value.printerKey === 'kobra') {
-          expect(value.printer.observedAt).toBe(Date.now() - 100)
-          expect(value.printer.progress).toBe(0.75)
+          if (failing && failure === 'disconnected') {
+            expect(value.printer).toEqual({
+              printerKey: 'kobra',
+              state: 'offline',
+              observedAt: Date.now(),
+            })
+            expect(value.fieldObservedAtMonoMs).toEqual({
+              connection: performance.now(),
+            })
+          } else {
+            expect(value.printer.observedAt).toBe(Date.now() - 100)
+            expect(value.printer.progress).toBe(0.75)
+          }
         } else {
           expect(value.printerKey).toBe('moon')
           expect(value.printer.observedAt).toBe(Date.now())
@@ -159,13 +170,29 @@ for (const failure of [
       expect(
         states().every(
           (s) =>
-            s.printerKey === 'moon' &&
-            s.progress >= 0.25 &&
-            s.progress < 0.3 &&
-            s.state === 'printing',
+            (failure === 'disconnected' &&
+              s.printerKey === 'kobra' &&
+              s.state === 'offline') ||
+            (s.printerKey === 'moon' &&
+              typeof s.progress === 'number' &&
+              s.progress >= 0.25 &&
+              s.progress < 0.3 &&
+              s.state === 'printing'),
         ),
       ).toBe(true)
-      expect(unavailable).toContain('kobra')
+      if (failure === 'disconnected') {
+        const offline = states().filter((s) => s.printerKey === 'kobra')
+        expect(offline.length).toBeGreaterThan(0)
+        for (const state of offline) {
+          expect(state.state).toBe('offline')
+          expect(state).not.toHaveProperty('progress')
+          expect(state).not.toHaveProperty('toolTemperatureCelsius')
+          expect(state).not.toHaveProperty('bedTemperatureCelsius')
+        }
+        expect(unavailable).not.toContain('kobra')
+      } else {
+        expect(unavailable).toContain('kobra')
+      }
       const moonBefore = states().length
       failing = false
       await vi.advanceTimersByTimeAsync(4500)

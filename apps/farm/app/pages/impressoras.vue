@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import DiscoveryResults from '../components/printer-discovery/Results.vue'
+import { openPrinterDiscoverySession } from '../utils/printer-discovery-view-session.ts'
+import {
+  discoveryPrefill,
+  discoveryStatus,
+} from '../utils/printer-discovery-view.ts'
+import type { DiscoveryResult } from '../../../../packages/farm-protocol/src/configuration-discovery.ts'
+
 import { openMoonrakerConfigurationBrowserSession } from '../utils/moonraker-onboarding-session.ts'
 import {
   validateMoonrakerTargetInput,
@@ -129,6 +137,67 @@ const heading = ref<HTMLElement | null>(null),
   errorSummary = ref<HTMLElement | null>(null),
   kobraErrorSummary = ref<HTMLElement | null>(null)
 
+const discoveryPrinters = ref<
+  Extract<DiscoveryResult, { ok: true }>['printers']
+>([])
+const discoveryMessage = ref('')
+const discoveryBusy = ref(false)
+async function searchPrinters() {
+  const key = selectedKobraKey.value
+  const state = kobraKeyState.value
+  const boot = kobraBootstrap.value
+  if (
+    !key ||
+    state.kind !== 'available' ||
+    boot.kind !== 'ready' ||
+    !kobraController
+  )
+    return
+  const signal = kobraController.signal
+  discoveryBusy.value = true
+  discoveryPrinters.value = []
+  discoveryMessage.value = 'Procurando impressoras…'
+  let session:
+    Awaited<ReturnType<typeof openPrinterDiscoverySession>> | undefined
+  try {
+    session = await openPrinterDiscoverySession({
+      accountId: state.accountId,
+      farmId: farmId.value,
+      agentId: kobraAgentId.value,
+      keyId: key.keyId,
+      localKey: key.localKey,
+      bootstrap: boot.data,
+      signal,
+    })
+    const result = await session.discover(signal)
+    if (signal.aborted) return
+    discoveryMessage.value = discoveryStatus(result)
+    if (result.ok) discoveryPrinters.value = result.printers
+  } catch {
+    if (!signal.aborted)
+      discoveryMessage.value =
+        'Não foi possível procurar impressoras. Tente novamente.'
+  } finally {
+    session?.close()
+    discoveryBusy.value = false
+  }
+}
+function selectDiscovery(
+  printer: Extract<DiscoveryResult, { ok: true }>['printers'][number],
+) {
+  const prefill = discoveryPrefill(printer)
+  closeKobraSession()
+  onboardingFamily.value = prefill.family
+  kobraLabel.value = prefill.label
+  if (prefill.family === 'bambu-lan') {
+    bambuIp.value = prefill.ip
+    bambuSerial.value = prefill.serial
+    bambuAccessCode.value = ''
+  } else {
+    moonrakerOrigin.value = prefill.origin
+    moonrakerApiKey.value = ''
+  }
+}
 const onboardingFamily = ref<
   'anycubic-kobra-x' | 'klipper-moonraker' | 'bambu-lan'
 >('anycubic-kobra-x')
@@ -751,6 +820,8 @@ async function loadKobraBootstrap(token: number, signal: AbortSignal) {
 }
 
 async function refreshKobraContext(preserveUnresolvedOp = true) {
+  discoveryPrinters.value = []
+  discoveryMessage.value = ''
   const currentFarm = farmId.value
   clearKobraContext(true, preserveUnresolvedOp)
   closeLiveFeeds()
@@ -768,6 +839,8 @@ async function refreshKobraContext(preserveUnresolvedOp = true) {
 }
 
 function onKobraContextChange() {
+  discoveryPrinters.value = []
+  discoveryMessage.value = ''
   clearPersistedOperation()
   void refreshKobraContext(false)
 }
@@ -1737,6 +1810,23 @@ onBeforeRouteLeave(clear)
           {{ kobraBootstrap.data.bootstrap.connectorFingerprint }}).
         </p>
       </fieldset>
+
+      <div v-if="kobraStage === 'idle'">
+        <button
+          type="button"
+          :disabled="
+            discoveryBusy || kobraBusy || kobraBootstrap.kind !== 'ready'
+          "
+          @click="searchPrinters"
+        >
+          Procurar impressoras
+        </button>
+        <p role="status" aria-live="polite">{{ discoveryMessage }}</p>
+        <DiscoveryResults
+          :printers="discoveryPrinters"
+          @select="selectDiscovery"
+        />
+      </div>
 
       <form
         v-if="kobraStage === 'idle' || kobraStage === 'preparing'"

@@ -7,6 +7,7 @@ No status request or other MQTT PUBLISH is sent; firmware requiring polling may
 therefore provide no observations. Missing fields remain absent.
 
 Community protocol references:
+
 - https://github.com/rvanderp3/kobra-connect/blob/main/docs/mqtt-commands.md
 - https://github.com/chrisfore/anycubic_ha_local
 

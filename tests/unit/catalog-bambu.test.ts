@@ -22,9 +22,23 @@ describe('Bambu catalog', () => {
   it('does not infer integration or firmware support from announcements', () => {
     for (const product of bambuCatalog) {
       expect(product.firmwareStatus).toContain('Desconhecido')
-      expect(Object.values(product.capabilities)).toEqual(
-        Array(7).fill('unknown'),
-      )
+      expect(product.capabilities).toEqual({
+        telemetry: 'simulated',
+        files: 'simulated',
+        camera: ['H2C', 'P2S', 'H2S'].includes(product.model)
+          ? 'simulated'
+          : 'unknown',
+        materials: 'unknown',
+        pause: 'simulated',
+        resume: 'simulated',
+        cancel: 'simulated',
+      })
+      for (const status of Object.values(product.capabilities)) {
+        if (status === 'documented')
+          expect(product.sources.length).toBeGreaterThan(0)
+        if (status === 'simulated')
+          expect(product.limitations.length).toBeGreaterThan(0)
+      }
     }
   })
 })

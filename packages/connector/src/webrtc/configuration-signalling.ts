@@ -16,6 +16,29 @@ export const CONFIGURATION_SIGNALLING_SUBPROTOCOL =
   'open3dfarm.config-signalling.v1'
 const MAX_SOCKET_BYTES = 12_288
 const MAX_IGNORED_CANDIDATES = 64
+/** Fixed processing stages reported when an inbound frame stops the link. */
+type FrameStage =
+  | 'frame-shape'
+  | 'frame-decode'
+  | 'frame-handle'
+  | 'context-scope'
+  | 'context-window'
+  | 'context-peer'
+  | 'context-session'
+  | 'context-offer'
+  | 'context-send'
+const ERROR_CATEGORIES = new Set([
+  'Error',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'AbortError',
+])
+/** Category only: never the message, stack or any value carried by the error. */
+function errorCategory(error: unknown): string {
+  if (!(error instanceof Error)) return 'non-error'
+  return ERROR_CATEGORIES.has(error.name) ? error.name : 'other-error'
+}
 
 export interface ConfigurationSocket {
   send(wire: string): void
@@ -90,7 +113,8 @@ export function createConfigurationSignallingClient(
   const peerFactory = options.peer ?? defaultPeer
   const report = (event: Readonly<Record<string, unknown>>) => {
     try {
-      options.onDiagnostic?.(event)
+      const pending: unknown = options.onDiagnostic?.(event)
+      if (pending instanceof Promise) pending.catch(() => {})
     } catch {
       /* Observational only. */
     }
@@ -106,6 +130,7 @@ export function createConfigurationSignallingClient(
     let context: Context | null = null
     let leaseTimer: ReturnType<typeof setTimeout> | undefined
     let readied = false
+    let stage: FrameStage = 'frame-shape'
     let finished: () => void = () => {}
     const done = new Promise<void>((resolve) => {
       finished = resolve
@@ -186,12 +211,14 @@ export function createConfigurationSignallingClient(
         { t: 'config.context-request' }
       >,
     ) {
+      stage = 'context-scope'
       if (
         frame.farm_id !== options.farmId ||
-        frame.agent_id !== options.agentId ||
-        clock() < frame.issued_at ||
-        clock() >= frame.expires_at
+        frame.agent_id !== options.agentId
       )
+        throw new Error('Foreign configuration context')
+      stage = 'context-window'
+      if (clock() < frame.issued_at || clock() >= frame.expires_at)
         throw new Error('Foreign configuration context')
       closeContext('superseded')
       let resolveBinding: (value: unknown) => void = () => {}
@@ -201,12 +228,15 @@ export function createConfigurationSignallingClient(
         rejectBinding = reject
       })
       binding.catch(() => {})
+      stage = 'context-session'
       const runtime = options.runtime()
+      stage = 'context-peer'
       const peer = peerFactory({
         ...(options.bindAddress ? { bindAddress: options.bindAddress } : {}),
         binding,
-        session: (sendWire) =>
-          runtime.openSession({
+        session: (sendWire) => {
+          stage = 'context-session'
+          const session = runtime.openSession({
             expected: {
               transportId: frame.transport_id,
               farmId: frame.farm_id,
@@ -218,7 +248,10 @@ export function createConfigurationSignallingClient(
               connectorNonce: frame.connector_nonce,
             },
             send: sendWire,
-          }),
+          })
+          stage = 'context-peer'
+          return session
+        },
       })
       const current: Context = {
         transportId: frame.transport_id,
@@ -233,8 +266,10 @@ export function createConfigurationSignallingClient(
       void peer.closed.then(() => {
         if (context === current) context = null
       })
+      stage = 'context-offer'
       const sdp = await peer.offer()
       if (context !== current) return
+      stage = 'context-send'
       send({
         v: 1,
         t: 'rtc.offer',
@@ -338,9 +373,26 @@ export function createConfigurationSignallingClient(
       message(raw) {
         chain = chain
           .then(async () => {
-            if (typeof raw !== 'string' || raw.length > MAX_SOCKET_BYTES)
-              throw new Error('Invalid frame')
-            await handle(decodeConfigurationSignallingServerFrame(raw))
+            let kind: string | null = null
+            try {
+              stage = 'frame-shape'
+              if (typeof raw !== 'string' || raw.length > MAX_SOCKET_BYTES)
+                throw new Error('Invalid frame')
+              stage = 'frame-decode'
+              const frame = decodeConfigurationSignallingServerFrame(raw)
+              kind = frame.t
+              stage = 'frame-handle'
+              await handle(frame)
+            } catch (error) {
+              report({
+                kind: 'configuration-signalling',
+                state: 'frame-failed',
+                stage,
+                frame: kind,
+                error: errorCategory(error),
+              })
+              throw error
+            }
           })
           .catch(() => stop())
       },

@@ -51,6 +51,7 @@ export type Diagnostic = Readonly<{
   ok?: boolean
   reason?: string | null
   state?: string
+  path?: string
 }>
 
 /**
@@ -329,6 +330,28 @@ function installPageProbe() {
     }
   }
   window.RTCPeerConnection = DiagnosticPeer
+  // Chromium warns "closed before the connection is established" only when
+  // page code calls close() on a CONNECTING socket. Recording each such call
+  // (before it happens) lets the audit pair that warning with an explicit,
+  // page-initiated close instead of excusing any WebSocket failure.
+  const SIGNALLING = new Set([
+    '/api/signalling/browser',
+    '/api/signalling/config-browser',
+  ])
+  const originalClose = WebSocket.prototype.close
+  WebSocket.prototype.close = function (code?: number, reason?: string) {
+    if (this.readyState === WebSocket.CONNECTING) {
+      let path = 'other'
+      try {
+        const pathname = new URL(this.url).pathname
+        if (SIGNALLING.has(pathname)) path = pathname
+      } catch {
+        /* Keep the placeholder. */
+      }
+      emit({ event: 'ws-close-connecting', path })
+    }
+    return originalClose.call(this, code, reason)
+  }
 }
 
 export type HttpIssue = Readonly<{

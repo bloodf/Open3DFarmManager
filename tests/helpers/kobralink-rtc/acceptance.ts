@@ -34,7 +34,11 @@ import {
   type ConnectorHost,
 } from './extension.ts'
 import { instrumentPage, type PageObserver } from './observe.ts'
-import type { Secret, World } from './qualification.ts'
+import {
+  unexplainedConsoleIssues,
+  type Secret,
+  type World,
+} from './qualification.ts'
 
 export async function browserLogin(
   page: Page,
@@ -596,8 +600,19 @@ export async function runQualificationWorld(input: {
     const consoleIssues = observers.flatMap(
       (observer) => observer.consoleIssues,
     )
+    // A close() the page itself made on a CONNECTING signalling socket
+    // (superseded feed) explains exactly one matching Chromium warning.
+    const closesWhileConnecting = observers.flatMap((observer) =>
+      observer.diagnostics
+        .filter((entry) => entry.event === 'ws-close-connecting')
+        .map((entry) => ({ page: entry.page, path: entry.path ?? 'other' })),
+    )
+    const unpairedConsole = unexplainedConsoleIssues(
+      consoleIssues,
+      closesWhileConnecting,
+    )
     // Chromium mirrors every HTTP error as a console error; those are judged above.
-    const unexpectedConsole = consoleIssues.filter(
+    const unexpectedConsole = unpairedConsole.filter(
       (issue) =>
         !/^Failed to load resource: the server responded with a status of/.test(
           issue.text,
@@ -607,7 +622,7 @@ export async function runQualificationWorld(input: {
       q,
       'no-unexpected-console-errors',
       unexpectedConsole.length === 0,
-      `console issues: ${consoleIssues.length} (unexpected ${unexpectedConsole
+      `console issues: ${consoleIssues.length}; page closes while connecting: ${closesWhileConnecting.length}, paired: ${consoleIssues.length - unpairedConsole.length} (unexpected ${unexpectedConsole
         .slice(0, 6)
         .map((i) => `${i.page} ${i.type} ${i.text.slice(0, 80)}`)
         .join('; ')})`,

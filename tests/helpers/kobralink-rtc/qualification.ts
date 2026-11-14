@@ -270,6 +270,42 @@ export function normalizePath(path: string): string {
     .slice(0, 160)
 }
 
+const CLOSED_WHILE_CONNECTING =
+  /^WebSocket connection to 'wss:\/\/[^/']+(\/api\/signalling\/(?:config-)?browser)' failed: WebSocket is closed before the connection is established\.$/
+
+/**
+ * Console issues not explained by an exact, page-initiated transition. A
+ * Chromium "closed before the connection is established" warning is explained
+ * only when it is a `warning` for a signalling path and is paired one-to-one
+ * with a recorded close() the same page made on a CONNECTING socket of that
+ * path. Any other text, type, path, page or an unpaired surplus stays
+ * unexplained.
+ */
+export function unexplainedConsoleIssues<
+  T extends Readonly<{ page: string; type: string; text: string }>,
+>(
+  issues: readonly T[],
+  closes: readonly Readonly<{ page: string; path: string }>[],
+): T[] {
+  const budget = new Map<string, number>()
+  for (const close of closes) {
+    const key = `${close.page}\0${close.path}`
+    budget.set(key, (budget.get(key) ?? 0) + 1)
+  }
+  return issues.filter((issue) => {
+    const path =
+      issue.type === 'warning'
+        ? CLOSED_WHILE_CONNECTING.exec(issue.text)?.[1]
+        : undefined
+    if (!path) return true
+    const key = `${issue.page}\0${path}`
+    const left = budget.get(key) ?? 0
+    if (left === 0) return true
+    budget.set(key, left - 1)
+    return false
+  })
+}
+
 /** What became of one response body the browser was sent. */
 export type BodyOutcome = 'read' | 'bodyless' | 'aborted' | 'unread'
 

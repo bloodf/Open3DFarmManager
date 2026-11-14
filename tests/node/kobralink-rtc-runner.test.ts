@@ -64,6 +64,7 @@ import {
   normalizePath,
   selectWorlds,
   sensitiveLeaves,
+  unexplainedConsoleIssues,
   verifyReport,
   type CheckRecord,
 } from '../helpers/kobralink-rtc/qualification.ts'
@@ -211,6 +212,42 @@ test('only a read, bodyless or browser-aborted response body is accounted for', 
   for (const failure of [null, 'net::ERR_CONNECTION_RESET', 'unknown', ''])
     for (const status of [200, 201, 302, 307, 400, 404, 500, 503])
       assert.equal(classifyBody({ ...ok, status, failure }), 'unread')
+})
+
+test('a closed-before-established warning needs its own page close while connecting', () => {
+  const text = (path: string) =>
+    `WebSocket connection to 'wss://127.0.0.1:58106${path}' failed: WebSocket is closed before the connection is established.`
+  const warning = {
+    page: 'owner',
+    type: 'warning',
+    text: text('/api/signalling/browser'),
+  }
+  const close = { page: 'owner', path: '/api/signalling/browser' }
+  // Run de3c89dd: one superseded feed closed its CONNECTING socket.
+  assert.deepEqual(unexplainedConsoleIssues([warning], [close]), [])
+  // Without a recorded page close the warning stays unexplained.
+  assert.deepEqual(unexplainedConsoleIssues([warning], []), [warning])
+  // One close explains exactly one warning, never a surplus.
+  assert.deepEqual(unexplainedConsoleIssues([warning, warning], [close]), [
+    warning,
+  ])
+  // Page, path and type must all match the recorded close.
+  for (const other of [
+    { ...warning, page: 'viewer' },
+    { ...warning, type: 'error' },
+    { ...warning, text: text('/api/signalling/connector') },
+    { ...warning, text: text('/api/signalling/config-browser') },
+  ])
+    assert.deepEqual(unexplainedConsoleIssues([other], [close]), [other])
+  // A genuine connection failure is never excused by a close.
+  for (const failure of [
+    `WebSocket connection to 'wss://127.0.0.1:58106/api/signalling/browser' failed: Error during WebSocket handshake: Unexpected response code: 401`,
+    `WebSocket connection to 'wss://127.0.0.1:58106/api/signalling/browser' failed: `,
+    `${text('/api/signalling/browser')} extra`,
+  ]) {
+    const issue = { ...warning, text: failure }
+    assert.deepEqual(unexplainedConsoleIssues([issue], [close]), [issue])
+  }
 })
 
 const passing = () => ({

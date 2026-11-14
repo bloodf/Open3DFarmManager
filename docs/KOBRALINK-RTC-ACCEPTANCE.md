@@ -220,6 +220,18 @@ Baseline images/network remain. Diagnostic logs and screenshots are retained
 in the ignored evidence directory under the run ID. Desktop live screenshot
 was inspected. Mobile qualification was not executed.
 
+The browser warning was diagnosed from that run's boundary log. At 23554 ms,
+after the Connector closed the read-only proof (23264 ms), the farm view
+rediscovered three times in under 300 ms. A newer feed for the same slot
+retired the older one. That one called `close()` on its signalling socket
+while it was still CONNECTING. Chromium logs exactly this warning for that
+call, and the socket reopened at 23647 ms. The page probe now records each
+page-initiated close of a CONNECTING signalling socket. The audit excuses this
+exact warning only when the same page and path have an unused recorded close,
+matched one to one. Other WebSocket failures, types, paths and surplus
+warnings still fail. This classification has not been through a runtime run
+yet.
+
 Repeat using the environment above and the reviewed v3 restart, then
 `KOBRALINK_RTC_WORLDS=positive node scripts/test-kobralink-rtc-acceptance.ts`.
 `--verify-report` must continue rejecting this incomplete report.

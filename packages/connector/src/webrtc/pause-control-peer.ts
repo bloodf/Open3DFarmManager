@@ -1,3 +1,7 @@
+import {
+  createFileUpload,
+  type FileUploadOptions,
+} from '../runtime/file-upload.ts'
 import { rtcBindAddress } from '../config/rtc.ts'
 import { PeerConnection, type DataChannel } from 'node-datachannel'
 import { ConnectorIdentity } from '../identity/store.ts'
@@ -29,6 +33,8 @@ import {
 type Options = Readonly<{
   /** Local ICE bind address from validated runtime config. Default loopback. */
   bindAddress?: string
+  fileTransfer?: FileUploadOptions
+  getAdmittedHandle?: import('./pause-control-session.ts').PauseSessionOptions['getAdmittedHandle']
   identity: ConnectorIdentity
   expected: PauseExpectedContext
   /** Only the authenticated current signalling owner may resolve this promise. */
@@ -52,6 +58,9 @@ export class PauseConnectorPeer {
   readonly closed: Promise<void>
   #resolveClosed: () => void = noop
   #peer: PeerConnection | undefined
+  #fileChannel: DataChannel | undefined
+  #upload: ReturnType<typeof createFileUpload> | undefined
+  #uploadClose: Promise<void> | undefined
   #channel: DataChannel | undefined
   #session: PauseControlSession
   #options: Options
@@ -87,6 +96,9 @@ export class PauseConnectorPeer {
     })
     this.#session = new PauseControlSession({
       role: 'connector',
+      ...(input.getAdmittedHandle
+        ? { getAdmittedHandle: input.getAdmittedHandle }
+        : {}),
       identity: input.identity,
       expected,
       ...(input.authDeadline !== undefined
@@ -164,6 +176,34 @@ export class PauseConnectorPeer {
           this.close('unexpected-media')
         }
       })
+      if (input.fileTransfer) {
+        const channel = this.#peer.createDataChannel('file-transfer-v1', {
+          unordered: false,
+        })
+        this.#fileChannel = channel
+        this.#upload = createFileUpload({
+          ...input.fileTransfer,
+          admittedHandle: () =>
+            this.current() ? this.#session.admittedHandle : undefined,
+          send: (wire) => {
+            if (
+              !this.current() ||
+              !channel.isOpen() ||
+              !channel.sendMessage(wire)
+            )
+              throw Error('File channel unavailable')
+          },
+        })
+        channel.onMessage((raw) => {
+          if (this.current()) this.#upload?.receive(raw)
+        })
+        channel.onClosed(() => {
+          this.#uploadClose = this.#upload?.close()
+        })
+        channel.onError(() => {
+          this.#uploadClose = this.#upload?.close()
+        })
+      }
       this.#channel = this.#peer.createDataChannel('pause-control-v1', {
         unordered: false,
       })
@@ -330,7 +370,9 @@ export class PauseConnectorPeer {
     this.#resolveTerminated()
     this.#resolveGathered()
     this.#session.close(this.#terminal)
+    this.#uploadClose = this.#upload?.close()
     for (const cleanup of [
+      () => this.#fileChannel?.close(),
       () => this.#channel?.onMessage(noop),
       () => this.#channel?.close(),
       () => this.#peer?.close(),
@@ -348,6 +390,8 @@ export class PauseConnectorPeer {
     }
     void Promise.allSettled([
       this.#session.closed,
+      ...(this.#uploadClose ? [this.#uploadClose] : []),
+      ...(this.#upload ? [this.#upload.settled()] : []),
       ...(this.#activation ? [this.#activation] : []),
       ...(this.#validation ? [this.#validation] : []),
       ...(this.#offerWork ? [this.#offerWork] : []),

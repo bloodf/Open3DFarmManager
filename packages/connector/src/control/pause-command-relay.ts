@@ -102,6 +102,8 @@ export type PauseCommandRelay = Readonly<{
    * The capability verifier checks cryptographic proofs during admission.
    */
   openPeer(input: PauseRelayPeerInput): boolean
+  /** Current admitted authority, without admission or dispatch side effects. */
+  admittedHandle(transportId: string): PauseCapabilityHandle | undefined
   /**
    * Admits the issued capability and the browser admission proof. The attempt is
    * single use: repeating it returns the outcome of the first attempt.
@@ -729,6 +731,12 @@ export function createPauseCommandRelay(
     return true
   }
   return Object.freeze({
+    admittedHandle(transportId: string) {
+      const peer = peers.get(transportId)
+      return !closed && peer && !peer.sealed && peer.handle?.current
+        ? peer.handle
+        : undefined
+    },
     openPeer,
     admitPeer,
     commandPeer,

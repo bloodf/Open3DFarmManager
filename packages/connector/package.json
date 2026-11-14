@@ -11,12 +11,13 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "effect": "4.1.2",
-    "node-datachannel": "0.33.6",
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
-    "zod": "4.6.7",
-    "ws": "8.22.1"
+    "effect": "4.1.2",
+    "mqtt": "5.16.1",
+    "node-datachannel": "0.33.6",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/ws": "8.18.2"

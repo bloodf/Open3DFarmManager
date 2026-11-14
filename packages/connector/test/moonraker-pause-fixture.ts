@@ -7,7 +7,9 @@ const { WebSocketServer } = await import('ws')
 export async function pauseFixture(
   input: {
     query?: (index: number, socket: WebSocket, id: number) => boolean
+    initialState?: 'printing' | 'paused'
     pause?: (socket: WebSocket, id: number) => boolean
+    objects?: readonly string[]
   } = {},
 ) {
   const server = createServer((_request, response) => {
@@ -26,10 +28,19 @@ export async function pauseFixture(
     method: string
     params?: unknown
   }> = []
+  const gcodeScripts: string[] = []
+  let printState: string = input.initialState ?? 'printing'
   let connections = 0,
     queries = 0,
     pauses = 0,
     pongs = 0
+  const objects = input.objects ?? [
+    'extruder',
+    'heater_bed',
+    'output_pin caselight',
+    'fan_generic aux',
+    'fan_generic chamber',
+  ]
   server.on('upgrade', (request, socket, head) => {
     if (request.url !== '/websocket') {
       socket.destroy()
@@ -66,17 +77,48 @@ export async function pauseFixture(
               eventtime: index,
               status: {
                 webhooks: { state: 'ready' },
-                print_stats: { state: pauses ? 'paused' : 'printing' },
+                print_stats: { state: printState },
               },
             },
           }),
         )
+      } else if (request.method === 'printer.objects.list') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { objects },
+          }),
+        )
+      } else if (request.method === 'printer.gcode.script') {
+        const params = request.params as { script?: string } | undefined
+        if (typeof params?.script === 'string') {
+          gcodeScripts.push(params.script)
+        }
+        socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
+        )
+      } else if (request.method === 'printer.emergency_stop') {
+        printState = 'error'
+        socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
+        )
       } else if (request.method === 'printer.print.pause') {
         pauses++
+        printState = 'paused'
         if (!input.pause?.(socket, request.id))
           socket.send(
             JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
           )
+      } else if (
+        request.method === 'printer.print.resume' ||
+        request.method === 'printer.print.cancel'
+      ) {
+        printState =
+          request.method === 'printer.print.resume' ? 'printing' : 'cancelled'
+        socket.send(
+          JSON.stringify({ jsonrpc: '2.0', id: request.id, result: 'ok' }),
+        )
       } else socket.terminate()
     })
   })
@@ -92,6 +134,7 @@ export async function pauseFixture(
   return {
     origin: `http://127.0.0.1:${address.port}`,
     requests,
+    gcodeScripts,
     counts: () => ({
       connections,
       queries,

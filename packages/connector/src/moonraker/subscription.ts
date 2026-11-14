@@ -61,7 +61,13 @@ const printState = z.enum([
 const progress = z.number().finite().min(0).max(1)
 const Status = z.object({
   webhooks: z.object({ state: webhookState }),
-  print_stats: z.object({ state: printState }),
+  print_stats: z.object({
+    state: printState,
+    filename: z.unknown().optional(),
+    print_duration: z.unknown().optional(),
+    total_duration: z.unknown().optional(),
+    info: z.unknown().optional(),
+  }),
   virtual_sdcard: z.object({ progress }),
 })
 const Snapshot = z.object({
@@ -77,7 +83,15 @@ const TemperatureSnapshot = Snapshot.extend({
 const Delta = z.tuple([
   z.object({
     webhooks: z.object({ state: webhookState.optional() }).optional(),
-    print_stats: z.object({ state: printState.optional() }).optional(),
+    print_stats: z
+      .object({
+        state: printState.optional(),
+        filename: z.unknown().optional(),
+        print_duration: z.unknown().optional(),
+        total_duration: z.unknown().optional(),
+        info: z.unknown().optional(),
+      })
+      .optional(),
     virtual_sdcard: z.object({ progress: progress.optional() }).optional(),
   }),
   z.number().finite().nonnegative(),
@@ -179,7 +193,15 @@ export function createMoonrakerSubscription(input: {
           client?.close()
         }, limits.staleAfterMs)
         const parsed = parseMoonrakerSnapshot(
-          JSON.stringify({ result: value }),
+          JSON.stringify({
+            result: {
+              ...value,
+              status: {
+                ...value.status,
+                print_stats: { state: value.status.print_stats.state },
+              },
+            },
+          }),
           {
             printerKey,
             observedAt: Date.now(),
@@ -283,6 +305,8 @@ export function createMoonrakerSubscription(input: {
                 state: delta.webhooks?.state ?? baseline.status.webhooks.state,
               },
               print_stats: {
+                ...baseline.status.print_stats,
+                ...delta.print_stats,
                 state:
                   delta.print_stats?.state ?? baseline.status.print_stats.state,
               },
@@ -301,7 +325,7 @@ export function createMoonrakerSubscription(input: {
             // Empty/unselected deltas cannot establish freshness of selected fields.
             if (
               delta.webhooks?.state === undefined &&
-              delta.print_stats?.state === undefined &&
+              delta.print_stats === undefined &&
               delta.virtual_sdcard?.progress === undefined
             )
               return

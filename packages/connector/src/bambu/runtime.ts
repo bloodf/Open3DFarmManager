@@ -35,7 +35,9 @@ export function createBambuRuntimeSubscription(input: {
   signal: AbortSignal
   onEvent: (event: BambuRuntimeEvent) => void
   staleAfterMs?: number
-  transport?: typeof createBambuTransport
+  transport?: (
+    options: BambuTransportOptions,
+  ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
 }) {
   const binding = parseBambuBinding({
     ...input.binding,
@@ -78,6 +80,7 @@ export function createBambuRuntimeSubscription(input: {
     }
     const parsed = PrinterState.safeParse({
       ...fields,
+      controls: binding.control ? ['pause', 'resume', 'cancel'] : [],
       printerKey: binding.printerKey,
       observedAt: Date.now(),
     })
@@ -97,7 +100,9 @@ export function createBambuRuntimeSubscription(input: {
       timer = setTimeout(publish, Math.max(1, Math.min(...stamps) + ttl - now))
   }
   const done = (async () => {
-    let transport: ReturnType<typeof createBambuTransport> | undefined
+    let transport:
+      | Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
+      | undefined
     try {
       if (signal.aborted) return
       unavailable('connecting')
@@ -160,6 +165,16 @@ export function createBambuRuntimeSubscription(input: {
           const now = performance.now()
           for (const key of Object.keys(observed) as (keyof Fields)[])
             times[key] = now
+          if (observed.materials) {
+            const merged = new Map(
+              (fields.materials ?? []).map((item) => [item.slot, item]),
+            )
+            for (const item of observed.materials) {
+              const previous = merged.get(item.slot)
+              merged.set(item.slot, { ...previous, ...item })
+            }
+            observed.materials = [...merged.values()]
+          }
           fields = { ...fields, ...observed }
           publish()
         },

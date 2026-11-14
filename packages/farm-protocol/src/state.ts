@@ -1,10 +1,44 @@
 import { z } from 'zod'
+import { ExtendedControlAction } from './control-actions.ts'
 
 export const PrinterState = z
   .strictObject({
+    controls: z
+      .array(ExtendedControlAction)
+      .max(ExtendedControlAction.options.length)
+      .refine((actions) => new Set(actions).size === actions.length)
+      .optional(),
+    identity: z
+      .strictObject({
+        vendor: z.string().min(1).max(255).optional(),
+        model: z.string().min(1).max(1024).optional(),
+        firmware: z.string().min(1).max(1024).optional(),
+      })
+      .optional(),
     printerKey: z.string().min(1).max(128),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     progress: z.number().min(0).max(1).optional(),
+    materials: z
+      .array(
+        z.strictObject({
+          slot: z.string().max(32),
+          materialType: z.string().max(64).optional(),
+          colorHex: z
+            .string()
+            .regex(/^[0-9A-F]{8}$/)
+            .optional(),
+          remainingPercent: z.number().min(0).max(100).optional(),
+          active: z.boolean().optional(),
+        }),
+      )
+      .max(17)
+      .optional(),
+    filename: z.string().max(255).optional(),
+    printDuration: z.number().finite().nonnegative().optional(),
+    totalDuration: z.number().finite().nonnegative().optional(),
+    currentLayer: z.number().int().nonnegative().optional(),
+    totalLayer: z.number().int().nonnegative().optional(),
+    estimatedRemainingSeconds: z.number().finite().nonnegative().optional(),
     toolTemperatureCelsius: z.number().finite().optional(),
     bedTemperatureCelsius: z.number().finite().optional(),
     observedAt: z.number().int().nonnegative(),

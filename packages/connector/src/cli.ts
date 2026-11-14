@@ -296,6 +296,8 @@ async function dispatch(args: string[]): Promise<number> {
         credentialPath: values['credential-file'],
       })
     } else {
+      process.env.WS_NO_BUFFER_UTIL = '1'
+      process.env.WS_NO_UTF_8_VALIDATE = '1'
       const { collectLocalTelemetry } = await import('./runtime/collect.ts')
       await collectLocalTelemetry(common)
     }

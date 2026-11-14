@@ -1,4 +1,12 @@
 import {
+  discoveryTargetHash,
+  encodeDiscoveryResult,
+} from '../../../farm-protocol/src/configuration-discovery.ts'
+import {
+  scanConfigurationDiscovery,
+  type DiscoveryScanner,
+} from '../runtime/configuration-discovery.ts'
+import {
   configurationBindingFromDescriptions,
   configurationBindingHash,
   decodeConfigurationSessionProof,
@@ -63,6 +71,7 @@ export interface ConfigurationRequestHandler {
 }
 
 export interface ConfigurationSessionOptions {
+  discovery?: DiscoveryScanner
   identity: ConnectorIdentity
   expected: ConfigurationExpectedContext
   issuers: ConfigurationIssuerSource
@@ -240,7 +249,8 @@ export class ConfigurationConnectorSession {
       return this.acceptBrowserProof(message.proof)
     }
     if (this.#state !== 'authenticated') return this.close('protocol-violation')
-    if (message.t === 'request') return this.request(message)
+    if (message.t === 'request' || message.t === 'discovery')
+      return this.request(message)
     return this.inventory(message)
   }
 
@@ -294,7 +304,7 @@ export class ConfigurationConnectorSession {
   }
 
   private async request(
-    message: Extract<BrowserChannelMessage, { t: 'request' }>,
+    message: Extract<BrowserChannelMessage, { t: 'request' | 'discovery' }>,
   ): Promise<void> {
     this.#requests++
     let frame, capability, admission
@@ -303,6 +313,13 @@ export class ConfigurationConnectorSession {
     } catch {
       return this.reject(null, 'invalid-request')
     }
+    if (
+      message.t === 'discovery' &&
+      (frame.type !== 'status' ||
+        frame.expected_revision !== 0 ||
+        frame.target_sha256 !== (await discoveryTargetHash()))
+    )
+      return this.reject(frame.request_id, 'invalid-request')
     try {
       capability = decodeConfigurationCapability(message.capability)
       admission = decodeConfigurationAdmissionProof(message.admission)
@@ -340,6 +357,33 @@ export class ConfigurationConnectorSession {
       binding.transport_id,
     )
     if (!admitted) return this.reject(frame.request_id, 'capability-rejected')
+    if (message.t === 'discovery') {
+      if (!(await this.#options.authority.adapter.isCurrent(admitted.context)))
+        return this.reject(frame.request_id, 'capability-rejected')
+      // Do not block the session queue: a second request must observe busy.
+      void scanConfigurationDiscovery(
+        this.#options.authority,
+        frame.request_id,
+        this.#options.discovery,
+      )
+        .then(async (result) => {
+          if (
+            !(await this.#options.authority.adapter.isCurrent(admitted.context))
+          )
+            result = {
+              request_id: frame.request_id,
+              ok: false,
+              reason: 'rejected',
+            }
+          this.transmit({
+            v: 1,
+            t: 'response',
+            frame: encodeDiscoveryResult(result),
+          })
+        })
+        .catch(() => this.close('handler-failed'))
+      return
+    }
     const response = await this.#options.handler.handle(admitted)
     if (!this.#terminal) this.respond(response)
   }

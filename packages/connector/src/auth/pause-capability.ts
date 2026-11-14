@@ -35,7 +35,14 @@ class AdmissionToken {
 }
 Object.freeze(AdmissionToken.prototype)
 export type PauseAdmissionToken = AdmissionToken
+const capabilityViews = new WeakMap<
+  CapabilityHandle,
+  () => PauseCapabilitySnapshot | undefined
+>()
 class CapabilityHandle {
+  get current(): PauseCapabilitySnapshot | undefined {
+    return capabilityViews.get(this)?.()
+  }
   #opaque = true
   constructor() {
     Object.freeze(this)
@@ -52,7 +59,7 @@ export type PauseCapabilitySnapshot = Readonly<
   readonly browser_public_key: Readonly<
     SignedPauseCapabilityV1['browser_public_key']
   >
-  readonly actions: readonly ['pause']
+  readonly actions: readonly import('../../../farm-protocol/src/control-actions.ts').ExtendedControlAction[]
 }
 type ClockSample = Readonly<{ wall: number; mono: number }>
 class PeerHandle {
@@ -469,6 +476,11 @@ export function createPauseCapabilityVerifier(config: {
               capability.expires_at - admission.start.wall,
               expected.expires_at - admission.start.wall,
             ),
+        })
+        capabilityViews.set(handle, () => {
+          const now = sample()
+          const result = now && inspectAt(handle, now.wall, now.mono)
+          return result && result.ok ? result.capability : undefined
         })
         return { ok: true, handle }
       } catch {

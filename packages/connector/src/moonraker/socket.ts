@@ -11,15 +11,18 @@ const { default: WebSocket } = await import('ws')
 export function createMoonrakerSocket(
   origin: string,
   limits: MoonrakerLimits,
-  extra: { allowSynchronousEvents?: boolean } = {},
+  extra: { allowSynchronousEvents?: boolean; authenticatedUrl?: string } = {},
 ) {
-  const url = new URL('/websocket', origin)
+  const { authenticatedUrl, ...options } = extra
+  const url = authenticatedUrl
+    ? new URL(authenticatedUrl)
+    : new URL('/websocket', origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return new WebSocket(url, {
     maxPayload: limits.maxMessageBytes,
     maxFragments: 128,
     maxBufferedChunks: 128,
-    ...extra,
+    ...options,
     headers: moonrakerAuthHeaders(origin, limits),
     perMessageDeflate: false,
     followRedirects: false,

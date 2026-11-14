@@ -66,10 +66,39 @@ export function packet(header: number, body: Buffer) {
 export async function startBambuSimulator({
   serial = 'SYNTHETIC',
   port = 0,
+  initialState,
+  confirmCommands = true,
+}: {
+  serial?: string
+  port?: number
+  initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
+  confirmCommands?: boolean
 } = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   const reportTopic = `device/${serial}/report`
+  let gcodeState = initialState
+  const extended: Record<string, unknown> = {}
+  const requests: { command: string; sequence_id: string }[] = []
+  function report(socket: TLSSocket) {
+    const topic = Buffer.from(reportTopic)
+    const length = Buffer.alloc(2)
+    length.writeUInt16BE(topic.length)
+    socket.write(
+      packet(
+        48,
+        Buffer.concat([
+          length,
+          topic,
+          Buffer.from(
+            JSON.stringify({
+              print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
+            }),
+          ),
+        ]),
+      ),
+    )
+  }
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
   const server = createServer(
@@ -77,6 +106,10 @@ export async function startBambuSimulator({
     (socket) => {
       let buffer = Buffer.alloc(0)
       let connected = false
+      const reports = setInterval(() => {
+        if (gcodeState && subscribed.has(socket)) report(socket)
+      }, 100)
+      socket.once('close', () => clearInterval(reports))
       socket.setTimeout(10000, () => socket.destroy())
       socket.on('data', (chunk) => {
         buffer = Buffer.concat([buffer, chunk])
@@ -136,6 +169,71 @@ export async function startBambuSimulator({
               socket.write(
                 Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),
               )
+              if (accepted && gcodeState) report(socket)
+            } else if (header === 48) {
+              if (body.length < 2) throw new Error('Invalid request')
+              const length = body.readUInt16BE(0)
+              if (
+                body.subarray(2, 2 + length).toString() !==
+                `device/${serial}/request`
+              )
+                throw new Error('Invalid request topic')
+              const value = JSON.parse(body.subarray(2 + length).toString())
+              const request = value?.print ?? value?.system
+              const command = request?.command
+              if (
+                ![
+                  'pause',
+                  'resume',
+                  'stop',
+                  'gcode_line',
+                  'ledctrl',
+                  'print_speed',
+                  'project_file',
+                ].includes(command) ||
+                typeof request?.sequence_id !== 'string'
+              )
+                throw new Error('Invalid request')
+              requests.push({ command, sequence_id: request.sequence_id })
+              if (confirmCommands) {
+                if (command === 'gcode_line') {
+                  const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(
+                    request.param,
+                  )
+                  const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+                  if (match) extended[match[1]!] = Number(match[2])
+                  else if (home) extended.homed_axes = home[1]
+                  else throw new Error('Invalid gcode')
+                } else if (
+                  command === 'ledctrl' &&
+                  request.led_node === 'chamber_light' &&
+                  ['on', 'off'].includes(request.led_mode)
+                )
+                  extended.light = request.led_mode
+                else if (
+                  command === 'print_speed' &&
+                  /^[1-4]$/.test(request.param)
+                )
+                  extended.speed = request.param
+                else if (
+                  command === 'project_file' &&
+                  request.param === 'Metadata/plate_1.gcode' &&
+                  typeof request.url === 'string' &&
+                  request.url.startsWith('file:///sdcard/')
+                ) {
+                  extended.file = request.url
+                  gcodeState = 'RUNNING'
+                } else if (!['pause', 'resume', 'stop'].includes(command))
+                  throw new Error('Invalid request')
+                if (['pause', 'resume', 'stop'].includes(command))
+                  gcodeState =
+                    command === 'pause'
+                      ? 'PAUSE'
+                      : command === 'resume'
+                        ? 'RUNNING'
+                        : 'IDLE'
+                for (const subscriber of subscribed) report(subscriber)
+              }
             } else if (header === 192 && !size)
               socket.write(Buffer.from([208, 0]))
             else if (header === 224 && !size) socket.destroy()
@@ -182,6 +280,13 @@ export async function startBambuSimulator({
     port: address.port,
     syntheticTrust: cert,
     reportTopic,
+    requests,
+    get extendedState() {
+      return { ...extended }
+    },
+    get gcodeState() {
+      return gcodeState
+    },
     publishReport(value: unknown) {
       const payload = Buffer.from(
         typeof value === 'string' ? value : JSON.stringify(value),

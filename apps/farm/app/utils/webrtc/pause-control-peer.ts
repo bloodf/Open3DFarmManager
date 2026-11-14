@@ -1,4 +1,38 @@
 import {
+  FileListRequest,
+  FileListResponse,
+  MAX_FILE_LIST_WIRE_BYTES,
+  type FileListResult,
+} from '../../../../../packages/farm-protocol/src/file-list.ts'
+import { z } from 'zod'
+import {
+  CHUNK_SIZE,
+  parseOffer,
+} from '../../../../../packages/farm-protocol/src/file-transfer.ts'
+import type { FileUploadResult } from '../../../../../packages/connector/src/runtime/file-upload.ts'
+const uploadReply = z.union([
+  z.strictObject({ type: z.literal('accept') }),
+  z.strictObject({ type: z.literal('ack') }),
+  z.strictObject({
+    type: z.literal('result'),
+    transfer_id: z.string(),
+    ok: z.literal(true),
+  }),
+  z.strictObject({
+    type: z.literal('result'),
+    transfer_id: z.string(),
+    ok: z.literal(false),
+    reason: z.enum([
+      'unauthorized',
+      'too-large',
+      'timeout',
+      'aborted',
+      'offline',
+      'invalid-transfer',
+    ]),
+  }),
+])
+import {
   ControlSessionBinding,
   controlBindingFromDescriptions,
   controlDtlsFingerprint,
@@ -71,6 +105,10 @@ export class PauseBrowserPeer {
   readonly closed: Promise<void>
   #resolveClosed: () => void = () => {}
   #peer: RTCPeerConnection | undefined
+  #fileChannel: RTCDataChannel | undefined
+  #fileUsed = false
+  #fileReply: ((raw: unknown) => void) | undefined
+  #fileReject: (() => void) | undefined
   #channel: RTCDataChannel | undefined
   #session: PauseControlSession
   #options: Options
@@ -181,6 +219,21 @@ export class PauseBrowserPeer {
       }
       this.#peer.ondatachannel = (event) => {
         const channel = event.channel
+        if (
+          channel.label === 'file-transfer-v1' &&
+          !this.#fileChannel &&
+          this.current() &&
+          channel.protocol === '' &&
+          channel.ordered &&
+          channel.maxPacketLifeTime === null &&
+          channel.maxRetransmits === null
+        ) {
+          this.#fileChannel = channel
+          channel.onmessage = (message) => this.#fileReply?.(message.data)
+          channel.onclose = () => this.#fileReject?.()
+          channel.onerror = () => this.#fileReject?.()
+          return
+        }
         if (
           !this.current() ||
           this.#channel ||
@@ -356,6 +409,161 @@ export class PauseBrowserPeer {
     if (!this.#options.onData) return false
     return this.current() && this.#session.sendCommand(command)
   }
+  async listFiles(printerKey: string): Promise<FileListResult> {
+    const request = FileListRequest.parse({
+      type: 'files.list',
+      request_id: crypto.randomUUID(),
+      printer_key: printerKey,
+    })
+    const channel = this.#fileChannel
+    if (
+      !this.current() ||
+      !this.#binding ||
+      !this.#certificateMatched ||
+      !this.#session.diagnostics().proofsReady ||
+      !channel ||
+      channel.readyState !== 'open' ||
+      this.#fileReply ||
+      this.#fileUsed
+    )
+      throw Error('File list unavailable')
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer)
+        this.#fileReply = undefined
+        this.#fileReject = undefined
+      }
+      const failed = () => {
+        cleanup()
+        channel.close()
+        reject(Error('File list closed'))
+      }
+      const timer = setTimeout(failed, 35000)
+      this.#fileReject = failed
+      this.#fileReply = (raw) => {
+        try {
+          if (
+            !this.current() ||
+            typeof raw !== 'string' ||
+            new TextEncoder().encode(raw).byteLength > MAX_FILE_LIST_WIRE_BYTES
+          )
+            throw Error('Invalid file list')
+          const result = FileListResponse.parse(JSON.parse(raw))
+          if (
+            result.request_id !== request.request_id ||
+            result.printer_key !== printerKey
+          )
+            throw Error('Invalid file list correlation')
+          cleanup()
+          resolve(result)
+        } catch {
+          failed()
+        }
+      }
+      try {
+        if (channel.bufferedAmount > CHUNK_SIZE * 4)
+          throw Error('File channel unavailable')
+        channel.send(JSON.stringify(request))
+      } catch {
+        failed()
+      }
+    })
+  }
+  async sendFile(
+    input: unknown,
+    file: Blob,
+    signal?: AbortSignal,
+    onProgress?: (sentBytes: number) => void,
+  ): Promise<FileUploadResult> {
+    const offer = parseOffer(input)
+    const channel = this.#fileChannel
+    if (
+      !this.current() ||
+      !this.#binding ||
+      !this.#certificateMatched ||
+      !this.#session.diagnostics().proofsReady ||
+      !channel ||
+      channel.readyState !== 'open' ||
+      this.#fileUsed ||
+      !!this.#fileReply ||
+      file.size !== offer.size
+    )
+      throw Error('File transfer unavailable')
+    this.#fileUsed = true
+    const request = (
+      wire: string | ArrayBuffer,
+    ): Promise<z.infer<typeof uploadReply>> =>
+      new Promise((resolve, reject) => {
+        const cleanup = () => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', aborted)
+          this.#fileReply = undefined
+          this.#fileReject = undefined
+        }
+        const failed = () => {
+          cleanup()
+          reject(Error('File transfer closed'))
+        }
+        const aborted = () => {
+          cleanup()
+          channel.close()
+          reject(Error('File transfer aborted'))
+        }
+        const timer = setTimeout(failed, 35000)
+        this.#fileReject = failed
+        this.#fileReply = (raw) => {
+          try {
+            if (typeof raw !== 'string' || raw.length > 2048)
+              throw Error('Invalid upload reply')
+            const result = uploadReply.parse(JSON.parse(raw))
+            cleanup()
+            resolve(result)
+          } catch {
+            failed()
+          }
+        }
+        signal?.addEventListener('abort', aborted, { once: true })
+        if (signal?.aborted) return aborted()
+        try {
+          if (
+            !this.current() ||
+            channel.readyState !== 'open' ||
+            channel.bufferedAmount > CHUNK_SIZE * 4
+          )
+            throw Error('File channel unavailable')
+          if (typeof wire === 'string') channel.send(wire)
+          else channel.send(wire)
+        } catch {
+          failed()
+        }
+      })
+    const result = (reply: z.infer<typeof uploadReply>): FileUploadResult => {
+      if (reply.type !== 'result' || reply.transfer_id !== offer.transfer_id)
+        throw Error('Invalid upload result')
+      return reply
+    }
+    try {
+      const accepted = await request(JSON.stringify(offer))
+      if (accepted.type === 'result') return result(accepted)
+      if (accepted.type !== 'accept') throw Error('Invalid upload reply')
+      let sequence = 0
+      for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+        const bytes = await file
+          .slice(offset, offset + CHUNK_SIZE)
+          .arrayBuffer()
+        const frame = new ArrayBuffer(bytes.byteLength + 4)
+        new DataView(frame).setUint32(0, sequence++)
+        new Uint8Array(frame, 4).set(new Uint8Array(bytes))
+        const ack = await request(frame)
+        if (ack.type === 'result') return result(ack)
+        if (ack.type !== 'ack') throw Error('Invalid upload reply')
+        onProgress?.(Math.min(offset + bytes.byteLength, file.size))
+      }
+      return result(await request(JSON.stringify({ type: 'complete' })))
+    } finally {
+      channel.close()
+    }
+  }
   close(reason = 'closed'): void {
     if (this.#terminal) return
     this.#terminal = reason.slice(0, 64) || 'closed'
@@ -363,6 +571,7 @@ export class PauseBrowserPeer {
     this.#resolveTerminated()
     this.#resolveGathered()
     this.#session.close(this.#terminal)
+    this.#fileReject?.()
     for (const cleanup of [
       () => {
         if (this.#channel) {
@@ -372,6 +581,7 @@ export class PauseBrowserPeer {
           this.#channel.onerror = null
         }
       },
+      () => this.#fileChannel?.close(),
       () => this.#channel?.close(),
       () => {
         if (this.#peer) {

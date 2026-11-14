@@ -1,3 +1,13 @@
+import {
+  controlWithinLimits,
+  type ControlLimits,
+} from '../runtime/control-limits.ts'
+import {
+  controlSourceState,
+  controlTargetState,
+  type ControlAction,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -34,7 +44,14 @@ const Observation = z.strictObject({
     .max(Number.MAX_SAFE_INTEGER),
   sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   ready: z.boolean(),
-  printState: z.enum(['printing', 'paused', 'idle', 'error', 'unknown']),
+  printState: z.enum([
+    'printing',
+    'paused',
+    'idle',
+    'cancelled',
+    'error',
+    'unknown',
+  ]),
   readyObservedMono: mono,
   printStateObservedMono: mono,
   receivedMono: mono,
@@ -52,12 +69,26 @@ export type PauseRpcResult = { acknowledged: boolean }
  * reconnect, queue or retry. A false/throwing guard forbids every send for this attempt.
  */
 export interface PauseDriver {
+  execute?(
+    action: ExtendedControlAction,
+    args: Record<string, unknown>,
+    input: {
+      binding: PrinterBinding
+      beforeSend(): boolean
+      signal: AbortSignal
+    },
+  ): Promise<PauseRpcResult>
+  controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   pauseOnce(input: {
+    args?: Record<string, unknown>
+    action?: ControlAction
     binding: PrinterBinding
     beforeSend(): boolean
     signal: AbortSignal
   }): Promise<PauseRpcResult>
   waitForPaused(input: {
+    args?: Record<string, unknown>
+    action?: ControlAction
     binding: PrinterBinding
     after: ObservationCursor
     signal: AbortSignal
@@ -71,6 +102,7 @@ export interface PreparedPauseDriver extends PauseDriver {
   closeAttempt(binding: PrinterBinding): Promise<void>
 }
 export type PauseDispatchReason =
+  | 'unsupported-action'
   | 'invalid-command'
   | 'invalid-authority'
   | 'scope'
@@ -104,6 +136,7 @@ export function createPauseDispatcher(config: {
   clock: PauseAuthorityClock
   journal: CommandJournalHandle
   driver: PreparedPauseDriver
+  controlLimits?: ControlLimits
   resultTimeoutMs?: number
 }) {
   const verifier = createPauseCapabilityVerifier({
@@ -121,6 +154,8 @@ export function createPauseDispatcher(config: {
     monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const journal = config.journal
   const driver = Object.freeze({
+    execute: config.driver.execute?.bind(config.driver),
+    controls: config.driver.controls?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
     closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
@@ -254,6 +289,10 @@ export function createPauseDispatcher(config: {
       } catch {
         return Promise.resolve({ kind: 'rejected', reason: 'invalid-command' })
       }
+      if (
+        !controlWithinLimits(command.action, command.args, config.controlLimits)
+      )
+        return Promise.resolve({ kind: 'rejected', reason: 'invalid-command' })
       const candidateMapping = readPrinterBinding(printerBinding)
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
@@ -395,6 +434,7 @@ export function createPauseDispatcher(config: {
         const decision = verifier.inspectAt(authorityHandle, now.wall, now.mono)
         if (!decision.ok) return 'invalid-authority'
         const cap = decision.capability
+        if (!cap.actions.includes(command.action)) return 'scope'
         if (
           command.capability_id !== cap.capability_id ||
           command.transport_id !== cap.transport_id ||
@@ -450,7 +490,7 @@ export function createPauseDispatcher(config: {
         if (
           !current ||
           !current.ready ||
-          current.printState !== 'printing' ||
+          !controlSourceState(command.action, current.printState) ||
           (connectionGeneration !== undefined &&
             current.connectionGeneration !== connectionGeneration)
         )
@@ -483,7 +523,7 @@ export function createPauseDispatcher(config: {
         if (
           !finalObservation ||
           !finalObservation.ready ||
-          finalObservation.printState !== 'printing' ||
+          !controlSourceState(command.action, finalObservation.printState) ||
           finalObservation.connectionGeneration !== connectionGeneration ||
           terminal
         )
@@ -525,6 +565,16 @@ export function createPauseDispatcher(config: {
           denial = live()
           if (denial) {
             finalize('rejected', denial, 'guard-denied')
+            return
+          }
+          if (
+            (!driver.execute &&
+              !['pause', 'resume', 'cancel'].includes(command.action)) ||
+            !(driver.controls?.(printerBinding) ?? ['pause']).includes(
+              command.action,
+            )
+          ) {
+            finalize('rejected', 'unsupported-action', 'guard-denied')
             return
           }
           let claim: ReturnType<typeof claimCommand>
@@ -599,11 +649,19 @@ export function createPauseDispatcher(config: {
             return
           }
           driverCalled = true
-          const rpc = await driver.pauseOnce({
-            binding: printerBinding,
-            beforeSend,
-            signal: controller.signal,
-          })
+          const rpc = await (driver.execute
+            ? driver.execute(command.action, command.args, {
+                binding: printerBinding,
+                beforeSend,
+                signal: controller.signal,
+              })
+            : driver.pauseOnce({
+                action: command.action as ControlAction,
+                args: command.args,
+                binding: printerBinding,
+                beforeSend,
+                signal: controller.signal,
+              }))
           if (terminal) return
           if (!guardCalled || contractBroken) {
             finalize('outcome-unknown', 'driver-contract', 'driver-contract')
@@ -636,6 +694,8 @@ export function createPauseDispatcher(config: {
             return
           }
           const paused = await driver.waitForPaused({
+            action: command.action as ControlAction,
+            args: command.args,
             binding: printerBinding,
             after: cursor,
             signal: controller.signal,
@@ -661,8 +721,9 @@ export function createPauseDispatcher(config: {
           }
           const observation = parsed.data
           if (
+            !['pause', 'resume', 'cancel'].includes(command.action) ||
             !observation.ready ||
-            observation.printState !== 'paused' ||
+            observation.printState !== controlTargetState(command.action) ||
             observation.assignmentId !== mapping.assignment_id ||
             observation.printerKey !== mapping.printer_key ||
             observation.connectionGeneration !== cursor.connectionGeneration ||

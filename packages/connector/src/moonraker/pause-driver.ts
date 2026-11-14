@@ -1,3 +1,10 @@
+import {
+  controlTargetState,
+  controlSourceState,
+  type ControlAction,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
+import { buildMoonrakerCommand } from './commands.ts'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 import {
@@ -40,11 +47,16 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
-const PAUSE = JSON.stringify({
-  jsonrpc: '2.0',
-  id: 2,
-  method: 'printer.print.pause',
-})
+const commandWire = (action: ControlAction) =>
+  JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: {
+      pause: 'printer.print.pause',
+      resume: 'printer.print.resume',
+      cancel: 'printer.print.cancel',
+    }[action],
+  })
 const queryWire = (id: number) =>
   JSON.stringify({
     jsonrpc: '2.0',
@@ -66,6 +78,11 @@ export function openFixedMoonrakerPause(input: {
   publish(observation: ControlObservation | null): void
   /** Permanent owner/context cancellation, including readonly result auditing. */
   signal: AbortSignal
+  /**
+   * Locally detected printer.objects.list. Extended actions are built against
+   * it and refused without it; lifecycle actions never need it.
+   */
+  objects?: readonly string[] | undefined
 }) {
   const candidateMapping = readPrinterBinding(input.binding)
   if (
@@ -101,7 +118,8 @@ export function openFixedMoonrakerPause(input: {
     prepared = false,
     attempted = false,
     acknowledged = false,
-    audited = false
+    audited = false,
+    extended = false
   let sequence = 0,
     sourceTime = -1,
     receivedBytes = 0,
@@ -270,13 +288,16 @@ export function openFixedMoonrakerPause(input: {
     wire: string,
     deadline: number,
     guard?: () => boolean,
+    cap = 500,
   ): Promise<unknown> {
     try {
       const sampled = now()
       readyToWrite()
+      // A G-code script replies only once Klipper finished it, so the single
+      // extended request may use the whole operation window.
       const remaining = Math.min(
-        500,
-        selected.limits.requestTimeoutMs,
+        cap,
+        cap === 500 ? selected.limits.requestTimeoutMs : cap,
         deadline - sampled,
       )
       if (remaining <= 0) throw failure()
@@ -322,7 +343,10 @@ export function openFixedMoonrakerPause(input: {
         sequence: ++sequence,
         ready: snapshot.status.webhooks.state === 'ready',
         printState:
-          state === 'printing' || state === 'paused' || state === 'error'
+          state === 'printing' ||
+          state === 'paused' ||
+          state === 'cancelled' ||
+          state === 'error'
             ? state
             : 'idle',
         readyObservedMono: started,
@@ -354,47 +378,89 @@ export function openFixedMoonrakerPause(input: {
       throw failure()
     }
   }
-  const driver: PauseDriver = Object.freeze({
-    pauseOnce({
+  /** The single command of this attempt; `wire` is always built locally. */
+  function send(
+    wire: string | undefined,
+    {
       binding: requested,
       beforeSend,
       signal,
-    }: Parameters<PauseDriver['pauseOnce']>[0]) {
-      if (requested !== binding || !prepared || attempted || terminal) {
+    }: Parameters<PauseDriver['pauseOnce']>[0],
+    cap?: number,
+  ) {
+    if (
+      requested !== binding ||
+      !prepared ||
+      attempted ||
+      terminal ||
+      wire === undefined
+    ) {
+      stop()
+      return closed.then(() => {
+        throw failure()
+      })
+    }
+    attempted = true
+    commandSignal = signal
+    signal.addEventListener('abort', commandAbort, { once: true })
+    if (signal.aborted) stop()
+    try {
+      const started = now()
+      operationDeadline = Math.min(lifetimeDeadline, started + 5000)
+      operationTimer = setTimeout(stop, operationDeadline - started)
+    } catch {
+      stop()
+      return closed.then(() => {
+        throw failure()
+      })
+    }
+    return request(2, wire, operationDeadline, beforeSend, cap)
+      .then((result) => {
+        current()
+        if (now() >= operationDeadline || result !== 'ok') throw failure()
+        current()
+        acknowledged = true
+        return { acknowledged: true }
+      })
+      .catch(async () => {
         stop()
-        return closed.then(() => {
-          throw failure()
-        })
-      }
-      attempted = true
-      commandSignal = signal
-      signal.addEventListener('abort', commandAbort, { once: true })
-      if (signal.aborted) stop()
-      try {
-        const started = now()
-        operationDeadline = Math.min(lifetimeDeadline, started + 5000)
-        operationTimer = setTimeout(stop, operationDeadline - started)
-      } catch {
-        stop()
-        return closed.then(() => {
-          throw failure()
-        })
-      }
-      return request(2, PAUSE, operationDeadline, beforeSend)
-        .then((result) => {
-          current()
-          if (now() >= operationDeadline || result !== 'ok') throw failure()
-          current()
-          acknowledged = true
-          return { acknowledged: true }
-        })
-        .catch(async () => {
-          stop()
-          await closed
-          throw failure()
-        })
+        await closed
+        throw failure()
+      })
+  }
+  function extendedWire(
+    action: ExtendedControlAction,
+    args: Record<string, unknown>,
+  ): string | undefined {
+    if (!input.objects) return undefined
+    try {
+      const call = buildMoonrakerCommand(action, args, input.objects)
+      return JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: call.method,
+        ...(call.params ? { params: call.params } : {}),
+      })
+    } catch {
+      return undefined
+    }
+  }
+  const driver: PauseDriver = Object.freeze({
+    execute(
+      action: ExtendedControlAction,
+      args: Record<string, unknown>,
+      request: Parameters<PauseDriver['pauseOnce']>[0],
+    ) {
+      if (action === 'pause' || action === 'resume' || action === 'cancel')
+        return send(commandWire(action), request)
+      extended = true
+      return send(extendedWire(action, args), request, 5000)
+    },
+    pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
+      return send(commandWire(request.action ?? 'pause'), request)
     },
     async waitForPaused({
+      action = 'pause',
       binding: requested,
       after,
       signal,
@@ -413,11 +479,19 @@ export function openFixedMoonrakerPause(input: {
         )
           throw failure()
         audited = true
+        if (extended) {
+          // No print-state target exists for an extended action. Report the
+          // first state read after the acknowledged request and let the
+          // dispatcher judge it.
+          const observation = await query(1, operationDeadline)
+          detachCommand()
+          return observation
+        }
         for (let i = 1; i <= 8; i++) {
           const observation = await query(i, operationDeadline)
           if (
             observation.ready &&
-            observation.printState === 'paused' &&
+            observation.printState === controlTargetState(action) &&
             observation.readyObservedMono > after.sentMono &&
             observation.printStateObservedMono > after.sentMono
           ) {
@@ -426,7 +500,10 @@ export function openFixedMoonrakerPause(input: {
             detachCommand()
             return observation
           }
-          if (!observation.ready || observation.printState !== 'printing')
+          if (
+            !observation.ready ||
+            !controlSourceState(action, observation.printState)
+          )
             throw failure()
         }
         throw failure()

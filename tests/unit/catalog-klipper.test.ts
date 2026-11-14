@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'vitest'
+import {
+  capabilityStatusLabels,
+  compatibilityCatalog,
+  compatibilityPageCatalog,
+  filterCompatibility,
+  klipperCatalog,
+  klipperFamilyIds,
+} from '../../apps/farm/app/utils/compatibility/index'
+
+const keys = [
+  'id',
+  'brand',
+  'model',
+  'releaseStatus',
+  'releaseDate',
+  'firmwareStatus',
+  'connection',
+  'capabilities',
+  'sources',
+  'limitations',
+]
+const capabilityKeys = [
+  'telemetry',
+  'files',
+  'camera',
+  'materials',
+  'pause',
+  'resume',
+  'cancel',
+]
+
+describe('catálogo Klipper/Moonraker', () => {
+  it('segue o contrato de registro com ids únicos', () => {
+    expect(klipperCatalog).toHaveLength(4)
+    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(4)
+    for (const product of klipperCatalog) {
+      expect(Object.keys(product).sort()).toEqual([...keys].sort())
+      expect(Object.keys(product.capabilities).sort()).toEqual(
+        [...capabilityKeys].sort(),
+      )
+      expect(product.id).toMatch(/^[a-z0-9-]+$/)
+      expect(
+        product.releaseDate === null ||
+          /^\d{4}-\d{2}-\d{2}$/.test(product.releaseDate),
+      ).toBe(true)
+      expect(product.limitations.length).toBeGreaterThan(0)
+      expect(product.sources.every((s) => s.startsWith('https://'))).toBe(true)
+    }
+  })
+
+  it('cobre genérico, K1 com root, kit Voron e Sovol', () => {
+    expect(klipperCatalog.map((p) => p.id)).toEqual([
+      'klipper-generic-moonraker',
+      'creality-k1-series-moonraker-root',
+      'voron-2-4-kit',
+      'sovol-sv08',
+    ])
+    expect(klipperCatalog.map((p) => p.brand)).toEqual([
+      'Klipper',
+      'Creality',
+      'Voron Design',
+      'Sovol',
+    ])
+  })
+
+  it('usa os status decididos e nunca documented sem fonte', () => {
+    for (const product of klipperCatalog) {
+      const c = product.capabilities
+      expect(c.telemetry).toBe('simulated')
+      expect(c.pause).toBe('simulated')
+      expect(c.resume).toBe('simulated')
+      expect(c.cancel).toBe('simulated')
+      expect(c.camera).toBe('simulated')
+      expect(c.files).toBe('unknown')
+      expect(c.materials).toBe('unknown')
+      for (const status of Object.values(c)) {
+        expect(capabilityStatusLabels[status]).toBeTruthy()
+        if (status === 'documented')
+          expect(product.sources.length).toBeGreaterThan(0)
+      }
+      expect(product.limitations.join(' ')).toMatch(/simuladores/)
+      expect(product.limitations.join(' ')).toMatch(/não habilita comandos/)
+    }
+  })
+
+  it('não altera o catálogo existente e expõe a família na página', () => {
+    expect(compatibilityCatalog.some((p) => klipperFamilyIds.has(p.id))).toBe(
+      false,
+    )
+    expect(compatibilityPageCatalog).toEqual([
+      ...compatibilityCatalog,
+      ...klipperCatalog,
+    ])
+    expect(
+      filterCompatibility('voron', compatibilityPageCatalog).map((p) => p.id),
+    ).toEqual(['voron-2-4-kit'])
+  })
+})

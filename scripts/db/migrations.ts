@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import type { Sql } from 'postgres'
+import {
+  validateMigrationHistoryChecksum,
+  validateMigrationSafety,
+  type MigrationSource,
+} from './migration-rules.ts'
 
 export function migrationCatalog(
   sources: readonly { name: string; sql: string }[],
@@ -50,14 +55,14 @@ export async function loadMigrationCatalog(
   const entries = await readdir(directory, { withFileTypes: true })
   if (entries.some((entry) => !entry.isFile()))
     throw new Error('Migration directory must contain regular SQL files only')
-  return migrationCatalog(
-    await Promise.all(
-      entries.map(async (entry) => ({
-        name: entry.name,
-        sql: await readFile(new URL(entry.name, directory), 'utf8'),
-      })),
-    ),
+  const sources: MigrationSource[] = await Promise.all(
+    entries.map(async (entry) => ({
+      name: entry.name,
+      sql: await readFile(new URL(entry.name, directory), 'utf8'),
+    })),
   )
+  validateMigrationSafety(sources)
+  return migrationCatalog(sources)
 }
 
 /** Catalog prefix ending at one specific migration, so later migrations cannot change a pinned acceptance fixture. */
@@ -84,13 +89,13 @@ export function validateMigrationHistory(
     )
       throw new Error('Invalid migration history')
     const migration = catalog[index]
-    if (
-      row.position !== index + 1 ||
-      !migration ||
-      row.id !== migration.id ||
-      row.checksum !== migration.checksum
-    )
+    if (row.position !== index + 1 || !migration || row.id !== migration.id)
       throw new Error('Migration history does not match the local catalog')
+    validateMigrationHistoryChecksum(
+      migration.id,
+      row.checksum,
+      migration.checksum,
+    )
   }
   return input.length
 }
@@ -104,13 +109,13 @@ export async function runMigrations(
   catalog: ReturnType<typeof migrationCatalog>,
   action: MigrationAction,
 ) {
-  // Snapshot and recompute digests before waiting for a database lock.
-  const checked = migrationCatalog(
-    catalog.flatMap((entry) => [
-      { name: `${entry.id}.up.sql`, sql: entry.up },
-      { name: `${entry.id}.down.sql`, sql: entry.down },
-    ]),
-  )
+  // Snapshot, validate safety, and recompute digests before waiting for a database lock.
+  const rawSources: MigrationSource[] = catalog.flatMap((entry) => [
+    { name: `${entry.id}.up.sql`, sql: entry.up },
+    { name: `${entry.id}.down.sql`, sql: entry.down },
+  ])
+  validateMigrationSafety(rawSources)
+  const checked = migrationCatalog(rawSources)
   return sql.begin(async (tx) => {
     // Concurrent runners queue on the advisory lock (bounded by statement_timeout);
     // DDL lock waits keep the short limit.

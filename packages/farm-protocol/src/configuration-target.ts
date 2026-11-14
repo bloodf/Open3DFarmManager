@@ -55,7 +55,7 @@ export type ConfigurationBridgeSelection = z.infer<
  * (`ConfigurationImmutableTarget` always requires it) and commit binds that
  * receipt's hash, so an omitted expectation never weakens commit.
  */
-export const ConfigurationTarget = z.strictObject({
+const KobraConfigurationTarget = z.strictObject({
   v: z.literal(1),
   protocol: z.literal(CONFIGURATION_PROTOCOL),
   backend: z.literal('kobralink-anycubic'),
@@ -64,6 +64,100 @@ export const ConfigurationTarget = z.strictObject({
   device_id: configurationOpaqueId.optional(),
   bridge: ConfigurationBridgeSelection,
 })
+/** Origin only: reject URL normalization that could hide credentials or a path. */
+export const ConfigurationMoonrakerOrigin = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => {
+    try {
+      if (
+        !/^https?:\/\/[^/?#]+\/?$/i.test(value) ||
+        /[\u0000-\u0020\u007f\\@]/u.test(value)
+      )
+        return false
+      const url = new URL(value)
+      return (
+        ['http:', 'https:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        url.pathname === '/' &&
+        !url.search &&
+        !url.hash
+      )
+    } catch {
+      return false
+    }
+  }, 'Expected an HTTP(S) origin')
+export const MoonrakerConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('moonraker'),
+  model: z.strictObject({
+    family: z.literal('klipper-moonraker'),
+    provisional: z.literal(true),
+  }),
+  origin: ConfigurationMoonrakerOrigin,
+  api_key: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,256}$/)
+    .optional(),
+  device_id: configurationOpaqueId.optional(),
+})
+export type MoonrakerConfigurationTarget = z.infer<
+  typeof MoonrakerConfigurationTarget
+>
+/** Bambu LAN MQTT over TLS. The port is fixed; the browser never selects one. */
+export const BAMBU_LAN_MQTT_PORT = 8883
+/** Printed serial: uppercase letters and digits only. */
+export const ConfigurationBambuSerial = z.string().regex(/^[0-9A-Z]{10,20}$/)
+/** LAN access code shown on the printer screen. Never echoed by any DTO. */
+export const ConfigurationBambuAccessCode = z
+  .string()
+  .regex(/^[A-Za-z0-9]{6,32}$/)
+/**
+ * Bambu Lab LAN-mode target. `access_code` is bound by the signed target hash
+ * and is kept only in the Connector private configuration. `control` is an
+ * explicit opt-in; without it the binding is telemetry only.
+ */
+export const BambuConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('bambu'),
+  model: z.strictObject({
+    family: z.literal('bambu-lan'),
+    provisional: z.literal(true),
+  }),
+  ipv4: ConfigurationIpv4,
+  serial: ConfigurationBambuSerial,
+  access_code: ConfigurationBambuAccessCode.optional(),
+  control: z.boolean(),
+  device_id: configurationOpaqueId.optional(),
+})
+export type BambuConfigurationTarget = z.infer<typeof BambuConfigurationTarget>
+/** Stock firmware telemetry endpoint; Moonraker uses its own target. */
+export const CREALITY_NATIVE_PORT = 9999
+export const CrealityConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('creality'),
+  model: z.strictObject({
+    family: z.literal('creality-native'),
+    provisional: z.literal(true),
+  }),
+  host: ConfigurationIpv4,
+  device_id: configurationOpaqueId.optional(),
+})
+export type CrealityConfigurationTarget = z.infer<
+  typeof CrealityConfigurationTarget
+>
+export const ConfigurationTarget = z.discriminatedUnion('backend', [
+  KobraConfigurationTarget,
+  MoonrakerConfigurationTarget,
+  BambuConfigurationTarget,
+  CrealityConfigurationTarget,
+])
+
 export type ConfigurationTarget = z.infer<typeof ConfigurationTarget>
 
 const observedText = (max: number) =>

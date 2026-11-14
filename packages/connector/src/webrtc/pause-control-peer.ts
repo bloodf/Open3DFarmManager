@@ -1,3 +1,9 @@
+import { createFileList, type FileListOptions } from '../runtime/file-list.ts'
+import { MAX_FILE_LIST_WIRE_BYTES } from '../../../farm-protocol/src/file-list.ts'
+import {
+  createFileUpload,
+  type FileUploadOptions,
+} from '../runtime/file-upload.ts'
 import { rtcBindAddress } from '../config/rtc.ts'
 import { PeerConnection, type DataChannel } from 'node-datachannel'
 import { ConnectorIdentity } from '../identity/store.ts'
@@ -29,6 +35,9 @@ import {
 type Options = Readonly<{
   /** Local ICE bind address from validated runtime config. Default loopback. */
   bindAddress?: string
+  fileTransfer?: FileUploadOptions
+  fileList?: FileListOptions
+  getAdmittedHandle?: import('./pause-control-session.ts').PauseSessionOptions['getAdmittedHandle']
   identity: ConnectorIdentity
   expected: PauseExpectedContext
   /** Only the authenticated current signalling owner may resolve this promise. */
@@ -52,6 +61,10 @@ export class PauseConnectorPeer {
   readonly closed: Promise<void>
   #resolveClosed: () => void = noop
   #peer: PeerConnection | undefined
+  #fileChannel: DataChannel | undefined
+  #upload: ReturnType<typeof createFileUpload> | undefined
+  #list: ReturnType<typeof createFileList> | undefined
+  #uploadClose: Promise<void> | undefined
   #channel: DataChannel | undefined
   #session: PauseControlSession
   #options: Options
@@ -87,6 +100,9 @@ export class PauseConnectorPeer {
     })
     this.#session = new PauseControlSession({
       role: 'connector',
+      ...(input.getAdmittedHandle
+        ? { getAdmittedHandle: input.getAdmittedHandle }
+        : {}),
       identity: input.identity,
       expected,
       ...(input.authDeadline !== undefined
@@ -137,7 +153,10 @@ export class PauseConnectorPeer {
         enableIceTcp: false,
         disableAutoNegotiation: true,
         disableFingerprintVerification: false,
-        maxMessageSize: MAX_PAUSE_CHANNEL_WIRE_BYTES,
+        maxMessageSize: Math.max(
+          MAX_PAUSE_CHANNEL_WIRE_BYTES,
+          MAX_FILE_LIST_WIRE_BYTES,
+        ),
       })
       this.#peer.onGatheringStateChange((state) => {
         if (state === 'complete') this.#resolveGathered()
@@ -164,6 +183,46 @@ export class PauseConnectorPeer {
           this.close('unexpected-media')
         }
       })
+      if (input.fileTransfer || input.fileList) {
+        const channel = this.#peer.createDataChannel('file-transfer-v1', {
+          unordered: false,
+        })
+        this.#fileChannel = channel
+        const send = (wire: string) => {
+          if (
+            !this.current() ||
+            !channel.isOpen() ||
+            !channel.sendMessage(wire)
+          )
+            throw Error('File channel unavailable')
+        }
+        if (input.fileList)
+          this.#list = createFileList({
+            ...input.fileList,
+            admittedHandle: () =>
+              this.current() ? this.#session.admittedHandle : undefined,
+            send,
+          })
+        if (input.fileTransfer)
+          this.#upload = createFileUpload({
+            ...input.fileTransfer,
+            admittedHandle: () =>
+              this.current() ? this.#session.admittedHandle : undefined,
+            send,
+          })
+        channel.onMessage((raw) => {
+          if (this.current() && !this.#list?.receive(raw))
+            this.#upload?.receive(raw)
+        })
+        channel.onClosed(() => {
+          this.#list?.close()
+          this.#uploadClose = this.#upload?.close()
+        })
+        channel.onError(() => {
+          this.#list?.close()
+          this.#uploadClose = this.#upload?.close()
+        })
+      }
       this.#channel = this.#peer.createDataChannel('pause-control-v1', {
         unordered: false,
       })
@@ -330,7 +389,10 @@ export class PauseConnectorPeer {
     this.#resolveTerminated()
     this.#resolveGathered()
     this.#session.close(this.#terminal)
+    this.#list?.close()
+    this.#uploadClose = this.#upload?.close()
     for (const cleanup of [
+      () => this.#fileChannel?.close(),
       () => this.#channel?.onMessage(noop),
       () => this.#channel?.close(),
       () => this.#peer?.close(),
@@ -348,6 +410,9 @@ export class PauseConnectorPeer {
     }
     void Promise.allSettled([
       this.#session.closed,
+      ...(this.#list ? [this.#list.settled()] : []),
+      ...(this.#uploadClose ? [this.#uploadClose] : []),
+      ...(this.#upload ? [this.#upload.settled()] : []),
       ...(this.#activation ? [this.#activation] : []),
       ...(this.#validation ? [this.#validation] : []),
       ...(this.#offerWork ? [this.#offerWork] : []),

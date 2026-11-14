@@ -29,8 +29,13 @@ describe('catálogo Anycubic', () => {
       expect(item.releaseDate).toBeNull()
       expect(item.firmwareStatus).toContain('desconhecida')
       for (const [capability, status] of Object.entries(item.capabilities)) {
+        if (status === 'documented')
+          expect(item.sources.length).toBeGreaterThan(0)
+        if (status === 'simulated')
+          expect(item.limitations.length).toBeGreaterThan(0)
         expect(status).toBe(
-          item.model === 'Kobra X' && capability === 'telemetry'
+          item.model === 'Kobra X' &&
+            ['telemetry', 'pause', 'resume', 'cancel'].includes(capability)
             ? 'simulated'
             : 'unknown',
         )

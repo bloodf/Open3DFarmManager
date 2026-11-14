@@ -2,7 +2,12 @@ import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 
 export type KobraLinkErrorCode =
-  'unavailable' | 'unauthorized' | 'invalid' | 'identity_changed' | 'timeout'
+  | 'unavailable'
+  | 'unauthorized'
+  | 'invalid'
+  | 'identity_changed'
+  | 'timeout'
+  | 'unsupported_state'
 export class KobraLinkError extends Error {
   readonly code: KobraLinkErrorCode
   constructor(code: KobraLinkErrorCode) {
@@ -67,6 +72,11 @@ export interface PrinterObservation extends PrinterStatus {
   connectionReason?: 'lost' | 'unreachable' | 'unreachable_ip'
   progress: number | null
   observedAt: number | null
+}
+export type KobraLinkControlAction = 'pause' | 'resume' | 'cancel'
+export interface KobraLinkControlResult {
+  accepted: true
+  confirmed: false
 }
 export type KobraLinkFetch = (
   url: string,
@@ -417,6 +427,41 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       )
     },
     listPrinters,
+    /**
+     * NatHacks/Kobralink 5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1:
+     * apps/api/src/core/core.controller.ts exposes POST print/{pause,resume,cancel}
+     * with 204. Acceptance does not confirm the physical printer state.
+     */
+    async controlPrinter(
+      printerId: string,
+      action: KobraLinkControlAction,
+    ): Promise<KobraLinkControlResult> {
+      const id = parse(bindingSchema.shape.id, printerId)
+      const command = parse(z.enum(['pause', 'resume', 'cancel']), action)
+      const sessionGeneration = generation
+      const current = sanitize(await request(`/api/v1/printers/${id}`, 'GET'))
+      if (current.id !== id) fail('identity_changed')
+      if (current.availability !== 'available') fail('unavailable')
+      if (
+        !(command === 'resume'
+          ? current.printState === 'paused'
+          : command === 'pause'
+            ? current.printState === 'printing'
+            : current.printState === 'printing' ||
+              current.printState === 'paused' ||
+              current.printState === 'pausing')
+      )
+        fail('unsupported_state')
+      const response = await request(
+        `/api/v1/printers/${id}/print/${command}`,
+        'POST',
+        undefined,
+        false,
+        sessionGeneration,
+      )
+      if (response !== null) fail('invalid')
+      return { accepted: true, confirmed: false }
+    },
     /** Read-only discovery snapshot used before any onboarding write. */
     async listPrinterIdentities(): Promise<PrinterIdentity[]> {
       return parse(

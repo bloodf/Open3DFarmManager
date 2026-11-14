@@ -1,9 +1,14 @@
+import { createMoonrakerSession } from '../moonraker/auth.ts'
 import { z } from 'zod'
 import { readPrivateJsonFile } from './local.ts'
 
 const credentials = new WeakMap<
   MoonrakerLimits,
-  { origin: string; key: string }
+  {
+    origin: string
+    key?: string
+    session?: ReturnType<typeof createMoonrakerSession>
+  }
 >()
 
 export function moonrakerAuthHeaders(
@@ -14,7 +19,12 @@ export function moonrakerAuthHeaders(
   if (!credential) return {}
   if (origin !== credential.origin)
     throw new Error('Invalid Moonraker credential origin')
-  return { 'X-Api-Key': credential.key }
+  return credential.key ? { 'X-Api-Key': credential.key } : {}
+}
+
+export function moonrakerSession(origin: string, limits: MoonrakerLimits) {
+  moonrakerAuthHeaders(origin, limits)
+  return credentials.get(limits)?.session
 }
 
 export type MoonrakerLimits = Readonly<{
@@ -85,15 +95,27 @@ export function validateMoonrakerInput(input: {
   if (input.assignment.apiKeyFile !== undefined) {
     try {
       const credential = z
-        .strictObject({
-          origin: z.string(),
-          apiKey: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
-        })
+        .union([
+          z.strictObject({
+            origin: z.string(),
+            apiKey: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
+          }),
+          z.strictObject({
+            origin: z.string(),
+            username: z.string().min(1).max(256),
+            password: z.string().min(1).max(4096),
+          }),
+        ])
         .parse(
           readPrivateJsonFile(input.assignment.apiKeyFile, { maxBytes: 4096 }),
         )
       if (credential.origin !== origin) throw new Error()
-      credentials.set(limits, { origin, key: credential.apiKey })
+      credentials.set(
+        limits,
+        'apiKey' in credential
+          ? { origin, key: credential.apiKey }
+          : { origin, session: createMoonrakerSession(credential) },
+      )
     } catch {
       throw new Error('Invalid private Moonraker credential')
     }

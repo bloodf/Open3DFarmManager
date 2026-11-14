@@ -1,3 +1,4 @@
+import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandOutcome,
   PauseProofsReady,
@@ -38,7 +39,8 @@ export type FarmPauseKey = Readonly<{
 type Signalling = Pick<
   PauseBrowserSignallingClient,
   'start' | 'close' | 'dispose' | 'sendPhase' | 'sendCommand'
->
+> &
+  Partial<Pick<PauseBrowserSignallingClient, 'listFiles' | 'sendFile'>>
 type SignallingOptions = NonNullable<
   ConstructorParameters<typeof PauseBrowserSignallingClient>[1]
 >
@@ -185,22 +187,47 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
       }, remaining)
     })
   }
+  async function issueControlCommand(
+    action: ExtendedControlAction,
+    args: Record<string, unknown> = {},
+  ): Promise<PauseCommandOutcome | undefined> {
+    if (state.kind !== 'ready' || !command) return undefined
+    if (now() >= state.expiresAt - PAUSE_CAPABILITY_MARGIN_MS) {
+      fail('expired')
+      return undefined
+    }
+    clearTimeout(expiry)
+    set({ kind: 'sending' })
+    const outcome = await command.issueControlCommand(action, args)
+    set({ kind: 'settled', outcome })
+    close()
+    return outcome
+  }
   void start()
   return Object.freeze({
     /** Sends the single signed pause. Only valid in the `ready` state. */
-    async pause(): Promise<PauseCommandOutcome | undefined> {
-      if (state.kind !== 'ready' || !command) return undefined
-      if (now() >= state.expiresAt - PAUSE_CAPABILITY_MARGIN_MS) {
-        fail('expired')
-        return undefined
-      }
-      clearTimeout(expiry)
-      set({ kind: 'sending' })
-      const outcome = await command.pause()
-      set({ kind: 'settled', outcome })
-      close()
-      return outcome
+    issueControlCommand,
+    async listFiles(printerKey: string) {
+      if (
+        state.kind !== 'ready' ||
+        controller.signal.aborted ||
+        !signalling?.listFiles
+      )
+        throw Error('File list unavailable')
+      return signalling.listFiles(printerKey)
     },
+    async sendFile(
+      ...args: Parameters<PauseBrowserSignallingClient['sendFile']>
+    ) {
+      if (
+        state.kind !== 'ready' ||
+        controller.signal.aborted ||
+        !signalling?.sendFile
+      )
+        throw Error('File transfer unavailable')
+      return signalling.sendFile(...args)
+    },
+    pause: () => issueControlCommand('pause'),
     close() {
       if (state.kind === 'connecting' || state.kind === 'ready') fail('closed')
       else close()

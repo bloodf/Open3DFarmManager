@@ -1,3 +1,7 @@
+import {
+  actionsForControlRole,
+  controlRoleAllowed,
+} from '../utils/pause-authority/role-policy.ts'
 import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
@@ -261,7 +265,7 @@ export class PostgresPauseAuthority {
     if (
       !member ||
       member.revoked_at !== null ||
-      !['owner', 'admin', 'operator'].includes(member.role)
+      !controlRoleAllowed(member.role)
     )
       return null
     const role = z.enum(['owner', 'admin', 'operator']).parse(member.role)
@@ -700,7 +704,7 @@ export class PostgresPauseAuthority {
               printer_key: current.printerKey,
               control_binding_sha256: stored.control_binding_sha256,
               admission_nonce: stored.admission_nonce,
-              actions: ['pause'],
+              actions: actionsForControlRole(current.role),
             })
             const signed = await signPauseCapability(claims, this.signingKey)
             const postSign = await this.validAt(

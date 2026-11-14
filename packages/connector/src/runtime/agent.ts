@@ -1,3 +1,4 @@
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { openLocalStatus } from '../status/local.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import { loadExistingIdentity } from '../identity/store.ts'
@@ -194,6 +195,8 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     printerKey: assignment.printer_key,
   }))
   let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
+  let controlsFor:
+    ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
     if (input.statusPort !== undefined) {
@@ -211,7 +214,10 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     }
     if (signal.aborted) return false
     snapshots = config.signalling
-      ? createFarmSnapshotSource({ assignmentRefs: refs })
+      ? createFarmSnapshotSource({
+          assignmentRefs: refs,
+          controlsFor: (id) => controlsFor?.(id) ?? [],
+        })
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')
     const { drainTelemetryOnce } = await import('../cloud/drain.ts')
@@ -407,6 +413,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           signal,
           freshness: offline.freshness,
           onDiagnostic: pauseDiagnostic,
+          onControls(read) {
+            controlsFor = read
+          },
         }).catch((error: unknown) => {
           // A pause-path failure never stops read-only telemetry or status.
           pauseDiagnostic({

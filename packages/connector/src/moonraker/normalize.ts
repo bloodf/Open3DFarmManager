@@ -24,12 +24,48 @@ export function normalizeMoonrakerSnapshot(
         state = 'idle'
     }
   }
+  const validNumber = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+  const info =
+    print_stats.info &&
+    typeof print_stats.info === 'object' &&
+    !Array.isArray(print_stats.info)
+      ? (print_stats.info as Record<string, unknown>)
+      : {}
+  const filename =
+    typeof print_stats.filename === 'string'
+      ? print_stats.filename.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 255)
+      : undefined
+  const duration = print_stats.print_duration
+  const remaining =
+    validNumber(duration) &&
+    duration > 0 &&
+    virtual_sdcard.progress > 0 &&
+    virtual_sdcard.progress < 1
+      ? (duration * (1 - virtual_sdcard.progress)) / virtual_sdcard.progress
+      : undefined
   return {
     sourceEventtime: snapshot.eventtime,
     printer: PrinterState.parse({
       ...context,
       state,
       progress: virtual_sdcard.progress,
+      ...(filename ? { filename } : {}),
+      ...(validNumber(duration) ? { printDuration: duration } : {}),
+      ...(validNumber(print_stats.total_duration)
+        ? { totalDuration: print_stats.total_duration }
+        : {}),
+      ...(validNumber(info.current_layer) &&
+      Number.isSafeInteger(info.current_layer)
+        ? { currentLayer: info.current_layer }
+        : {}),
+      ...(validNumber(info.total_layer) &&
+      Number.isSafeInteger(info.total_layer)
+        ? { totalLayer: info.total_layer }
+        : {}),
+      ...(remaining !== undefined && Number.isFinite(remaining)
+        ? { estimatedRemainingSeconds: remaining }
+        : {}),
     }),
   }
 }

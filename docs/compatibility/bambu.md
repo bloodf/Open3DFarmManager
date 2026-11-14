@@ -43,3 +43,17 @@ Confirmar estoque, datas regionais e variantes antes de fechar ranking. Obter co
 - [S4](https://blog.bambulab.com/bambu-lab-h2c-where-multi-material-vortek-system-meets-engineering-precision/) — publicação: 2025-11-14; acesso: 2026-11-13.
 - [S5](https://blog.bambulab.com/the-icon-redefined-meet-the-p2s-a-completely-reengineered-version-of-the-ultra-productive-p1-series/) — publicação: 2025-10-14; acesso: 2026-11-13.
 - [S6](https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/) — publicação: 2025-01-16; acesso: 2026-11-13.
+
+## Controle LAN opt-in no Connector
+
+O binding local aceita `control: true`; o padrão é `false`, somente leitura e
+sem controles anunciados. Pausa, retomada e cancelamento usam MQTT TLS no tópico
+`device/<serial>/request`, com `print.command` igual a `pause`, `resume` ou `stop`
+e `sequence_id` textual. O Connector envia uma única requisição por comando
+assinado, sem fila, repetição ou fallback HTTP/cloud. O sucesso exige um relatório
+posterior com a mudança de estado; ausência de confirmação termina com timeout
+tipado. O código de acesso fica apenas no arquivo privado de credenciais.
+
+Firmwares mais recentes exigem modo LAN-only/Developer para comandos LAN.
+A disponibilidade depende do modelo e firmware. Validação apenas com simulador
+loopback: **not proven on hardware** (não comprovado em hardware).

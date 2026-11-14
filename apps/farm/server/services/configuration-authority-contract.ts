@@ -103,7 +103,7 @@ export const ConfigurationReceiptRegistration = z.strictObject({
   assignment_id: BrowserDeviceUuid,
   printer_key: z
     .string()
-    .regex(/^kobra-x-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+    .regex(/^(?:kobra-x|moonraker)-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
   committed_revision: revision,
   registered_at: configurationTime,
 })

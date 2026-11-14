@@ -16,6 +16,21 @@ Unit tests cover catalog naming, pairing, order and history validation. `testPos
 
 The coordinator ran this helper successfully against a disposable native ARM64 PostgreSQL 17.11 instance with migrations 0001 through 0004. All six integration groups passed, including concurrent migration attempts and rollback of both DDL and journal after a deliberate SQL error. This validates local migration tooling, not application startup or production deployment.
 
+## Upgrade safety and expand/contract migration rules
+
+To prevent data loss and support zero-downtime rolling upgrades, all migrations are subject to structural and expand/contract safety rules validated by `scripts/db/migration-rules.ts` prior to execution:
+
+1. **Paired files**: Every `NNNN_name.up.sql` must have a corresponding, non-empty `NNNN_name.down.sql` rollback file.
+2. **Contiguous numbering**: Migration numbers must be contiguous four-digit sequences starting strictly at `0001`.
+3. **Expand/contract safety**: Forward migration files (`.up.sql`) numbered above `0027` are prohibited from containing destructive operations that break rolling deployments or cause data loss:
+   - `DROP TABLE`
+   - `DROP COLUMN`
+   - `TRUNCATE` (standalone statements; trigger definitions like `BEFORE TRUNCATE` remain permitted)
+   - `ALTER COLUMN ... TYPE` (type rewrites that lock tables or fail on existing data)
+   - `DELETE without WHERE` (bulk data truncation without explicit row filtering)
+     Exceptions must be registered in the exported `EXPAND_CONTRACT_ALLOWLIST` with an explicit migration ID, matching rule, and documented justification. SQL comments and string literals are stripped prior to rule evaluation to prevent false positives.
+4. **Immutability of applied migrations**: The runner validates catalog checksums against the database journal. If a checksum mismatch is detected, the runner halts and explicitly names the affected file, instructing the operator to restore the released migration file rather than editing already-applied SQL in place.
+
 ## Application startup, readiness and database service
 
 Startup gating is opt-in through the `database` runtime config: `NUXT_DATABASE_ENABLED` must be exactly `true`, `false` or unset (any other value is an invalid configuration and stops startup), plus `NUXT_DATABASE_DATABASE_URL`, `NUXT_DATABASE_MIGRATIONS` (`verify`, default, or `apply`) and `NUXT_DATABASE_MIGRATIONS_DIR` (the image sets `/app/migrations`).

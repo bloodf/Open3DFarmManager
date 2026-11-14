@@ -1,3 +1,4 @@
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -32,7 +33,18 @@ export type RawPrinterObservation = Omit<
       | Readonly<{
           bambu: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
+      | Readonly<{
+          creality: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
   }
+
+function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
+  return 'bambu' in timing
+    ? timing.bambu
+    : 'creality' in timing
+      ? timing.creality
+      : timing
+}
 
 const FRAME_LIMIT = 'Application frame limit'
 
@@ -40,6 +52,7 @@ const FRAME_LIMIT = 'Application frame limit'
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
   nowMono?: () => number
+  controlsFor?: (assignmentId: string) => readonly ExtendedControlAction[]
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -84,11 +97,7 @@ export function createFarmSnapshotSource(input: {
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
       if (!entry) return
-      const times = Object.values(
-        'bambu' in entry.fieldObservedAtMonoMs
-          ? entry.fieldObservedAtMonoMs.bambu
-          : entry.fieldObservedAtMonoMs,
-      )
+      const times = Object.values(fieldTimes(entry.fieldObservedAtMonoMs))
       captured = Math.min(captured, ...times)
       until = Math.min(until, ...times.map((time) => time + 5000))
       const temperature = entry.temperatureObservation
@@ -99,9 +108,14 @@ export function createFarmSnapshotSource(input: {
         captured = Math.min(captured, temperature.observedAtMonoMs)
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
+      const controls = input.controlsFor?.(ref.assignmentId)
+      const advertisedControls =
+        controls && controls.length > 0 ? { controls: [...controls] } : {}
+      const { controls: _untrustedControls, ...printer } = entry.printer
       printers.push(
         PrinterState.parse({
-          ...entry.printer,
+          ...printer,
+          ...advertisedControls,
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),
@@ -185,20 +199,25 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
     }
     const timing = value.fieldObservedAtMonoMs
-    const bambu = 'bambu' in timing
-    const times = 'bambu' in timing ? timing.bambu : timing
+    const fieldStamped = 'bambu' in timing || 'creality' in timing
+    const times = fieldTimes(timing)
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
-    const previousTimes =
-      previousTiming && 'bambu' in previousTiming
-        ? previousTiming.bambu
-        : previousTiming
-    const expectedFields = bambu
+    const previousTimes = previousTiming
+      ? fieldTimes(previousTiming)
+      : undefined
+    const expectedFields = fieldStamped
       ? [
           'state',
           ...(
             [
+              'identity',
               'progress',
+              'filename',
+              'materials',
+              'currentLayer',
+              'totalLayer',
+              'estimatedRemainingSeconds',
               'toolTemperatureCelsius',
               'bedTemperatureCelsius',
             ] as const
@@ -223,7 +242,9 @@ export function createFarmSnapshotSource(input: {
         const boundaryTime =
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
-            (!!previousTiming && 'bambu' in previousTiming) !== bambu)
+            (!!previousTiming &&
+              ('bambu' in previousTiming || 'creality' in previousTiming)) !==
+              fieldStamped)
             ? Math.max(...Object.values(previousTimes))
             : previousTime
         return (
@@ -240,7 +261,7 @@ export function createFarmSnapshotSource(input: {
       throw Error('Invalid observation time')
     }
     const temperature =
-      connectionOnly || bambu
+      connectionOnly || fieldStamped
         ? undefined
         : (value.temperatureObservation ??
           (previous?.epoch === value.epoch
@@ -264,14 +285,17 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid printer snapshot')
     }
-    // Bambu fields carry their own stamps; Moonraker temperatures use separate evidence.
+    // Bambu and Creality fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
-      ...(bambu ? parsedPrinter.data : {}),
+      ...(fieldStamped ? parsedPrinter.data : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
       ...(parsedPrinter.data.progress === undefined
         ? {}
         : { progress: parsedPrinter.data.progress }),
+      ...(parsedPrinter.data.identity
+        ? { identity: Object.freeze({ ...parsedPrinter.data.identity }) }
+        : {}),
       observedAt: parsedPrinter.data.observedAt,
     })
     if (printer.printerKey !== value.printerKey) {
@@ -287,7 +311,11 @@ export function createFarmSnapshotSource(input: {
         fieldObservedAtMonoMs:
           'bambu' in timing
             ? Object.freeze({ bambu: Object.freeze({ ...timing.bambu }) })
-            : Object.freeze({ ...timing }),
+            : 'creality' in timing
+              ? Object.freeze({
+                  creality: Object.freeze({ ...timing.creality }),
+                })
+              : Object.freeze({ ...timing }),
         ...(temperature
           ? {
               temperatureObservation: Object.freeze({

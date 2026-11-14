@@ -11,6 +11,21 @@ export const PrinterState = z
     printerKey: z.string().min(1).max(128),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     progress: z.number().min(0).max(1).optional(),
+    materials: z
+      .array(
+        z.strictObject({
+          slot: z.string().max(32),
+          materialType: z.string().max(64).optional(),
+          colorHex: z
+            .string()
+            .regex(/^[0-9A-F]{8}$/)
+            .optional(),
+          remainingPercent: z.number().min(0).max(100).optional(),
+          active: z.boolean().optional(),
+        }),
+      )
+      .max(17)
+      .optional(),
     filename: z.string().max(255).optional(),
     printDuration: z.number().finite().nonnegative().optional(),
     totalDuration: z.number().finite().nonnegative().optional(),

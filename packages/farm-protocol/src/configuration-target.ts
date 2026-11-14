@@ -107,9 +107,38 @@ export const MoonrakerConfigurationTarget = z.strictObject({
 export type MoonrakerConfigurationTarget = z.infer<
   typeof MoonrakerConfigurationTarget
 >
+/** Bambu LAN MQTT over TLS. The port is fixed; the browser never selects one. */
+export const BAMBU_LAN_MQTT_PORT = 8883
+/** Printed serial: uppercase letters and digits only. */
+export const ConfigurationBambuSerial = z.string().regex(/^[0-9A-Z]{10,20}$/)
+/** LAN access code shown on the printer screen. Never echoed by any DTO. */
+export const ConfigurationBambuAccessCode = z
+  .string()
+  .regex(/^[A-Za-z0-9]{6,32}$/)
+/**
+ * Bambu Lab LAN-mode target. `access_code` is bound by the signed target hash
+ * and is kept only in the Connector private configuration. `control` is an
+ * explicit opt-in; without it the binding is telemetry only.
+ */
+export const BambuConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('bambu'),
+  model: z.strictObject({
+    family: z.literal('bambu-lan'),
+    provisional: z.literal(true),
+  }),
+  ipv4: ConfigurationIpv4,
+  serial: ConfigurationBambuSerial,
+  access_code: ConfigurationBambuAccessCode.optional(),
+  control: z.boolean(),
+  device_id: configurationOpaqueId.optional(),
+})
+export type BambuConfigurationTarget = z.infer<typeof BambuConfigurationTarget>
 export const ConfigurationTarget = z.discriminatedUnion('backend', [
   KobraConfigurationTarget,
   MoonrakerConfigurationTarget,
+  BambuConfigurationTarget,
 ])
 
 export type ConfigurationTarget = z.infer<typeof ConfigurationTarget>

@@ -4,9 +4,7 @@
     "status": {
       "webhooks": { "state": "ready", "state_message": "synthetic fixture" },
       "print_stats": {
-        "state": "printing",
-        "filename": "synthetic-test.gcode",
-        "print_duration": 120
+        "state": "printing"
       },
       "virtual_sdcard": {
         "progress": 0.25,

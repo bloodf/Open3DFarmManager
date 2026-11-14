@@ -39,6 +39,12 @@ describe('Moonraker job telemetry', () => {
     expect(observe({ state: 'standby' }, 0)).not.toHaveProperty(
       'estimatedRemainingSeconds',
     )
+    expect(observe({ print_duration: 100 }, 1)).not.toHaveProperty(
+      'estimatedRemainingSeconds',
+    )
+    expect(observe({ print_duration: 0 }, 0.5)).not.toHaveProperty(
+      'estimatedRemainingSeconds',
+    )
     expect(observe({ filename: 'x' })).not.toHaveProperty('currentLayer')
   })
   it('omits malformed fields and bounds filenames', () => {

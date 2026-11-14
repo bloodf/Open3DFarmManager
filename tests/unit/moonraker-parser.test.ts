@@ -179,6 +179,7 @@ test('projects the complete webhook and print-state matrix at progress boundarie
             observedAt: 1_800_000_000_000,
             state: expected[index],
             progress,
+            filename: 'remote',
           },
         })
       }

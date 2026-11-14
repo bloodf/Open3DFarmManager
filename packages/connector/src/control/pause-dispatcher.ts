@@ -5,6 +5,7 @@ import {
 import {
   controlSourceState,
   controlTargetState,
+  ControlResultCode,
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
@@ -127,6 +128,8 @@ export type PauseDispatchResult =
       kind: 'not-sent' | 'applied' | 'outcome-unknown'
       cmdId: string
       reason: PauseDispatchReason
+      /** Advisory driver detail. Present only when a driver reported one. */
+      code?: ControlResultCode
     }
 type Sample = { wall: number; mono: number }
 
@@ -342,6 +345,7 @@ export function createPauseDispatcher(config: {
       let finishDetails:
         | { journalReason: CommandJournalReason; observedWall?: number }
         | undefined
+      let resultCode: ControlResultCode | undefined
       let cleaned = false
       function cleanup() {
         if (cleaned) return
@@ -369,6 +373,7 @@ export function createPauseDispatcher(config: {
               kind: kind === 'rejected' ? 'not-sent' : kind,
               cmdId: command.cmd_id,
               reason,
+              ...(resultCode && kind !== 'applied' ? { code: resultCode } : {}),
             }
           : { kind: 'rejected', reason }
         cleanup()
@@ -746,7 +751,11 @@ export function createPauseDispatcher(config: {
             return
           }
           finalize('applied', 'applied', 'applied', observedAt.wall)
-        } catch {
+        } catch (error) {
+          const carried = ControlResultCode.safeParse(
+            (error as { resultCode?: unknown } | null)?.resultCode,
+          )
+          if (carried.success) resultCode = carried.data
           if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)

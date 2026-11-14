@@ -1,5 +1,6 @@
 import type {
   ControlAction,
+  ControlResultCode,
   ExtendedControlAction,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
@@ -195,7 +196,32 @@ export function getPrinterActionButtons(
 /**
  * Outcome text for each control action.
  */
+/**
+ * Operator hints for an advisory result code. Shown after the outcome text,
+ * never instead of it: the code does not change what happened to the command.
+ */
+export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
+  'bambu-authorization-required':
+    'A impressora Bambu recusou o comando porque o controle de autorização do firmware está ativo. No painel da impressora, ative o modo Somente LAN (LAN Only) e o Modo Desenvolvedor (Developer Mode) e tente novamente.',
+}
+
+export function resultCodeHint(
+  code: ControlResultCode | undefined,
+): string | undefined {
+  return code === undefined ? undefined : RESULT_CODE_HINTS[code]
+}
+
 export function actionOutcomeText(
+  action: ControlAction,
+  outcome: PauseCommandOutcome,
+  code?: ControlResultCode,
+): string {
+  const hint = outcome === 'applied' ? undefined : resultCodeHint(code)
+  if (hint) return `${actionOutcomeBaseText(action, outcome)} ${hint}`
+  return actionOutcomeBaseText(action, outcome)
+}
+
+function actionOutcomeBaseText(
   action: ControlAction,
   outcome: PauseCommandOutcome,
 ): string {
@@ -245,7 +271,7 @@ export function controlStatusText(
     case 'sending':
       return `Enviando o comando de ${verb}…`
     case 'settled':
-      return actionOutcomeText(action, state.outcome)
+      return actionOutcomeText(action, state.outcome, state.code)
     case 'failed':
       switch (state.reason) {
         case 'unavailable':

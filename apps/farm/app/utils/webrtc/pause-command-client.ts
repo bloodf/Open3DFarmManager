@@ -1,4 +1,7 @@
-import { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import {
+  ExtendedControlAction,
+  type ControlResultCode,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   encodeCommandV2,
@@ -77,7 +80,7 @@ export type PauseCommandClientOptions = Readonly<{
    */
   monotonicNow?(): number
   /** Notified once per command with its final outcome. */
-  onOutcome?(outcome: PauseCommandOutcome): void
+  onOutcome?(outcome: PauseCommandOutcome, code?: ControlResultCode): void
   /** Aborted when the control session ends. */
   signal?: AbortSignal
 }>
@@ -205,7 +208,10 @@ export function createPauseCommandClient(
     if (timer === undefined) return
     clearTimeout(timer)
   }
-  function settleCommand(outcome: PauseCommandOutcome): void {
+  function settleCommand(
+    outcome: PauseCommandOutcome,
+    code?: ControlResultCode,
+  ): void {
     const current = command
     if (!current) return
     command = undefined
@@ -214,7 +220,7 @@ export function createPauseCommandClient(
     terminal = true
     current.settle(outcome)
     try {
-      options.onOutcome?.(outcome)
+      options.onOutcome?.(outcome, code)
     } catch {
       // A throwing observer never breaks the settlement of the command.
     }
@@ -528,7 +534,7 @@ export function createPauseCommandClient(
       if (frame.t !== 'control.result') return
       const current = command
       if (!current || frame.command_id !== current.id) return
-      settleCommand(frame.outcome)
+      settleCommand(frame.outcome, frame.code)
     },
     pause(): Promise<PauseCommandOutcome> {
       if (aborted) return Promise.resolve('rejected')

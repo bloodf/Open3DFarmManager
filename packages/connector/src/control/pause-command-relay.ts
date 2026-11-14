@@ -1,4 +1,5 @@
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
+import type { ControlResultCode } from '../../../farm-protocol/src/control-actions.ts'
 import { decodeCommandV2 } from '../../../farm-protocol/src/command-v2.ts'
 import {
   ControlSessionBinding,
@@ -327,6 +328,7 @@ export function createPauseCommandRelay(
     peer: Peer,
     commandId: string,
     outcome: PauseRelayOutcome,
+    code?: ControlResultCode,
   ): void {
     // A sealed peer never sends again: the result stays local.
     if (peer.sealed) return
@@ -335,6 +337,7 @@ export function createPauseCommandRelay(
         t: 'control.result',
         command_id: commandId,
         outcome,
+        ...(code ? { code } : {}),
       }),
     )
     if (state !== 'sent') {
@@ -537,7 +540,12 @@ export function createPauseCommandRelay(
     else if (outcome === 'outcome-unknown') outcomeUnknown++
     else if (outcome === 'not-sent') notSent++
     else rejected++
-    deliverResult(peer, commandId, outcome)
+    deliverResult(
+      peer,
+      commandId,
+      outcome,
+      'code' in result ? result.code : undefined,
+    )
     return outcome
   }
   function commandPeer(input: {

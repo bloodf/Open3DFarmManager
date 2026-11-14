@@ -12,6 +12,7 @@ import {
   MAX_PAUSE_CAPABILITY_WIRE_BYTES,
   MAX_PAUSE_ADMISSION_WIRE_BYTES,
 } from './pause-capability.ts'
+import { ControlResultCode } from './control-actions.ts'
 import { decodeCommandV2, MAX_COMMAND_V2_WIRE_BYTES } from './command-v2.ts'
 
 // An already-canonical inner JSON string costs at most twice its UTF-8 bytes
@@ -65,6 +66,7 @@ export const PauseChannelFrame = z
       t: z.literal('control.result'),
       command_id: BrowserDeviceUuid,
       outcome: z.enum(['rejected', 'not-sent', 'applied', 'outcome-unknown']),
+      code: ControlResultCode.optional(),
     }),
     z.strictObject({
       ...base,

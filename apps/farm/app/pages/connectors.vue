@@ -1,4 +1,19 @@
 <script setup lang="ts">
+import {
+  connectorVersionView,
+  connectorUpgradeDoc,
+} from '../utils/connector-version.ts'
+import { useConnectorVersions } from '../utils/connector-version-feed.ts'
+const versionFeed = useConnectorVersions()
+const versionReady = versionFeed.ready
+
+function versionFor(agentId: string) {
+  return connectorVersionView(
+    versionReady.value?.scope?.farmId === farmId.value
+      ? versionFeed.versions.value.get(agentId)
+      : undefined,
+  )
+}
 type Farm = { farmId: string }
 type Connector = {
   agentId: string
@@ -8,6 +23,15 @@ type Connector = {
 const farms = ref<Farm[]>([])
 const connectors = ref<Connector[]>([])
 const farmId = ref('')
+watch([farmId, versionReady], ([selected, ready]) => {
+  if (
+    selected &&
+    ready &&
+    ready.scope?.farmId !== selected &&
+    ready.farms.some((farm) => farm.farmId === selected)
+  )
+    void versionFeed.selectFarm(selected)
+})
 const nextFarm = ref<string | null>(null)
 const nextConnector = ref<string | null>(null)
 const pending = ref(false)
@@ -99,6 +123,8 @@ function selectRecovery(target: Connector | null) {
   recoveryConfirmed.value = false
 }
 function selectFarm() {
+  versionFeed.versions.value = new Map()
+  if (farmId.value) void versionFeed.selectFarm(farmId.value)
   cancel()
   if (farmId.value) void load('connectors')
 }
@@ -216,6 +242,41 @@ onBeforeRouteLeave(() => {
       </p>
       <template v-if="farmId && !pending">
         <h2>Connectors registrados</h2>
+        <p>
+          Versões são consultadas pela conexão direta autenticada. Sem uma chave
+          aprovada neste navegador ou sem conexão, a versão permanece
+          desconhecida.
+        </p>
+        <template v-if="versionReady?.keys.kind === 'available'">
+          <label for="version-key"
+            >Chave do navegador para consultar versões</label
+          >
+          <select
+            id="version-key"
+            :value="versionReady.keys.selected"
+            @change="
+              versionFeed.selectKey(($event.target as HTMLSelectElement).value)
+            "
+          >
+            <option value="">Selecione uma chave</option>
+            <option
+              v-for="key in versionReady.keys.choices"
+              :key="key.keyId"
+              :value="key.keyId"
+            >
+              {{ key.thumbprint }}
+            </option>
+          </select>
+        </template>
+        <button
+          v-if="
+            versionReady?.nextPrinter && versionReady.scope?.farmId === farmId
+          "
+          type="button"
+          @click="versionFeed.selectFarm(farmId, versionReady.nextPrinter)"
+        >
+          Consultar versões das próximas impressoras
+        </button>
         <p v-if="!connectors.length">Nenhum Connector registrado nesta farm.</p>
         <ul v-else>
           <li v-for="connector in connectors" :key="connector.agentId">
@@ -224,9 +285,17 @@ onBeforeRouteLeave(() => {
               <dd>{{ connector.agentId }}</dd>
               <dt>Impressão digital</dt>
               <dd>{{ connector.fingerprint }}</dd>
+              <dt>Versão do Connector</dt>
+              <dd>{{ versionFor(connector.agentId).version }}</dd>
+              <dt>Revisão do protocolo</dt>
+              <dd>{{ versionFor(connector.agentId).revision }}</dd>
               <dt>Estado do registro</dt>
               <dd>{{ statusLabel[connector.status] }}</dd>
             </dl>
+            <p v-if="versionFor(connector.agentId).warning" role="status">
+              {{ versionFor(connector.agentId).warning }}
+              <a :href="connectorUpgradeDoc">Documentação de atualização</a>
+            </p>
             <button
               v-if="pairingEnabled && connector.status !== 'revoked'"
               type="button"

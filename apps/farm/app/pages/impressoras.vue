@@ -1250,6 +1250,11 @@ onBeforeRouteLeave(clear)
 <template>
   <main id="conteudo">
     <h1 ref="heading" tabindex="-1">Impressoras da farm</h1>
+    <p>
+      <NuxtLink to="/compatibilidade"
+        >Consultar compatibilidade de impressoras</NuxtLink
+      >
+    </p>
     <nav aria-label="Conta">
       <NuxtLink to="/">Início</NuxtLink> ·
       <NuxtLink to="/farm">Minha farm</NuxtLink> ·

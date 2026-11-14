@@ -473,6 +473,7 @@ export class PauseBrowserPeer {
     input: unknown,
     file: Blob,
     signal?: AbortSignal,
+    onProgress?: (sentBytes: number) => void,
   ): Promise<FileUploadResult> {
     const offer = parseOffer(input)
     const channel = this.#fileChannel
@@ -556,6 +557,7 @@ export class PauseBrowserPeer {
         const ack = await request(frame)
         if (ack.type === 'result') return result(ack)
         if (ack.type !== 'ack') throw Error('Invalid upload reply')
+        onProgress?.(Math.min(offset + bytes.byteLength, file.size))
       }
       return result(await request(JSON.stringify({ type: 'complete' })))
     } finally {

@@ -39,7 +39,8 @@ export type FarmPauseKey = Readonly<{
 type Signalling = Pick<
   PauseBrowserSignallingClient,
   'start' | 'close' | 'dispose' | 'sendPhase' | 'sendCommand'
->
+> &
+  Partial<Pick<PauseBrowserSignallingClient, 'listFiles' | 'sendFile'>>
 type SignallingOptions = NonNullable<
   ConstructorParameters<typeof PauseBrowserSignallingClient>[1]
 >
@@ -206,6 +207,26 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   return Object.freeze({
     /** Sends the single signed pause. Only valid in the `ready` state. */
     issueControlCommand,
+    async listFiles(printerKey: string) {
+      if (
+        state.kind !== 'ready' ||
+        controller.signal.aborted ||
+        !signalling?.listFiles
+      )
+        throw Error('File list unavailable')
+      return signalling.listFiles(printerKey)
+    },
+    async sendFile(
+      ...args: Parameters<PauseBrowserSignallingClient['sendFile']>
+    ) {
+      if (
+        state.kind !== 'ready' ||
+        controller.signal.aborted ||
+        !signalling?.sendFile
+      )
+        throw Error('File transfer unavailable')
+      return signalling.sendFile(...args)
+    },
     pause: () => issueControlCommand('pause'),
     close() {
       if (state.kind === 'connecting' || state.kind === 'ready') fail('closed')

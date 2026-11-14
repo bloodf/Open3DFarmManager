@@ -103,7 +103,12 @@ type Peer = Pick<
   PauseBrowserPeer,
   'answer' | 'close' | 'closed' | 'sendPhase'
 > &
-  Partial<Pick<PauseBrowserPeer, 'diagnostics' | 'sendCommand'>>
+  Partial<
+    Pick<
+      PauseBrowserPeer,
+      'diagnostics' | 'sendCommand' | 'listFiles' | 'sendFile'
+    >
+  >
 type Options = Readonly<{
   peerFactory?: (input: PeerOptions) => Peer
   clock?: ChannelClock
@@ -408,6 +413,20 @@ export class PauseBrowserSignallingClient {
       this.close('command-send')
       return false
     }
+  }
+  async listFiles(printerKey: string) {
+    if (
+      !this.#channel.current() ||
+      !this.#proofsReady ||
+      !this.#peer?.listFiles
+    )
+      throw Error('File list unavailable')
+    return this.#peer.listFiles(printerKey)
+  }
+  async sendFile(...args: Parameters<PauseBrowserPeer['sendFile']>) {
+    if (!this.#channel.current() || !this.#proofsReady || !this.#peer?.sendFile)
+      throw Error('File transfer unavailable')
+    return this.#peer.sendFile(...args)
   }
   close(reason = 'closed'): void {
     this.#channel.close(reason)

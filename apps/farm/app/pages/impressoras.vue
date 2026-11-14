@@ -754,6 +754,7 @@ async function ensureKobraSession(
   ) {
     throw new Error('Contexto de configuração indisponível.')
   }
+  const token = kobraGeneration
   const session = await openConfigurationBrowserSession({
     accountId: keyState.accountId,
     farmId: farmId.value,
@@ -763,6 +764,10 @@ async function ensureKobraSession(
     bootstrap: boot.data,
     signal,
   })
+  if (token !== kobraGeneration || signal.aborted) {
+    session.close()
+    throw new Error('Configuration context changed before connection')
+  }
   kobraSession = session
   return session
 }
@@ -946,7 +951,8 @@ async function prepareKobraX() {
     const targetSha256 = await configurationTargetHash(validated.target)
     if (kobraKeyState.value.kind !== 'available')
       throw new Error('Approved browser key required')
-    opContext = {
+    if (token !== kobraGeneration || opController.signal.aborted) return
+    const candidate: KobraOperationContext = {
       accountId: kobraKeyState.value.accountId,
       operationId: crypto.randomUUID(),
       farmId: farmId.value,
@@ -959,19 +965,25 @@ async function prepareKobraX() {
       preparedReceipt: null,
       preparedReceiptSha256: null,
     }
-    kobraOperation.value = opContext
-    persistPendingOperation(opContext, 'awaiting-reconcile')
     const session = await ensureKobraSession(opController.signal)
     if (token !== kobraGeneration) return
     const outcome = await session.prepare({
-      operationId: opContext.operationId,
-      target: opContext.target,
-      expectedRevision: opContext.expectedRevision,
+      operationId: candidate.operationId,
+      target: candidate.target,
+      expectedRevision: candidate.expectedRevision,
       signal: opController.signal,
+      beforeDispatch: () => {
+        if (token !== kobraGeneration || opController.signal.aborted)
+          throw new Error('Configuration context changed before dispatch')
+        // Persist before handing the frame to the transport; send failures stay uncertain.
+        persistPendingOperation(candidate, 'awaiting-reconcile')
+        opContext = candidate
+        kobraOperation.value = candidate
+      },
     })
-    await applySessionOutcome(outcome, opContext, token, opController.signal)
+    await applySessionOutcome(outcome, candidate, token, opController.signal)
   } catch (cause) {
-    await handleKobraException(cause, opContext, token, true)
+    await handleKobraException(cause, opContext, token, opContext !== null)
   } finally {
     if (token === kobraGeneration) kobraBusy.value = false
   }

@@ -32,9 +32,9 @@
     "command": "node scripts/test-configuration-postgres-acceptance.ts (explicit admission, owned context, pinned image, external evidence directory and loopback port required)"
   },
   "service_free_gate": {
-    "status": "blocked",
+    "status": "pass",
     "runner_test": "pass",
-    "typescript": "TS2322 in tests/node/telemetry-queue-lock.test.ts:249: missing limits; outside authorized ownership",
-    "formatting": "not reached by gate"
+    "typescript": "pass",
+    "formatting": "pass"
   }
 }

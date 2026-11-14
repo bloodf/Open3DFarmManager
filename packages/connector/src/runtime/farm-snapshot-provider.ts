@@ -57,7 +57,9 @@ const FRAME_LIMIT = 'Application frame limit'
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
   nowMono?: () => number
-  controlsFor?: (assignmentId: string) => readonly ExtendedControlAction[]
+  controlsFor?: (
+    assignmentId: string,
+  ) => readonly ExtendedControlAction[] | undefined
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -115,7 +117,7 @@ export function createFarmSnapshotSource(input: {
       }
       const controls = input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
-        controls && controls.length > 0 ? { controls: [...controls] } : {}
+        controls !== undefined ? { controls: [...controls] } : {}
       const { controls: _untrustedControls, ...printer } = entry.printer
       printers.push(
         PrinterState.parse({

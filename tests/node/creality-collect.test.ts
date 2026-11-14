@@ -200,7 +200,7 @@ test(
 
 test('Creality field provenance expires independently and cannot grant controls', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
-  const f = fixture(['creality'])
+  const f = fixture(['creality'], () => [])
   const stamps = { state: 100, progress: 100, toolTemperatureCelsius: 50 }
   try {
     f.source.observe({
@@ -218,7 +218,7 @@ test('Creality field provenance expires independently and cannot grant controls'
       fieldObservedAtMonoMs: { creality: stamps },
     })
     f.open()
-    assert.equal(f.received[0]?.printers[0]?.controls, undefined)
+    assert.deepEqual(f.received[0]?.printers[0]?.controls, [])
     assert.equal(f.received[0]?.validUntilMonoMs, 5050)
     stamps.toolTemperatureCelsius = 100
     f.setNow(5050)

@@ -216,7 +216,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     snapshots = config.signalling
       ? createFarmSnapshotSource({
           assignmentRefs: refs,
-          controlsFor: (id) => controlsFor?.(id) ?? [],
+          controlsFor: (id) => controlsFor?.(id),
         })
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')

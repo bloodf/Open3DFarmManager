@@ -8,6 +8,13 @@ export const PrinterState = z
       .max(3)
       .refine((actions) => new Set(actions).size === actions.length)
       .optional(),
+    identity: z
+      .strictObject({
+        vendor: z.string().min(1).max(255).optional(),
+        model: z.string().min(1).max(1024).optional(),
+        firmware: z.string().min(1).max(1024).optional(),
+      })
+      .optional(),
     printerKey: z.string().min(1).max(128),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     progress: z.number().min(0).max(1).optional(),

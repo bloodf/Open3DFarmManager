@@ -88,7 +88,13 @@ export type MoonrakerCompleteObservation = Readonly<{
 }>
 const selectedObjects = {
   webhooks: ['state'],
-  print_stats: ['state'],
+  print_stats: [
+    'state',
+    'filename',
+    'print_duration',
+    'total_duration',
+    'info',
+  ],
   virtual_sdcard: ['progress'],
 }
 const completeObjects = {

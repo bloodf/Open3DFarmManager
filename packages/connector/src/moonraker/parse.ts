@@ -30,6 +30,10 @@ const Status = z.object({
     state: z.enum(['ready', 'startup', 'shutdown', 'error']),
   }),
   print_stats: z.object({
+    filename: z.unknown().optional(),
+    print_duration: z.unknown().optional(),
+    total_duration: z.unknown().optional(),
+    info: z.unknown().optional(),
     state: z.enum([
       'standby',
       'printing',

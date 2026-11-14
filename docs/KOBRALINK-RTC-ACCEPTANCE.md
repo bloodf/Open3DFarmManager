@@ -25,7 +25,7 @@ The bounded positive first-registration chain is **qualified** (`pass`) for:
   `finally`, and the dedicated VM is returned `STOPPED` with the global Docker
   context kept on `orbstack`.
 
-## Final qualification: status **blocked**
+## Final qualification: status **blocked** (see Current qualification checkpoint)
 
 The same real stack now runs seven isolated worlds, each with a fresh database,
 bridge and synthetic printer: `positive`, `think-time`, `lost-reply`,
@@ -243,3 +243,48 @@ Candidate `0be57e799c48151dc611bca66fa154b2464b5222` preserves the offline and t
 The subsequent full-suite attempt `e2ea6f07-917b-45ab-bb46-a73ff4763fea` failed before any world executed: Docker refused creation of the isolated subnet with `invalid pool request: Pool overlaps with other one on this address space`. Inspection identified a pre-existing network labelled for run `c8d96f0a-2317-403c-8fd7-7714c3aac973`, with three think-time container endpoints. These resources were outside the transferred run custody and were preserved. No full-suite retry was made. The owned VM was stopped after inspection. This is an infrastructure custody blocker, not evidence of a product defect or full qualification.
 
 The committed JSON is the actual failed full-attempt report. Its `complete` field describes selection of all worlds, not successful execution; worlds and qualifications remain authoritative. `--verify-report` must fail. Runner tests, 22 configuration/diagnostic tests, TypeScript and formatting passed. Unread 302/307 rejection remains covered. No physical printer or production service was used.
+
+## Current qualification checkpoint (2026-11-14, candidate 55456de)
+
+Status: **blocked**. `--verify-report` must fail. The committed JSON is the
+actual report of full run `e5d289c7-f654-4483-b4b4-2519c5741e34` on
+`6bfe5c1417d18ac8b6141c59d5aaf2f9e820b107` (source SHA-256
+`bd52d16e…936b21`, output SHA-256 `10df845e…6792fc`): all seven worlds exited 0
+(31/26/13/15/14/13/12 checks), twelve qualifications plus
+`think_time_lease_renewal` passed, resource cleanup passed, and
+`browser_secrets_absent` failed on one unread body.
+
+Fixes since run `620bba9c-be53-49ec-8a21-557409a12ecf`:
+
+- `d5a2e48`: the Connector judged the database-stamped `config.context-request`
+  not-before strictly against its own clock and refused every context
+  (`context-window`) in five worlds. It now applies the published hard-max
+  skew (5000 ms) as the browser does. Expiry, deadlines, TTLs and
+  `MIN_CONTEXT_MS` are unchanged. `tests/unit/configuration-context-clock.test.ts`
+  reproduces the refusal through the real handler.
+- `a73a31b`…`55456de`: denial bodies no page code drained were never scanned.
+  `pageStatus` drains its own response; the observer captures each in-scope
+  response at network level, paired by method, URL, status and request start
+  stamp with exactly one candidate. A capture counts only when complete:
+  exact declared length for unencoded, unchunked bodies, otherwise a finished
+  load, and a body that finished before streaming is fetched at
+  `loadingFinished` before a navigation can discard it. Truncated, short,
+  encoded-unfinished and ambiguous captures stay unread. Real-Chromium
+  regressions are in `tests/node/kobralink-rtc-runner.test.ts`.
+- The packaging test takes its optional upstream checkout from
+  `KOBRALINK_UPSTREAM_CHECKOUT` instead of a private host path.
+
+Selected runs on the capture fixes: `e17fe67a` (authority, credential-expiry,
+late-ack: 0 unread; late-ack recovery failed once when the first config
+context closed before inventory) and `a82aeed8` (late-ack: all checks pass).
+
+Open blocker, selected positive `d6564045-8ea8-4fab-a867-d4ca3633541a` on
+`55456de`: the owner's configuration bootstrap was refused with 403 from
+2103 ms to 29917 ms (8 requests), so positive stopped after 9 checks. The
+body audit was clean (70 read, 0 unread). The refusal is the bootstrap
+authority returning null; it has no Connector-readiness predicate, and the
+Connector reported signalling ready from 2945 ms while the 403s continued.
+Owner and admin use separate browser contexts. The exact store predicate was
+not identified: the run's database was removed by cleanup, and no fixture
+readiness ordering or clock window explains a 28 s refusal. No physical
+printer or production service was used; the owned VM is stopped.

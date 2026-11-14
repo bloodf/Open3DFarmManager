@@ -1,296 +1,64 @@
 {
   "status": "fail",
   "complete": true,
-  "head": "0be57e799c48151dc611bca66fa154b2464b5222",
-  "run": "e2ea6f07-917b-45ab-bb46-a73ff4763fea",
-  "sourceSha256": null,
-  "outputSha256": null,
-  "worlds": {},
-  "qualifications": {
-    "first_registration_without_device_id": "not-executed",
-    "single_ui": "not-executed",
-    "inventory_before_live": "not-executed",
-    "reload_reconnect_no_duplicate": "not-executed",
-    "lost_ack_recovery": "not-executed",
-    "late_ack_fresh_authority": "not-executed",
-    "revoked_authority_refused": "not-executed",
-    "account_switch_isolated": "not-executed",
-    "browser_secrets_absent": "not-executed",
-    "mobile_keyboard_accessibility": "not-executed",
-    "stale_error_capabilities": "not-executed",
-    "resource_cleanup": "pass",
-    "think_time_lease_renewal": "not-executed"
+  "head": "6bfe5c1417d18ac8b6141c59d5aaf2f9e820b107",
+  "run": "e5d289c7-f654-4483-b4b4-2519c5741e34",
+  "sourceSha256": "bd52d16eb14bafb60f389223d0f1fe2ca9fbafc4af2d0611a32ee8fd1c936b21",
+  "outputSha256": "10df845e36fe6a70e1b8109d6e9b42f36c6d26742b6b863f737bd5b4dc6792fc",
+  "worlds": {
+    "positive": {
+      "exit": 0,
+      "checks": 31
+    },
+    "think-time": {
+      "exit": 0,
+      "checks": 26
+    },
+    "lost-reply": {
+      "exit": 0,
+      "checks": 13
+    },
+    "late-ack": {
+      "exit": 0,
+      "checks": 15
+    },
+    "authority": {
+      "exit": 0,
+      "checks": 14
+    },
+    "account-switch": {
+      "exit": 0,
+      "checks": 13
+    },
+    "credential-expiry": {
+      "exit": 0,
+      "checks": 12
+    }
   },
-  "failures": [],
-  "missing": [
+  "qualifications": {
+    "first_registration_without_device_id": "pass",
+    "single_ui": "pass",
+    "inventory_before_live": "pass",
+    "reload_reconnect_no_duplicate": "pass",
+    "lost_ack_recovery": "pass",
+    "late_ack_fresh_authority": "pass",
+    "revoked_authority_refused": "pass",
+    "account_switch_isolated": "pass",
+    "browser_secrets_absent": "fail",
+    "mobile_keyboard_accessibility": "pass",
+    "stale_error_capabilities": "pass",
+    "resource_cleanup": "pass",
+    "think_time_lease_renewal": "pass"
+  },
+  "failures": [
     {
-      "qualification": "first_registration_without_device_id",
-      "id": "device-id-left-empty"
-    },
-    {
-      "qualification": "first_registration_without_device_id",
-      "id": "identity-observed-before-commit"
-    },
-    {
-      "qualification": "first_registration_without_device_id",
-      "id": "confirmed-heading"
-    },
-    {
-      "qualification": "single_ui",
-      "id": "no-foreign-pages"
-    },
-    {
-      "qualification": "single_ui",
-      "id": "no-iframe"
-    },
-    {
-      "qualification": "inventory_before_live",
-      "id": "collector-stopped-before-inventory"
-    },
-    {
-      "qualification": "inventory_before_live",
-      "id": "local-commit-unconfirmed-then-activated"
-    },
-    {
-      "qualification": "inventory_before_live",
-      "id": "live-authenticated-idle"
-    },
-    {
-      "qualification": "reload_reconnect_no_duplicate",
-      "id": "reload-preserves-counts"
-    },
-    {
-      "qualification": "reload_reconnect_no_duplicate",
-      "id": "reconnect-preserves-counts"
-    },
-    {
-      "qualification": "reload_reconnect_no_duplicate",
-      "id": "connector-restart-preserves-counts"
-    },
-    {
-      "qualification": "reload_reconnect_no_duplicate",
-      "id": "repeat-registration-refused-without-duplicate"
-    },
-    {
-      "qualification": "lost_ack_recovery",
-      "id": "reply-lost-unconfirmed"
-    },
-    {
-      "qualification": "lost_ack_recovery",
-      "id": "reload-restores-pending-operation"
-    },
-    {
-      "qualification": "lost_ack_recovery",
-      "id": "reconcile-confirms-same-operation"
-    },
-    {
-      "qualification": "lost_ack_recovery",
-      "id": "no-duplicate-after-lost-reply"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "server-registered-connector-unconfirmed"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "expired-transport-proof-refused"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "old-ack-without-admitted-status-refused"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "old-ack-on-new-transport-refused"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "fresh-status-then-ack-confirms"
-    },
-    {
-      "qualification": "late_ack_fresh_authority",
-      "id": "no-duplicate-after-late-ack"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "owner-write-succeeds"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "admin-write-succeeds"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "viewer-refused"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "revoked-membership-refused"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "revoked-browser-key-refused"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "revoked-connector-refused"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "expired-credential-refused-enrollment-approved"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "credential-only-revocation-unreachable-by-schema"
-    },
-    {
-      "qualification": "revoked_authority_refused",
-      "id": "denied-cases-add-nothing"
-    },
-    {
-      "qualification": "account_switch_isolated",
-      "id": "pending-restored-for-owner"
-    },
-    {
-      "qualification": "account_switch_isolated",
-      "id": "pending-hidden-from-other-account"
-    },
-    {
-      "qualification": "account_switch_isolated",
-      "id": "forged-restore-refused"
-    },
-    {
-      "qualification": "account_switch_isolated",
-      "id": "owner-keeps-own-operation"
-    },
-    {
+      "world": "positive",
       "qualification": "browser_secrets_absent",
-      "id": "secret-set-non-empty"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "responses-clean"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "storage-clean"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "console-clean"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "dom-clean"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "websocket-clean"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "browser-inspection-complete"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "no-unexpected-console-errors"
-    },
-    {
-      "qualification": "browser_secrets_absent",
-      "id": "no-unexpected-network-errors"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "mobile-form-keyboard-only"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "mobile-identity-confirm-commit"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "mobile-live-view"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "mobile-error-state"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "desktop-error-state"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "focus-visible"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "controls-labelled"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "no-horizontal-overflow"
-    },
-    {
-      "qualification": "mobile_keyboard_accessibility",
-      "id": "screenshots-captured"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "unknown-before-first-state"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "offline-reported-truthfully"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "stale-after-connector-stop"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "kobra-controls-absent"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "kobra-camera-absent"
-    },
-    {
-      "qualification": "stale_error_capabilities",
-      "id": "capabilities-declared-unavailable"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "renewal-observed-during-think-time"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "prepare-near-rotation-safe"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "prepare-refusal-never-reached-connector"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "prepare-near-rotation-recoverable"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "commit-near-rotation-safe"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "commit-near-rotation-recoverable"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "fresh-admission-after-renewal"
-    },
-    {
-      "qualification": "think_time_lease_renewal",
-      "id": "no-duplicate-after-think-time"
+      "id": "browser-inspection-complete",
+      "ok": false,
+      "detail": "pages=2 storage/DOM unread on: none; response bodies read: 312; unread: 1; bodyless by protocol: 0; aborted by the browser before completion: 0"
     }
   ],
-  "checks": 5
+  "missing": [],
+  "checks": 129
 }

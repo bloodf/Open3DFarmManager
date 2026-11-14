@@ -484,3 +484,47 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     server.close()
   }
 })
+
+test('network capture keeps a finished body the page navigated away from', async () => {
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith('/page')) return res.end('<html>ok</html>')
+    res.setHeader('content-type', 'application/json')
+    res.end('{"me":"finished-then-navigated"}')
+  }).listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.goto(origin + '/page')
+    const network = await captureBodies(page, origin)
+    let take: ReturnType<typeof network.take> | undefined
+    page.on('response', (res) => {
+      if (!res.url().endsWith('/api/me')) return
+      take = network.take(
+        res.request().method(),
+        res.url(),
+        res.status(),
+        res.request().timing().startTime,
+      )
+    })
+    // Run e5d289c7: the page read the body, the load finished before any
+    // streaming began, and a navigation followed before the observer read it.
+    await page.evaluate(async () => {
+      await (await fetch('/api/me')).text()
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      location.href = '/page?next'
+    })
+    await page.waitForURL(/next/)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    assert.ok(take)
+    const captured = (await take).read()
+    assert.equal(captured.body, '{"me":"finished-then-navigated"}')
+    assert.equal(captured.facts.finished, true)
+    assert.equal(captured.facts.fetched, true)
+  } finally {
+    await browser.close()
+    server.closeAllConnections()
+    server.close()
+  }
+})

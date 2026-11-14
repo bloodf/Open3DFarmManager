@@ -6,7 +6,8 @@ import type { CDPSession, Page } from '@playwright/test'
  * this session (`Network.streamResourceContent`). A body counts as captured
  * only when it is complete: for an unencoded, unchunked response exactly the
  * declared Content-Length bytes arrived; otherwise Chromium reported
- * `Network.loadingFinished`. Chromium does not report a body the
+ * `Network.loadingFinished`. A body that finished before streaming began is
+ * fetched whole at that moment, before a navigation can discard it. Chromium does not report a body the
  * page never drains as finished even when every declared byte arrived.
  * Partial, overflowing or unframed unfinished bodies are never read.
  */
@@ -18,6 +19,7 @@ export interface BodyFacts {
   finished: boolean
   failed: boolean
   streamed: boolean
+  fetched: boolean
   /** Bytes beyond the capture bound were dropped: never a complete body. */
   truncated: boolean
 }
@@ -40,6 +42,8 @@ type Entry = {
   finished: boolean
   failed: boolean
   streamed: boolean
+  /** Whole body fetched from Chromium right when loading finished. */
+  fetched: boolean
   truncated: boolean
   waiters: (() => void)[]
 }
@@ -81,7 +85,10 @@ function settle(entry: Entry) {
 }
 
 function complete(entry: Entry): boolean {
-  if (!entry.streamed || entry.truncated || entry.failed) return false
+  if (entry.truncated || entry.failed) return false
+  // A body fetched whole at loadingFinished is the complete decoded body.
+  if (entry.fetched) return entry.finished
+  if (!entry.streamed) return false
   // Exact wire framing proves completeness only for untransformed bodies:
   // decoded bytes are not comparable with a compressed or chunked length.
   if (entry.declaredLength !== null && !entry.encoded && !entry.chunked)
@@ -102,6 +109,7 @@ function view(entry: Entry | null): CapturedBody {
       finished: entry?.finished ?? false,
       failed: entry?.failed ?? false,
       streamed: entry?.streamed ?? false,
+      fetched: entry?.fetched ?? false,
       truncated: entry?.truncated ?? false,
     },
   }
@@ -125,6 +133,7 @@ function newEntry(headers: Record<string, unknown>, startMs: number): Entry {
     finished: false,
     failed: false,
     streamed: false,
+    fetched: false,
     truncated: false,
     waiters: [],
   }
@@ -174,6 +183,7 @@ function attach(
       void session
         .send('Network.streamResourceContent', { requestId: event.requestId })
         .then((result) => {
+          if (entry.fetched) return
           entry.streamed = true
           push(entry, Buffer.from(result.bufferedData, 'base64'), true)
           if (complete(entry)) settle(entry)
@@ -192,7 +202,29 @@ function attach(
     if (!entry) return
     entry.finished = true
     byId.delete(event.requestId)
-    if (complete(entry)) settle(entry)
+    if (entry.streamed) {
+      if (complete(entry)) settle(entry)
+      return
+    }
+    // Finished before streaming began: fetch the whole body now, before a
+    // navigation can discard it. A failed fetch leaves it uncaptured.
+    void session
+      .send('Network.getResponseBody', { requestId: event.requestId })
+      .then((result) => {
+        if (entry.streamed) return
+        const whole = Buffer.from(
+          result.body,
+          result.base64Encoded ? 'base64' : 'utf8',
+        )
+        if (whole.length > MAX_CAPTURE_BYTES) entry.truncated = true
+        else {
+          entry.chunks = [whole]
+          entry.bytes = whole.length
+          entry.fetched = true
+        }
+        if (complete(entry)) settle(entry)
+      })
+      .catch(() => {})
   })
   session.on('Network.loadingFailed', (event) => {
     const entry = byId.get(event.requestId)

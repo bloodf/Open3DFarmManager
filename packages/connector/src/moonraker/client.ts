@@ -1,4 +1,4 @@
-import { moonrakerAuthHeaders } from '../config/moonraker.ts'
+import { moonrakerSession, moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
@@ -38,7 +38,10 @@ export async function readMoonrakerReady(input: {
       signal,
       redirect: 'error',
       credentials: 'omit',
-      headers: moonrakerAuthHeaders(input.origin, input.limits),
+      headers: await (moonrakerSession(
+        input.origin,
+        input.limits,
+      )?.getAuthHeaders() ?? moonrakerAuthHeaders(input.origin, input.limits)),
     })
     if (!response.ok || !response.body)
       throw new MoonrakerClientError('offline')
@@ -117,9 +120,7 @@ export function openMoonrakerClient(input: {
   close: () => void
 } {
   // Let the snapshot promise continuation install its baseline before a delta.
-  const socket = createMoonrakerSocket(input.origin, input.limits, {
-    allowSynchronousEvents: false,
-  })
+  let socket: ReturnType<typeof createMoonrakerSocket> | undefined
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
   let nextId = 1
@@ -149,13 +150,14 @@ export function openMoonrakerClient(input: {
       /* Still destroy native transport. */
     }
     input.signal.removeEventListener('abort', abort)
-    socket.off('open', open)
-    socket.off('message', message)
+    socket?.off('open', open)
+    socket?.off('message', message)
     if (!subscribed) rejectSnapshot(new MoonrakerClientError(reason))
     // Keep the error listener until actual close: terminate during a handshake
     // emits an asynchronous error. Joining closed observes destruction, not intent.
     closedReason = reason
-    socket.terminate()
+    if (socket) socket.terminate()
+    else resolveClosed(reason)
   }
   function abort() {
     finish('offline')
@@ -170,8 +172,8 @@ export function openMoonrakerClient(input: {
   }
   function close() {
     finish('offline')
-    socket.off('error', error)
-    socket.off('close', close)
+    socket?.off('error', error)
+    socket?.off('close', close)
     resolveClosed(closedReason)
   }
   function open() {
@@ -185,7 +187,7 @@ export function openMoonrakerClient(input: {
     )
     pending = { id: 1, started: performance.now() }
     // Subscribe remains the only request unless raw display evidence is enabled.
-    socket.send(
+    socket!.send(
       JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -211,8 +213,8 @@ export function openMoonrakerClient(input: {
           Math.min(1000, input.limits.requestTimeoutMs),
         )
         try {
-          if (socket.bufferedAmount !== 0) throw Error('Outbound queue')
-          socket.send(
+          if (socket!.bufferedAmount !== 0) throw Error('Outbound queue')
+          socket!.send(
             JSON.stringify({
               jsonrpc: '2.0',
               id: nextId,
@@ -287,10 +289,26 @@ export function openMoonrakerClient(input: {
       finish('invalid-response')
     }
   }
-  socket.on('open', open)
-  socket.on('message', message)
-  socket.on('error', error)
-  socket.on('close', close)
+  async function connect() {
+    try {
+      const session = moonrakerSession(input.origin, input.limits)
+      const authenticatedUrl = session
+        ? await session.getWebsocketUrl()
+        : undefined
+      if (finished) return
+      socket = createMoonrakerSocket(input.origin, input.limits, {
+        allowSynchronousEvents: false,
+        ...(authenticatedUrl ? { authenticatedUrl } : {}),
+      })
+      socket.on('open', open)
+      socket.on('message', message)
+      socket.on('error', error)
+      socket.on('close', close)
+    } catch {
+      finish('offline')
+    }
+  }
+  void connect()
   input.signal.addEventListener('abort', abort, { once: true })
   if (input.signal.aborted) abort()
   return { snapshot, closed, close: abort }

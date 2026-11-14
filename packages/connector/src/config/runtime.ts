@@ -1,3 +1,5 @@
+import { parseCollectorConfig } from './creality.ts'
+import { provisionCrealityPrinter } from '../control/printer-binding.ts'
 import { z } from 'zod'
 import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
@@ -7,11 +9,7 @@ import {
   provisionReadonlyPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
-import {
-  LocalCollectorConfigSchema,
-  parseLocalCollectorConfig,
-  readPrivateJsonFile,
-} from './local.ts'
+import { readPrivateJsonFile } from './local.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
 import { parsePauseRuntimeConfig } from './pause.ts'
@@ -20,8 +18,8 @@ import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 
 const Runtime = z.strictObject({
-  version: z.union([z.literal(1), z.literal(2)]),
-  collection: LocalCollectorConfigSchema,
+  version: z.union([z.literal(1), z.literal(2), z.literal(4)]),
+  collection: z.unknown(),
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
   telemetry: z
@@ -61,7 +59,7 @@ export function readAgentRuntimeConfig(
   const input = Runtime.parse(
     readPrivateJsonFile(path, { maxBytes: 64 * 1024 }),
   )
-  const collection = parseLocalCollectorConfig(input.collection)
+  const collection = parseCollectorConfig(input.collection)
   if (input.version !== collection.version)
     throw Error('Runtime collection version mismatch')
   if (collection.spoolman && collection.spoolman.farmId !== credential.farm_id)
@@ -82,9 +80,21 @@ export function readAgentRuntimeConfig(
       value !== null &&
       'backend' in value &&
       value.backend === 'kobralink'
-    const binding = isKobra
-      ? provisionReadonlyPrinter(value)
-      : registry?.provision(value)
+    const creality =
+      collection.version === 4
+        ? collection.creality.printers.find(
+            (p) =>
+              typeof value === 'object' &&
+              value !== null &&
+              'printer_key' in value &&
+              value.printer_key === p.printerKey,
+          )
+        : undefined
+    const binding = creality
+      ? provisionCrealityPrinter(value, creality)
+      : isKobra
+        ? provisionReadonlyPrinter(value)
+        : registry?.provision(value)
     if (!binding) throw Error('Moonraker assignment requires local allowlist')
     const assignment = readRuntimePrinterBinding(binding)
     if (
@@ -101,7 +111,11 @@ export function readAgentRuntimeConfig(
   if (
     assignments.length !==
     collection.printers.length +
-      (collection.version === 2 ? collection.kobralink.printers.length : 0)
+      (collection.version === 4
+        ? collection.creality.printers.length
+        : collection.version === 2
+          ? collection.kobralink.printers.length
+          : 0)
   )
     throw new Error('Runtime assignment mapping is incomplete')
   for (const printer of collection.printers) {

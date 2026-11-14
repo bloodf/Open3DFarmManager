@@ -1,4 +1,21 @@
 import { z } from 'zod'
+import { readPrivateJsonFile } from './local.ts'
+
+const credentials = new WeakMap<
+  MoonrakerLimits,
+  { origin: string; key: string }
+>()
+
+export function moonrakerAuthHeaders(
+  origin: string,
+  limits: MoonrakerLimits,
+): Record<string, string> {
+  const credential = credentials.get(limits)
+  if (!credential) return {}
+  if (origin !== credential.origin)
+    throw new Error('Invalid Moonraker credential origin')
+  return { 'X-Api-Key': credential.key }
+}
 
 export type MoonrakerLimits = Readonly<{
   maxMessageBytes: number
@@ -26,7 +43,7 @@ const Limits = z
   .refine((value) => value.reconnectMinMs <= value.reconnectMaxMs)
 
 export function validateMoonrakerInput(input: {
-  assignment: { printerKey: string; origin: string }
+  assignment: { printerKey: string; origin: string; apiKeyFile?: string }
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
 }): { printerKey: string; origin: string; limits: MoonrakerLimits } {
@@ -61,5 +78,21 @@ export function validateMoonrakerInput(input: {
   const origin = originOnly(input.assignment.origin)
   if (!input.allowedOrigins.map(originOnly).includes(origin))
     throw new Error('Moonraker origin is not allowlisted')
+  if (input.assignment.apiKeyFile !== undefined) {
+    try {
+      const credential = z
+        .strictObject({
+          origin: z.string(),
+          apiKey: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
+        })
+        .parse(
+          readPrivateJsonFile(input.assignment.apiKeyFile, { maxBytes: 4096 }),
+        )
+      if (credential.origin !== origin) throw new Error()
+      credentials.set(limits, { origin, key: credential.apiKey })
+    } catch {
+      throw new Error('Invalid private Moonraker credential')
+    }
+  }
   return { printerKey, origin, limits }
 }

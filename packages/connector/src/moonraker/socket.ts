@@ -1,3 +1,4 @@
+import { moonrakerAuthHeaders } from '../config/moonraker.ts'
 import type { MoonrakerLimits } from '../config/moonraker.ts'
 
 // Set before module evaluation. Do not statically import ws or enable addons.
@@ -19,6 +20,7 @@ export function createMoonrakerSocket(
     maxFragments: 128,
     maxBufferedChunks: 128,
     ...extra,
+    headers: moonrakerAuthHeaders(origin, limits),
     perMessageDeflate: false,
     followRedirects: false,
     handshakeTimeout: limits.connectTimeoutMs,

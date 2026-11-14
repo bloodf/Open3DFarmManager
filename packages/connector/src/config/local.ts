@@ -51,6 +51,7 @@ const LegacyCollectorConfigSchema = z.strictObject({
       z.strictObject({
         printerKey: z.string().min(1).max(128),
         origin: z.string().min(1).max(2048),
+        apiKeyFile: z.string().min(1).max(4096).optional(),
       }),
     )
     .min(1)

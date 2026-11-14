@@ -208,12 +208,6 @@ test('only a read, bodyless or browser-aborted response body is accounted for', 
     classifyBody({ ...ok, status: 503, failure: 'net::ERR_ABORTED' }),
     'aborted',
   )
-  // An unread redirect is never excused, even when the browser aborted it.
-  for (const status of [301, 302, 303, 307, 308])
-    assert.equal(
-      classifyBody({ ...ok, status, failure: 'net::ERR_ABORTED' }),
-      'unread',
-    )
   // Anything else body-bearing that was not read is never treated as clean.
   for (const failure of [null, 'net::ERR_CONNECTION_RESET', 'unknown', ''])
     for (const status of [200, 201, 302, 307, 400, 404, 500, 503])

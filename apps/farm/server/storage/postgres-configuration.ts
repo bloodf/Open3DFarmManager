@@ -86,6 +86,7 @@ type Candidate = {
   account: z.infer<typeof Account>
   session: z.infer<typeof Session>
   authority: PauseNegotiationAuthority
+  sessionObservedAt: number
   credentialIssuedAt: number
   slotObservedAt: number | null
 }
@@ -127,7 +128,11 @@ function rolledBackSerializationFailure(error: unknown) {
 export class PostgresConfigurationStore {
   private readonly sql: Sql
   private readonly config: PauseNegotiationConfig
-  constructor(sql: Sql, config: unknown) {
+  constructor(
+    sql: Sql,
+    config: unknown,
+    private readonly observeTime: () => number = Date.now,
+  ) {
     this.sql = sql
     this.config = Object.freeze(Config.parse(config))
   }
@@ -162,14 +167,15 @@ export class PostgresConfigurationStore {
     let result!: T
     await this.sql.begin('isolation level serializable', async (tx) => {
       const first = await this.observe(tx, scope.sessionRecordId)
-      const candidate =
-        first === null ? null : await this.current(tx, scope, first)
+      const candidate = first === null ? null : await this.current(tx, scope)
       const now = await this.observe(tx, scope.sessionRecordId)
+      const sessionNow = this.observeTime()
       const authority =
         candidate &&
         now !== null &&
         first !== null &&
         now >= first &&
+        sessionNow >= candidate.sessionObservedAt &&
         now >= candidate.credentialIssuedAt &&
         now < candidate.authority.validUntil &&
         (candidate.slotObservedAt === null ||
@@ -178,7 +184,7 @@ export class PostgresConfigurationStore {
           scope.sessionRecordId,
           candidate.session,
           candidate.account,
-          now,
+          sessionNow,
           this.config,
         ).ok
           ? candidate.authority
@@ -290,7 +296,6 @@ export class PostgresConfigurationStore {
   private async current(
     tx: TransactionSql,
     scope: PauseNegotiationScope,
-    observedAt: number,
   ): Promise<Candidate | null> {
     const accounts =
       await tx`SELECT id,session_version::float8 AS "sessionVersion",disabled FROM farm.session_accounts WHERE id=(SELECT account_id FROM farm.account_sessions WHERE id=${scope.sessionRecordId}) FOR SHARE`
@@ -298,6 +303,8 @@ export class PostgresConfigurationStore {
       await tx`SELECT id,account_id AS "accountId",account_version::float8 AS "accountVersion",created_at::float8 AS "createdAt",last_seen_at::float8 AS "lastSeenAt",absolute_expires_at::float8 AS "absoluteExpiresAt",revoked_at::float8 AS "revokedAt" FROM farm.account_sessions WHERE id=${scope.sessionRecordId} FOR SHARE`
     const account = Account.safeParse(accounts[0]),
       session = Session.safeParse(sessions[0])
+    // Session timestamps originate in the application clock, independently of DB chronology.
+    const sessionObservedAt = this.observeTime()
     if (
       !account.success ||
       !session.success ||
@@ -305,7 +312,7 @@ export class PostgresConfigurationStore {
         scope.sessionRecordId,
         session.data,
         account.data,
-        observedAt,
+        sessionObservedAt,
         this.config,
       ).ok
     )
@@ -385,6 +392,7 @@ export class PostgresConfigurationStore {
       account: account.data,
       session: session.data,
       authority,
+      sessionObservedAt,
       credentialIssuedAt,
       slotObservedAt: slot?.observed_at ?? null,
     }

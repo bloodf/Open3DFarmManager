@@ -1,4 +1,7 @@
-import { controlRoleAllowed } from '../utils/pause-authority/role-policy.ts'
+import {
+  actionsForControlRole,
+  controlRoleAllowed,
+} from '../utils/pause-authority/role-policy.ts'
 import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
@@ -701,7 +704,7 @@ export class PostgresPauseAuthority {
               printer_key: current.printerKey,
               control_binding_sha256: stored.control_binding_sha256,
               admission_nonce: stored.admission_nonce,
-              actions: ['pause', 'resume', 'cancel'],
+              actions: actionsForControlRole(current.role),
             })
             const signed = await signPauseCapability(claims, this.signingKey)
             const postSign = await this.validAt(

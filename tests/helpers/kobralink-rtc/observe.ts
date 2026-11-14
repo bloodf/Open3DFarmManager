@@ -526,15 +526,14 @@ export async function instrumentPage(input: {
           .then(async (outcome) => {
             const error = typeof outcome === 'symbol' ? null : outcome
             // Even after a failure the browser may still hold what arrived.
-            let body =
-              outcome === NETWORK
-                ? null
-                : await Promise.race([
-                    res.text().catch(() => null),
-                    new Promise<null>((resolve) =>
-                      setTimeout(resolve, 2000, null),
-                    ),
-                  ])
+            // Playwright's own read always comes first; the network capture
+            // only covers a body the page never drained.
+            let body = await Promise.race([
+              res.text().catch(() => null),
+              new Promise<null>((resolve) =>
+                setTimeout(resolve, outcome === NETWORK ? 200 : 2000, null),
+              ),
+            ])
             if (body === null) {
               const captured = (await capture).read()
               facts = captured.facts

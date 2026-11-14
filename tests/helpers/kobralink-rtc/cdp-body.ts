@@ -4,9 +4,11 @@ import type { CDPSession, Page } from '@playwright/test'
  * Network-level body capture for one page, independent of whether the page
  * script ever consumes a response. Chromium streams the bytes it receives to
  * this session (`Network.streamResourceContent`). A body counts as captured
- * only after `Network.loadingFinished` for the same request and, when a
- * length was declared, only with exactly that many bytes: a partial or
- * never-finished body is never treated as read.
+ * only when it is complete by HTTP framing: exactly the declared
+ * Content-Length bytes arrived, or, without a declared length, Chromium
+ * reported `Network.loadingFinished`. Chromium does not report a body the
+ * page never drains as finished even when every declared byte arrived.
+ * Partial, overflowing or unframed unfinished bodies are never read.
  */
 export interface BodyFacts {
   declaredLength: number | null
@@ -15,6 +17,8 @@ export interface BodyFacts {
   finished: boolean
   failed: boolean
   streamed: boolean
+  /** Bytes beyond the capture bound were dropped: never a complete body. */
+  truncated: boolean
 }
 export interface CapturedBody {
   /** Complete body text; null unless loading finished with the full body. */
@@ -34,6 +38,7 @@ type Entry = {
   finished: boolean
   failed: boolean
   streamed: boolean
+  truncated: boolean
   waiters: (() => void)[]
 }
 
@@ -45,6 +50,21 @@ const MAX_CAPTURE_BYTES = 1_048_576
  */
 const START_TOLERANCE_MS = 0.05
 const CAPTURED_TYPES = new Set(['Document', 'XHR', 'Fetch'])
+/**
+ * The single unclaimed capture whose start stamp is the given one. None or
+ * several candidates both mean no attribution: another request's body is
+ * never assigned to this response.
+ */
+export function uniqueMatch<T extends { startMs: number; claimed: boolean }>(
+  candidates: readonly T[],
+  startMs: number,
+): T | null | 'ambiguous' {
+  const matches = candidates.filter(
+    (c) => !c.claimed && Math.abs(c.startMs - startMs) < START_TOLERANCE_MS,
+  )
+  if (matches.length > 1) return 'ambiguous'
+  return matches[0] ?? null
+}
 const keyOf = (method: string, url: string, status: number) =>
   `${method.toUpperCase()} ${status} ${url}`
 
@@ -58,16 +78,18 @@ function settle(entry: Entry) {
   for (const wake of entry.waiters.splice(0)) wake()
 }
 
+function complete(entry: Entry): boolean {
+  if (!entry.streamed || entry.truncated || entry.failed) return false
+  return entry.declaredLength === null
+    ? entry.finished
+    : entry.bytes === entry.declaredLength
+}
+
 function view(entry: Entry | null): CapturedBody {
   const received = entry ? Buffer.concat(entry.chunks) : Buffer.alloc(0)
-  const complete =
-    !!entry &&
-    entry.finished &&
-    entry.streamed &&
-    received.length < MAX_CAPTURE_BYTES &&
-    (entry.declaredLength === null || received.length === entry.declaredLength)
+  const whole = !!entry && complete(entry) && received.length === entry.bytes
   return {
-    body: complete ? received.toString('utf8') : null,
+    body: whole ? received.toString('utf8') : null,
     facts: {
       declaredLength: entry?.declaredLength ?? null,
       chunked: entry?.chunked ?? false,
@@ -75,6 +97,7 @@ function view(entry: Entry | null): CapturedBody {
       finished: entry?.finished ?? false,
       failed: entry?.failed ?? false,
       streamed: entry?.streamed ?? false,
+      truncated: entry?.truncated ?? false,
     },
   }
 }
@@ -94,6 +117,7 @@ function newEntry(headers: Record<string, unknown>, startMs: number): Entry {
     finished: false,
     failed: false,
     streamed: false,
+    truncated: false,
     waiters: [],
   }
 }
@@ -109,13 +133,14 @@ function attach(
   >()
   const byId = new Map<string, Entry>()
   const push = (entry: Entry, chunk: Buffer, front = false) => {
-    if (entry.bytes + chunk.length > MAX_CAPTURE_BYTES) {
-      entry.bytes = MAX_CAPTURE_BYTES
+    if (entry.truncated || entry.bytes + chunk.length > MAX_CAPTURE_BYTES) {
+      entry.truncated = true
       return
     }
     entry.bytes += chunk.length
     if (front) entry.chunks.unshift(chunk)
     else entry.chunks.push(chunk)
+    if (complete(entry)) settle(entry)
   }
   session.on('Network.requestWillBeSent', (event) => {
     requests.set(event.requestId, {
@@ -143,6 +168,7 @@ function attach(
         .then((result) => {
           entry.streamed = true
           push(entry, Buffer.from(result.bufferedData, 'base64'), true)
+          if (complete(entry)) settle(entry)
         })
         .catch(() => {})
     } catch {
@@ -158,7 +184,7 @@ function attach(
     if (!entry) return
     entry.finished = true
     byId.delete(event.requestId)
-    settle(entry)
+    if (complete(entry)) settle(entry)
   })
   session.on('Network.loadingFailed', (event) => {
     const entry = byId.get(event.requestId)
@@ -185,25 +211,22 @@ export async function captureBodies(page: Page, origin: string) {
      * method, URL and status and the same Chromium request start stamp.
      * Anything but exactly one unclaimed match stays uncaptured. The capture
      * may be announced slightly after Playwright's event. `finished` settles
-     * only once loading finished at network level.
+     * only once the captured body is complete.
      */
     async take(method: string, url: string, status: number, startMs: number) {
       const key = keyOf(method, url, status)
       let entry: Entry | null = null
       for (let i = 0; i < 50 && !entry; i++) {
-        const matches = (queues.get(key) ?? []).filter(
-          (e) =>
-            !e.claimed && Math.abs(e.startMs - startMs) < START_TOLERANCE_MS,
-        )
-        if (matches.length === 1) {
-          entry = matches[0]!
+        const match = uniqueMatch(queues.get(key) ?? [], startMs)
+        if (match === 'ambiguous') break
+        if (match) {
+          entry = match
           entry.claimed = true
-        } else if (matches.length > 1) break
-        else await new Promise((resolve) => setTimeout(resolve, 20))
+        } else await new Promise((resolve) => setTimeout(resolve, 20))
       }
       const found = entry
       const finished = new Promise<void>((resolve) => {
-        if (found?.finished) resolve()
+        if (found && complete(found)) resolve()
         else found?.waiters.push(resolve)
       })
       return { finished, read: () => view(found) }

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { createServer } from 'node:http'
+import { chromium } from '@playwright/test'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
+import {
+  captureBodies,
+  uniqueMatch,
+} from '../helpers/kobralink-rtc/cdp-body.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 const env = {
@@ -381,4 +387,79 @@ test('verify-report CLI refuses a missing report without runtime admission', asy
   assert.equal(result.status, 1)
   assert.match(result.stderr, /ENOENT/)
   assert.doesNotMatch(result.stderr, /Explicit admission/)
+})
+
+test('capture pairs only exactly one unclaimed request with the same start', () => {
+  const a = { startMs: 1000, claimed: false }
+  const b = { startMs: 1000.01, claimed: false }
+  const c = { startMs: 1000.3, claimed: false }
+  assert.equal(uniqueMatch([a, c], 1000), a)
+  assert.equal(uniqueMatch([a, c], 1000.3), c)
+  // Two candidates on the same stamp: never attribute either body.
+  assert.equal(uniqueMatch([a, b, c], 1000), 'ambiguous')
+  // No candidate or an already claimed one: no body.
+  assert.equal(uniqueMatch([a, c], 1000.15), null)
+  assert.equal(uniqueMatch([{ ...a, claimed: true }, c], 1000), null)
+})
+
+test('network capture reads only complete undrained bodies, never a prefix', async () => {
+  const SECRET = 'secret-after-retained-prefix'
+  const server = createServer((req, res) => {
+    if (req.url === '/') return res.end('<html>ok</html>')
+    res.statusCode = 403
+    res.setHeader('content-type', 'application/json')
+    if (req.url === '/api/complete') return res.end('{"denied":"complete"}')
+    if (req.url === '/api/short') {
+      res.setHeader('content-length', '100')
+      res.write('{"partial":')
+      return
+    }
+    // Chunked, no Content-Length, finished, larger than the capture bound.
+    res.write('x'.repeat(1_100_000))
+    res.end(SECRET)
+  }).listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.goto(origin + '/')
+    const network = await captureBodies(page, origin)
+    const takes = new Map<string, ReturnType<typeof network.take>>()
+    const twice: ReturnType<typeof network.take>[] = []
+    page.on('response', (res) => {
+      const path = new URL(res.url()).pathname
+      if (!path.startsWith('/api/')) return
+      const args = [
+        res.request().method(),
+        res.url(),
+        res.status(),
+        res.request().timing().startTime,
+      ] as const
+      takes.set(path, network.take(...args))
+      if (path === '/api/complete') twice.push(network.take(...args))
+    })
+    // The page reads only statuses: no body is ever drained by page code.
+    for (const path of ['/api/complete', '/api/short', '/api/overflow'])
+      void page
+        .evaluate(async (u) => (await fetch(u)).status, origin + path)
+        .catch(() => 0)
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    const read = async (path: string) => (await takes.get(path))!.read()
+    const done = await read('/api/complete')
+    assert.equal(done.body, '{"denied":"complete"}')
+    const short = await read('/api/short')
+    assert.equal(short.body, null)
+    assert.equal(short.facts.declaredLength, 100)
+    assert.ok(short.facts.receivedBytes < 100)
+    const overflow = await read('/api/overflow')
+    assert.equal(overflow.body, null)
+    assert.equal(overflow.facts.truncated, true)
+    // The same request is never claimed a second time.
+    assert.equal((await twice[0]!).read().body, null)
+  } finally {
+    await browser.close()
+    server.closeAllConnections()
+    server.close()
+  }
 })

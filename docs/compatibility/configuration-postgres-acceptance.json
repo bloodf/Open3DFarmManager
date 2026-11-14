@@ -3,29 +3,38 @@
   "database": "PostgreSQL 17, disposable digest-pinned instance",
   "qualifications": {
     "migrations_and_grants": "pass",
-    "current_authority": "pass",
     "atomic_registration": "pass",
     "replay_after_reconnect": "pass",
     "conflict_isolation": "pass",
     "rollback": "pass",
     "concurrency": "pass",
+    "configuration_schema_readiness": "pass",
+    "current_authority": "pass",
     "resource_cleanup": "pass"
   },
   "evidence": {
     "database": "Actual disposable PostgreSQL 17 with complete migration catalog including 0026 and production PostgresConfigurationStore.",
     "authority": "Owner/admin allowed; viewer, cross-account, revoked browser and revoked credential rejected with preserved database state.",
     "transactions": "Atomic registration, exact replay after reconnect, canonical conflicts, rollback and concurrent conflicting registration passed database row assertions.",
-    "cleanup": "Harness container and tmpfs removed; restart-created API container and volume removed; VM returned stopped. Pinned images and existing isolated network retained."
+    "cleanup": "Harness container and tmpfs removed; VM returned stopped. Baseline images, volumes and networks retained.",
+    "schema_readiness": "Exact lifecycle role guard passed with only farm_configuration_authority membership. Reverting only 0027 reproduced SQLSTATE 42501; reapplying returned current against the real catalog. Journal DML and unwanted privileges remained denied. Historical journal rows, populated assignments, role memberships and other table grants were unchanged."
   },
   "boundaries": [
     "Actual PostgreSQL evidence; synthetic SQL tests do not substitute for these checks.",
     "No enabled Nuxt, browser or RTC qualification.",
     "No deployment or physical printer commands.",
-    "Product files were not modified."
+    "Product files were not modified.",
+    "Configuration receipts remain synthetic store-boundary inputs; this does not qualify receipt signatures or final browser RTC."
   ],
   "evidence_basis": {
-    "candidate": "de231c20c89186ace8fa34a0bc55e7b365aa8376",
-    "scope": "Actual database execution on committed harness with integrated JSONB parameter fix. Report-only follow-up commit.",
+    "candidate": "cbce8793704e47d8e56f8a0180faf990aea61398",
+    "scope": "Actual PostgreSQL execution of committed readiness qualification and previous eight qualifications; report-only follow-up.",
     "command": "node scripts/test-configuration-postgres-acceptance.ts (explicit admission, owned context, pinned image, external evidence directory and loopback port required)"
+  },
+  "service_free_gate": {
+    "status": "blocked",
+    "runner_test": "pass",
+    "typescript": "TS2322 in tests/node/telemetry-queue-lock.test.ts:249: missing limits; outside authorized ownership",
+    "formatting": "not reached by gate"
   }
 }

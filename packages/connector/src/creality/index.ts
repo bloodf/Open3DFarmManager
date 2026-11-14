@@ -32,7 +32,7 @@ export function decodeCrealityStatus(
   const result: CrealityTelemetry = {}
   const states = ['idle', 'printing', 'paused'] as const
   if (typeof data.state === 'number' && states[data.state] !== undefined)
-    result.state = states[data.state]
+    result.state = states[data.state]!
   if (typeof data.err === 'number' && data.err !== 0) result.state = 'error'
   for (const [source, target, max] of [
     ['nozzleTemp', 'nozzleTemp', 500],

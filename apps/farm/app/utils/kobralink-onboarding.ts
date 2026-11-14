@@ -613,6 +613,7 @@ export async function openConfigurationBrowserSession(
   async function authorizeAndSendFrame(
     frame: ConfigurationRequestFrame,
     signal: AbortSignal,
+    beforeDispatch?: () => void,
   ): Promise<ConfigurationResponseFrame> {
     const current = ensureAlive(signal)
     const targetSha256 = await configurationFrameTargetHash(frame)
@@ -702,6 +703,7 @@ export async function openConfigurationBrowserSession(
       issuer: capability.issuer,
       expiresAt: capability.expires_at,
     }
+    beforeDispatch?.()
     const waitResponse = awaitChannelMessage(signal)
     const sent = client.sendMessage({
       v: 1,
@@ -993,6 +995,7 @@ export async function openConfigurationBrowserSession(
       target: ConfigurationTarget
       expectedRevision: number
       signal: AbortSignal
+      beforeDispatch?: () => void
     }): Promise<ConfigurationSessionOutcome> {
       const targetSha256 = await configurationTargetHash(params.target)
       const frame: ConfigurationRequestFrame = {
@@ -1004,7 +1007,11 @@ export async function openConfigurationBrowserSession(
         expected_revision: params.expectedRevision,
         target: params.target,
       }
-      const response = await authorizeAndSendFrame(frame, params.signal)
+      const response = await authorizeAndSendFrame(
+        frame,
+        params.signal,
+        params.beforeDispatch,
+      )
       return await mapResponseToOutcome({
         response,
         operationId: params.operationId,

@@ -10,7 +10,7 @@ import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -120,7 +120,11 @@ type Receipt = {
 const journals = new WeakMap<JournalHandle, State>()
 const receipts = new WeakMap<ClaimHandle, Receipt>()
 
-const actionSchema = `CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel'))) STRICT`
+const legacyActionSchema = `CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel'))) STRICT`
+const actionSchema = legacyActionSchema.replace(
+  "'pause','resume','cancel'",
+  "'pause','resume','cancel','emergency_stop','firmware_restart','set_temperature','set_fan','home','set_light','set_speed','start_print'",
+)
 const schema = [
   actionSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
@@ -266,7 +270,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, SCHEMA_VERSION].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -297,6 +301,30 @@ export function openCommandJournal(input: {
         database.exec(
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
+        database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
+      } else if (version === 2 && app === APPLICATION_ID) {
+        const definitions = database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
+          )
+          .all()
+          .map((row) => row.sql)
+        const legacySchema = schema
+          .map((sql) => (sql === actionSchema ? legacyActionSchema : sql))
+          .sort()
+        if (
+          definitions.length !== legacySchema.length ||
+          definitions.some((sql, index) => sql !== legacySchema[index])
+        )
+          throw new Error('Invalid command journal schema')
+        database.exec(
+          'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
+        )
+        database.exec(actionSchema)
+        database.exec(
+          'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
+        )
+        database.exec('DROP TABLE legacy_control_command_actions')
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')

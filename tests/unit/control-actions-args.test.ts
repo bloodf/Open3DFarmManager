@@ -90,7 +90,9 @@ import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixt
 
 let monotonic = 0
 const monotonicNow = () => (monotonic += 0.001)
-async function commandFixture(action: 'resume' | 'cancel' | 'set_temperature') {
+async function commandFixture(
+  action: 'resume' | 'cancel' | 'set_temperature' | 'emergency_stop',
+) {
   const now = Date.now()
   const pair = await crypto.subtle.generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
@@ -125,7 +127,7 @@ async function commandFixture(action: 'resume' | 'cancel' | 'set_temperature') {
 }
 
 async function authorityFixture(
-  action: 'resume' | 'cancel' | 'set_temperature',
+  action: 'resume' | 'cancel' | 'set_temperature' | 'emergency_stop',
 ) {
   const { pair, publicKey, command } = await commandFixture(action)
   const now = command.issued_at
@@ -233,15 +235,12 @@ async function authorityFixture(
 
 async function fixture(
   t: TestContext,
-  action: 'resume' | 'cancel' | 'set_temperature',
+  action: 'resume' | 'cancel' | 'set_temperature' | 'emergency_stop',
   supported = true,
   mode: Parameters<typeof pauseFixture>[0] = {},
-  allowedActions: ('pause' | 'resume' | 'cancel' | 'set_temperature')[] = [
-    'pause',
-    'resume',
-    'cancel',
-    'set_temperature',
-  ],
+  allowedActions: (
+    'pause' | 'resume' | 'cancel' | 'set_temperature' | 'emergency_stop'
+  )[] = ['pause', 'resume', 'cancel', 'set_temperature'],
 ) {
   const cleanup: Array<() => unknown | Promise<unknown>> = []
   t.onTestFinished(async () => {
@@ -294,6 +293,7 @@ async function fixture(
     observe: (binding, observation) =>
       dispatcher?.observe(binding, observation) ?? false,
   })
+  if (action === 'emergency_stop') await router.detect(printerBinding)
   const driver = {
     ...router,
     prepare: vi.fn(router.prepare),
@@ -427,4 +427,37 @@ it('returns typed unsupported-action before driver preparation', async (t) => {
   expect(f.driver.prepare).not.toHaveBeenCalled()
   expect(f.driver.pauseOnce).not.toHaveBeenCalled()
   expect(f.remote.requests).toEqual([])
+})
+
+it('dispatches emergency_stop to Moonraker in error state', async (t) => {
+  const f = await fixture(
+    t,
+    'emergency_stop',
+    true,
+    {
+      query: (index, socket, id) => {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              eventtime: index,
+              status: {
+                webhooks: { state: 'ready' },
+                print_stats: { state: 'error' },
+              },
+            },
+          }),
+        )
+        return true
+      },
+    },
+    ['emergency_stop'],
+  )
+  await f.dispatcher.dispatch(f.input)
+  expect(
+    f.remote.requests.filter(
+      (request) => request.method === 'printer.emergency_stop',
+    ),
+  ).toHaveLength(1)
 })

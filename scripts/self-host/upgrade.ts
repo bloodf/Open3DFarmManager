@@ -31,14 +31,42 @@ export function volumes(config: any) {
       result[mount.source] = config.volumes[mount.source].name
     }
   }
-  if (
-    Object.keys(result).length < 2 ||
-    !config.services?.postgres ||
-    !config.services?.connector
+  // The Connector CLI requires --data-dir; deployments choose its location.
+  const command = config.services?.connector?.command
+  const args: unknown[] = Array.isArray(command)
+    ? command
+    : typeof command === 'string'
+      ? command.split(/\s+/)
+      : []
+  const flag = args.findIndex((arg) => arg === '--data-dir')
+  const inline = args.find(
+    (arg) => typeof arg === 'string' && arg.startsWith('--data-dir='),
   )
-    throw new Error(
-      'Deployment must include postgres and connector persistent volumes',
+  const connectorTarget =
+    flag >= 0
+      ? args[flag + 1]
+      : typeof inline === 'string'
+        ? inline.slice('--data-dir='.length)
+        : undefined
+  for (const [service, target] of [
+    ['postgres', '/var/lib/postgresql/data'],
+    ['connector', connectorTarget],
+  ] as const) {
+    if (
+      typeof target !== 'string' ||
+      !target.startsWith('/') ||
+      !config.services?.[service]?.volumes?.some(
+        (mount: { target?: string; type?: string; source?: string }) =>
+          mount.target === target &&
+          mount.type === 'volume' &&
+          mount.source &&
+          config.volumes?.[mount.source]?.name,
+      )
     )
+      throw new Error(
+        'Deployment must include postgres and connector persistent volumes on their data paths',
+      )
+  }
   return JSON.stringify(Object.entries(result).sort())
 }
 export async function upgrade(

@@ -1,3 +1,4 @@
+import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
@@ -129,4 +130,32 @@ export function provisionReadonlyPrinter(input: unknown): PrinterBinding {
 }
 export function readRuntimePrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding) ?? readonlyBindings.get(binding) ?? null
+}
+
+const bambuBindings = new WeakMap<PrinterBinding, BambuBinding>()
+/** Trusted local provisioning only. An empty Moonraker origin cannot select an HTTP endpoint. */
+export function provisionBambuPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = parseBambuBinding(bindingInput)
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('Bambu assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  bambuBindings.set(binding, local)
+  return binding
+}
+export function readBambuPrinterBinding(
+  binding: PrinterBinding,
+): BambuBinding | null {
+  return readPrinterBinding(binding)
+    ? (bambuBindings.get(binding) ?? null)
+    : null
 }

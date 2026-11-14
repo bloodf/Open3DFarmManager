@@ -74,7 +74,9 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
-  bambuTransport?: typeof createBambuTransport
+  bambuTransport?: (
+    options: Parameters<typeof createBambuTransport>[0],
+  ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
   kobraFetch?: KobraLinkFetch
   config: LocalCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void

@@ -35,6 +35,7 @@ const schema = endpoint.extend({
     .min(1)
     .max(128)
     .regex(/^[A-Za-z0-9_-]+$/),
+  control: z.boolean().default(false),
   credentialFile: path,
   caFile: path.optional(),
   pinSha256: z

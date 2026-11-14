@@ -198,5 +198,36 @@ export function createBambuTransport(options: BambuTransportOptions) {
   signal.addEventListener('abort', close, { once: true })
   if (signal.aborted) void close()
   else client.connect()
-  return { done, close }
+  function publish(
+    command: 'pause' | 'resume' | 'stop',
+    sequenceId: string,
+    beforeSend: () => boolean,
+  ): Promise<void> {
+    if (
+      stopped ||
+      !client.connected ||
+      !['pause', 'resume', 'stop'].includes(command) ||
+      !/^[0-9]{1,16}$/.test(sequenceId)
+    )
+      return Promise.reject(new Error('Bambu request unavailable'))
+    const payload = JSON.stringify({
+      print: { command, sequence_id: sequenceId },
+    })
+    return new Promise<void>((resolve, reject) => {
+      if (beforeSend() !== true) {
+        reject(new Error('Bambu request denied'))
+        return
+      }
+      client.publish(
+        `device/${serial}/request`,
+        payload,
+        { qos: 0, retain: false },
+        (error) => {
+          if (error) reject(new Error('Bambu request unavailable'))
+          else resolve()
+        },
+      )
+    })
+  }
+  return { done, close, publish }
 }

@@ -1,8 +1,10 @@
+import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { MOONRAKER_CONTROLS } from '../../../farm-protocol/src/control-actions.ts'
 import type { ControlDriver } from '../control/control-driver.ts'
 import { openFixedMoonrakerPause } from '../moonraker/pause-driver.ts'
 import {
   readPrinterBinding,
+  readBambuPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import type {
@@ -22,20 +24,31 @@ export function createPauseDriverRouter(config: {
   ): boolean
 }): ControlDriver {
   type Attempt = {
-    driver: ReturnType<typeof openFixedMoonrakerPause>
+    driver: Pick<
+      ReturnType<typeof openFixedMoonrakerPause>,
+      'prepare' | 'driver' | 'close'
+    >
     detach(): void
   }
   const generations = new Map<PrinterBinding, number>()
   const attempts = new Map<PrinterBinding, Attempt>()
   return Object.freeze({
     controls: (binding: PrinterBinding) =>
-      readPrinterBinding(binding) ? MOONRAKER_CONTROLS : [],
+      readBambuPrinterBinding(binding)
+        ? readBambuPrinterBinding(binding)?.control
+          ? MOONRAKER_CONTROLS
+          : []
+        : readPrinterBinding(binding)
+          ? MOONRAKER_CONTROLS
+          : [],
     async prepare({
       binding,
       signal,
     }: Parameters<PreparedPauseDriver['prepare']>[0]) {
       if (
         !readPrinterBinding(binding) ||
+        (readBambuPrinterBinding(binding) !== null &&
+          !readBambuPrinterBinding(binding)?.control) ||
         signal.aborted ||
         attempts.has(binding)
       )
@@ -53,9 +66,16 @@ export function createPauseDriverRouter(config: {
       const abort = () => owner.abort()
       signal.addEventListener('abort', abort, { once: true })
       if (signal.aborted) owner.abort()
-      let fixed: ReturnType<typeof openFixedMoonrakerPause>
+      let fixed: Pick<
+        ReturnType<typeof openFixedMoonrakerPause>,
+        'prepare' | 'driver' | 'close'
+      >
       try {
-        fixed = openFixedMoonrakerPause({
+        fixed = (
+          readBambuPrinterBinding(binding)
+            ? openFixedBambuControl
+            : openFixedMoonrakerPause
+        )({
           binding,
           allowedOrigins: config.allowedOrigins,
           limits: config.limits,

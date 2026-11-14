@@ -78,6 +78,7 @@ export async function startBambuSimulator({
     throw new Error('Invalid synthetic serial')
   const reportTopic = `device/${serial}/report`
   let gcodeState = initialState
+  const extended: Record<string, unknown> = {}
   const requests: { command: string; sequence_id: string }[] = []
   function report(socket: TLSSocket) {
     const topic = Buffer.from(reportTopic)
@@ -91,7 +92,7 @@ export async function startBambuSimulator({
           topic,
           Buffer.from(
             JSON.stringify({
-              print: { gcode_state: gcodeState, mc_percent: 25 },
+              print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
             }),
           ),
         ]),
@@ -178,20 +179,59 @@ export async function startBambuSimulator({
               )
                 throw new Error('Invalid request topic')
               const value = JSON.parse(body.subarray(2 + length).toString())
-              const command = value?.print?.command
+              const request = value?.print ?? value?.system
+              const command = request?.command
               if (
-                !['pause', 'resume', 'stop'].includes(command) ||
-                typeof value?.print?.sequence_id !== 'string'
+                ![
+                  'pause',
+                  'resume',
+                  'stop',
+                  'gcode_line',
+                  'ledctrl',
+                  'print_speed',
+                  'project_file',
+                ].includes(command) ||
+                typeof request?.sequence_id !== 'string'
               )
                 throw new Error('Invalid request')
-              requests.push({ command, sequence_id: value.print.sequence_id })
+              requests.push({ command, sequence_id: request.sequence_id })
               if (confirmCommands) {
-                gcodeState =
-                  command === 'pause'
-                    ? 'PAUSE'
-                    : command === 'resume'
-                      ? 'RUNNING'
-                      : 'IDLE'
+                if (command === 'gcode_line') {
+                  const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(
+                    request.param,
+                  )
+                  const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+                  if (match) extended[match[1]!] = Number(match[2])
+                  else if (home) extended.homed_axes = home[1]
+                  else throw new Error('Invalid gcode')
+                } else if (
+                  command === 'ledctrl' &&
+                  request.led_node === 'chamber_light' &&
+                  ['on', 'off'].includes(request.led_mode)
+                )
+                  extended.light = request.led_mode
+                else if (
+                  command === 'print_speed' &&
+                  /^[1-4]$/.test(request.param)
+                )
+                  extended.speed = request.param
+                else if (
+                  command === 'project_file' &&
+                  request.param === 'Metadata/plate_1.gcode' &&
+                  typeof request.url === 'string' &&
+                  request.url.startsWith('file:///sdcard/')
+                ) {
+                  extended.file = request.url
+                  gcodeState = 'RUNNING'
+                } else if (!['pause', 'resume', 'stop'].includes(command))
+                  throw new Error('Invalid request')
+                if (['pause', 'resume', 'stop'].includes(command))
+                  gcodeState =
+                    command === 'pause'
+                      ? 'PAUSE'
+                      : command === 'resume'
+                        ? 'RUNNING'
+                        : 'IDLE'
                 for (const subscriber of subscribed) report(subscriber)
               }
             } else if (header === 192 && !size)
@@ -241,6 +281,9 @@ export async function startBambuSimulator({
     syntheticTrust: cert,
     reportTopic,
     requests,
+    get extendedState() {
+      return { ...extended }
+    },
     get gcodeState() {
       return gcodeState
     },

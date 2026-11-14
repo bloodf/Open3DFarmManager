@@ -54,6 +54,8 @@ Veja a [origem e as instruções para atualizar as capturas](docs/images/README.
 | Pausa assinada            | Transporte, autoridade, relay e emissão de capacidade implementados em etapas; o controle no produto continua desabilitado.                                           |
 | Câmera e simulador        | Existem testes e provas parciais. Vídeo em movimento e pausa genuína no simulador ainda têm critérios de aceitação pendentes.                                         |
 
+**KobraLink (Anycubic Kobra X).** A integração exibe telemetria somente leitura de impressoras Kobra X dentro da interface OpenFarm, sem um segundo painel. O serviço KobraLink é instalado e operado separadamente; veja o [guia de hospedagem](docs/KOBRALINK-SELF-HOSTING.md). O [registro de aceitação RTC](docs/KOBRALINK-RTC-ACCEPTANCE.md) traz a evidência atual e seus limites. A [matriz documental FDM](docs/compatibility/fdm-matrix-final.md) lista 15 identidades candidatas, mas a ordem por recência não está verificada, e a matriz não comprova suporte a firmware ou hardware. Câmera e controles não fazem parte desta integração, e o projeto não é uma versão pronta para produção.
+
 Testes locais, integração com fixtures e aceitação com simuladores são evidências diferentes. O [registro da Fase 0](docs/PHASE-0.md) e o [checkpoint da visão da farm](docs/FARM-VIEW-CHECKPOINT.md) detalham o que cada execução comprova.
 
 ## Execute localmente

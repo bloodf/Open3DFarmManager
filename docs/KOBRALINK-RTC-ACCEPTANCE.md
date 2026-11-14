@@ -25,7 +25,44 @@ The bounded positive first-registration chain is **qualified** (`pass`) for:
   `finally`, and the dedicated VM is returned `STOPPED` with the global Docker
   context kept on `orbstack`.
 
-## Final qualification: status **blocked** (see Current qualification checkpoint)
+## Acceptance: Kobra X from the single interface — **pass** (run `6bf9caa0`, candidate `f7db255`)
+
+Acceptance is one real run of the `positive` world on the isolated VM with
+the pinned unmodified KobraLink image and the original synthetic MQTT printer:
+the Kobra X is created and registered entirely from Open3dFarm (no device id,
+no second interface), the server confirms the signed inventory, and
+authenticated read-only WebRTC telemetry shows the printer `Ociosa`. FDM only;
+synthetic printer, unknown firmware, no hardware qualification.
+
+The committed result
+[`docs/compatibility/kobralink-rtc-acceptance.json`](compatibility/kobralink-rtc-acceptance.json)
+is written by `node scripts/test-kobralink-rtc-acceptance.ts --single-ui-result
+<retained run directory>` only from that run's `final-report.json`,
+`positive/checks.jsonl` and `runner-checks.jsonl`, each of which must match the
+run's own `evidence.sha256`. It requires the 19 checks in
+`SINGLE_UI_REQUIRED` (`tests/helpers/kobralink-rtc/single-ui.ts`): device-id-less
+registration with the identity observed before commit and the confirmed
+heading; no foreign page or `iframe`; collector stopped before inventory,
+`unconfirmed` then `activated`, live authenticated idle telemetry; no printer
+or bridge secret in responses, storage, console, DOM or WebSocket frames; and
+owned containers, network and private material removed, VM `Stopped`, global
+context `orbstack`. Every other recorded check is kept in `recorded` but not
+required; the every-response-body audit (`browser-inspection-complete`) is not
+part of acceptance.
+
+`node scripts/test-kobralink-rtc-acceptance.ts --verify-single-ui` re-reads
+the committed result and git only: status `pass`, positive world exit `0`,
+every required check `true` and recorded, the run head an ancestor of `HEAD`,
+and no file outside the harness paths changed since that head, so the product
+verified is the product that ran. In run `6bf9caa0` all 36 recorded checks
+passed (31 positive, 5 runner cleanup); source SHA-256 `b483dfe1…`, build
+output SHA-256 `d85f5c5e…`.
+
+The seven-world matrix, the twelve qualifications, the think-time addition and
+`--verify-report` below are retained as legacy optional diagnostics and are
+not acceptance.
+
+## Legacy seven-world qualification (optional): status **blocked**
 
 The same real stack now runs seven isolated worlds, each with a fresh database,
 bridge and synthetic printer: `positive`, `think-time`, `lost-reply`,

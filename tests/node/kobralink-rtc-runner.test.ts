@@ -2,12 +2,16 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
   uniqueMatch,
 } from '../helpers/kobralink-rtc/cdp-body.ts'
+import { instrumentPage } from '../helpers/kobralink-rtc/observe.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 const env = {
@@ -303,8 +307,10 @@ test('verify-report refuses a think-time refusal that is not recoverable', () =>
   ])
 })
 
-test('the committed report is read strictly, whatever it currently says', async () => {
+test('the committed single-UI result is read strictly, whatever it says', async () => {
   const { readFile } = await import('node:fs/promises')
+  const { verifySingleUi } =
+    await import('../helpers/kobralink-rtc/single-ui.ts')
   const report: unknown = JSON.parse(
     await readFile(
       new URL(
@@ -314,7 +320,7 @@ test('the committed report is read strictly, whatever it currently says', async 
       'utf8',
     ),
   )
-  const problems = verifyReport(report)
+  const problems = verifySingleUi(report)
   const status = (report as { status?: unknown }).status
   assert.equal(problems.length === 0, status === 'pass')
 })
@@ -542,4 +548,96 @@ test('network capture keeps a finished body the page navigated away from', async
     server.closeAllConnections()
     server.close()
   }
+})
+
+test('a body read in the same tick as a reload is still captured whole', async () => {
+  // Run b83850cd: /api/auth/me finished, the page reloaded at once and
+  // Chromium had dropped the body before `getResponseBody` reached it.
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith('/page')) return res.end('<html>ok</html>')
+    res.setHeader('content-type', 'application/json')
+    res.end('{"me":"read-then-reloaded"}')
+  }).listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const evidence = await mkdtemp(join(tmpdir(), 'kobralink-observe-'))
+  const browser = await chromium.launch({ headless: true })
+  try {
+    for (let round = 0; round < 5; round++) {
+      const page = await browser.newPage()
+      await page.goto(origin + '/page')
+      const observer = await instrumentPage({
+        page,
+        label: 'owner',
+        evidence,
+        origin,
+        t0: Date.now(),
+      })
+      await page
+        .evaluate(async () => {
+          const reads = [1, 2, 3, 4].map(() =>
+            fetch('/api/me').then((r) => r.text()),
+          )
+          await Promise.all(reads)
+          location.reload()
+        })
+        .catch(() => {})
+      await page.waitForLoadState('load')
+      const scan = await observer.scan([])
+      assert.equal(scan.unread, 0, `round ${round}: a finished body was lost`)
+      assert.equal(scan.aborted, 0)
+      assert.ok(scan.read >= 4)
+      await page.close()
+    }
+  } finally {
+    await browser.close()
+    server.closeAllConnections()
+    server.close()
+    await rm(evidence, { recursive: true, force: true })
+  }
+})
+
+test('single-UI result is derived only from manifest-matching run files', async () => {
+  const { createHash } = await import('node:crypto')
+  const { buildSingleUiResult, verifySingleUi, SINGLE_UI_REQUIRED } =
+    await import('../helpers/kobralink-rtc/single-ui.ts')
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex')
+  const line = (check: string, ok = true) => {
+    const [qualification, id] = check.split('/')
+    return JSON.stringify({ world: 'positive', qualification, id, ok })
+  }
+  const build = (lines: string[], exit = 0, tamper = false) => {
+    const files = {
+      'final-report.json': JSON.stringify({
+        head: 'a'.repeat(40),
+        run: '6bf9caa0-7707-4e38-81b7-33e27563979b',
+        sourceSha256: 'b'.repeat(64),
+        outputSha256: 'c'.repeat(64),
+        worlds: { positive: { exit } },
+      }),
+      'positive/checks.jsonl': lines.join('\n') + '\n',
+      'runner-checks.jsonl': '',
+    }
+    const manifest = Object.entries(files)
+      .map(([name, text]) => `${sha(tamper ? text + 'x' : text)}  ${name}`)
+      .join('\n')
+    return buildSingleUiResult({ manifest, files })
+  }
+  const all = SINGLE_UI_REQUIRED.map((check) => line(check))
+  const passing = build([
+    ...all,
+    line('browser_secrets_absent/browser-inspection-complete', false),
+  ])
+  assert.equal(passing.status, 'pass')
+  assert.deepEqual(verifySingleUi(passing), [])
+  // A failed repetition, a missing check or a failed world never passes.
+  const failed = build([...all, line(SINGLE_UI_REQUIRED[7], false)])
+  assert.equal(failed.status, 'fail')
+  assert.ok(verifySingleUi(failed).length > 0)
+  assert.ok(verifySingleUi(build(all.slice(1))).length > 0)
+  assert.ok(verifySingleUi(build(all, 1)).length > 0)
+  // Files that do not match the run's own manifest are refused.
+  assert.throws(() => build(all, 0, true), /does not match the run manifest/)
+  // A hand-edited pass without recorded checks is refused.
+  assert.ok(verifySingleUi({ ...passing, recorded: [] }).length > 0)
 })

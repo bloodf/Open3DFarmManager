@@ -1,64 +1,234 @@
 {
-  "status": "fail",
-  "complete": true,
-  "head": "6bfe5c1417d18ac8b6141c59d5aaf2f9e820b107",
-  "run": "e5d289c7-f654-4483-b4b4-2519c5741e34",
-  "sourceSha256": "bd52d16eb14bafb60f389223d0f1fe2ca9fbafc4af2d0611a32ee8fd1c936b21",
-  "outputSha256": "10df845e36fe6a70e1b8109d6e9b42f36c6d26742b6b863f737bd5b4dc6792fc",
-  "worlds": {
-    "positive": {
-      "exit": 0,
-      "checks": 31
-    },
-    "think-time": {
-      "exit": 0,
-      "checks": 26
-    },
-    "lost-reply": {
-      "exit": 0,
-      "checks": 13
-    },
-    "late-ack": {
-      "exit": 0,
-      "checks": 15
-    },
-    "authority": {
-      "exit": 0,
-      "checks": 14
-    },
-    "account-switch": {
-      "exit": 0,
-      "checks": 13
-    },
-    "credential-expiry": {
-      "exit": 0,
-      "checks": 12
-    }
-  },
-  "qualifications": {
-    "first_registration_without_device_id": "pass",
-    "single_ui": "pass",
-    "inventory_before_live": "pass",
-    "reload_reconnect_no_duplicate": "pass",
-    "lost_ack_recovery": "pass",
-    "late_ack_fresh_authority": "pass",
-    "revoked_authority_refused": "pass",
-    "account_switch_isolated": "pass",
-    "browser_secrets_absent": "fail",
-    "mobile_keyboard_accessibility": "pass",
-    "stale_error_capabilities": "pass",
-    "resource_cleanup": "pass",
-    "think_time_lease_renewal": "pass"
-  },
-  "failures": [
+  "acceptance": "kobra-x-single-ui",
+  "status": "pass",
+  "head": "f7db255f605323ccee0d71a482b9f999d495ffd3",
+  "run": "6bf9caa0-7707-4e38-81b7-33e27563979b",
+  "sourceSha256": "b483dfe18ab78ec00ee54224a901f604c80d8256033c8a8e8c94c61bd01ffa86",
+  "outputSha256": "d85f5c5ef23b6a7be7d074a459644249bc9d689ae786e84f21e7b89b439ac631",
+  "evidenceManifestSha256": "5a473da23b5be327f19be1035165e72548fbb21d0302e11365cc642ac2994999",
+  "positiveExit": 0,
+  "required": [
     {
-      "world": "positive",
-      "qualification": "browser_secrets_absent",
-      "id": "browser-inspection-complete",
-      "ok": false,
-      "detail": "pages=2 storage/DOM unread on: none; response bodies read: 312; unread: 1; bodyless by protocol: 0; aborted by the browser before completion: 0"
+      "check": "first_registration_without_device_id/device-id-left-empty",
+      "ok": true
+    },
+    {
+      "check": "first_registration_without_device_id/identity-observed-before-commit",
+      "ok": true
+    },
+    {
+      "check": "first_registration_without_device_id/confirmed-heading",
+      "ok": true
+    },
+    {
+      "check": "single_ui/no-foreign-pages",
+      "ok": true
+    },
+    {
+      "check": "single_ui/no-iframe",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/collector-stopped-before-inventory",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/local-commit-unconfirmed-then-activated",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/live-authenticated-idle",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/secret-set-non-empty",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/responses-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/storage-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/console-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/dom-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/websocket-clean",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/containers-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/network-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/private-material-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/vm-stopped",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/global-context-preserved",
+      "ok": true
     }
   ],
-  "missing": [],
-  "checks": 129
+  "recorded": [
+    {
+      "check": "mobile_keyboard_accessibility/desktop-error-state",
+      "ok": true
+    },
+    {
+      "check": "mobile_keyboard_accessibility/no-horizontal-overflow",
+      "ok": true
+    },
+    {
+      "check": "mobile_keyboard_accessibility/controls-labelled",
+      "ok": true
+    },
+    {
+      "check": "first_registration_without_device_id/device-id-left-empty",
+      "ok": true
+    },
+    {
+      "check": "first_registration_without_device_id/identity-observed-before-commit",
+      "ok": true
+    },
+    {
+      "check": "first_registration_without_device_id/confirmed-heading",
+      "ok": true
+    },
+    {
+      "check": "single_ui/no-foreign-pages",
+      "ok": true
+    },
+    {
+      "check": "single_ui/no-iframe",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/collector-stopped-before-inventory",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/local-commit-unconfirmed-then-activated",
+      "ok": true
+    },
+    {
+      "check": "inventory_before_live/live-authenticated-idle",
+      "ok": true
+    },
+    {
+      "check": "revoked_authority_refused/owner-write-succeeds",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/kobra-controls-absent",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/kobra-camera-absent",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/capabilities-declared-unavailable",
+      "ok": true
+    },
+    {
+      "check": "reload_reconnect_no_duplicate/reload-preserves-counts",
+      "ok": true
+    },
+    {
+      "check": "reload_reconnect_no_duplicate/repeat-registration-refused-without-duplicate",
+      "ok": true
+    },
+    {
+      "check": "reload_reconnect_no_duplicate/reconnect-preserves-counts",
+      "ok": true
+    },
+    {
+      "check": "reload_reconnect_no_duplicate/connector-restart-preserves-counts",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/offline-reported-truthfully",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/stale-after-connector-stop",
+      "ok": true
+    },
+    {
+      "check": "stale_error_capabilities/unknown-before-first-state",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/secret-set-non-empty",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/browser-inspection-complete",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/responses-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/storage-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/console-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/dom-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/websocket-clean",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/no-unexpected-network-errors",
+      "ok": true
+    },
+    {
+      "check": "browser_secrets_absent/no-unexpected-console-errors",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/containers-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/network-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/private-material-removed",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/vm-stopped",
+      "ok": true
+    },
+    {
+      "check": "resource_cleanup/global-context-preserved",
+      "ok": true
+    }
+  ]
 }

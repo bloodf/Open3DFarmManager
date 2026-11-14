@@ -295,3 +295,33 @@ think-time addition from `additional`. Since `06b679b` the runner
 writes the twelve qualifications and the addition as separate sections, so a
 complete passing run can verify. The committed JSON is kept exactly as that
 run produced it.
+
+### Owner bootstrap 403: bounded cause (outside the owned harness)
+
+Reproduced on `838c1da` in selected positive
+`8507cce5-2813-4a62-a7e2-e4ea558d6173` (7 owner bootstrap 403s). The failure
+snapshot (`authority-snapshot.json`, booleans and deltas only) showed the
+owner page selecting the world's own Connector and the owner's own enrolled
+key, and every persisted authority input valid: membership (owner, not
+revoked), browser key (approved, same farm and account, not revoked),
+enrollment (approved, same farm), one credential (same farm, fingerprint
+matches enrollment, issued 30.5 s earlier, expires in 269 s), one proof slot
+(not expired), no revocations. The database clock was 75 ms behind the host.
+
+The remaining refusing predicate is the session check in
+`PostgresConfigurationStore` (`apps/farm/server/storage/postgres-configuration.ts`):
+`evaluateSession(..., observedAt)` with `observedAt` from
+`farm.observe_signalling_session_expiry` (PostgreSQL `clock_timestamp()`),
+which returns `invalid-state` when `now < session.lastSeenAt`. Every
+authenticated request, including the bootstrap request itself, first touches
+`last_seen_at` through `PostgresSessionStore.authorizeAndTouch`
+(`apps/farm/server/storage/postgres-session.ts`) with the Nitro host clock
+(`Date.now`). With the database clock behind the host by more than the
+request's own latency, every bootstrap is refused for as long as the offset
+lasts; with it ahead (earlier runs, +4 ms measured), it passes. Selected
+positive `ddf34ac2-63aa-4f44-9cc0-da90f856a043` on `62cdb58` after a fresh VM
+start passed 31/31 with no 403. This is the same mixed database/host clock
+domain as the Connector `context-window` refusal fixed in `d5a2e48`, here on
+the server side. It needs a product fix that compares the session touch and
+the authority observation in one clock domain without widening expiry; the
+harness does not change production authority to pass it.

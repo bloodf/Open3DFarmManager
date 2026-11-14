@@ -57,12 +57,22 @@ function checkedOrigin(origin: string, limits: MoonrakerLimits): string {
  */
 export async function discoverMoonraker(input: {
   origin: string
+  apiKeyFile?: string
   webcamOrigin?: string
   limits: MoonrakerLimits
   signal: AbortSignal
   client: { name: string; version: string; url: string }
 }): Promise<MoonrakerDiscovery> {
-  const origin = checkedOrigin(input.origin, input.limits)
+  const checked = validateMoonrakerInput({
+    assignment: {
+      printerKey: 'discovery',
+      origin: input.origin,
+      apiKeyFile: input.apiKeyFile,
+    },
+    allowedOrigins: [input.origin],
+    limits: input.limits,
+  })
+  const origin = checked.origin
   const webcamOrigin = input.webcamOrigin
     ? checkedOrigin(input.webcamOrigin, input.limits)
     : null
@@ -72,7 +82,7 @@ export async function discoverMoonraker(input: {
       input.limits.connectTimeoutMs + REQUESTS * input.limits.requestTimeoutMs,
     ),
   ])
-  const socket = createMoonrakerSocket(origin, input.limits)
+  const socket = createMoonrakerSocket(origin, checked.limits)
   let fail: (error: MoonrakerClientError) => void = () => {}
   const dead = new Promise<never>((_, reject) => (fail = reject))
   dead.catch(() => {})

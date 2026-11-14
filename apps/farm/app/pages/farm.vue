@@ -17,7 +17,12 @@ import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
-import type { ControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import FarmExtendedControls from '../components/FarmExtendedControls.vue'
+import { extendedLabel } from '../utils/farm-control-extended.ts'
+import type {
+  ControlAction,
+  ExtendedControlAction,
+} from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   farmConnectionNotice,
   localInterfaceOrigin,
@@ -226,7 +231,8 @@ const pauseCancel = ref<HTMLButtonElement | null>(null)
 const pauseTarget = shallowRef<{
   assignmentId: string
   printerKey: string
-  action: ControlAction
+  action: ExtendedControlAction
+  args: Record<string, unknown>
 } | null>(null)
 const pauseState = shallowRef<FarmPauseControlState>({ kind: 'connecting' })
 const pauseLost = ref(false)
@@ -252,8 +258,13 @@ const pauseStatus = computed(() => {
   ) {
     return 'O estado da impressora deixou de estar ao vivo. Nenhum comando foi enviado.'
   }
+  if (!['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)) {
+    if (pauseState.value.kind === 'settled')
+      return lastControlResults.value[pauseTarget.value.assignmentId] ?? ''
+    return controlStatusText('pause', pauseState.value, pauseRemaining.value)
+  }
   return controlStatusText(
-    pauseTarget.value.action,
+    pauseTarget.value.action as ControlAction,
     pauseState.value,
     pauseRemaining.value,
   )
@@ -279,7 +290,12 @@ const pauseResolver = createFarmStatusKeyResolver({
     )
   },
 })
-async function openControl(row: FarmRow, action: ControlAction, event: Event) {
+async function openControl(
+  row: FarmRow,
+  action: ExtendedControlAction,
+  event: Event,
+  args: Record<string, unknown> = {},
+) {
   const current = ready.value
   if (
     !current?.scope ||
@@ -303,6 +319,7 @@ async function openControl(row: FarmRow, action: ControlAction, event: Event) {
     assignmentId: row.assignment.assignmentId,
     printerKey: row.assignment.printerKey,
     action,
+    args,
   }
   pauseControl = openFarmPauseControl({
     accountId: scope.accountId,
@@ -327,7 +344,20 @@ async function openControl(row: FarmRow, action: ControlAction, event: Event) {
       pauseState.value = state
       if (state.kind === 'settled' && pauseTarget.value) {
         lastControlResults.value[pauseTarget.value.assignmentId] =
-          controlStatusText(pauseTarget.value.action, state, 0)
+          state.kind === 'settled' &&
+          !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
+            ? {
+                applied: 'Comando confirmado pelo Connector.',
+                rejected: 'Comando recusado.',
+                'not-sent': 'Comando não enviado.',
+                'outcome-unknown':
+                  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+              }[state.outcome]
+            : controlStatusText(
+                pauseTarget.value.action as ControlAction,
+                state,
+                0,
+              )
       }
     },
   })
@@ -340,7 +370,10 @@ function openPause(row: FarmRow, event: Event) {
 }
 function confirmControl() {
   if (pauseState.value.kind === 'ready' && pauseTarget.value) {
-    void pauseControl?.issueControlCommand(pauseTarget.value.action)
+    void pauseControl?.issueControlCommand(
+      pauseTarget.value.action,
+      pauseTarget.value.args,
+    )
   }
 }
 function confirmPause() {
@@ -815,6 +848,25 @@ function dateLabel(time: number) {
                       novamente após recarregar.
                     </p>
                   </template>
+                  <FarmExtendedControls
+                    v-if="!isKobraXAssignment(row.assignment)"
+                    :row="row"
+                    :keys="ready.keys"
+                    :control-enabled="pauseEnabled"
+                    :command-in-flight="
+                      pauseControl !== undefined &&
+                      pauseState.kind !== 'settled' &&
+                      pauseState.kind !== 'failed'
+                    "
+                    :now="now"
+                    :last-result="
+                      lastControlResults[row.assignment.assignmentId]
+                    "
+                    @action="
+                      (action, args, event) =>
+                        openControl(row, action, event, args)
+                    "
+                  />
                   <template v-if="!isKobraXAssignment(row.assignment)">
                     <template
                       v-if="row.observation?.state.controls !== undefined"
@@ -876,11 +928,23 @@ function dateLabel(time: number) {
     >
       <template v-if="pauseTarget">
         <h2 id="pause-dialog-title">
-          {{ actionDialogTitle(pauseTarget.action, pauseTarget.printerKey) }}
+          {{
+            ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+              ? actionDialogTitle(
+                  pauseTarget.action as ControlAction,
+                  pauseTarget.printerKey,
+                )
+              : `${extendedLabel(pauseTarget.action)} — ${pauseTarget.printerKey}`
+          }}
         </h2>
         <p id="pause-dialog-description">
           {{
-            actionDialogDescription(pauseTarget.action, pauseTarget.printerKey)
+            ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+              ? actionDialogDescription(
+                  pauseTarget.action as ControlAction,
+                  pauseTarget.printerKey,
+                )
+              : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
           }}
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
@@ -890,7 +954,13 @@ function dateLabel(time: number) {
             :disabled="pauseState.kind !== 'ready' || pauseRemaining <= 0"
             @click="confirmControl"
           >
-            {{ actionButtonConfirmationLabel(pauseTarget.action) }}
+            {{
+              ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+                ? actionButtonConfirmationLabel(
+                    pauseTarget.action as ControlAction,
+                  )
+                : 'Confirmar comando'
+            }}
           </button>
           <button
             ref="pauseCancel"

@@ -1,4 +1,4 @@
-import type { ControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandOutcome,
   PauseProofsReady,
@@ -187,7 +187,8 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     })
   }
   async function issueControlCommand(
-    action: ControlAction,
+    action: ExtendedControlAction,
+    args: Record<string, unknown> = {},
   ): Promise<PauseCommandOutcome | undefined> {
     if (state.kind !== 'ready' || !command) return undefined
     if (now() >= state.expiresAt - PAUSE_CAPABILITY_MARGIN_MS) {
@@ -196,7 +197,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     }
     clearTimeout(expiry)
     set({ kind: 'sending' })
-    const outcome = await command.issueControlCommand(action)
+    const outcome = await command.issueControlCommand(action, args)
     set({ kind: 'settled', outcome })
     close()
     return outcome

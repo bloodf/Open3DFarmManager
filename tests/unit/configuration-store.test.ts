@@ -1,9 +1,12 @@
-import { ConfigurationChallengeRecord } from '../../apps/farm/server/services/configuration-authority-contract.ts'
+import {
+  ConfigurationChallengeRecord,
+  type ConfigurationAuthorityTransaction,
+} from '../../apps/farm/server/services/configuration-authority-contract.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { deriveConfigurationAssignmentIdentity } from '../../packages/farm-protocol/src/configuration-inventory.ts'
 import { connectorKeyBinding } from '../../apps/farm/server/utils/connector-credentials.ts'
 import { describe, it, expect, vi } from 'vitest'
-import type { Sql } from 'postgres'
+import postgres, { type Sql } from 'postgres'
 import { PostgresConfigurationStore } from '../../apps/farm/server/storage/postgres-configuration.ts'
 
 const scope = {
@@ -548,5 +551,104 @@ it('retains challenge replay identities across adapter restart', async () => {
   await restarted.transaction(scope, async (tx) => {
     expect(await tx.consumeChallenge(record.challenge.challenge_id)).toBeNull()
     expect(await tx.insertChallenge(record)).toBe(false)
+  })
+})
+
+// Synthetic attempt boundary: the real adapter callback runs, then the attempt is
+// rolled back (never committed) when `fail` returns an error. Real PostgreSQL
+// conflict behaviour is qualified by the actual acceptance harness.
+function attempts(
+  db: Awaited<ReturnType<typeof authorityFixture>>,
+  fail: (attempt: number) => unknown,
+) {
+  let begins = 0
+  const pool = {
+    async begin(
+      level: string,
+      work: (tx: unknown) => Promise<void>,
+    ): Promise<void> {
+      const attempt = ++begins
+      return (db.pool as unknown as typeof pool).begin(level, async (tx) => {
+        await work(tx)
+        const error = fail(attempt)
+        if (error) throw error
+      })
+    },
+  }
+  return { pool: pool as unknown as Sql, begins: () => begins }
+}
+const serialization = () =>
+  new postgres.PostgresError({
+    code: '40001',
+    message: 'could not serialize access due to concurrent update',
+  })
+describe('serialization failure recovery', () => {
+  it('reruns a rolled-back 40001 attempt in a fresh transaction without partial writes', async () => {
+    const db = await authorityFixture()
+    const run = attempts(db, (n) => (n === 1 ? serialization() : null))
+    const store = new PostgresConfigurationStore(run.pool, config)
+    const created: boolean[] = []
+    const result = await store.transaction(scope, async (tx) => {
+      created.push(await tx.createOperation(operation))
+      return tx.authority?.role
+    })
+    expect(result).toBe('owner')
+    expect(run.begins()).toBe(2)
+    // The rolled-back first insert left nothing behind, so the replay creates it again.
+    expect(created).toEqual([true, true])
+    expect(db.stored(operation.operation_id)).toEqual(operation)
+    expect(
+      db.statements.filter((s) => s.includes('observe_signalling')).length,
+    ).toBe(4)
+  })
+  it('stops after a finite number of serialization failures', async () => {
+    const db = await authorityFixture()
+    const run = attempts(db, () => serialization())
+    const store = new PostgresConfigurationStore(run.pool, config)
+    const work = vi.fn(async (tx: ConfigurationAuthorityTransaction) =>
+      tx.createOperation(operation),
+    )
+    await expect(store.transaction(scope, work)).rejects.toMatchObject({
+      code: '40001',
+    })
+    expect(run.begins()).toBe(3)
+    expect(work).toHaveBeenCalledTimes(3)
+    expect(db.stored(operation.operation_id)).toBeUndefined()
+  })
+  it.each([
+    ['lock timeout', () => new postgres.PostgresError({ code: '55P03' })],
+    ['deadlock', () => new postgres.PostgresError({ code: '40P01' })],
+    ['connection loss', () => new postgres.PostgresError({ code: '57P01' })],
+    ['callback error', () => new Error('callback failed')],
+    ['spoofed code', () => Object.assign(new Error('x'), { code: '40001' })],
+    ['plain object', () => ({ code: '40001' })],
+  ])('never retries %s', async (_name, error) => {
+    const db = await authorityFixture()
+    const run = attempts(db, () => error())
+    const store = new PostgresConfigurationStore(run.pool, config)
+    await expect(
+      store.transaction(scope, (tx) => tx.createOperation(operation)),
+    ).rejects.toBeDefined()
+    expect(run.begins()).toBe(1)
+    expect(db.stored(operation.operation_id)).toBeUndefined()
+  })
+  it('re-reads authority on every attempt and denies a revocation committed between attempts', async () => {
+    const db = await authorityFixture()
+    const run = attempts(db, (n) => {
+      if (n !== 1) return null
+      db.rows['SELECT role,revoked_at'] = [{ role: 'viewer', revoked_at: null }]
+      return serialization()
+    })
+    const store = new PostgresConfigurationStore(run.pool, config)
+    const seen: (string | null)[] = []
+    const result = await store.transaction(scope, async (tx) => {
+      seen.push(tx.authority?.role ?? null)
+      if (!tx.authority) return 'denied'
+      await tx.createOperation(operation)
+      return 'granted'
+    })
+    expect(result).toBe('denied')
+    expect(seen).toEqual(['owner', null])
+    expect(db.stored(operation.operation_id)).toBeUndefined()
   })
 })

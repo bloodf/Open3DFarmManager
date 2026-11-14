@@ -9,7 +9,7 @@ import {
 } from '../services/configuration-authority-contract.ts'
 import { readPauseNegotiationCredentialRecords } from './postgres-connector-credential-record.ts'
 import { z } from 'zod'
-import type { Sql, TransactionSql } from 'postgres'
+import postgres, { type Sql, type TransactionSql } from 'postgres'
 import {
   BrowserDeviceTextId,
   BrowserDeviceUuid,
@@ -100,11 +100,30 @@ function jsonbRecord(
   return tx.json(record)
 }
 
+/** Total attempts, including the first, for one logical configuration transaction. */
+const MAX_SERIALIZABLE_ATTEMPTS = 3
+
+/** True only for a driver-reported SQLSTATE 40001. PostgreSQL has already rolled that
+ * transaction back (statement or COMMIT failure), so nothing from the attempt is durable.
+ * Connection loss, lock/statement timeouts, deadlocks, TRANSACTION_ROLLED_BACK and
+ * callback errors are not proof of a rollback-only outcome and are never retried. */
+function rolledBackSerializationFailure(error: unknown) {
+  return error instanceof postgres.PostgresError && error.code === '40001'
+}
+
 /** Reads authority and persists admission/registration in one serializable transaction.
  * The supplied pool must
  * run under reviewed farm_configuration_authority: a mutation-capable role, not read-only SQL.
  * The expiry observer may persist terminal session expiry, but no session is touched.
- * sessionRecordId comes from the sealed-login owner, not a browser request field. */
+ * sessionRecordId comes from the sealed-login owner, not a browser request field.
+ * A concurrent session touch can make the expiry observer fail with SQLSTATE 40001; the
+ * whole attempt is then rerun, at most MAX_SERIALIZABLE_ATTEMPTS times, each in a fresh
+ * serializable transaction that re-reads session, account, membership, browser key,
+ * enrollment and credential authority and the observed time. Nothing is carried over.
+ * Callback restriction: `work` may run more than once and only the committed attempt's
+ * result is returned, so its effects must stay inside `tx` or be pure (validation,
+ * hashing, signing, random IDs, in-process registry reads). It must not perform upstream
+ * calls, physical or other side effects, and must not swallow database errors. */
 export class PostgresConfigurationStore {
   private readonly sql: Sql
   private readonly config: PauseNegotiationConfig
@@ -124,6 +143,22 @@ export class PostgresConfigurationStore {
     work: (tx: ConfigurationAuthorityTransaction) => Promise<T>,
   ): Promise<T> {
     const scope = ConfigurationScope.parse(input)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.attempt(scope, work)
+      } catch (error) {
+        if (
+          attempt >= MAX_SERIALIZABLE_ATTEMPTS ||
+          !rolledBackSerializationFailure(error)
+        )
+          throw error
+      }
+    }
+  }
+  private async attempt<T>(
+    scope: ConfigurationScope,
+    work: (tx: ConfigurationAuthorityTransaction) => Promise<T>,
+  ): Promise<T> {
     let result!: T
     await this.sql.begin('isolation level serializable', async (tx) => {
       const first = await this.observe(tx, scope.sessionRecordId)

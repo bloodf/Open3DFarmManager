@@ -5,7 +5,7 @@ import { loadMigrationCatalog } from '../../scripts/db/migrations.ts'
 
 test('production migration is catalogued and rollback preserves receipt history', async () => {
   const catalog = await loadMigrationCatalog()
-  const migration = catalog.at(-1)
+  const migration = catalog.find((entry) => entry.id === '0026_configuration')
   assert.equal(migration?.id, '0026_configuration')
   assert.match(migration!.up, /REFERENCES farm.printer_assignments/)
   assert.match(migration!.down, /RAISE EXCEPTION/)

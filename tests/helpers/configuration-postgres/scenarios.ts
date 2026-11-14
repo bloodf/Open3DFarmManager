@@ -9,6 +9,7 @@ import { PostgresPairingProof } from '../../../apps/farm/server/storage/postgres
 import { ConnectorIdentity } from '../../../packages/connector/src/identity/store.ts'
 import { validateBrowserDevicePublicKey } from '../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { deriveConfigurationAssignmentIdentity } from '../../../packages/farm-protocol/src/configuration-inventory.ts'
+import { qualifySerializationRecovery } from './serialization.ts'
 
 /** Caller must supply a fresh disposable cluster with the complete real migration catalog. */
 export async function qualifyConfiguration(
@@ -318,6 +319,17 @@ export async function qualifyConfiguration(
     status: 'pass',
     outcomes,
     rows: await snapshot(),
+  })
+  await qualifySerializationRecovery({
+    admin,
+    sql,
+    role,
+    config,
+    scope,
+    account,
+    farm,
+    operation,
+    record,
   })
   const catalog = await loadMigrationCatalog()
   const readiness = catalog.find(

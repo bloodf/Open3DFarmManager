@@ -518,6 +518,10 @@ export async function openConfigurationBrowserSession(
     resolveReady = resolve
     rejectReady = reject
   })
+  // A refused start rejects both this and `client.start()`; the caller only
+  // ever awaits one of them, so mark this one observed. It is still awaited
+  // below and still rejects there with its own reason.
+  void readyPromise.catch(() => {})
 
   const createClient =
     input.createSignalling ??
@@ -608,6 +612,36 @@ export async function openConfigurationBrowserSession(
       clearTimeout(timer)
       signal.removeEventListener('abort', onAbort)
     }
+  }
+
+  /**
+   * Sends one channel message and awaits its reply. A send the peer refuses
+   * (or that throws) releases the reply slot it registered, so no waiter is
+   * left to reject unobserved on a later timeout or terminal.
+   */
+  async function sendAndAwaitReply(
+    message: Parameters<SignallingClientLike['sendMessage']>[0],
+    signal: AbortSignal,
+    sendFailure: string,
+  ) {
+    const previous = pendingWaiter
+    const reply = awaitChannelMessage(signal)
+    const own = pendingWaiter === previous ? null : pendingWaiter
+    let sent = false
+    try {
+      sent = client.sendMessage(message)
+    } finally {
+      if (!sent) {
+        if (own && pendingWaiter === own) {
+          pendingWaiter = null
+          own.reject(new Error(sendFailure))
+        }
+        // The caller receives the send failure itself, not this reply.
+        void reply.catch(() => {})
+      }
+    }
+    if (!sent) throw new Error(sendFailure)
+    return await reply
   }
 
   async function authorizeAndSendFrame(
@@ -704,16 +738,17 @@ export async function openConfigurationBrowserSession(
       expiresAt: capability.expires_at,
     }
     beforeDispatch?.()
-    const waitResponse = awaitChannelMessage(signal)
-    const sent = client.sendMessage({
-      v: 1,
-      t: 'request',
-      frame: encodeConfigurationRequest(frame),
-      capability: encodeConfigurationCapability(capability),
-      admission: admissionProofWire,
-    })
-    if (!sent) throw new Error('send-failed')
-    const reply = await waitResponse
+    const reply = await sendAndAwaitReply(
+      {
+        v: 1,
+        t: 'request',
+        frame: encodeConfigurationRequest(frame),
+        capability: encodeConfigurationCapability(capability),
+        admission: admissionProofWire,
+      },
+      signal,
+      'send-failed',
+    )
     if (reply.t !== 'response')
       throw new Error('Unexpected channel message type')
     const decoded = decodeConfigurationResponse(reply.frame)
@@ -841,17 +876,18 @@ export async function openConfigurationBrowserSession(
       throw new Error('Invalid server inventory acknowledgement signature')
     }
     ensureAlive(params.signal)
-    const waitInventory = awaitChannelMessage(params.signal)
-    const sent = client.sendMessage({
-      v: 1,
-      t: 'inventory',
-      operation_id: params.operationId,
-      local_committed_receipt_sha256: localReceiptSha256,
-      committed_revision: params.localCommittedReceipt.committed_revision,
-      attestation: registration.inventoryAckWire,
-    })
-    if (!sent) throw new Error('inventory-send-failed')
-    const invReply = await waitInventory
+    const invReply = await sendAndAwaitReply(
+      {
+        v: 1,
+        t: 'inventory',
+        operation_id: params.operationId,
+        local_committed_receipt_sha256: localReceiptSha256,
+        committed_revision: params.localCommittedReceipt.committed_revision,
+        attestation: registration.inventoryAckWire,
+      },
+      params.signal,
+      'inventory-send-failed',
+    )
     if (
       invReply.t !== 'inventory-result' ||
       invReply.operation_id !== params.operationId

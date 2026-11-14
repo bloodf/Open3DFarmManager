@@ -55,77 +55,131 @@ const MAX = 65536
 export function packet(header: number, body: Buffer) {
   const length: number[] = []
   let n = body.length
-  do { let digit = n % 128; n = Math.floor(n / 128); if (n) digit |= 128; length.push(digit) } while (n)
+  do {
+    let digit = n % 128
+    n = Math.floor(n / 128)
+    if (n) digit |= 128
+    length.push(digit)
+  } while (n)
   return Buffer.concat([Buffer.from([header, ...length]), body])
 }
-export async function startBambuSimulator({ serial = 'SYNTHETIC', port = 0 } = {}) {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial)) throw new Error('Invalid synthetic serial')
+export async function startBambuSimulator({
+  serial = 'SYNTHETIC',
+  port = 0,
+} = {}) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
+    throw new Error('Invalid synthetic serial')
   const reportTopic = `device/${serial}/report`
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
-  const server = createServer({ cert, key, handshakeTimeout: 3000 }, socket => {
-    let buffer = Buffer.alloc(0)
-    let connected = false
-    socket.setTimeout(10000, () => socket.destroy())
-    socket.on('data', chunk => {
-      buffer = Buffer.concat([buffer, chunk])
-      if (buffer.length > MAX) { socket.destroy(); return }
-      try {
-        while (buffer.length >= 2) {
-          let size = 0, factor = 1, offset = 1
-          while (true) {
-            if (offset >= buffer.length) return
-            const digit = buffer[offset++]!
-            size += (digit & 127) * factor
-            if (size > MAX || offset > 5) throw new Error('Packet limit')
-            if (!(digit & 128)) break
-            factor *= 128
-          }
-          if (buffer.length < offset + size) return
-          const header = buffer[0]!
-          const body = buffer.subarray(offset, offset + size)
-          buffer = buffer.subarray(offset + size)
-          if (!connected) {
-            if (header !== 16 || body.length < 12 || body.subarray(0,7).toString('hex') !== '00044d51545404' || body[7] !== 2) throw new Error('CONNECT required')
-            const idLength = body.readUInt16BE(10)
-            if (!idLength || body.length !== 12 + idLength) throw new Error('Invalid client ID')
-            connected = true; socket.write(Buffer.from([32,2,0,0]))
-          } else if (header === 130) {
-            if (body.length < 5 || body.readUInt16BE(0) === 0) throw new Error('Invalid subscription')
-            const length = body.readUInt16BE(2)
-            if (body.length !== length + 5 || body.at(-1) !== 0) throw new Error('Only QoS 0 supported')
-            const accepted = body.subarray(4,4+length).toString() === reportTopic
-            if (accepted) subscribed.add(socket)
-            socket.write(Buffer.from([144,3,body[0]!,body[1]!,accepted ? 0 : 128]))
-          } else if (header === 192 && !size) socket.write(Buffer.from([208,0]))
-          else if (header === 224 && !size) socket.destroy()
-          else throw new Error('Unsupported packet; commands forbidden')
+  const server = createServer(
+    { cert, key, handshakeTimeout: 3000 },
+    (socket) => {
+      let buffer = Buffer.alloc(0)
+      let connected = false
+      socket.setTimeout(10000, () => socket.destroy())
+      socket.on('data', (chunk) => {
+        buffer = Buffer.concat([buffer, chunk])
+        if (buffer.length > MAX) {
+          socket.destroy()
+          return
         }
-      } catch { socket.destroy() }
-    })
-  })
-  server.on('connection', socket => {
+        try {
+          while (buffer.length >= 2) {
+            let size = 0,
+              factor = 1,
+              offset = 1
+            while (true) {
+              if (offset >= buffer.length) return
+              const digit = buffer[offset++]!
+              size += (digit & 127) * factor
+              if (size > MAX || offset > 5) throw new Error('Packet limit')
+              if (!(digit & 128)) break
+              factor *= 128
+            }
+            if (buffer.length < offset + size) return
+            const header = buffer[0]!
+            const body = buffer.subarray(offset, offset + size)
+            buffer = buffer.subarray(offset + size)
+            if (!connected) {
+              if (
+                header !== 16 ||
+                body.length < 12 ||
+                body.subarray(0, 7).toString('hex') !== '00044d51545404' ||
+                body[7] !== 2
+              )
+                throw new Error('CONNECT required')
+              const idLength = body.readUInt16BE(10)
+              if (!idLength || body.length !== 12 + idLength)
+                throw new Error('Invalid client ID')
+              connected = true
+              socket.write(Buffer.from([32, 2, 0, 0]))
+            } else if (header === 130) {
+              if (body.length < 5 || body.readUInt16BE(0) === 0)
+                throw new Error('Invalid subscription')
+              const length = body.readUInt16BE(2)
+              if (body.length !== length + 5 || body.at(-1) !== 0)
+                throw new Error('Only QoS 0 supported')
+              const accepted =
+                body.subarray(4, 4 + length).toString() === reportTopic
+              if (accepted) subscribed.add(socket)
+              socket.write(
+                Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),
+              )
+            } else if (header === 192 && !size)
+              socket.write(Buffer.from([208, 0]))
+            else if (header === 224 && !size) socket.destroy()
+            else throw new Error('Unsupported packet; commands forbidden')
+          }
+        } catch {
+          socket.destroy()
+        }
+      })
+    },
+  )
+  server.on('connection', (socket) => {
     sockets.add(socket as TLSSocket)
     socket.on('error', () => {})
-    socket.on('close', () => { sockets.delete(socket as TLSSocket); subscribed.delete(socket as TLSSocket) })
+    socket.on('close', () => {
+      sockets.delete(socket as TLSSocket)
+      subscribed.delete(socket as TLSSocket)
+    })
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve() })
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', reject)
+      resolve()
+    })
   })
   const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Missing listener')
+  if (!address || typeof address === 'string')
+    throw new Error('Missing listener')
   async function disconnectClients() {
-    await Promise.all([...sockets].map(socket => new Promise<void>(resolve => { socket.once('close', resolve); socket.destroy() })))
+    await Promise.all(
+      [...sockets].map(
+        (socket) =>
+          new Promise<void>((resolve) => {
+            socket.once('close', resolve)
+            socket.destroy()
+          }),
+      ),
+    )
   }
   let closing: Promise<void> | undefined
   return {
-    host: '127.0.0.1', port: address.port, syntheticTrust: cert, reportTopic,
+    host: '127.0.0.1',
+    port: address.port,
+    syntheticTrust: cert,
+    reportTopic,
     publishReport(value: unknown) {
-      const payload = Buffer.from(typeof value === 'string' ? value : JSON.stringify(value))
+      const payload = Buffer.from(
+        typeof value === 'string' ? value : JSON.stringify(value),
+      )
       if (payload.length > MAX - 256) throw new Error('Report too large')
       const topic = Buffer.from(reportTopic)
-      const length = Buffer.alloc(2); length.writeUInt16BE(topic.length)
+      const length = Buffer.alloc(2)
+      length.writeUInt16BE(topic.length)
       const bytes = packet(48, Buffer.concat([length, topic, payload]))
       for (const socket of subscribed) {
         if (socket.writableLength > MAX) socket.destroy()
@@ -135,8 +189,11 @@ export async function startBambuSimulator({ serial = 'SYNTHETIC', port = 0 } = {
     disconnectClients,
     close() {
       closing ??= (async () => {
-        const closed = new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
-        await disconnectClients(); await closed
+        const closed = new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        )
+        await disconnectClients()
+        await closed
       })()
       return closing
     },

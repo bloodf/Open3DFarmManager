@@ -4,8 +4,11 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import ws from '../../packages/connector/node_modules/ws/index.js'
-const { WebSocketServer } = ws
+import { createRequire } from 'node:module'
+import type * as Ws from '../../packages/connector/node_modules/@types/ws/index.d.ts'
+const { WebSocketServer } = createRequire(
+  new URL('../../packages/connector/package.json', import.meta.url),
+)('ws') as typeof Ws
 
 function run(args: string[]) {
   return new Promise<{ code: number | null; out: string; err: string }>(

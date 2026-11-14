@@ -43,7 +43,11 @@ const Limits = z
   .refine((value) => value.reconnectMinMs <= value.reconnectMaxMs)
 
 export function validateMoonrakerInput(input: {
-  assignment: { printerKey: string; origin: string; apiKeyFile?: string }
+  assignment: {
+    printerKey: string
+    origin: string
+    apiKeyFile?: string | undefined
+  }
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
 }): { printerKey: string; origin: string; limits: MoonrakerLimits } {

@@ -437,6 +437,7 @@ function dateLabel(time: number) {
     <h1 ref="heading" tabindex="-1">Minha farm</h1>
     <nav aria-label="Navegação da farm" class="actions">
       <NuxtLink to="/">Início</NuxtLink>
+      <NuxtLink to="/arquivos">Arquivos</NuxtLink>
       <NuxtLink to="/impressoras">Impressoras</NuxtLink>
       <NuxtLink to="/parear">Connectors</NuxtLink>
       <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>

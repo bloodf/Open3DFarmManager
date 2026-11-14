@@ -24,7 +24,7 @@ const TOKEN = 'secret-header.secret-payload.secret-signature'
 const LEAK = 'leaked-detail-must-not-appear'
 const nonce = () => base64url(crypto.getRandomValues(new Uint8Array(32)))
 
-type Failure = 'scope' | 'window' | 'session' | 'offer'
+type Failure = 'scope' | 'window' | 'expired' | 'session' | 'offer'
 type DiagnosticMode = 'record' | 'throw' | 'reject'
 
 async function browserKey() {
@@ -182,8 +182,13 @@ async function drive(failure: Failure, mode: DiagnosticMode) {
     browser_public_key: browser.publicKey,
     browser_thumbprint: browser.thumbprint,
     connector_nonce: nonce(),
-    issued_at: failure === 'window' ? T0 + 1 : T0,
-    expires_at: T0 + 30_000,
+    issued_at:
+      failure === 'window'
+        ? T0 + 5_007
+        : failure === 'expired'
+          ? T0 - 30_000
+          : T0,
+    expires_at: failure === 'expired' ? T0 - 3 : T0 + 30_000,
   })
   await until(() => socketCloses > 0)
   const outcome = {
@@ -203,9 +208,25 @@ async function drive(failure: Failure, mode: DiagnosticMode) {
   }
 }
 
-const EXPECTED_STAGE: Record<Failure, { stage: string; error: string }> = {
+const EXPECTED_STAGE: Record<
+  Failure,
+  { stage: string; error: string; window?: string; windowMs?: number }
+> = {
   scope: { stage: 'context-scope', error: 'Error' },
-  window: { stage: 'context-window', error: 'Error' },
+  // Context issued beyond the 5000 ms skew bound: a future lease.
+  window: {
+    stage: 'context-window',
+    error: 'Error',
+    window: 'future',
+    windowMs: 5_007,
+  },
+  // Context that ended 3 ms before the Connector clock: an expired lease.
+  expired: {
+    stage: 'context-window',
+    error: 'Error',
+    window: 'expired',
+    windowMs: 3,
+  },
   session: { stage: 'context-session', error: 'Error' },
   offer: { stage: 'context-offer', error: 'TypeError' },
 }
@@ -232,9 +253,8 @@ describe('configuration signalling: fixed failure-stage diagnostics', () => {
         {
           kind: 'configuration-signalling',
           state: 'frame-failed',
-          stage: EXPECTED_STAGE[failure].stage,
           frame: 'config.context-request',
-          error: EXPECTED_STAGE[failure].error,
+          ...EXPECTED_STAGE[failure],
         },
       ])
       const wire = JSON.stringify(diagnostics)

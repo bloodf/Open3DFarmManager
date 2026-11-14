@@ -1,6 +1,10 @@
 import { createHash, createPublicKey } from 'node:crypto'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
-import { CONFIGURATION_PROTOCOL } from '../../../farm-protocol/src/configuration-common.ts'
+import {
+  CONFIGURATION_HARD_MAXIMUMS,
+  CONFIGURATION_PROTOCOL,
+  configurationFresh,
+} from '../../../farm-protocol/src/configuration-common.ts'
 import {
   decodeConfigurationSignallingServerFrame,
   encodeConfigurationSignallingClientFrame,
@@ -16,6 +20,12 @@ export const CONFIGURATION_SIGNALLING_SUBPROTOCOL =
   'open3dfarm.config-signalling.v1'
 const MAX_SOCKET_BYTES = 12_288
 const MAX_IGNORED_CANDIDATES = 64
+/**
+ * Leases are stamped by the farm (database clock) and judged here by the
+ * Connector wall clock. Their not-before tolerates the published hard-max
+ * skew, exactly as the browser does; expiry is never extended.
+ */
+const LEASE_SKEW_MS = CONFIGURATION_HARD_MAXIMUMS.skewMs
 /** Fixed processing stages reported when an inbound frame stops the link. */
 type FrameStage =
   | 'frame-shape'
@@ -34,6 +44,23 @@ const ERROR_CATEGORIES = new Set([
   'SyntaxError',
   'AbortError',
 ])
+/** Bound on the numeric window distance a diagnostic may carry. */
+const MAX_WINDOW_DIAGNOSTIC_MS = 600_000
+/**
+ * Which side of a context lease the Connector clock fell on, and by how many
+ * whole milliseconds (clamped). Timing only: never a lease or frame value.
+ */
+type WindowMiss = { window: 'future' | 'expired'; windowMs: number }
+function windowMiss(now: number, issuedAt: number, expiresAt: number) {
+  const future = now < expiresAt
+  const distance = future ? issuedAt - now : now - expiresAt
+  return {
+    window: future ? 'future' : 'expired',
+    windowMs: Number.isFinite(distance)
+      ? Math.min(MAX_WINDOW_DIAGNOSTIC_MS, Math.max(0, Math.ceil(distance)))
+      : MAX_WINDOW_DIAGNOSTIC_MS,
+  } satisfies WindowMiss
+}
 /** Category only: never the message, stack or any value carried by the error. */
 function errorCategory(error: unknown): string {
   if (!(error instanceof Error)) return 'non-error'
@@ -131,6 +158,7 @@ export function createConfigurationSignallingClient(
     let leaseTimer: ReturnType<typeof setTimeout> | undefined
     let readied = false
     let stage: FrameStage = 'frame-shape'
+    let miss: WindowMiss | null = null
     let finished: () => void = () => {}
     const done = new Promise<void>((resolve) => {
       finished = resolve
@@ -218,8 +246,11 @@ export function createConfigurationSignallingClient(
       )
         throw new Error('Foreign configuration context')
       stage = 'context-window'
-      if (clock() < frame.issued_at || clock() >= frame.expires_at)
+      const windowNow = clock()
+      if (!configurationFresh(frame, windowNow, LEASE_SKEW_MS)) {
+        miss = windowMiss(windowNow, frame.issued_at, frame.expires_at)
         throw new Error('Foreign configuration context')
+      }
       closeContext('superseded')
       let resolveBinding: (value: unknown) => void = () => {}
       let rejectBinding: (error: Error) => void = () => {}
@@ -298,7 +329,7 @@ export function createConfigurationSignallingClient(
         case 'config.connector-ready': {
           if (phase !== 'proof') throw new Error('Unexpected ready')
           const now = clock()
-          if (now < frame.issued_at - 5000 || now >= frame.expires_at)
+          if (!configurationFresh(frame, now, LEASE_SKEW_MS))
             throw new Error('Stale inbox lease')
           phase = 'ready'
           const revision = options.runtime().revision()
@@ -376,6 +407,7 @@ export function createConfigurationSignallingClient(
             let kind: string | null = null
             try {
               stage = 'frame-shape'
+              miss = null
               if (typeof raw !== 'string' || raw.length > MAX_SOCKET_BYTES)
                 throw new Error('Invalid frame')
               stage = 'frame-decode'
@@ -390,6 +422,7 @@ export function createConfigurationSignallingClient(
                 stage,
                 frame: kind,
                 error: errorCategory(error),
+                ...(stage === 'context-window' && miss ? miss : {}),
               })
               throw error
             }

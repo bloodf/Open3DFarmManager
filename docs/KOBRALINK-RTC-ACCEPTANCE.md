@@ -308,7 +308,7 @@ enrollment (approved, same farm), one credential (same farm, fingerprint
 matches enrollment, issued 30.5 s earlier, expires in 269 s), one proof slot
 (not expired), no revocations. The database clock was 75 ms behind the host.
 
-The remaining refusing predicate is the session check in
+Not yet proved causally: no failing snapshot captured the session touch delta (added in `62cdb58`; that reproduction passed). The remaining candidate predicate is the session check in
 `PostgresConfigurationStore` (`apps/farm/server/storage/postgres-configuration.ts`):
 `evaluateSession(..., observedAt)` with `observedAt` from
 `farm.observe_signalling_session_expiry` (PostgreSQL `clock_timestamp()`),
@@ -323,5 +323,4 @@ positive `ddf34ac2-63aa-4f44-9cc0-da90f856a043` on `62cdb58` after a fresh VM
 start passed 31/31 with no 403. This is the same mixed database/host clock
 domain as the Connector `context-window` refusal fixed in `d5a2e48`, here on
 the server side. It needs a product fix that compares the session touch and
-the authority observation in one clock domain without widening expiry; the
-harness does not change production authority to pass it.
+the authority observation in one clock domain without widening expiry; a deterministic store-level reproduction is still required before that fix. The harness does not change production authority to pass it.

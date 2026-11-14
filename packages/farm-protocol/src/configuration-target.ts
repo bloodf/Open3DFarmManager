@@ -135,10 +135,27 @@ export const BambuConfigurationTarget = z.strictObject({
   device_id: configurationOpaqueId.optional(),
 })
 export type BambuConfigurationTarget = z.infer<typeof BambuConfigurationTarget>
+/** Stock firmware telemetry endpoint; Moonraker uses its own target. */
+export const CREALITY_NATIVE_PORT = 9999
+export const CrealityConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('creality'),
+  model: z.strictObject({
+    family: z.literal('creality-native'),
+    provisional: z.literal(true),
+  }),
+  host: ConfigurationIpv4,
+  device_id: configurationOpaqueId.optional(),
+})
+export type CrealityConfigurationTarget = z.infer<
+  typeof CrealityConfigurationTarget
+>
 export const ConfigurationTarget = z.discriminatedUnion('backend', [
   KobraConfigurationTarget,
   MoonrakerConfigurationTarget,
   BambuConfigurationTarget,
+  CrealityConfigurationTarget,
 ])
 
 export type ConfigurationTarget = z.infer<typeof ConfigurationTarget>

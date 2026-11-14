@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  CREALITY_SUPPORT_NOTE,
+  validateCrealityTargetInput,
+  describeCrealityConfigurationError,
+} from '../utils/creality-onboarding.ts'
 import DiscoveryResults from '../components/printer-discovery/Results.vue'
 import { openPrinterDiscoverySession } from '../utils/printer-discovery-view-session.ts'
 import {
@@ -199,8 +204,19 @@ function selectDiscovery(
   }
 }
 const onboardingFamily = ref<
-  'anycubic-kobra-x' | 'klipper-moonraker' | 'bambu-lan'
+  'anycubic-kobra-x' | 'klipper-moonraker' | 'bambu-lan' | 'creality-native'
 >('anycubic-kobra-x')
+const crealityHost = ref('')
+const isCrealityOnboarding = computed(
+  () =>
+    kobraOperation.value?.target.backend === 'creality' ||
+    (kobraStage.value === 'idle' &&
+      onboardingFamily.value === 'creality-native'),
+)
+function selectCrealityMoonraker() {
+  closeKobraSession()
+  onboardingFamily.value = 'klipper-moonraker'
+}
 const bambuIp = ref('')
 const bambuSerial = ref('')
 const bambuAccessCode = ref('')
@@ -215,11 +231,14 @@ const onboardingFamilyLabel = computed(() =>
     ? 'Klipper / Moonraker'
     : isBambuOnboarding.value
       ? 'Bambu Lab (LAN)'
-      : 'Anycubic Kobra X',
+      : isCrealityOnboarding.value
+        ? 'Creality (firmware original)'
+        : 'Anycubic Kobra X',
 )
 const describeBackendError = (code: string) =>
   describeMoonrakerConfigurationError(code) ??
-  (isBambuOnboarding.value ? describeBambuConfigurationError(code) : null)
+  (isBambuOnboarding.value ? describeBambuConfigurationError(code) : null) ??
+  (isCrealityOnboarding.value ? describeCrealityConfigurationError(code) : null)
 const moonrakerOrigin = ref('')
 const moonrakerApiKey = ref('')
 const isMoonrakerOnboarding = computed(
@@ -1273,6 +1292,77 @@ async function prepareBambuPrinter() {
   }
 }
 
+async function prepareCrealityPrinter() {
+  if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
+  kobraError.value = ''
+  kobraStatus.value = ''
+  const validated = validateCrealityTargetInput({
+    host: crealityHost.value.trim(),
+    displayLabel: kobraLabel.value,
+  })
+  if (!validated.ok) {
+    kobraError.value = validated.error
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const expectedRevision = kobraBootstrap.value.data.bootstrap.revision
+  if (expectedRevision === null) {
+    kobraError.value = 'Configuração não disponível neste Connector.'
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const token = kobraGeneration
+  const opController = new AbortController()
+  kobraController = opController
+  kobraBusy.value = true
+  kobraStage.value = 'preparing'
+  kobraStatus.value =
+    'Conectando via WebRTC config-v1 e verificando a Creality na LAN do Connector…'
+  let opContext: KobraOperationContext | null = null
+  try {
+    const targetSha256 = await configurationTargetHash(validated.target)
+    if (kobraKeyState.value.kind !== 'available')
+      throw new Error('Approved browser key required')
+    if (token !== kobraGeneration || opController.signal.aborted) return
+    const candidate: KobraOperationContext = {
+      accountId: kobraKeyState.value.accountId,
+      operationId: crypto.randomUUID(),
+      farmId: farmId.value,
+      agentId: kobraAgentId.value,
+      keyId: kobraKeyId.value,
+      target: validated.target,
+      targetSha256,
+      expectedRevision,
+      displayLabel: validated.displayLabel,
+      preparedReceipt: null,
+      preparedReceiptSha256: null,
+    }
+    const session = await ensureKobraSession(opController.signal)
+    if (token !== kobraGeneration) return
+    const outcome = await session.prepare({
+      operationId: candidate.operationId,
+      target: validated.target,
+      expectedRevision: candidate.expectedRevision,
+      signal: opController.signal,
+      beforeDispatch: () => {
+        if (token !== kobraGeneration || opController.signal.aborted)
+          throw new Error('Configuration context changed before dispatch')
+        // Persist before handing the frame to the transport; send failures stay uncertain.
+        persistPendingOperation(candidate, 'awaiting-reconcile')
+        opContext = candidate
+        kobraOperation.value = candidate
+      },
+    })
+    await applySessionOutcome(outcome, candidate, token, opController.signal)
+  } catch (cause) {
+    await handleKobraException(cause, opContext, token, opContext !== null)
+  } finally {
+    if (token === kobraGeneration) kobraBusy.value = false
+  }
+}
+
 async function commitKobraX() {
   const opContext = kobraOperation.value
   if (
@@ -1835,7 +1925,9 @@ onBeforeRouteLeave(clear)
             ? prepareMoonrakerPrinter()
             : onboardingFamily === 'bambu-lan'
               ? prepareBambuPrinter()
-              : prepareKobraX()
+              : onboardingFamily === 'creality-native'
+                ? prepareCrealityPrinter()
+                : prepareKobraX()
         "
       >
         <fieldset :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'">
@@ -1849,6 +1941,9 @@ onBeforeRouteLeave(clear)
             <option value="anycubic-kobra-x">Anycubic Kobra X</option>
             <option value="klipper-moonraker">Klipper / Moonraker</option>
             <option value="bambu-lan">Bambu Lab (LAN)</option>
+            <option value="creality-native">
+              Creality (firmware original)
+            </option>
           </select>
           <template v-if="onboardingFamily === 'klipper-moonraker'">
             <label for="moonraker-origin">Origem HTTP(S) do Moonraker</label>
@@ -1888,6 +1983,27 @@ onBeforeRouteLeave(clear)
               Suporte não qualificado. O Connector verifica o Moonraker em modo
               somente leitura antes de aceitar.
             </p>
+          </template>
+          <template v-else-if="onboardingFamily === 'creality-native'">
+            <label for="creality-host">Endereço IPv4 da Creality na LAN</label>
+            <input
+              id="creality-host"
+              v-model="crealityHost"
+              required
+              maxlength="15"
+              inputmode="decimal"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="creality-host-help"
+            />
+            <p id="creality-host-help">
+              Ex.: 192.168.1.60. Firmware original, porta 9999. Sem URL ou
+              credenciais.
+            </p>
+            <p>{{ CREALITY_SUPPORT_NOTE }}</p>
+            <button type="button" @click="selectCrealityMoonraker">
+              Minha Creality usa Klipper / Moonraker
+            </button>
           </template>
           <template v-else-if="onboardingFamily === 'bambu-lan'">
             <label for="bambu-ip">Endereço IPv4 da Bambu Lab na LAN</label>
@@ -2006,7 +2122,9 @@ onBeforeRouteLeave(clear)
                     ? 'Preparar Klipper / Moonraker'
                     : onboardingFamily === 'bambu-lan'
                       ? 'Preparar Bambu Lab (LAN)'
-                      : 'Preparar Anycubic Kobra X'
+                      : onboardingFamily === 'creality-native'
+                        ? 'Preparar Creality'
+                        : 'Preparar Anycubic Kobra X'
               }}
             </button>
           </div>
@@ -2076,7 +2194,7 @@ onBeforeRouteLeave(clear)
           <dd>{{ kobraPrepared.expectedRevision }}</dd>
         </dl>
         <h4>Capacidades admitidas para esta impressora</h4>
-        <p v-if="isMoonrakerOnboarding">
+        <p v-if="isMoonrakerOnboarding || isCrealityOnboarding">
           Telemetria somente leitura. Comandos e câmera não qualificados.
         </p>
         <template
@@ -2098,7 +2216,9 @@ onBeforeRouteLeave(clear)
         </template>
         <dl>
           <div
-            v-for="cap in isMoonrakerOnboarding || isBambuOnboarding
+            v-for="cap in isMoonrakerOnboarding ||
+            isBambuOnboarding ||
+            isCrealityOnboarding
               ? []
               : KOBRA_X_DEVICE_CAPABILITIES"
             :key="cap.id"

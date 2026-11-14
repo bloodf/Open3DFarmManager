@@ -334,12 +334,14 @@ describe('Bambu Report Decoder', () => {
         progress: 0,
         toolTemperatureCelsius: 24.5,
         bedTemperatureCelsius: 23.0,
+        filename: 'test_print.gcode',
       })
 
       // Check that extraneous keys are not attached to observation
       expect(Object.keys(result).sort()).toEqual(
         [
           'bedTemperatureCelsius',
+          'filename',
           'kind',
           'progress',
           'state',

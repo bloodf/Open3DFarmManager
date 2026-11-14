@@ -1,3 +1,4 @@
+import { CrealityBinding } from '../config/creality.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
@@ -157,5 +158,33 @@ export function readBambuPrinterBinding(
 ): BambuBinding | null {
   return readPrinterBinding(binding)
     ? (bambuBindings.get(binding) ?? null)
+    : null
+}
+
+const crealityBindings = new WeakMap<
+  PrinterBinding,
+  Readonly<import('zod').infer<typeof CrealityBinding>>
+>()
+export function provisionCrealityPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(CrealityBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('Creality assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  crealityBindings.set(binding, local)
+  return binding
+}
+export function readCrealityPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (crealityBindings.get(binding) ?? null)
     : null
 }

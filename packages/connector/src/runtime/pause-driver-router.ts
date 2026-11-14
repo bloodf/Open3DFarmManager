@@ -1,3 +1,6 @@
+import { openFixedCrealityControl } from '../creality/control-driver.ts'
+import { CREALITY_ACTIONS } from '../creality/commands.ts'
+import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
@@ -67,6 +70,7 @@ export function createPauseDriverRouter(config: {
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
     if (!readPrinterBinding(binding)) return []
+    if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
     const bambu = readBambuPrinterBinding(binding)
     if (bambu)
       return bambu.control ? bambuControls(config.bambuModel?.(binding)) : []
@@ -75,7 +79,11 @@ export function createPauseDriverRouter(config: {
   return Object.freeze({
     controls,
     async detect(binding: PrinterBinding, signal?: AbortSignal) {
-      if (readPrinterBinding(binding) && !readBambuPrinterBinding(binding))
+      if (
+        readPrinterBinding(binding) &&
+        !readBambuPrinterBinding(binding) &&
+        !readCrealityPrinterBinding(binding)
+      )
         moonrakerObjects.set(
           binding,
           await detectMoonrakerObjects({
@@ -118,9 +126,11 @@ export function createPauseDriverRouter(config: {
       >
       try {
         fixed = (
-          readBambuPrinterBinding(binding)
-            ? openFixedBambuControl
-            : openFixedMoonrakerPause
+          readCrealityPrinterBinding(binding)
+            ? openFixedCrealityControl
+            : readBambuPrinterBinding(binding)
+              ? openFixedBambuControl
+              : openFixedMoonrakerPause
         )({
           binding,
           allowedOrigins: config.allowedOrigins,

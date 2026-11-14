@@ -1,6 +1,23 @@
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import type { ObservationContext, ValidatedMoonrakerSnapshot } from './parse.ts'
 
+function parseFanSpeedPercent(raw: unknown): number | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw))
+    return undefined
+  const speed = (raw as Record<string, unknown>).speed
+  if (typeof speed !== 'number' || !Number.isFinite(speed)) return undefined
+  const clamped = Math.max(0, Math.min(1, speed))
+  return Math.round(clamped * 100)
+}
+
+function parsePinValue(raw: unknown): boolean | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw))
+    return undefined
+  const value = (raw as Record<string, unknown>).value
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return value > 0
+}
+
 export function normalizeMoonrakerSnapshot(
   snapshot: ValidatedMoonrakerSnapshot,
   context: ObservationContext,
@@ -34,7 +51,9 @@ export function normalizeMoonrakerSnapshot(
       : {}
   const filename =
     typeof print_stats.filename === 'string'
-      ? print_stats.filename.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 255)
+      ? print_stats.filename
+          .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+          .slice(0, 255)
       : undefined
   const duration = print_stats.print_duration
   const remaining =
@@ -44,6 +63,51 @@ export function normalizeMoonrakerSnapshot(
     virtual_sdcard.progress < 1
       ? (duration * (1 - virtual_sdcard.progress)) / virtual_sdcard.progress
       : undefined
+
+  const rawStatus = snapshot.status as Record<string, unknown>
+
+  // Fans extraction: fan (part), fan_generic aux / aux_fan, fan_generic chamber / chamber_fan
+  let partFan: number | undefined
+  if ('fan' in rawStatus) {
+    partFan = parseFanSpeedPercent(rawStatus.fan)
+  } else if ('fan_generic part' in rawStatus) {
+    partFan = parseFanSpeedPercent(rawStatus['fan_generic part'])
+  } else if ('fan_generic part_fan' in rawStatus) {
+    partFan = parseFanSpeedPercent(rawStatus['fan_generic part_fan'])
+  }
+
+  let auxFan: number | undefined
+  if ('fan_generic aux' in rawStatus) {
+    auxFan = parseFanSpeedPercent(rawStatus['fan_generic aux'])
+  } else if ('fan_generic aux_fan' in rawStatus) {
+    auxFan = parseFanSpeedPercent(rawStatus['fan_generic aux_fan'])
+  }
+
+  let chamberFan: number | undefined
+  if ('fan_generic chamber' in rawStatus) {
+    chamberFan = parseFanSpeedPercent(rawStatus['fan_generic chamber'])
+  } else if ('fan_generic chamber_fan' in rawStatus) {
+    chamberFan = parseFanSpeedPercent(rawStatus['fan_generic chamber_fan'])
+  }
+
+  const fans: PrinterState['fans'] =
+    partFan !== undefined || auxFan !== undefined || chamberFan !== undefined
+      ? {
+          ...(partFan !== undefined ? { part: partFan } : {}),
+          ...(auxFan !== undefined ? { aux: auxFan } : {}),
+          ...(chamberFan !== undefined ? { chamber: chamberFan } : {}),
+        }
+      : undefined
+
+  // Light extraction: output_pin caselight
+  let chamberLight: boolean | undefined
+  if ('output_pin caselight' in rawStatus) {
+    chamberLight = parsePinValue(rawStatus['output_pin caselight'])
+  }
+
+  const light: PrinterState['light'] =
+    chamberLight !== undefined ? { chamber: chamberLight } : undefined
+
   return {
     sourceEventtime: snapshot.eventtime,
     printer: PrinterState.parse({
@@ -66,6 +130,8 @@ export function normalizeMoonrakerSnapshot(
       ...(remaining !== undefined && Number.isFinite(remaining)
         ? { estimatedRemainingSeconds: remaining }
         : {}),
+      ...(fans !== undefined ? { fans } : {}),
+      ...(light !== undefined ? { light } : {}),
     }),
   }
 }

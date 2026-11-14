@@ -25,26 +25,28 @@ const ServerInfo = z.object({
   klippy_connected: z.boolean(),
   klippy_state: klippyState,
 })
-const Status = z.object({
-  webhooks: z.object({
-    state: z.enum(['ready', 'startup', 'shutdown', 'error']),
-  }),
-  print_stats: z.object({
-    filename: z.unknown().optional(),
-    print_duration: z.unknown().optional(),
-    total_duration: z.unknown().optional(),
-    info: z.unknown().optional(),
-    state: z.enum([
-      'standby',
-      'printing',
-      'paused',
-      'error',
-      'complete',
-      'cancelled',
-    ]),
-  }),
-  virtual_sdcard: z.object({ progress: z.number().finite().min(0).max(1) }),
-})
+const Status = z
+  .object({
+    webhooks: z.object({
+      state: z.enum(['ready', 'startup', 'shutdown', 'error']),
+    }),
+    print_stats: z.object({
+      filename: z.unknown().optional(),
+      print_duration: z.unknown().optional(),
+      total_duration: z.unknown().optional(),
+      info: z.unknown().optional(),
+      state: z.enum([
+        'standby',
+        'printing',
+        'paused',
+        'error',
+        'complete',
+        'cancelled',
+      ]),
+    }),
+    virtual_sdcard: z.object({ progress: z.number().finite().min(0).max(1) }),
+  })
+  .passthrough()
 const Snapshot = z.object({ eventtime: nonnegative, status: Status })
 export type ValidatedMoonrakerSnapshot = z.infer<typeof Snapshot>
 const Context = z.strictObject({

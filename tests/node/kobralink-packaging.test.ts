@@ -509,10 +509,15 @@ test('verifyCheckout and cloneOrFetch enforce pin, cleanliness, origin and idemp
       /Origin repository mismatch/,
     )
 
-    // 7. Also verify read-only external upstream-kobralink archive if present on host
-    const hostUpstream =
-      '/Users/heitor/Developer/open3dfarmmanager-plans/2026-11-13-kobralink-execution/upstream-kobralink'
-    if (existsSync(hostUpstream)) {
+    // 7. Optionally verify a read-only upstream KobraLink checkout supplied by
+    // KOBRALINK_UPSTREAM_CHECKOUT. Unset skips this step; a supplied path that
+    // does not exist fails instead of being silently skipped.
+    const hostUpstream = process.env.KOBRALINK_UPSTREAM_CHECKOUT
+    if (hostUpstream !== undefined) {
+      assert.ok(
+        hostUpstream !== '' && existsSync(hostUpstream),
+        'KOBRALINK_UPSTREAM_CHECKOUT does not name an existing checkout',
+      )
       const hostRes = await verifyCheckout(hostUpstream, lockMetadata)
       assert.equal(hostRes.verified, true)
       assert.equal(hostRes.commit, '5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1')

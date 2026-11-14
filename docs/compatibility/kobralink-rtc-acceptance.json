@@ -1,0 +1,64 @@
+{
+  "status": "fail",
+  "complete": true,
+  "head": "6bfe5c1417d18ac8b6141c59d5aaf2f9e820b107",
+  "run": "e5d289c7-f654-4483-b4b4-2519c5741e34",
+  "sourceSha256": "bd52d16eb14bafb60f389223d0f1fe2ca9fbafc4af2d0611a32ee8fd1c936b21",
+  "outputSha256": "10df845e36fe6a70e1b8109d6e9b42f36c6d26742b6b863f737bd5b4dc6792fc",
+  "worlds": {
+    "positive": {
+      "exit": 0,
+      "checks": 31
+    },
+    "think-time": {
+      "exit": 0,
+      "checks": 26
+    },
+    "lost-reply": {
+      "exit": 0,
+      "checks": 13
+    },
+    "late-ack": {
+      "exit": 0,
+      "checks": 15
+    },
+    "authority": {
+      "exit": 0,
+      "checks": 14
+    },
+    "account-switch": {
+      "exit": 0,
+      "checks": 13
+    },
+    "credential-expiry": {
+      "exit": 0,
+      "checks": 12
+    }
+  },
+  "qualifications": {
+    "first_registration_without_device_id": "pass",
+    "single_ui": "pass",
+    "inventory_before_live": "pass",
+    "reload_reconnect_no_duplicate": "pass",
+    "lost_ack_recovery": "pass",
+    "late_ack_fresh_authority": "pass",
+    "revoked_authority_refused": "pass",
+    "account_switch_isolated": "pass",
+    "browser_secrets_absent": "fail",
+    "mobile_keyboard_accessibility": "pass",
+    "stale_error_capabilities": "pass",
+    "resource_cleanup": "pass",
+    "think_time_lease_renewal": "pass"
+  },
+  "failures": [
+    {
+      "world": "positive",
+      "qualification": "browser_secrets_absent",
+      "id": "browser-inspection-complete",
+      "ok": false,
+      "detail": "pages=2 storage/DOM unread on: none; response bodies read: 312; unread: 1; bodyless by protocol: 0; aborted by the browser before completion: 0"
+    }
+  ],
+  "missing": [],
+  "checks": 129
+}

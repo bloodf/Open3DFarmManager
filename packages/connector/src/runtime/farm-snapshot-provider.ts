@@ -184,16 +184,33 @@ export function createFarmSnapshotSource(input: {
     if (previous && value.epoch > previous.epoch) {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
     }
-    if ('bambu' in value.fieldObservedAtMonoMs) {
-      invalidate({ printerKey: value.printerKey, epoch: value.epoch })
-      return
-    }
-    const times = value.fieldObservedAtMonoMs
+    const timing = value.fieldObservedAtMonoMs
+    const bambu = 'bambu' in timing
+    const times = 'bambu' in timing ? timing.bambu : timing
     const connectionOnly = 'connection' in times
-    const previousTimes = previous?.fieldObservedAtMonoMs
+    const previousTiming = previous?.fieldObservedAtMonoMs
+    const previousTimes =
+      previousTiming && 'bambu' in previousTiming
+        ? previousTiming.bambu
+        : previousTiming
+    const expectedFields = bambu
+      ? [
+          'state',
+          ...(
+            [
+              'progress',
+              'toolTemperatureCelsius',
+              'bedTemperatureCelsius',
+            ] as const
+          ).filter((field) => value.printer[field] !== undefined),
+        ]
+          .sort()
+          .join(',')
+      : connectionOnly
+        ? 'connection'
+        : 'printState,progress,webhooks'
     if (
-      Object.keys(times).sort().join(',') !==
-        (connectionOnly ? 'connection' : 'printState,progress,webhooks') ||
+      Object.keys(times).sort().join(',') !== expectedFields ||
       (connectionOnly &&
         (value.printer.state !== 'offline' ||
           value.printer.progress !== undefined)) ||
@@ -204,7 +221,9 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           Object.entries(previousTimes).find(([key]) => key === field)?.[1]
         const boundaryTime =
-          previousTimes && 'connection' in previousTimes !== connectionOnly
+          previousTimes &&
+          ('connection' in previousTimes !== connectionOnly ||
+            (!!previousTiming && 'bambu' in previousTiming) !== bambu)
             ? Math.max(...Object.values(previousTimes))
             : previousTime
         return (
@@ -220,12 +239,13 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid observation time')
     }
-    const temperature = connectionOnly
-      ? undefined
-      : (value.temperatureObservation ??
-        (previous?.epoch === value.epoch
-          ? previous.temperatureObservation
-          : undefined))
+    const temperature =
+      connectionOnly || bambu
+        ? undefined
+        : (value.temperatureObservation ??
+          (previous?.epoch === value.epoch
+            ? previous.temperatureObservation
+            : undefined))
     if (
       temperature &&
       (!Number.isFinite(temperature.observedAtMonoMs) ||
@@ -244,8 +264,9 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid printer snapshot')
     }
-    // Only separately stamped complete evidence can add display temperatures.
+    // Bambu fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
+      ...(bambu ? parsedPrinter.data : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
       ...(parsedPrinter.data.progress === undefined
@@ -263,7 +284,10 @@ export function createFarmSnapshotSource(input: {
       Object.freeze({
         ...observation,
         printer: Object.freeze(printer),
-        fieldObservedAtMonoMs: Object.freeze({ ...times }),
+        fieldObservedAtMonoMs:
+          'bambu' in timing
+            ? Object.freeze({ bambu: Object.freeze({ ...timing.bambu }) })
+            : Object.freeze({ ...timing }),
         ...(temperature
           ? {
               temperatureObservation: Object.freeze({

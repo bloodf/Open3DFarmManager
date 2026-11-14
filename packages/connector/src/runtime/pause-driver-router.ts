@@ -1,3 +1,6 @@
+import { openFixedAnycubicControl } from '../anycubic/control-driver.ts'
+import { anycubicControls } from '../anycubic/control-support.ts'
+import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
 import { CREALITY_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
@@ -71,6 +74,8 @@ export function createPauseDriverRouter(config: {
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
     if (!readPrinterBinding(binding)) return []
     if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
+    const anycubic = readAnycubicPrinterBinding(binding)
+    if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
     if (bambu)
       return bambu.control ? bambuControls(config.bambuModel?.(binding)) : []
@@ -82,7 +87,8 @@ export function createPauseDriverRouter(config: {
       if (
         readPrinterBinding(binding) &&
         !readBambuPrinterBinding(binding) &&
-        !readCrealityPrinterBinding(binding)
+        !readCrealityPrinterBinding(binding) &&
+        !readAnycubicPrinterBinding(binding)
       )
         moonrakerObjects.set(
           binding,
@@ -126,11 +132,13 @@ export function createPauseDriverRouter(config: {
       >
       try {
         fixed = (
-          readCrealityPrinterBinding(binding)
-            ? openFixedCrealityControl
-            : readBambuPrinterBinding(binding)
-              ? openFixedBambuControl
-              : openFixedMoonrakerPause
+          readAnycubicPrinterBinding(binding)
+            ? openFixedAnycubicControl
+            : readCrealityPrinterBinding(binding)
+              ? openFixedCrealityControl
+              : readBambuPrinterBinding(binding)
+                ? openFixedBambuControl
+                : openFixedMoonrakerPause
         )({
           binding,
           allowedOrigins: config.allowedOrigins,

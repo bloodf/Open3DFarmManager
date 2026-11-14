@@ -190,15 +190,22 @@ export function readCrealityPrinterBinding(binding: PrinterBinding) {
     : null
 }
 
+const AnycubicControlBinding = AnycubicBinding.extend({
+  caFile: z.string().min(1).max(4096).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-fA-F0-9]{64}$/)
+    .optional(),
+})
 const anycubicBindings = new WeakMap<
   PrinterBinding,
-  z.infer<typeof AnycubicBinding>
+  z.infer<typeof AnycubicControlBinding>
 >()
 export function provisionAnycubicPrinter(
   assignmentInput: unknown,
   bindingInput: unknown,
 ): PrinterBinding {
-  const local = Object.freeze(AnycubicBinding.parse(bindingInput))
+  const local = Object.freeze(AnycubicControlBinding.parse(bindingInput))
   const scope = Assignment.omit({ moonraker_origin: true }).parse(
     assignmentInput,
   )

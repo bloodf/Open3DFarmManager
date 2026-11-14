@@ -1,4 +1,7 @@
-import { controlsForBackend } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  controlsForBackend,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -52,6 +55,7 @@ const FRAME_LIMIT = 'Application frame limit'
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
   nowMono?: () => number
+  controlsFor?: (assignmentId: string) => readonly ExtendedControlAction[]
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -111,7 +115,11 @@ export function createFarmSnapshotSource(input: {
         PrinterState.parse({
           ...entry.printer,
           // Legacy Moonraker snapshots imply its three controls; readonly must deny them explicitly.
-          ...(entry.status ? {} : { controls: controlsForBackend('readonly') }),
+          ...(input.controlsFor
+            ? { controls: [...input.controlsFor(ref.assignmentId)] }
+            : entry.status
+              ? {}
+              : { controls: controlsForBackend('readonly') }),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),

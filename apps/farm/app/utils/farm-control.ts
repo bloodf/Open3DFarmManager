@@ -163,24 +163,29 @@ export function getPrinterActionButtons(
     row.observation?.state.controls !== undefined
       ? row.observation.state.controls
       : ['pause' as const]
-  return advertised.map((action) => {
-    const avail = controlActionAvailability(
-      action,
-      row,
-      keys,
-      controlEnabled,
-      now,
+  return advertised
+    .filter(
+      (action): action is ControlAction =>
+        action === 'pause' || action === 'resume' || action === 'cancel',
     )
-    const available = avail.available
-    const disabled = commandInFlight || !available
-    return {
-      action,
-      label: ACTION_LABELS[action],
-      available,
-      disabled,
-      reason: avail.available ? '' : avail.reason,
-    }
-  })
+    .map((action) => {
+      const avail = controlActionAvailability(
+        action,
+        row,
+        keys,
+        controlEnabled,
+        now,
+      )
+      const available = avail.available
+      const disabled = commandInFlight || !available
+      return {
+        action,
+        label: ACTION_LABELS[action],
+        available,
+        disabled,
+        reason: avail.available ? '' : avail.reason,
+      }
+    })
 }
 
 /**

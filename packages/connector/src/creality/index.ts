@@ -9,6 +9,12 @@ export interface CrealityTelemetry {
   progress?: number
   filename?: string
   layer?: number
+  totalLayer?: number
+  printDuration?: number
+  estimatedRemainingSeconds?: number
+  model?: string
+  hostname?: string
+  firmwareVersion?: string
 }
 export function decodeCrealityStatus(
   frame: string | Buffer,
@@ -35,6 +41,9 @@ export function decodeCrealityStatus(
     ['bedTemp2', 'bedTarget', 200],
     ['printProgress', 'progress', 100],
     ['layer', 'layer', 1000000],
+    ['TotalLayer', 'totalLayer', 1000000],
+    ['printJobTime', 'printDuration', Number.MAX_SAFE_INTEGER],
+    ['printLeftTime', 'estimatedRemainingSeconds', Number.MAX_SAFE_INTEGER],
   ] as const) {
     const n = data[source]
     if (
@@ -42,12 +51,26 @@ export function decodeCrealityStatus(
       Number.isFinite(n) &&
       n >= 0 &&
       n <= max &&
-      (target !== 'layer' || Number.isInteger(n))
+      (!['layer', 'totalLayer'].includes(target) || Number.isInteger(n))
     )
       result[target] = n
   }
-  if (typeof data.print === 'string' && data.print.length <= 1024)
-    result.filename = data.print
+  // Stock firmware frame fields: https://github.com/DaviBe92/k2-websocket-re
+  for (const [source, target, max] of [
+    ['print', 'filename', 255],
+    ['printFileName', 'filename', 255],
+    ['model', 'model', 255],
+    ['hostname', 'hostname', 255],
+    ['modelVersion', 'firmwareVersion', 255],
+  ] as const) {
+    const value = data[source]
+    if (
+      typeof value === 'string' &&
+      value.length <= max &&
+      !/[\x00-\x1f\x7f-\x9f]/.test(value)
+    )
+      result[target] = value
+  }
   return result
 }
 

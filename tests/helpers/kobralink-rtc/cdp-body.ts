@@ -6,8 +6,9 @@ import type { CDPSession, Page } from '@playwright/test'
  * this session (`Network.streamResourceContent`). A body counts as captured
  * only when it is complete: for an unencoded, unchunked response exactly the
  * declared Content-Length bytes arrived; otherwise Chromium reported
- * `Network.loadingFinished`. A body that finished before streaming began is
- * fetched whole at that moment, before a navigation can discard it. Chromium does not report a body the
+ * `Network.loadingFinished`. A finished body not already complete from the
+ * stream is fetched whole from durable browser-process storage, which a page
+ * navigation cannot discard. Chromium does not report a body the
  * page never drains as finished even when every declared byte arrived.
  * Partial, overflowing or unframed unfinished bodies are never read.
  */
@@ -44,11 +45,15 @@ type Entry = {
   streamed: boolean
   /** Whole body fetched from Chromium right when loading finished. */
   fetched: boolean
+  /** Decoded bytes Chromium reported received (`dataReceived.dataLength`). */
+  decodedLength: number
   truncated: boolean
   waiters: (() => void)[]
 }
 
 const MAX_CAPTURE_BYTES = 1_048_576
+/** Browser-process body store for this page's session. */
+const DURABLE_BUFFER_BYTES = 64 * MAX_CAPTURE_BYTES
 /**
  * Playwright and this session derive the same start stamp from the same
  * Chromium event within float noise (observed <= 0.012 ms); distinct
@@ -93,7 +98,9 @@ function complete(entry: Entry): boolean {
   // decoded bytes are not comparable with a compressed or chunked length.
   if (entry.declaredLength !== null && !entry.encoded && !entry.chunked)
     return entry.bytes === entry.declaredLength
-  return entry.finished
+  // Finished counts only with every decoded byte Chromium received: durable
+  // storage may finish a load without streaming its bytes to this session.
+  return entry.finished && entry.bytes === entry.decodedLength
 }
 
 function view(entry: Entry | null): CapturedBody {
@@ -134,6 +141,7 @@ function newEntry(headers: Record<string, unknown>, startMs: number): Entry {
     failed: false,
     streamed: false,
     fetched: false,
+    decodedLength: 0,
     truncated: false,
     waiters: [],
   }
@@ -195,28 +203,34 @@ function attach(
   })
   session.on('Network.dataReceived', (event) => {
     const entry = byId.get(event.requestId)
-    if (entry && event.data) push(entry, Buffer.from(event.data, 'base64'))
+    if (!entry) return
+    entry.decodedLength += event.dataLength
+    if (event.data) push(entry, Buffer.from(event.data, 'base64'))
   })
   session.on('Network.loadingFinished', (event) => {
     const entry = byId.get(event.requestId)
     if (!entry) return
     entry.finished = true
     byId.delete(event.requestId)
-    if (entry.streamed) {
-      if (complete(entry)) settle(entry)
+    if (entry.streamed && complete(entry)) {
+      settle(entry)
       return
     }
-    // Finished before streaming began: fetch the whole body now, before a
-    // navigation can discard it. A failed fetch leaves it uncaptured.
+    // Finished, but not complete from streamed bytes (streaming had not
+    // begun, or durable storage withheld the stream): fetch the whole
+    // finished body from the browser-process store. A failed fetch leaves it
+    // uncaptured.
     void session
       .send('Network.getResponseBody', { requestId: event.requestId })
       .then((result) => {
-        if (entry.streamed) return
         const whole = Buffer.from(
           result.body,
           result.base64Encoded ? 'base64' : 'utf8',
         )
         if (whole.length > MAX_CAPTURE_BYTES) entry.truncated = true
+        // The store returns '' for a body it dropped (over its per-resource
+        // bound): only the exact decoded length Chromium received is whole.
+        else if (whole.length !== entry.decodedLength) return
         else {
           entry.chunks = [whole]
           entry.bytes = whole.length
@@ -240,6 +254,13 @@ export async function captureBodies(page: Page, origin: string) {
   const queues = new Map<string, Entry[]>()
   try {
     const session = await page.context().newCDPSession(page)
+    // Bodies are kept in the browser process, so a navigation of the page
+    // cannot discard a finished body before it is fetched. Without durable
+    // storage `getResponseBody` sent on `loadingFinished` loses that race.
+    await session.send('Network.configureDurableMessages', {
+      maxTotalBufferSize: DURABLE_BUFFER_BYTES,
+      maxResourceBufferSize: MAX_CAPTURE_BYTES,
+    })
     await session.send('Network.enable')
     attach(session, origin, queues)
   } catch {

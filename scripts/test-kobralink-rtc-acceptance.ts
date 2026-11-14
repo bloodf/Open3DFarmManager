@@ -27,6 +27,11 @@ import {
   type World,
 } from '../tests/helpers/kobralink-rtc/qualification.ts'
 import { loadMigrationCatalog, runMigrations } from './db/migrations.ts'
+import {
+  buildSingleUiResult,
+  SINGLE_UI_SOURCES,
+  verifySingleUi,
+} from '../tests/helpers/kobralink-rtc/single-ui.ts'
 import { createSyntheticTls } from '../tests/fixtures/kobralink-integration/tls.ts'
 
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
@@ -38,6 +43,72 @@ if (process.argv[2] === '--verify-report') {
   const problems = verifyReport(JSON.parse(await readFile(path, 'utf8')))
   for (const problem of problems) console.error(problem)
   console.log(JSON.stringify({ verified: problems.length === 0 }))
+  process.exit(problems.length ? 1 : 0)
+}
+const singleUiPath = join(
+  checkout,
+  'docs/compatibility/kobralink-rtc-acceptance.json',
+)
+/** Paths that may change after the run: harness and its committed result. */
+const HARNESS_PATHS = [
+  'scripts/test-kobralink-rtc-acceptance.ts',
+  'tests/e2e/kobralink-rtc.spec.ts',
+  'tests/helpers/kobralink-rtc/',
+  'tests/node/kobralink-rtc-runner.test.ts',
+  'docs/KOBRALINK-RTC-ACCEPTANCE.md',
+  'docs/compatibility/kobralink-rtc-acceptance.json',
+]
+if (process.argv[2] === '--single-ui-result') {
+  // Writes the committed result from one retained run, never from claims.
+  const run = process.argv[3]
+  assert.ok(run, 'usage: --single-ui-result <retained run directory>')
+  const files = Object.fromEntries(
+    await Promise.all(
+      SINGLE_UI_SOURCES.map(
+        async (name) =>
+          [name, await readFile(join(run, name), 'utf8')] as const,
+      ),
+    ),
+  ) as Record<(typeof SINGLE_UI_SOURCES)[number], string>
+  const result = buildSingleUiResult({
+    manifest: await readFile(join(run, 'evidence.sha256'), 'utf8'),
+    files,
+  })
+  await writeFile(singleUiPath, JSON.stringify(result, null, 2) + '\n')
+  console.log(JSON.stringify({ status: result.status, head: result.head }))
+  process.exit(result.status === 'pass' ? 0 : 1)
+}
+if (process.argv[2] === '--verify-single-ui') {
+  // Reads the committed result and git only: no Docker, sockets or browser.
+  const result = JSON.parse(await readFile(singleUiPath, 'utf8')) as {
+    head?: unknown
+  }
+  const problems = verifySingleUi(result)
+  const head = typeof result.head === 'string' ? result.head : ''
+  const git = (args: string[]) =>
+    spawnSync('git', args, { cwd: checkout, encoding: 'utf8' })
+  if (!problems.length) {
+    if (git(['cat-file', '-e', `${head}^{commit}`]).status !== 0)
+      problems.push(`run head ${head} is not in this repository`)
+    else if (git(['merge-base', '--is-ancestor', head, 'HEAD']).status !== 0)
+      problems.push(`run head ${head} is not an ancestor of HEAD`)
+    else {
+      // Product source must be byte-identical to what the run built.
+      const changed = git(['diff', '--name-only', head, '--'])
+        .stdout.split('\n')
+        .filter(Boolean)
+        .filter(
+          (name) =>
+            !HARNESS_PATHS.some((path) =>
+              path.endsWith('/') ? name.startsWith(path) : name === path,
+            ),
+        )
+      for (const name of changed)
+        problems.push(`${name} changed since the run head`)
+    }
+  }
+  for (const problem of problems) console.error(problem)
+  console.log(JSON.stringify({ verified: problems.length === 0, head }))
   process.exit(problems.length ? 1 : 0)
 }
 const options = registrationAdmission(process.env, checkout)

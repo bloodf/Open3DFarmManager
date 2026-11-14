@@ -155,7 +155,9 @@ const discoveryPrinters = ref<
 >([])
 const discoveryMessage = ref('')
 const discoveryBusy = ref(false)
-async function searchPrinters() {
+const probeHost = ref('')
+async function searchPrinters(host?: string) {
+  if (discoveryBusy.value) return
   const key = selectedKobraKey.value
   const state = kobraKeyState.value
   const boot = kobraBootstrap.value
@@ -182,10 +184,13 @@ async function searchPrinters() {
       bootstrap: boot.data,
       signal,
     })
-    const result = await session.discover(signal)
+    const result = await session.discover(signal, host)
     if (signal.aborted) return
     discoveryMessage.value = discoveryStatus(result)
-    if (result.ok) discoveryPrinters.value = result.printers
+    if (result.ok) {
+      discoveryPrinters.value = result.printers
+      if (host && result.printers[0]) selectDiscovery(result.printers[0])
+    }
   } catch {
     if (!signal.aborted)
       discoveryMessage.value =
@@ -198,6 +203,18 @@ async function searchPrinters() {
 function selectDiscovery(
   printer: Extract<DiscoveryResult, { ok: true }>['printers'][number],
 ) {
+  if (printer.vendor === 'creality' || printer.vendor === 'anycubic') {
+    closeKobraSession()
+    onboardingFamily.value =
+      printer.vendor === 'creality' ? 'creality-native' : 'anycubic-lan'
+    if (printer.vendor === 'creality') crealityHost.value = printer.host
+    else {
+      anycubicHost.value = printer.host
+      anycubicUsername.value = ''
+      anycubicPassword.value = ''
+    }
+    return
+  }
   const prefill = discoveryPrefill(printer)
   closeKobraSession()
   onboardingFamily.value = prefill.family
@@ -2039,9 +2056,28 @@ onBeforeRouteLeave(clear)
           :disabled="
             discoveryBusy || kobraBusy || kobraBootstrap.kind !== 'ready'
           "
-          @click="searchPrinters"
+          @click="searchPrinters()"
         >
           Procurar impressoras
+        </button>
+        <label for="probe-host">Endereço IPv4 da impressora</label>
+        <input
+          id="probe-host"
+          v-model="probeHost"
+          placeholder="192.168.1.50"
+          :disabled="discoveryBusy"
+        />
+        <button
+          type="button"
+          :disabled="
+            discoveryBusy ||
+            kobraBusy ||
+            kobraBootstrap.kind !== 'ready' ||
+            !probeHost.trim()
+          "
+          @click="searchPrinters(probeHost.trim())"
+        >
+          Identificar
         </button>
         <p role="status" aria-live="polite">{{ discoveryMessage }}</p>
         <DiscoveryResults

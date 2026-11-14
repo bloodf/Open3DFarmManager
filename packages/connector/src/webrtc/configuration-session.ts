@@ -317,7 +317,7 @@ export class ConfigurationConnectorSession {
       message.t === 'discovery' &&
       (frame.type !== 'status' ||
         frame.expected_revision !== 0 ||
-        frame.target_sha256 !== (await discoveryTargetHash()))
+        frame.target_sha256 !== (await discoveryTargetHash(message.host)))
     )
       return this.reject(frame.request_id, 'invalid-request')
     try {
@@ -365,6 +365,7 @@ export class ConfigurationConnectorSession {
         this.#options.authority,
         frame.request_id,
         this.#options.discovery,
+        message.host,
       )
         .then(async (result) => {
           if (

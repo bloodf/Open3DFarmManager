@@ -249,6 +249,7 @@ export async function openPrinterDiscoverySession(
     frame: ConfigurationRequestFrame,
     signal: AbortSignal,
     beforeDispatch?: () => void,
+    host?: string,
   ) {
     const current = ensureAlive(signal)
     const targetSha256 = await configurationFrameTargetHash(frame)
@@ -339,6 +340,7 @@ export async function openPrinterDiscoverySession(
       {
         v: 1,
         t: 'discovery',
+        ...(host === undefined ? {} : { host }),
         frame: encodeConfigurationRequest(frame),
         capability: encodeConfigurationCapability(capability),
         admission: admissionProofWire,
@@ -355,12 +357,13 @@ export async function openPrinterDiscoverySession(
   }
 
   return {
-    async discover(signal: AbortSignal) {
+    async discover(signal: AbortSignal, host?: string) {
       const frame = await discoveryRequest(
         crypto.randomUUID(),
         crypto.randomUUID(),
+        host,
       )
-      return authorizeAndSendFrame(frame, signal)
+      return authorizeAndSendFrame(frame, signal, undefined, host)
     },
     close() {
       client.close('closed')

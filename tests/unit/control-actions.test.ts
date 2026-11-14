@@ -205,8 +205,8 @@ test('snapshots expose backend controls and strip untrusted advertised controls'
     })
     expect(received?.printers.map((printer) => printer.controls)).toEqual([
       ['pause', 'resume', 'cancel'],
-      undefined,
-      undefined,
+      [],
+      [],
     ])
     expect(controlsForBackend('unknown')).toEqual([])
     expect(

@@ -1,3 +1,5 @@
+import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
+import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import { parseLocalCollectorConfig } from '../config/local.ts'
@@ -72,6 +74,7 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  bambuTransport?: typeof createBambuTransport
   kobraFetch?: KobraLinkFetch
   config: LocalCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
@@ -270,6 +273,30 @@ export async function collectIntoQueue(input: {
               },
             })
             onEvent({ kind: 'snapshot', printer, sourceEventtime: sourceTime })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 3) {
+      for (const binding of config.bambu.printers) {
+        if (signal.aborted) break
+        let epoch = 1
+        const sub = createBambuRuntimeSubscription({
+          binding, signal, staleAfterMs: 5000,
+          ...(input.bambuTransport ? { transport: input.bambuTransport } : {}),
+          onEvent(event) {
+            if (event.kind === 'unavailable') {
+              input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch: epoch++ })
+              onEvent({ kind: 'unavailable', printerKey: binding.printerKey, reason: 'offline' })
+              return
+            }
+            input.onRawObservation?.({
+              printerKey: binding.printerKey, epoch, printer: event.printer,
+              receivedAtMonoMs: performance.now(),
+              fieldObservedAtMonoMs: { bambu: event.source.fieldObservedAtMonoMs },
+            })
+            onEvent(event)
           },
         })
         subscriptions.push({ done: sub.done.catch(fail) })

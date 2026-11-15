@@ -29,6 +29,13 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     releaseDate: null,
     firmwareStatus:
       'Klipper e Moonraker em versões do usuário; compatibilidade por versão não qualificada',
+    firmwareNotes: [
+      {
+        firmware: 'Klipper do usuário',
+        note: 'A versão e a configuração variam; consulte as mudanças de configuração antes de atualizar. https://www.klipper3d.org/Config_Changes.html',
+        sources: ['https://www.klipper3d.org/Config_Changes.html'],
+      },
+    ],
     connection:
       'API HTTP e WebSocket do Moonraker na rede local; autenticação depende da configuração do usuário',
     capabilities: simulatedControl,
@@ -54,6 +61,13 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     releaseDate: null,
     firmwareStatus:
       'Firmware baseado em Klipper com fonte oficial publicada; Moonraker completo exige acesso root e é mantido pela comunidade',
+    firmwareNotes: [
+      {
+        firmware: 'Firmware K1 da Creality',
+        note: 'A Creality publica o código baseado em Klipper; o Moonraker depende de instalação adicional. https://github.com/CrealityOfficial/K1_Series_Klipper',
+        sources: ['https://github.com/CrealityOfficial/K1_Series_Klipper'],
+      },
+    ],
     connection:
       'Moonraker na rede local somente após acesso root; o WebSocket de fábrica na porta 9999 é outra integração e consta no catálogo Creality',
     capabilities: simulatedControl,
@@ -78,6 +92,13 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     releaseDate: null,
     firmwareStatus:
       'Klipper é o firmware de referência do projeto; Moonraker é escolha do montador',
+    firmwareNotes: [
+      {
+        firmware: 'Klipper do montador',
+        note: 'A configuração depende da montagem Voron. https://github.com/VoronDesign/Voron-2',
+        sources: ['https://github.com/VoronDesign/Voron-2'],
+      },
+    ],
     connection:
       'Moonraker na rede local conforme a montagem; interface e autenticação definidas pelo montador',
     capabilities: simulatedControl,
@@ -101,6 +122,13 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     releaseDate: null,
     firmwareStatus:
       'Baseado em Klipper com repositório de configuração publicado pela Sovol; versão e licença completas não inspecionadas',
+    firmwareNotes: [
+      {
+        firmware: 'Firmware SV08 da Sovol',
+        note: 'A Sovol publica o firmware baseado em Klipper; a versão instalada varia. https://github.com/Sovol3d/SV08',
+        sources: ['https://github.com/Sovol3d/SV08'],
+      },
+    ],
     connection:
       'Moonraker na rede local segundo a configuração publicada; autenticação e exposição de rede não verificadas',
     capabilities: simulatedControl,
@@ -113,6 +141,31 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       ...commonLimitations,
       'Nenhum teste em SV08 real foi executado; a classificação decorre da família Klipper/Moonraker.',
       'Câmera opcional e acessórios não foram avaliados.',
+    ],
+  },
+  {
+    id: 'voron-trident-kit',
+    brand: 'Voron Design',
+    model: 'Voron Trident (kit de montagem própria)',
+    releaseStatus: 'Projeto aberto; data de lançamento não verificada',
+    releaseDate: null,
+    firmwareStatus: 'Klipper configurado pelo montador; versão não qualificada',
+    firmwareNotes: [
+      {
+        firmware: 'Klipper do montador',
+        note: 'A configuração depende da montagem. https://github.com/VoronDesign/Voron-Trident',
+        sources: ['https://github.com/VoronDesign/Voron-Trident'],
+      },
+    ],
+    connection: 'Moonraker na rede local conforme a montagem',
+    capabilities: simulatedControl,
+    sources: [
+      'https://github.com/VoronDesign/Voron-Trident',
+      'https://moonraker.readthedocs.io/en/latest/',
+    ],
+    limitations: [
+      ...commonLimitations,
+      'Nenhum teste em Trident real foi executado; acessórios e configuração variam por montagem.',
     ],
   },
 ]

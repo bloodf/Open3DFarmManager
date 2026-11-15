@@ -57,3 +57,7 @@ tipado. O código de acesso fica apenas no arquivo privado de credenciais.
 Firmwares mais recentes exigem modo LAN-only/Developer para comandos LAN.
 A disponibilidade depende do modelo e firmware. Validação apenas com simulador
 loopback: **not proven on hardware** (não comprovado em hardware).
+
+## Notas por firmware no catálogo
+
+Para A2L, X2D, H2C, P2S e H2S, a versão instalada é desconhecida. O anúncio [S6] prevê controle de autorização em modelos futuros, mas não identifica a versão instalada em cada modelo nem comprova a integração. Os recursos testados continuam classificados como simulados até qualificação em hardware.

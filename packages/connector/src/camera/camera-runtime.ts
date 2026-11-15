@@ -3,6 +3,11 @@ import {
   selectCrealityCamera,
   streamCrealityJpegs,
 } from '../creality/camera.ts'
+import { openAnycubicCameraSource } from '../anycubic/camera-media.ts'
+import {
+  selectAnycubicCamera,
+  type AnycubicCameraSource,
+} from '../anycubic/camera.ts'
 import { openBambuCameraSource } from '../bambu/camera-media.ts'
 import type { BambuCameraSource } from '../bambu/camera.ts'
 import type { HelperExecutable } from '../../../../tools/rtsp-ingest/supervisor/process.ts'
@@ -26,6 +31,14 @@ export async function createCameraMediaFactory(input: {
       cameraId: string
       assignmentId: string
       source: { host: string; port?: number }
+    }[]
+  }
+  anycubic?: {
+    ffmpeg: HelperExecutable
+    cameras: readonly {
+      cameraId: string
+      assignmentId: string
+      source: AnycubicCameraSource
     }[]
   }
   bambu?: {
@@ -54,6 +67,30 @@ export async function createCameraMediaFactory(input: {
     scope: { farmId, agentId, printerId: camera.assignmentId },
     sourceHandle: 'camera-' + index,
   }))
+  const anycubic = new Map(
+    (input.anycubic?.cameras ?? []).map((camera, index) => {
+      selectAnycubicCamera(camera.source)
+      const handle = 'anycubic-camera-' + index
+      cameras.push({
+        cameraId: camera.cameraId,
+        scope: { farmId, agentId, printerId: camera.assignmentId },
+        sourceHandle: handle,
+      })
+      const source =
+        camera.source.kind === 'rinkhals'
+          ? {
+              ...camera.source,
+              ...(camera.source.auth
+                ? { auth: Object.freeze({ ...camera.source.auth }) }
+                : {}),
+            }
+          : { ...camera.source }
+      return [handle, Object.freeze(source)] as const
+    }),
+  )
+  const anycubicFfmpeg = input.anycubic
+    ? Object.freeze({ ...input.anycubic.ffmpeg })
+    : undefined
   const bambu = new Map(
     (input.bambu?.cameras ?? []).map((camera, index) => {
       const handle = 'bambu-camera-' + index
@@ -96,6 +133,27 @@ export async function createCameraMediaFactory(input: {
           expectedAgentId: agentId,
         }),
       openSource: (handle, signal, expiresAtMonoMs, isCurrent) => {
+        const anycubicSource = anycubic.get(handle)
+        if (anycubicSource && anycubicFfmpeg) {
+          if (
+            !isCurrent() ||
+            signal.aborted ||
+            expiresAtMonoMs <= performance.now() ||
+            expiresAtMonoMs - performance.now() > 30000
+          )
+            throw Error('Anycubic camera admission expired')
+          return openAnycubicCameraSource({
+            source: anycubicSource,
+            ffmpeg: anycubicFfmpeg,
+            isCurrent,
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(
+                Math.max(1, Math.ceil(expiresAtMonoMs - performance.now())),
+              ),
+            ]),
+          })
+        }
         const crealitySource = creality.get(handle)
         if (crealitySource && crealityFfmpeg) {
           if (

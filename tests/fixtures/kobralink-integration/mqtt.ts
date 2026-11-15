@@ -504,6 +504,10 @@ export function createSyntheticMqtt(
       publishStatus()
       return structuredClone(telemetry)
     },
+    finishPrint(outcome: 'finished' | 'canceled' | 'failed'): void {
+      telemetry = { ...telemetry, state: outcome }
+      publishStatus()
+    },
     publishStatus,
     snapshot(): SyntheticMqttSnapshot {
       const live = [...sessions.values()]

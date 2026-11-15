@@ -3,6 +3,7 @@
     <nav aria-label="Navegação principal">
       <NuxtLink to="/farm">Farm</NuxtLink>
       <NuxtLink to="/arquivos">Arquivos</NuxtLink>
+      <NuxtLink to="/historico">Histórico</NuxtLink>
     </nav>
     <slot />
   </div>

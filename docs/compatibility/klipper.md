@@ -29,3 +29,8 @@ Nothing is `documented`; no hardware qualification exists.
 
 Release dates are `null` where no dated public source was checked.
 Rooting a K1 may affect warranty and stability; this project does not automate it.
+
+Voron Trident is also listed with simulated control and unknown files and
+materials. Its Klipper configuration depends on the builder; see the
+[Voron Trident repository](https://github.com/VoronDesign/Voron-Trident).
+Firmware notes in the catalog link to their respective upstream sources.

@@ -16,6 +16,7 @@ import {
 import SpoolInventory from '../components/SpoolInventory.vue'
 import FarmMaterials from '../components/FarmMaterials.vue'
 import FarmEnvironment from '../components/FarmEnvironment.vue'
+import { farmJobOutcome } from '../utils/farm-job-outcome.ts'
 import { farmJobView } from '../utils/farm-job-view.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import CameraDisplay from '../components/CameraDisplay.vue'
@@ -744,6 +745,47 @@ function dateLabel(time: number) {
                       :fans="row.observation.state.fans"
                       :light="row.observation.state.light"
                     />
+                    <div aria-live="polite" aria-atomic="true">
+                      <template v-if="farmJobOutcome(row.observation.state)">
+                        <p>
+                          {{ farmJobOutcome(row.observation.state)?.label }}
+                        </p>
+                        <dl aria-label="Último trabalho">
+                          <div
+                            v-if="
+                              farmJobOutcome(row.observation.state)?.filename
+                            "
+                          >
+                            <dt>Arquivo</dt>
+                            <dd class="opaque">
+                              {{
+                                farmJobOutcome(row.observation.state)?.filename
+                              }}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Fim</dt>
+                            <dd>
+                              {{
+                                farmJobOutcome(row.observation.state)?.endedAt
+                              }}
+                            </dd>
+                          </div>
+                          <div
+                            v-if="
+                              farmJobOutcome(row.observation.state)?.duration
+                            "
+                          >
+                            <dt>Duração</dt>
+                            <dd>
+                              {{
+                                farmJobOutcome(row.observation.state)?.duration
+                              }}
+                            </dd>
+                          </div>
+                        </dl>
+                      </template>
+                    </div>
                     <dl aria-label="Trabalho atual">
                       <div v-if="farmJobView(row.observation.state).filename">
                         <dt>Arquivo</dt>
@@ -917,7 +959,7 @@ function dateLabel(time: number) {
                       pauseState.kind !== 'settled' &&
                       pauseState.kind !== 'failed'
                     "
-                    :now="now"
+                    :now="liveNow()"
                     @action="
                       (action, args, event) =>
                         openControl(row, action, event, args)
@@ -933,7 +975,7 @@ function dateLabel(time: number) {
                       pauseState.kind !== 'settled' &&
                       pauseState.kind !== 'failed'
                     "
-                    :now="now"
+                    :now="liveNow()"
                     :last-result="
                       lastControlResults[row.assignment.assignmentId]
                     "
@@ -955,7 +997,7 @@ function dateLabel(time: number) {
                           pauseState.kind !== 'settled' &&
                           pauseState.kind !== 'failed'
                         "
-                        :now="now"
+                        :now="liveNow()"
                         :last-result="
                           lastControlResults[row.assignment.assignmentId]
                         "

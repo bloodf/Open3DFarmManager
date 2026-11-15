@@ -71,6 +71,15 @@ export const PrinterState = z
     currentLayer: z.number().int().nonnegative().optional(),
     totalLayer: z.number().int().nonnegative().optional(),
     estimatedRemainingSeconds: z.number().finite().nonnegative().optional(),
+    lastJob: z
+      .strictObject({
+        outcome: z.enum(['completed', 'cancelled', 'failed']),
+        filename: z.string().max(255).optional(),
+        printDuration: z.number().finite().nonnegative().optional(),
+        totalDuration: z.number().finite().nonnegative().optional(),
+        endedAt: z.number().int().nonnegative(),
+      })
+      .optional(),
     toolTemperatureCelsius: z.number().finite().optional(),
     bedTemperatureCelsius: z.number().finite().optional(),
     observedAt: z.number().int().nonnegative(),

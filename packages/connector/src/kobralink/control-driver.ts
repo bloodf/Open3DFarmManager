@@ -11,6 +11,10 @@ import { createKobraLinkClient, type KobraLinkFetch } from './client.ts'
 import { readKobraLinkCredential } from './runtime.ts'
 import { KobraLinkExtendedCommand } from './extended-control.ts'
 
+/** How long a sent lifecycle action waits for the bridge to report its target state. */
+const CONFIRM_WAIT_MS = 4000
+const CONFIRM_POLL_MS = 250
+
 /** A locally provisioned, single-use attempt. Acceptance never proves physical completion. */
 export function openFixedKobraLinkControl(input: {
   binding: PrinterBinding
@@ -98,12 +102,101 @@ export function openFixedKobraLinkControl(input: {
       )
     return { acknowledged: true }
   }
+  let sequence = 1
+  let sent: Parameters<NonNullable<PauseDriver['execute']>>[0] | undefined
+  function observed(
+    observation: Awaited<ReturnType<typeof client.getPrinterObservation>>,
+    cancelled: boolean,
+  ): ControlObservation {
+    const now = input.clock.monotonicNow()
+    return Object.freeze({
+      assignmentId: mapping!.assignment_id,
+      printerKey: mapping!.printer_key,
+      connectionGeneration: input.connectionGeneration,
+      sequence: ++sequence,
+      ready: true,
+      printState:
+        observation.printState === 'printing' ||
+        observation.printState === 'paused'
+          ? observation.printState
+          : cancelled && observation.lastJob?.outcome === 'cancelled'
+            ? 'cancelled'
+            : observation.printState === 'standby' ||
+                observation.printState === 'complete'
+              ? 'idle'
+              : observation.printState === 'error'
+                ? 'error'
+                : 'unknown',
+      readyObservedMono: now,
+      printStateObservedMono: now,
+      receivedMono: now,
+    })
+  }
   const driver: PauseDriver = {
-    execute: send,
-    pauseOnce: (next) => send(next.action ?? 'pause', next.args ?? {}, next),
-    // The bridge returns acceptance only. Never manufacture a state confirmation.
-    async waitForPaused() {
-      return null
+    execute(action, args, next) {
+      sent = action
+      return send(action, args, next)
+    },
+    pauseOnce(next) {
+      sent = next.action ?? 'pause'
+      return send(sent, next.args ?? {}, next)
+    },
+    /**
+     * The bridge returns acceptance only, so the state is read back from it
+     * after the send and never assumed. A lifecycle action waits, bounded,
+     * for the bridge to report its target state; any other action is
+     * answered by the first available read after the send. No read, or a
+     * state that never arrives, stays unconfirmed.
+     */
+    async waitForPaused(request) {
+      const action = sent
+      if (
+        !attempted ||
+        !action ||
+        request.binding !== input.binding ||
+        request.signal.aborted
+      )
+        return null
+      const target =
+        action === 'pause'
+          ? 'paused'
+          : action === 'resume'
+            ? 'printing'
+            : action === 'cancel'
+              ? 'cancelled'
+              : undefined
+      const deadline = input.clock.monotonicNow() + CONFIRM_WAIT_MS
+      for (;;) {
+        try {
+          current()
+          const observation = await client.getPrinterObservation({
+            id: local!.id,
+            deviceId: local!.deviceId,
+          })
+          current()
+          if (request.signal.aborted) return null
+          if (observation.availability === 'available') {
+            const latest = observed(observation, action === 'cancel')
+            if (!target || latest.printState === target) {
+              input.publish(latest)
+              return latest
+            }
+          }
+        } catch {
+          return null
+        }
+        if (input.clock.monotonicNow() >= deadline) return null
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer)
+            request.signal.removeEventListener('abort', done)
+            resolve()
+          }
+          const timer = setTimeout(done, CONFIRM_POLL_MS)
+          request.signal.addEventListener('abort', done, { once: true })
+        })
+        if (request.signal.aborted) return null
+      }
     },
   }
   return {

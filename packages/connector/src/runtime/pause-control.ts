@@ -20,6 +20,7 @@ import {
   type PauseConnectorSignallingScope,
 } from '../cloud/pause-signalling-client.ts'
 import { createPauseDriverRouter } from './pause-driver-router.ts'
+import { createFileTargets } from './file-targets.ts'
 import { runSignallingLifecycle } from './signalling.ts'
 
 export type PauseControlDiagnostic =
@@ -188,6 +189,16 @@ export async function runPauseControl(input: {
       // Diagnostics never change the command path.
     }
   }
+  // File listing and upload ride the same admitted control peer, for the
+  // locally provisioned printer of this control assignment only.
+  const files: NonNullable<ClientOptions['files']> = {
+    ...createFileTargets({
+      config,
+      assignmentId,
+      dataDirectory: input.dataDirectory,
+    }),
+    getAdmittedHandle: (transportId) => relay.admittedHandle(transportId),
+  }
   function admitted(result: Awaited<ReturnType<typeof relay.admitPeer>>) {
     diagnostic(
       result.ok
@@ -220,6 +231,7 @@ export async function runPauseControl(input: {
             identity: input.identity,
           },
           {
+            files,
             onInboxReady() {
               onAdmitted()
               diagnostic({ kind: 'pause-listening' })

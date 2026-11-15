@@ -1,4 +1,5 @@
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
+import { moonrakerLastJob } from '../moonraker/normalize.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -80,6 +81,10 @@ export function createFarmSnapshotSource(input: {
   const entries = new Map<string, RawPrinterObservation>()
   const epochs = new Map<string, number>()
   const retired = new Map<string, number>()
+  // Last finished job per printer. Outlives epochs so a reconnect or the next
+  // print never erases it; `rearmed` marks that a new job ran since it was set.
+  const lastJobs = new Map<string, NonNullable<PrinterState['lastJob']>>()
+  const rearmed = new Set<string>()
   let spoolState: { value: SpoolSummaryState; receivedMono: number } | undefined
   const listeners = new Set<() => void>()
   let closed = false,
@@ -100,6 +105,8 @@ export function createFarmSnapshotSource(input: {
     if (closed) return
     closed = true
     entries.clear()
+    lastJobs.clear()
+    rearmed.clear()
     notify()
     listeners.clear()
   }
@@ -136,9 +143,12 @@ export function createFarmSnapshotSource(input: {
         controls: _untrustedControls,
         macros: _untrustedMacros,
         firmware: _untrustedFirmware,
+        lastJob: _observedLastJob,
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
+      const lastJob = lastJobs.get(ref.printerKey)
+      if (lastJob) printer.lastJob = lastJob
       for (const field of ['fans', 'light', 'materials'] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(
@@ -357,9 +367,38 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid printer snapshot')
     }
+    const active =
+      parsedPrinter.data.state === 'printing' ||
+      parsedPrinter.data.state === 'paused'
+    if (active) {
+      lastJobs.delete(value.printerKey)
+      rearmed.add(value.printerKey)
+    }
+    const finished =
+      parsedPrinter.data.lastJob ??
+      (!fieldStamped && !connectionOnly && value.status
+        ? moonrakerLastJob(value.status, parsedPrinter.data.observedAt)
+        : undefined)
+    if (finished && !active) {
+      const known = lastJobs.get(value.printerKey)
+      // The same terminal state is re-observed every poll; keep its first endedAt.
+      const repeat =
+        known !== undefined &&
+        !rearmed.has(value.printerKey) &&
+        known.outcome === finished.outcome &&
+        known.filename === finished.filename &&
+        known.printDuration === finished.printDuration &&
+        known.totalDuration === finished.totalDuration
+      if (!repeat) {
+        lastJobs.set(value.printerKey, Object.freeze({ ...finished }))
+        rearmed.delete(value.printerKey)
+      }
+    }
     // Bambu and Creality fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
-      ...(fieldStamped ? parsedPrinter.data : {}),
+      ...(fieldStamped
+        ? (({ lastJob: _lastJob, ...rest }) => rest)(parsedPrinter.data)
+        : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
       ...(parsedPrinter.data.fans ? { fans: parsedPrinter.data.fans } : {}),

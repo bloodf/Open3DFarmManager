@@ -12,12 +12,14 @@ export function createCrealityCollection(input: {
   onUnavailable: (epoch: number) => void
 }) {
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let active = false
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Partial<PrinterState> = {}
   let stamps: Partial<Record<keyof PrinterState, number>> = {}
   let nestedStamps: Record<string, Record<string, number>> = {}
   const invalidate = () => {
+    active = false
     firmwareObservation = undefined
     nestedStamps = {}
     values = {}
@@ -89,7 +91,26 @@ export function createCrealityCollection(input: {
         }
       }
       if (!values.state || values.progress === undefined) return
+      const finished =
+        active && report.state && ['idle', 'error'].includes(report.state)
+          ? {
+              outcome:
+                report.state === 'error'
+                  ? 'failed'
+                  : values.progress === 1
+                    ? 'completed'
+                    : 'cancelled',
+              endedAt: Date.now(),
+              ...(values.filename === undefined
+                ? {}
+                : { filename: values.filename }),
+            }
+          : undefined
+      if (report.state === 'printing' || report.state === 'paused')
+        active = true
+      else if (finished) active = false
       const printer = PrinterState.safeParse({
+        ...(finished ? { lastJob: finished } : {}),
         ...values,
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),

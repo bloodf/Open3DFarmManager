@@ -43,6 +43,27 @@ export const ACTION_NOUNS: Record<ControlAction, string> = {
   cancel: 'Cancelamento',
 }
 
+/** Longest gap a page clock tick may lag behind a frame received after it. */
+const TICK_LAG_MS = 5000
+
+/**
+ * The page clock ticks once a second, so a frame can arrive after the sample
+ * it is judged against. Such an observation is fresh, not stale: measure it
+ * from its own receipt. A larger gap is a clock fault and stays untouched.
+ */
+function clockNotBefore(
+  observation: NonNullable<FarmRow['observation']>,
+  now: Clock,
+): Clock {
+  const lag = observation.received.mono - now.mono
+  return lag > 0 && lag <= TICK_LAG_MS
+    ? {
+        wall: Math.max(now.wall, observation.received.wall),
+        mono: observation.received.mono,
+      }
+    : now
+}
+
 /**
  * Checks whether an action can be executed on a given printer row.
  * Degraded sessions (connection not 'authenticated' or historical observation)
@@ -95,7 +116,7 @@ export function controlActionAvailability(
       reason: `${noun} indisponível. Não há conexão direta ao vivo.`,
     }
   }
-  if (observationAge(observation, now).stale) {
+  if (observationAge(observation, clockNotBefore(observation, now)).stale) {
     return {
       available: false,
       reason: `${noun} indisponível. O estado da impressora está desatualizado.`,
@@ -244,7 +265,7 @@ function actionOutcomeBaseText(
 
   switch (outcome) {
     case 'applied':
-      return `Impressão ${actionPast}. O Connector confirmou a ${actionNoun}.`
+      return `Impressão ${actionPast}. O Connector confirmou ${action === 'cancel' ? 'o' : 'a'} ${actionNoun}.`
     case 'rejected':
       return `Comando recusado. A impressão não foi ${actionPast} e nada será repetido automaticamente.`
     case 'not-sent':

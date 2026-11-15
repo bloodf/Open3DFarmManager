@@ -70,6 +70,8 @@ export async function startAnycubicSimulator({
   confirmCommands = true,
   credentials,
   environmentReport,
+  printDurationMs = 1000,
+  totalLayers = 10,
 }: {
   serial?: string
   port?: number
@@ -77,9 +79,24 @@ export async function startAnycubicSimulator({
   credentials?: { username: string; password: string }
   confirmCommands?: boolean
   environmentReport?: unknown
+  printDurationMs?: number
+  totalLayers?: number
 } = {}) {
   if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
+  if (
+    !Number.isFinite(printDurationMs) ||
+    printDurationMs <= 0 ||
+    !Number.isInteger(totalLayers) ||
+    totalLayers <= 0
+  )
+    throw new Error('Invalid print configuration')
+  const files = new Map<string, Buffer>()
+  let lifecycle: 'idle' | 'printing' | 'paused' | 'finished' | 'error' = 'idle'
+  let elapsed = 0
+  let started = 0
+  let timer: ReturnType<typeof setInterval> | undefined
+  let progress = 0
   const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
   let gcodeState = initialState
   const extended: Record<string, unknown> = {}
@@ -97,6 +114,12 @@ export async function startAnycubicSimulator({
           Buffer.from(
             JSON.stringify({
               print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
+              data: {
+                state: lifecycle,
+                progress,
+                curr_layer: Math.floor((progress * totalLayers) / 100),
+                total_layers: totalLayers,
+              },
             }),
           ),
         ]),
@@ -105,6 +128,32 @@ export async function startAnycubicSimulator({
   }
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
+  function stopTimer() {
+    if (timer) clearInterval(timer)
+    timer = undefined
+  }
+  function broadcast() {
+    for (const socket of subscribed) report(socket)
+  }
+  function startTimer() {
+    started = Date.now()
+    timer = setInterval(
+      () => {
+        progress = Math.min(
+          100,
+          Math.floor(
+            ((elapsed + Date.now() - started) * 100) / printDurationMs,
+          ),
+        )
+        if (progress === 100) {
+          lifecycle = 'finished'
+          stopTimer()
+        }
+        broadcast()
+      },
+      Math.min(50, printDurationMs),
+    )
+  }
   const server = createServer(
     { cert, key, handshakeTimeout: 3000 },
     (socket) => {
@@ -202,10 +251,57 @@ export async function startAnycubicSimulator({
             } else if (header === 48) {
               if (body.length < 2) throw new Error('Invalid request')
               const length = body.readUInt16BE(0)
-              if (
-                body.subarray(2, 2 + length).toString() !==
-                `device/${serial}/request`
-              )
+              const topicName = body.subarray(2, 2 + length).toString()
+              const raw = JSON.parse(body.subarray(2 + length).toString())
+              const isStart =
+                topicName ===
+                  `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print` &&
+                raw?.type === 'print' &&
+                raw?.action === 'start'
+              const isControl =
+                topicName ===
+                  `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
+                raw?.type === 'print' &&
+                ['stop', 'pause', 'resume'].includes(raw?.action)
+              if (isStart || isControl) {
+                if (confirmCommands) {
+                  if (isStart) {
+                    if (
+                      !files.has(raw?.data?.filename) ||
+                      lifecycle === 'printing' ||
+                      lifecycle === 'paused'
+                    )
+                      throw new Error('Invalid start')
+                    stopTimer()
+                    elapsed = 0
+                    progress = 0
+                    lifecycle = 'printing'
+                    startTimer()
+                  } else if (
+                    raw.action === 'stop' &&
+                    (lifecycle === 'printing' || lifecycle === 'paused')
+                  ) {
+                    stopTimer()
+                    lifecycle = 'idle'
+                  } else if (
+                    raw.action === 'pause' &&
+                    lifecycle === 'printing'
+                  ) {
+                    elapsed += Date.now() - started
+                    stopTimer()
+                    lifecycle = 'paused'
+                  } else if (
+                    raw.action === 'resume' &&
+                    lifecycle === 'paused'
+                  ) {
+                    lifecycle = 'printing'
+                    startTimer()
+                  }
+                  broadcast()
+                }
+                continue
+              }
+              if (topicName !== `device/${serial}/request`)
                 throw new Error('Invalid request topic')
               const value = JSON.parse(body.subarray(2 + length).toString())
               const request = value?.print ?? value?.system
@@ -310,6 +406,53 @@ export async function startAnycubicSimulator({
     syntheticTrust: cert,
     reportTopic,
     requests,
+    upload(filename: string, data: Buffer) {
+      if (
+        !filename.endsWith('.gcode') ||
+        filename.length > 255 ||
+        /[\\\x00-\x1f\x7f%]/.test(filename) ||
+        filename
+          .split('/')
+          .some((part) => !part || part === '.' || part === '..') ||
+        !Buffer.isBuffer(data) ||
+        !data.length
+      )
+        throw new Error('Invalid synthetic upload')
+      files.set(filename, Buffer.from(data))
+    },
+    /** Journey control: a print in progress at a fixed percentage. */
+    setPrintProgress(percent: number) {
+      if (!Number.isInteger(percent) || percent < 0 || percent > 99)
+        throw new Error('Invalid progress')
+      stopTimer()
+      lifecycle = 'printing'
+      progress = percent
+      broadcast()
+    },
+    /** Journey control: the running print completes. */
+    finishPrint() {
+      if (lifecycle !== 'printing' && lifecycle !== 'paused')
+        throw new Error('No active print')
+      stopTimer()
+      lifecycle = 'finished'
+      progress = 100
+      broadcast()
+    },
+    failPrint() {
+      if (lifecycle !== 'printing' && lifecycle !== 'paused')
+        throw new Error('No active print')
+      stopTimer()
+      lifecycle = 'error'
+      broadcast()
+    },
+    get lifecycle() {
+      return {
+        state: lifecycle,
+        progress,
+        currentLayer: Math.floor((progress * totalLayers) / 100),
+        totalLayers,
+      }
+    },
     get extendedState() {
       return { ...extended }
     },
@@ -332,6 +475,7 @@ export async function startAnycubicSimulator({
     },
     disconnectClients,
     close() {
+      stopTimer()
       closing ??= (async () => {
         const closed = new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),

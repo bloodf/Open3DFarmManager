@@ -15,6 +15,7 @@ const keys = [
   'releaseStatus',
   'releaseDate',
   'firmwareStatus',
+  'firmwareNotes',
   'connection',
   'capabilities',
   'sources',
@@ -32,8 +33,8 @@ const capabilityKeys = [
 
 describe('catálogo Klipper/Moonraker', () => {
   it('segue o contrato de registro com ids únicos', () => {
-    expect(klipperCatalog).toHaveLength(4)
-    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(4)
+    expect(klipperCatalog).toHaveLength(5)
+    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(5)
     for (const product of klipperCatalog) {
       expect(Object.keys(product).sort()).toEqual([...keys].sort())
       expect(Object.keys(product.capabilities).sort()).toEqual(
@@ -55,12 +56,14 @@ describe('catálogo Klipper/Moonraker', () => {
       'creality-k1-series-moonraker-root',
       'voron-2-4-kit',
       'sovol-sv08',
+      'voron-trident-kit',
     ])
     expect(klipperCatalog.map((p) => p.brand)).toEqual([
       'Klipper',
       'Creality',
       'Voron Design',
       'Sovol',
+      'Voron Design',
     ])
   })
 
@@ -94,6 +97,6 @@ describe('catálogo Klipper/Moonraker', () => {
     ])
     expect(
       filterCompatibility('voron', compatibilityPageCatalog).map((p) => p.id),
-    ).toEqual(['voron-2-4-kit'])
+    ).toEqual(['voron-2-4-kit', 'voron-trident-kit'])
   })
 })

@@ -128,11 +128,10 @@ function rolledBackSerializationFailure(error: unknown) {
 export class PostgresConfigurationStore {
   private readonly sql: Sql
   private readonly config: PauseNegotiationConfig
-  constructor(
-    sql: Sql,
-    config: unknown,
-    private readonly observeTime: () => number = Date.now,
-  ) {
+  private readonly observeTime: () => number
+
+  constructor(sql: Sql, config: unknown, observeTime: () => number = Date.now) {
+    this.observeTime = observeTime
     this.sql = sql
     this.config = Object.freeze(Config.parse(config))
   }

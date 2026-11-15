@@ -60,12 +60,14 @@ export function createBambuRuntimeSubscription(input: {
   let fields: Partial<Fields> = {}
   let times: Partial<Record<keyof Fields, number>> = {}
   let connected = false
+  let activeJob = false
   const clear = () => {
     firmwareObservation = undefined
     version = undefined
     upgradeReport = undefined
     fields = {}
     times = {}
+    activeJob = false
     clearTimeout(timer)
   }
   const unavailable = (
@@ -189,7 +191,8 @@ export function createBambuRuntimeSubscription(input: {
             unavailable('invalid-response')
             return
           }
-          const { kind: _, ...observed } = result
+          const { kind: _, ...decoded } = result
+          const observed: Partial<Fields> = decoded
           // Unknown explicit states must not retain a previously recognized state.
           const raw: unknown = JSON.parse(payload.toString('utf8'))
           if (
@@ -205,8 +208,29 @@ export function createBambuRuntimeSubscription(input: {
             delete times.state
           }
           const now = performance.now()
+          delete fields.lastJob
+          delete times.lastJob
+          const print = (raw as { print?: { gcode_state?: unknown } })?.print
+          const state = print?.gcode_state
+          if (state === 'RUNNING' || state === 'PREPARE' || state === 'PAUSE')
+            activeJob = true
+          else if (
+            activeJob &&
+            (state === 'FINISH' || state === 'FAILED' || state === 'IDLE')
+          ) {
+            observed.lastJob = {
+              outcome:
+                state === 'FINISH'
+                  ? 'completed'
+                  : state === 'FAILED'
+                    ? 'failed'
+                    : 'cancelled',
+              endedAt: Date.now(),
+            }
+            activeJob = false
+          }
           for (const key of Object.keys(observed) as (keyof Fields)[])
-            times[key] = now
+            if (key !== 'lastJob') times[key] = now
           if (observed.materials) {
             const merged = new Map(
               (fields.materials ?? []).map((item) => [item.slot, item]),

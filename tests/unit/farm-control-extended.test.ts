@@ -3,6 +3,7 @@ import {
   advertisedExtended,
   buildExtendedArgs,
   requiresExtendedConfirmation,
+  unsupportedExtended,
 } from '../../apps/farm/app/utils/farm-control-extended.ts'
 describe('extended farm controls', () => {
   it('builds bounded arguments', () => {
@@ -24,6 +25,29 @@ describe('extended farm controls', () => {
     expect(buildExtendedArgs('set_speed', 'sport', '')).toEqual({
       level: 'sport',
     })
+  })
+  it('accepts the numeric model a number input produces', () => {
+    expect(buildExtendedArgs('set_temperature', 'extruder', 215)).toEqual({
+      heater: 'extruder',
+      target_c: 215,
+    })
+    expect(buildExtendedArgs('set_fan', 'part', 80)).toEqual({
+      fan: 'part',
+      percent: 80,
+    })
+    expect(buildExtendedArgs('set_fan', 'part', 101)).toBeUndefined()
+  })
+  it('lists the commands a printer does not advertise', () => {
+    expect(unsupportedExtended(['pause', 'home', 'set_light'])).toEqual([
+      'set_temperature',
+      'set_fan',
+      'set_speed',
+      'firmware_restart',
+      'emergency_stop',
+      'load_filament',
+      'unload_filament',
+    ])
+    expect(unsupportedExtended(undefined)).toEqual([])
   })
   it('only shows advertised actions and identifies confirmations', () => {
     expect(advertisedExtended(['home', 'pause'])).toEqual(['home'])

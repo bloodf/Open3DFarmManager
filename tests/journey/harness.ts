@@ -27,15 +27,32 @@ import {
 } from './moonraker-simulator.ts'
 import { startJourneyDatabase, type JourneyDatabase } from './database.ts'
 import { AUDIENCE, startFarmApp, type FarmApp } from './farm-app.ts'
+import {
+  VENDOR_DESCRIPTIONS,
+  startVendorSimulator,
+  type VendorControls,
+  type VendorDiscovery,
+  type VendorName,
+  type VendorSimulator,
+} from './harness-vendors.ts'
+
+export type {
+  VendorControls,
+  VendorDiscovery,
+  VendorName,
+  VendorSimulator,
+} from './harness-vendors.ts'
 
 /**
- * Simulators the harness can stand in front of the Connector. The Moonraker
- * fixture is the only one wired so far; a brand adds its entry here.
+ * Simulators the harness can stand in front of the Connector: the Moonraker
+ * fixture or one of the vendor simulators (Bambu LAN, Creality, Anycubic LAN,
+ * KobraLink). Every one starts mid-print at 25 %.
  */
-export type SimulatorName = 'moonraker-fixture'
+export type SimulatorName = 'moonraker-fixture' | VendorName
 export const SIMULATORS: Readonly<Record<SimulatorName, string>> = {
   'moonraker-fixture':
     'Loopback read-only Moonraker (tests/journey/moonraker-simulator.ts): printing, 25 % progress, 210/60 °C, empty Spoolman',
+  ...VENDOR_DESCRIPTIONS,
 }
 
 export type JourneyOptions = Readonly<{
@@ -43,6 +60,8 @@ export type JourneyOptions = Readonly<{
   browser: Browser
   simulator?: SimulatorName
   printerKey?: string
+  /** Bambu only: opt the printer binding in to control commands. */
+  control?: boolean
 }>
 
 export type JourneyHarness = Readonly<{
@@ -69,9 +88,20 @@ export type JourneyHarness = Readonly<{
   openFarm(page?: Page): Promise<ReturnType<Page['locator']>>
   /** Waits for the authenticated direct connection and a state on the row. */
   expectLiveTelemetry(page?: Page): Promise<void>
+  /** Waits until the row's progress bar shows `fraction` (0..1). */
+  expectProgress(fraction: number, page?: Page): Promise<void>
   /** Moves the simulated print from 25 % to 75 %. */
   advanceSimulator(): void
-  /** The simulated printer: change its state, read what it was asked. */
+  /**
+   * Scripts the simulated print whatever the vendor: progress, finish, fail.
+   * For the Moonraker fixture finish/fail set its `complete`/`error` state.
+   */
+  controls: VendorControls
+  /** The vendor simulator (absent for the Moonraker fixture). */
+  vendor: VendorSimulator | undefined
+  /** Loopback discovery/probe responder (Creality and Anycubic only). */
+  discovery: VendorDiscovery | undefined
+  /** The Moonraker simulator; throws for any other simulator. */
   printer: MoonrakerSimulator
   simulatorObservation(): ReturnType<
     Awaited<ReturnType<typeof createRuntimeMoonrakerFixture>>['observe']
@@ -149,7 +179,7 @@ export async function startJourneyHarness(
   if (!journeyEnabled())
     throw new Error('The journey harness is opt-in: set OPENFARM_JOURNEY=1')
   const simulator = options.simulator ?? 'moonraker-fixture'
-  if (!(simulator in SIMULATORS))
+  if (!Object.hasOwn(SIMULATORS, simulator))
     throw new Error(`Unknown simulator "${simulator}"`)
   const printerKey = options.printerKey ?? `journey-${simulator}`
   const runId = randomUUID().slice(0, 8)
@@ -210,12 +240,27 @@ export async function startJourneyHarness(
     })
     // The Connector collects from this simulator (the runtime fixture's own
     // synthetic server predates the discovery/query protocol and stays idle).
-    const printer = await startMoonrakerSimulator()
-    undo.push(() => printer.close())
-    Object.assign(process.env, {
-      SIGNALLING_HTTPS_SIM_MOONRAKER: printer.origin,
-      SIGNALLING_HTTPS_SIM_SPOOLMAN: printer.spoolmanOrigin,
-    })
+    // A vendor simulator replaces it; its runtime section is built after the
+    // pairing, when the assignment exists.
+    const isMoonraker = simulator === 'moonraker-fixture'
+    let printer: MoonrakerSimulator | undefined
+    let vendor: VendorSimulator | undefined
+    if (isMoonraker) {
+      printer = await startMoonrakerSimulator()
+      const moonraker = printer
+      undo.push(() => moonraker.close())
+      Object.assign(process.env, {
+        SIGNALLING_HTTPS_SIM_MOONRAKER: moonraker.origin,
+        SIGNALLING_HTTPS_SIM_SPOOLMAN: moonraker.spoolmanOrigin,
+      })
+    } else {
+      vendor = await startVendorSimulator(simulator as VendorName, {
+        printerKey,
+        ...(options.control === undefined ? {} : { control: options.control }),
+      })
+      const started = vendor
+      undo.push(() => started.close())
+    }
     const runtime = await createRuntimeMoonrakerFixture()
     undo.push(async () => {
       const pid = runtime.observe().packagedPid
@@ -363,6 +408,16 @@ export async function startJourneyHarness(
       audience: AUDIENCE,
       claim,
       assignmentRefs: [assignment],
+      ...(vendor
+        ? {
+            runtime: await vendor.runtime({
+              farmId: database.farmId,
+              agentId: claim.agent_id,
+              assignmentId,
+              printerKey,
+            }),
+          }
+        : {}),
     })
 
     const openFarm = async (page: Page = ownerPage) => {
@@ -391,6 +446,18 @@ export async function startJourneyHarness(
       )
       return page
     }
+    const controls: VendorControls =
+      vendor?.controls ??
+      (() => {
+        const moonraker = printer as MoonrakerSimulator
+        return {
+          setProgress: (percent: number) =>
+            moonraker.update({ state: 'printing', progress: percent / 100 }),
+          finishPrint: () =>
+            moonraker.update({ state: 'complete', progress: 1 }),
+          failPrint: () => moonraker.update({ state: 'error' }),
+        }
+      })()
     return Object.freeze({
       origin,
       farmId: database.farmId,
@@ -419,8 +486,27 @@ export async function startJourneyHarness(
           '0.25',
         )
       },
-      advanceSimulator: () => printer.update({ progress: 0.75 }),
-      printer,
+      async expectProgress(fraction: number, page: Page = ownerPage) {
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', { name: printerKey, exact: true }),
+        })
+        await expect(row.getByRole('progressbar')).toHaveAttribute(
+          'value',
+          String(fraction),
+          { timeout: 15_000 },
+        )
+      },
+      advanceSimulator: () => controls.setProgress(75),
+      controls,
+      vendor,
+      discovery: vendor?.discovery,
+      get printer(): MoonrakerSimulator {
+        if (!printer)
+          throw new Error(
+            `The Moonraker simulator is not running (simulator: ${simulator}); use controls or vendor`,
+          )
+        return printer
+      },
       simulatorObservation: () => runtime.observe(),
       disconnectSignalling: () => app.disconnectUpgrades(),
       appLog: () => app.log(),

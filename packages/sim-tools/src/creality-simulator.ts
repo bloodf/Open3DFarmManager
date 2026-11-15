@@ -154,6 +154,11 @@ export async function createCrealitySimulator(
     get state() {
       return { ...currentFrame }
     },
+    /** Journey control: merge into the current frame and broadcast it. */
+    setFrame(patch: object) {
+      Object.assign(currentFrame, patch)
+      broadcast(currentFrame)
+    },
     emitFrame(frame: object) {
       broadcast(frame)
     },

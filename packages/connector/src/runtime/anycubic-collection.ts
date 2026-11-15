@@ -92,7 +92,7 @@ export function createAnycubicCollection(input: {
       clearTimeout(timer)
       timer = setTimeout(
         invalidate,
-        Math.max(1, Math.min(...Object.values(times)) + 5000 - now),
+        Math.max(1, (times.state ?? now) + 5000 - now),
       )
     },
   })

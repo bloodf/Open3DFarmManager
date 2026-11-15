@@ -228,7 +228,9 @@ export function createFarmSnapshotSource(input: {
               'estimatedRemainingSeconds',
               'toolTemperatureCelsius',
               'bedTemperatureCelsius',
-              ...('bambu' in timing ? (['fans', 'light'] as const) : []),
+              ...('bambu' in timing || 'anycubic' in timing
+                ? (['fans', 'light'] as const)
+                : []),
             ] as const
           ).filter((field) => value.printer[field] !== undefined),
         ]

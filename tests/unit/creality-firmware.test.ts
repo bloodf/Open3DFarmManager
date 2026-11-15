@@ -9,7 +9,8 @@ describe('Creality firmware', () => {
   })
 
   it('leaves absent and invalid versions absent', () => {
-    for (const version of [undefined, '', 'x'.repeat(65), '1\n2']) {
+    expect(mapCrealityFirmware({})).toBeUndefined()
+    for (const version of ['', 'x'.repeat(65), '1\n2']) {
       expect(mapCrealityFirmware({ firmwareVersion: version })).toBeUndefined()
     }
     expect(mapCrealityFirmware({ firmwareVersion: 'x'.repeat(64) })).toEqual({

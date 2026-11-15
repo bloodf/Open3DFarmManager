@@ -6,6 +6,7 @@ import {
   advertisedExtended,
   buildExtendedArgs,
   extendedLabel,
+  unsupportedExtended,
   type FarmExtendedAction,
 } from '../utils/farm-control-extended.ts'
 const props = defineProps<{
@@ -26,6 +27,9 @@ const emit = defineEmits<{
 }>()
 const actions = computed(() =>
   advertisedExtended(props.row.observation?.state.controls),
+)
+const unsupported = computed(() =>
+  unsupportedExtended(props.row.observation?.state.controls),
 )
 const choices = reactive<Record<string, string>>({
   set_temperature: 'extruder',
@@ -149,6 +153,17 @@ function submit(action: FarmExtendedAction, event: Event) {
         autorizada.
       </p>
     </div>
+    <template v-if="unsupported.length">
+      <h5 :id="'unsupported-' + row.assignment.assignmentId">
+        Comandos não suportados por esta impressora
+      </h5>
+      <dl :aria-labelledby="'unsupported-' + row.assignment.assignmentId">
+        <div v-for="action in unsupported" :key="action">
+          <dt>{{ extendedLabel(action) }}</dt>
+          <dd>Não suportado</dd>
+        </div>
+      </dl>
+    </template>
   </section>
 </template>
 <style scoped>

@@ -110,7 +110,8 @@ export async function listMoonrakerFiles(
 
 function safeRelative(path: string): boolean {
   return (
-    !/[\\%?#:\u0000-\u001f\u007f-\u009f]/.test(path) &&
+    !/[\\\u0000-\u001f\u007f-\u009f]/.test(path) &&
+    !/%(?:2f|5c|2e)/i.test(path) &&
     !path.split('/').some((part) => !part || part === '.' || part === '..')
   )
 }

@@ -30,6 +30,8 @@ export type FarmApp = Readonly<{
   origin: string
   /** PEM certificate the Connector must trust (NODE_EXTRA_CA_CERTS). */
   certificatePath: string
+  /** Ed25519 SPKI of the pause/control capability issuer (kid `pause-fixture`). */
+  pausePublicKeySpki: string
   /** Bounded tail of the Nitro output, for failure diagnostics. */
   log(): string
   /** Drops every live upgraded connection, as a network loss would. */
@@ -98,7 +100,7 @@ async function stopChild(child: ChildProcess | undefined) {
  */
 export async function startFarmApp(
   database: JourneyDatabase,
-  options: { farmView?: boolean } = {},
+  options: { farmView?: boolean; history?: boolean } = {},
 ): Promise<FarmApp> {
   const directory = await mkdtemp(join(tmpdir(), 'o3dfm-journey-'))
   await chmod(directory, 0o700)
@@ -196,8 +198,27 @@ export async function startFarmApp(
       }),
       { mode: 0o600 },
     )
+    // Signed control capabilities (pause, resume, cancel, extended, files).
+    const pauseKeys = generateKeyPairSync('ed25519')
+    const pauseIssuerPath = join(directory, 'pause-issuer.json')
+    const pausePublicKeySpki = pauseKeys.publicKey
+      .export({ format: 'der', type: 'spki' })
+      .toString('base64url')
+    await writeFile(
+      pauseIssuerPath,
+      JSON.stringify({
+        version: 1,
+        issuer: origin,
+        kid: 'pause-fixture',
+        privateKeyPkcs8: pauseKeys.privateKey
+          .export({ format: 'der', type: 'pkcs8' })
+          .toString('base64url'),
+      }),
+      { mode: 0o600 },
+    )
     const url = (index: number) => database.url(CAPABILITIES[index]!)
-    const tokenTtlSeconds = '300'
+    // No renewal is configured: the credential must outlive a whole journey.
+    const tokenTtlSeconds = '3600'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       OPEN3DFARM_CONFIGURATION: JSON.stringify({
@@ -252,8 +273,39 @@ export async function startFarmApp(
       NUXT_CONNECTOR_SIGNALLING_PROOF_DATABASE_URL: url(7),
       NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH: registry,
       NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: tokenTtlSeconds,
-      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '8000',
+      // One proof slot per Connector credential serves both signalling sockets
+      // and telemetry. A pending proof answers the others "retry after its
+      // remaining lifetime"; kept well under the Connector's 8 s admission
+      // window, so a collision is a short wait and not a dropped socket.
+      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '3000',
+      NUXT_PAUSE_AUTHORITY_ENABLED: 'true',
+      NUXT_PAUSE_AUTHORITY_DATABASE_URL: database.url('farm_pause_authority'),
+      NUXT_PAUSE_AUTHORITY_ISSUER_KEY_PATH: pauseIssuerPath,
+      NUXT_PAUSE_AUTHORITY_ISSUER_PUBLIC_KEY_SPKI: pausePublicKeySpki,
+      NUXT_PAUSE_AUTHORITY_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_KID: 'pause-fixture',
+      NUXT_PAUSE_AUTHORITY_AUDIENCE: 'open3dfarmmanager:pause',
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_AUDIENCE: AUDIENCE,
     }
+    // Connector telemetry feeds the finished-job history. Opt-in: its uploads
+    // share the Connector's credential proof slot with signalling.
+    if (options.history)
+      Object.assign(env, {
+        NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
+        NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: database.url(
+          'farm_connector_telemetry_writer',
+        ),
+        NUXT_CONNECTOR_TELEMETRY_ORIGIN: origin,
+        NUXT_CONNECTOR_TELEMETRY_ISSUER: origin,
+        NUXT_CONNECTOR_TELEMETRY_AUDIENCE: AUDIENCE,
+        NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH: registry,
+        NUXT_CONNECTOR_TELEMETRY_TOKEN_TTL_SECONDS: tokenTtlSeconds,
+        NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '3000',
+        NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
+        NUXT_JOB_HISTORY_ENABLED: 'true',
+        NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
+      })
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -285,6 +337,7 @@ export async function startFarmApp(
     return Object.freeze({
       origin,
       certificatePath: cert,
+      pausePublicKeySpki,
       directory,
       log: () => output,
       disconnectUpgrades: () => ownedProxy.disconnectUpgrades(),

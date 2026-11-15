@@ -62,6 +62,30 @@ export type JourneyOptions = Readonly<{
   printerKey?: string
   /** Bambu only: opt the printer binding in to control commands. */
   control?: boolean
+  /**
+   * Opts the Connector in to signed control for the assigned printer: the
+   * lifecycle and extended commands, the file list, uploads and print start.
+   * Off by default, so the read-only journeys keep no control path.
+   */
+  commands?: boolean
+  /**
+   * Stores Connector telemetry on the server, so finished jobs reach the
+   * history page. Off by default.
+   */
+  history?: boolean
+  /**
+   * Performs the printer set-up in the browser instead of the harness calling
+   * the assignment API. Receives the signed-in owner page and must return once
+   * the assignment for `printerKey` on `agentId` exists.
+   */
+  setup?(context: {
+    page: Page
+    origin: string
+    farmId: string
+    agentId: string
+    printerKey: string
+    vendor: VendorSimulator | undefined
+  }): Promise<void>
 }>
 
 export type JourneyHarness = Readonly<{
@@ -123,6 +147,8 @@ const ENV_KEYS = [
   'NODE_EXTRA_CA_CERTS',
   'SIGNALLING_HTTPS_SIM_MOONRAKER',
   'SIGNALLING_HTTPS_SIM_SPOOLMAN',
+  'SIGNALLING_HTTPS_FARM_PAUSE',
+  'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
 ] as const
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
@@ -222,7 +248,9 @@ export async function startJourneyHarness(
   try {
     const database: JourneyDatabase = await startJourneyDatabase(runId)
     undo.push(() => database.close())
-    const app: FarmApp = await startFarmApp(database)
+    const app: FarmApp = await startFarmApp(database, {
+      history: options.history === true,
+    })
     undo.push(() => app.close())
     const { origin } = app
 
@@ -238,6 +266,13 @@ export async function startJourneyHarness(
       WS_NO_UTF_8_VALIDATE: '1',
       NODE_EXTRA_CA_CERTS: app.certificatePath,
     })
+    delete process.env.SIGNALLING_HTTPS_FARM_PAUSE
+    delete process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
+    if (options.commands)
+      Object.assign(process.env, {
+        SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+        SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY: app.pausePublicKeySpki,
+      })
     // The Connector collects from this simulator (the runtime fixture's own
     // synthetic server predates the discovery/query protocol and stays idle).
     // A vendor simulator replaces it; its runtime section is built after the
@@ -394,14 +429,46 @@ export async function startJourneyHarness(
 
     // Assign the printer, then read the assignment back.
     const path = `/api/farms/${database.farmId}/printers`
-    const registration = (await pagePost(ownerPage, path, {
-      agentId: claim.agent_id,
-      printerKey,
-      confirmedLocalConfiguration: true,
-    })) as { assignmentId?: unknown }
-    if (typeof registration.assignmentId !== 'string')
-      throw new Error('Printer assignment failed')
-    const assignmentId = registration.assignmentId
+    let assignmentId: string
+    if (options.setup) {
+      await options.setup({
+        page: ownerPage,
+        origin,
+        farmId: database.farmId,
+        agentId: claim.agent_id,
+        printerKey,
+        vendor,
+      })
+      const listed = (await ownerPage.evaluate(async (url) => {
+        const response = await fetch(url, { cache: 'no-store' })
+        return response.ok ? await response.json() : null
+      }, path)) as {
+        printers?: {
+          assignmentId?: unknown
+          agentId?: unknown
+          printerKey?: unknown
+          status?: unknown
+        }[]
+      } | null
+      const created = listed?.printers?.find(
+        (printer) =>
+          printer.printerKey === printerKey &&
+          printer.agentId === claim.agent_id &&
+          printer.status === 'active',
+      )
+      if (typeof created?.assignmentId !== 'string')
+        throw new Error('Browser set-up did not create the assignment')
+      assignmentId = created.assignmentId
+    } else {
+      const registration = (await pagePost(ownerPage, path, {
+        agentId: claim.agent_id,
+        printerKey,
+        confirmedLocalConfiguration: true,
+      })) as { assignmentId?: unknown }
+      if (typeof registration.assignmentId !== 'string')
+        throw new Error('Printer assignment failed')
+      assignmentId = registration.assignmentId
+    }
     const assignment = { assignmentId, agentId: claim.agent_id, printerKey }
     await runtime.start({
       origin,

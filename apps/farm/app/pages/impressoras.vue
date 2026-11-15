@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import {
+  describeAnycubicTarget,
+  validateAnycubicTargetInput,
+  withoutAnycubicCredentials,
+  describeAnycubicConfigurationError,
+} from '../utils/anycubic-onboarding.ts'
+
 import PrinterIdentity from '../components/printer-identity/PrinterIdentity.vue'
 import {
   CREALITY_SUPPORT_NOTE,
@@ -148,7 +155,9 @@ const discoveryPrinters = ref<
 >([])
 const discoveryMessage = ref('')
 const discoveryBusy = ref(false)
-async function searchPrinters() {
+const probeHost = ref('')
+async function searchPrinters(host?: string) {
+  if (discoveryBusy.value) return
   const key = selectedKobraKey.value
   const state = kobraKeyState.value
   const boot = kobraBootstrap.value
@@ -175,10 +184,13 @@ async function searchPrinters() {
       bootstrap: boot.data,
       signal,
     })
-    const result = await session.discover(signal)
+    const result = await session.discover(signal, host)
     if (signal.aborted) return
     discoveryMessage.value = discoveryStatus(result)
-    if (result.ok) discoveryPrinters.value = result.printers
+    if (result.ok) {
+      discoveryPrinters.value = result.printers
+      if (host && result.printers[0]) selectDiscovery(result.printers[0])
+    }
   } catch {
     if (!signal.aborted)
       discoveryMessage.value =
@@ -191,6 +203,18 @@ async function searchPrinters() {
 function selectDiscovery(
   printer: Extract<DiscoveryResult, { ok: true }>['printers'][number],
 ) {
+  if (printer.vendor === 'creality' || printer.vendor === 'anycubic') {
+    closeKobraSession()
+    onboardingFamily.value =
+      printer.vendor === 'creality' ? 'creality-native' : 'anycubic-lan'
+    if (printer.vendor === 'creality') crealityHost.value = printer.host
+    else {
+      anycubicHost.value = printer.host
+      anycubicUsername.value = ''
+      anycubicPassword.value = ''
+    }
+    return
+  }
   const prefill = discoveryPrefill(printer)
   closeKobraSession()
   onboardingFamily.value = prefill.family
@@ -202,11 +226,35 @@ function selectDiscovery(
   } else {
     moonrakerOrigin.value = prefill.origin
     moonrakerApiKey.value = ''
+    moonrakerUsername.value = ''
+    moonrakerPassword.value = ''
   }
 }
 const onboardingFamily = ref<
-  'anycubic-kobra-x' | 'klipper-moonraker' | 'bambu-lan' | 'creality-native'
+  | 'anycubic-lan'
+  | 'anycubic-kobra-x'
+  | 'klipper-moonraker'
+  | 'bambu-lan'
+  | 'creality-native'
 >('anycubic-kobra-x')
+const anycubicHost = ref('')
+const anycubicPort = ref(9883)
+const anycubicModelId = ref('')
+const anycubicDeviceId = ref('')
+const anycubicUsername = ref('')
+const anycubicPassword = ref('')
+const anycubicCaFile = ref('')
+const anycubicPin = ref('')
+const anycubicTargetView = computed(() =>
+  kobraOperation.value?.target.backend === 'anycubic'
+    ? describeAnycubicTarget(kobraOperation.value.target)
+    : null,
+)
+const isAnycubicOnboarding = computed(
+  () =>
+    kobraOperation.value?.target.backend === 'anycubic' ||
+    (kobraStage.value === 'idle' && onboardingFamily.value === 'anycubic-lan'),
+)
 const crealityHost = ref('')
 const isCrealityOnboarding = computed(
   () =>
@@ -228,20 +276,27 @@ const isBambuOnboarding = computed(
     (kobraStage.value === 'idle' && onboardingFamily.value === 'bambu-lan'),
 )
 const onboardingFamilyLabel = computed(() =>
-  isMoonrakerOnboarding.value
-    ? 'Klipper / Moonraker'
-    : isBambuOnboarding.value
-      ? 'Bambu Lab (LAN)'
-      : isCrealityOnboarding.value
-        ? 'Creality (firmware original)'
-        : 'Anycubic Kobra X',
+  isAnycubicOnboarding.value
+    ? 'Anycubic (LAN)'
+    : isMoonrakerOnboarding.value
+      ? 'Klipper / Moonraker'
+      : isBambuOnboarding.value
+        ? 'Bambu Lab (LAN)'
+        : isCrealityOnboarding.value
+          ? 'Creality (firmware original)'
+          : 'Anycubic Kobra X',
 )
 const describeBackendError = (code: string) =>
+  (isAnycubicOnboarding.value
+    ? describeAnycubicConfigurationError(code)
+    : null) ??
   describeMoonrakerConfigurationError(code) ??
   (isBambuOnboarding.value ? describeBambuConfigurationError(code) : null) ??
   (isCrealityOnboarding.value ? describeCrealityConfigurationError(code) : null)
 const moonrakerOrigin = ref('')
 const moonrakerApiKey = ref('')
+const moonrakerUsername = ref('')
+const moonrakerPassword = ref('')
 const isMoonrakerOnboarding = computed(
   () =>
     kobraOperation.value?.target.backend === 'moonraker' ||
@@ -349,11 +404,13 @@ function persistPendingOperation(
         agentId: op.agentId,
         keyId: op.keyId,
         target:
-          op.target.backend === 'moonraker'
-            ? withoutMoonrakerKey(op.target)
-            : op.target.backend === 'bambu'
-              ? withoutBambuAccessCode(op.target)
-              : op.target,
+          op.target.backend === 'anycubic'
+            ? withoutAnycubicCredentials(op.target)
+            : op.target.backend === 'moonraker'
+              ? withoutMoonrakerKey(op.target)
+              : op.target.backend === 'bambu'
+                ? withoutBambuAccessCode(op.target)
+                : op.target,
         targetSha256: op.targetSha256,
         expectedRevision: op.expectedRevision,
         displayLabel: op.displayLabel,
@@ -452,6 +509,8 @@ function closeKobraSession() {
     active.close()
     void active.dispose()
   }
+  anycubicUsername.value = ''
+  anycubicPassword.value = ''
 }
 
 function clearKobraContext(
@@ -459,6 +518,8 @@ function clearKobraContext(
   preserveUnresolvedOp = false,
 ) {
   moonrakerApiKey.value = ''
+  moonrakerUsername.value = ''
+  moonrakerPassword.value = ''
   bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
@@ -1141,13 +1202,17 @@ async function prepareKobraX() {
   }
 }
 
-async function prepareMoonrakerPrinter() {
+async function prepareMoonrakerPrinter(
+  login: { username?: string; password?: string; clear?: () => void } = {},
+) {
   if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
   kobraError.value = ''
   kobraStatus.value = ''
   const validated = validateMoonrakerTargetInput({
     origin: moonrakerOrigin.value,
     apiKey: moonrakerApiKey.value,
+    username: login.username,
+    password: login.password,
     displayLabel: kobraLabel.value,
   })
   if (!validated.ok) {
@@ -1203,6 +1268,7 @@ async function prepareMoonrakerPrinter() {
         if (token !== kobraGeneration || opController.signal.aborted)
           throw new Error('Configuration context changed before dispatch')
         moonrakerApiKey.value = ''
+        login.clear?.()
         // Persist before handing the frame to the transport; send failures stay uncertain.
         persistPendingOperation(candidate, 'awaiting-reconcile')
         opContext = candidate
@@ -1279,6 +1345,91 @@ async function prepareBambuPrinter() {
         if (token !== kobraGeneration || opController.signal.aborted)
           throw new Error('Configuration context changed before dispatch')
         bambuAccessCode.value = ''
+        // Persist before handing the frame to the transport; send failures stay uncertain.
+        persistPendingOperation(candidate, 'awaiting-reconcile')
+        opContext = candidate
+        kobraOperation.value = candidate
+      },
+    })
+    await applySessionOutcome(outcome, candidate, token, opController.signal)
+  } catch (cause) {
+    await handleKobraException(cause, opContext, token, opContext !== null)
+  } finally {
+    if (token === kobraGeneration) kobraBusy.value = false
+  }
+}
+
+async function prepareAnycubicPrinter() {
+  if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
+  kobraError.value = ''
+  kobraStatus.value = ''
+  const validated = validateAnycubicTargetInput({
+    host: anycubicHost.value.trim(),
+    port: Number(anycubicPort.value),
+    modelId: anycubicModelId.value.trim(),
+    deviceId: anycubicDeviceId.value.trim(),
+    username: anycubicUsername.value,
+    password: anycubicPassword.value,
+    ...(typeof anycubicCaFile !== 'undefined' && anycubicCaFile.value
+      ? { caFile: anycubicCaFile.value }
+      : {}),
+    ...(typeof anycubicPin !== 'undefined' && anycubicPin.value
+      ? { pinSha256: anycubicPin.value }
+      : {}),
+    displayLabel: kobraLabel.value,
+  })
+  if (!validated.ok) {
+    kobraError.value = validated.error
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const expectedRevision = kobraBootstrap.value.data.bootstrap.revision
+  if (expectedRevision === null) {
+    kobraError.value = 'Configuração não disponível neste Connector.'
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
+  const token = kobraGeneration
+  const opController = new AbortController()
+  kobraController = opController
+  kobraBusy.value = true
+  kobraStage.value = 'preparing'
+  kobraStatus.value =
+    'Conectando via WebRTC config-v1 e verificando a Anycubic Lab na LAN do Connector…'
+  let opContext: KobraOperationContext | null = null
+  try {
+    // The access code is bound by the signed hash, then leaves browser state.
+    const targetSha256 = await configurationTargetHash(validated.target)
+    if (kobraKeyState.value.kind !== 'available')
+      throw new Error('Approved browser key required')
+    if (token !== kobraGeneration || opController.signal.aborted) return
+    const candidate: KobraOperationContext = {
+      accountId: kobraKeyState.value.accountId,
+      operationId: crypto.randomUUID(),
+      farmId: farmId.value,
+      agentId: kobraAgentId.value,
+      keyId: kobraKeyId.value,
+      target: withoutAnycubicCredentials(validated.target),
+      targetSha256,
+      expectedRevision,
+      displayLabel: validated.displayLabel,
+      preparedReceipt: null,
+      preparedReceiptSha256: null,
+    }
+    const session = await ensureKobraSession(opController.signal)
+    if (token !== kobraGeneration) return
+    const outcome = await session.prepare({
+      operationId: candidate.operationId,
+      target: validated.target,
+      expectedRevision: candidate.expectedRevision,
+      signal: opController.signal,
+      beforeDispatch: () => {
+        if (token !== kobraGeneration || opController.signal.aborted)
+          throw new Error('Configuration context changed before dispatch')
+        anycubicPassword.value = ''
+        anycubicUsername.value = ''
         // Persist before handing the frame to the transport; send failures stay uncertain.
         persistPendingOperation(candidate, 'awaiting-reconcile')
         opContext = candidate
@@ -1471,6 +1622,8 @@ async function cancelKobraX() {
 function abortLocalKobraWait() {
   if (!kobraBusy.value) return
   moonrakerApiKey.value = ''
+  moonrakerUsername.value = ''
+  moonrakerPassword.value = ''
   bambuAccessCode.value = ''
   kobraGeneration++
   kobraController?.abort()
@@ -1911,9 +2064,28 @@ onBeforeRouteLeave(clear)
           :disabled="
             discoveryBusy || kobraBusy || kobraBootstrap.kind !== 'ready'
           "
-          @click="searchPrinters"
+          @click="searchPrinters()"
         >
           Procurar impressoras
+        </button>
+        <label for="probe-host">Endereço IPv4 da impressora</label>
+        <input
+          id="probe-host"
+          v-model="probeHost"
+          placeholder="192.168.1.50"
+          :disabled="discoveryBusy"
+        />
+        <button
+          type="button"
+          :disabled="
+            discoveryBusy ||
+            kobraBusy ||
+            kobraBootstrap.kind !== 'ready' ||
+            !probeHost.trim()
+          "
+          @click="searchPrinters(probeHost.trim())"
+        >
+          Identificar
         </button>
         <p role="status" aria-live="polite">{{ discoveryMessage }}</p>
         <DiscoveryResults
@@ -1925,13 +2097,22 @@ onBeforeRouteLeave(clear)
       <form
         v-if="kobraStage === 'idle' || kobraStage === 'preparing'"
         @submit.prevent="
-          onboardingFamily === 'klipper-moonraker'
-            ? prepareMoonrakerPrinter()
-            : onboardingFamily === 'bambu-lan'
-              ? prepareBambuPrinter()
-              : onboardingFamily === 'creality-native'
-                ? prepareCrealityPrinter()
-                : prepareKobraX()
+          onboardingFamily === 'anycubic-lan'
+            ? prepareAnycubicPrinter()
+            : onboardingFamily === 'klipper-moonraker'
+              ? prepareMoonrakerPrinter({
+                  username: moonrakerUsername,
+                  password: moonrakerPassword,
+                  clear: () => {
+                    moonrakerUsername = ''
+                    moonrakerPassword = ''
+                  },
+                })
+              : onboardingFamily === 'bambu-lan'
+                ? prepareBambuPrinter()
+                : onboardingFamily === 'creality-native'
+                  ? prepareCrealityPrinter()
+                  : prepareKobraX()
         "
       >
         <fieldset :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'">
@@ -1942,6 +2123,7 @@ onBeforeRouteLeave(clear)
             v-model="onboardingFamily"
             @change="closeKobraSession"
           >
+            <option value="anycubic-lan">Anycubic (LAN)</option>
             <option value="anycubic-kobra-x">Anycubic Kobra X</option>
             <option value="klipper-moonraker">Klipper / Moonraker</option>
             <option value="bambu-lan">Bambu Lab (LAN)</option>
@@ -1983,9 +2165,106 @@ onBeforeRouteLeave(clear)
                   : 'Chave não configurada.'
               }}
             </p>
+            <label for="moonraker-username"
+              >Usuário (alternativa à chave)</label
+            >
+            <input
+              id="moonraker-username"
+              v-model="moonrakerUsername"
+              maxlength="256"
+              autocomplete="off"
+            />
+            <label for="moonraker-password">Senha</label>
+            <input
+              id="moonraker-password"
+              v-model="moonrakerPassword"
+              type="password"
+              maxlength="256"
+              autocomplete="new-password"
+            />
             <p>
               Suporte não qualificado. O Connector verifica o Moonraker em modo
               somente leitura antes de aceitar.
+            </p>
+          </template>
+          <template v-else-if="onboardingFamily === 'anycubic-lan'">
+            <label for="anycubic-host">Endereço IPv4 na LAN</label>
+            <input
+              id="anycubic-host"
+              v-model="anycubicHost"
+              type="text"
+              maxlength="15"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <label for="anycubic-port">Porta LAN</label>
+            <input
+              id="anycubic-port"
+              v-model="anycubicPort"
+              type="number"
+              maxlength="5"
+              required
+              autocomplete="off"
+              spellcheck="false"
+              min="1"
+              max="65535"
+            />
+            <label for="anycubic-model">Identificador do modelo</label>
+            <input
+              id="anycubic-model"
+              v-model="anycubicModelId"
+              type="text"
+              maxlength="64"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <label for="anycubic-device">Identificador do dispositivo</label>
+            <input
+              id="anycubic-device"
+              v-model="anycubicDeviceId"
+              type="text"
+              maxlength="64"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <label for="anycubic-username">Usuário LAN</label>
+            <input
+              id="anycubic-username"
+              v-model="anycubicUsername"
+              type="password"
+              maxlength="256"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <label for="anycubic-ca">Arquivo CA no Connector</label>
+            <input id="anycubic-ca" v-model="anycubicCaFile" maxlength="4096" />
+            <label for="anycubic-pin">SHA-256 do certificado</label>
+            <input id="anycubic-pin" v-model="anycubicPin" maxlength="64" />
+            <label for="anycubic-password">Senha LAN</label>
+            <input
+              id="anycubic-password"
+              v-model="anycubicPassword"
+              type="password"
+              maxlength="2048"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p>
+              Porta padrão: 9883. Credenciais guardadas somente no Connector.
+              {{
+                anycubicUsername && anycubicPassword
+                  ? 'Acesso configurado.'
+                  : 'Informe as credenciais LAN.'
+              }}
+            </p>
+            <p>
+              Suporte não qualificado. O Connector verifica a conexão LAN sem
+              enviar comandos.
             </p>
           </template>
           <template v-else-if="onboardingFamily === 'creality-native'">
@@ -2122,13 +2401,15 @@ onBeforeRouteLeave(clear)
               {{
                 kobraBusy && kobraStage === 'preparing'
                   ? 'Preparando no Connector…'
-                  : onboardingFamily === 'klipper-moonraker'
-                    ? 'Preparar Klipper / Moonraker'
-                    : onboardingFamily === 'bambu-lan'
-                      ? 'Preparar Bambu Lab (LAN)'
-                      : onboardingFamily === 'creality-native'
-                        ? 'Preparar Creality'
-                        : 'Preparar Anycubic Kobra X'
+                  : onboardingFamily === 'anycubic-lan'
+                    ? 'Preparar Anycubic (LAN)'
+                    : onboardingFamily === 'klipper-moonraker'
+                      ? 'Preparar Klipper / Moonraker'
+                      : onboardingFamily === 'bambu-lan'
+                        ? 'Preparar Bambu Lab (LAN)'
+                        : onboardingFamily === 'creality-native'
+                          ? 'Preparar Creality'
+                          : 'Preparar Anycubic Kobra X'
               }}
             </button>
           </div>
@@ -2151,6 +2432,16 @@ onBeforeRouteLeave(clear)
         <h3 id="kobra-prepared-heading">
           3. Revisar identidade observada e qualificação provisória
         </h3>
+        <dl v-if="anycubicTargetView">
+          <dt>Endereço LAN</dt>
+          <dd>{{ anycubicTargetView.host }}:{{ anycubicTargetView.port }}</dd>
+          <dt>Modelo configurado</dt>
+          <dd>{{ anycubicTargetView.modelId }}</dd>
+          <dt>Dispositivo configurado</dt>
+          <dd>{{ anycubicTargetView.deviceId }}</dd>
+          <dt>Credenciais LAN</dt>
+          <dd>{{ anycubicTargetView.credentials }}</dd>
+        </dl>
         <dl>
           <dt>Operação</dt>
           <dd class="exact-key">{{ kobraPrepared.operationId }}</dd>
@@ -2162,7 +2453,7 @@ onBeforeRouteLeave(clear)
             {{
               isMoonrakerOnboarding
                 ? 'Identidade da origem no Connector'
-                : isBambuOnboarding
+                : isBambuOnboarding || isAnycubicOnboarding
                   ? 'Identidade da impressora no Connector'
                   : 'Instância da ponte no Connector'
             }}
@@ -2198,7 +2489,11 @@ onBeforeRouteLeave(clear)
           <dd>{{ kobraPrepared.expectedRevision }}</dd>
         </dl>
         <h4>Capacidades admitidas para esta impressora</h4>
-        <p v-if="isMoonrakerOnboarding || isCrealityOnboarding">
+        <p v-if="isAnycubicOnboarding">
+          Credenciais LAN: configurado (guardadas somente no Connector). Suporte
+          não qualificado. Controles dependem do driver registrado no Connector.
+        </p>
+        <p v-else-if="isMoonrakerOnboarding || isCrealityOnboarding">
           Telemetria somente leitura. Comandos e câmera não qualificados.
         </p>
         <template
@@ -2220,7 +2515,8 @@ onBeforeRouteLeave(clear)
         </template>
         <dl>
           <div
-            v-for="cap in isMoonrakerOnboarding ||
+            v-for="cap in isAnycubicOnboarding ||
+            isMoonrakerOnboarding ||
             isBambuOnboarding ||
             isCrealityOnboarding
               ? []
@@ -2241,7 +2537,11 @@ onBeforeRouteLeave(clear)
           Conferi a identidade observada ({{
             kobraPrepared.receipt.observed.device_id
           }}), a qualificação provisória de modelo/firmware e que esta
-          impressora operará somente em leitura.
+          {{
+            isAnycubicOnboarding
+              ? 'os controles dependem do driver registrado no Connector.'
+              : 'esta impressora operará somente em leitura.'
+          }}
         </label>
         <div class="kobra-actions">
           <button

@@ -408,7 +408,25 @@ onBeforeUnmount(() => {
             <p v-if="!files.length">
               Consulte os arquivos da impressora ou envie um arquivo.
             </p>
-            <form v-else @submit.prevent="start">
+            <ul
+              v-if="files.some((file) => file.thumbnail)"
+              aria-label="Miniaturas dos arquivos"
+            >
+              <li
+                v-for="file in files.filter((item) => item.thumbnail)"
+                :key="file.name"
+              >
+                <img
+                  :src="`data:image/png;base64,${file.thumbnail}`"
+                  alt=""
+                  width="96"
+                  height="96"
+                  style="object-fit: contain"
+                />
+                {{ file.name }}
+              </li>
+            </ul>
+            <form v-if="files.length" @submit.prevent="start">
               <label for="files-existing">Arquivo para imprimir</label>
               <select id="files-existing" v-model="selected" :disabled="busy">
                 <option value="">Selecione um arquivo</option>

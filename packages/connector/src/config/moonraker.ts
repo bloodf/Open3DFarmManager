@@ -107,7 +107,7 @@ export function validateMoonrakerInput(input: {
           }),
         ])
         .parse(
-          readPrivateJsonFile(input.assignment.apiKeyFile, { maxBytes: 4096 }),
+          readPrivateJsonFile(input.assignment.apiKeyFile, { maxBytes: 8192 }),
         )
       if (credential.origin !== origin) throw new Error()
       credentials.set(

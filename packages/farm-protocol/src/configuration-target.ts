@@ -89,21 +89,29 @@ export const ConfigurationMoonrakerOrigin = z
       return false
     }
   }, 'Expected an HTTP(S) origin')
-export const MoonrakerConfigurationTarget = z.strictObject({
-  v: z.literal(1),
-  protocol: z.literal(CONFIGURATION_PROTOCOL),
-  backend: z.literal('moonraker'),
-  model: z.strictObject({
-    family: z.literal('klipper-moonraker'),
-    provisional: z.literal(true),
-  }),
-  origin: ConfigurationMoonrakerOrigin,
-  api_key: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{1,256}$/)
-    .optional(),
-  device_id: configurationOpaqueId.optional(),
-})
+export const MoonrakerConfigurationTarget = z
+  .strictObject({
+    v: z.literal(1),
+    protocol: z.literal(CONFIGURATION_PROTOCOL),
+    backend: z.literal('moonraker'),
+    model: z.strictObject({
+      family: z.literal('klipper-moonraker'),
+      provisional: z.literal(true),
+    }),
+    origin: ConfigurationMoonrakerOrigin,
+    api_key: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,256}$/)
+      .optional(),
+    username: z.string().min(1).max(256).optional(),
+    password: z.string().min(1).max(256).optional(),
+    device_id: configurationOpaqueId.optional(),
+  })
+  .refine(
+    (v) =>
+      Boolean(v.username) === Boolean(v.password) && !(v.api_key && v.username),
+    { message: 'Choose one Moonraker credential method' },
+  )
 export type MoonrakerConfigurationTarget = z.infer<
   typeof MoonrakerConfigurationTarget
 >
@@ -151,7 +159,42 @@ export const CrealityConfigurationTarget = z.strictObject({
 export type CrealityConfigurationTarget = z.infer<
   typeof CrealityConfigurationTarget
 >
+/** Credentials are carried only by config-v1 to Connector private custody. */
+export const AnycubicConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('anycubic'),
+  model: z.strictObject({
+    family: z.literal('anycubic-lan'),
+    provisional: z.literal(true),
+  }),
+  host: ConfigurationIpv4,
+  port: z.number().int().min(1).max(65535).default(9883),
+  modelId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  deviceId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  username: z.string().min(1).max(256).optional(),
+  password: z
+    .string()
+    .min(1)
+    .max(256)
+    .refine(
+      (value) =>
+        new TextEncoder().encode(JSON.stringify(value)).byteLength <= 4096,
+      'Credential exceeds private file limit',
+    )
+    .optional(),
+  caFile: z.string().min(1).max(4096).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-fA-F0-9]{64}$/)
+    .optional(),
+  device_id: configurationOpaqueId.optional(),
+})
+export type AnycubicConfigurationTarget = z.infer<
+  typeof AnycubicConfigurationTarget
+>
 export const ConfigurationTarget = z.discriminatedUnion('backend', [
+  AnycubicConfigurationTarget,
   KobraConfigurationTarget,
   MoonrakerConfigurationTarget,
   BambuConfigurationTarget,

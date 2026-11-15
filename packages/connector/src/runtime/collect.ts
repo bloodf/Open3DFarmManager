@@ -1,3 +1,5 @@
+import type { CrealityCollectorConfig } from '../config/creality.ts'
+import { createAnycubicCollection } from './anycubic-collection.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
@@ -5,8 +7,8 @@ import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import {
   parseCollectorConfig,
   readCollectorConfig,
-  type CrealityCollectorConfig,
-} from '../config/creality.ts'
+  type AnycubicCollectorConfig,
+} from '../config/anycubic.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
@@ -76,11 +78,16 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  discoverMoonrakerObjects?: boolean
   bambuTransport?: (
     options: Parameters<typeof createBambuTransport>[0],
   ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
+  anycubicTransport?: Parameters<
+    typeof createAnycubicCollection
+  >[0]['transport']
   kobraFetch?: KobraLinkFetch
-  config: LocalCollectorConfig | CrealityCollectorConfig
+  config:
+    LocalCollectorConfig | CrealityCollectorConfig | AnycubicCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -171,6 +178,7 @@ export async function collectIntoQueue(input: {
     for (const assignment of config.printers) {
       if (signal.aborted) break
       const subscription = createMoonrakerSubscription({
+        ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         assignment,
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,
@@ -328,6 +336,31 @@ export async function collectIntoQueue(input: {
           onObservation(observation) {
             input.onRawObservation?.(observation)
             onEvent({ kind: 'snapshot', printer: observation.printer })
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 5) {
+      for (const binding of config.anycubic.printers) {
+        if (signal.aborted) break
+        const sub = createAnycubicCollection({
+          ...(input.anycubicTransport
+            ? { transport: input.anycubicTransport }
+            : {}),
+          binding,
+          signal,
+          onObservation(value) {
+            input.onRawObservation?.(value)
+            onEvent({ kind: 'snapshot', printer: value.printer })
           },
           onUnavailable(epoch) {
             input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })

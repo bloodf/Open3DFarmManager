@@ -4,6 +4,8 @@ import { MoonrakerConfigurationTarget } from '../../../../packages/farm-protocol
 export function validateMoonrakerTargetInput(input: {
   origin: string
   apiKey?: string
+  username?: string
+  password?: string
   displayLabel?: string
 }) {
   const parsed = MoonrakerConfigurationTarget.safeParse({
@@ -13,6 +15,8 @@ export function validateMoonrakerTargetInput(input: {
     model: { family: 'klipper-moonraker', provisional: true },
     origin: input.origin,
     ...(input.apiKey ? { api_key: input.apiKey } : {}),
+    ...(input.username ? { username: input.username } : {}),
+    ...(input.password ? { password: input.password } : {}),
   })
   if (!parsed.success)
     return {
@@ -34,9 +38,19 @@ export function validateMoonrakerTargetInput(input: {
 }
 
 export function withoutMoonrakerKey<
-  T extends { backend: string; api_key?: string | undefined },
->(target: T): Omit<T, 'api_key'> {
-  const { api_key: _key, ...safe } = target
+  T extends {
+    backend: string
+    api_key?: string | undefined
+    username?: string | undefined
+    password?: string | undefined
+  },
+>(target: T): Omit<T, 'api_key' | 'username' | 'password'> {
+  const {
+    api_key: _key,
+    username: _username,
+    password: _password,
+    ...safe
+  } = target
   return safe
 }
 export function describeMoonrakerConfigurationError(code: string) {

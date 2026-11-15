@@ -16,6 +16,9 @@ export const ExtendedControlAction = z.enum([
   'firmware_restart',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
+/** Optional, advisory detail of a command result. It never changes the outcome. */
+export const ControlResultCode = z.enum(['bambu-authorization-required'])
+export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
   'pause',
   'resume',

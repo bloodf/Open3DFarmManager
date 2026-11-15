@@ -1,3 +1,4 @@
+import { getPrinterActionButtons } from '../../apps/farm/app/utils/farm-control.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
@@ -25,6 +26,22 @@ const limits = {
   reconnectMinMs: 100,
   reconnectMaxMs: 100,
 }
+function assertNoButtons(printer: ReturnType<typeof snapshot>) {
+  assert.deepEqual(printer.controls, [])
+  assert.deepEqual(
+    getPrinterActionButtons(
+      { observation: { state: printer } } as Parameters<
+        typeof getPrinterActionButtons
+      >[0],
+      { kind: 'unavailable' } as Parameters<typeof getPrinterActionButtons>[1],
+      true,
+      false,
+      { wall: 100, mono: 100 },
+    ),
+    [],
+  )
+}
+
 const lifecycle = ['pause', 'resume', 'cancel']
 const scope = () => ({
   assignment_id: randomUUID(),
@@ -196,6 +213,7 @@ test('Bambu snapshot follows local control opt-in without opening a connection',
       caFile: '/nonexistent/synthetic-ca',
       control,
     })
+    if (!control) assertNoButtons(snapshot(t, () => driver.controls(binding)))
     assert.deepEqual(
       snapshot(t, () => driver.controls(binding)).controls,
       control
@@ -208,7 +226,7 @@ test('Bambu snapshot follows local control opt-in without opening a connection',
             'set_speed',
             'start_print',
           ]
-        : undefined,
+        : [],
     )
   }
 })
@@ -225,7 +243,7 @@ test('KobraLink snapshot preserves the registered read-only driver capabilities'
   })
   const driver = router()
   const printer = snapshot(t, () => driver.controls(binding))
-  assert.equal(Object.hasOwn(printer, 'controls'), false)
+  assertNoButtons(printer)
 })
 
 test('controls schema accepts all protocol actions, omission and legacy lists but rejects duplicates and unknown actions', () => {
@@ -282,6 +300,6 @@ test('advertisement is scoped to each snapshot assignment and overrides observat
   f.open()
   assert.deepEqual(
     f.received.at(-1)?.printers.map((printer) => printer.controls),
-    [['home'], undefined],
+    [['home'], []],
   )
 })

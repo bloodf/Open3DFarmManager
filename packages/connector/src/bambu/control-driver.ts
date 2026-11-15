@@ -17,6 +17,15 @@ import type {
 import { readBambuCredentials } from './credentials.ts'
 import { buildBambuCommand } from './commands.ts'
 import { createBambuControlTransport } from './control-transport.ts'
+import {
+  BambuAuthorizationRequired,
+  bambuAuthorizationRequired,
+  classifyBambuReply,
+  mergeBambuReply,
+  sentBambuRequest,
+  type BambuReply,
+  type BambuSentRequest,
+} from './control-authorization.ts'
 
 const lifecycle = (action: ExtendedControlAction | undefined) =>
   action === undefined || ['pause', 'resume', 'cancel'].includes(action)
@@ -56,6 +65,8 @@ export function openFixedBambuControl(input: {
   let action: ExtendedControlAction | undefined
   let sentSequence = 0
   let sentMono = 0
+  let sent: BambuSentRequest | null = null
+  let reply: BambuReply = 'none'
   let notify: (() => void) | undefined
   const controller = new AbortController()
   const failure = () => new Error('Bambu control unavailable')
@@ -101,14 +112,17 @@ export function openFixedBambuControl(input: {
       onReport(payload) {
         if (stopped) return
         try {
-          const parsed = Report.safeParse(
-            parseBoundedJson(payload.toString('utf8'), {
-              maxBytes: 131072,
-              maxDepth: 16,
-              maxValues: 8192,
-              maxStringChars: 16384,
-            }),
-          )
+          const report = parseBoundedJson(payload.toString('utf8'), {
+            maxBytes: 131072,
+            maxDepth: 16,
+            maxValues: 8192,
+            maxStringChars: 16384,
+          })
+          if (sent) {
+            reply = mergeBambuReply(reply, classifyBambuReply(report, sent))
+            if (reply === 'authorization-required') notify?.()
+          }
+          const parsed = Report.safeParse(report)
           if (!parsed.success) return
           const now = input.clock.monotonicNow()
           const state = parsed.data.print.gcode_state
@@ -149,13 +163,24 @@ export function openFixedBambuControl(input: {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         notify = undefined
-        reject(new BambuControlTimeout())
+        reject(
+          bambuAuthorizationRequired({
+            reply,
+            lifecycle: lifecycle(action),
+            timedOut: true,
+            targetReached: predicate(),
+          })
+            ? new BambuAuthorizationRequired()
+            : new BambuControlTimeout(),
+        )
       }, timeoutMs)
       const check = () => {
-        if (!stopped && !predicate()) return
+        const refused = !stopped && reply === 'authorization-required'
+        if (!stopped && !refused && !predicate()) return
         clearTimeout(timer)
         notify = undefined
         if (stopped) reject(failure())
+        else if (refused) reject(new BambuAuthorizationRequired())
         else resolve()
       }
       notify = check
@@ -192,6 +217,8 @@ export function openFixedBambuControl(input: {
       throw failure()
     }
     action = next
+    sent = sentBambuRequest(payload)
+    reply = 'none'
     sentSequence = sequence
     sentMono = input.clock.monotonicNow()
     await transport.publish(payload, () => {

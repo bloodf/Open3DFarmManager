@@ -1,3 +1,4 @@
+import { connectorVersionMetadata } from '../status/version.ts'
 import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
@@ -214,6 +215,7 @@ export class FarmStatusSender {
       const message = validatedStatusMessage(
         {
           t: 'snapshot',
+          ...connectorVersionMetadata,
           seq: this.#seq,
           printers: input.printers,
           ...(input.inventory ? { inventory: input.inventory } : {}),

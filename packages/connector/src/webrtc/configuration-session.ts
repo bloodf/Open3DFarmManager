@@ -1,3 +1,4 @@
+import type { PrinterNetworkPolicy } from '../provisioning/policy.ts'
 import {
   discoveryTargetHash,
   encodeDiscoveryResult,
@@ -71,6 +72,7 @@ export interface ConfigurationRequestHandler {
 }
 
 export interface ConfigurationSessionOptions {
+  printerNetworkPolicy?: PrinterNetworkPolicy
   discovery?: DiscoveryScanner
   identity: ConnectorIdentity
   expected: ConfigurationExpectedContext
@@ -317,7 +319,7 @@ export class ConfigurationConnectorSession {
       message.t === 'discovery' &&
       (frame.type !== 'status' ||
         frame.expected_revision !== 0 ||
-        frame.target_sha256 !== (await discoveryTargetHash()))
+        frame.target_sha256 !== (await discoveryTargetHash(message.host)))
     )
       return this.reject(frame.request_id, 'invalid-request')
     try {
@@ -365,6 +367,8 @@ export class ConfigurationConnectorSession {
         this.#options.authority,
         frame.request_id,
         this.#options.discovery,
+        message.host,
+        this.#options.printerNetworkPolicy ?? { allows: () => false },
       )
         .then(async (result) => {
           if (

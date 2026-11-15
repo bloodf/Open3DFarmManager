@@ -10,6 +10,8 @@ export type BambuReportResult =
       state?: PrinterState['state']
       progress?: number
       materials?: PrinterState['materials']
+      fans?: PrinterState['fans']
+      light?: PrinterState['light']
       filename?: string
       currentLayer?: number
       totalLayer?: number
@@ -184,7 +186,13 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
         'mc_remaining_time',
       ].some((key) => key in printRecord) ||
       'nozzle_temper' in printRecord ||
-      'bed_temper' in printRecord
+      'bed_temper' in printRecord ||
+      [
+        'cooling_fan_speed',
+        'big_fan1_speed',
+        'big_fan2_speed',
+        'lights_report',
+      ].some((key) => key in printRecord)
 
     if (!hasTelemetryFields) {
       return { kind: 'ignored' }
@@ -253,6 +261,37 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
   )
     observation.estimatedRemainingSeconds = remaining * 60
 
+  const fans: NonNullable<PrinterState['fans']> = {}
+  for (const [source, target] of [
+    ['cooling_fan_speed', 'part'],
+    ['big_fan1_speed', 'aux'],
+    ['big_fan2_speed', 'chamber'],
+  ] as const) {
+    const raw = printRecord[source]
+    const value =
+      typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw
+    if (
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value <= 15
+    )
+      fans[target] = Math.round((value / 15) * 100)
+  }
+  if (Object.keys(fans).length) observation.fans = fans
+  if (Array.isArray(printRecord.lights_report)) {
+    for (const item of printRecord.lights_report) {
+      if (
+        item &&
+        typeof item === 'object' &&
+        item.node === 'chamber_light' &&
+        (item.mode === 'on' || item.mode === 'off')
+      ) {
+        observation.light = { chamber: item.mode === 'on' }
+        break
+      }
+    }
+  }
   const materials = decodeMaterials(printRecord)
   if (materials.length) observation.materials = materials
   return observation

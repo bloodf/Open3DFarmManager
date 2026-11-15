@@ -1,3 +1,4 @@
+import { connectorVersionMetadata } from './version.ts'
 import { createServer } from 'node:http'
 
 export function parseStatusPort(value: string): number {
@@ -15,9 +16,10 @@ export type LocalStatus = {
 }
 
 // Construct the public response field by field. Never serialize runtime config.
-export function projectStatus(value: LocalStatus): LocalStatus {
+export function projectStatus(value: LocalStatus) {
   const count = (n: number) => (Number.isSafeInteger(n) && n >= 0 ? n : 0)
   return {
+    ...connectorVersionMetadata,
     queueDepth: count(value.queueDepth),
     delivered: count(value.delivered),
     retries: count(value.retries),

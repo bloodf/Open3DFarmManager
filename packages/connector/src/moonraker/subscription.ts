@@ -59,20 +59,39 @@ const printState = z.enum([
   'cancelled',
 ])
 const progress = z.number().finite().min(0).max(1)
-const Status = z.object({
-  webhooks: z.object({ state: webhookState }),
-  print_stats: z.object({
-    state: printState,
-    filename: z.unknown().optional(),
-    print_duration: z.unknown().optional(),
-    total_duration: z.unknown().optional(),
-    info: z.unknown().optional(),
-  }),
-  virtual_sdcard: z.object({ progress }),
-})
+const OptionalTelemetry = z
+  .record(z.string(), z.unknown())
+  .transform((status) =>
+    Object.fromEntries(
+      Object.entries(status).filter(
+        ([name]) =>
+          name === 'fan' ||
+          name.startsWith('fan_generic ') ||
+          name === 'output_pin caselight',
+      ),
+    ),
+  )
+const Status = z
+  .object({
+    webhooks: z.object({ state: webhookState }),
+    print_stats: z.object({
+      state: printState,
+      filename: z.unknown().optional(),
+      print_duration: z.unknown().optional(),
+      total_duration: z.unknown().optional(),
+      info: z.unknown().optional(),
+    }),
+    virtual_sdcard: z.object({ progress }),
+  })
+  .catchall(z.unknown())
 const Snapshot = z.object({
   eventtime: z.number().finite().nonnegative(),
-  status: Status,
+  status: Status.transform((status) => ({
+    webhooks: status.webhooks,
+    print_stats: status.print_stats,
+    virtual_sdcard: status.virtual_sdcard,
+    ...OptionalTelemetry.parse(status),
+  })),
 })
 const TemperatureSnapshot = Snapshot.extend({
   status: Status.extend({
@@ -81,19 +100,21 @@ const TemperatureSnapshot = Snapshot.extend({
   }),
 })
 const Delta = z.tuple([
-  z.object({
-    webhooks: z.object({ state: webhookState.optional() }).optional(),
-    print_stats: z
-      .object({
-        state: printState.optional(),
-        filename: z.unknown().optional(),
-        print_duration: z.unknown().optional(),
-        total_duration: z.unknown().optional(),
-        info: z.unknown().optional(),
-      })
-      .optional(),
-    virtual_sdcard: z.object({ progress: progress.optional() }).optional(),
-  }),
+  z
+    .object({
+      webhooks: z.object({ state: webhookState.optional() }).optional(),
+      print_stats: z
+        .object({
+          state: printState.optional(),
+          filename: z.unknown().optional(),
+          print_duration: z.unknown().optional(),
+          total_duration: z.unknown().optional(),
+          info: z.unknown().optional(),
+        })
+        .optional(),
+      virtual_sdcard: z.object({ progress: progress.optional() }).optional(),
+    })
+    .catchall(z.unknown()),
   z.number().finite().nonnegative(),
 ])
 
@@ -115,6 +136,7 @@ export function createMoonrakerSubscription(input: {
   assignment: MoonrakerAssignment
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
+  discoverObjects?: boolean
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -247,6 +269,8 @@ export function createMoonrakerSubscription(input: {
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
+          parsed.printer.fans,
+          parsed.printer.light,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint
@@ -259,6 +283,7 @@ export function createMoonrakerSubscription(input: {
           origin,
           limits,
           signal,
+          ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,
@@ -300,7 +325,10 @@ export function createMoonrakerSubscription(input: {
           onStatus(params) {
             const [delta, eventtime] = Delta.parse(params)
             if (!baseline) throw new Error('No baseline')
+            const optional = OptionalTelemetry.parse(delta)
             const status = {
+              ...OptionalTelemetry.parse(baseline.status),
+              ...optional,
               webhooks: {
                 state: delta.webhooks?.state ?? baseline.status.webhooks.state,
               },
@@ -324,6 +352,7 @@ export function createMoonrakerSubscription(input: {
             }
             // Empty/unselected deltas cannot establish freshness of selected fields.
             if (
+              Object.keys(optional).length === 0 &&
               delta.webhooks?.state === undefined &&
               delta.print_stats === undefined &&
               delta.virtual_sdcard?.progress === undefined

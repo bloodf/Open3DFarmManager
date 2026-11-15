@@ -68,13 +68,15 @@ export async function startAnycubicSimulator({
   port = 0,
   initialState,
   confirmCommands = true,
+  credentials,
 }: {
   serial?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
+  credentials?: { username: string; password: string }
   confirmCommands?: boolean
 } = {}) {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
+  if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
   let gcodeState = initialState
@@ -144,6 +146,7 @@ export async function startAnycubicSimulator({
                 throw new Error('CONNECT required')
               let cursor = 10
               const fields = body[7] === 194 ? 3 : 1
+              const values: string[] = []
               for (let field = 0; field < fields; field++) {
                 if (cursor + 2 > body.length)
                   throw new Error('Missing CONNECT field')
@@ -151,10 +154,17 @@ export async function startAnycubicSimulator({
                 cursor += 2
                 if (!length || cursor + length > body.length)
                   throw new Error('Invalid CONNECT field')
+                values.push(body.subarray(cursor, cursor + length).toString())
                 cursor += length
               }
               if (cursor !== body.length)
                 throw new Error('Trailing CONNECT bytes')
+              if (
+                credentials &&
+                (values[1] !== credentials.username ||
+                  values[2] !== credentials.password)
+              )
+                throw new Error('Authentication failed')
               connected = true
               socket.write(Buffer.from([32, 2, 0, 0]))
             } else if (header === 130) {
@@ -163,8 +173,10 @@ export async function startAnycubicSimulator({
               const length = body.readUInt16BE(2)
               if (body.length !== length + 5 || body.at(-1) !== 0)
                 throw new Error('Only QoS 0 supported')
-              const accepted =
-                body.subarray(4, 4 + length).toString() === reportTopic
+              const accepted = [
+                reportTopic,
+                reportTopic.replace('/info/report', '/+/report'),
+              ].includes(body.subarray(4, 4 + length).toString())
               if (accepted) subscribed.add(socket)
               socket.write(
                 Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),

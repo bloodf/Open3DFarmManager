@@ -1,4 +1,14 @@
 import {
+  discardStagedAnycubic,
+  anycubicIdentity,
+  anycubicCredentialPath,
+  prepareAnycubic,
+  existingAnycubicBinding,
+  anycubicRuntimeContains,
+  commitAnycubic,
+  type AnycubicProbe,
+} from './anycubic.ts'
+import {
   crealityIdentity,
   probeCreality,
   existingCrealityBinding,
@@ -101,6 +111,7 @@ export interface ProvisioningEngineOptions {
   printerNetworks: readonly string[]
   fetch?: KobraLinkFetch
   /** Read-only stock telemetry probe. No command is sent. */
+  anycubicProbe?: AnycubicProbe
   crealityProbe?: CrealityProbe
   /** Read-only Bambu LAN probe. Tests inject a fixture; default opens TLS/MQTT. */
   bambuProbe?: BambuProbe
@@ -274,6 +285,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             return finalizeCommit(op)
           return save(op, 'prepared', { plan: null })
         }
+        if (op.target.backend === 'anycubic') {
+          if (!op.plan) return toRecovery(op, 'journal-inconsistent')
+          if (anycubicRuntimeContains(options.runtime, op.target, op.plan))
+            return finalizeCommit(op)
+          return save(op, 'prepared', { plan: null })
+        }
         if (op.target.backend === 'creality') {
           if (!op.plan) return toRecovery(op, 'journal-inconsistent')
           if (crealityRuntimeContains(options.runtime, op.target.host, op.plan))
@@ -322,6 +339,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       revision: Math.max(state.revision, plan.committed_revision),
       active: state.active === op.operation_id ? null : state.active,
     })
+    if (op.target.backend === 'anycubic')
+      removePrivateFile(
+        anycubicCredentialPath(options.stateDirectory, op.operation_id),
+      )
     return committed
   }
 
@@ -402,6 +423,8 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       removePrivateFile(
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
       )
+    if (op.target.backend === 'anycubic')
+      discardStagedAnycubic(options.stateDirectory, op.operation_id)
     if (op.target.backend === 'bambu')
       discardStagedBambu(options.stateDirectory, op.operation_id)
     const failed = save(op, 'failed', { failure: code })
@@ -565,6 +588,22 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       )
         return errorFrame(frame.request_id, 'busy')
     }
+    if (frame.target.backend === 'anycubic') {
+      const host = frame.target.host
+      if (!policy.allows(host))
+        return errorFrame(frame.request_id, 'invalid-request')
+      if (
+        state.operations.some((id) => {
+          const prior = journal.readOperation(id)
+          return (
+            prior?.target.backend === 'anycubic' &&
+            prior.target.host === host &&
+            prior.stage === 'local-committed'
+          )
+        })
+      )
+        return errorFrame(frame.request_id, 'busy')
+    }
     if (frame.target.backend === 'creality') {
       const host = frame.target.host
       if (!policy.allows(host))
@@ -598,6 +637,11 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (frame.expected_revision !== state.revision)
       return errorFrame(frame.request_id, 'revision-conflict')
     if (
+      frame.target.backend === 'anycubic' &&
+      (!frame.target.username || !frame.target.password)
+    )
+      return errorFrame(frame.request_id, 'invalid-request')
+    if (
       frame.target.backend === 'bambu' &&
       (!frame.target.access_code || !policy.allows(frame.target.ipv4))
     )
@@ -628,11 +672,20 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         transport_id: context.transport_id,
       },
       target:
-        frame.target.backend === 'moonraker'
-          ? (({ api_key: _key, ...safe }) => safe)(frame.target)
-          : frame.target.backend === 'bambu'
-            ? (({ access_code: _code, ...safe }) => safe)(frame.target)
-            : frame.target,
+        frame.target.backend === 'anycubic'
+          ? (({ username: _username, password: _password, ...safe }) => safe)(
+              frame.target,
+            )
+          : frame.target.backend === 'moonraker'
+            ? (({
+                api_key: _key,
+                username: _username,
+                password: _password,
+                ...safe
+              }) => safe)(frame.target)
+            : frame.target.backend === 'bambu'
+              ? (({ access_code: _code, ...safe }) => safe)(frame.target)
+              : frame.target,
       target_sha256: targetHash,
       expected_revision: frame.expected_revision,
       bridge_instance_id: null,
@@ -652,6 +705,49 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       active: op.operation_id,
       operations: [...pruned.operations, op.operation_id],
     })
+    if (frame.target.backend === 'anycubic') {
+      let reachable = false
+      try {
+        reachable = await prepareAnycubic(
+          options.stateDirectory,
+          op.operation_id,
+          frame.target,
+          options.anycubicProbe,
+        )
+      } catch {
+        /* Network failures never expose endpoint details. */
+      }
+      if (!reachable) return describe(frame, await fail(op, 'not-available'))
+      if (!(await stillCurrent(context)))
+        return describe(frame, await fail(op, 'capability-rejected'))
+      const identity = anycubicIdentity(frame.target)
+      if (
+        frame.target.device_id &&
+        frame.target.device_id !== identity.device_id
+      )
+        return describe(frame, await fail(op, 'identity-conflict'))
+      op = save(op, 'discovering', {
+        bridge_instance_id: identity.bridge_instance_id,
+        printer: {
+          id: identity.device_id,
+          device_id: identity.device_id,
+          ip: null,
+          model: null,
+          firmware: null,
+          ownership: 'preexisting',
+        },
+      })
+      const prepared = await signOperationReceipt(
+        options.connector,
+        op,
+        'prepared',
+        clock(),
+      )
+      return describe(
+        frame,
+        save(op, 'prepared', { prepared, latest: prepared }),
+      )
+    }
     if (frame.target.backend === 'creality') {
       let reachable = false
       try {
@@ -855,6 +951,47 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       if (credentialFile !== stagedPath) removePrivateFile(stagedPath)
       return describe(frame, await finalizeCommit(committing))
     }
+    if (op.target.backend === 'anycubic') {
+      if (!op.printer || !op.bridge_instance_id)
+        return errorFrame(frame.request_id, 'identity-conflict')
+      const identity = await deriveConfigurationAssignmentIdentity({
+        account_id: context.account_id,
+        farm_id: context.farm_id,
+        agent_id: context.agent_id,
+        bridge_instance_id: op.bridge_instance_id,
+        device_id: op.printer.device_id,
+      })
+      try {
+        existingAnycubicBinding(
+          options.runtime,
+          op.target,
+          identity,
+          anycubicCredentialPath(options.stateDirectory, op.operation_id),
+        )
+      } catch {
+        return errorFrame(frame.request_id, 'identity-conflict')
+      }
+      if (!(await stillCurrent(context)))
+        return errorFrame(frame.request_id, 'capability-rejected')
+      const plan = {
+        ...identity,
+        credential_file: anycubicCredentialPath(
+          options.stateDirectory,
+          op.operation_id,
+        ),
+        committed_revision: op.expected_revision + 1,
+      }
+      const committing = save(op, 'committing', { plan })
+      try {
+        commitAnycubic(options.runtime, op.target, plan)
+      } catch {
+        if (!anycubicRuntimeContains(options.runtime, op.target, plan)) {
+          save(committing, 'prepared', { plan: null })
+          return errorFrame(frame.request_id, 'not-available')
+        }
+      }
+      return describe(frame, await finalizeCommit(committing))
+    }
     if (op.target.backend === 'creality') {
       if (!op.printer || !op.bridge_instance_id)
         return errorFrame(frame.request_id, 'identity-conflict')
@@ -1014,6 +1151,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       removePrivateFile(
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
       )
+    if (
+      op.target.backend === 'anycubic' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      discardStagedAnycubic(options.stateDirectory, op.operation_id)
     if (
       op.target.backend === 'bambu' &&
       op.stage !== 'local-committed' &&
@@ -1223,8 +1366,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             const moonraker = op.target.backend === 'moonraker'
             const bambu = op.target.backend === 'bambu'
             const creality = op.target.backend === 'creality'
+            const anycubic = op.target.backend === 'anycubic'
             const identity =
-              (bridge || moonraker || bambu || creality) &&
+              (bridge || moonraker || bambu || creality || anycubic) &&
               op.bridge_instance_id
                 ? await deriveConfigurationAssignmentIdentity({
                     account_id: context.account_id,
@@ -1236,34 +1380,36 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
                 : null
             // The committed runtime must still hold exactly this assignment.
             if (
-              (!bridge && !moonraker && !bambu && !creality) ||
+              (!bridge && !moonraker && !bambu && !creality && !anycubic) ||
               !identity ||
               identity.assignment_id !== op.plan.assignment_id ||
               identity.printer_key !== op.plan.printer_key ||
-              !(op.target.backend === 'moonraker'
-                ? moonrakerRuntimeContains(
-                    options.runtime,
-                    new URL(op.target.origin).origin,
-                    op.plan,
-                  )
-                : op.target.backend === 'bambu'
-                  ? bambuRuntimeContains(
+              !(op.target.backend === 'anycubic'
+                ? anycubicRuntimeContains(options.runtime, op.target, op.plan)
+                : op.target.backend === 'moonraker'
+                  ? moonrakerRuntimeContains(
                       options.runtime,
-                      op.target.serial,
+                      new URL(op.target.origin).origin,
                       op.plan,
                     )
-                  : op.target.backend === 'creality'
-                    ? crealityRuntimeContains(
+                  : op.target.backend === 'bambu'
+                    ? bambuRuntimeContains(
                         options.runtime,
-                        op.target.host,
+                        op.target.serial,
                         op.plan,
                       )
-                    : bridge &&
-                      runtimeContains(
-                        options.runtime,
-                        bindingFor(op.plan, bridge, op.printer),
-                        op.plan,
-                      ))
+                    : op.target.backend === 'creality'
+                      ? crealityRuntimeContains(
+                          options.runtime,
+                          op.target.host,
+                          op.plan,
+                        )
+                      : bridge &&
+                        runtimeContains(
+                          options.runtime,
+                          bindingFor(op.plan, bridge, op.printer),
+                          op.plan,
+                        ))
             )
               return { ok: false, reason: 'mismatch' }
             let accepted = false

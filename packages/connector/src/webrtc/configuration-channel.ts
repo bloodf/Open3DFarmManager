@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ProbeHost } from '../../../farm-protocol/src/configuration-discovery.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
@@ -39,6 +40,7 @@ export const BrowserChannelMessage = z.discriminatedUnion('t', [
   z.strictObject({
     v: z.literal(1),
     t: z.literal('discovery'),
+    host: ProbeHost.optional(),
     frame: frameWire,
     capability: proofWire,
     admission: proofWire,

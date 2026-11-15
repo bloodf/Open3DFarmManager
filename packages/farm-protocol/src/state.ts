@@ -33,6 +33,18 @@ export const PrinterState = z
       )
       .max(17)
       .optional(),
+    fans: z
+      .strictObject({
+        part: z.number().int().min(0).max(100).optional(),
+        aux: z.number().int().min(0).max(100).optional(),
+        chamber: z.number().int().min(0).max(100).optional(),
+      })
+      .optional(),
+    light: z
+      .strictObject({
+        chamber: z.boolean().optional(),
+      })
+      .optional(),
     filename: z.string().max(255).optional(),
     printDuration: z.number().finite().nonnegative().optional(),
     totalDuration: z.number().finite().nonnegative().optional(),

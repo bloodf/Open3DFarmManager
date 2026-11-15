@@ -1,3 +1,13 @@
+import {
+  KOBRALINK_BRIDGE_CONTROLS,
+  KOBRALINK_BRIDGE_PATHS,
+  KobraLinkBridgeCommand,
+} from './bridge-control.ts'
+import {
+  KOBRALINK_CONTROLS,
+  KobraLinkExtendedCommand,
+  kobraLinkRequests,
+} from './extended-control.ts'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 
@@ -374,6 +384,46 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       b,
     )
   }
+  async function sendExtended(
+    printerId: string,
+    wires: { path: string; body: unknown }[],
+    requiresIdle: boolean,
+  ): Promise<KobraLinkControlResult> {
+    const id = parse(bindingSchema.shape.id, printerId)
+    const sessionGeneration = generation
+    // Recheck identity, freshness and session before every write, including
+    // each axis of a partial home. Never retry a potentially accepted write.
+    for (const wire of wires) {
+      const current = sanitize(
+        await request(
+          `/api/v1/printers/${id}`,
+          'GET',
+          undefined,
+          false,
+          sessionGeneration,
+        ),
+      )
+      if (current.id !== id) fail('identity_changed')
+      if (current.availability !== 'available') fail('unavailable')
+      if (
+        current.printState === 'unknown' ||
+        current.printState === 'error' ||
+        (requiresIdle &&
+          current.printState !== 'standby' &&
+          current.printState !== 'complete')
+      )
+        fail('unsupported_state')
+      const response = await request(
+        `/api/v1/printers/${id}/${wire.path}`,
+        'POST',
+        wire.body,
+        false,
+        sessionGeneration,
+      )
+      if (response !== null) fail('invalid')
+    }
+    return { accepted: true, confirmed: false }
+  }
   return {
     authContract: 'unverified' as const,
     clearSession() {
@@ -427,6 +477,32 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       )
     },
     listPrinters,
+    supportedControls: KOBRALINK_CONTROLS,
+    async controlExtendedPrinter(
+      printerId: string,
+      input: KobraLinkExtendedCommand,
+    ): Promise<KobraLinkControlResult> {
+      const command = parse(KobraLinkExtendedCommand, input)
+      return sendExtended(
+        printerId,
+        kobraLinkRequests(command),
+        command.action === 'home' || command.action === 'start_print',
+      )
+    },
+    supportedBridgeControls: KOBRALINK_BRIDGE_CONTROLS,
+    async controlBridgePrinter(
+      printerId: string,
+      input: KobraLinkBridgeCommand,
+    ): Promise<KobraLinkControlResult> {
+      const command = parse(KobraLinkBridgeCommand, input)
+      return sendExtended(
+        printerId,
+        [{ path: KOBRALINK_BRIDGE_PATHS[command.action], body: command.args }],
+        command.action === 'axis' ||
+          command.action === 'axis_off' ||
+          command.action === 'ams_feed',
+      )
+    },
     /**
      * NatHacks/Kobralink 5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1:
      * apps/api/src/core/core.controller.ts exposes POST print/{pause,resume,cancel}

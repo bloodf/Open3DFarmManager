@@ -1,4 +1,7 @@
-import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  ControlResultCode,
+  ExtendedControlAction,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandOutcome,
   PauseProofsReady,
@@ -18,7 +21,7 @@ export type FarmPauseControlState =
   /** Admitted peer with a fresh signed capability, valid until `expiresAt` (wall). */
   | { kind: 'ready'; expiresAt: number }
   | { kind: 'sending' }
-  | { kind: 'settled'; outcome: PauseCommandOutcome }
+  | { kind: 'settled'; outcome: PauseCommandOutcome; code?: ControlResultCode }
   | { kind: 'failed'; reason: FarmPauseFailure }
 
 /** `not-ready`: no fresh capability in time, often a wrong device clock. */
@@ -77,6 +80,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   let command: ReturnType<typeof createPauseCommandClient> | undefined
   let capabilityExpiresAt: number | undefined
   let expiry: ReturnType<typeof setTimeout> | undefined
+  let resultCode: ControlResultCode | undefined
   let disposed: Promise<void> | undefined
   function set(next: FarmPauseControlState) {
     // A settled outcome or failure is final for this session.
@@ -133,7 +137,10 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
         },
         sendCommand: (message) => signalling?.sendCommand(message) ?? false,
       },
-      onOutcome: (outcome) => set({ kind: 'settled', outcome }),
+      onOutcome: (outcome, code) => {
+        resultCode = code
+        set({ kind: 'settled', outcome, ...(code ? { code } : {}) })
+      },
     })
     const create =
       input.createSignalling ??
@@ -199,7 +206,11 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     clearTimeout(expiry)
     set({ kind: 'sending' })
     const outcome = await command.issueControlCommand(action, args)
-    set({ kind: 'settled', outcome })
+    set({
+      kind: 'settled',
+      outcome,
+      ...(resultCode ? { code: resultCode } : {}),
+    })
     close()
     return outcome
   }

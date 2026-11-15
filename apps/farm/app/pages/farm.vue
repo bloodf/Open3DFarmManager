@@ -14,6 +14,8 @@ import {
   type FarmSort,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
+import FarmMaterials from '../components/FarmMaterials.vue'
+import FarmEnvironment from '../components/FarmEnvironment.vue'
 import { farmJobView } from '../utils/farm-job-view.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import CameraDisplay from '../components/CameraDisplay.vue'
@@ -709,6 +711,13 @@ function dateLabel(time: number) {
                         </dd>
                       </div>
                     </dl>
+                    <FarmMaterials
+                      :materials="row.observation.state.materials"
+                    />
+                    <FarmEnvironment
+                      :fans="row.observation.state.fans"
+                      :light="row.observation.state.light"
+                    />
                     <dl aria-label="Trabalho atual">
                       <div v-if="farmJobView(row.observation.state).filename">
                         <dt>Arquivo</dt>

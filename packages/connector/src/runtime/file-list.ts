@@ -7,12 +7,20 @@ import {
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
 import {
   listMoonrakerFiles,
+  createThumbnailDownload,
   type MoonrakerFilesClient,
 } from '../moonraker/files.ts'
 import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
 
 export type FileListTarget =
-  | { backend: 'moonraker'; client: MoonrakerFilesClient }
+  | {
+      backend: 'moonraker'
+      client: MoonrakerFilesClient
+      thumbnailSource?: {
+        origin: string
+        limits: import('../config/moonraker.ts').MoonrakerLimits
+      }
+    }
   | ({ backend: 'bambu' } & Omit<BambuListOptions, 'signal'>)
 export type FileListOptions = Readonly<{
   targetFor(printerKey: string): FileListTarget | undefined
@@ -92,7 +100,26 @@ export function createFileList(
           const entries =
             target.backend === 'moonraker'
               ? await Promise.race([
-                  listMoonrakerFiles(target.client, { limit: 200 }),
+                  listMoonrakerFiles(
+                    {
+                      request: (method, params) =>
+                        target.client.request(method, params),
+                      ...(target.thumbnailSource
+                        ? {
+                            downloadThumbnail: createThumbnailDownload({
+                              ...target.thumbnailSource,
+                              signal: controller.signal,
+                            }),
+                          }
+                        : target.client.downloadThumbnail
+                          ? {
+                              downloadThumbnail: (path) =>
+                                target.client.downloadThumbnail!(path),
+                            }
+                          : {}),
+                    },
+                    { limit: 200 },
+                  ),
                   deadline,
                 ])
               : (
@@ -111,6 +138,23 @@ export function createFileList(
               return file.success ? [file.data] : []
             })
             .slice(0, 200)
+          // Preserve the existing channel bound, retaining the newest previews first.
+          for (let i = files.length - 1; i >= 0; i--) {
+            if (
+              new TextEncoder().encode(
+                JSON.stringify({
+                  type: 'files.list.result',
+                  request_id: request.request_id,
+                  printer_key: request.printer_key,
+                  ok: true,
+                  files,
+                }),
+              ).byteLength <= MAX_FILE_LIST_WIRE_BYTES
+            )
+              break
+            const file = files[i]
+            if (file) delete file.thumbnail
+          }
           send(
             authorized()
               ? { ok: true, files }

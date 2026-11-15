@@ -363,19 +363,15 @@ test('a live recovery mutex keeps the original lock error', () => {
   })
 })
 
-test(
-  'a lock that is not a private regular file is never taken over',
-  { skip: chmodUnreliable },
-  () => {
-    withLock(owner, (path) => {
-      chmodSync(path, 0o644)
-      assert.throws(
-        () => acquireQueueLock(path, probe({ alive: () => false })),
-        /EEXIST/,
-      )
-    })
-  },
-)
+test('a lock that is not a private regular file is never taken over', () => {
+  withLock(owner, (path) => {
+    chmodSync(path, 0o644)
+    assert.throws(
+      () => acquireQueueLock(path, probe({ alive: () => false })),
+      /EEXIST/,
+    )
+  })
+})
 
 test(
   'a failed directory sync after publishing releases the new lock',

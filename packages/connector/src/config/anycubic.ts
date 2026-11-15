@@ -16,6 +16,11 @@ export const AnycubicBinding = z.strictObject({
   modelId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   deviceId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   username: z.string().min(1).max(256),
+  caFile: z.string().min(1).max(4096).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-fA-F0-9]{64}$/)
+    .optional(),
   passwordFile: z.string().min(1).max(4096),
 })
 const Config = LocalCollectorConfigSchema.options[0]

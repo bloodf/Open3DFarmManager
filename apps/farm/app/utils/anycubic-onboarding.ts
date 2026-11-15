@@ -12,6 +12,8 @@ export function validateAnycubicTargetInput(input: {
   port?: number
   modelId: string
   deviceId: string
+  caFile?: string | undefined
+  pinSha256?: string | undefined
   username: string
   password: string
   displayLabel?: string
@@ -25,6 +27,8 @@ export function validateAnycubicTargetInput(input: {
     port: input.port ?? 9883,
     modelId: input.modelId,
     deviceId: input.deviceId,
+    ...(input.caFile ? { caFile: input.caFile } : {}),
+    ...(input.pinSha256 ? { pinSha256: input.pinSha256 } : {}),
     username: input.username,
     password: input.password,
   })

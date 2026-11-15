@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import {
   createAnycubicLanClient,
   decodeAnycubicReport,
@@ -39,6 +40,10 @@ export function createAnycubicCollection(input: {
     host: input.binding.host,
     port: input.binding.port,
     serial: input.binding.modelId + '/' + input.binding.deviceId,
+    ...(input.binding.caFile
+      ? { caPem: readFileSync(input.binding.caFile, 'utf8') }
+      : {}),
+    ...(input.binding.pinSha256 ? { pinSha256: input.binding.pinSha256 } : {}),
     credentials: { username: input.binding.username, password },
     limits: {
       maxFrameBytes: 65536,

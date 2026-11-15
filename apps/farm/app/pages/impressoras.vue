@@ -243,6 +243,8 @@ const anycubicModelId = ref('')
 const anycubicDeviceId = ref('')
 const anycubicUsername = ref('')
 const anycubicPassword = ref('')
+const anycubicCaFile = ref('')
+const anycubicPin = ref('')
 const anycubicTargetView = computed(() =>
   kobraOperation.value?.target.backend === 'anycubic'
     ? describeAnycubicTarget(kobraOperation.value.target)
@@ -1368,6 +1370,12 @@ async function prepareAnycubicPrinter() {
     deviceId: anycubicDeviceId.value.trim(),
     username: anycubicUsername.value,
     password: anycubicPassword.value,
+    ...(typeof anycubicCaFile !== 'undefined' && anycubicCaFile.value
+      ? { caFile: anycubicCaFile.value }
+      : {}),
+    ...(typeof anycubicPin !== 'undefined' && anycubicPin.value
+      ? { pinSha256: anycubicPin.value }
+      : {}),
     displayLabel: kobraLabel.value,
   })
   if (!validated.ok) {
@@ -2171,7 +2179,7 @@ onBeforeRouteLeave(clear)
               id="moonraker-password"
               v-model="moonrakerPassword"
               type="password"
-              maxlength="4096"
+              maxlength="256"
               autocomplete="new-password"
             />
             <p>
@@ -2232,6 +2240,10 @@ onBeforeRouteLeave(clear)
               autocomplete="off"
               spellcheck="false"
             />
+            <label for="anycubic-ca">Arquivo CA no Connector</label>
+            <input id="anycubic-ca" v-model="anycubicCaFile" maxlength="4096" />
+            <label for="anycubic-pin">SHA-256 do certificado</label>
+            <input id="anycubic-pin" v-model="anycubicPin" maxlength="64" />
             <label for="anycubic-password">Senha LAN</label>
             <input
               id="anycubic-password"
@@ -2250,23 +2262,6 @@ onBeforeRouteLeave(clear)
                   : 'Informe as credenciais LAN.'
               }}
             </p>
-            <label for="moonraker-username"
-              >Usuário (alternativa à chave)</label
-            >
-            <input
-              id="moonraker-username"
-              v-model="moonrakerUsername"
-              maxlength="256"
-              autocomplete="off"
-            />
-            <label for="moonraker-password">Senha</label>
-            <input
-              id="moonraker-password"
-              v-model="moonrakerPassword"
-              type="password"
-              maxlength="4096"
-              autocomplete="new-password"
-            />
             <p>
               Suporte não qualificado. O Connector verifica a conexão LAN sem
               enviar comandos.

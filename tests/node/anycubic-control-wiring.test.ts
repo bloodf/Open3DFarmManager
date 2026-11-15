@@ -80,6 +80,8 @@ async function startAnycubicSimulator({
   let gcodeState = initialState
   const extended: Record<string, unknown> = {}
   const requests: unknown[] = []
+  // What the printer reports back after an `update` or `light` request.
+  let reported: Record<string, unknown> = {}
   function report(socket: TLSSocket) {
     const topic = Buffer.from(reportTopic)
     const length = Buffer.alloc(2)
@@ -99,6 +101,7 @@ async function startAnycubicSimulator({
                     : gcodeState === 'IDLE'
                       ? 'idle'
                       : 'printing',
+                ...reported,
               },
             }),
           ),
@@ -194,6 +197,15 @@ async function startAnycubicSimulator({
                 if (value.action === 'pause') gcodeState = 'PAUSE'
                 if (value.action === 'resume') gcodeState = 'RUNNING'
                 if (value.action === 'stop') gcodeState = 'IDLE'
+                if (value.action === 'update')
+                  reported = { ...reported, ...value.data.settings }
+                if (value.type === 'light')
+                  reported = {
+                    ...reported,
+                    lights: [
+                      { type: value.data.type, status: value.data.status },
+                    ],
+                  }
                 for (const subscriber of subscribed) report(subscriber)
               }
             } else if (header === 192 && !size)

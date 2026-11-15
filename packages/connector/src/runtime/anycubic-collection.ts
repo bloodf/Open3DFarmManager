@@ -29,6 +29,10 @@ export function createAnycubicCollection(input: {
     throw Error('Invalid Anycubic credential file')
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
   let activeJob = false
+  let activeFilename: string | undefined
+  // Repeated in every observation until the next job starts, so a telemetry
+  // batch that misses the transition report still carries the finished job.
+  let lastJob: PrinterState['lastJob']
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Record<string, unknown> = {}
@@ -36,6 +40,7 @@ export function createAnycubicCollection(input: {
   const invalidate = () => {
     firmwareObservation = undefined
     activeJob = false
+    activeFilename = undefined
     clearTimeout(timer)
     values = {}
     times = {}
@@ -69,9 +74,14 @@ export function createAnycubicCollection(input: {
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       if (report.kind === 'ignored' && !firmware) return
       const state = (report as Record<string, unknown>).state
-      let lastJob: PrinterState['lastJob']
-      if (state === 'printing' || state === 'paused') activeJob = true
-      else if (
+      if (state === 'printing' || state === 'paused') {
+        activeJob = true
+        // A new job starts: the previous end is no longer the last one.
+        lastJob = undefined
+        const name = (report as Record<string, unknown>).filename
+        if (typeof name === 'string' && name && name.length <= 255)
+          activeFilename = name
+      } else if (
         activeJob &&
         (state === 'finished' || state === 'idle' || state === 'error')
       ) {
@@ -83,8 +93,10 @@ export function createAnycubicCollection(input: {
                 ? 'failed'
                 : 'cancelled',
           endedAt: Date.now(),
+          ...(activeFilename ? { filename: activeFilename } : {}),
         }
         activeJob = false
+        activeFilename = undefined
       }
       for (const [key, value] of Object.entries(
         report as Record<string, unknown>,

@@ -27,8 +27,75 @@ const lifecycle = (action: ExtendedControlAction | undefined) =>
 const Report = z.object({
   data: z.object({
     state: z.enum(['printing', 'paused', 'idle', 'finished', 'error']),
+    target_nozzle_temp: z.number().finite().optional().catch(undefined),
+    target_hotbed_temp: z.number().finite().optional().catch(undefined),
+    fan_speed_pct: z.number().finite().optional().catch(undefined),
+    filename: z.string().max(255).optional().catch(undefined),
+    lights: z
+      .array(
+        z.object({
+          type: z.number().optional().catch(undefined),
+          status: z.number().optional().catch(undefined),
+        }),
+      )
+      .optional()
+      .catch(undefined),
   }),
 })
+type ReportData = z.infer<typeof Report>['data']
+// The light the documented `light` request switches (commands.ts, type 3).
+const CONTROLLED_LIGHT = 3
+
+/**
+ * What the printer itself reported back about the one extended action of this
+ * attempt. Absent unless the report carries the requested value, so a report
+ * that merely follows the send never confirms it.
+ */
+function reportedEffect(
+  action: ExtendedControlAction | undefined,
+  args: Record<string, unknown>,
+  data: ReportData,
+  observedMono: number,
+): ControlObservation['effect'] {
+  switch (action) {
+    case 'set_temperature': {
+      const heater = args.heater
+      const target =
+        heater === 'extruder'
+          ? data.target_nozzle_temp
+          : heater === 'bed'
+            ? data.target_hotbed_temp
+            : undefined
+      return (heater === 'extruder' || heater === 'bed') &&
+        typeof target === 'number'
+        ? { kind: 'temperature', heater, target_c: target, observedMono }
+        : undefined
+    }
+    case 'set_fan':
+      return args.fan === 'part' && typeof data.fan_speed_pct === 'number'
+        ? {
+            kind: 'fan',
+            fan: 'part',
+            percent: Math.min(100, Math.max(0, data.fan_speed_pct)),
+            observedMono,
+          }
+        : undefined
+    case 'set_light': {
+      const light = data.lights?.find(
+        (entry) => entry.type === CONTROLLED_LIGHT,
+      )
+      return light && (light.status === 0 || light.status === 1)
+        ? { kind: 'light', on: light.status === 1, observedMono }
+        : undefined
+    }
+    case 'start_print':
+      return typeof data.filename === 'string'
+        ? { kind: 'file', filename: data.filename, observedMono }
+        : undefined
+    default:
+      return undefined
+  }
+}
 export class AnycubicControlTimeout extends Error {
   readonly code = 'BAMBU_CONTROL_TIMEOUT'
   constructor() {
@@ -63,6 +130,7 @@ export function openFixedAnycubicControl(input: {
   let prepared = false
   let stopped = false
   let action: ExtendedControlAction | undefined
+  let actionArgs: Record<string, unknown> = {}
   let sentSequence = 0
   let sentMono = 0
   let notify: (() => void) | undefined
@@ -128,6 +196,10 @@ export function openFixedAnycubicControl(input: {
           if (!parsed.success) return
           const now = input.clock.monotonicNow()
           const state = parsed.data.data.state
+          const effect =
+            attempted && !lifecycle(action)
+              ? reportedEffect(action, actionArgs, parsed.data.data, now)
+              : undefined
           latest = Object.freeze({
             assignmentId: mapping.assignment_id,
             printerKey: mapping.printer_key,
@@ -147,6 +219,7 @@ export function openFixedAnycubicControl(input: {
             readyObservedMono: now,
             printStateObservedMono: now,
             receivedMono: now,
+            ...(effect ? { effect } : {}),
           })
           input.publish(latest)
           notify?.()
@@ -180,9 +253,9 @@ export function openFixedAnycubicControl(input: {
   }
   /**
    * The single request of this attempt. Lifecycle actions are confirmed by their
-   * target print state; an extended action has no print-state target, so it is
-   * acknowledged by the first report received after the send. That proves the
-   * printer kept serving this connection, not that the setting took effect.
+   * target print state; an extended action is acknowledged by the first report
+   * after the send that carries the requested value, which the dispatcher
+   * then compares with the request.
    */
   async function send(
     next: ExtendedControlAction,
@@ -206,6 +279,7 @@ export function openFixedAnycubicControl(input: {
       throw failure()
     }
     action = next
+    actionArgs = args
     sentSequence = sequence
     sentMono = input.clock.monotonicNow()
     const guard = () => {
@@ -231,7 +305,9 @@ export function openFixedAnycubicControl(input: {
       () =>
         !!latest &&
         latest.sequence > sentSequence &&
-        (!lifecycle(next) || latest.printState === controlTargetState(next)),
+        (lifecycle(next)
+          ? latest.printState === controlTargetState(next)
+          : latest.effect !== undefined),
     )
     return { acknowledged: true }
   }

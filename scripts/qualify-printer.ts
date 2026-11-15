@@ -11,7 +11,7 @@ Arguments:
   [credential file]              Optional path to credentials JSON or token file
 
 Options:
-  --port <port>                  Target network port (defaults by vendor: moonraker=7125, bambu=8883, creality=9999, anycubic=8883)
+  --port <port>                  Target network port (defaults by vendor: moonraker=7125, bambu=8883, creality=9999, anycubic=9883)
   --serial <serial>              Printer serial number (Bambu, Anycubic)
   --timeout <ms>                 Timeout in milliseconds (default: 10000)
   --camera-port <port>           Explicit camera port override

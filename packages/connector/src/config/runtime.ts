@@ -10,6 +10,7 @@ import {
   readRuntimePrinterBinding,
   readPrinterBinding,
   provisionReadonlyPrinter,
+  provisionKobraLinkPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
@@ -70,6 +71,8 @@ export function readAgentRuntimeConfig(
         allowedOrigins: collection.allowedOrigins,
       })
     : null
+  const pause =
+    input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
   const ids = new Set<string>()
   // The exact provisioned handles are retained privately. They are the only
   // source of a printer binding and are never reconstructed or serialized.
@@ -106,7 +109,34 @@ export function readAgentRuntimeConfig(
       : creality
         ? provisionCrealityPrinter(value, creality)
         : isKobra
-          ? provisionReadonlyPrinter(value)
+          ? (() => {
+              const readonly = provisionReadonlyPrinter(value)
+              const assignment = readRuntimePrinterBinding(readonly)!
+              if (
+                pause?.control?.assignmentId !== assignment.assignment_id ||
+                collection.version !== 2
+              )
+                return readonly
+              const local = collection.kobralink.printers.find(
+                (p) => p.printerKey === assignment.printer_key,
+              )
+              if (
+                !local ||
+                !('backend' in assignment) ||
+                assignment.origin !== local.origin ||
+                assignment.bridgeInstance !== local.bridgeInstance ||
+                assignment.deviceId !== local.deviceId ||
+                assignment.id !== local.id ||
+                assignment.revision !== local.revision
+              )
+                throw new Error('KobraLink assignment mismatch')
+              const { assignment_id, farm_id, agent_id, printer_key } =
+                assignment
+              return provisionKobraLinkPrinter(
+                { assignment_id, farm_id, agent_id, printer_key },
+                local,
+              )
+            })()
           : registry?.provision(value)
     if (!binding) throw Error('Moonraker assignment requires local allowlist')
     const assignment = readRuntimePrinterBinding(binding)
@@ -166,8 +196,6 @@ export function readAgentRuntimeConfig(
       if (matches.length !== 1) throw Error('KobraLink assignment mismatch')
     }
   }
-  const pause =
-    input.pause === undefined ? null : parsePauseRuntimeConfig(input.pause)
   if (pause?.control && !provisioned.has(pause.control.assignmentId))
     throw new Error('Pause control assignment is not provisioned locally')
   if (pause?.control) {

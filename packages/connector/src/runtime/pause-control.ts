@@ -130,7 +130,12 @@ export async function runPauseControl(input: {
   let relay: ReturnType<typeof createPauseCommandRelay>
   try {
     const router = createPauseDriverRouter({
-      allowedOrigins: config.collection.allowedOrigins,
+      allowedOrigins: [
+        ...config.collection.allowedOrigins,
+        ...(config.collection.version === 2
+          ? config.collection.kobralink.allowedOrigins
+          : []),
+      ],
       limits: config.collection.limits,
       clock,
       observe: (binding, observation) => relay.observe(binding, observation),

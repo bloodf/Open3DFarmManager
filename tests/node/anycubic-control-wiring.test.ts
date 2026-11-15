@@ -366,6 +366,7 @@ for (const [action, args, type, verb, data] of [
           'set_temperature',
           'set_fan',
           'set_light',
+          'start_print',
         ])
         const unknown = provisionAnycubicPrinter(
           { ...assignment, assignment_id: randomUUID() },

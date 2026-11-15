@@ -1,3 +1,4 @@
+import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { getSpoolmanMaterials } from './spoolman-materials.ts'
 import {
   validateMoonrakerInput,
@@ -190,16 +191,17 @@ export async function collectIntoQueue(input: {
     }
     for (const assignment of config.printers) {
       if (signal.aborted) break
-      const selected = config.spoolman
-        ? validateMoonrakerInput({
-            assignment,
-            allowedOrigins: config.allowedOrigins,
-            limits: config.limits,
-          })
-        : undefined
+      const selected = validateMoonrakerInput({
+        assignment,
+        allowedOrigins: config.allowedOrigins,
+        limits: config.limits,
+      })
       let cached: RawPrinterObservation['materialsObservation'] | undefined
       let cachedInventory: SpoolmanSnapshot | undefined
       let pending = false
+      let firmwareObservation: RawPrinterObservation['firmwareObservation']
+      let nextFirmwareRead = -Infinity
+      let firmwarePending = false
       let latest: RawPrinterObservation | undefined
       const subscription = createMoonrakerSubscription({
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
@@ -209,6 +211,75 @@ export async function collectIntoQueue(input: {
         signal,
         onRawObservation(value) {
           latest = value
+          const at = performance.now()
+          if (
+            !firmwarePending &&
+            at >= nextFirmwareRead &&
+            input.onRawObservation
+          ) {
+            firmwarePending = true
+            nextFirmwareRead = at + 600_000
+            const read = readMoonrakerFirmware({
+              async request() {
+                const session = moonrakerSession(
+                  selected.origin,
+                  selected.limits,
+                )
+                const headers = session
+                  ? await session.getAuthHeaders()
+                  : moonrakerAuthHeaders(selected.origin, selected.limits)
+                const response = await fetch(
+                  new URL('/machine/update/status', selected.origin),
+                  {
+                    headers,
+                    redirect: 'error',
+                    credentials: 'omit',
+                    signal: AbortSignal.any([
+                      signal,
+                      AbortSignal.timeout(
+                        Math.min(5000, selected.limits.requestTimeoutMs),
+                      ),
+                    ]),
+                  },
+                )
+                if (!response.ok || !response.body)
+                  throw Error('Firmware unavailable')
+                const reader = response.body.getReader()
+                const chunks: Uint8Array[] = []
+                let size = 0
+                try {
+                  while (true) {
+                    const chunk = await reader.read()
+                    if (chunk.done) break
+                    size += chunk.value.length
+                    if (size > selected.limits.maxMessageBytes)
+                      throw Error('Firmware response bound')
+                    chunks.push(chunk.value)
+                  }
+                } finally {
+                  await reader.cancel()
+                }
+                return JSON.parse(Buffer.concat(chunks).toString()).result
+              },
+            })
+              .then((firmware) => {
+                if (signal.aborted || latest?.epoch !== value.epoch) return
+                firmwareObservation = firmware
+                  ? { firmware, observedAtMonoMs: at }
+                  : undefined
+                input.onRawObservation?.({
+                  ...latest,
+                  receivedAtMonoMs: performance.now(),
+                  ...(firmwareObservation ? { firmwareObservation } : {}),
+                })
+              })
+              .catch(() => {})
+              .finally(() => {
+                firmwarePending = false
+                materialReads.delete(read)
+              })
+            materialReads.add(read)
+          }
           if (
             cachedInventory !== inventory ||
             inventory?.kind !== 'observed' ||
@@ -217,6 +288,7 @@ export async function collectIntoQueue(input: {
             cached = undefined
           input.onRawObservation?.({
             ...value,
+            ...(firmwareObservation ? { firmwareObservation } : {}),
             ...(cached ? { materialsObservation: cached } : {}),
           })
           if (!selected || !inventory || pending || !input.onRawObservation)
@@ -277,6 +349,7 @@ export async function collectIntoQueue(input: {
               const current = latest
               input.onRawObservation?.({
                 ...current,
+                ...(firmwareObservation ? { firmwareObservation } : {}),
                 receivedAtMonoMs: performance.now(),
                 materialsObservation: cached,
               })
@@ -291,6 +364,7 @@ export async function collectIntoQueue(input: {
         ...(input.onRawUnavailable
           ? {
               onRawUnavailable(event) {
+                firmwareObservation = undefined
                 latest = undefined
                 cached = undefined
                 input.onRawUnavailable?.(event)
@@ -424,6 +498,9 @@ export async function collectIntoQueue(input: {
               printerKey: binding.printerKey,
               epoch,
               printer: event.printer,
+              ...(event.firmwareObservation
+                ? { firmwareObservation: event.firmwareObservation }
+                : {}),
               receivedAtMonoMs: performance.now(),
               fieldObservedAtMonoMs: {
                 bambu: event.source.fieldObservedAtMonoMs,

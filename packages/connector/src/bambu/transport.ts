@@ -1,3 +1,4 @@
+import { buildGetVersionRequest } from './version.ts'
 import { connect as tlsConnect } from 'node:tls'
 import { createHash } from 'node:crypto'
 import { MqttClient } from 'mqtt'
@@ -57,6 +58,7 @@ export function createBambuTransport(options: BambuTransportOptions) {
   )
     throw new Error('Invalid Bambu transport options')
   const topic = `device/${serial}/report`
+  let versionTimer: ReturnType<typeof setInterval> | undefined
   let stopped = false
   let retries = 0
   let inflight = 0
@@ -129,6 +131,7 @@ export function createBambuTransport(options: BambuTransportOptions) {
   )
   function close() {
     if (stopped) return done
+    clearInterval(versionTimer)
     stopped = true
     clearTimeout(timer)
     signal.removeEventListener('abort', close)
@@ -144,6 +147,7 @@ export function createBambuTransport(options: BambuTransportOptions) {
   client.on('error', () => {
     /* Connection errors are handled by close/retry without exposing credentials. */
   })
+  client.on('close', () => clearInterval(versionTimer))
   client.on('connect', () => {
     client.subscribe(topic, { qos: 0 }, (error, grants) => {
       if (
@@ -158,6 +162,19 @@ export function createBambuTransport(options: BambuTransportOptions) {
       retries = 0
       try {
         onConnection('connected')
+        if (stopped) return
+        const readVersion = () => {
+          if (!stopped && client.connected)
+            client.publish(
+              `device/${serial}/request`,
+              JSON.stringify(buildGetVersionRequest('0')),
+              { qos: 0, retain: false },
+              () => {},
+            )
+        }
+        clearInterval(versionTimer)
+        readVersion()
+        versionTimer = setInterval(readVersion, 600_000)
       } catch {
         void close()
       }

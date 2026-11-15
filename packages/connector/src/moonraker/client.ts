@@ -258,6 +258,8 @@ export function openMoonrakerClient(input: {
       )
       const reply = Reply.safeParse(value)
       if (reply.success) {
+        // Only the discovery request is outstanding until the base subscription.
+        if (discovering && reply.data.id !== Number.MAX_SAFE_INTEGER) return
         // A discovery reply after the fallback cannot replace the baseline.
         if (
           input.discoverObjects &&

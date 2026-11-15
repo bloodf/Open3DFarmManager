@@ -8,7 +8,7 @@ const pages = join(app, 'app/pages')
 const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 
 // Mount the actual page script and form, replacing only network discovery and lifecycle.
-export async function setupFormsBundle() {
+export async function setupFormsBundle(revision: number | null = 1) {
   const page = readFileSync(join(pages, 'impressoras.vue'), 'utf8')
   const script = page
     .slice(0, page.indexOf('</script>'))
@@ -24,7 +24,7 @@ const openPrinterDiscoverySession = async () => ({
     )
     .replace(
       /onMounted\(\(\) => \{[\s\S]*$/,
-      `kobraBootstrap.value = { kind: 'ready', data: { bootstrap: { revision: null } } }
+      `kobraBootstrap.value = { kind: 'ready', data: { bootstrap: { revision: ${JSON.stringify(revision)} } } }
 kobraKeyId.value = 'synthetic'
 kobraKeyState.value = { kind: 'available', accountId: 'synthetic', choices: [{ keyId: 'synthetic', localKey: {} }] }
 kobraController = new AbortController()

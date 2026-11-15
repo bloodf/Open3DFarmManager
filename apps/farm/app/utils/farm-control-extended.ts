@@ -33,11 +33,19 @@ export function advertisedExtended(
 ): FarmExtendedAction[] {
   return extendedActions.filter((action) => actions?.includes(action))
 }
+/** Extended actions the Connector does not advertise for this printer. */
+export function unadvertisedExtended(
+  actions: readonly ExtendedControlAction[] | undefined,
+): FarmExtendedAction[] {
+  return actions ? extendedActions.filter((a) => !actions.includes(a)) : []
+}
 export function buildExtendedArgs(
   action: FarmExtendedAction,
   choice: string,
-  value: string,
+  // A numeric input's model is a number once the operator types in it.
+  input: string | number,
 ): Record<string, unknown> | undefined {
+  const value = String(input)
   let args: Record<string, unknown>
   switch (action) {
     case 'set_temperature':

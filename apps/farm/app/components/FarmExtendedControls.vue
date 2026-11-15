@@ -6,6 +6,7 @@ import {
   advertisedExtended,
   buildExtendedArgs,
   extendedLabel,
+  unadvertisedExtended,
   type FarmExtendedAction,
 } from '../utils/farm-control-extended.ts'
 const props = defineProps<{
@@ -27,13 +28,16 @@ const emit = defineEmits<{
 const actions = computed(() =>
   advertisedExtended(props.row.observation?.state.controls),
 )
+const unsupported = computed(() =>
+  unadvertisedExtended(props.row.observation?.state.controls),
+)
 const choices = reactive<Record<string, string>>({
   set_temperature: 'extruder',
   set_fan: 'part',
   set_light: 'on',
   set_speed: 'standard',
 })
-const values = reactive<Record<string, string>>({
+const values = reactive<Record<string, string | number>>({
   set_temperature: '',
   set_fan: '',
 })
@@ -63,6 +67,10 @@ function submit(action: FarmExtendedAction, event: Event) {
   >
     <h4>Controles adicionais</h4>
     <p v-if="lastResult" role="status" aria-live="polite">{{ lastResult }}</p>
+    <p v-if="unsupported.length">
+      Não suportado por esta impressora:
+      {{ unsupported.map(extendedLabel).join(', ') }}.
+    </p>
     <div v-for="action in actions" :key="action" class="control">
       <label v-if="action === 'set_temperature'"
         >Aquecedor

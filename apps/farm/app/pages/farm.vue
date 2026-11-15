@@ -959,7 +959,7 @@ function dateLabel(time: number) {
                       pauseState.kind !== 'settled' &&
                       pauseState.kind !== 'failed'
                     "
-                    :now="now"
+                    :now="liveNow()"
                     @action="
                       (action, args, event) =>
                         openControl(row, action, event, args)
@@ -975,7 +975,7 @@ function dateLabel(time: number) {
                       pauseState.kind !== 'settled' &&
                       pauseState.kind !== 'failed'
                     "
-                    :now="now"
+                    :now="liveNow()"
                     :last-result="
                       lastControlResults[row.assignment.assignmentId]
                     "
@@ -997,7 +997,7 @@ function dateLabel(time: number) {
                           pauseState.kind !== 'settled' &&
                           pauseState.kind !== 'failed'
                         "
-                        :now="now"
+                        :now="liveNow()"
                         :last-result="
                           lastControlResults[row.assignment.assignmentId]
                         "

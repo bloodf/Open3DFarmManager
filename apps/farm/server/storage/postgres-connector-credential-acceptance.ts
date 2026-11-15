@@ -1,4 +1,6 @@
 import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
+import { jobsFromEvents } from '../services/job-history-core.ts'
+import { recordJobs } from './job-history-store.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import type { ConnectorCredentialRecord } from './connector-credential-record.ts'
@@ -658,6 +660,13 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                // Finished jobs ride along in the same transaction; the
+                // unique key makes a repeated end a no-op.
+                await recordJobs(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  jobsFromEvents(sorted),
+                )
               }
               const writtenAt = readNow()
               if (

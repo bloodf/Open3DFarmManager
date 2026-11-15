@@ -26,7 +26,11 @@ interface RawRow {
   endedAt: number
 }
 
-/** Same transaction as the telemetry event; the unique key makes repeats a no-op. */
+/**
+ * Same transaction as the telemetry event; the unique key makes repeats a
+ * no-op. The conflict clause names no columns on purpose: naming them needs
+ * SELECT on the table, and the telemetry writer role only has INSERT.
+ */
 export async function recordJobs(
   tx: TransactionSql,
   scope: { farmId: string; agentId: string },
@@ -35,7 +39,7 @@ export async function recordJobs(
   for (const job of jobs)
     await tx`INSERT INTO farm.job_history (farm_id, agent_id, printer_key, outcome, filename, print_duration_seconds, total_duration_seconds, ended_at)
       VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${job.printerKey}, ${job.outcome}, ${job.filename ?? null}, ${job.printDurationSeconds ?? null}, ${job.totalDurationSeconds ?? null}, ${job.endedAt})
-      ON CONFLICT (farm_id, agent_id, printer_key, ended_at) DO NOTHING`
+      ON CONFLICT DO NOTHING`
 }
 
 export interface JobHistoryListInput {

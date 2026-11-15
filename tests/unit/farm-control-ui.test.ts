@@ -320,7 +320,7 @@ describe('result messages and status copy', () => {
     )
     expect(
       controlStatusText('cancel', { kind: 'settled', outcome: 'applied' }, 0),
-    ).toBe('Impressão cancelada. O Connector confirmou a cancelamento.')
+    ).toBe('Impressão cancelada. O Connector confirmou o cancelamento.')
     expect(
       controlStatusText('cancel', { kind: 'failed', reason: 'unavailable' }, 0),
     ).toContain('Não foi possível obter uma autorização segura.')

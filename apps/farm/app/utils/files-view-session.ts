@@ -24,6 +24,8 @@ export function createFilesSession(input: {
   available(): boolean
   changed(state: FilesState): void
   files(files: PrinterFile[]): void
+  /** The printer library cannot list files; a stored name may be typed. */
+  listUnsupported?(): void
 }) {
   let printRefs = new Map<string, string>()
   let active: AbortController | undefined
@@ -73,6 +75,7 @@ export function createFilesSession(input: {
           if (result.reason === 'unsupported') {
             input.files([])
             printRefs.clear()
+            input.listUnsupported?.()
             publish({
               kind: 'error',
               message:

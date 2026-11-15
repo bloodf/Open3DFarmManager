@@ -33,6 +33,9 @@ const upload = shallowRef<File | null>(null)
 const operation = shallowRef<FilesState>({ kind: 'idle' })
 const enabled = ref(false)
 const confirmed = ref(false)
+// Listing unsupported: the name of a file already stored on the printer.
+const manualEntry = ref(false)
+const manualName = ref('')
 const metadataAbort = new AbortController()
 onMounted(async () => {
   try {
@@ -187,10 +190,15 @@ const session = createFilesSession({
     selected.value = ''
     confirmed.value = false
   },
+  listUnsupported: () => {
+    manualEntry.value = true
+  },
 })
 function reset() {
   session.cancel()
   files.value = []
+  manualEntry.value = false
+  manualName.value = ''
   selected.value = ''
   upload.value = null
   confirmed.value = false
@@ -217,7 +225,7 @@ watch(
   },
   { flush: 'sync' },
 )
-watch(selected, () => {
+watch([selected, manualName], () => {
   confirmed.value = false
 })
 function chooseFarm(event: Event) {
@@ -243,6 +251,12 @@ function list() {
     selected.value = ''
     void session.list(row.value.assignment.printerKey)
   }
+}
+function startStored() {
+  const name = manualName.value.trim()
+  if (!confirmed.value || !manualEntry.value || !printableFile(name)) return
+  confirmed.value = false
+  void session.start(name)
 }
 function start() {
   if (
@@ -433,6 +447,52 @@ onBeforeUnmount(() => {
                 {{ file.name }}
               </li>
             </ul>
+            <form
+              v-if="manualEntry && !files.length"
+              @submit.prevent="startStored"
+            >
+              <p>
+                Listagem não suportada pela biblioteca desta impressora. Informe
+                o nome exato de um arquivo .gcode já armazenado na impressora.
+              </p>
+              <label for="files-stored">Arquivo armazenado na impressora</label>
+              <input
+                id="files-stored"
+                v-model="manualName"
+                type="text"
+                maxlength="255"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="busy"
+              />
+              <p v-if="manualName.trim() && !printableFile(manualName.trim())">
+                Nome inválido para o comando de impressão.
+              </p>
+              <label class="confirmation"
+                ><input
+                  v-model="confirmed"
+                  type="checkbox"
+                  :disabled="
+                    busy ||
+                    !availability.available ||
+                    !printableFile(manualName.trim())
+                  "
+                />Conferi o arquivo {{ manualName.trim() || 'informado' }} e a
+                impressora {{ row?.assignment.printerKey }}. Quero iniciar esta
+                impressão.</label
+              >
+              <button
+                type="submit"
+                :disabled="
+                  busy ||
+                  !availability.available ||
+                  !printableFile(manualName.trim()) ||
+                  !confirmed
+                "
+              >
+                Iniciar impressão
+              </button>
+            </form>
             <form v-if="files.length" @submit.prevent="start">
               <label for="files-existing">Arquivo para imprimir</label>
               <select id="files-existing" v-model="selected" :disabled="busy">

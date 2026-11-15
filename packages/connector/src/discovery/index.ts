@@ -1,8 +1,9 @@
 import dgram from 'node:dgram'
+import { crealityQuery, isCrealityResponse, probeCreality } from './creality.ts'
 import { isIPv4 } from 'node:net'
 
 export type Printer = {
-  vendor: 'bambu' | 'moonraker'
+  vendor: 'bambu' | 'moonraker' | 'creality'
   host: string
   port?: number
   serial?: string
@@ -191,6 +192,7 @@ type Options = {
   mdnsPort?: number
   queryAddress?: string
   queryPort?: number
+  crealityPorts?: { https: number; http: number }
   createSocket?: () => dgram.Socket
 }
 export async function discoverPrinters(
@@ -202,6 +204,7 @@ export async function discoverPrinters(
   const sockets: dgram.Socket[] = [],
     records: RecordData[] = [],
     printers: Printer[] = []
+  const crealityHosts = new Set<string>()
   const factory =
     options.createSocket ??
     (() => dgram.createSocket({ type: 'udp4', reuseAddr: true }))
@@ -210,8 +213,13 @@ export async function discoverPrinters(
       const socket = factory()
       sockets.push(socket)
       socket.on('error', reject)
-      socket.on('message', (packet) => {
+      socket.on('message', (packet, peer) => {
         if (mdns) {
+          if (
+            crealityHosts.size < 128 &&
+            isCrealityResponse(packet, decodeDns(packet))
+          )
+            crealityHosts.add(peer.address)
           if (records.length < 2048)
             records.push(...decodeDns(packet).slice(0, 2048 - records.length))
         } else {
@@ -230,6 +238,14 @@ export async function discoverPrinters(
             }
           }
           socket.send(
+            crealityQuery(),
+            options.queryPort ?? 5353,
+            options.queryAddress ?? '224.0.0.251',
+            (error) => {
+              if (error) reject(error)
+            },
+          )
+          socket.send(
             encodeQuery(),
             options.queryPort ?? 5353,
             options.queryAddress ?? '224.0.0.251',
@@ -244,8 +260,19 @@ export async function discoverPrinters(
       bind(options.mdnsPort ?? 5353, true),
     ])
     await new Promise((resolve) => setTimeout(resolve, timeout))
+    const creality = (
+      await Promise.all(
+        [...crealityHosts].map((host) =>
+          probeCreality(host, options.crealityPorts),
+        ),
+      )
+    ).filter((printer): printer is Printer => printer !== undefined)
     const unique = new Map<string, Printer>()
-    for (const printer of [...printers, ...moonrakerPrinters(records)])
+    for (const printer of [
+      ...printers,
+      ...moonrakerPrinters(records),
+      ...creality,
+    ])
       unique.set(
         `${printer.vendor}:${printer.serial ?? printer.host}:${printer.port ?? ''}`,
         printer,

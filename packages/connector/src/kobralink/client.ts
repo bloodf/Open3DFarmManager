@@ -46,6 +46,8 @@ const liveSchema = z.object({
   firmwareVersion: text.optional(),
   printState: text.optional(),
   kobraState: text.optional(),
+  filename: z.string().optional(),
+  printDurationSec: z.number().finite().nonnegative().optional(),
   connectionError: z.object({ code: text }).nullable().optional(),
 })
 const printerSchema = z.object({
@@ -87,6 +89,12 @@ export interface PrinterObservation extends PrinterStatus {
   connectionReason?: 'lost' | 'unreachable' | 'unreachable_ip'
   progress: number | null
   observedAt: number | null
+  lastJob?: {
+    outcome: 'completed' | 'cancelled' | 'failed'
+    filename?: string
+    printDuration?: number
+    endedAt: number
+  }
 }
 export type KobraLinkControlAction = 'pause' | 'resume' | 'cancel'
 export interface KobraLinkControlResult {
@@ -328,7 +336,35 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
         state === 'error')
         ? state
         : 'unknown'
+    const outcome =
+      live?.kobraState === 'finished'
+        ? 'completed'
+        : live?.kobraState === 'canceled' || live?.kobraState === 'stoped'
+          ? 'cancelled'
+          : live?.kobraState === 'failed'
+            ? 'failed'
+            : undefined
+    const filename = live?.filename
+      ?.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+      .slice(0, 255)
+    const endedAt = live?.updatedAt
     return {
+      ...(availability === 'available' &&
+      outcome &&
+      endedAt !== undefined &&
+      Number.isSafeInteger(endedAt) &&
+      endedAt >= 0
+        ? {
+            lastJob: {
+              outcome,
+              ...(filename ? { filename } : {}),
+              ...(live?.printDurationSec !== undefined
+                ? { printDuration: live.printDurationSec }
+                : {}),
+              endedAt,
+            },
+          }
+        : {}),
       id: p.id,
       deviceId: p.deviceId,
       name: p.name,
@@ -355,6 +391,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       connectionReason: _connectionReason,
       progress: _progress,
       observedAt: _observedAt,
+      lastJob: _lastJob,
       ...status
     } = observe(value, expected)
     return status

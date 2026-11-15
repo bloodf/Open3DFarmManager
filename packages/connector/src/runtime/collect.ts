@@ -454,6 +454,7 @@ export async function collectIntoQueue(input: {
               state,
               progress: status.progress,
               observedAt: status.observedAt,
+              ...(status.lastJob ? { lastJob: status.lastJob } : {}),
             }
             input.onRawObservation?.({
               printerKey: binding.printerKey,

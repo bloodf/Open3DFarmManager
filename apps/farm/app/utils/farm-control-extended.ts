@@ -33,11 +33,29 @@ export function advertisedExtended(
 ): FarmExtendedAction[] {
   return extendedActions.filter((action) => actions?.includes(action))
 }
+/**
+ * Commands a printer that advertises its controls does not offer. The page
+ * names them as unsupported instead of hiding them. A printer that advertises
+ * nothing (no control path) lists none.
+ */
+export function unsupportedExtended(
+  actions: readonly ExtendedControlAction[] | undefined,
+): ExtendedControlAction[] {
+  if (actions === undefined) return []
+  const known: readonly ExtendedControlAction[] = [
+    ...extendedActions,
+    'load_filament',
+    'unload_filament',
+  ]
+  return known.filter((action) => !actions.includes(action))
+}
 export function buildExtendedArgs(
   action: FarmExtendedAction,
   choice: string,
-  value: string,
+  input: string | number,
 ): Record<string, unknown> | undefined {
+  // A number input bound with v-model yields a number, not its text.
+  const value = String(input)
   let args: Record<string, unknown>
   switch (action) {
     case 'set_temperature':

@@ -71,6 +71,8 @@ export function signallingHttpsProxy(input: {
   key: Buffer
   cert: Buffer
   upstreamPort: number
+  /** Paths answered 503 here, as an upstream outage would (not upgrades). */
+  unavailable?: (path: string) => boolean
 }) {
   if (
     !Number.isInteger(input.upstreamPort) ||
@@ -81,6 +83,11 @@ export function signallingHttpsProxy(input: {
   const server = createHttpsServer(
     { key: input.key, cert: input.cert },
     (req, res) => {
+      if (input.unavailable?.(req.url ?? '')) {
+        req.resume()
+        res.writeHead(503, { 'content-length': '0' }).end()
+        return
+      }
       const upstream = httpRequest(
         {
           host: '127.0.0.1',

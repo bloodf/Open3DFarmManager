@@ -5,6 +5,7 @@ import {
   MAX_FILE_LIST_WIRE_BYTES,
 } from '../../../farm-protocol/src/file-list.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
+import { awaitAdmittedHandle } from '../files/admission-grace.ts'
 import {
   listMoonrakerFiles,
   createThumbnailDownload,
@@ -62,7 +63,7 @@ export function createFileList(
       if (!parsed.success) return false
       if (closed) return true
       const request = parsed.data
-      const handle = input.admittedHandle()
+      let handle = input.admittedHandle()
       const authorized = () => {
         const current = input.admittedHandle()
         const cap = current?.current
@@ -90,10 +91,6 @@ export function createFileList(
           input.send(wire)
         }
       }
-      if (!authorized()) {
-        send({ ok: false, reason: 'unauthorized' })
-        return true
-      }
       if (busy) {
         send({ ok: false, reason: 'busy' })
         return true
@@ -108,6 +105,14 @@ export function createFileList(
       })
       work = (async () => {
         try {
+          handle ??= await awaitAdmittedHandle(
+            input.admittedHandle,
+            controller.signal,
+          )
+          if (!authorized()) {
+            send({ ok: false, reason: 'unauthorized' })
+            return
+          }
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
           if (target.backend === 'creality' || target.backend === 'anycubic')

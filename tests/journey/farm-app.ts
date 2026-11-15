@@ -24,16 +24,25 @@ import { CAPABILITIES, type JourneyDatabase } from './database.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 export const AUDIENCE = 'open3dfarmmanager:signalling'
+export const PAUSE_KID = 'pause-fixture'
+export const PAUSE_AUDIENCE = 'open3dfarmmanager:pause'
 
 export type FarmApp = Readonly<{
   /** `https://127.0.0.1:<port>`: the TLS proxy in front of Nitro. */
   origin: string
   /** PEM certificate the Connector must trust (NODE_EXTRA_CA_CERTS). */
   certificatePath: string
+  /** Base64url SPKI of the pause (signed control) issuer the app signs with. */
+  pauseIssuerPublicKeySpki: string
   /** Bounded tail of the Nitro output, for failure diagnostics. */
   log(): string
   /** Drops every live upgraded connection, as a network loss would. */
   disconnectUpgrades(): Promise<void>
+  /**
+   * Opens or closes the Connector's telemetry upload path at the proxy (503
+   * while closed, as an upstream outage). Closed at start.
+   */
+  setTelemetryUpload(open: boolean): void
   directory: string
   close(): Promise<void>
 }>
@@ -105,6 +114,10 @@ export async function startFarmApp(
   let app: ChildProcess | undefined
   let proxy: ReturnType<typeof signallingHttpsProxy> | undefined
   let output = ''
+  // Telemetry ingestion and the signalling inboxes share one proof slot per
+  // Connector credential on the server and displace each other, so the upload
+  // path stays closed until a spec asks for delivery.
+  let telemetryUpload = false
   try {
     const farm = join(checkout, 'apps/farm')
     const layer = join(directory, 'layer')
@@ -174,6 +187,8 @@ export async function startFarmApp(
       key: await readFile(tlsKey),
       cert: await readFile(cert),
       upstreamPort: appPort,
+      unavailable: (path) =>
+        !telemetryUpload && path.startsWith('/api/connector/telemetry'),
     })
     proxy.server.listen(0, '127.0.0.1')
     await once(proxy.server, 'listening')
@@ -197,6 +212,25 @@ export async function startFarmApp(
       { mode: 0o600 },
     )
     const url = (index: number) => database.url(CAPABILITIES[index]!)
+    // Signed control: the app issues capabilities with this key; the
+    // Connector trusts only its public half (harness `control` option).
+    const pauseKeys = generateKeyPairSync('ed25519')
+    const pauseIssuerKeyPath = join(directory, 'pause-issuer.json')
+    const pauseIssuerPublicKeySpki = pauseKeys.publicKey
+      .export({ format: 'der', type: 'spki' })
+      .toString('base64url')
+    await writeFile(
+      pauseIssuerKeyPath,
+      JSON.stringify({
+        version: 1,
+        issuer: origin,
+        kid: PAUSE_KID,
+        privateKeyPkcs8: pauseKeys.privateKey
+          .export({ format: 'der', type: 'pkcs8' })
+          .toString('base64url'),
+      }),
+      { mode: 0o600, flag: 'wx' },
+    )
     const tokenTtlSeconds = '300'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -253,6 +287,32 @@ export async function startFarmApp(
       NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH: registry,
       NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: tokenTtlSeconds,
       NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '8000',
+      NUXT_PAUSE_AUTHORITY_ENABLED: 'true',
+      NUXT_PAUSE_AUTHORITY_DATABASE_URL: database.url('farm_pause_authority'),
+      NUXT_PAUSE_AUTHORITY_ISSUER_KEY_PATH: pauseIssuerKeyPath,
+      NUXT_PAUSE_AUTHORITY_ISSUER_PUBLIC_KEY_SPKI: pauseIssuerPublicKeySpki,
+      NUXT_PAUSE_AUTHORITY_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_KID: PAUSE_KID,
+      NUXT_PAUSE_AUTHORITY_AUDIENCE: PAUSE_AUDIENCE,
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_AUDIENCE: AUDIENCE,
+      NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
+      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: database.url(
+        'farm_connector_telemetry_writer',
+      ),
+      NUXT_CONNECTOR_TELEMETRY_ORIGIN: origin,
+      NUXT_CONNECTOR_TELEMETRY_ISSUER: origin,
+      NUXT_CONNECTOR_TELEMETRY_AUDIENCE: AUDIENCE,
+      NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH: registry,
+      NUXT_CONNECTOR_TELEMETRY_TOKEN_TTL_SECONDS: tokenTtlSeconds,
+      // One proof slot per credential is shared with the signalling inboxes:
+      // a pending telemetry challenge makes them wait for its expiry, which
+      // must stay well inside their admission windows. One second is too
+      // short for the Connector to answer: nothing is ever delivered.
+      NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '2000',
+      NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
+      NUXT_JOB_HISTORY_ENABLED: 'true',
+      NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
     }
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {
@@ -285,9 +345,13 @@ export async function startFarmApp(
     return Object.freeze({
       origin,
       certificatePath: cert,
+      pauseIssuerPublicKeySpki,
       directory,
       log: () => output,
       disconnectUpgrades: () => ownedProxy.disconnectUpgrades(),
+      setTelemetryUpload(open: boolean) {
+        telemetryUpload = open
+      },
       async close() {
         const failures: unknown[] = []
         for (const step of [

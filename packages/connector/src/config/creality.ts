@@ -13,6 +13,8 @@ export const CrealityBinding = z.strictObject({
     .max(253)
     .regex(/^[a-zA-Z0-9.:-]+$/),
   port: z.number().int().min(1).max(65535).default(9999),
+  /** Stock HTTP upload port (POST /upload/<name>); absent means 80. */
+  httpPort: z.number().int().min(1).max(65535).optional(),
 })
 const CrealityConfig = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })

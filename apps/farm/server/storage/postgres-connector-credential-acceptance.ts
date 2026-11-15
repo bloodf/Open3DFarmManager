@@ -26,6 +26,8 @@ import {
   prepareTelemetryOperation,
   type TelemetryOperation,
 } from '../services/telemetry-operation.ts'
+import { jobsFromEvents } from '../services/job-history-core.ts'
+import { recordJobs } from './job-history-store.ts'
 
 export interface CredentialAcceptanceConfig {
   issuer: string
@@ -658,6 +660,13 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                // Finished jobs carried by the snapshots are recorded in the
+                // same transaction as their events; repeats are a no-op.
+                await recordJobs(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  jobsFromEvents(sorted),
+                )
               }
               const writtenAt = readNow()
               if (

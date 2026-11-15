@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: MIT
-import { connect as tlsConnect, type TLSSocket } from 'node:tls'
-import { createHash } from 'node:crypto'
 import { createAnycubicLanClient } from '../../packages/connector/src/anycubic/transport.ts'
 import { decodeAnycubicReport } from '../../packages/connector/src/anycubic/report.ts'
 import { createKobraLinkClient } from '../../packages/connector/src/kobralink/client.ts'
@@ -23,7 +21,7 @@ export async function qualifyAnycubic(
   files: ObservedFiles
 }> {
   const host = options.host
-  const port = options.port ?? 8883
+  const port = options.port ?? 9883
   const serial = options.serial ?? credentials.serial ?? 'SYNTHETIC'
   const timeoutMs = options.timeoutMs ?? 10_000
 
@@ -133,85 +131,7 @@ export async function qualifyAnycubic(
 
       controller.signal.addEventListener('abort', finish, { once: true })
 
-      // First run direct TLS socket to handle specific simulator report topic
       const pinSha256 = options.pinSha256 ?? credentials.pinSha256
-      let socket: TLSSocket | undefined
-      try {
-        socket = tlsConnect({
-          host,
-          port,
-          ca: credentials.caPem,
-          minVersion: 'TLSv1.2',
-          rejectUnauthorized: !pinSha256,
-        })
-        socket.on('error', () => {})
-        socket.once('secureConnect', () => {
-          if (
-            pinSha256 &&
-            createHash('sha256')
-              .update(socket!.getPeerCertificate().raw)
-              .digest('hex') !== pinSha256.toLowerCase()
-          ) {
-            socket!.destroy()
-            return
-          }
-          // Send MQTT CONNECT
-          socket!.write(
-            Buffer.from([16, 13, 0, 4, 77, 81, 84, 84, 4, 2, 0, 10, 0, 1, 120]),
-          )
-        })
-
-        let buffer = Buffer.alloc(0)
-        let subscribed = false
-        socket.on('data', (chunk) => {
-          buffer = Buffer.concat([buffer, chunk])
-          while (buffer.length >= 2) {
-            const header = buffer[0]!
-            let offset = 1
-            let size = 0
-            let mul = 1
-            while (offset < buffer.length) {
-              const b = buffer[offset++]!
-              size += (b & 127) * mul
-              if (!(b & 128)) break
-              mul *= 128
-            }
-            if (buffer.length < offset + size) break
-            const body = buffer.subarray(offset, offset + size)
-            buffer = buffer.subarray(offset + size)
-
-            if (header === 32 && !subscribed) {
-              // CONNACK received, send SUBSCRIBE to exact topic
-              subscribed = true
-              const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
-              const topicBytes = Buffer.from(reportTopic)
-              const subBody = Buffer.alloc(4 + topicBytes.length + 1)
-              subBody.writeUInt16BE(1, 0)
-              subBody.writeUInt16BE(topicBytes.length, 2)
-              topicBytes.copy(subBody, 4)
-              subBody[4 + topicBytes.length] = 0
-              socket!.write(
-                Buffer.concat([Buffer.from([130, subBody.length]), subBody]),
-              )
-            } else if (header === 48) {
-              // PUBLISH received
-              if (body.length >= 2) {
-                const topicLen = body.readUInt16BE(0)
-                const payload = body.subarray(2 + topicLen)
-                processPayload(payload)
-                if (observedFields.size > 0) {
-                  setTimeout(() => {
-                    socket?.destroy()
-                    finish()
-                  }, 100)
-                }
-              }
-            }
-          }
-        })
-      } catch {}
-
-      // Also run createAnycubicLanClient concurrently in case broker expects wildcard topic
       let lanClient: ReturnType<typeof createAnycubicLanClient> | undefined
       try {
         lanClient = createAnycubicLanClient({
@@ -239,7 +159,6 @@ export async function qualifyAnycubic(
             processPayload(payload)
             if (observedFields.size > 0) {
               setTimeout(() => {
-                socket?.destroy()
                 void lanClient?.close()
                 finish()
               }, 100)
@@ -251,7 +170,6 @@ export async function qualifyAnycubic(
 
       setTimeout(
         () => {
-          socket?.destroy()
           void lanClient?.close()
           finish()
         },

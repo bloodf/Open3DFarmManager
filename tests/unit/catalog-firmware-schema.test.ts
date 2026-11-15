@@ -6,10 +6,10 @@ import {
 import type { AnycubicCatalogProduct } from '../../apps/farm/app/utils/compatibility/anycubic'
 
 describe('catalog firmware notes', () => {
-  it('keeps existing entries valid without notes', () => {
+  it('keeps entries without notes valid alongside documented firmware', () => {
     expect(compatibilityPageCatalog.length).toBeGreaterThan(0)
     expect(
-      compatibilityPageCatalog.every(
+      compatibilityPageCatalog.some(
         (product) => product.firmwareNotes === undefined,
       ),
     ).toBe(true)
@@ -23,25 +23,53 @@ describe('catalog firmware notes', () => {
         id: 'one',
         model: 'Model One',
         firmwareNotes: [
-          { firmware: '1.0', note: 'Nota da versão 1' },
-          { firmware: '2.0', note: 'Nota da versão 2' },
+          {
+            firmware: '1.0',
+            note: 'Nota da versão 1',
+            sources: ['https://example.com/1'],
+          },
+          {
+            firmware: '2.0',
+            note: 'Nota da versão 2',
+            sources: ['https://example.com/2'],
+          },
         ],
       },
       {
         ...base,
         id: 'two',
         model: 'Model Two',
-        firmwareNotes: [{ firmware: '1.0', note: 'Outra nota' }],
+        firmwareNotes: [
+          {
+            firmware: '1.0',
+            note: 'Outra nota',
+            sources: ['https://example.com/3'],
+          },
+        ],
       },
     ]
     expect(
       filterCompatibility('Model One', products)[0]?.firmwareNotes,
     ).toEqual([
-      { firmware: '1.0', note: 'Nota da versão 1' },
-      { firmware: '2.0', note: 'Nota da versão 2' },
+      {
+        firmware: '1.0',
+        note: 'Nota da versão 1',
+        sources: ['https://example.com/1'],
+      },
+      {
+        firmware: '2.0',
+        note: 'Nota da versão 2',
+        sources: ['https://example.com/2'],
+      },
     ])
     expect(
       filterCompatibility('Model Two', products)[0]?.firmwareNotes,
-    ).toEqual([{ firmware: '1.0', note: 'Outra nota' }])
+    ).toEqual([
+      {
+        firmware: '1.0',
+        note: 'Outra nota',
+        sources: ['https://example.com/3'],
+      },
+    ])
   })
 })

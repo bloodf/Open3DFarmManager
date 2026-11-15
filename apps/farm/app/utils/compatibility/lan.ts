@@ -8,6 +8,15 @@ export const lanCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Data de lançamento não verificada neste catálogo',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware não qualificada',
+    firmwareNotes: [
+      {
+        firmware: 'V2.4.6.7',
+        note: 'Versão documentada pelo fabricante; integração LAN não qualificada em hardware.',
+        sources: [
+          'https://wiki.anycubic.com/it/fdm-3d-printer/kobra-3-combo/firmware-upgrade-log',
+        ],
+      },
+    ],
     connection: 'Integração LAN para o identificador de modelo 20024',
     capabilities: {
       telemetry: 'simulated',

@@ -11,6 +11,7 @@ export interface AnycubicCatalogProduct {
   readonly firmwareNotes?: readonly {
     readonly firmware: string
     readonly note: string
+    readonly sources: readonly string[]
   }[]
   readonly connection: string
   readonly capabilities: Readonly<
@@ -47,6 +48,15 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Data de lançamento desconhecida',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareNotes: [
+      {
+        firmware: 'Versão desconhecida',
+        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        sources: [
+          'https://us.anycubic3d.com/products/kobra-3-max-v2-combo-3d-printer',
+        ],
+      },
+    ],
     connection: 'Conexão e API desconhecidas',
     capabilities: unknownCapabilities,
     sources: [
@@ -64,6 +74,15 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Apresentada em feira; lançamento desconhecido',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareNotes: [
+      {
+        firmware: 'Versão desconhecida',
+        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        sources: [
+          'https://www.prnewswire.com/news-releases/anycubic-showcases-next-generation-3d-printing-lineup-at-rapidtct-2026-highlighting-multicolor-fdm-and-large-format-resin-innovation-302743844.html',
+        ],
+      },
+    ],
     connection: 'Conexão e API desconhecidas',
     capabilities: unknownCapabilities,
     sources: [
@@ -80,6 +99,15 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Apresentada na Formnext 2025',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareNotes: [
+      {
+        firmware: 'Versão desconhecida',
+        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        sources: [
+          'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
+        ],
+      },
+    ],
     connection: 'Ponte local KobraLink testada somente em simulação',
     capabilities: {
       ...unknownCapabilities,
@@ -105,6 +133,15 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Apresentada na Formnext 2025',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareNotes: [
+      {
+        firmware: 'Versão desconhecida',
+        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        sources: [
+          'https://wiki.anycubic.com/en/fdm-3d-printer/kobra-s1-max-combo/firmware-updating-guide',
+        ],
+      },
+    ],
     connection: 'API e autenticação desconhecidas',
     capabilities: unknownCapabilities,
     sources: [
@@ -119,6 +156,15 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     releaseStatus: 'Candidata; data de lançamento desconhecida',
     releaseDate: null,
     firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareNotes: [
+      {
+        firmware: 'Versão desconhecida',
+        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        sources: [
+          'https://wiki.anycubic.com/k3-v2/Anycubic%20Kobra%203%20V2%20combo%20User%20Manual-EN-V1.0.pdf',
+        ],
+      },
+    ],
     connection: 'API e autenticação desconhecidas',
     capabilities: unknownCapabilities,
     sources: ['https://store.anycubic.com/products/kobra-3-v2'],

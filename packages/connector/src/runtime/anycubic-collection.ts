@@ -28,12 +28,14 @@ export function createAnycubicCollection(input: {
   if (typeof password !== 'string' || !password || password.length > 2048)
     throw Error('Invalid Anycubic credential file')
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let activeJob = false
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Record<string, unknown> = {}
   let times: Partial<Record<keyof PrinterState, number>> = {}
   const invalidate = () => {
     firmwareObservation = undefined
+    activeJob = false
     clearTimeout(timer)
     values = {}
     times = {}
@@ -66,6 +68,24 @@ export function createAnycubicCollection(input: {
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       if (report.kind === 'ignored' && !firmware) return
+      const state = (report as Record<string, unknown>).state
+      let lastJob: PrinterState['lastJob']
+      if (state === 'printing' || state === 'paused') activeJob = true
+      else if (
+        activeJob &&
+        (state === 'finished' || state === 'idle' || state === 'error')
+      ) {
+        lastJob = {
+          outcome:
+            state === 'finished'
+              ? 'completed'
+              : state === 'error'
+                ? 'failed'
+                : 'cancelled',
+          endedAt: Date.now(),
+        }
+        activeJob = false
+      }
       for (const [key, value] of Object.entries(
         report as Record<string, unknown>,
       )) {
@@ -81,6 +101,7 @@ export function createAnycubicCollection(input: {
       if (!values.state) return
       const parsed = PrinterState.safeParse({
         ...values,
+        ...(lastJob ? { lastJob } : {}),
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })

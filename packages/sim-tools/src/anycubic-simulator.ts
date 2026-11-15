@@ -420,6 +420,24 @@ export async function startAnycubicSimulator({
         throw new Error('Invalid synthetic upload')
       files.set(filename, Buffer.from(data))
     },
+    /** Journey control: a print in progress at a fixed percentage. */
+    setPrintProgress(percent: number) {
+      if (!Number.isInteger(percent) || percent < 0 || percent > 99)
+        throw new Error('Invalid progress')
+      stopTimer()
+      lifecycle = 'printing'
+      progress = percent
+      broadcast()
+    },
+    /** Journey control: the running print completes. */
+    finishPrint() {
+      if (lifecycle !== 'printing' && lifecycle !== 'paused')
+        throw new Error('No active print')
+      stopTimer()
+      lifecycle = 'finished'
+      progress = 100
+      broadcast()
+    },
     failPrint() {
       if (lifecycle !== 'printing' && lifecycle !== 'paused')
         throw new Error('No active print')

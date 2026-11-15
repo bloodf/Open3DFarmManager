@@ -412,6 +412,24 @@ export async function startBambuSimulator({
         throw new Error('Invalid upload')
       uploads.add(`file:///sdcard/${name}`)
     },
+    /** Journey control: a print in progress at a fixed percentage. */
+    setPrintProgress(percent: number) {
+      if (!Number.isInteger(percent) || percent < 0 || percent > 99)
+        throw new Error('Invalid progress')
+      stopTimer()
+      gcodeState = 'RUNNING'
+      extended.mc_percent = percent
+      for (const subscriber of subscribed) report(subscriber)
+    },
+    /** Journey control: the running print completes. */
+    finishPrint() {
+      if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
+        throw new Error('No active print')
+      stopTimer()
+      gcodeState = 'FINISH'
+      extended.mc_percent = 100
+      for (const subscriber of subscribed) report(subscriber)
+    },
     failPrint() {
       if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
         throw new Error('No active print')

@@ -116,6 +116,15 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /**
+       * Journey harness only: another vendor's collection and assignment
+       * replace the Moonraker ones (the packaged Connector is unchanged).
+       */
+      runtime?: {
+        version: 2 | 3 | 4 | 5
+        collection: Record<string, unknown>
+        assignment: Record<string, unknown>
+      }
     }) {
       if (running || disposal || input.assignmentRefs.length !== 1)
         throw Error('Runtime fixture scope')
@@ -289,8 +298,8 @@ export async function createRuntimeMoonrakerFixture() {
       await writeFile(
         configPath,
         JSON.stringify({
-          version: 1,
-          collection: {
+          version: input.runtime?.version ?? 1,
+          collection: input.runtime?.collection ?? {
             version: 1,
             allowedOrigins: [moon],
             printers: [{ printerKey: ref.printerKey, origin: moon }],
@@ -304,7 +313,7 @@ export async function createRuntimeMoonrakerFixture() {
             }),
           },
           assignments: [
-            {
+            input.runtime?.assignment ?? {
               assignment_id: ref.assignmentId,
               agent_id: ref.agentId,
               farm_id: input.claim.farm_id,

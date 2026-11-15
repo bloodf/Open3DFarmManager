@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ExtendedControlAction } from './control-actions.ts'
+import { ExtendedControlAction, controlRoleAllowed } from './control-actions.ts'
 import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
@@ -85,17 +85,25 @@ const fields = {
   actions: z
     .array(ExtendedControlAction)
     .min(1)
-    .max(11)
+    .max(ExtendedControlAction.options.length)
     .refine((actions) => new Set(actions).size === actions.length),
 }
 const lifetime = (value: { issued_at: number; expires_at: number }) =>
   value.expires_at > value.issued_at &&
   value.expires_at - value.issued_at <= PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
-export const PauseCapabilityV1 = z.strictObject(fields).refine(lifetime)
+const validRoles = (value: {
+  role: string
+  actions: ExtendedControlAction[]
+}) => value.actions.every((action) => controlRoleAllowed(value.role, action))
+export const PauseCapabilityV1 = z
+  .strictObject(fields)
+  .refine(lifetime)
+  .refine(validRoles)
 export type PauseCapabilityV1 = z.infer<typeof PauseCapabilityV1>
 export const SignedPauseCapabilityV1 = z
   .strictObject({ ...fields, signature })
   .refine(lifetime)
+  .refine(validRoles)
 export type SignedPauseCapabilityV1 = z.infer<typeof SignedPauseCapabilityV1>
 function bounded(input: unknown, max: number): string {
   const wire = canonicalize(input)

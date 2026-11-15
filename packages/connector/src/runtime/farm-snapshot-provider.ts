@@ -61,6 +61,7 @@ const FRAME_LIMIT = 'Application frame limit'
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
   nowMono?: () => number
+  macrosFor?: (assignmentId: string) => readonly string[] | undefined
   controlsFor?: (
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
@@ -123,10 +124,15 @@ export function createFarmSnapshotSource(input: {
         captured = Math.min(captured, temperature.observedAtMonoMs)
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
+      const macros = input.macrosFor?.(ref.assignmentId)
       const controls = input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
-      const { controls: _untrustedControls, ...printer } = entry.printer
+      const {
+        controls: _untrustedControls,
+        macros: _untrustedMacros,
+        ...printer
+      } = entry.printer
       for (const field of ['fans', 'light', 'materials'] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(
@@ -145,6 +151,7 @@ export function createFarmSnapshotSource(input: {
         PrinterState.parse({
           ...printer,
           ...advertisedControls,
+          ...(macros !== undefined ? { macros: [...macros] } : {}),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),

@@ -14,6 +14,15 @@ const sequence = z.string().regex(/^[0-9]{1,16}$/)
 const ControlRequest = z.union([
   z.strictObject({
     print: z.strictObject({
+      command: z.literal('ams_change_filament'),
+      target: z.union([z.number().int().min(0).max(15), z.literal(255)]),
+      curr_temp: z.number().finite().min(0).max(300),
+      tar_temp: z.number().finite().min(0).max(300),
+      sequence_id: sequence,
+    }),
+  }),
+  z.strictObject({
+    print: z.strictObject({
       command: z.enum([
         'pause',
         'resume',

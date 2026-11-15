@@ -8,6 +8,8 @@ const actions = [
   'set_light',
   'set_speed',
   'start_print',
+  'load_filament',
+  'unload_filament',
 ] as const
 export function supportedBambuActions(_model: string): readonly string[] {
   return [...actions]
@@ -33,6 +35,28 @@ export function buildBambuCommand(
   if (['pause', 'resume', 'cancel'].includes(action)) {
     keys([])
     return print(action === 'cancel' ? 'stop' : action)
+  }
+  if (action === 'load_filament' || action === 'unload_filament') {
+    keys(action === 'load_filament' ? ['tray', 'target_c'] : ['target_c'])
+    const target = action === 'unload_filament' ? 255 : args.tray
+    if (
+      !Number.isInteger(target) ||
+      (action === 'load_filament' &&
+        ((target as number) < 0 || (target as number) > 15)) ||
+      !Number.isFinite(args.target_c) ||
+      (args.target_c as number) < 0 ||
+      (args.target_c as number) > 300
+    )
+      throw new Error('Invalid filament request')
+    return {
+      print: {
+        command: 'ams_change_filament',
+        target,
+        curr_temp: args.target_c,
+        tar_temp: args.target_c,
+        sequence_id,
+      },
+    }
   }
   if (action === 'set_temperature') {
     keys(['heater', 'target_c'])

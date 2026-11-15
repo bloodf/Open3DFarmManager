@@ -67,18 +67,23 @@ export async function startBambuSimulator({
   serial = 'SYNTHETIC',
   port = 0,
   initialState,
+  initialTargetTemperature,
   confirmCommands = true,
 }: {
   serial?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
+  initialTargetTemperature?: number
   confirmCommands?: boolean
 } = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   const reportTopic = `device/${serial}/report`
   let gcodeState = initialState
-  const extended: Record<string, unknown> = {}
+  const extended: Record<string, unknown> =
+    initialTargetTemperature === undefined
+      ? {}
+      : { nozzle_target_temper: initialTargetTemperature }
   const requests: { command: string; sequence_id: string }[] = []
   function report(socket: TLSSocket) {
     const topic = Buffer.from(reportTopic)

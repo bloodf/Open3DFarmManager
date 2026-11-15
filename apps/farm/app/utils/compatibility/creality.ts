@@ -8,6 +8,11 @@ export interface CrealityCatalogProduct {
   readonly releaseStatus: string
   readonly releaseDate: string | null
   readonly firmwareStatus: string
+  readonly firmwareNotes: readonly {
+    readonly firmware: string
+    readonly note: string
+    readonly sources: readonly string[]
+  }[]
   readonly connection: string
   readonly capabilities: Readonly<
     Record<
@@ -38,6 +43,15 @@ const unknownCapabilities = {
 export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   {
     id: 'creality-mbox',
+    firmwareNotes: [
+      {
+        firmware: 'Desconhecido',
+        note: 'Versão e interface de firmware não identificadas na documentação consultada.',
+        sources: [
+          'https://wiki.creality.com/zh/mBox-series/mBox/filament-replacement-guide',
+        ],
+      },
+    ],
     brand: 'Creality',
     model: 'mBox',
     releaseStatus:
@@ -59,6 +73,15 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v3-neo',
+    firmwareNotes: [
+      {
+        firmware: 'Desconhecido',
+        note: 'Versão de firmware e interface local não verificadas.',
+        sources: [
+          'https://store.creality.com/products/ender-3-v3-neo-3d-printer',
+        ],
+      },
+    ],
     brand: 'Creality',
     model: 'Ender-3 V3 Neo',
     releaseStatus:
@@ -82,6 +105,13 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v3-mega',
+    firmwareNotes: [
+      {
+        firmware: 'Desconhecido',
+        note: 'Versão de firmware e protocolo local não verificados.',
+        sources: ['https://www.creality.com/products/ender-3-v3-mega'],
+      },
+    ],
     brand: 'Creality',
     model: 'Ender-3 V3 Mega',
     releaseStatus:
@@ -109,6 +139,13 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-k3',
+    firmwareNotes: [
+      {
+        firmware: 'Desconhecido',
+        note: 'Fabricante descreve base Klipper; versão e interface Moonraker não verificadas.',
+        sources: ['https://www.creality.com/blog/k3-questions-answered'],
+      },
+    ],
     brand: 'Creality',
     model: 'K3',
     releaseStatus:
@@ -133,6 +170,15 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v4',
+    firmwareNotes: [
+      {
+        firmware: 'Desconhecido',
+        note: 'Versão de firmware e interface local não verificadas.',
+        sources: [
+          'https://store.creality.com/products/ender-3-v4-combo-3d-printer',
+        ],
+      },
+    ],
     brand: 'Creality',
     model: 'Ender-3 V4',
     releaseStatus:

@@ -1,3 +1,4 @@
+import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { openFixedKobraLinkControl } from '../kobralink/control-driver.ts'
 import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
@@ -89,6 +90,8 @@ export function createPauseDriverRouter(config: {
   }
   return Object.freeze({
     controls,
+    macros: (binding: PrinterBinding) =>
+      advertisedMoonrakerMacros(moonrakerObjects.get(binding)),
     async detect(binding: PrinterBinding, signal?: AbortSignal) {
       if (
         readPrinterBinding(binding) &&

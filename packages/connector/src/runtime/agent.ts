@@ -195,6 +195,8 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     printerKey: assignment.printer_key,
   }))
   let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
+  let macrosFor:
+    ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
@@ -217,6 +219,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       ? createFarmSnapshotSource({
           assignmentRefs: refs,
           controlsFor: (id) => controlsFor?.(id),
+          macrosFor: (id) => macrosFor?.(id),
         })
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')

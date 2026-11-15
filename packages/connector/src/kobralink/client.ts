@@ -1,4 +1,9 @@
 import {
+  kobraLinkUploadBody,
+  parseKobraLinkFiles,
+  parseKobraLinkLibrary,
+} from './files.ts'
+import {
   KOBRALINK_BRIDGE_CONTROLS,
   KOBRALINK_BRIDGE_PATHS,
   KobraLinkBridgeCommand,
@@ -184,10 +189,14 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
         headers: {
           accept: 'application/json',
           Origin: origin,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(body === undefined || body instanceof FormData
+            ? {}
+            : { 'content-type': 'application/json' }),
           ...(cookie ? { Cookie: cookie } : {}),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined
+          ? {}
+          : { body: body instanceof FormData ? body : JSON.stringify(body) }),
       })
       if (controller.signal.aborted) fail('timeout')
       if (expectedGeneration !== generation) fail('unauthorized')
@@ -477,6 +486,60 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       )
     },
     listPrinters,
+    async listPrinterFiles(binding: PrinterBinding) {
+      const b = parse(bindingSchema, binding)
+      await getPrinter(b)
+      const value = await request(
+        `/api/v1/printers/${b.id}/printer-files`,
+        'GET',
+      )
+      try {
+        return parseKobraLinkFiles(value)
+      } catch {
+        return fail('invalid')
+      }
+    },
+    async listLibraryFiles(binding: PrinterBinding) {
+      const b = parse(bindingSchema, binding)
+      await getPrinter(b)
+      const value = await request(`/api/v1/printers/${b.id}/files`, 'GET')
+      try {
+        return parseKobraLinkLibrary(value)
+      } catch {
+        return fail('invalid')
+      }
+    },
+    async startLibraryFile(binding: PrinterBinding, fileId: string) {
+      const b = parse(bindingSchema, binding)
+      const id = parse(z.string().min(1).max(128), fileId)
+      const sessionGeneration = generation
+      const current = await getPrinter(b)
+      if (current.availability !== 'available') fail('unavailable')
+      if (current.printState !== 'standby' && current.printState !== 'complete')
+        fail('unsupported_state')
+      await request(
+        `/api/v1/printers/${b.id}/print`,
+        'POST',
+        { fileId: id, excludedObjects: [] },
+        false,
+        sessionGeneration,
+      )
+      return { accepted: true as const, confirmed: false as const }
+    },
+    async uploadFile(binding: PrinterBinding, filePath: string, name: string) {
+      const b = parse(bindingSchema, binding)
+      const sessionGeneration = generation
+      const body = await kobraLinkUploadBody(filePath, name)
+      const current = await getPrinter(b)
+      if (current.availability !== 'available') fail('unavailable')
+      return request(
+        `/api/v1/printers/${b.id}/files`,
+        'POST',
+        body,
+        false,
+        sessionGeneration,
+      )
+    },
     supportedControls: KOBRALINK_CONTROLS,
     async controlExtendedPrinter(
       printerId: string,

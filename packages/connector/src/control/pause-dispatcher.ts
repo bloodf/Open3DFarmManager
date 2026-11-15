@@ -738,10 +738,19 @@ export function createPauseDispatcher(config: {
             return
           }
           const observation = parsed.data
+          // Pause, resume and cancel are confirmed by their target print
+          // state. Any other action has none: its driver acknowledged the one
+          // request and then read a fresh state on the same connection, which
+          // is all a printer offers. Leaving such a command unresolved would
+          // hold the journal's single active row and refuse every later
+          // command for this printer.
+          const lifecycle = ['pause', 'resume', 'cancel'].includes(
+            command.action,
+          )
           if (
-            !['pause', 'resume', 'cancel'].includes(command.action) ||
             !observation.ready ||
-            observation.printState !== controlTargetState(command.action) ||
+            (lifecycle &&
+              observation.printState !== controlTargetState(command.action)) ||
             observation.assignmentId !== mapping.assignment_id ||
             observation.printerKey !== mapping.printer_key ||
             observation.connectionGeneration !== cursor.connectionGeneration ||

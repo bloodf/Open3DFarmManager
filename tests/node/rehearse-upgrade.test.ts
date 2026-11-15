@@ -234,3 +234,44 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     assert.equal(process.listenerCount(signal), listeners)
   })
 }
+
+for (const interrupt of ['SIGINT', 'SIGTERM'] as const) {
+  test(`${interrupt} aborts an in-flight command and cleans up`, async (t) => {
+    const options = await fixture(t)
+    let aborted = false
+    let cleaned = false
+    let manifest = ''
+    const runner: Runner = async (args, _input, signal) => {
+      manifest = args[args.indexOf('-f') + 1]!
+      if (args.includes('up')) {
+        assert.ok(signal)
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true
+              reject(new Error('Command aborted'))
+            },
+            { once: true },
+          )
+          process.emit(interrupt)
+        })
+      }
+      if (args.includes('down')) {
+        assert.equal(signal, undefined)
+        assert.deepEqual(args.slice(5), [
+          'down',
+          '--volumes',
+          '--remove-orphans',
+        ])
+        await access(manifest)
+        cleaned = true
+      }
+      return ''
+    }
+    await assert.rejects(rehearseUpgrade(options, runner), /interrupted/)
+    assert.equal(aborted, true)
+    assert.equal(cleaned, true)
+    await assert.rejects(access(dirname(manifest)))
+  })
+}

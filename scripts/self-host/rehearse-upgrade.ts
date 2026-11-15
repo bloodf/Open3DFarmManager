@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util'
 export type Runner = (
   args: string[],
   input?: Buffer | string,
+  signal?: AbortSignal,
 ) => Promise<string>
 export interface Options {
   backup: string
@@ -146,15 +147,17 @@ export async function rehearseUpgrade(options: Options, runner: Runner) {
   const compose = join(directory, 'compose.json')
   const base = ['compose', '--project-name', project, '-f', compose]
   const exec = [...base, 'exec', '-T', 'postgres']
+  const controller = new AbortController()
   let interrupted = false
   const onSignal = () => {
     interrupted = true
+    controller.abort()
   }
   process.on('SIGINT', onSignal)
   process.on('SIGTERM', onSignal)
   const run: Runner = async (args, input) => {
     if (interrupted) throw new Error('Rehearsal interrupted')
-    const result = await runner(args, input)
+    const result = await runner(args, input, controller.signal)
     if (interrupted) throw new Error('Rehearsal interrupted')
     return result
   }
@@ -280,7 +283,7 @@ export async function rehearseUpgrade(options: Options, runner: Runner) {
     }
   } catch {
     failure = new Error(
-      `Rehearsal failed at ${stage} for ${project}; live installation untouched`,
+      `Rehearsal ${interrupted ? 'failed: interrupted' : `failed at ${stage}`} for ${project}; live installation untouched`,
     )
   } finally {
     if (started) {
@@ -307,13 +310,14 @@ export async function rehearseUpgrade(options: Options, runner: Runner) {
   return report
 }
 
-export const dockerRunner: Runner = async (args, input) =>
+export const dockerRunner: Runner = async (args, input, signal) =>
   new Promise((resolve, reject) => {
     const env = { ...process.env }
     for (const key of Object.keys(env))
       if (key.startsWith('COMPOSE_')) delete env[key]
     const child = spawn('docker', args, {
       env,
+      signal,
       stdio: ['pipe', 'pipe', 'ignore'],
     })
     let output = ''

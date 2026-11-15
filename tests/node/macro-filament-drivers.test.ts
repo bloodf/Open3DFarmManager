@@ -395,6 +395,7 @@ for (const [action, args, script] of [
       action,
       args,
     )
+    assert.ok(f.driver.macros, 'router exposes macro discovery')
     assert.deepEqual(f.driver.macros(f.printerBinding), ['CLEAN'])
     const result = await f.dispatch()
     assert.equal(result.kind, 'outcome-unknown')

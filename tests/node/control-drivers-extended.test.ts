@@ -182,6 +182,8 @@ async function authorityFixture(action: Action, args: Args) {
       (action) => action !== 'run_macro',
     ),
   }
+  assert.ok(!capability.actions.includes('run_macro'))
+  assert.ok(capability.actions.includes(action))
   const challenge = {
     v: 1 as const,
     purpose: 'pause-admission' as const,

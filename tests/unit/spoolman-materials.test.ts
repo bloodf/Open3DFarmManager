@@ -33,7 +33,13 @@ describe('Spoolman materials', () => {
     const snapshot = {
       kind: 'observed' as const,
       ageMs: 0,
-      inventory: { items: [spool], farmId: 'a', serviceId: 'b', observedAt: 0 },
+      inventory: {
+        items: [spool],
+        farmId: 'a',
+        serviceId: 'b',
+        observedFrom: 0,
+        observedThrough: 0,
+      },
     }
     expect(await getSpoolmanMaterials(async () => 3, snapshot)).toEqual([
       mapSpoolmanMaterial(spool),

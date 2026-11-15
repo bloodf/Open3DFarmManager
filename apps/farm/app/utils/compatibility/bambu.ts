@@ -8,6 +8,11 @@ export interface BambuCatalogProduct {
   readonly releaseStatus: string
   readonly releaseDate: string | null
   readonly firmwareStatus: string
+  readonly firmwareNotes: readonly {
+    readonly firmware: string
+    readonly note: string
+    readonly sources: readonly string[]
+  }[]
   readonly connection: string
   readonly capabilities: Readonly<
     Record<
@@ -39,6 +44,15 @@ const common = {
   brand: 'Bambu Lab',
   releaseStatus: 'Anunciada; disponibilidade regional não verificada',
   firmwareStatus: 'Desconhecido para este modelo',
+  firmwareNotes: [
+    {
+      firmware: 'Versão desconhecida',
+      note: 'A Bambu anunciou controle de autorização para modelos futuros; a versão instalada e a aplicação neste modelo não foram verificadas. Integração somente simulada.',
+      sources: [
+        'https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/',
+      ],
+    },
+  ],
   connection:
     'Integração e requisitos de conexão não verificados para este modelo',
   capabilities,

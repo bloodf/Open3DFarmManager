@@ -52,11 +52,18 @@ test('staged upload streams multipart to stock HTTP; start sends a 9999 text com
     assert.match(body, /name="file"; filename="test part.gcode"/)
     assert.ok(body.includes('G28\nG1 X10\n'))
     const received = new Promise<unknown>((resolve) =>
-      ws.once('connection', (socket: import('ws').WebSocket) =>
-        socket.once('message', (data, binary) => {
-          assert.equal(binary, false)
-          resolve(JSON.parse(data.toString()))
-        }),
+      ws.once(
+        'connection',
+        (socket: {
+          once(
+            event: 'message',
+            listener: (data: Buffer, binary: boolean) => void,
+          ): unknown
+        }) =>
+          socket.once('message', (data, binary) => {
+            assert.equal(binary, false)
+            resolve(JSON.parse(data.toString()))
+          }),
       ),
     )
     assert.deepEqual(

@@ -247,6 +247,27 @@ export function openMoonrakerClient(input: {
       Math.max(0, 1000 - (performance.now() - lastRequestStarted)),
     )
   }
+  let extensionId: number | undefined
+  let extendSubscription = false
+  function sendExtension() {
+    if (!extendSubscription || pending || finished) return
+    extendSubscription = false
+    extensionId = nextId + 1
+    clearTimeout(queryTimer)
+    pending = { id: ++nextId, started: performance.now() }
+    queryTimeout = setTimeout(
+      () => finish('stale'),
+      input.limits.requestTimeoutMs,
+    )
+    socket!.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: nextId,
+        method: 'printer.objects.subscribe',
+        params: { objects },
+      }),
+    )
+  }
   let lastRequestStarted = 0
   function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
@@ -260,24 +281,11 @@ export function openMoonrakerClient(input: {
       if (reply.success) {
         // Only the discovery request is outstanding until the base subscription.
         if (discovering && reply.data.id !== Number.MAX_SAFE_INTEGER) return
-        // A discovery reply after the fallback cannot replace the baseline.
         if (
           input.discoverObjects &&
-          !discovering &&
-          reply.data.id === Number.MAX_SAFE_INTEGER &&
-          typeof reply.data.result === 'object' &&
-          reply.data.result !== null &&
-          'objects' in reply.data.result
-        )
-          return
-        if (
-          !pending ||
-          (reply.data.id !== pending.id &&
-            !(discovering && reply.data.id === Number.MAX_SAFE_INTEGER)) ||
-          !Object.hasOwn(reply.data, 'result')
-        )
-          throw new Error('Unexpected reply')
-        if (discovering) {
+          reply.data.id === Number.MAX_SAFE_INTEGER
+        ) {
+          const wasDiscovering = discovering
           clearTimeout(discoveryTimer)
           const listed = z
             .object({ objects: z.array(z.string().min(1).max(128)).max(512) })
@@ -298,6 +306,11 @@ export function openMoonrakerClient(input: {
           objects = { ...selectedObjects, ...optional }
           queryObjects = { ...completeObjects, ...optional }
           discovering = false
+          if (!wasDiscovering) {
+            extendSubscription = true
+            sendExtension()
+            return
+          }
           pending = { id: ++nextId, started: performance.now() }
           socket!.send(
             JSON.stringify({
@@ -309,6 +322,12 @@ export function openMoonrakerClient(input: {
           )
           return
         }
+        if (
+          !pending ||
+          reply.data.id !== pending.id ||
+          !Object.hasOwn(reply.data, 'result')
+        )
+          throw new Error('Unexpected reply')
         const received = performance.now(),
           started = pending.started
         if (
@@ -317,6 +336,16 @@ export function openMoonrakerClient(input: {
             received - started >= Math.min(1000, input.limits.requestTimeoutMs))
         )
           throw Error('Late observation')
+        if (reply.data.id === extensionId) {
+          const result = z
+            .object({
+              status: z.record(z.string(), z.unknown()),
+              eventtime: z.number(),
+            })
+            .parse(reply.data.result)
+          input.onStatus([result.status, result.eventtime])
+          extensionId = undefined
+        }
         pending = undefined
         lastRequestStarted = started
         clearTimeout(queryTimeout)
@@ -332,7 +361,8 @@ export function openMoonrakerClient(input: {
           clearTimeout(timer)
           resolveSnapshot(reply.data.result)
         }
-        scheduleQuery()
+        if (extendSubscription) sendExtension()
+        else scheduleQuery()
         return
       }
       const notification = Notification.parse(value)

@@ -1,3 +1,4 @@
+import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
 import { CrealityBinding } from '../config/creality.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
@@ -131,7 +132,24 @@ export function provisionReadonlyPrinter(input: unknown): PrinterBinding {
   return binding
 }
 export function readRuntimePrinterBinding(binding: PrinterBinding) {
-  return readPrinterBinding(binding) ?? readonlyBindings.get(binding) ?? null
+  const mapping = readPrinterBinding(binding)
+  const local = mapping ? kobraLinkBindings.get(binding) : undefined
+  if (mapping && local) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: local.backend,
+      bridgeInstance: local.bridgeInstance,
+      origin: local.origin,
+      deviceId: local.deviceId,
+      id: local.id,
+      revision: local.revision,
+    }
+  }
+  return mapping ?? readonlyBindings.get(binding) ?? null
 }
 
 const bambuBindings = new WeakMap<PrinterBinding, BambuBinding>()
@@ -222,5 +240,34 @@ export function provisionAnycubicPrinter(
 export function readAnycubicPrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding)
     ? (anycubicBindings.get(binding) ?? null)
+    : null
+}
+
+const kobraLinkBindings = new WeakMap<
+  PrinterBinding,
+  import('../kobralink/configuration.ts').KobraLinkRuntimeBinding
+>()
+/** Explicit local command opt-in; read-only snapshot handles remain inert. */
+export function provisionKobraLinkPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(KobraLinkRuntimeBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('KobraLink assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  kobraLinkBindings.set(binding, local)
+  return binding
+}
+export function readKobraLinkPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (kobraLinkBindings.get(binding) ?? null)
     : null
 }

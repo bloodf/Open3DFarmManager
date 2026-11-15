@@ -17,10 +17,9 @@ type CrealitySim = Awaited<ReturnType<typeof createCrealitySimulator>>
 
 const UPLOAD = 'peca-jornada.gcode'
 const GCODE = Buffer.from('; journey\nG28\nG1 X10 Y10 F3000\nM84\n')
-// Temperature, fan, light and homing have no print-state target: the
-// Connector confirms them once the printer acknowledged the one request and
-// reported a fresh state after it.
-const APPLIED = 'Comando confirmado pelo Connector.'
+// These drivers do not supply action-specific confirmation evidence.
+const UNCONFIRMED =
+  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const NOT_SENT = /Nenhum comando foi enviado\./
 
@@ -172,7 +171,7 @@ if (journeyEnabled())
           await control.click()
         },
         'Confirmar comando',
-        APPLIED,
+        UNCONFIRMED,
       )
     }
 
@@ -453,7 +452,7 @@ if (journeyEnabled())
         .getByRole('button', { name: 'Iniciar impressão', exact: true })
         .click()
       await expect(status).toHaveText(
-        'Impressão iniciada. O Connector confirmou o comando.',
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
         { timeout: 60_000 },
       )
       expect(sets()).toContainEqual({

@@ -197,6 +197,7 @@ test('sender opens only after admitted context and sends copied complete genuine
     f.complete()
     assert.deepEqual(f.sent[0], {
       t: 'snapshot',
+      rtcScope: 'loopback',
       connectorVersion: '0.0.1',
       protocolRevision: 1,
       seq: 0,
@@ -487,6 +488,7 @@ test('sender copies optional finite temperatures without making a command or cha
     assert.deepEqual(f.sent, [
       {
         t: 'snapshot',
+        rtcScope: 'loopback',
         connectorVersion: '0.0.1',
         protocolRevision: 1,
         seq: 0,
@@ -506,6 +508,7 @@ test('sender copies optional finite temperatures without making a command or cha
     assert.deepEqual(f.sent, [
       {
         t: 'snapshot',
+        rtcScope: 'loopback',
         connectorVersion: '0.0.1',
         protocolRevision: 1,
         seq: 0,

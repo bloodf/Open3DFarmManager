@@ -166,6 +166,13 @@ function syncDirectory(path: string) {
     closeSync(fd)
   }
 }
+/** Filesystem steps that can fail after a lock is published; tests replace them. */
+export const lockFs = {
+  link: linkSync,
+  unlink: unlinkSync,
+  rename: renameSync,
+  syncDirectory,
+}
 function writeCandidate(path: string, owner: Owner) {
   const candidate = `${path}.${owner.instance}`
   const fd = openSync(candidate, 'wx', 0o600)
@@ -177,25 +184,11 @@ function writeCandidate(path: string, owner: Owner) {
   }
   return candidate
 }
-/**
- * Publishes a complete owner record without replacing anything: write and fsync
- * a unique candidate, then hard-link it into place (EEXIST if present). A crash
- * can leave only a candidate, never an empty lock.
- */
-function writeNew(path: string, owner: Owner) {
-  const candidate = writeCandidate(path, owner)
-  try {
-    linkSync(candidate, path)
-  } finally {
-    unlinkSync(candidate)
-  }
-  syncDirectory(path)
-}
 const ignore = (action: () => void) => {
   try {
     action()
   } catch {
-    // Best-effort removal of leftovers.
+    // Best-effort cleanup; never replaces the error being reported.
   }
 }
 const ours = (path: string, owner: Owner) =>
@@ -203,8 +196,29 @@ const ours = (path: string, owner: Owner) =>
 /** Removes a lock or mutex only while it still holds this instance's record. */
 function release(path: string, owner: Owner) {
   if (!ours(path, owner)) return
-  unlinkSync(path)
-  syncDirectory(path)
+  lockFs.unlink(path)
+  lockFs.syncDirectory(path)
+}
+/**
+ * Publishes a complete owner record without replacing anything: write and fsync
+ * a unique candidate, then hard-link it into place (EEXIST if present). A crash
+ * can leave only a candidate, never an empty lock. A crash between link and
+ * candidate unlink leaves a two-link lock, which needs an operator.
+ */
+function writeNew(path: string, owner: Owner) {
+  const candidate = writeCandidate(path, owner)
+  try {
+    lockFs.link(candidate, path)
+  } finally {
+    ignore(() => lockFs.unlink(candidate))
+  }
+  try {
+    lockFs.syncDirectory(path)
+  } catch (error) {
+    // Not durably ours: give it back rather than hold it unreported.
+    ignore(() => release(path, owner))
+    throw error
+  }
 }
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -221,7 +235,7 @@ const escapeRegExp = (text: string) =>
 export function acquireQueueLock(
   path: string,
   probe: LockProbe = systemLockProbe,
-): { recovered: boolean } {
+): { recovered: boolean; mutexLeft?: true } {
   const owner = describe(probe)
   try {
     writeNew(path, owner)
@@ -231,6 +245,7 @@ export function acquireQueueLock(
     const seen = readPrivate(path)
     if (seen === undefined || !stale(parse(seen), probe)) throw error
     const mutex = path + '.recover'
+    let mutexLeft: true | undefined
     try {
       writeNew(mutex, owner)
     } catch {
@@ -245,19 +260,25 @@ export function acquireQueueLock(
       )
       for (const entry of readdirSync(dirname(path)))
         if (leftover.test(entry))
-          ignore(() => unlinkSync(join(dirname(path), entry)))
+          ignore(() => lockFs.unlink(join(dirname(path), entry)))
       const candidate = writeCandidate(path, owner)
-      renameSync(candidate, path)
+      lockFs.rename(candidate, path)
       try {
-        syncDirectory(path)
+        lockFs.syncDirectory(path)
       } catch (syncError) {
         // Not durably ours: give the lock back rather than hold it unreported.
         ignore(() => release(path, owner))
         throw syncError
       }
     } finally {
-      release(mutex, owner)
+      // Never replaces the error being reported; on success it is surfaced below.
+      try {
+        release(mutex, owner)
+      } catch {
+        mutexLeft = true
+      }
     }
-    return { recovered: true }
+    // The lock is ours, but the next recovery will fail closed on this mutex.
+    return mutexLeft ? { recovered: true, mutexLeft } : { recovered: true }
   }
 }

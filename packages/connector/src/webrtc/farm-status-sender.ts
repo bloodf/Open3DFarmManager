@@ -1,3 +1,7 @@
+import {
+  isLoopbackBindAddress,
+  DEFAULT_RTC_BIND_ADDRESS,
+} from '../config/rtc.ts'
 import { connectorVersionMetadata } from '../status/version.ts'
 import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
@@ -47,6 +51,7 @@ type Client = {
  * A changed mapping requires a new authenticated session, never a stale replay.
  */
 export class FarmStatusSender {
+  #rtcScope: 'loopback' | 'lan'
   #client: Client
   #refs: readonly AssignmentRef[]
   #open: FarmSnapshotProvider
@@ -65,10 +70,16 @@ export class FarmStatusSender {
   #abort = () => this.close('aborted')
   constructor(options: {
     client: Client
+    bindAddress?: string
     assignmentRefs: readonly AssignmentRef[]
     openSnapshots: FarmSnapshotProvider
     signal: AbortSignal
   }) {
+    this.#rtcScope = isLoopbackBindAddress(
+      options.bindAddress ?? DEFAULT_RTC_BIND_ADDRESS,
+    )
+      ? 'loopback'
+      : 'lan'
     this.#client = options.client
     this.#refs = snapshotAssignmentRefs(
       options.assignmentRefs,
@@ -215,7 +226,9 @@ export class FarmStatusSender {
       const message = validatedStatusMessage(
         {
           t: 'snapshot',
-          ...connectorVersionMetadata,
+          ...(this.#seq === 0
+            ? { ...connectorVersionMetadata, rtcScope: this.#rtcScope }
+            : {}),
           seq: this.#seq,
           printers: input.printers,
           ...(input.inventory ? { inventory: input.inventory } : {}),

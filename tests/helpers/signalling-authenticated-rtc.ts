@@ -143,6 +143,11 @@ async function connectorChild(
         ...(process.env.SIGNALLING_HTTPS_CAMERA
           ? { SIGNALLING_HTTPS_CAMERA: process.env.SIGNALLING_HTTPS_CAMERA }
           : {}),
+        ...Object.fromEntries(
+          ['SIGNALLING_HTTPS_SIM_MOONRAKER', 'SIGNALLING_HTTPS_SIM_SPOOLMAN']
+            .filter((key) => process.env[key])
+            .map((key) => [key, process.env[key]!]),
+        ),
       },
     },
   )
@@ -565,6 +570,15 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 packagedFiles: runtime.packagedFiles,
               }),
           )
+          if (process.env.SIGNALLING_HTTPS_SIM_MOONRAKER) {
+            const { testSimulatorFarmPage } =
+              await import('./signalling-sim-farm-page.ts')
+            await testSimulatorFarmPage({ fixture: input, note: session.note })
+            await session.note(
+              'authenticated-farm-page-simulator-inventory-and-readonly-degradation',
+            )
+            return
+          }
           if (process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes') {
             await testAuthenticatedFarmPage({
               fixture: input,

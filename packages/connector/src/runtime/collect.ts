@@ -1,3 +1,9 @@
+import { getSpoolmanMaterials } from './spoolman-materials.ts'
+import {
+  validateMoonrakerInput,
+  moonrakerAuthHeaders,
+  moonrakerSession,
+} from '../config/moonraker.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import { createAnycubicCollection } from './anycubic-collection.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
@@ -26,6 +32,7 @@ import { assertUnscopedCollection } from './queue-scope.ts'
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
   | { kind: 'queue-lock-recovered' }
+  | { kind: 'queue-lock-mutex-left' }
   | {
       kind: 'loss'
       phase: 'recovery' | 'retention'
@@ -164,30 +171,131 @@ export async function collectIntoQueue(input: {
       fail(error)
     }
   }
+  const materialReads = new Set<Promise<void>>()
+  let inventory: SpoolmanSnapshot | undefined
   try {
     if (queue.recoveredStaleLock) diagnostic({ kind: 'queue-lock-recovered' })
+    if (queue.recoveryMutexLeft) diagnostic({ kind: 'queue-lock-mutex-left' })
     loss(queue.recovery, 'recovery')
     if (config.spoolman && !signal.aborted) {
       const provider = createSpoolmanProvider({
         config: config.spoolman,
         signal,
-        ...(input.onInventory ? { onSnapshot: input.onInventory } : {}),
+        onSnapshot(value) {
+          inventory = value
+          input.onInventory?.(value)
+        },
       })
       subscriptions.push({ done: provider.done.catch(fail) })
     }
     for (const assignment of config.printers) {
       if (signal.aborted) break
+      const selected = config.spoolman
+        ? validateMoonrakerInput({
+            assignment,
+            allowedOrigins: config.allowedOrigins,
+            limits: config.limits,
+          })
+        : undefined
+      let cached: RawPrinterObservation['materialsObservation'] | undefined
+      let cachedInventory: SpoolmanSnapshot | undefined
+      let pending = false
+      let latest: RawPrinterObservation | undefined
       const subscription = createMoonrakerSubscription({
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         assignment,
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,
         signal,
-        ...(input.onRawObservation
-          ? { onRawObservation: input.onRawObservation }
-          : {}),
+        onRawObservation(value) {
+          latest = value
+          if (
+            cachedInventory !== inventory ||
+            inventory?.kind !== 'observed' ||
+            (cached && cached.observedAtMonoMs + 5000 <= performance.now())
+          )
+            cached = undefined
+          input.onRawObservation?.({
+            ...value,
+            ...(cached ? { materialsObservation: cached } : {}),
+          })
+          if (!selected || !inventory || pending || !input.onRawObservation)
+            return
+          pending = true
+          const snapshot = inventory
+          const started = performance.now()
+          const read = getSpoolmanMaterials(async () => {
+            const session = moonrakerSession(selected.origin, selected.limits)
+            const headers = session
+              ? await session.getAuthHeaders()
+              : moonrakerAuthHeaders(selected.origin, selected.limits)
+            const response = await fetch(
+              new URL('/server/spoolman/spool_id', selected.origin),
+              {
+                headers,
+                redirect: 'error',
+                credentials: 'omit',
+                signal: AbortSignal.any([
+                  signal,
+                  AbortSignal.timeout(
+                    Math.min(5000, selected.limits.requestTimeoutMs),
+                  ),
+                ]),
+              },
+            )
+            if (!response.ok || !response.body) return null
+            const reader = response.body.getReader()
+            const chunks: Uint8Array[] = []
+            let size = 0
+            try {
+              while (true) {
+                const chunk = await reader.read()
+                if (chunk.done) break
+                size += chunk.value.length
+                if (size > 4096) return null
+                chunks.push(chunk.value)
+              }
+            } finally {
+              await reader.cancel()
+            }
+            const body = JSON.parse(Buffer.concat(chunks).toString())
+            return typeof body?.result?.spool_id === 'number'
+              ? body.result.spool_id
+              : null
+          }, snapshot)
+            .then((materials) => {
+              if (
+                !materials ||
+                signal.aborted ||
+                latest?.epoch !== value.epoch ||
+                inventory !== snapshot ||
+                performance.now() - started >= 5000
+              )
+                return
+              cached = { materials, observedAtMonoMs: started }
+              cachedInventory = snapshot
+              const current = latest
+              input.onRawObservation?.({
+                ...current,
+                receivedAtMonoMs: performance.now(),
+                materialsObservation: cached,
+              })
+            })
+            .catch(() => {})
+            .finally(() => {
+              pending = false
+              materialReads.delete(read)
+            })
+          materialReads.add(read)
+        },
         ...(input.onRawUnavailable
-          ? { onRawUnavailable: input.onRawUnavailable }
+          ? {
+              onRawUnavailable(event) {
+                latest = undefined
+                cached = undefined
+                input.onRawUnavailable?.(event)
+              },
+            }
           : {}),
         onEvent,
       })
@@ -379,6 +487,7 @@ export async function collectIntoQueue(input: {
     fail(error)
   } finally {
     controller.abort()
+    await Promise.all(materialReads)
     await Promise.all(subscriptions.map((subscription) => subscription.done))
     try {
       input.onDiagnostic({ kind: 'summary', ...totals })

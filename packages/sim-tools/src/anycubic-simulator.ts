@@ -69,12 +69,14 @@ export async function startAnycubicSimulator({
   initialState,
   confirmCommands = true,
   credentials,
+  environmentReport,
 }: {
   serial?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
   credentials?: { username: string; password: string }
   confirmCommands?: boolean
+  environmentReport?: unknown
 } = {}) {
   if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
@@ -182,6 +184,21 @@ export async function startAnycubicSimulator({
                 Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),
               )
               if (accepted && gcodeState) report(socket)
+              if (accepted && environmentReport !== undefined) {
+                const topic = Buffer.from(reportTopic)
+                const length = Buffer.alloc(2)
+                length.writeUInt16BE(topic.length)
+                socket.write(
+                  packet(
+                    48,
+                    Buffer.concat([
+                      length,
+                      topic,
+                      Buffer.from(JSON.stringify(environmentReport)),
+                    ]),
+                  ),
+                )
+              }
             } else if (header === 48) {
               if (body.length < 2) throw new Error('Invalid request')
               const length = body.readUInt16BE(0)

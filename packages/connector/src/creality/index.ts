@@ -15,6 +15,15 @@ export interface CrealityTelemetry {
   model?: string
   hostname?: string
   firmwareVersion?: string
+  fans?: { part?: number; aux?: number; chamber?: number }
+  light?: { chamber?: boolean }
+  materials?: Array<{
+    slot: string
+    materialType?: string
+    colorHex?: string
+    remainingPercent?: number
+    active?: boolean
+  }>
 }
 export function decodeCrealityStatus(
   frame: string | Buffer,
@@ -71,6 +80,93 @@ export function decodeCrealityStatus(
     )
       result[target] = value
   }
+  // Stock :9999 status and boxsInfo wire shapes:
+  // https://github.com/DaviBe92/k2-websocket-re
+  const fans: NonNullable<CrealityTelemetry['fans']> = {}
+  for (const [source, target] of [
+    ['modelFanPct', 'part'],
+    ['auxiliaryFanPct', 'aux'],
+    ['caseFanPct', 'chamber'],
+  ] as const) {
+    const n = data[source]
+    if (typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 100)
+      fans[target] = n
+  }
+  if (Object.keys(fans).length) result.fans = fans
+  if (data.lightSw === 0 || data.lightSw === 1)
+    result.light = { chamber: data.lightSw === 1 }
+  const boxInfo = data.boxsInfo
+  if (boxInfo && typeof boxInfo === 'object' && !Array.isArray(boxInfo)) {
+    const boxes = (boxInfo as Record<string, unknown>).materialBoxs
+    if (Array.isArray(boxes) && boxes.length <= 17) {
+      const materials: NonNullable<CrealityTelemetry['materials']> = []
+      const seen = new Set<string>()
+      let valid = true
+      for (const box of boxes) {
+        if (!box || typeof box !== 'object' || Array.isArray(box)) {
+          valid = false
+          break
+        }
+        const b = box as Record<string, unknown>
+        if (
+          !Number.isInteger(b.id) ||
+          (b.id as number) < 0 ||
+          (b.id as number) > 4 ||
+          !Array.isArray(b.materials) ||
+          b.materials.length > 17
+        ) {
+          valid = false
+          break
+        }
+        for (const entry of b.materials) {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            valid = false
+            break
+          }
+          const m = entry as Record<string, unknown>
+          if (
+            !Number.isInteger(m.id) ||
+            (m.id as number) < 0 ||
+            (m.id as number) > 999
+          ) {
+            valid = false
+            break
+          }
+          const slot = `${b.id}:${m.id}`
+          if (seen.has(slot) || materials.length >= 17) {
+            valid = false
+            break
+          }
+          seen.add(slot)
+          const material: NonNullable<CrealityTelemetry['materials']>[number] =
+            { slot }
+          if (
+            typeof m.type === 'string' &&
+            m.type.length > 0 &&
+            m.type.length <= 64 &&
+            !/[\x00-\x1f\x7f-\x9f]/.test(m.type)
+          )
+            material.materialType = m.type
+          if (typeof m.color === 'string') {
+            const match = /^#(?:0)?([0-9a-f]{6})$/i.exec(m.color)
+            if (match) material.colorHex = `${match[1]!.toUpperCase()}FF`
+          }
+          if (
+            typeof m.percent === 'number' &&
+            Number.isFinite(m.percent) &&
+            m.percent >= 0 &&
+            m.percent <= 100
+          )
+            material.remainingPercent = m.percent
+          if (m.selected === 0 || m.selected === 1)
+            material.active = m.selected === 1
+          materials.push(material)
+        }
+        if (!valid) break
+      }
+      if (valid) result.materials = materials
+    }
+  }
   return result
 }
 
@@ -78,6 +174,7 @@ export function createCrealityTelemetryClient(options: {
   host: string
   port?: number
   onTelemetry: (report: CrealityTelemetry) => void
+  onDisconnect?: () => void
   reconnectDelayMs?: number
   maxReconnectDelayMs?: number
 }) {
@@ -124,6 +221,7 @@ export function createCrealityTelemetryClient(options: {
       }
     })
     socket.once('close', () => {
+      if (!stopped) options.onDisconnect?.()
       if (stopped) {
         resolveDone()
         return

@@ -99,6 +99,9 @@ export async function createCrealitySimulator(
     get state() {
       return { ...currentFrame }
     },
+    emitFrame(frame: object) {
+      broadcast(frame)
+    },
     disconnect() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const socket of server.clients as Set<any>) socket.terminate()

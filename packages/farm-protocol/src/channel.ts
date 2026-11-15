@@ -4,6 +4,7 @@ import { SpoolInventory } from './inventory.ts'
 
 export const StatusMessage = z.strictObject({
   t: z.literal('snapshot'),
+  rtcScope: z.enum(['loopback', 'lan']).optional(),
   connectorVersion: z.string().min(1).max(128).optional(),
   protocolRevision: z
     .number()

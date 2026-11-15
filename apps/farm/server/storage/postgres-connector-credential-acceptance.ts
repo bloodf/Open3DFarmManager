@@ -303,17 +303,24 @@ export class PostgresConnectorCredentialAcceptance {
           let candidateCheckedAt: number | undefined
           let candidateClockRegressed = false
           let admitted = false
-          const hint =
-            this.config.purpose === 'telemetry-ingestion'
-              ? tokenJtiHint(request.token)
-              : null
-          // A legacy root-only acceptor may also be configured for generic
-          // telemetry proofs. Invalid hints must not require new table grants.
+          const hint = tokenJtiHint(request.token)
+          // Telemetry adopts successors through the writer role (0022) and
+          // signalling through the acceptor grants (0026). A legacy root-only
+          // acceptor, or a database before 0026, keeps the root-only path:
+          // an invalid or unknown hint must not require new table grants.
           const mayReadSuccessors =
             hint !== null &&
             hint !== root.jti &&
             (
-              await tx`SELECT pg_has_role(current_user,'farm_connector_telemetry_writer','USAGE') AS allowed`
+              await tx`SELECT CASE
+                WHEN ${this.config.purpose}='telemetry-ingestion' THEN pg_has_role(current_user,'farm_connector_telemetry_writer','USAGE')
+                WHEN to_regclass('farm.connector_successor_proofs') IS NULL THEN false
+                ELSE has_table_privilege(current_user,'farm.connector_credential_successors','SELECT')
+                  AND has_table_privilege(current_user,'farm.connector_successor_proofs','INSERT')
+                  AND has_table_privilege(current_user,'farm.connector_successor_proofs','SELECT')
+                  AND has_any_column_privilege(current_user,'farm.connector_successor_proofs','UPDATE')
+                  AND has_any_column_privilege(current_user,'farm.connector_credential_successors','UPDATE')
+              END AS allowed`
             )[0]?.allowed === true
           if (mayReadSuccessors) {
             const candidate = (

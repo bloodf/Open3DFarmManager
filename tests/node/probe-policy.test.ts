@@ -36,15 +36,15 @@ test('an injected fixture policy permits a read-only probe', async () => {
     res.end(JSON.stringify({ result: { moonraker_version: 'fixture' } }))
   })
   await new Promise<void>((resolve) =>
-    server.listen(7125, '127.0.0.2', resolve),
+    server.listen(7125, '127.0.0.1', resolve),
   )
   try {
     const result = await scanConfigurationDiscovery(
       {} as ConfigurationAuthority,
       'allowed',
       undefined,
-      '127.0.0.2',
-      { allows: (host) => host === '127.0.0.2' },
+      '127.0.0.1',
+      { allows: (host) => host === '127.0.0.1' },
     )
     assert.equal(result.ok, true)
     assert.equal(requests, 1)

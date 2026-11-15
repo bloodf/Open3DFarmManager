@@ -1,3 +1,5 @@
+import { simulatorRtcFarmScenarios } from './rtc-farm-acceptance-sim-scenarios.ts'
+
 /**
  * Composable rows for scripts/test-rtc-farm-acceptance.ts. Each row is one fresh
  * `scripts/test-signalling-https.ts --run` against the shared disposable cluster
@@ -77,6 +79,8 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         'farm-page-camera-detached-no-helper',
       ],
     },
+    // Opt-in genuine-simulator row; absent unless its origins are set.
+    ...simulatorRtcFarmScenarios(),
   })
 
 export function selectRtcFarmScenarios(list: string | undefined) {

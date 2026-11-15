@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { test } from 'node:test'
+import type { CameraAccessUnit } from '../../packages/connector/src/camera/session.ts'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -192,11 +193,7 @@ test(
               startCapture: sim.startCapture,
               stopCapture: sim.stopCapture,
             }
-      let iterator:
-        | AsyncIterator<
-            import('../../packages/connector/src/camera/session.ts').CameraAccessUnit
-          >
-        | undefined
+      let iterator: AsyncIterator<CameraAccessUnit> | undefined
       try {
         const media = await openAnycubicCameraSource({
           source,
@@ -211,7 +208,7 @@ test(
         assert.ok(first.value.data.length > 20)
         let previous = first.value.timestampUs
         for (let i = 0; i < (kind === 'stock' ? 5 : 1); i++) {
-          const next = await iterator.next()
+          const next: IteratorResult<CameraAccessUnit> = await iterator.next()
           assert.equal(next.done, false)
           assert.ok(next.value.timestampUs > previous)
           previous = next.value.timestampUs

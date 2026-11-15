@@ -57,10 +57,13 @@ export type JobHistoryListResult =
 
 export class PostgresJobHistory {
   private inflight = 0
-  constructor(
-    private readonly sql: Sql,
-    private readonly clock: () => number = Date.now,
-  ) {}
+  private readonly sql: Sql
+  private readonly clock: () => number
+
+  constructor(sql: Sql, clock: () => number = Date.now) {
+    this.sql = sql
+    this.clock = clock
+  }
   async list(input: JobHistoryListInput): Promise<JobHistoryListResult> {
     if (
       !inventoryUuid.test(input.farmId) ||

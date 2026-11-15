@@ -1,3 +1,4 @@
+import type { FarmSnapshotProvider } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 import { randomUUID } from 'node:crypto'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import { test } from 'node:test'

@@ -282,6 +282,13 @@ export async function startVendorSimulator(
         serial: `${MODEL_ID}/${deviceId}`,
         credentials: { username, password },
         initialState: 'RUNNING',
+        // A started file prints for a few seconds, then completes by itself.
+        printDurationMs: 8000,
+        // State changes are reported at once; the repeated report is slow
+        // enough for the Connector's telemetry queue to run empty between
+        // uploads. A queue that never empties uploads without pause and keeps
+        // the credential proof slot away from both signalling inboxes.
+        reportIntervalMs: 3000,
       })
       undo.push(() => sim.close())
       sim.setPrintProgress(25)
@@ -304,6 +311,9 @@ export async function startVendorSimulator(
         await privateJson(passwordFile, password)
         return {
           version: 5,
+          // Uploads and both signalling inboxes share one credential proof
+          // slot on the server; spaced uploads leave it free for commands.
+          telemetryIdleMs: 5000,
           collection: {
             version: 5,
             allowedOrigins: [],

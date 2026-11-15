@@ -452,12 +452,21 @@ export async function createRuntimeMoonrakerFixture() {
         let bytes = 0,
           errors = 0,
           buffer = ''
+        let stderrTail = ''
         const closed = new Promise<void>((resolve) => {
           child.once('error', () => {
             failure = true
           })
           child.once('close', (code, signal) => {
-            if (code !== 0 || signal !== null || buffer.length) failure = true
+            if (code !== 0 || signal !== null || buffer.length) {
+              failure = true
+              // Why the packaged Connector did not stop cleanly.
+              console.error(
+                'Packaged Connector exit',
+                JSON.stringify({ code, signal, pending: buffer.length }),
+                stderrTail,
+              )
+            }
             settled = true
             resolve()
           })
@@ -490,6 +499,7 @@ export async function createRuntimeMoonrakerFixture() {
         })
         child.stderr.on('data', (chunk: Buffer) => {
           errors += chunk.length
+          stderrTail = (stderrTail + chunk.toString()).slice(-1500)
           if (errors > 16384) {
             failure = true
             child.kill('SIGTERM')

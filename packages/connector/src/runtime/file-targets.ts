@@ -56,6 +56,16 @@ export function createFileTargets(input: {
         list: { backend: 'creality' },
       }
     }
+    // The Anycubic LAN library documents neither an upload body nor a
+    // listing schema (anycubic/files.ts). The target still exists so the page
+    // is answered "unsupported" instead of being refused as unauthorized.
+    if (
+      collection.version === 5 &&
+      collection.anycubic.printers.some(
+        (printer) => printer.printerKey === controlledKey,
+      )
+    )
+      return { upload: { backend: 'anycubic' }, list: { backend: 'anycubic' } }
     return undefined
   }
   const provisioned = targets()

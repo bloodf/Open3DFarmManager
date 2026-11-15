@@ -36,10 +36,13 @@ export type ConnectorsPage = {
 
 /** Fresh authorization and bounded reads share the account -> session -> membership transaction. */
 export class PostgresConnectorInventory {
-  constructor(
-    private readonly sql: Sql,
-    private readonly clock: () => number = Date.now,
-  ) {}
+  private readonly sql: Sql
+  private readonly clock: () => number
+
+  constructor(sql: Sql, clock: () => number = Date.now) {
+    this.sql = sql
+    this.clock = clock
+  }
 
   private valid(input: InventoryPageInput): boolean {
     return (

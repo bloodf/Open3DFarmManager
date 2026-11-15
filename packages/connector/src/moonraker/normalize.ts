@@ -18,6 +18,54 @@ function parsePinValue(raw: unknown): boolean | undefined {
   return value > 0
 }
 
+const OUTCOMES = {
+  complete: 'completed',
+  cancelled: 'cancelled',
+  error: 'failed',
+} as const
+
+/**
+ * Finished-job summary from a ready printer's terminal print_stats state.
+ * Kept apart from the per-snapshot projection: Moonraker keeps reporting the
+ * terminal state until the next print, so only a stateful caller can say when
+ * the job ended.
+ */
+export function moonrakerLastJob(
+  status: Readonly<{
+    webhooks: { state: string }
+    print_stats: Readonly<Record<string, unknown>>
+  }>,
+  observedAt: number,
+): PrinterState['lastJob'] {
+  const stats = status.print_stats
+  const outcome =
+    status.webhooks.state === 'ready' &&
+    typeof stats.state === 'string' &&
+    Object.hasOwn(OUTCOMES, stats.state)
+      ? OUTCOMES[stats.state as keyof typeof OUTCOMES]
+      : undefined
+  if (outcome === undefined) return undefined
+  const valid = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+  const filename =
+    typeof stats.filename === 'string'
+      ? stats.filename
+          .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+          .slice(0, 255)
+      : ''
+  return {
+    outcome,
+    ...(filename ? { filename } : {}),
+    ...(valid(stats.print_duration)
+      ? { printDuration: stats.print_duration }
+      : {}),
+    ...(valid(stats.total_duration)
+      ? { totalDuration: stats.total_duration }
+      : {}),
+    endedAt: observedAt,
+  }
+}
+
 export function normalizeMoonrakerSnapshot(
   snapshot: ValidatedMoonrakerSnapshot,
   context: ObservationContext,

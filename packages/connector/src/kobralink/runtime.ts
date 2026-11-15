@@ -116,3 +116,40 @@ export function readKobraLinkCredential(binding: KobraLinkRuntimeBinding) {
     }),
   )
 }
+
+/** Fresh Connector-owned session per file operation, with the channel's abort signal.
+ * Wire source: https://github.com/NatHacks/Kobralink/blob/5a5e5d9b1e3b9ad4f0760672cf7dc4bb8c85f5e1/apps/api/src/core/core.controller.ts
+ */
+export function createKobraLinkFilesTarget(input: {
+  binding: KobraLinkRuntimeBinding
+  allowedOrigins: readonly string[]
+  fetch?: KobraLinkOptions['fetch']
+}) {
+  const binding = KobraLinkRuntimeBinding.parse(input.binding)
+  return {
+    backend: 'kobralink' as const,
+    binding: { id: binding.id, deviceId: binding.deviceId },
+    async client(signal: AbortSignal) {
+      const credential = readKobraLinkCredential(binding)
+      const client = createKobraLinkClient({
+        origin: binding.origin,
+        allowedOrigins: input.allowedOrigins,
+        signal,
+        ...(input.fetch ? { fetch: input.fetch } : {}),
+      })
+      try {
+        await client.authenticate({
+          ownership: 'fresh_owned',
+          mode: 'signin',
+          name: credential.name,
+          email: credential.email,
+          password: credential.password,
+        })
+        return client
+      } catch (error) {
+        client.clearSession()
+        throw error
+      }
+    },
+  }
+}

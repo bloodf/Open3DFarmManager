@@ -17,12 +17,14 @@ const uploadReply = z.union([
     type: z.literal('result'),
     transfer_id: z.string(),
     ok: z.literal(true),
+    library: z.literal(true).optional(),
   }),
   z.strictObject({
     type: z.literal('result'),
     transfer_id: z.string(),
     ok: z.literal(false),
     reason: z.enum([
+      'unsupported',
       'unauthorized',
       'too-large',
       'timeout',

@@ -8,7 +8,15 @@ export function anycubicControls(
   model: string,
 ): readonly ExtendedControlAction[] {
   return supportedAnycubicActions(model).length
-    ? ['pause', 'resume', 'cancel', 'set_temperature', 'set_fan', 'set_light']
+    ? [
+        'pause',
+        'resume',
+        'cancel',
+        'set_temperature',
+        'set_fan',
+        'set_light',
+        'start_print',
+      ]
     : []
 }
 

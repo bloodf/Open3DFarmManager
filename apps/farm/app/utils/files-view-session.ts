@@ -25,6 +25,7 @@ export function createFilesSession(input: {
   changed(state: FilesState): void
   files(files: PrinterFile[]): void
 }) {
+  let printRefs = new Map<string, string>()
   let active: AbortController | undefined
   async function run(
     work: (
@@ -68,7 +69,24 @@ export function createFilesSession(input: {
       return run(async (session, signal, publish) => {
         const result = await session.listFiles(printerKey)
         signal.throwIfAborted()
-        if (!result.ok) throw Error('File list rejected')
+        if (!result.ok) {
+          if (result.reason === 'unsupported') {
+            input.files([])
+            printRefs.clear()
+            publish({
+              kind: 'error',
+              message:
+                'Listagem não suportada pela biblioteca desta impressora.',
+            })
+            return
+          }
+          throw Error('File list rejected')
+        }
+        printRefs = new Map(
+          result.files.flatMap((file) =>
+            file.printRef ? [[file.name, file.printRef]] : [],
+          ),
+        )
         input.files(result.files)
         publish({
           kind: 'done',
@@ -109,7 +127,27 @@ export function createFilesSession(input: {
           publish({ kind: 'uploading', sent, total: file.size }),
         )
         signal.throwIfAborted()
-        if (!result.ok) throw Error('Upload rejected')
+        if (!result.ok) {
+          if (result.reason === 'unsupported') {
+            publish({
+              kind: 'error',
+              message: 'Envio não suportado pela biblioteca desta impressora.',
+            })
+            return
+          }
+          throw Error('Upload rejected')
+        }
+        if (result.library) {
+          input.files([])
+          printRefs.clear()
+          publish({
+            kind: 'done',
+            message:
+              'Arquivo enviado à biblioteca da ponte. Atualize a lista para selecionar e iniciar a impressão.',
+          })
+          return
+        }
+        printRefs.clear()
         input.files([{ name: file.name, size: file.size, modified: 0 }])
         publish({
           kind: 'done',
@@ -125,7 +163,7 @@ export function createFilesSession(input: {
         if (!input.available()) throw Error('Unavailable')
         publish({ kind: 'starting' })
         const outcome = await session.issueControlCommand('start_print', {
-          file: name,
+          file: printRefs.get(name) ?? name,
         })
         publish({ kind: 'done', message: printOutcomeText(outcome) })
       })

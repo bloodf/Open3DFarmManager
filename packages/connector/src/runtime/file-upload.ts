@@ -9,9 +9,23 @@ import {
   uploadMoonrakerFile,
   MoonrakerUploadError,
 } from '../moonraker/upload.ts'
+import { uploadCrealityFile } from '../creality/files.ts'
+import type {
+  createKobraLinkClient,
+  PrinterBinding,
+} from '../kobralink/client.ts'
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
+  | { backend: 'creality'; origin: string }
+  | { backend: 'anycubic' }
+  | {
+      backend: 'kobralink'
+      client(
+        signal: AbortSignal,
+      ): Promise<ReturnType<typeof createKobraLinkClient>>
+      binding: PrinterBinding
+    }
   | { backend: 'moonraker'; origin: string; apiKey?: string }
   | ({ backend: 'bambu' } & Omit<
       Parameters<typeof uploadBambuFile>[0],
@@ -22,12 +36,18 @@ export type FileUploadOptions = Readonly<{
   targetFor(printerKey: string): FileUploadTarget | undefined
 }>
 export type FileUploadResult =
-  | { type: 'result'; transfer_id: string; ok: true }
+  | {
+      type: 'result'
+      transfer_id: string
+      ok: true
+      library?: true | undefined
+    }
   | {
       type: 'result'
       transfer_id: string
       ok: false
       reason:
+        | 'unsupported'
         | 'unauthorized'
         | 'too-large'
         | 'timeout'
@@ -68,6 +88,7 @@ export function createFileUpload(
   }
   async function process(raw: unknown) {
     let forwarding = false
+    let library = false
     try {
       if (!offer) {
         if (used || typeof raw !== 'string' || raw.length > 2048)
@@ -84,7 +105,14 @@ export function createFileUpload(
           } satisfies FileUploadResult)
           return
         }
-        if (!input.targetFor(offer.printer_key)) throw Error('offline')
+        const target = input.targetFor(offer.printer_key)
+        if (!target) throw Error('offline')
+        if (
+          target.backend === 'anycubic' ||
+          ((target.backend === 'creality' || target.backend === 'kobralink') &&
+            !/\.gcode$/i.test(offer.name))
+        )
+          throw Error('unsupported')
         transfer = await receiver.offer(offer)
         if (closed || !authorized()) throw Error('unauthorized')
         send({ type: 'accept' })
@@ -119,14 +147,29 @@ export function createFileUpload(
           signal: controller.signal,
         }
         forwarding = true
+        library = target.backend === 'kobralink'
         if (target.backend === 'moonraker')
           await uploadMoonrakerFile({ ...target, ...common })
-        else await uploadBambuFile({ ...target, ...common })
+        else if (target.backend === 'bambu')
+          await uploadBambuFile({ ...target, ...common })
+        else if (target.backend === 'creality')
+          await uploadCrealityFile({ ...target, ...common })
+        else if (target.backend === 'kobralink') {
+          controller.signal.throwIfAborted()
+          const client = await target.client(controller.signal)
+          try {
+            if (closed || !authorized()) throw Error('unauthorized')
+            await client.uploadFile(target.binding, filePath, common.name)
+          } finally {
+            client.clearSession()
+          }
+        } else throw Error('unsupported')
       })
       send({
         type: 'result',
         transfer_id: offer.transfer_id,
         ok: true,
+        ...(library ? { library: true as const } : {}),
       } satisfies FileUploadResult)
     } catch (error) {
       await transfer?.abort()
@@ -136,7 +179,9 @@ export function createFileUpload(
         : error instanceof MoonrakerUploadError
           ? error.reason
           : error instanceof Error &&
-              ['unauthorized', 'offline', 'aborted'].includes(error.message)
+              ['unauthorized', 'offline', 'aborted', 'unsupported'].includes(
+                error.message,
+              )
             ? error.message
             : forwarding
               ? 'offline'

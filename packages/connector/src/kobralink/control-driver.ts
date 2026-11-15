@@ -79,6 +79,18 @@ export function openFixedKobraLinkControl(input: {
         action: 'light',
         args: command.args,
       })
+    } else if (
+      action === 'start_print' &&
+      typeof args.file === 'string' &&
+      args.file.startsWith('kobralink-library:')
+    ) {
+      const id = args.file.slice('kobralink-library:'.length)
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(id))
+        throw new Error('Invalid library file')
+      await client.startLibraryFile(
+        { id: local!.id, deviceId: local!.deviceId },
+        id,
+      )
     } else
       await client.controlExtendedPrinter(
         local!.id,

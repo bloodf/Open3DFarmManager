@@ -1,4 +1,8 @@
 <script setup lang="ts">
+const hydrated = ref(false)
+onMounted(() => {
+  hydrated.value = true
+})
 import { completeAuth } from '../utils/auth-invalidation.ts'
 
 const props = defineProps<{
@@ -70,7 +74,6 @@ async function submit() {
     <input
       id="account-token"
       v-model="token"
-      name="token"
       :type="secretToken ? 'password' : 'text'"
       autocomplete="off"
       autocapitalize="none"
@@ -84,7 +87,6 @@ async function submit() {
     <input
       id="account-username"
       v-model="username"
-      name="username"
       autocomplete="username"
       autocapitalize="none"
       :spellcheck="false"
@@ -102,7 +104,6 @@ async function submit() {
     <input
       id="account-password"
       v-model="password"
-      name="password"
       type="password"
       autocomplete="new-password"
       required
@@ -112,9 +113,10 @@ async function submit() {
     />
     <p id="account-password-help" class="help">Use 12 caracteres ou mais.</p>
     <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
-    <button type="submit" :disabled="pending">
+    <button type="submit" :disabled="pending || !hydrated">
       {{ pending ? 'Criando conta…' : submitLabel }}
     </button>
+    <p role="status" v-if="!hydrated">Preparando o formulário</p>
     <p role="status">{{ pending ? 'Criando sua conta.' : '' }}</p>
   </form>
 </template>

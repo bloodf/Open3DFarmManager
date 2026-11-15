@@ -1,4 +1,8 @@
 <script setup lang="ts">
+const hydrated = ref(false)
+onMounted(() => {
+  hydrated.value = true
+})
 const username = ref('')
 const password = ref('')
 const token = ref('')
@@ -82,7 +86,10 @@ async function submit(complete: boolean) {
         required
         :disabled="pending"
       />
-      <button type="submit" :disabled="pending">Redefinir senha</button>
+      <button type="submit" :disabled="pending || !hydrated">
+        Redefinir senha
+      </button>
+      <p v-if="!hydrated" role="status">Preparando o formulário</p>
       <p role="status" aria-live="polite">
         {{ pending ? 'Processando solicitação.' : message }}
       </p>

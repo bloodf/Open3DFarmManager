@@ -1,4 +1,8 @@
 <script setup lang="ts">
+const hydrated = ref(false)
+onMounted(() => {
+  hydrated.value = true
+})
 import { completeAuth } from '../utils/auth-invalidation.ts'
 
 const username = ref('')
@@ -59,7 +63,6 @@ async function login() {
       <input
         id="username"
         v-model="username"
-        name="username"
         autocomplete="username"
         autocapitalize="none"
         :spellcheck="false"
@@ -77,16 +80,16 @@ async function login() {
       <input
         id="password"
         v-model="password"
-        name="password"
         type="password"
         autocomplete="current-password"
         required
         :disabled="pending"
       />
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
-      <button type="submit" :disabled="pending">
+      <button type="submit" :disabled="pending || !hydrated">
         {{ pending ? 'Entrando…' : 'Entrar' }}
       </button>
+      <p role="status" v-if="!hydrated">Preparando o formulário</p>
       <p role="status">{{ pending ? 'Verificando seus dados.' : '' }}</p>
     </form>
     <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>

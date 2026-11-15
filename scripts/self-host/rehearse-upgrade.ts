@@ -130,7 +130,7 @@ export function disposableCompose(project: string, image: string) {
   }
 }
 
-export async function rehearseUpgrade(options: Options, run: Runner) {
+export async function rehearseUpgrade(options: Options, runner: Runner) {
   if (!options.backup || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(options.to))
     throw new Error('Backup and target version required')
   if (
@@ -146,6 +146,18 @@ export async function rehearseUpgrade(options: Options, run: Runner) {
   const compose = join(directory, 'compose.json')
   const base = ['compose', '--project-name', project, '-f', compose]
   const exec = [...base, 'exec', '-T', 'postgres']
+  let interrupted = false
+  const onSignal = () => {
+    interrupted = true
+  }
+  process.on('SIGINT', onSignal)
+  process.on('SIGTERM', onSignal)
+  const run: Runner = async (args, input) => {
+    if (interrupted) throw new Error('Rehearsal interrupted')
+    const result = await runner(args, input)
+    if (interrupted) throw new Error('Rehearsal interrupted')
+    return result
+  }
   let started = false
   let retainManifest = false
   let stage = 'prepare'
@@ -215,6 +227,13 @@ export async function rehearseUpgrade(options: Options, run: Runner) {
       )
     stage = 'read baseline'
     const before = await snapshot()
+    if (
+      !Object.keys(before.counts).some((table) => table.startsWith('farm.')) ||
+      !Object.values(before.configuration).some((rows) => rows.length > 0)
+    )
+      throw new Error(
+        'Restored backup has no application tables or configuration rows',
+      )
     stage = 'migrate release'
     await run([
       ...base,
@@ -266,7 +285,7 @@ export async function rehearseUpgrade(options: Options, run: Runner) {
   } finally {
     if (started) {
       try {
-        await run([...base, 'down', '--volumes', '--remove-orphans'])
+        await runner([...base, 'down', '--volumes', '--remove-orphans'])
       } catch {
         retainManifest = true
         failure = new Error(
@@ -274,7 +293,14 @@ export async function rehearseUpgrade(options: Options, run: Runner) {
         )
       }
     }
-    if (!retainManifest) await rm(directory, { recursive: true, force: true })
+    try {
+      if (!retainManifest) await rm(directory, { recursive: true, force: true })
+    } finally {
+      process.off('SIGINT', onSignal)
+      process.off('SIGTERM', onSignal)
+    }
+    if (interrupted && !failure)
+      failure = new Error('Rehearsal failed: interrupted')
   }
   if (failure) throw failure
   if (!report) throw new Error('Rehearsal produced no report')

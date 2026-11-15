@@ -62,6 +62,8 @@ test('status configuration and projection reject unsafe values and omit secrets'
     path: '/private',
   }
   assert.deepEqual(projectStatus(privateState), {
+    connectorVersion: '0.0.1',
+    protocolRevision: 1,
     queueDepth: 2,
     delivered: 3,
     retries: 1,

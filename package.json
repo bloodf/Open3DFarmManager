@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit && pnpm --dir apps/farm typecheck",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:journey": "OPENFARM_JOURNEY=1 playwright test -c playwright.journey.config.ts",
     "test:e2e:auth-session": "node scripts/test-auth-session-e2e.ts",
     "test:rtc-farm": "node scripts/test-rtc-farm-acceptance.ts",
     "test:connector-outage": "node scripts/test-connector-outage-recovery.ts",

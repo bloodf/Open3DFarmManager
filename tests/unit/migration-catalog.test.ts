@@ -19,6 +19,7 @@ describe('migration catalog', () => {
     )
     expect(repository[22]?.id).toBe('0023_connector_credential_renewals')
     expect(repository[24]?.id).toBe('0025_schema_reader')
+    expect(repository[29]?.id).toBe('0030_signalling_successor_credentials')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )

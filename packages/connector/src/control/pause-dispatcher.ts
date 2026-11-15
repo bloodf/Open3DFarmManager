@@ -738,10 +738,15 @@ export function createPauseDispatcher(config: {
             return
           }
           const observation = parsed.data
+          // A lifecycle action is confirmed by its target print state. Any
+          // other action has no print-state target: it is confirmed by a
+          // fresh, ready observation the driver read after the acknowledged
+          // send. That proves the printer kept serving this connection, not
+          // that the setting took effect.
           if (
-            !['pause', 'resume', 'cancel'].includes(command.action) ||
             !observation.ready ||
-            observation.printState !== controlTargetState(command.action) ||
+            (['pause', 'resume', 'cancel'].includes(command.action) &&
+              observation.printState !== controlTargetState(command.action)) ||
             observation.assignmentId !== mapping.assignment_id ||
             observation.printerKey !== mapping.printer_key ||
             observation.connectionGeneration !== cursor.connectionGeneration ||

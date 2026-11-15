@@ -69,6 +69,13 @@ type Options = Readonly<{
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   clock?: ChannelClock
+  /**
+   * Locally provisioned file operations for the control peer. Both need the
+   * admitted capability, so they are only passed with `getAdmittedHandle`.
+   */
+  fileTransfer?: PeerOptions['fileTransfer']
+  fileList?: PeerOptions['fileList']
+  getAdmittedHandle?: PeerOptions['getAdmittedHandle']
 }>
 /** Separate pause transport only. Current server authority and actual RTC proofs
  * are necessary but never confer capability or dispatch permission. */
@@ -396,6 +403,17 @@ export class PauseConnectorSignallingClient {
           ...(s.keyId !== undefined ? { keyId: s.keyId } : {}),
         },
         expectedBinding: this.#binding,
+        ...(this.#options.getAdmittedHandle
+          ? {
+              getAdmittedHandle: this.#options.getAdmittedHandle,
+              ...(this.#options.fileTransfer
+                ? { fileTransfer: this.#options.fileTransfer }
+                : {}),
+              ...(this.#options.fileList
+                ? { fileList: this.#options.fileList }
+                : {}),
+            }
+          : {}),
         ...(caps.authDeadline !== undefined
           ? { authDeadline: caps.authDeadline }
           : {}),

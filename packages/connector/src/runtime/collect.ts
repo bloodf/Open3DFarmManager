@@ -382,7 +382,19 @@ export async function collectIntoQueue(input: {
         let sourceTime = -1
         let observedMono = -1
         let disconnectedMono = -1
+        // The bridge keeps reporting a finished job with a fresh `updatedAt`
+        // on every poll. The first observation of an ended job fixes its end
+        // time; it is repeated unchanged until another job ends.
+        let lastJob: PrinterState['lastJob']
+        let ended = false
+        // The bridge is polled every second and its `updatedAt` always moves.
+        // Only a changed state is queued for the cloud: an unchanged snapshot
+        // per poll would keep the telemetry upload, and with it the
+        // credential proof slot signalling shares, permanently busy. The live
+        // view still receives every raw observation.
+        let queuedState: string | undefined
         const unavailable = () => {
+          queuedState = undefined
           input.onRawUnavailable?.({
             printerKey: binding.printerKey,
             epoch: epoch++,
@@ -415,7 +427,10 @@ export async function collectIntoQueue(input: {
                 receivedAtMonoMs: now,
                 fieldObservedAtMonoMs: { connection: now },
               })
-              onEvent({ kind: 'snapshot', printer })
+              if (queuedState !== 'offline') {
+                queuedState = 'offline'
+                onEvent({ kind: 'snapshot', printer })
+              }
               return
             }
             const age =
@@ -449,12 +464,14 @@ export async function collectIntoQueue(input: {
               status.printState === 'complete'
                 ? 'idle'
                 : status.printState
+            if (status.lastJob && !ended) lastJob = status.lastJob
+            ended = status.lastJob !== undefined
             const printer: PrinterState = {
               printerKey: binding.printerKey,
               state,
               progress: status.progress,
               observedAt: status.observedAt,
-              ...(status.lastJob ? { lastJob: status.lastJob } : {}),
+              ...(lastJob ? { lastJob } : {}),
             }
             input.onRawObservation?.({
               printerKey: binding.printerKey,
@@ -467,7 +484,15 @@ export async function collectIntoQueue(input: {
                 progress: observedMono,
               },
             })
-            onEvent({ kind: 'snapshot', printer, sourceEventtime: sourceTime })
+            const queued = JSON.stringify([state, status.progress, lastJob])
+            if (queuedState !== queued) {
+              queuedState = queued
+              onEvent({
+                kind: 'snapshot',
+                printer,
+                sourceEventtime: sourceTime,
+              })
+            }
           },
         })
         subscriptions.push({ done: sub.done.catch(fail) })

@@ -826,8 +826,8 @@ for (const backend of ['creality', 'anycubic', 'kobralink'] as const) {
         true,
         control,
       )
-      // Extended commands retain the dispatcher's unconfirmed outcome contract.
-      assert.equal(await f.start(filename), 'outcome-unknown')
+      // The fresh state read after the send confirms an extended command.
+      assert.equal(await f.start(filename), 'applied')
       check()
     },
   )
@@ -905,7 +905,10 @@ test(
     assert.deepEqual(fixture.starts, [
       { fileId: 'file-1', excludedObjects: [] },
     ])
-    assert.match(JSON.stringify(states.at(-1)), /Resultado desconhecido/)
+    assert.match(
+      JSON.stringify(states.at(-1)),
+      /Impressão iniciada\. O Connector confirmou o comando\./,
+    )
   },
 )
 

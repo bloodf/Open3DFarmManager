@@ -398,8 +398,9 @@ for (const [action, args, script] of [
     assert.ok(f.driver.macros, 'router exposes macro discovery')
     assert.deepEqual(f.driver.macros(f.printerBinding), ['CLEAN'])
     const result = await f.dispatch()
-    assert.equal(result.kind, 'outcome-unknown')
-    assert.equal(result.reason, 'state-unconfirmed')
+    // No print-state target: the fresh report read after the send confirms it.
+    assert.equal(result.kind, 'applied')
+    assert.equal(result.reason, 'applied')
     assert.deepEqual(f.moonraker?.gcodeScripts, [script])
   })
 }
@@ -412,8 +413,9 @@ for (const action of ['load_filament', 'unload_filament'] as const) {
       action === 'load_filament' ? { tray: 15 } : {},
     )
     const result = await f.dispatch()
-    assert.equal(result.kind, 'outcome-unknown')
-    assert.equal(result.reason, 'state-unconfirmed')
+    // No print-state target: the fresh report read after the send confirms it.
+    assert.equal(result.kind, 'applied')
+    assert.equal(result.reason, 'applied')
     assert.deepEqual(f.bambu?.extendedState.ams, {
       tray_now: action === 'load_filament' ? '15' : '255',
     })

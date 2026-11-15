@@ -27,6 +27,10 @@ export type RawPrinterObservation = Omit<
   'status' | 'fieldObservedAtMonoMs'
 > &
   Partial<Pick<RawMoonrakerObservation, 'status'>> & {
+    firmwareObservation?: Readonly<{
+      firmware: NonNullable<PrinterState['firmware']>
+      observedAtMonoMs: number
+    }>
     materialsObservation?: Readonly<{
       materials: NonNullable<PrinterState['materials']>
       observedAtMonoMs: number
@@ -131,8 +135,10 @@ export function createFarmSnapshotSource(input: {
       const {
         controls: _untrustedControls,
         macros: _untrustedMacros,
-        ...printer
+        firmware: _untrustedFirmware,
+        ...observedPrinter
       } = entry.printer
+      const printer: PrinterState = { ...observedPrinter }
       for (const field of ['fans', 'light', 'materials'] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(
@@ -141,6 +147,11 @@ export function createFarmSnapshotSource(input: {
           if (stamp + 5000 <= now) delete printer[field]
           else until = Math.min(until, stamp + 5000)
         }
+      }
+      const firmware = entry.firmwareObservation
+      if (firmware && firmware.observedAtMonoMs + 600_000 > now) {
+        printer.firmware = firmware.firmware
+        until = Math.min(until, firmware.observedAtMonoMs + 600_000)
       }
       const material = entry.materialsObservation
       if (material && material.observedAtMonoMs + 5000 > now) {
@@ -332,6 +343,15 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid materials observation')
     }
+    const firmware = value.firmwareObservation
+    if (
+      firmware &&
+      (!Number.isFinite(firmware.observedAtMonoMs) ||
+        firmware.observedAtMonoMs < 0 ||
+        firmware.observedAtMonoMs > value.receivedAtMonoMs ||
+        !PrinterState.shape.firmware.safeParse(firmware.firmware).success)
+    )
+      throw Error('Invalid firmware observation')
     const parsedPrinter = PrinterState.safeParse(value.printer)
     if (!parsedPrinter.success) {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
@@ -361,6 +381,14 @@ export function createFarmSnapshotSource(input: {
       value.printerKey,
       Object.freeze({
         ...observation,
+        ...(firmware
+          ? {
+              firmwareObservation: Object.freeze({
+                observedAtMonoMs: firmware.observedAtMonoMs,
+                firmware: structuredClone(firmware.firmware),
+              }),
+            }
+          : {}),
         ...(value.materialsObservation
           ? {
               materialsObservation: Object.freeze({

@@ -1,5 +1,6 @@
 import { parseCollectorConfig } from './anycubic.ts'
 import {
+  provisionBambuPrinter,
   provisionAnycubicPrinter,
   provisionCrealityPrinter,
 } from '../control/printer-binding.ts'
@@ -22,7 +23,13 @@ import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 
 const Runtime = z.strictObject({
-  version: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(5)]),
+  version: z.union([
+    z.literal(1),
+    z.literal(2),
+    z.literal(3),
+    z.literal(4),
+    z.literal(5),
+  ]),
   collection: z.unknown(),
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
@@ -84,6 +91,16 @@ export function readAgentRuntimeConfig(
       value !== null &&
       'backend' in value &&
       value.backend === 'kobralink'
+    const bambu =
+      collection.version === 3
+        ? collection.bambu.printers.find(
+            (p) =>
+              typeof value === 'object' &&
+              value !== null &&
+              'printer_key' in value &&
+              value.printer_key === p.printerKey,
+          )
+        : undefined
     const creality =
       collection.version === 4
         ? collection.creality.printers.find(
@@ -104,40 +121,42 @@ export function readAgentRuntimeConfig(
               value.printer_key === p.printerKey,
           )
         : undefined
-    const binding = anycubic
-      ? provisionAnycubicPrinter(value, anycubic)
-      : creality
-        ? provisionCrealityPrinter(value, creality)
-        : isKobra
-          ? (() => {
-              const readonly = provisionReadonlyPrinter(value)
-              const assignment = readRuntimePrinterBinding(readonly)!
-              if (
-                pause?.control?.assignmentId !== assignment.assignment_id ||
-                collection.version !== 2
-              )
-                return readonly
-              const local = collection.kobralink.printers.find(
-                (p) => p.printerKey === assignment.printer_key,
-              )
-              if (
-                !local ||
-                !('backend' in assignment) ||
-                assignment.origin !== local.origin ||
-                assignment.bridgeInstance !== local.bridgeInstance ||
-                assignment.deviceId !== local.deviceId ||
-                assignment.id !== local.id ||
-                assignment.revision !== local.revision
-              )
-                throw new Error('KobraLink assignment mismatch')
-              const { assignment_id, farm_id, agent_id, printer_key } =
-                assignment
-              return provisionKobraLinkPrinter(
-                { assignment_id, farm_id, agent_id, printer_key },
-                local,
-              )
-            })()
-          : registry?.provision(value)
+    const binding = bambu
+      ? provisionBambuPrinter(value, bambu)
+      : anycubic
+        ? provisionAnycubicPrinter(value, anycubic)
+        : creality
+          ? provisionCrealityPrinter(value, creality)
+          : isKobra
+            ? (() => {
+                const readonly = provisionReadonlyPrinter(value)
+                const assignment = readRuntimePrinterBinding(readonly)!
+                if (
+                  pause?.control?.assignmentId !== assignment.assignment_id ||
+                  collection.version !== 2
+                )
+                  return readonly
+                const local = collection.kobralink.printers.find(
+                  (p) => p.printerKey === assignment.printer_key,
+                )
+                if (
+                  !local ||
+                  !('backend' in assignment) ||
+                  assignment.origin !== local.origin ||
+                  assignment.bridgeInstance !== local.bridgeInstance ||
+                  assignment.deviceId !== local.deviceId ||
+                  assignment.id !== local.id ||
+                  assignment.revision !== local.revision
+                )
+                  throw new Error('KobraLink assignment mismatch')
+                const { assignment_id, farm_id, agent_id, printer_key } =
+                  assignment
+                return provisionKobraLinkPrinter(
+                  { assignment_id, farm_id, agent_id, printer_key },
+                  local,
+                )
+              })()
+            : registry?.provision(value)
     if (!binding) throw Error('Moonraker assignment requires local allowlist')
     const assignment = readRuntimePrinterBinding(binding)
     if (
@@ -158,9 +177,11 @@ export function readAgentRuntimeConfig(
         ? collection.anycubic.printers.length
         : collection.version === 4
           ? collection.creality.printers.length
-          : collection.version === 2
-            ? collection.kobralink.printers.length
-            : 0)
+          : collection.version === 3
+            ? collection.bambu.printers.length
+            : collection.version === 2
+              ? collection.kobralink.printers.length
+              : 0)
   )
     throw new Error('Runtime assignment mapping is incomplete')
   for (const printer of collection.printers) {

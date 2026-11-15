@@ -69,11 +69,13 @@ export async function startBambuSimulator({
   initialState,
   initialTargetTemperature,
   confirmCommands = true,
+  versionModules,
 }: {
   serial?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
   initialTargetTemperature?: number
+  versionModules?: { name: string; sw_ver: string }[]
   confirmCommands?: boolean
 } = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
@@ -184,6 +186,35 @@ export async function startBambuSimulator({
               )
                 throw new Error('Invalid request topic')
               const value = JSON.parse(body.subarray(2 + length).toString())
+              if (value?.info?.command === 'get_version') {
+                requests.push({
+                  command: 'get_version',
+                  sequence_id: value.info.sequence_id,
+                })
+                if (versionModules) {
+                  const topic = Buffer.from(reportTopic)
+                  const length = Buffer.alloc(2)
+                  length.writeUInt16BE(topic.length)
+                  socket.write(
+                    packet(
+                      48,
+                      Buffer.concat([
+                        length,
+                        topic,
+                        Buffer.from(
+                          JSON.stringify({
+                            info: {
+                              command: 'get_version',
+                              module: versionModules,
+                            },
+                          }),
+                        ),
+                      ]),
+                    ),
+                  )
+                }
+                continue
+              }
               const request = value?.print ?? value?.system
               const command = request?.command
               if (

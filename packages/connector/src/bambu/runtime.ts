@@ -1,3 +1,6 @@
+import { mapBambuFirmware } from './firmware.ts'
+import { decodeBambuVersion } from './version.ts'
+import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
@@ -13,6 +16,7 @@ export type BambuRuntimeEvent =
   | {
       kind: 'snapshot'
       printer: PrinterState
+      firmwareObservation?: RawPrinterObservation['firmwareObservation']
       source: {
         serial: string
         epoch: number
@@ -48,12 +52,18 @@ export function createBambuRuntimeSubscription(input: {
     throw Error('Invalid Bambu expiry')
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
+  let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let version: unknown
+  let upgradeReport: unknown
   let epoch = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let fields: Partial<Fields> = {}
   let times: Partial<Record<keyof Fields, number>> = {}
   let connected = false
   const clear = () => {
+    firmwareObservation = undefined
+    version = undefined
+    upgradeReport = undefined
     fields = {}
     times = {}
     clearTimeout(timer)
@@ -87,6 +97,7 @@ export function createBambuRuntimeSubscription(input: {
     if (parsed.success)
       input.onEvent({
         kind: 'snapshot',
+        ...(firmwareObservation ? { firmwareObservation } : {}),
         printer: parsed.data,
         source: {
           serial: binding.serial,
@@ -140,7 +151,38 @@ export function createBambuRuntimeSubscription(input: {
         },
         onReport(payload) {
           if (signal.aborted || !connected) return
+          let rawFirmware: unknown
+          try {
+            rawFirmware = JSON.parse(payload.toString('utf8'))
+          } catch {
+            clear()
+            unavailable('invalid-response')
+            return
+          }
+          if (decodeBambuVersion(rawFirmware)) version = rawFirmware
+          if (
+            rawFirmware &&
+            typeof rawFirmware === 'object' &&
+            'print' in rawFirmware &&
+            rawFirmware.print &&
+            typeof rawFirmware.print === 'object' &&
+            'upgrade_state' in rawFirmware.print
+          )
+            upgradeReport = rawFirmware
+          const firmware = mapBambuFirmware(version, upgradeReport)
+          if (
+            firmware &&
+            (decodeBambuVersion(rawFirmware) || upgradeReport === rawFirmware)
+          )
+            firmwareObservation = {
+              firmware,
+              observedAtMonoMs: performance.now(),
+            }
           const result = decodeBambuReport(payload.toString('utf8'))
+          if (result.kind === 'ignored' && firmware) {
+            publish()
+            return
+          }
           if (result.kind === 'ignored') return
           if (result.kind === 'invalid') {
             clear()

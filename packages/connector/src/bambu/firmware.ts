@@ -1,5 +1,5 @@
 import { firmwareUpdateAvailable } from '@open3dfarmmanager/farm-protocol'
-import { decodeBambuVersion } from './version'
+import { decodeBambuVersion } from './version.ts'
 
 type Firmware = {
   current?: string

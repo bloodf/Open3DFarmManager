@@ -224,7 +224,9 @@ test(
         bedTemp2: 65,
         printProgress: 30,
         fan: 1,
+        modelFanPct: 100,
         fanAuxiliary: 1,
+        auxiliaryFanPct: 100,
         lightSw: 1,
         autohome: 'X Y',
       })

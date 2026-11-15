@@ -343,6 +343,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             let sender: InstanceType<typeof FarmStatusSender>
             try {
               sender = new FarmStatusSender({
+                bindAddress: config.rtc.bindAddress,
                 client,
                 assignmentRefs: refs,
                 openSnapshots: source.open,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  connectorRtcScopeHint,
   connectorVersionView,
   connectorUpgradeDoc,
 } from '../utils/connector-version.ts'
@@ -292,6 +293,19 @@ onBeforeRouteLeave(() => {
               <dt>Estado do registro</dt>
               <dd>{{ statusLabel[connector.status] }}</dd>
             </dl>
+            <p
+              v-if="
+                connectorRtcScopeHint(
+                  versionFeed.versions.value.get(connector.agentId)?.rtcScope,
+                )
+              "
+            >
+              {{
+                connectorRtcScopeHint(
+                  versionFeed.versions.value.get(connector.agentId)?.rtcScope,
+                )
+              }}
+            </p>
             <p v-if="versionFor(connector.agentId).warning" role="status">
               {{ versionFor(connector.agentId).warning }}
               <a :href="connectorUpgradeDoc">Documentação de atualização</a>

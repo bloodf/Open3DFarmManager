@@ -1,3 +1,4 @@
+import type { PrinterNetworkPolicy } from '../provisioning/policy.ts'
 import { probePrinterHost } from '../discovery/probe.ts'
 import { discoverPrinters } from '../discovery/index.ts'
 import {
@@ -11,15 +12,20 @@ import type { ConfigurationAuthority } from './configuration-authority.ts'
 export type DiscoveryScanner = typeof discoverPrinters
 const active = new WeakSet<ConfigurationAuthority>()
 
-/** Shared authority belongs to one Connector, across all its RTC sessions. */
+/** Shared authority belongs to one Connector, across all its RTC sessions.
+ * Signed sessions always supply the runtime network policy.
+ */
 export async function scanConfigurationDiscovery(
   authority: ConfigurationAuthority,
   requestId: string,
   scan: DiscoveryScanner = discoverPrinters,
   host?: string,
+  policy?: PrinterNetworkPolicy,
 ): Promise<DiscoveryResult> {
   if (active.has(authority))
     return { request_id: requestId, ok: false, reason: 'busy' }
+  if (host !== undefined && policy !== undefined && !policy.allows(host))
+    return { request_id: requestId, ok: false, reason: 'failed' }
   active.add(authority)
   let timer: ReturnType<typeof setTimeout> | undefined
   // Leave room for socket setup and cleanup inside the five-second deadline.

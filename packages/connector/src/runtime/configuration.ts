@@ -1,3 +1,4 @@
+import { createPrinterNetworkPolicy } from '../provisioning/policy.ts'
 import type { ProvisioningConfig } from '../config/provisioning.ts'
 import { runtimeBootstrap } from '../config/provisioning.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
@@ -73,6 +74,9 @@ export function createConfigurationRuntime(
     ...(options.fetch ? { fetch: options.fetch } : {}),
     clock,
   })
+  const printerNetworkPolicy = createPrinterNetworkPolicy(
+    config.printerNetworks,
+  )
   const seen: string[] = []
   const sessions = new Set<ConfigurationConnectorSession>()
   let stopped = false
@@ -148,6 +152,7 @@ export function createConfigurationRuntime(
         throw new Error('Configuration session unavailable')
       const session = new ConfigurationConnectorSession({
         identity,
+        printerNetworkPolicy,
         expected: input.expected,
         issuers: options.issuers,
         authority,

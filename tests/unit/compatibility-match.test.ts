@@ -12,7 +12,7 @@ import {
 describe('compatibility-match', () => {
   describe('catalog coverage: every entry in compatibilityPageCatalog is matched', () => {
     it('matches every catalog entry by its exact id', () => {
-      expect(compatibilityPageCatalog.length).toBe(19)
+      expect(compatibilityPageCatalog.length).toBe(21)
       for (const product of compatibilityPageCatalog) {
         const match = matchCompatibility({ model: product.id })
         expect(match.identified).toBe(true)

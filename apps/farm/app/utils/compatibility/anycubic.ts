@@ -80,6 +80,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     capabilities: {
       ...unknownCapabilities,
       telemetry: 'simulated',
+      files: 'simulated',
       pause: 'simulated',
       resume: 'simulated',
       cancel: 'simulated',
@@ -89,7 +90,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     ],
     limitations: [
       'A simulação não comprova suporte ao equipamento físico ou ao firmware.',
-      'Comandos simulados pela ponte KobraLink; não comprovado em hardware.',
+      'Arquivos e comandos estendidos, incluindo temperatura, ventilador, luz e velocidade, simulados pela ponte KobraLink; não comprovado em hardware.',
       'Câmera não foi qualificada.',
     ],
   },

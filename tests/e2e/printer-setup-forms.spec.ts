@@ -25,7 +25,7 @@ test('forms expose unique labelled controls and validate each family', async ({
     ['bambu-lan', 'Endereço IPv4 da Bambu Lab na LAN', 'bad'],
     ['creality-native', 'Endereço IPv4 da Creality na LAN', 'bad'],
     ['anycubic-lan', 'Endereço IPv4 na LAN', 'bad'],
-  ]) {
+  ] as const) {
     await family.selectOption(value)
     const ids = await page
       .locator('[id]')

@@ -58,14 +58,21 @@ const row = computed(() =>
     (item) => item.assignment.assignmentId === printer.value,
   ),
 )
-const availability = computed(() =>
-  row.value && ready.value
-    ? filesAvailability(row.value, ready.value.keys, enabled.value, now.value)
+// Reads the once-a-second tick for reactivity, but measures against a fresh
+// sample: a frame received after the last tick would otherwise have a negative
+// age, count as stale and cancel the operation in progress.
+const availability = computed(() => {
+  void now.value
+  return row.value && ready.value
+    ? filesAvailability(row.value, ready.value.keys, enabled.value, {
+        wall: Date.now(),
+        mono: performance.now(),
+      })
     : {
         available: false as const,
         reason: 'Selecione uma impressora com conexão direta ao vivo.',
-      },
-)
+      }
+})
 const busy = computed(() =>
   ['loading', 'preparing', 'uploading', 'starting'].includes(
     operation.value.kind,

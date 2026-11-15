@@ -336,7 +336,9 @@ for (const [action, args, path] of [
       assert.equal(remote.extended.length, 0)
       return
     }
-    assert.equal(result.kind, 'outcome-unknown')
+    // The bridge is read back after the accepted write: a fresh, available
+    // state confirms the command without claiming the setting took effect.
+    assert.equal(result.kind, 'applied')
     assert.equal(remote.extended.length, 1)
     assert.equal(remote.extended[0]?.path, `/api/v1/printers/printer-1/${path}`)
   })

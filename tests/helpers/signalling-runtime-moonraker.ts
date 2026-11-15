@@ -95,6 +95,8 @@ export async function createRuntimeMoonrakerFixture() {
     packagedSha256: string | null = null
   let packagedManifestSha256: string | null = null,
     packagedFiles = 0
+  // Bounded tail of Connector diagnostic kinds, for failure reports.
+  let recent: readonly string[] = []
   function diagnostic(value: unknown) {
     const parsed = z
       .object({
@@ -108,6 +110,11 @@ export async function createRuntimeMoonrakerFixture() {
       if (parsed.status === 'delivered') telemetryDelivered += parsed.count ?? 0
       else telemetryRetained++
     }
+    if (parsed.kind !== 'queued')
+      recent = [
+        ...recent,
+        parsed.reason ? `${parsed.kind}:${parsed.reason}` : parsed.kind,
+      ].slice(-24)
     if (parsed.kind === 'queued') queued++
     if (parsed.kind === 'readonly-admitted') admitted++
     if (parsed.kind === 'readonly-listening') listening++
@@ -554,6 +561,7 @@ export async function createRuntimeMoonrakerFixture() {
         pauseInboxes,
         telemetryDelivered,
         telemetryRetained,
+        recent,
       }
     },
     close() {

@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.ts'
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
 import type { Printer } from '../../packages/connector/src/discovery/index.ts'
+import { probePrinterHost } from '../../packages/connector/src/discovery/probe.ts'
 import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
@@ -60,7 +61,9 @@ export type VendorDiscovery = Readonly<{
   host: string
   port: number
   /** Runs the Connector's own probe against the responder. */
-  probe(): Promise<Printer | undefined>
+  probe(): Promise<
+    Printer | { vendor: 'kobralink'; host: string; port: number } | undefined
+  >
 }>
 
 export type VendorSimulator = Readonly<{
@@ -69,7 +72,7 @@ export type VendorSimulator = Readonly<{
   /** The simulator itself, for vendor-specific assertions. */
   raw: unknown
   controls: VendorControls
-  /** Absent for vendors with no network discovery step (Bambu, KobraLink). */
+  /** Absent for vendors with no network discovery step (Bambu). */
   discovery: VendorDiscovery | undefined
   runtime(scope: RuntimeScope): Promise<VendorRuntime>
   close(): Promise<void>
@@ -109,6 +112,28 @@ function listening(server: Server) {
       else resolve(address.port)
     })
   })
+}
+
+/** Listens on the first free loopback port of an inclusive range. */
+async function listeningInRange(
+  server: Server,
+  host: string,
+  first: number,
+  last: number,
+) {
+  for (let port = first; port <= last; port++) {
+    const bound = await new Promise<boolean>((resolve, reject) => {
+      const failed = (error: NodeJS.ErrnoException) =>
+        error.code === 'EADDRINUSE' ? resolve(false) : reject(error)
+      server.once('error', failed)
+      server.listen(port, host, () => {
+        server.removeListener('error', failed)
+        resolve(true)
+      })
+    })
+    if (bound) return port
+  }
+  throw new Error(`No free loopback port in ${first}..${last}`)
 }
 
 function closing(server: Server) {
@@ -313,21 +338,63 @@ export async function startVendorSimulator(
       const bridge = await startKobraBridgeSimulator(identity)
       undo.push(() => bridge.close())
       raw = bridge
+      // The scripted steps keep the file the bridge is printing.
+      const printing = () =>
+        bridge.state.filename ? { filename: bridge.state.filename } : {}
       controls = {
         setProgress: (percent) =>
-          bridge.setState({ printState: 'printing', progress: percent / 100 }),
+          bridge.setState({
+            ...printing(),
+            printState: 'printing',
+            progress: percent / 100,
+          }),
         finishPrint: () =>
           bridge.setState({
+            ...printing(),
             printState: 'complete',
             kobraState: 'finished',
             progress: 1,
+            printDurationSec: 1800,
           }),
         failPrint: () =>
           bridge.setState({
+            ...printing(),
             printState: 'error',
             kobraState: 'failed',
             progress: bridge.state.progress,
           }),
+      }
+      // The Connector's host probe finds a KobraLink bridge by its Moonraker-
+      // compatible /server/info on ports 7125, 80 and 7126..7140. This
+      // responder answers on the first free port of that range.
+      const info = createServer((request, response) => {
+        if (request.method !== 'GET' || request.url !== '/server/info') {
+          response.writeHead(404).end()
+          return
+        }
+        response.setHeader('content-type', 'application/json')
+        response.end(
+          JSON.stringify({
+            result: { moonraker_version: 'kobralink-journey' },
+          }),
+        )
+      })
+      // IPv6 loopback: other simulators on this machine listen on 127.0.0.1,
+      // and the probe reports only the first port that answers.
+      const probeHost = '::1'
+      const infoPort = await listeningInRange(info, probeHost, 7126, 7140)
+      undo.push(closing(info))
+      discovery = {
+        host: probeHost,
+        port: infoPort,
+        probe: async () => {
+          const found = await probePrinterHost(probeHost, { timeoutMs: 1500 })
+          // Another journey on this machine may hold a lower port of the
+          // same range, so any bridge-hinted answer counts.
+          return found?.hint
+            ? { vendor: 'kobralink', host: found.host, port: found.port }
+            : undefined
+        },
       }
       runtime = async (scope) => {
         const bridgeInstance = 'journey-bridge'

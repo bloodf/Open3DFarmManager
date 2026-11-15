@@ -265,7 +265,7 @@ function actionOutcomeBaseText(
 
   switch (outcome) {
     case 'applied':
-      return `Impressão ${actionPast}. O Connector confirmou a ${actionNoun}.`
+      return `Impressão ${actionPast}. O Connector confirmou ${action === 'cancel' ? 'o' : 'a'} ${actionNoun}.`
     case 'rejected':
       return `Comando recusado. A impressão não foi ${actionPast} e nada será repetido automaticamente.`
     case 'not-sent':

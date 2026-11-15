@@ -157,11 +157,11 @@ for (const { wire, outcome, state } of cases) {
       assert.equal(latest()?.state, state)
       assert.deepEqual(latest()?.lastJob, finished)
 
-      // A new print keeps the previous result until it ends.
+      // A new print clears the previous result until it ends.
       current = 'printing'
       push({ print_stats: { state: 'printing' } })
       await until('next print', () => latest()?.state === 'printing')
-      assert.deepEqual(latest()?.lastJob, finished)
+      assert.equal(latest()?.lastJob, undefined)
 
       // The next print ending replaces it with a later end time.
       await sleep(5)

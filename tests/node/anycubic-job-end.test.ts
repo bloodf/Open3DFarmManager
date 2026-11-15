@@ -139,10 +139,9 @@ test('Anycubic lifecycle reports completed, cancelled and failed jobs through sn
       onUnavailable() {},
     })
     for (const outcome of ['completed', 'cancelled', 'failed'] as const) {
-      const previous = latest()?.lastJob
       start()
       await until(() => latest()?.state === 'printing')
-      assert.deepEqual(latest()?.lastJob, previous)
+      assert.equal(latest()?.lastJob, undefined)
       if (outcome === 'cancelled')
         publish(
           'anycubic/anycubicCloud/v1/printer/public/20024/TEST/print/request',

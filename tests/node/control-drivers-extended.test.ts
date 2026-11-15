@@ -176,7 +176,9 @@ async function authorityFixture(action: Action, args: Args) {
     printer_key: 'é"\\'.repeat(32),
     control_binding_sha256: bindingHash,
     admission_nonce: admissionNonce,
-    actions: [...ExtendedControlAction.options],
+    actions: ExtendedControlAction.options.filter(
+      (action) => action !== 'run_macro',
+    ),
   }
   const challenge = {
     v: 1 as const,

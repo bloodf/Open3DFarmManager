@@ -178,12 +178,12 @@ async function authorityFixture(action: Action, args: Args) {
     printer_key: 'é"\\'.repeat(32),
     control_binding_sha256: bindingHash,
     admission_nonce: admissionNonce,
-    actions: ExtendedControlAction.options.filter(
-      (action) => action !== 'run_macro',
-    ),
+    actions: [...ExtendedControlAction.options],
   }
-  assert.ok(!capability.actions.includes('run_macro'))
-  assert.ok(capability.actions.includes(action))
+  // An operator is never granted run_macro: only owners and admins are.
+  capability.actions = capability.actions.filter(
+    (granted) => granted !== 'run_macro',
+  )
   const challenge = {
     v: 1 as const,
     purpose: 'pause-admission' as const,

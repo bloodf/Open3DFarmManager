@@ -290,6 +290,7 @@ test('Creality snapshots advertise only the wired driver actions', () => {
       'set_fan',
       'home',
       'set_light',
+      'start_print',
     ])
   } finally {
     f.source.close()

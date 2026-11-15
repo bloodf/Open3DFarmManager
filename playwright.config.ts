@@ -1,7 +1,22 @@
+import { execFileSync } from 'node:child_process'
 import { defineConfig } from '@playwright/test'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
 
-// Override the loopback port with E2E_PORT when 3100 is taken.
+// Pick a free loopback port once and pass it to Playwright workers as well.
+if (!process.env.E2E_PORT) {
+  process.env.E2E_PORT = execFileSync(
+    process.execPath,
+    [
+      '-e',
+      `const server = require('node:net').createServer()
+server.listen(0, '127.0.0.1', () => {
+  console.log(server.address().port)
+  server.close()
+})`,
+    ],
+    { encoding: 'utf8' },
+  ).trim()
+}
 const port = e2ePort('E2E_PORT', 3100)
 
 export default defineConfig({

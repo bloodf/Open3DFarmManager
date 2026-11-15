@@ -49,6 +49,9 @@ test('late objects extend the initial subscription', async () => {
       maxMessageBytes: 4096,
       connectTimeoutMs: 1000,
       requestTimeoutMs: 1000,
+      staleAfterMs: 5000,
+      reconnectMinMs: 100,
+      reconnectMaxMs: 1000,
     },
     signal: new AbortController().signal,
     discoverObjects: true,
@@ -56,12 +59,16 @@ test('late objects extend the initial subscription', async () => {
   })
   try {
     await client.snapshot
-    assert.equal(requests[0].fan, undefined)
+    const initial = requests[0]
+    assert.ok(initial)
+    assert.equal(initial.fan, undefined)
     assert.deepEqual(await late, [
       { fan: { speed: 0.42 }, 'output_pin caselight': { value: 1 } },
       1,
     ])
-    assert.deepEqual(requests[1].fan, ['speed'])
+    const extended = requests[1]
+    assert.ok(extended)
+    assert.deepEqual(extended.fan, ['speed'])
   } finally {
     client.close()
     await client.closed

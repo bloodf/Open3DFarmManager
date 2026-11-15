@@ -41,6 +41,11 @@ export function createCrealityCollection(input: {
         ...(report.bedTemp === undefined
           ? {}
           : { bedTemperatureCelsius: report.bedTemp }),
+        ...(report.fans === undefined ? {} : { fans: report.fans }),
+        ...(report.light === undefined ? {} : { light: report.light }),
+        ...(report.materials === undefined
+          ? {}
+          : { materials: report.materials }),
         observedAt: Date.now(),
       })
       if (!printer.success) {

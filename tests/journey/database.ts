@@ -19,6 +19,10 @@ export const CAPABILITIES = [
   'farm_connector_credential_acceptor',
   'farm_printer_ownership',
   'farm_configuration_authority',
+  'farm_pause_authority',
+  // Telemetry ingestion verifies the Connector credential in the same login.
+  'farm_connector_telemetry_writer, farm_connector_credential_acceptor',
+  'farm_job_history_reader',
 ] as const
 
 export type Account = Readonly<{ id: string; username: string }>

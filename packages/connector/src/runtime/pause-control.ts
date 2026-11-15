@@ -20,6 +20,10 @@ import {
   type PauseConnectorSignallingScope,
 } from '../cloud/pause-signalling-client.ts'
 import { createPauseDriverRouter } from './pause-driver-router.ts'
+import {
+  readAnycubicPrinterBinding,
+  readPrinterBinding,
+} from '../control/printer-binding.ts'
 import { runSignallingLifecycle } from './signalling.ts'
 
 export type PauseControlDiagnostic =
@@ -115,6 +119,16 @@ export async function runPauseControl(input: {
   const printerBinding = config.bindingFor(assignmentId)
   if (!printerBinding)
     throw new Error('Pause control assignment is not provisioned locally')
+  // The Anycubic LAN library documents neither an upload body nor a listing
+  // schema (anycubic/files.ts). The file channel is still opened for such a
+  // printer so the page is told "unsupported" instead of losing the session.
+  const controlPrinterKey = readAnycubicPrinterBinding(printerBinding)
+    ? readPrinterBinding(printerBinding)?.printer_key
+    : undefined
+  const anycubicFileTarget = (printerKey: string) =>
+    controlPrinterKey !== undefined && printerKey === controlPrinterKey
+      ? ({ backend: 'anycubic' } as const)
+      : undefined
   const issuers = await loadPauseIssuerKeys(pause)
   if (input.signal.aborted) return
   const jti = classified('credential', () =>
@@ -220,6 +234,24 @@ export async function runPauseControl(input: {
             identity: input.identity,
           },
           {
+            ...(controlPrinterKey === undefined
+              ? {}
+              : {
+                  async peerFactory(options) {
+                    const { PauseConnectorPeer } =
+                      await import('../webrtc/pause-control-peer.ts')
+                    return new PauseConnectorPeer({
+                      ...options,
+                      // Files are served only under the admitted capability.
+                      getAdmittedHandle: (id) => relay.admittedHandle(id),
+                      fileTransfer: {
+                        directory: join(input.dataDirectory, 'uploads'),
+                        targetFor: anycubicFileTarget,
+                      },
+                      fileList: { targetFor: anycubicFileTarget },
+                    })
+                  },
+                }),
             onInboxReady() {
               onAdmitted()
               diagnostic({ kind: 'pause-listening' })

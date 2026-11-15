@@ -47,6 +47,8 @@ export type VendorRuntime = Readonly<{
   version: 2 | 3 | 4 | 5
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
+  /** Wait between telemetry uploads once the queue is empty (100..5000). */
+  telemetryIdleMs?: number
 }>
 
 export type VendorDiscovery = Readonly<{
@@ -239,6 +241,11 @@ export async function startVendorSimulator(
         serial: `${MODEL_ID}/${deviceId}`,
         credentials: { username, password },
         initialState: 'RUNNING',
+        // A started file prints for a few seconds, then completes by itself.
+        printDurationMs: 8000,
+        // One report a second, as a printer does; ten a second keeps the
+        // Connector uploading without pause.
+        reportIntervalMs: 1000,
       })
       undo.push(() => sim.close())
       sim.setPrintProgress(25)
@@ -261,6 +268,9 @@ export async function startVendorSimulator(
         await privateJson(passwordFile, password)
         return {
           version: 5,
+          // Uploads and both signalling inboxes share one credential proof
+          // slot on the server; spaced uploads leave it free for commands.
+          telemetryIdleMs: 5000,
           collection: {
             version: 5,
             allowedOrigins: [],

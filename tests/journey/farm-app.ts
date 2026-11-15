@@ -30,6 +30,8 @@ export type FarmApp = Readonly<{
   origin: string
   /** PEM certificate the Connector must trust (NODE_EXTRA_CA_CERTS). */
   certificatePath: string
+  /** Ed25519 SPKI (base64url) of the control issuer the Connector must trust. */
+  pauseIssuerPublicKeySpki: string
   /** Bounded tail of the Nitro output, for failure diagnostics. */
   log(): string
   /** Drops every live upgraded connection, as a network loss would. */
@@ -196,8 +198,28 @@ export async function startFarmApp(
       }),
       { mode: 0o600 },
     )
+    // Signed control commands: the issuer key the Connector is told to trust.
+    const pauseKeys = generateKeyPairSync('ed25519')
+    const pauseIssuerPath = join(directory, 'pause-issuer.json')
+    const pauseIssuerPublicKeySpki = pauseKeys.publicKey
+      .export({ format: 'der', type: 'spki' })
+      .toString('base64url')
+    await writeFile(
+      pauseIssuerPath,
+      JSON.stringify({
+        version: 1,
+        issuer: origin,
+        kid: 'pause-fixture',
+        privateKeyPkcs8: pauseKeys.privateKey
+          .export({ format: 'der', type: 'pkcs8' })
+          .toString('base64url'),
+      }),
+      { mode: 0o600 },
+    )
     const url = (index: number) => database.url(CAPABILITIES[index]!)
-    const tokenTtlSeconds = '300'
+    // The Connector credential is not renewed here, and it stops getting
+    // session leases well before expiry: one hour outlasts any journey.
+    const tokenTtlSeconds = '3600'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       OPEN3DFARM_CONFIGURATION: JSON.stringify({
@@ -252,7 +274,31 @@ export async function startFarmApp(
       NUXT_CONNECTOR_SIGNALLING_PROOF_DATABASE_URL: url(7),
       NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH: registry,
       NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: tokenTtlSeconds,
-      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '8000',
+      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '3000',
+      NUXT_PAUSE_AUTHORITY_ENABLED: 'true',
+      NUXT_PAUSE_AUTHORITY_DATABASE_URL: url(10),
+      NUXT_PAUSE_AUTHORITY_ISSUER_KEY_PATH: pauseIssuerPath,
+      NUXT_PAUSE_AUTHORITY_ISSUER_PUBLIC_KEY_SPKI: pauseIssuerPublicKeySpki,
+      NUXT_PAUSE_AUTHORITY_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_KID: 'pause-fixture',
+      NUXT_PAUSE_AUTHORITY_AUDIENCE: 'open3dfarmmanager:pause',
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_ISSUER: origin,
+      NUXT_PAUSE_AUTHORITY_CREDENTIAL_AUDIENCE: AUDIENCE,
+      NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
+      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: url(11),
+      NUXT_CONNECTOR_TELEMETRY_ORIGIN: origin,
+      NUXT_CONNECTOR_TELEMETRY_ISSUER: origin,
+      NUXT_CONNECTOR_TELEMETRY_AUDIENCE: AUDIENCE,
+      NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH: registry,
+      NUXT_CONNECTOR_TELEMETRY_TOKEN_TTL_SECONDS: tokenTtlSeconds,
+      // One proof slot per credential is shared by telemetry and both
+      // signalling inboxes. A busy slot is answered with a retry of up to this
+      // lifetime, which must stay well inside the Connector's 8 s admission
+      // deadline or the Connector gives the session up.
+      NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '2000',
+      NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
+      NUXT_JOB_HISTORY_ENABLED: 'true',
+      NUXT_JOB_HISTORY_DATABASE_URL: url(12),
     }
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {
@@ -285,6 +331,7 @@ export async function startFarmApp(
     return Object.freeze({
       origin,
       certificatePath: cert,
+      pauseIssuerPublicKeySpki,
       directory,
       log: () => output,
       disconnectUpgrades: () => ownedProxy.disconnectUpgrades(),

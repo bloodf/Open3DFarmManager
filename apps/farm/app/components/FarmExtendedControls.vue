@@ -33,7 +33,8 @@ const choices = reactive<Record<string, string>>({
   set_light: 'on',
   set_speed: 'standard',
 })
-const values = reactive<Record<string, string>>({
+// A number input's v-model yields a number, so readers convert it to text.
+const values = reactive<Record<string, string | number>>({
   set_temperature: '',
   set_fan: '',
 })
@@ -43,14 +44,16 @@ function available(action: FarmExtendedAction) {
     props.row,
     props.keys,
     props.controlEnabled,
-    props.now,
+    // The tick keeps this reactive; a fresh sample keeps a frame received
+    // after the last tick from having a negative age.
+    (void props.now, { wall: Date.now(), mono: performance.now() }),
   ).available
 }
 function submit(action: FarmExtendedAction, event: Event) {
   const args = buildExtendedArgs(
     action,
     choices[action] ?? '',
-    values[action] ?? '',
+    String(values[action] ?? ''),
   )
   if (args && available(action) && !props.commandInFlight)
     emit('action', action, args, event)
@@ -137,7 +140,7 @@ function submit(action: FarmExtendedAction, event: Event) {
           !buildExtendedArgs(
             action,
             choices[action] ?? '',
-            values[action] ?? '',
+            String(values[action] ?? ''),
           )
         "
         @click="submit(action, $event)"

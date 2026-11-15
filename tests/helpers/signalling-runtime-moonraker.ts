@@ -124,6 +124,8 @@ export async function createRuntimeMoonrakerFixture() {
         version: 2 | 3 | 4 | 5
         collection: Record<string, unknown>
         assignment: Record<string, unknown>
+        /** Wait between telemetry uploads once the queue is empty. */
+        telemetryIdleMs?: number
       }
     }) {
       if (running || disposal || input.assignmentRefs.length !== 1)
@@ -329,6 +331,9 @@ export async function createRuntimeMoonrakerFixture() {
             audience: input.audience,
             retryMinMs: 1000,
             retryMaxMs: 1000,
+            ...(input.runtime?.telemetryIdleMs === undefined
+              ? {}
+              : { idleMs: input.runtime.telemetryIdleMs }),
           },
           signalling: {
             endpoint:

@@ -56,6 +56,8 @@ export type FileUploadResult =
         | 'invalid-transfer'
     }
 const terminal = z.strictObject({ type: z.enum(['complete', 'abort']) })
+/** Longest wait for a capability admission that is still in progress. */
+const ADMISSION_WAIT_MS = 2000
 
 /** One stop-and-wait transfer per control peer. No remote destination or credential is accepted. */
 export function createFileUpload(
@@ -95,6 +97,14 @@ export function createFileUpload(
           throw Error('invalid-transfer')
         used = true
         offer = parseOffer(JSON.parse(raw))
+        // The page may send its offer while the capability it just presented
+        // is still being verified: pending is not yet unauthorized.
+        for (
+          let waited = 0;
+          waited < ADMISSION_WAIT_MS && !closed && !input.admittedHandle();
+          waited += 50
+        )
+          await new Promise((resolve) => setTimeout(resolve, 50))
         handle = input.admittedHandle()
         if (!authorized()) {
           send({

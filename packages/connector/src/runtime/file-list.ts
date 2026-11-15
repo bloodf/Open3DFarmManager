@@ -49,6 +49,7 @@ export function createFileList(
   let busy = false
   let work: Promise<void> = Promise.resolve()
   const controller = new AbortController()
+  let admissionWaits = 0
   return {
     receive(raw: unknown): boolean {
       if (typeof raw !== 'string' || raw.length > 2048) return false
@@ -62,6 +63,19 @@ export function createFileList(
       if (!parsed.success) return false
       if (closed) return true
       const request = parsed.data
+      // The page may ask while the capability it just presented is still
+      // being verified: pending is not yet unauthorized. Ask again shortly.
+      if (!input.admittedHandle() && admissionWaits < 40) {
+        admissionWaits++
+        const retry = setTimeout(() => {
+          if (!closed) this.receive(raw)
+        }, 50)
+        controller.signal.addEventListener('abort', () => clearTimeout(retry), {
+          once: true,
+        })
+        return true
+      }
+      admissionWaits = 0
       const handle = input.admittedHandle()
       const authorized = () => {
         const current = input.admittedHandle()

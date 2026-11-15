@@ -62,6 +62,11 @@ export type JourneyOptions = Readonly<{
   printerKey?: string
   /** Bambu only: opt the printer binding in to control commands. */
   control?: boolean
+  /**
+   * Opts the Connector in to the signed control path for the assigned printer
+   * (its runtime `pause` section), so the page can send commands and files.
+   */
+  commands?: boolean
 }>
 
 export type JourneyHarness = Readonly<{
@@ -123,6 +128,8 @@ const ENV_KEYS = [
   'NODE_EXTRA_CA_CERTS',
   'SIGNALLING_HTTPS_SIM_MOONRAKER',
   'SIGNALLING_HTTPS_SIM_SPOOLMAN',
+  'SIGNALLING_HTTPS_FARM_PAUSE',
+  'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
 ] as const
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
@@ -260,6 +267,15 @@ export async function startJourneyHarness(
       })
       const started = vendor
       undo.push(() => started.close())
+    }
+    if (options.commands)
+      Object.assign(process.env, {
+        SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+        SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY: app.pauseIssuerPublicKeySpki,
+      })
+    else {
+      delete process.env.SIGNALLING_HTTPS_FARM_PAUSE
+      delete process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
     }
     const runtime = await createRuntimeMoonrakerFixture()
     undo.push(async () => {

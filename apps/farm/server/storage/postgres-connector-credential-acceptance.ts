@@ -17,6 +17,8 @@ import {
   telemetryPrinterKey,
 } from '@open3dfarmmanager/farm-protocol'
 import { verifyConnectorCredential } from '../utils/connector-credentials.ts'
+import { jobsFromEvents } from '../services/job-history-core.ts'
+import { recordJobs } from './job-history-store.ts'
 import {
   TelemetryProofChallenge,
   TelemetryProofCompletion,
@@ -658,6 +660,12 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                // Finished jobs ride along in the same transaction; repeats are a no-op.
+                await recordJobs(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  jobsFromEvents(sorted),
+                )
               }
               const writtenAt = readNow()
               if (

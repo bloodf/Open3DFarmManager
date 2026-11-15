@@ -17,13 +17,19 @@ const emit = defineEmits<{
   (e: 'action', action: ControlAction, event: Event): void
 }>()
 
+// The tick keeps this reactive; the fresh sample keeps a frame received after
+// the last tick from having a negative age and disabling every button.
+function liveNow(): Clock {
+  void props.now
+  return { wall: Date.now(), mono: performance.now() }
+}
 const buttons = computed(() =>
   getPrinterActionButtons(
     props.row,
     props.keys,
     props.controlEnabled,
     props.commandInFlight,
-    props.now,
+    liveNow(),
   ),
 )
 

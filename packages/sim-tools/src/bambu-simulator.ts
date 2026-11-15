@@ -70,7 +70,11 @@ export async function startBambuSimulator({
   initialTargetTemperature,
   confirmCommands = true,
   versionModules,
+  printDurationMs,
+  totalLayers = 100,
 }: {
+  printDurationMs?: number
+  totalLayers?: number
   serial?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
@@ -80,8 +84,20 @@ export async function startBambuSimulator({
 } = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
+  if (
+    printDurationMs !== undefined &&
+    (!Number.isFinite(printDurationMs) ||
+      printDurationMs <= 0 ||
+      !Number.isInteger(totalLayers) ||
+      totalLayers < 1)
+  )
+    throw new Error('Invalid print configuration')
+  const uploads = new Set<string>()
+  let timer: ReturnType<typeof setInterval> | undefined
+  let elapsed = 0
+  let lastTick = 0
   const reportTopic = `device/${serial}/report`
-  let gcodeState = initialState
+  let gcodeState: string | undefined = initialState
   const extended: Record<string, unknown> =
     initialTargetTemperature === undefined
       ? {}
@@ -104,6 +120,32 @@ export async function startBambuSimulator({
           ),
         ]),
       ),
+    )
+  }
+  function stopTimer() {
+    if (timer) clearInterval(timer)
+    timer = undefined
+  }
+  function startTimer() {
+    if (printDurationMs === undefined) return
+    stopTimer()
+    lastTick = Date.now()
+    timer = setInterval(
+      () => {
+        const now = Date.now()
+        elapsed += now - lastTick
+        lastTick = now
+        const fraction = Math.min(elapsed / printDurationMs, 1)
+        extended.mc_percent = Math.floor(fraction * 100)
+        extended.layer_num = Math.floor(fraction * totalLayers)
+        extended.total_layer_num = totalLayers
+        if (fraction === 1) {
+          gcodeState = 'FINISH'
+          stopTimer()
+        }
+        for (const subscriber of subscribed) report(subscriber)
+      },
+      Math.min(100, Math.max(5, printDurationMs / 10)),
     )
   }
   const sockets = new Set<TLSSocket>()
@@ -258,8 +300,20 @@ export async function startBambuSimulator({
                   typeof request.url === 'string' &&
                   request.url.startsWith('file:///sdcard/')
                 ) {
+                  if (
+                    printDurationMs !== undefined &&
+                    !uploads.has(request.url)
+                  )
+                    throw new Error('File not uploaded')
                   extended.file = request.url
                   gcodeState = 'RUNNING'
+                  elapsed = 0
+                  extended.mc_percent = 0
+                  if (printDurationMs !== undefined) {
+                    extended.layer_num = 0
+                    extended.total_layer_num = totalLayers
+                    startTimer()
+                  } else delete extended.mc_percent
                 } else if (
                   command === 'ams_change_filament' &&
                   Number.isInteger(request.target) &&
@@ -282,6 +336,8 @@ export async function startBambuSimulator({
                       : command === 'resume'
                         ? 'RUNNING'
                         : 'IDLE'
+                if (command === 'pause' || command === 'stop') stopTimer()
+                if (command === 'resume') startTimer()
                 for (const subscriber of subscribed) report(subscriber)
               }
             } else if (header === 192 && !size)
@@ -351,8 +407,21 @@ export async function startBambuSimulator({
         else socket.write(bytes)
       }
     },
+    uploadFile(name: string, data: Uint8Array) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
+        throw new Error('Invalid upload')
+      uploads.add(`file:///sdcard/${name}`)
+    },
+    failPrint() {
+      if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
+        throw new Error('No active print')
+      stopTimer()
+      gcodeState = 'FAILED'
+      for (const subscriber of subscribed) report(subscriber)
+    },
     disconnectClients,
     close() {
+      stopTimer()
       closing ??= (async () => {
         const closed = new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),

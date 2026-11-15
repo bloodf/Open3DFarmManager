@@ -402,3 +402,50 @@ test('pre-sampled finalization retains durable watermark, provenance and single-
     f.cleanup()
   }
 })
+
+test('an unconfirmed extended command reads as unknown but frees the printer; an unconfirmed pause does not', () => {
+  const f = fixture()
+  try {
+    const temperature = f.command({
+      purpose: 'printer-control',
+      action: 'set_temperature',
+      args: { heater: 'extruder', target_c: 210 },
+    })
+    const first = f.claim(temperature)
+    assert.ok(first.ok)
+    assert.equal(markWriteStarted(f.journal, first.receipt), true)
+    assert.equal(
+      finishCommand(
+        f.journal,
+        first.receipt,
+        'outcome-unknown',
+        'state-unconfirmed',
+      ),
+      true,
+    )
+    assert.equal(
+      readCommandOutcome(f.journal, temperature.cmd_id)?.status,
+      'outcome-unknown',
+    )
+    assert.deepEqual(f.claim(temperature), { ok: false, reason: 'replay' })
+    const pause = f.command()
+    const second = f.claim(pause)
+    assert.ok(second.ok)
+    assert.equal(markWriteStarted(f.journal, second.receipt), true)
+    assert.equal(
+      finishCommand(
+        f.journal,
+        second.receipt,
+        'outcome-unknown',
+        'state-unconfirmed',
+      ),
+      true,
+    )
+    assert.deepEqual(f.claim(f.command()), {
+      ok: false,
+      reason: 'assignment-busy',
+    })
+  } finally {
+    f.cleanup()
+  }
+})

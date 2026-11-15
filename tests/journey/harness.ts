@@ -237,6 +237,7 @@ export async function startJourneyHarness(
       for (const key of ENV_KEYS)
         if (savedEnv[key] === undefined) delete process.env[key]
         else process.env[key] = savedEnv[key]
+      if (failures.length) console.error('Journey cleanup failures', failures)
       if (failures.length)
         throw new Error('Journey cleanup incomplete: ' + failures.join('; '))
     })())

@@ -72,6 +72,7 @@ export async function startAnycubicSimulator({
   environmentReport,
   printDurationMs = 1000,
   totalLayers = 10,
+  reportIntervalMs = 100,
 }: {
   serial?: string
   port?: number
@@ -81,6 +82,8 @@ export async function startAnycubicSimulator({
   environmentReport?: unknown
   printDurationMs?: number
   totalLayers?: number
+  /** Period of the repeated report each subscribed client receives. */
+  reportIntervalMs?: number
 } = {}) {
   if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
@@ -91,12 +94,20 @@ export async function startAnycubicSimulator({
     totalLayers <= 0
   )
     throw new Error('Invalid print configuration')
+  if (!Number.isInteger(reportIntervalMs) || reportIntervalMs < 10)
+    throw new Error('Invalid report interval')
   const files = new Map<string, Buffer>()
   let lifecycle: 'idle' | 'printing' | 'paused' | 'finished' | 'error' = 'idle'
   let elapsed = 0
   let started = 0
   let timer: ReturnType<typeof setInterval> | undefined
   let progress = 0
+  // A progress set by the journey controls has no clock to resume from.
+  let scripted = false
+  let filename: string | undefined
+  // Targets and switches set by the documented `update` and `light` requests.
+  const settings: Record<string, number> = {}
+  let light: { type: number; status: number } | undefined
   const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
   let gcodeState = initialState
   const extended: Record<string, unknown> = {}
@@ -119,6 +130,24 @@ export async function startAnycubicSimulator({
                 progress,
                 curr_layer: Math.floor((progress * totalLayers) / 100),
                 total_layers: totalLayers,
+                ...(filename ? { filename } : {}),
+                // Made up: the simulated heaters reach a target at once.
+                ...(settings.target_nozzle_temp !== undefined
+                  ? { target_nozzle_temp: settings.target_nozzle_temp }
+                  : {}),
+                ...(settings.target_hotbed_temp !== undefined
+                  ? { target_hotbed_temp: settings.target_hotbed_temp }
+                  : {}),
+                ...(settings.target_nozzle_temp !== undefined
+                  ? { curr_nozzle_temp: settings.target_nozzle_temp }
+                  : {}),
+                ...(settings.target_hotbed_temp !== undefined
+                  ? { curr_hotbed_temp: settings.target_hotbed_temp }
+                  : {}),
+                ...(settings.fan_speed_pct !== undefined
+                  ? { fan_speed_pct: settings.fan_speed_pct }
+                  : {}),
+                ...(light ? { lights: [light] } : {}),
               },
             }),
           ),
@@ -161,7 +190,7 @@ export async function startAnycubicSimulator({
       let connected = false
       const reports = setInterval(() => {
         if (gcodeState && subscribed.has(socket)) report(socket)
-      }, 100)
+      }, reportIntervalMs)
       socket.once('close', () => clearInterval(reports))
       socket.setTimeout(10000, () => socket.destroy())
       socket.on('data', (chunk) => {
@@ -254,8 +283,11 @@ export async function startAnycubicSimulator({
               const topicName = body.subarray(2, 2 + length).toString()
               const raw = JSON.parse(body.subarray(2 + length).toString())
               const isStart =
-                topicName ===
-                  `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print` &&
+                [
+                  `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print`,
+                  // A serial that already carries the model id.
+                  `anycubic/anycubicCloud/v1/slicer/printer/${serial}/print`,
+                ].includes(topicName) &&
                 raw?.type === 'print' &&
                 raw?.action === 'start'
               const isControl =
@@ -263,6 +295,50 @@ export async function startAnycubicSimulator({
                   `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
                 raw?.type === 'print' &&
                 ['stop', 'pause', 'resume'].includes(raw?.action)
+              const isUpdate =
+                topicName ===
+                  `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
+                raw?.type === 'print' &&
+                raw?.action === 'update'
+              const isLight =
+                topicName ===
+                  `anycubic/anycubicCloud/v1/printer/public/${serial}/light/request` &&
+                raw?.type === 'light' &&
+                raw?.action === 'control'
+              if (isUpdate || isLight) {
+                if (confirmCommands) {
+                  if (isLight) {
+                    const { type, status } = raw?.data ?? {}
+                    if (
+                      !Number.isInteger(type) ||
+                      (status !== 0 && status !== 1)
+                    )
+                      throw new Error('Invalid light request')
+                    light = { type, status }
+                  } else {
+                    const entries = Object.entries(raw?.data?.settings ?? {})
+                    if (
+                      entries.length !== 1 ||
+                      entries.some(
+                        ([key, value]) =>
+                          ![
+                            'target_nozzle_temp',
+                            'target_hotbed_temp',
+                            'fan_speed_pct',
+                          ].includes(key) ||
+                          !Number.isInteger(value) ||
+                          (value as number) < 0 ||
+                          (value as number) > 300,
+                      )
+                    )
+                      throw new Error('Invalid update request')
+                    for (const [key, value] of entries)
+                      settings[key] = value as number
+                  }
+                  broadcast()
+                }
+                continue
+              }
               if (isStart || isControl) {
                 if (confirmCommands) {
                   if (isStart) {
@@ -275,6 +351,8 @@ export async function startAnycubicSimulator({
                     stopTimer()
                     elapsed = 0
                     progress = 0
+                    scripted = false
+                    filename = raw.data.filename
                     lifecycle = 'printing'
                     startTimer()
                   } else if (
@@ -287,7 +365,7 @@ export async function startAnycubicSimulator({
                     raw.action === 'pause' &&
                     lifecycle === 'printing'
                   ) {
-                    elapsed += Date.now() - started
+                    if (!scripted) elapsed += Date.now() - started
                     stopTimer()
                     lifecycle = 'paused'
                   } else if (
@@ -295,7 +373,7 @@ export async function startAnycubicSimulator({
                     lifecycle === 'paused'
                   ) {
                     lifecycle = 'printing'
-                    startTimer()
+                    if (!scripted) startTimer()
                   }
                   broadcast()
                 }
@@ -425,6 +503,7 @@ export async function startAnycubicSimulator({
       if (!Number.isInteger(percent) || percent < 0 || percent > 99)
         throw new Error('Invalid progress')
       stopTimer()
+      scripted = true
       lifecycle = 'printing'
       progress = percent
       broadcast()
@@ -452,6 +531,10 @@ export async function startAnycubicSimulator({
         currentLayer: Math.floor((progress * totalLayers) / 100),
         totalLayers,
       }
+    },
+    /** What the `update` and `light` requests last set. */
+    get settings() {
+      return { ...settings, ...(light ? { light: { ...light } } : {}) }
     },
     get extendedState() {
       return { ...extended }

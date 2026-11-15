@@ -1,3 +1,4 @@
+import { mapCrealityFirmware } from '../creality/firmware.ts'
 import { createCrealityTelemetryClient } from '../creality/index.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
@@ -10,12 +11,14 @@ export function createCrealityCollection(input: {
   onObservation: (value: RawPrinterObservation) => void
   onUnavailable: (epoch: number) => void
 }) {
+  let firmwareObservation: RawPrinterObservation['firmwareObservation']
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Partial<PrinterState> = {}
   let stamps: Partial<Record<keyof PrinterState, number>> = {}
   let nestedStamps: Record<string, Record<string, number>> = {}
   const invalidate = () => {
+    firmwareObservation = undefined
     nestedStamps = {}
     values = {}
     stamps = {}
@@ -29,6 +32,8 @@ export function createCrealityCollection(input: {
     onTelemetry(report) {
       if (input.signal.aborted) return
       const now = performance.now()
+      const firmware = mapCrealityFirmware(report)
+      if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       const delta = {
         printerKey: input.binding.printerKey,
         ...(report.state === undefined ? {} : { state: report.state }),
@@ -96,6 +101,7 @@ export function createCrealityCollection(input: {
       input.onObservation({
         printerKey: input.binding.printerKey,
         epoch,
+        ...(firmwareObservation ? { firmwareObservation } : {}),
         printer: printer.data,
         receivedAtMonoMs: now,
         fieldObservedAtMonoMs: { creality: { ...stamps } },

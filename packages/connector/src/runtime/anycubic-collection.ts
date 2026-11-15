@@ -1,3 +1,4 @@
+import { mapAnycubicFirmware } from '../anycubic/firmware.ts'
 import { readFileSync } from 'node:fs'
 import {
   createAnycubicLanClient,
@@ -26,11 +27,13 @@ export function createAnycubicCollection(input: {
   }
   if (typeof password !== 'string' || !password || password.length > 2048)
     throw Error('Invalid Anycubic credential file')
+  let firmwareObservation: RawPrinterObservation['firmwareObservation']
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Record<string, unknown> = {}
   let times: Partial<Record<keyof PrinterState, number>> = {}
   const invalidate = () => {
+    firmwareObservation = undefined
     clearTimeout(timer)
     values = {}
     times = {}
@@ -58,8 +61,11 @@ export function createAnycubicCollection(input: {
     },
     onReport(payload) {
       const report = decodeAnycubicReport(payload)
-      if (report.kind !== 'observation') return
+      if (report.kind === 'invalid') return
       const now = performance.now()
+      const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
+      if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
+      if (report.kind === 'ignored' && !firmware) return
       for (const [key, value] of Object.entries(
         report as Record<string, unknown>,
       )) {
@@ -85,6 +91,7 @@ export function createAnycubicCollection(input: {
       input.onObservation({
         printerKey: input.binding.printerKey,
         epoch,
+        ...(firmwareObservation ? { firmwareObservation } : {}),
         printer: parsed.data,
         receivedAtMonoMs: now,
         fieldObservedAtMonoMs: { anycubic: { ...times } },

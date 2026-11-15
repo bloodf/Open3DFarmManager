@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { ExtendedControlAction, MacroName } from './control-actions.ts'
 
+export { firmwareUpdateAvailable } from './firmware.ts'
+
 export const PrinterState = z
   .strictObject({
     macros: z.array(MacroName).max(50).optional(),
@@ -14,6 +16,23 @@ export const PrinterState = z
         vendor: z.string().min(1).max(255).optional(),
         model: z.string().min(1).max(1024).optional(),
         firmware: z.string().min(1).max(1024).optional(),
+      })
+      .optional(),
+    firmware: z
+      .strictObject({
+        current: z.string().min(1).max(64).optional(),
+        latest: z.string().min(1).max(64).optional(),
+        updateAvailable: z.boolean().optional(),
+        components: z
+          .array(
+            z.strictObject({
+              name: z.string().min(1).max(64),
+              current: z.string().min(1).max(64),
+              latest: z.string().min(1).max(64).optional(),
+            }),
+          )
+          .max(16)
+          .optional(),
       })
       .optional(),
     printerKey: z.string().min(1).max(128),

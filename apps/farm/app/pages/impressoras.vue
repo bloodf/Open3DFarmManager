@@ -1831,6 +1831,7 @@ onBeforeRouteLeave(clear)
         <li v-for="printer in printers" :key="printer.assignmentId">
           <PrinterIdentity
             :identity="liveObservations[printer.assignmentId]?.state.identity"
+            :firmware="liveObservations[printer.assignmentId]?.state.firmware"
           />
           <dl>
             <dt>Chave exata</dt>

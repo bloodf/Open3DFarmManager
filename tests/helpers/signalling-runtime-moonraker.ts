@@ -458,15 +458,15 @@ export async function createRuntimeMoonrakerFixture() {
             failure = true
           })
           child.once('close', (code, signal) => {
-            if (code !== 0 || signal !== null || buffer.length) {
-              failure = true
-              // Why the packaged Connector did not stop cleanly.
+            if (code !== 0 || signal !== null || buffer.length) failure = true
+            // Why the packaged Connector did not stop cleanly.
+            if (code !== 0 || signal !== null || buffer.length)
               console.error(
                 'Packaged Connector exit',
                 JSON.stringify({ code, signal, pending: buffer.length }),
                 stderrTail,
               )
-            }
+            console.error('Packaged Connector stderr bytes', errors, bytes)
             settled = true
             resolve()
           })
@@ -508,6 +508,12 @@ export async function createRuntimeMoonrakerFixture() {
         stopPackaged = async () => {
           if (child.exitCode === null && child.signalCode === null)
             child.kill('SIGTERM')
+          // A busy host needs longer than the strict bound below to wind down;
+          // wait for it here so only a Connector that never stops fails.
+          await Promise.race([
+            closed,
+            new Promise<void>((resolve) => setTimeout(resolve, 14_000).unref()),
+          ])
           let timer: ReturnType<typeof setTimeout> | undefined
           try {
             await Promise.race([

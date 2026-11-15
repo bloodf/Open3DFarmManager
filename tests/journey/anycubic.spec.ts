@@ -326,6 +326,7 @@ function suite(title: string) {
         name: 'Consultar arquivos',
         exact: true,
       })
+      let preparing = ''
       for (let attempt = 0; attempt < 15; attempt++) {
         if (!safeToRepeat())
           throw new Error('The printer changed state; not repeating')
@@ -342,7 +343,15 @@ function suite(title: string) {
           await openFiles(page)
         // Each file operation uses one control session of the Connector.
         await controlInbox()
-        const button = await prepare()
+        // A field disabled between two live sessions is not an error: nothing
+        // was sent, so the operation is prepared again.
+        let button: Locator
+        try {
+          button = await prepare()
+        } catch (error) {
+          preparing = error instanceof Error ? error.message : String(error)
+          continue
+        }
         // The page clears a confirmation when the live session blinks: the
         // operation is prepared again.
         if (
@@ -362,7 +371,9 @@ function suite(title: string) {
         ).toBeVisible({ timeout: 90_000 })
         if ((await done.isVisible()) && verified()) return
       }
-      throw new Error('File operation never completed: ' + expected)
+      throw new Error(
+        'File operation never completed: ' + expected + ' ' + preparing,
+      )
     }
     const filesStatus = (page: Page, text: string | RegExp) =>
       page.getByRole('status').filter({ hasText: text })

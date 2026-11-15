@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -44,10 +45,13 @@ export type AnycubicProbe = (input: {
   modelId: string
   deviceId: string
   credentialFile: string
+  caFile?: string | undefined
+  pinSha256?: string | undefined
   signal: AbortSignal
 }) => Promise<boolean>
 /** Subscribe only. No printer command or request is published. */
 export const probeAnycubic: AnycubicProbe = async (input) => {
+  if (!input.caFile && !input.pinSha256) return false
   if (input.signal.aborted) return false
   const credentials = Credentials.parse(
     readPrivateJsonFile(input.credentialFile, { maxBytes: 8192 }),
@@ -59,6 +63,8 @@ export const probeAnycubic: AnycubicProbe = async (input) => {
     port: input.port,
     serial: input.modelId + '/' + input.deviceId,
     credentials,
+    ...(input.caFile ? { caPem: readFileSync(input.caFile, 'utf8') } : {}),
+    ...(input.pinSha256 ? { pinSha256: input.pinSha256 } : {}),
     signal: AbortSignal.any([input.signal, controller.signal]),
     limits: {
       maxFrameBytes: 65536,
@@ -100,6 +106,8 @@ export async function prepareAnycubic(
   let ok = false
   try {
     ok = await probe({
+      ...(target.caFile ? { caFile: target.caFile } : {}),
+      ...(target.pinSha256 ? { pinSha256: target.pinSha256 } : {}),
       host: target.host,
       port: target.port,
       modelId: target.modelId,
@@ -225,6 +233,8 @@ export function commitAnycubic(
           ...(current.collection.anycubic?.printers ?? []),
           {
             printerKey: plan.printer_key,
+            ...(target.caFile ? { caFile: target.caFile } : {}),
+            ...(target.pinSha256 ? { pinSha256: target.pinSha256 } : {}),
             host: target.host,
             port: target.port,
             modelId: target.modelId,

@@ -104,7 +104,7 @@ export const MoonrakerConfigurationTarget = z
       .regex(/^[A-Za-z0-9_-]{1,256}$/)
       .optional(),
     username: z.string().min(1).max(256).optional(),
-    password: z.string().min(1).max(4096).optional(),
+    password: z.string().min(1).max(256).optional(),
     device_id: configurationOpaqueId.optional(),
   })
   .refine(
@@ -176,12 +176,17 @@ export const AnycubicConfigurationTarget = z.strictObject({
   password: z
     .string()
     .min(1)
-    .max(2048)
+    .max(256)
     .refine(
       (value) =>
         new TextEncoder().encode(JSON.stringify(value)).byteLength <= 4096,
       'Credential exceeds private file limit',
     )
+    .optional(),
+  caFile: z.string().min(1).max(4096).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-fA-F0-9]{64}$/)
     .optional(),
   device_id: configurationOpaqueId.optional(),
 })

@@ -367,17 +367,19 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid printer snapshot')
     }
-    if (
+    const active =
       parsedPrinter.data.state === 'printing' ||
       parsedPrinter.data.state === 'paused'
-    )
+    if (active) {
+      lastJobs.delete(value.printerKey)
       rearmed.add(value.printerKey)
+    }
     const finished =
       parsedPrinter.data.lastJob ??
       (!fieldStamped && !connectionOnly && value.status
         ? moonrakerLastJob(value.status, parsedPrinter.data.observedAt)
         : undefined)
-    if (finished) {
+    if (finished && !active) {
       const known = lastJobs.get(value.printerKey)
       // The same terminal state is re-observed every poll; keep its first endedAt.
       const repeat =

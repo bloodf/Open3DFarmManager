@@ -174,6 +174,7 @@ export function createCrealityTelemetryClient(options: {
   host: string
   port?: number
   onTelemetry: (report: CrealityTelemetry) => void
+  onDisconnect?: () => void
   reconnectDelayMs?: number
   maxReconnectDelayMs?: number
 }) {
@@ -220,6 +221,7 @@ export function createCrealityTelemetryClient(options: {
       }
     })
     socket.once('close', () => {
+      if (!stopped) options.onDisconnect?.()
       if (stopped) {
         resolveDone()
         return

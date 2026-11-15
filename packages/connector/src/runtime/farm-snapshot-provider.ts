@@ -27,6 +27,10 @@ export type RawPrinterObservation = Omit<
   'status' | 'fieldObservedAtMonoMs'
 > &
   Partial<Pick<RawMoonrakerObservation, 'status'>> & {
+    materialsObservation?: Readonly<{
+      materials: NonNullable<PrinterState['materials']>
+      observedAtMonoMs: number
+    }>
     fieldObservedAtMonoMs:
       | RawMoonrakerObservation['fieldObservedAtMonoMs']
       | Readonly<{ connection: number }>
@@ -104,7 +108,11 @@ export function createFarmSnapshotSource(input: {
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
       if (!entry) return
-      const times = Object.values(fieldTimes(entry.fieldObservedAtMonoMs))
+      const timing = fieldTimes(entry.fieldObservedAtMonoMs)
+      const independent = ['fans', 'light', 'materials']
+      const times = Object.entries(timing)
+        .filter(([key]) => !independent.includes(key))
+        .map(([, time]) => time)
       captured = Math.min(captured, ...times)
       until = Math.min(until, ...times.map((time) => time + 5000))
       const temperature = entry.temperatureObservation
@@ -119,6 +127,20 @@ export function createFarmSnapshotSource(input: {
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const { controls: _untrustedControls, ...printer } = entry.printer
+      for (const field of ['fans', 'light', 'materials'] as const) {
+        if (field in timing) {
+          const stamp = Object.entries(timing).find(
+            ([key]) => key === field,
+          )![1]
+          if (stamp + 5000 <= now) delete printer[field]
+          else until = Math.min(until, stamp + 5000)
+        }
+      }
+      const material = entry.materialsObservation
+      if (material && material.observedAtMonoMs + 5000 > now) {
+        printer.materials = material.materials
+        until = Math.min(until, material.observedAtMonoMs + 5000)
+      }
       printers.push(
         PrinterState.parse({
           ...printer,
@@ -228,9 +250,8 @@ export function createFarmSnapshotSource(input: {
               'estimatedRemainingSeconds',
               'toolTemperatureCelsius',
               'bedTemperatureCelsius',
-              ...('bambu' in timing || 'anycubic' in timing
-                ? (['fans', 'light'] as const)
-                : []),
+              'fans',
+              'light',
             ] as const
           ).filter((field) => value.printer[field] !== undefined),
         ]
@@ -292,6 +313,18 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
       throw Error('Invalid temperature observation time')
     }
+    if (
+      value.materialsObservation &&
+      (!Number.isFinite(value.materialsObservation.observedAtMonoMs) ||
+        value.materialsObservation.observedAtMonoMs < 0 ||
+        value.materialsObservation.observedAtMonoMs > value.receivedAtMonoMs ||
+        !PrinterState.shape.materials.safeParse(
+          value.materialsObservation.materials,
+        ).success)
+    ) {
+      invalidate({ printerKey: value.printerKey, epoch: value.epoch })
+      throw Error('Invalid materials observation')
+    }
     const parsedPrinter = PrinterState.safeParse(value.printer)
     if (!parsedPrinter.success) {
       invalidate({ printerKey: value.printerKey, epoch: value.epoch })
@@ -321,6 +354,16 @@ export function createFarmSnapshotSource(input: {
       value.printerKey,
       Object.freeze({
         ...observation,
+        ...(value.materialsObservation
+          ? {
+              materialsObservation: Object.freeze({
+                observedAtMonoMs: value.materialsObservation.observedAtMonoMs,
+                materials: structuredClone(
+                  value.materialsObservation.materials,
+                ),
+              }),
+            }
+          : {}),
         printer: Object.freeze(printer),
         fieldObservedAtMonoMs:
           'anycubic' in timing

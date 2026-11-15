@@ -116,6 +116,7 @@ export function openMoonrakerClient(input: {
 } {
   // Let the snapshot promise continuation install its baseline before a delta.
   let socket: ReturnType<typeof createMoonrakerSocket> | undefined
+  let discoveryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
   let nextId = 1
@@ -140,6 +141,7 @@ export function openMoonrakerClient(input: {
     if (finished) return
     finished = true
     clearTimeout(timer)
+    clearTimeout(discoveryTimer)
     clearTimeout(queryTimer)
     clearTimeout(queryTimeout)
     try {
@@ -184,11 +186,29 @@ export function openMoonrakerClient(input: {
         : input.limits.requestTimeoutMs,
     )
     pending = { id: 1, started: performance.now() }
+    if (discovering) {
+      discoveryTimer = setTimeout(
+        () => {
+          if (finished || !discovering) return
+          discovering = false
+          pending = { id: 1, started: performance.now() }
+          socket!.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: nextId,
+              method: 'printer.objects.subscribe',
+              params: { objects },
+            }),
+          )
+        },
+        Math.min(50, input.limits.requestTimeoutMs / 2),
+      )
+    }
     // Optional RTC discovery precedes the subscription on the same connection.
     socket!.send(
       JSON.stringify({
         jsonrpc: '2.0',
-        id: 1,
+        id: discovering ? Number.MAX_SAFE_INTEGER : 1,
         method: discovering
           ? 'printer.objects.list'
           : 'printer.objects.subscribe',
@@ -238,13 +258,25 @@ export function openMoonrakerClient(input: {
       )
       const reply = Reply.safeParse(value)
       if (reply.success) {
+        // A discovery reply after the fallback cannot replace the baseline.
+        if (
+          input.discoverObjects &&
+          !discovering &&
+          reply.data.id === Number.MAX_SAFE_INTEGER &&
+          typeof reply.data.result === 'object' &&
+          reply.data.result !== null &&
+          'objects' in reply.data.result
+        )
+          return
         if (
           !pending ||
-          reply.data.id !== pending.id ||
+          (reply.data.id !== pending.id &&
+            !(discovering && reply.data.id === Number.MAX_SAFE_INTEGER)) ||
           !Object.hasOwn(reply.data, 'result')
         )
           throw new Error('Unexpected reply')
         if (discovering) {
+          clearTimeout(discoveryTimer)
           const listed = z
             .object({ objects: z.array(z.string().min(1).max(128)).max(512) })
             .parse(reply.data.result)

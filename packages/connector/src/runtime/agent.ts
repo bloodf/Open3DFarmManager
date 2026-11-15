@@ -417,6 +417,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           signal,
           freshness: offline.freshness,
           onDiagnostic: pauseDiagnostic,
+          onMacros(read) {
+            macrosFor = read
+          },
           onControls(read) {
             controlsFor = read
           },

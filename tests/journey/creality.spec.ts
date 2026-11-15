@@ -370,7 +370,7 @@ if (journeyEnabled())
         page,
         'Cancelar',
         'Confirmar cancelamento',
-        'Impressão cancelada. O Connector confirmou a cancelamento.',
+        'Impressão cancelada. O Connector confirmou o cancelamento.',
       )
       expect(sets()).toContainEqual({ stop: 1 })
       await reportedState(row, 'Ociosa')

@@ -107,7 +107,7 @@ async function stopChild(child: ChildProcess | undefined) {
  */
 export async function startFarmApp(
   database: JourneyDatabase,
-  options: { farmView?: boolean } = {},
+  options: { farmView?: boolean; history?: boolean } = {},
 ): Promise<FarmApp> {
   const directory = await mkdtemp(join(tmpdir(), 'o3dfm-journey-'))
   await chmod(directory, 0o700)
@@ -116,8 +116,10 @@ export async function startFarmApp(
   let output = ''
   // Telemetry ingestion and the signalling inboxes share one proof slot per
   // Connector credential on the server and displace each other, so the upload
-  // path stays closed until a spec asks for delivery.
-  let telemetryUpload = false
+  // path stays closed until a spec asks for delivery. A `history` journey
+  // keeps it open from the start and runs with the short proof lifetimes below.
+  const liveHistory = options.history === true
+  let telemetryUpload = liveHistory
   try {
     const farm = join(checkout, 'apps/farm')
     const layer = join(directory, 'layer')
@@ -231,7 +233,9 @@ export async function startFarmApp(
       }),
       { mode: 0o600, flag: 'wx' },
     )
-    const tokenTtlSeconds = '300'
+    // No renewal is configured: with telemetry flowing for the whole journey
+    // the credential must outlive it.
+    const tokenTtlSeconds = liveHistory ? '3600' : '300'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       OPEN3DFARM_CONFIGURATION: JSON.stringify({
@@ -286,7 +290,11 @@ export async function startFarmApp(
       NUXT_CONNECTOR_SIGNALLING_PROOF_DATABASE_URL: url(7),
       NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH: registry,
       NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS: tokenTtlSeconds,
-      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: '8000',
+      // With telemetry flowing next to both signalling sockets, a pending
+      // proof answers the others "retry after its remaining lifetime": kept
+      // well under the Connector's 8 s admission window, a collision is a
+      // short wait and not a dropped socket.
+      NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS: liveHistory ? '3000' : '8000',
       NUXT_PAUSE_AUTHORITY_ENABLED: 'true',
       NUXT_PAUSE_AUTHORITY_DATABASE_URL: database.url('farm_pause_authority'),
       NUXT_PAUSE_AUTHORITY_ISSUER_KEY_PATH: pauseIssuerKeyPath,
@@ -309,7 +317,7 @@ export async function startFarmApp(
       // a pending telemetry challenge makes them wait for its expiry, which
       // must stay well inside their admission windows. One second is too
       // short for the Connector to answer: nothing is ever delivered.
-      NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '2000',
+      NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: liveHistory ? '3000' : '2000',
       NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
       NUXT_JOB_HISTORY_ENABLED: 'true',
       NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),

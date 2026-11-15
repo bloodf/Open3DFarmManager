@@ -69,6 +69,25 @@ export type JourneyOptions = Readonly<{
    * Off by default: the read-only journey stays unchanged.
    */
   signedControl?: boolean
+  /**
+   * Stores Connector telemetry on the server for the whole journey (the
+   * upload path is open from the start), so finished jobs reach the history
+   * page while the live connection stays up. Off by default.
+   */
+  history?: boolean
+  /**
+   * Performs the printer set-up in the browser instead of the harness calling
+   * the assignment API. Receives the signed-in owner page and must return once
+   * the assignment for `printerKey` on `agentId` exists.
+   */
+  setup?(context: {
+    page: Page
+    origin: string
+    farmId: string
+    agentId: string
+    printerKey: string
+    vendor: VendorSimulator | undefined
+  }): Promise<void>
 }>
 
 export type JourneyHarness = Readonly<{
@@ -240,7 +259,9 @@ export async function startJourneyHarness(
   try {
     const database: JourneyDatabase = await startJourneyDatabase(runId)
     undo.push(() => database.close())
-    const app: FarmApp = await startFarmApp(database)
+    const app: FarmApp = await startFarmApp(database, {
+      history: options.history === true,
+    })
     undo.push(() => app.close())
     const { origin } = app
 
@@ -422,14 +443,46 @@ export async function startJourneyHarness(
 
     // Assign the printer, then read the assignment back.
     const path = `/api/farms/${database.farmId}/printers`
-    const registration = (await pagePost(ownerPage, path, {
-      agentId: claim.agent_id,
-      printerKey,
-      confirmedLocalConfiguration: true,
-    })) as { assignmentId?: unknown }
-    if (typeof registration.assignmentId !== 'string')
-      throw new Error('Printer assignment failed')
-    const assignmentId = registration.assignmentId
+    let assignmentId: string
+    if (options.setup) {
+      await options.setup({
+        page: ownerPage,
+        origin,
+        farmId: database.farmId,
+        agentId: claim.agent_id,
+        printerKey,
+        vendor,
+      })
+      const listed = (await ownerPage.evaluate(async (url) => {
+        const response = await fetch(url, { cache: 'no-store' })
+        return response.ok ? await response.json() : null
+      }, path)) as {
+        printers?: {
+          assignmentId?: unknown
+          agentId?: unknown
+          printerKey?: unknown
+          status?: unknown
+        }[]
+      } | null
+      const created = listed?.printers?.find(
+        (printer) =>
+          printer.printerKey === printerKey &&
+          printer.agentId === claim.agent_id &&
+          printer.status === 'active',
+      )
+      if (typeof created?.assignmentId !== 'string')
+        throw new Error('Browser set-up did not create the assignment')
+      assignmentId = created.assignmentId
+    } else {
+      const registration = (await pagePost(ownerPage, path, {
+        agentId: claim.agent_id,
+        printerKey,
+        confirmedLocalConfiguration: true,
+      })) as { assignmentId?: unknown }
+      if (typeof registration.assignmentId !== 'string')
+        throw new Error('Printer assignment failed')
+      assignmentId = registration.assignmentId
+    }
     const assignment = { assignmentId, agentId: claim.agent_id, printerKey }
     await runtime.start({
       origin,

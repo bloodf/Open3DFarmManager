@@ -826,14 +826,8 @@ for (const backend of ['creality', 'anycubic', 'kobralink'] as const) {
         true,
         control,
       )
-      // A driver that acknowledged the request and read a fresh state after
-      // it lets the dispatcher settle an extended command as applied, which
-      // releases the journal's single active row for the next command. The
-      // KobraLink driver reads no state after the send: it stays unconfirmed.
-      assert.equal(
-        await f.start(filename),
-        backend === 'kobralink' ? 'outcome-unknown' : 'applied',
-      )
+      // The fresh state read after the send confirms an extended command.
+      assert.equal(await f.start(filename), 'applied')
       check()
     },
   )
@@ -911,7 +905,10 @@ test(
     assert.deepEqual(fixture.starts, [
       { fileId: 'file-1', excludedObjects: [] },
     ])
-    assert.match(JSON.stringify(states.at(-1)), /Resultado desconhecido/)
+    assert.match(
+      JSON.stringify(states.at(-1)),
+      /Impressão iniciada\. O Connector confirmou o comando\./,
+    )
   },
 )
 

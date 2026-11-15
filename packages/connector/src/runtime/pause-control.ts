@@ -20,9 +20,8 @@ import {
   type PauseConnectorSignallingScope,
 } from '../cloud/pause-signalling-client.ts'
 import { createPauseDriverRouter } from './pause-driver-router.ts'
+import { createFileTargets } from './file-targets.ts'
 import { runSignallingLifecycle } from './signalling.ts'
-import type { FileUploadTarget } from './file-upload.ts'
-import type { FileListTarget } from './file-list.ts'
 
 export type PauseControlDiagnostic =
   | { kind: 'pause-listening' }
@@ -190,38 +189,15 @@ export async function runPauseControl(input: {
       // Diagnostics never change the command path.
     }
   }
-  // File channel: only the locally provisioned printer of this control
-  // assignment, and only backends whose upload path is wired here. Nothing
-  // from the wire selects a destination.
-  const controlledKey = config.assignments.find(
-    (assignment) => assignment.assignment_id === assignmentId,
-  )?.printer_key
-  const crealityFor = (printerKey: string) =>
-    printerKey === controlledKey && config.collection.version === 4
-      ? config.collection.creality.printers.find(
-          (printer) => printer.printerKey === printerKey,
-        )
-      : undefined
+  // File listing and upload ride the same admitted control peer, for the
+  // locally provisioned printer of this control assignment only.
   const files: NonNullable<ClientOptions['files']> = {
+    ...createFileTargets({
+      config,
+      assignmentId,
+      dataDirectory: input.dataDirectory,
+    }),
     getAdmittedHandle: (transportId) => relay.admittedHandle(transportId),
-    fileTransfer: {
-      directory: join(input.dataDirectory, 'file-staging'),
-      targetFor(printerKey): FileUploadTarget | undefined {
-        const creality = crealityFor(printerKey)
-        if (!creality) return undefined
-        const host = creality.host.includes(':')
-          ? `[${creality.host}]`
-          : creality.host
-        return {
-          backend: 'creality',
-          origin: `http://${host}:${creality.httpPort ?? 80}`,
-        }
-      },
-    },
-    fileList: {
-      targetFor: (printerKey): FileListTarget | undefined =>
-        crealityFor(printerKey) ? { backend: 'creality' } : undefined,
-    },
   }
   function admitted(result: Awaited<ReturnType<typeof relay.admitPeer>>) {
     diagnostic(

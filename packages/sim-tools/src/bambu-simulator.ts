@@ -190,6 +190,7 @@ export async function startBambuSimulator({
                   'ledctrl',
                   'print_speed',
                   'project_file',
+                  'ams_change_filament',
                 ].includes(command) ||
                 typeof request?.sequence_id !== 'string'
               )
@@ -223,7 +224,20 @@ export async function startBambuSimulator({
                 ) {
                   extended.file = request.url
                   gcodeState = 'RUNNING'
-                } else if (!['pause', 'resume', 'stop'].includes(command))
+                } else if (
+                  command === 'ams_change_filament' &&
+                  Number.isInteger(request.target) &&
+                  ((request.target >= 0 && request.target <= 15) ||
+                    request.target === 255) &&
+                  Number.isInteger(request.curr_temp) &&
+                  request.curr_temp >= 0 &&
+                  request.curr_temp <= 300 &&
+                  Number.isInteger(request.tar_temp) &&
+                  request.tar_temp >= 0 &&
+                  request.tar_temp <= 300
+                )
+                  extended.ams = { tray_now: String(request.target) }
+                else if (!['pause', 'resume', 'stop'].includes(command))
                   throw new Error('Invalid request')
                 if (['pause', 'resume', 'stop'].includes(command))
                   gcodeState =

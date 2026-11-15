@@ -136,8 +136,9 @@ export function createFarmSnapshotSource(input: {
         controls: _untrustedControls,
         macros: _untrustedMacros,
         firmware: _untrustedFirmware,
-        ...printer
+        ...observedPrinter
       } = entry.printer
+      const printer: PrinterState = { ...observedPrinter }
       for (const field of ['fans', 'light', 'materials'] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(

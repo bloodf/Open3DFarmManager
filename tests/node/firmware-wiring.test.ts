@@ -51,23 +51,28 @@ async function moonrakerFixture() {
   })
   const websocket = new WebSocketServer({ server })
   let eventtime = 0
-  websocket.on('connection', (socket) =>
-    socket.on('message', (data) => {
-      const request = JSON.parse(data.toString())
-      methods.push(request.method)
-      const result =
-        request.method === 'printer.objects.list'
-          ? { objects: [] }
-          : {
-              eventtime: ++eventtime,
-              status: {
-                webhooks: { state: 'ready' },
-                print_stats: { state: 'printing' },
-                virtual_sdcard: { progress: 0.25 },
-              },
-            }
-      socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }))
-    }),
+  websocket.on(
+    'connection',
+    (socket: {
+      on(event: 'message', listener: (data: Buffer) => void): void
+      send(data: string): void
+    }) =>
+      socket.on('message', (data) => {
+        const request = JSON.parse(data.toString())
+        methods.push(request.method)
+        const result =
+          request.method === 'printer.objects.list'
+            ? { objects: [] }
+            : {
+                eventtime: ++eventtime,
+                status: {
+                  webhooks: { state: 'ready' },
+                  print_stats: { state: 'printing' },
+                  virtual_sdcard: { progress: 0.25 },
+                },
+              }
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }))
+      }),
   )
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()

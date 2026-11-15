@@ -9,7 +9,7 @@ const port = e2ePort('FARM_VIEW_PORT', 3101)
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: 'farm-view.spec.ts',
+  testMatch: ['farm-view.spec.ts', 'farm-controls.spec.ts'],
   workers: 1,
   use: { baseURL: `http://127.0.0.1:${port}` },
   webServer: {

@@ -53,6 +53,8 @@ const BAMBU_ALL = [
   'set_light',
   'set_speed',
   'start_print',
+  'load_filament',
+  'unload_filament',
 ]
 const LIMITS = {
   maxMessageBytes: 4096,
@@ -178,6 +180,10 @@ async function authorityFixture(action: Action, args: Args) {
     admission_nonce: admissionNonce,
     actions: [...ExtendedControlAction.options],
   }
+  // An operator is never granted run_macro: only owners and admins are.
+  capability.actions = capability.actions.filter(
+    (granted) => granted !== 'run_macro',
+  )
   const challenge = {
     v: 1 as const,
     purpose: 'pause-admission' as const,

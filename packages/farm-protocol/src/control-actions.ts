@@ -14,6 +14,9 @@ export const ExtendedControlAction = z.enum([
   'set_speed',
   'start_print',
   'firmware_restart',
+  'run_macro',
+  'load_filament',
+  'unload_filament',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -27,7 +30,12 @@ export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
 export function controlsForBackend(backend: string): readonly ControlAction[] {
   return backend === 'moonraker' ? MOONRAKER_CONTROLS : []
 }
-export function controlRoleAllowed(role: string): boolean {
+export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+export function controlRoleAllowed(
+  role: string,
+  action?: ExtendedControlAction,
+): boolean {
+  if (action === 'run_macro') return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
 export function controlSourceState(
@@ -57,12 +65,21 @@ export function controlTargetState(
 
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
+    action: z.literal('run_macro'),
+    args: z.strictObject({ name: MacroName }),
+  }),
+  z.strictObject({
+    action: z.literal('load_filament'),
+    args: z.strictObject({ tray: z.number().int().min(0).max(15).optional() }),
+  }),
+  z.strictObject({
     action: z.enum([
       'pause',
       'resume',
       'cancel',
       'emergency_stop',
       'firmware_restart',
+      'unload_filament',
     ]),
     args: z.strictObject({}),
   }),

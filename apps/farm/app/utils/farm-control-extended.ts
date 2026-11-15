@@ -13,7 +13,7 @@ export const extendedActions = [
   'emergency_stop',
 ] as const
 export type FarmExtendedAction = (typeof extendedActions)[number]
-const labels: Record<FarmExtendedAction, string> = {
+const labels: Partial<Record<ExtendedControlAction, string>> = {
   set_temperature: 'Definir temperatura',
   set_fan: 'Definir ventilador',
   home: 'Referenciar eixos',
@@ -21,9 +21,12 @@ const labels: Record<FarmExtendedAction, string> = {
   set_speed: 'Definir velocidade',
   firmware_restart: 'Reiniciar firmware',
   emergency_stop: 'Parada de emergência',
+  run_macro: 'Executar macro',
+  load_filament: 'Carregar filamento',
+  unload_filament: 'Descarregar filamento',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
-  return labels[action as FarmExtendedAction] ?? action
+  return labels[action] ?? action
 }
 export function advertisedExtended(
   actions: readonly ExtendedControlAction[] | undefined,

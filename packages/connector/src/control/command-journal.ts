@@ -10,7 +10,7 @@ import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -121,9 +121,13 @@ const journals = new WeakMap<JournalHandle, State>()
 const receipts = new WeakMap<ClaimHandle, Receipt>()
 
 const legacyActionSchema = `CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel'))) STRICT`
-const actionSchema = legacyActionSchema.replace(
+const previousActionSchema = legacyActionSchema.replace(
   "'pause','resume','cancel'",
   "'pause','resume','cancel','emergency_stop','firmware_restart','set_temperature','set_fan','home','set_light','set_speed','start_print'",
+)
+const actionSchema = previousActionSchema.replace(
+  "'firmware_restart',",
+  "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
 const schema = [
   actionSchema,
@@ -270,7 +274,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, 3, SCHEMA_VERSION].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -302,7 +306,7 @@ export function openCommandJournal(input: {
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if (version === 2 && app === APPLICATION_ID) {
+      } else if ((version === 2 || version === 3) && app === APPLICATION_ID) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -310,7 +314,13 @@ export function openCommandJournal(input: {
           .all()
           .map((row) => row.sql)
         const legacySchema = schema
-          .map((sql) => (sql === actionSchema ? legacyActionSchema : sql))
+          .map((sql) =>
+            sql === actionSchema
+              ? version === 2
+                ? legacyActionSchema
+                : previousActionSchema
+              : sql,
+          )
           .sort()
         if (
           definitions.length !== legacySchema.length ||

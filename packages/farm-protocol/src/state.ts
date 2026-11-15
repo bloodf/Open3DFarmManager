@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import { ExtendedControlAction } from './control-actions.ts'
+import { ExtendedControlAction, MacroName } from './control-actions.ts'
 
 export const PrinterState = z
   .strictObject({
+    macros: z.array(MacroName).max(50).optional(),
     controls: z
       .array(ExtendedControlAction)
       .max(ExtendedControlAction.options.length)

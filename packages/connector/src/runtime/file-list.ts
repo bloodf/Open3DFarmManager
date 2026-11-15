@@ -10,9 +10,22 @@ import {
   createThumbnailDownload,
   type MoonrakerFilesClient,
 } from '../moonraker/files.ts'
+import type {
+  createKobraLinkClient,
+  PrinterBinding,
+} from '../kobralink/client.ts'
 import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
 
 export type FileListTarget =
+  | { backend: 'creality' }
+  | { backend: 'anycubic' }
+  | {
+      backend: 'kobralink'
+      client(
+        signal: AbortSignal,
+      ): Promise<ReturnType<typeof createKobraLinkClient>>
+      binding: PrinterBinding
+    }
   | {
       backend: 'moonraker'
       client: MoonrakerFilesClient
@@ -97,47 +110,74 @@ export function createFileList(
         try {
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
+          if (target.backend === 'creality' || target.backend === 'anycubic')
+            throw Error('unsupported')
           const entries =
-            target.backend === 'moonraker'
-              ? await Promise.race([
-                  listMoonrakerFiles(
-                    {
-                      request: (method, params) =>
-                        target.client.request(method, params),
-                      ...(target.thumbnailSource
-                        ? {
-                            downloadThumbnail: createThumbnailDownload({
-                              ...target.thumbnailSource,
-                              signal: controller.signal,
-                            }),
-                          }
-                        : target.client.downloadThumbnail
-                          ? {
-                              downloadThumbnail: (path) =>
-                                target.client.downloadThumbnail!(path),
-                            }
-                          : {}),
-                    },
-                    { limit: 200 },
-                  ),
-                  deadline,
-                ])
-              : (
+            target.backend === 'kobralink'
+              ? (
                   await Promise.race([
-                    listBambuFiles({ ...target, signal: controller.signal }),
+                    (async () => {
+                      const client = await target.client(controller.signal)
+                      try {
+                        if (!authorized()) throw Error('unauthorized')
+                        return await client.listLibraryFiles(target.binding)
+                      } finally {
+                        client.clearSession()
+                      }
+                    })(),
                     deadline,
                   ])
-                ).map(({ name, size, modifiedAt }) => ({
-                  name,
-                  size,
-                  modified: Date.parse(modifiedAt) / 1000,
+                ).map((file) => ({
+                  name: file.filename,
+                  size: file.sizeBytes,
+                  modified: 0,
+                  printRef: `kobralink-library:${file.id}`,
                 }))
+              : target.backend === 'moonraker'
+                ? await Promise.race([
+                    listMoonrakerFiles(
+                      {
+                        request: (method, params) =>
+                          target.client.request(method, params),
+                        ...(target.thumbnailSource
+                          ? {
+                              downloadThumbnail: createThumbnailDownload({
+                                ...target.thumbnailSource,
+                                signal: controller.signal,
+                              }),
+                            }
+                          : target.client.downloadThumbnail
+                            ? {
+                                downloadThumbnail: (path) =>
+                                  target.client.downloadThumbnail!(path),
+                              }
+                            : {}),
+                      },
+                      { limit: 200 },
+                    ),
+                    deadline,
+                  ])
+                : (
+                    await Promise.race([
+                      listBambuFiles({ ...target, signal: controller.signal }),
+                      deadline,
+                    ])
+                  ).map(({ name, size, modifiedAt }) => ({
+                    name,
+                    size,
+                    modified: Date.parse(modifiedAt) / 1000,
+                  }))
           const files = entries
             .flatMap((entry) => {
               const file = PrinterFile.safeParse(entry)
               return file.success ? [file.data] : []
             })
             .slice(0, 200)
+          if (
+            target.backend === 'kobralink' &&
+            new Set(files.map((file) => file.name)).size !== files.length
+          )
+            throw Error('Ambiguous library filenames')
           // Preserve the existing channel bound, retaining the newest previews first.
           for (let i = files.length - 1; i >= 0; i--) {
             if (
@@ -160,8 +200,15 @@ export function createFileList(
               ? { ok: true, files }
               : { ok: false, reason: 'unauthorized' },
           )
-        } catch {
-          send({ ok: false, reason: authorized() ? 'offline' : 'unauthorized' })
+        } catch (error) {
+          send({
+            ok: false,
+            reason: !authorized()
+              ? 'unauthorized'
+              : error instanceof Error && error.message === 'unsupported'
+                ? 'unsupported'
+                : 'offline',
+          })
         }
       })()
         .catch(() => {})

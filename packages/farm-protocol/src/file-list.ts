@@ -18,6 +18,10 @@ export const PrinterFile = z.strictObject({
         !name.startsWith('/') &&
         !name.split('/').some((part) => part === '..' || part === '.' || !part),
     ),
+  printRef: z
+    .string()
+    .regex(/^kobralink-library:[A-Za-z0-9_-]{1,128}$/)
+    .optional(),
   size: z.number().finite().nonnegative(),
   modified: z.number().finite().nonnegative(),
   thumbnail: z
@@ -54,7 +58,7 @@ export const FileListResponse = z.discriminatedUnion('ok', [
     request_id: id,
     printer_key: id,
     ok: z.literal(false),
-    reason: z.enum(['unauthorized', 'offline', 'busy']),
+    reason: z.enum(['unauthorized', 'offline', 'busy', 'unsupported']),
   }),
 ])
 export type FileListResult = z.infer<typeof FileListResponse>

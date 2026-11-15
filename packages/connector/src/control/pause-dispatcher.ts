@@ -4,6 +4,7 @@ import {
 } from '../runtime/control-limits.ts'
 import {
   controlSourceState,
+  controlRoleAllowed,
   controlTargetState,
   ControlResultCode,
   type ControlAction,
@@ -79,6 +80,7 @@ export interface PauseDriver {
       signal: AbortSignal
     },
   ): Promise<PauseRpcResult>
+  macros?(binding: PrinterBinding): readonly string[] | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   pauseOnce(input: {
     args?: Record<string, unknown>
@@ -159,6 +161,7 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    macros: config.driver.macros?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
     closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
@@ -439,7 +442,17 @@ export function createPauseDispatcher(config: {
         const decision = verifier.inspectAt(authorityHandle, now.wall, now.mono)
         if (!decision.ok) return 'invalid-authority'
         const cap = decision.capability
-        if (!cap.actions.includes(command.action)) return 'scope'
+        if (
+          !cap.actions.includes(command.action) ||
+          !controlRoleAllowed(cap.role, command.action)
+        )
+          return 'scope'
+        if (
+          command.action === 'run_macro' &&
+          (typeof command.args.name !== 'string' ||
+            !driver.macros?.(printerBinding)?.includes(command.args.name))
+        )
+          return 'unsupported-action'
         if (
           command.capability_id !== cap.capability_id ||
           command.transport_id !== cap.transport_id ||

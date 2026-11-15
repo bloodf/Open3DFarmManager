@@ -91,6 +91,9 @@ export async function runPauseControl(input: {
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
   /** Read-only capabilities from the same router used by the relay. */
+  onMacros?: (
+    read: (assignmentId: string) => readonly string[] | undefined,
+  ) => void
   onControls?: (
     read: (assignmentId: string) => readonly ExtendedControlAction[],
   ) => void
@@ -140,6 +143,10 @@ export async function runPauseControl(input: {
       clock,
       observe: (binding, observation) => relay.observe(binding, observation),
     })
+    input.onMacros?.((id) => {
+      const binding = config.bindingFor(id)
+      return binding ? router.macros?.(binding) : undefined
+    })
     if (input.onControls) {
       input.onControls((id) => {
         const binding = config.bindingFor(id)
@@ -166,6 +173,7 @@ export async function runPauseControl(input: {
     })
   } catch (error) {
     // Nothing reached the journal yet: release it before failing.
+    input.onMacros?.(() => undefined)
     input.onControls?.(() => [])
     closeCommandJournal(journal)
     throw error
@@ -282,6 +290,7 @@ export async function runPauseControl(input: {
       },
     })
   } finally {
+    input.onMacros?.(() => undefined)
     input.onControls?.(() => [])
     relay.close()
     // A stalled driver close retains the journal; it is never force-closed.

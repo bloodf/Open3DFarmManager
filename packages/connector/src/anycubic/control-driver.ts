@@ -1,3 +1,4 @@
+import { startAnycubicPrint } from './files.ts'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
@@ -197,19 +198,35 @@ export function openFixedAnycubicControl(input: {
     )
       throw failure()
     attempted = true
-    let payload: ReturnType<typeof buildAnycubicControlCommand>
+    let payload: ReturnType<typeof buildAnycubicControlCommand> | undefined
     try {
-      payload = buildAnycubicControlCommand(next, args)
+      if (next !== 'start_print')
+        payload = buildAnycubicControlCommand(next, args)
     } catch {
       throw failure()
     }
     action = next
     sentSequence = sequence
     sentMono = input.clock.monotonicNow()
-    await transport.publish(payload, () => {
+    const guard = () => {
       current()
       return !request.signal.aborted && request.beforeSend()
-    })
+    }
+    if (next === 'start_print') {
+      if (typeof args.file !== 'string') throw failure()
+      await startAnycubicPrint({
+        model: local!.modelId,
+        deviceId: local!.deviceId,
+        filename: args.file,
+        signal: request.signal,
+        transport: {
+          publish: (topic, wire) => transport.publishFile(topic, wire, guard),
+        },
+      })
+    } else {
+      if (!payload) throw failure()
+      await transport.publish(payload, guard)
+    }
     await wait(
       () =>
         !!latest &&

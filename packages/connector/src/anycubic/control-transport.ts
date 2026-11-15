@@ -231,5 +231,30 @@ export function createAnycubicControlTransport(
       )
     })
   }
-  return { done, close, publish }
+  // Documented slicer print topic, distinct from the public control request topic.
+  // https://github.com/rvanderp3/kobra-connect/blob/main/docs/mqtt-commands.md
+  function publishFile(
+    topic: string,
+    payload: string,
+    beforeSend: () => boolean,
+  ): Promise<void> {
+    if (
+      stopped ||
+      !client.connected ||
+      topic !== `anycubic/anycubicCloud/v1/slicer/printer/${serial}/print` ||
+      Buffer.byteLength(payload) > 2048
+    )
+      return Promise.reject(new Error('Anycubic request unavailable'))
+    return new Promise((resolve, reject) => {
+      if (!beforeSend()) {
+        reject(new Error('Anycubic request denied'))
+        return
+      }
+      client.publish(topic, payload, { qos: 0, retain: false }, (error) => {
+        if (error) reject(new Error('Anycubic request unavailable'))
+        else resolve()
+      })
+    })
+  }
+  return { done, close, publish, publishFile }
 }

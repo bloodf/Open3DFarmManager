@@ -21,6 +21,8 @@ import { useFarmView } from '../composables/useFarmView.ts'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
 import FarmExtendedControls from '../components/FarmExtendedControls.vue'
+import FarmMacrosControls from '../components/FarmMacrosControls.vue'
+import { macroArgs } from '../utils/farm-macros.ts'
 import { extendedLabel } from '../utils/farm-control-extended.ts'
 import type {
   ControlAction,
@@ -301,6 +303,8 @@ async function openControl(
 ) {
   const current = ready.value
   if (
+    (action === 'run_macro' &&
+      !macroArgs(row.observation?.state, String(args.name ?? ''))) ||
     !current?.scope ||
     current.keys.kind !== 'available' ||
     !liveControlActionAvailability(
@@ -373,6 +377,26 @@ function openPause(row: FarmRow, event: Event) {
 }
 function confirmControl() {
   if (pauseState.value.kind === 'ready' && pauseTarget.value) {
+    const row = ready.value?.rows.find(
+      (item) =>
+        item.assignment.assignmentId === pauseTarget.value?.assignmentId,
+    )
+    if (
+      !row ||
+      !ready.value ||
+      !liveControlActionAvailability(
+        pauseTarget.value.action,
+        row,
+        ready.value.keys,
+        pauseEnabled.value,
+      ).available ||
+      (pauseTarget.value.action === 'run_macro' &&
+        !macroArgs(
+          row.observation?.state,
+          String(pauseTarget.value.args.name ?? ''),
+        ))
+    )
+      return
     void pauseControl?.issueControlCommand(
       pauseTarget.value.action,
       pauseTarget.value.args,
@@ -409,6 +433,8 @@ watch([() => ready.value?.rows, now], () => {
   )
   if (
     !row ||
+    (target.action === 'run_macro' &&
+      !macroArgs(row.observation?.state, String(target.args.name ?? ''))) ||
     !ready.value ||
     !liveControlActionAvailability(
       target.action,
@@ -881,6 +907,22 @@ function dateLabel(time: number) {
                       novamente após recarregar.
                     </p>
                   </template>
+                  <FarmMacrosControls
+                    v-if="!isKobraXAssignment(row.assignment)"
+                    :row="row"
+                    :keys="ready.keys"
+                    :control-enabled="pauseEnabled"
+                    :command-in-flight="
+                      pauseControl !== undefined &&
+                      pauseState.kind !== 'settled' &&
+                      pauseState.kind !== 'failed'
+                    "
+                    :now="now"
+                    @action="
+                      (action, args, event) =>
+                        openControl(row, action, event, args)
+                    "
+                  />
                   <FarmExtendedControls
                     v-if="!isKobraXAssignment(row.assignment)"
                     :row="row"
@@ -967,7 +1009,7 @@ function dateLabel(time: number) {
                   pauseTarget.action as ControlAction,
                   pauseTarget.printerKey,
                 )
-              : `${extendedLabel(pauseTarget.action)} — ${pauseTarget.printerKey}`
+              : `${extendedLabel(pauseTarget.action)}${pauseTarget.action === 'run_macro' ? ` ${pauseTarget.args.name}` : ''} — ${pauseTarget.printerKey}`
           }}
         </h2>
         <p id="pause-dialog-description">

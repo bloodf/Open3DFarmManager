@@ -19,6 +19,7 @@ export const CREALITY_ACTIONS = [
   'set_fan',
   'home',
   'set_light',
+  'start_print',
 ] as const
 
 export type CrealityAction = (typeof CREALITY_ACTIONS)[number]
@@ -45,6 +46,23 @@ export function buildCrealityCommand(
       if (!allowed.includes(key)) {
         throw new Error(`Unexpected argument '${key}' for action '${action}'`)
       }
+    }
+  }
+
+  if (action === 'start_print') {
+    keys(['file'])
+    if (
+      typeof args.file !== 'string' ||
+      !/^[A-Za-z0-9_][A-Za-z0-9_. -]{0,254}\.gcode$/i.test(args.file) ||
+      args.file.includes('..') ||
+      Buffer.byteLength(args.file) > 255
+    )
+      throw new Error('Invalid Creality filename')
+    return {
+      method: 'set',
+      params: {
+        opGcodeFile: `printprt:/usr/data/printer_data/gcodes/${args.file}`,
+      },
     }
   }
 

@@ -225,6 +225,8 @@ test('Bambu snapshot follows local control opt-in without opening a connection',
             'set_light',
             'set_speed',
             'start_print',
+            'load_filament',
+            'unload_filament',
           ]
         : [],
     )

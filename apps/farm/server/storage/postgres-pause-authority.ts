@@ -1,3 +1,4 @@
+import { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   actionsForControlRole,
   controlRoleAllowed,
@@ -704,7 +705,10 @@ export class PostgresPauseAuthority {
               printer_key: current.printerKey,
               control_binding_sha256: stored.control_binding_sha256,
               admission_nonce: stored.admission_nonce,
-              actions: actionsForControlRole(current.role),
+              actions: actionsForControlRole(
+                current.role,
+                ExtendedControlAction.options,
+              ),
             })
             const signed = await signPauseCapability(claims, this.signingKey)
             const postSign = await this.validAt(

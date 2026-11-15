@@ -1,3 +1,4 @@
+import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -82,6 +83,11 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
+  if (objects.includes('gcode_macro LOAD_FILAMENT'))
+    supported.push('load_filament')
+  if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
+    supported.push('unload_filament')
   return Object.freeze(supported)
 }
 
@@ -100,6 +106,24 @@ export function buildMoonrakerCommand(
         throw new Error(`Unexpected argument '${key}' for action '${action}'`)
       }
     }
+  }
+
+  if (['run_macro', 'load_filament', 'unload_filament'].includes(action)) {
+    keys(action === 'run_macro' ? ['name'] : [])
+    const name =
+      action === 'run_macro'
+        ? args.name
+        : action === 'load_filament'
+          ? 'LOAD_FILAMENT'
+          : 'UNLOAD_FILAMENT'
+    if (
+      typeof name !== 'string' ||
+      !objects.includes(`gcode_macro ${name}`) ||
+      (action === 'run_macro' &&
+        !advertisedMoonrakerMacros(objects)?.includes(name))
+    )
+      throw new Error('Macro unavailable')
+    return { method: 'printer.gcode.script', params: { script: name } }
   }
 
   if (action === 'pause') {

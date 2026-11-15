@@ -44,6 +44,7 @@ for (const [action, args, params] of [
         'set_fan',
         'home',
         'set_light',
+        'start_print',
       ])
       const signal = new AbortController().signal
       await router.prepare({ binding, signal })

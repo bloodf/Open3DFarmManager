@@ -15,6 +15,7 @@ const simulatedControl = {
 
 const commonLimitations = [
   'Telemetria, câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
+  'Macros anunciadas e comandos de carregar e descarregar filamento foram exercitados em simulador Moonraker; dependem das macros configuradas e não são comprovados em hardware.',
   'O rótulo Simulado não habilita comandos nem concede autoridade de controle; qualquer comando exige autorização própria do OpenFarm.',
 ] as const
 

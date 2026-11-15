@@ -1,6 +1,7 @@
 import { anycubicCatalog } from './anycubic'
 import { bambuCatalog } from './bambu'
 import { crealityCatalog } from './creality'
+import { lanCatalog } from './lan'
 import { klipperCatalog, klipperFamilyIds } from './klipper'
 import type { CatalogCapability, AnycubicCatalogProduct } from './anycubic'
 
@@ -8,6 +9,7 @@ export const compatibilityCatalog: readonly AnycubicCatalogProduct[] = [
   ...anycubicCatalog,
   ...bambuCatalog,
   ...crealityCatalog,
+  ...lanCatalog,
 ]
 
 export { klipperCatalog, klipperFamilyIds }

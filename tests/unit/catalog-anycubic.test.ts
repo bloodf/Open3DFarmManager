@@ -35,7 +35,9 @@ describe('catálogo Anycubic', () => {
           expect(item.limitations.length).toBeGreaterThan(0)
         expect(status).toBe(
           item.model === 'Kobra X' &&
-            ['telemetry', 'pause', 'resume', 'cancel'].includes(capability)
+            ['telemetry', 'files', 'pause', 'resume', 'cancel'].includes(
+              capability,
+            )
             ? 'simulated'
             : 'unknown',
         )

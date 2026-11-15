@@ -547,7 +547,9 @@ export async function startJourneyHarness(
         const row = await openFarm(page)
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
-        ).toBeVisible({ timeout: 30_000 })
+          // With signed commands on, the Connector opens two signalling
+          // sockets that take turns on one credential proof slot.
+        ).toBeVisible({ timeout: 60_000 })
         await expect(row.getByRole('progressbar')).toHaveAttribute(
           'value',
           '0.25',

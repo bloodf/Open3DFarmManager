@@ -64,9 +64,15 @@ export type JourneyOptions = Readonly<{
   control?: boolean
   /**
    * Opts the Connector in to the signed control path for the assigned printer
-   * (its runtime `pause` section), so the page can send commands and files.
+   * (its runtime `pause` section) and turns on the app's control authority,
+   * so the page can send commands and files.
    */
   commands?: boolean
+  /**
+   * Turns on telemetry ingestion and the job history the server records
+   * from it (the Histórico page). Off, telemetry uploads are refused.
+   */
+  history?: boolean
 }>
 
 export type JourneyHarness = Readonly<{
@@ -229,7 +235,10 @@ export async function startJourneyHarness(
   try {
     const database: JourneyDatabase = await startJourneyDatabase(runId)
     undo.push(() => database.close())
-    const app: FarmApp = await startFarmApp(database)
+    const app: FarmApp = await startFarmApp(database, {
+      control: options.commands === true,
+      history: options.history === true,
+    })
     undo.push(() => app.close())
     const { origin } = app
 

@@ -385,6 +385,8 @@ function suite(title: string, extra?: Extended) {
         browser,
         simulator: 'anycubic',
         commands: true,
+        // Only the main journey reads the history page.
+        history: extra === undefined,
       })
       // Fields are disabled between live sessions: fail fast and try again.
       harness.ownerPage.setDefaultTimeout(15_000)

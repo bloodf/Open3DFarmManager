@@ -47,6 +47,12 @@ export type VendorRuntime = Readonly<{
   version: 2 | 3 | 4 | 5
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
+  /**
+   * Pause between telemetry drains. Telemetry, the status inbox and the
+   * control inbox share one credential proof slot; a slower drain leaves the
+   * slot free for the inboxes of a simulator that reports every second.
+   */
+  telemetryIdleMs?: number
 }>
 
 export type VendorDiscovery = Readonly<{
@@ -177,15 +183,24 @@ export async function startVendorSimulator(
         }
       }
     } else if (name === 'creality') {
-      const sim = await createCrealitySimulator({
-        state: 1,
-        printProgress: 25,
-        nozzleTemp: 210,
-        bedTemp: 60,
-        filename: 'journey.gcode',
-        layer: 25,
-        totalLayer: 100,
-      })
+      const sim = await createCrealitySimulator(
+        {
+          state: 1,
+          printProgress: 25,
+          nozzleTemp: 210,
+          bedTemp: 60,
+          filename: 'journey.gcode',
+          layer: 25,
+          totalLayer: 100,
+          // Stock frame field names, the ones the Connector decodes.
+          printFileName: 'journey.gcode',
+          TotalLayer: 100,
+        },
+        // A started print lasts long enough for the page to show it running.
+        // The status heartbeat keeps the observation current, as stock
+        // firmware does while a client is connected.
+        { durationMs: 6000, totalLayers: 12, heartbeatMs: 1000 },
+      )
       undo.push(() => sim.close())
       raw = sim
       controls = {
@@ -224,12 +239,15 @@ export async function startVendorSimulator(
                 printerKey: scope.printerKey,
                 host: '127.0.0.1',
                 port: sim.port,
+                // Stock HTTP upload endpoint of the simulator.
+                httpPort: sim.httpPort,
               },
             ],
           },
           limits: { staleAfterMs: 5000 },
         },
         assignment: localAssignment(scope),
+        telemetryIdleMs: 5000,
       })
     } else if (name === 'anycubic') {
       const deviceId = 'JOURNEY'

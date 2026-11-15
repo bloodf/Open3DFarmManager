@@ -77,6 +77,11 @@ export async function createRuntimeMoonrakerFixture() {
   let pauses = 0
   // The Connector's pause inbox is admitted and waiting for a browser.
   let pauseInboxReady = false
+  // How many times that inbox started listening (one per control session).
+  let pauseInboxes = 0
+  // Telemetry delivery attempts reported by the Connector.
+  let telemetryDelivered = 0,
+    telemetryRetained = 0
   let printState: 'printing' | 'paused' = 'printing'
   let closeServer: (() => Promise<void>) | undefined
   let port = 0
@@ -95,12 +100,21 @@ export async function createRuntimeMoonrakerFixture() {
       .object({
         kind: z.string().max(64),
         reason: z.string().max(80).optional(),
+        status: z.string().max(32).optional(),
+        count: z.number().optional(),
       })
       .parse(value)
+    if (parsed.kind === 'delivery') {
+      if (parsed.status === 'delivered') telemetryDelivered += parsed.count ?? 0
+      else telemetryRetained++
+    }
     if (parsed.kind === 'queued') queued++
     if (parsed.kind === 'readonly-admitted') admitted++
     if (parsed.kind === 'readonly-listening') listening++
-    if (parsed.kind === 'pause-listening') pauseInboxReady = true
+    if (parsed.kind === 'pause-listening') {
+      pauseInboxReady = true
+      pauseInboxes++
+    }
     if (parsed.kind === 'pause-terminal') pauseInboxReady = false
     if (parsed.kind === 'readonly-terminal')
       terminalReason = parsed.reason ?? 'unclassified'
@@ -124,6 +138,8 @@ export async function createRuntimeMoonrakerFixture() {
         version: 2 | 3 | 4 | 5
         collection: Record<string, unknown>
         assignment: Record<string, unknown>
+        /** Pause between telemetry drains of an empty queue (100..5000). */
+        telemetryIdleMs?: number
       }
     }) {
       if (running || disposal || input.assignmentRefs.length !== 1)
@@ -329,6 +345,9 @@ export async function createRuntimeMoonrakerFixture() {
             audience: input.audience,
             retryMinMs: 1000,
             retryMaxMs: 1000,
+            ...(input.runtime?.telemetryIdleMs === undefined
+              ? {}
+              : { idleMs: input.runtime.telemetryIdleMs }),
           },
           signalling: {
             endpoint:
@@ -532,6 +551,9 @@ export async function createRuntimeMoonrakerFixture() {
         packagedFiles,
         pauses,
         pauseInboxReady,
+        pauseInboxes,
+        telemetryDelivered,
+        telemetryRetained,
       }
     },
     close() {

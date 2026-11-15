@@ -62,6 +62,13 @@ export type JourneyOptions = Readonly<{
   printerKey?: string
   /** Bambu only: opt the printer binding in to control commands. */
   control?: boolean
+  /**
+   * Enables the signed control path for the assigned printer: the Connector
+   * trusts the app's pause issuer and opens its control inbox, so the page
+   * shows the advertised commands and the file page can upload and start.
+   * Off by default: the read-only journey stays unchanged.
+   */
+  signedControl?: boolean
 }>
 
 export type JourneyHarness = Readonly<{
@@ -108,6 +115,15 @@ export type JourneyHarness = Readonly<{
   >
   /** Drops the browser↔app WebSocket upgrades, as a network loss would. */
   disconnectSignalling(): Promise<void>
+  /**
+   * Opens or closes the Connector's telemetry upload path (closed at start).
+   * The Connector queues its telemetry durably while the path is closed and
+   * delivers the backlog once it opens. On the server, telemetry ingestion
+   * and the status/control inboxes share one proof slot per Connector
+   * credential and displace each other: open the path only while no live
+   * connection is needed (for example to read the job history).
+   */
+  setTelemetryUpload(open: boolean): void
   /** Bounded Nitro output tail for failure diagnostics. */
   appLog(): string
   close(): Promise<void>
@@ -123,6 +139,8 @@ const ENV_KEYS = [
   'NODE_EXTRA_CA_CERTS',
   'SIGNALLING_HTTPS_SIM_MOONRAKER',
   'SIGNALLING_HTTPS_SIM_SPOOLMAN',
+  'SIGNALLING_HTTPS_FARM_PAUSE',
+  'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
 ] as const
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
@@ -260,6 +278,16 @@ export async function startJourneyHarness(
       })
       const started = vendor
       undo.push(() => started.close())
+    }
+    // The runtime fixture reads these when it is created.
+    if (options.signedControl)
+      Object.assign(process.env, {
+        SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+        SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY: app.pauseIssuerPublicKeySpki,
+      })
+    else {
+      delete process.env.SIGNALLING_HTTPS_FARM_PAUSE
+      delete process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
     }
     const runtime = await createRuntimeMoonrakerFixture()
     undo.push(async () => {
@@ -480,7 +508,7 @@ export async function startJourneyHarness(
         const row = await openFarm(page)
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
-        ).toBeVisible({ timeout: 30_000 })
+        ).toBeVisible({ timeout: 60_000 })
         await expect(row.getByRole('progressbar')).toHaveAttribute(
           'value',
           '0.25',
@@ -509,6 +537,7 @@ export async function startJourneyHarness(
       },
       simulatorObservation: () => runtime.observe(),
       disconnectSignalling: () => app.disconnectUpgrades(),
+      setTelemetryUpload: (open: boolean) => app.setTelemetryUpload(open),
       appLog: () => app.log(),
       close,
     })

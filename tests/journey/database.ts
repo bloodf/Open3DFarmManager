@@ -19,6 +19,10 @@ export const CAPABILITIES = [
   'farm_connector_credential_acceptor',
   'farm_printer_ownership',
   'farm_configuration_authority',
+  // Journey extras: signed control, telemetry ingestion and job history.
+  'farm_pause_authority',
+  'farm_connector_telemetry_writer',
+  'farm_job_history_reader',
 ] as const
 
 export type Account = Readonly<{ id: string; username: string }>

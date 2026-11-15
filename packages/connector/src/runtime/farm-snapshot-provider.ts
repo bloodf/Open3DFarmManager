@@ -300,6 +300,8 @@ export function createFarmSnapshotSource(input: {
       ...(fieldStamped ? parsedPrinter.data : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.fans ? { fans: parsedPrinter.data.fans } : {}),
+      ...(parsedPrinter.data.light ? { light: parsedPrinter.data.light } : {}),
       ...(parsedPrinter.data.progress === undefined
         ? {}
         : { progress: parsedPrinter.data.progress }),

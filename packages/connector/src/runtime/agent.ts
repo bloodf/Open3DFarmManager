@@ -520,6 +520,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        discoverMoonrakerObjects: true,
         ...(input.onInventory || snapshots
           ? {
               onInventory(value: SpoolmanSnapshot) {

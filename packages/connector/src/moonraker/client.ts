@@ -104,6 +104,7 @@ export function openMoonrakerClient(input: {
   origin: string
   limits: MoonrakerLimits
   signal: AbortSignal
+  discoverObjects?: boolean
   onStatus: (params: unknown) => void
   /** Opt-in display evidence; default telemetry transport remains unchanged. */
   onComplete?: (observation: MoonrakerCompleteObservation) => void
@@ -121,6 +122,9 @@ export function openMoonrakerClient(input: {
   let pending: { id: number; started: number } | undefined
   let finished = false
   let subscribed = false
+  let discovering = input.discoverObjects === true
+  let objects: Record<string, string[]> = { ...selectedObjects }
+  let queryObjects: Record<string, string[]> = { ...completeObjects }
   let resolveSnapshot: (value: unknown) => void = () => {}
   let rejectSnapshot: (reason: Error) => void = () => {}
   let resolveClosed: (reason: MoonrakerFailureReason) => void = () => {}
@@ -180,15 +184,15 @@ export function openMoonrakerClient(input: {
         : input.limits.requestTimeoutMs,
     )
     pending = { id: 1, started: performance.now() }
-    // Subscribe remains the only request unless raw display evidence is enabled.
+    // Optional RTC discovery precedes the subscription on the same connection.
     socket!.send(
       JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
-        method: 'printer.objects.subscribe',
-        params: {
-          objects: selectedObjects,
-        },
+        method: discovering
+          ? 'printer.objects.list'
+          : 'printer.objects.subscribe',
+        ...(discovering ? {} : { params: { objects } }),
       }),
     )
   }
@@ -213,7 +217,7 @@ export function openMoonrakerClient(input: {
               jsonrpc: '2.0',
               id: nextId,
               method: 'printer.objects.query',
-              params: { objects: completeObjects },
+              params: { objects: queryObjects },
             }),
           )
         } catch {
@@ -240,6 +244,37 @@ export function openMoonrakerClient(input: {
           !Object.hasOwn(reply.data, 'result')
         )
           throw new Error('Unexpected reply')
+        if (discovering) {
+          const listed = z
+            .object({ objects: z.array(z.string().min(1).max(128)).max(512) })
+            .parse(reply.data.result)
+          const optional = Object.fromEntries(
+            listed.objects
+              .filter(
+                (name) =>
+                  name === 'fan' ||
+                  name.startsWith('fan_generic ') ||
+                  name === 'output_pin caselight',
+              )
+              .map((name) => [
+                name,
+                [name === 'output_pin caselight' ? 'value' : 'speed'],
+              ]),
+          )
+          objects = { ...selectedObjects, ...optional }
+          queryObjects = { ...completeObjects, ...optional }
+          discovering = false
+          pending = { id: ++nextId, started: performance.now() }
+          socket!.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: nextId,
+              method: 'printer.objects.subscribe',
+              params: { objects },
+            }),
+          )
+          return
+        }
         const received = performance.now(),
           started = pending.started
         if (

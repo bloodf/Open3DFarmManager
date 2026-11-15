@@ -78,6 +78,7 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  discoverMoonrakerObjects?: boolean
   bambuTransport?: (
     options: Parameters<typeof createBambuTransport>[0],
   ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
@@ -177,6 +178,7 @@ export async function collectIntoQueue(input: {
     for (const assignment of config.printers) {
       if (signal.aborted) break
       const subscription = createMoonrakerSubscription({
+        ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         assignment,
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,

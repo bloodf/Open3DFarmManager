@@ -3,7 +3,11 @@ import { once } from 'node:events'
 import { WebSocketServer, type WebSocket } from 'ws'
 
 export async function moonrakerSpoolmanFixture() {
-  const requests: { path: string; key?: string; authorization?: string }[] = []
+  const requests: {
+    path: string
+    key: string | undefined
+    authorization: string | undefined
+  }[] = []
   let spoolReply: unknown = { result: { spool_id: 42 } }
   let peer: WebSocket | undefined
   let eventtime = 1

@@ -90,7 +90,7 @@ try {
   )
   assert.match((await sql`SHOW server_version`)[0]?.server_version, /^17\./)
   const full = await loadMigrationCatalog()
-  catalogThrough(full, '0026_signalling_successor_credentials')
+  catalogThrough(full, '0030_signalling_successor_credentials')
   await runMigrations(sql, full, { kind: 'up' })
   const journal = async () => [
     ...(await sql!`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`),
@@ -98,10 +98,10 @@ try {
   assert.equal(validateMigrationHistory(full, await journal()), full.length)
   checks = await testPostgresSignallingSuccessors(sql, port)
   // 0026 is reversible and only removes its own grants.
-  if (full.at(-1)?.id === '0026_signalling_successor_credentials') {
+  if (full.at(-1)?.id === '0030_signalling_successor_credentials') {
     await runMigrations(sql, full, {
       kind: 'down',
-      expectedLastId: '0026_signalling_successor_credentials',
+      expectedLastId: '0030_signalling_successor_credentials',
     })
     const granted = async (role: string) =>
       (

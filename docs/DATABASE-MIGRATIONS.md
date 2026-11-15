@@ -67,7 +67,7 @@ Startup failures map SQLSTATE to fixed messages: `42501` is `database permission
 
 ### Signalling successor credentials (0026)
 
-Migration `0026_signalling_successor_credentials` lets signalling accept renewed Connector credentials. It adds grants only:
+Migration `0030_signalling_successor_credentials` lets signalling accept renewed Connector credentials. It adds grants only:
 
 - `farm_signalling_reader`: `SELECT` on `farm.connector_credential_successors`. Successor rows are immutable (0021 trigger), so the reader resolves them without row locks.
 - `farm_connector_credential_acceptor`: the same successor grants the telemetry writer received in 0022, namely `SELECT` and `UPDATE (jti)` (row locks only; the trigger rejects updates) on `farm.connector_credential_successors`, plus `SELECT`, `INSERT` and the proof-state column `UPDATE`s on `farm.connector_successor_proofs`.

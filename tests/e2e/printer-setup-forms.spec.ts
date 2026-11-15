@@ -77,13 +77,30 @@ test('Moonraker rejects mixed credentials and secrets stay out of rendered text'
   await page
     .getByRole('button', { name: 'Preparar Klipper / Moonraker' })
     .click()
-  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveText(
+    'Informe uma origem HTTP(S), sem credenciais, caminho, consulta ou fragmento. A chave opcional aceita até 256 letras, números, sublinhados ou hífens.',
+  )
   await expect(page.locator('main')).not.toContainText('secret-key')
   await expect(page.locator('main')).not.toContainText('secret-password')
   await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute(
     'type',
     'password',
   )
+  await page.reload()
+  await page.evaluate(() => {
+    document.body.innerHTML = '<div id="fixture"></div>'
+  })
+  await page.addScriptTag({ content: await setupFormsBundle(null) })
+  await page.evaluate(() =>
+    (window as any).mountSetupForms(document.querySelector('#fixture')),
+  )
+  await page
+    .getByLabel('Família da impressora')
+    .selectOption('klipper-moonraker')
+  await page
+    .getByLabel('Origem HTTP(S) do Moonraker')
+    .fill('http://192.168.1.20:7125')
+  await page.getByLabel('Chave de API (opcional)').fill('secret-key')
   await page.getByLabel('Usuário (alternativa à chave)').clear()
   await page.getByLabel('Senha', { exact: true }).clear()
   await page

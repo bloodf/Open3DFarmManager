@@ -8,6 +8,10 @@ export interface AnycubicCatalogProduct {
   readonly releaseStatus: string
   readonly releaseDate: string | null
   readonly firmwareStatus: string
+  readonly firmwareNotes?: readonly {
+    readonly firmware: string
+    readonly note: string
+  }[]
   readonly connection: string
   readonly capabilities: Readonly<
     Record<

@@ -38,6 +38,11 @@ describe('Creality environmental telemetry', () => {
   it('decodes stock status and CFS fields', () => {
     expect(decodeCrealityStatus(JSON.stringify(full))).toEqual(expected)
     expect(
+      decodeCrealityStatus(JSON.stringify({ boxsInfo: full.boxsInfo })),
+    ).toEqual({
+      materials: expected.materials,
+    })
+    expect(
       decodeCrealityStatus(
         JSON.stringify({
           modelFanPct: 0,

@@ -69,6 +69,12 @@ type Options = Readonly<{
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   clock?: ChannelClock
+  /**
+   * Optional file channel on the control transport (upload and listing).
+   * Absent keeps the transport command-only. Every file request is still
+   * gated by the capability the relay admitted for this transport.
+   */
+  files?: Pick<PeerOptions, 'fileTransfer' | 'fileList' | 'getAdmittedHandle'>
 }>
 /** Separate pause transport only. Current server authority and actual RTC proofs
  * are necessary but never confer capability or dispatch permission. */
@@ -383,6 +389,7 @@ export class PauseConnectorSignallingClient {
       const caps = this.#channel.deadlines(),
         s = this.#scope
       const input: PeerOptions = {
+        ...(this.#options.files ?? {}),
         ...(s.bindAddress === undefined ? {} : { bindAddress: s.bindAddress }),
         identity: s.identity,
         expected: {

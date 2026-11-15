@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { FileReceiver } from '../files/file-transfer.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
+import { awaitAdmittedHandle } from '../files/admission-grace.ts'
 import {
   parseOffer,
   CHUNK_SIZE,
@@ -95,7 +96,9 @@ export function createFileUpload(
           throw Error('invalid-transfer')
         used = true
         offer = parseOffer(JSON.parse(raw))
-        handle = input.admittedHandle()
+        handle =
+          input.admittedHandle() ??
+          (await awaitAdmittedHandle(input.admittedHandle, controller.signal))
         if (!authorized()) {
           send({
             type: 'result',

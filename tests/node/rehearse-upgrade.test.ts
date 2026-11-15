@@ -23,7 +23,13 @@ async function fixture(t: TestContext) {
   await writeFile(backup, 'PGDMPfixture')
   return { backup, to: 'v2', image: 'example/farm:v2' }
 }
-function fake(after = baseline, failAt = '') {
+function fake(
+  after: {
+    counts: Record<string, string>
+    configuration: Record<string, string[]>
+  } = baseline,
+  failAt = '',
+) {
   const calls: { args: string[]; input?: Buffer | string }[] = []
   let snapshots = 0
   let manifest: ReturnType<typeof disposableCompose> | undefined

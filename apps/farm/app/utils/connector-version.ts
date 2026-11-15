@@ -1,6 +1,7 @@
 import { protocolCompatibility } from '../../../../packages/farm-protocol/src/version.ts'
 
 export type ConnectorVersion = {
+  rtcScope?: 'loopback' | 'lan'
   connectorVersion?: string
   protocolRevision?: number
 }
@@ -23,4 +24,11 @@ export function connectorVersionView(value: ConnectorVersion = {}) {
         'Compatibilidade desconhecida. Conecte o Connector para consultar sua versão.',
     }[compatibility],
   }
+}
+
+export function connectorRtcScopeHint(scope?: ConnectorVersion['rtcScope']) {
+  if (scope === 'loopback')
+    return 'Acesso WebRTC somente nesta máquina. Para permitir acesso pela rede local, configure rtc.bindAddress no Connector.'
+  if (scope === 'lan') return 'Acesso WebRTC pela rede local.'
+  return ''
 }

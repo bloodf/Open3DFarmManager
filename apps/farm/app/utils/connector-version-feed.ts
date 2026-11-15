@@ -51,7 +51,10 @@ export function useConnectorVersions() {
               state.value.scope?.viewEpoch !== input.scope.viewEpoch
             )
               return
-            next.set(input.agentId, snapshot.message)
+            next.set(input.agentId, {
+              ...next.get(input.agentId),
+              ...snapshot.message,
+            })
             versions.value = next
           },
           onHealth(health) {

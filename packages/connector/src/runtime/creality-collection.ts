@@ -14,7 +14,9 @@ export function createCrealityCollection(input: {
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Partial<PrinterState> = {}
   let stamps: Partial<Record<keyof PrinterState, number>> = {}
+  let nestedStamps: Record<string, Record<string, number>> = {}
   const invalidate = () => {
+    nestedStamps = {}
     values = {}
     stamps = {}
     clearTimeout(timer)
@@ -55,8 +57,31 @@ export function createCrealityCollection(input: {
       }
       for (const key of Object.keys(delta) as (keyof typeof delta)[]) {
         if (key === 'printerKey') continue
-        Object.assign(values, { [key]: delta[key] })
-        stamps[key] = now
+        const incoming = delta[key]
+        if (
+          incoming &&
+          typeof incoming === 'object' &&
+          !Array.isArray(incoming)
+        ) {
+          const times = (nestedStamps[key] ??= {})
+          const previous = values[key]
+          const merged = {
+            ...(previous && typeof previous === 'object' ? previous : {}),
+            ...incoming,
+          }
+          for (const name of Object.keys(incoming)) times[name] = now
+          for (const name of Object.keys(times)) {
+            if (now - times[name]! >= 5000) {
+              delete times[name]
+              Reflect.deleteProperty(merged, name)
+            }
+          }
+          Object.assign(values, { [key]: merged })
+          stamps[key] = Math.min(...Object.values(times))
+        } else {
+          Object.assign(values, { [key]: incoming })
+          stamps[key] = now
+        }
       }
       if (!values.state || values.progress === undefined) return
       const printer = PrinterState.safeParse({

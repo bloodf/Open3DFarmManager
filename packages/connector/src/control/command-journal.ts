@@ -29,6 +29,20 @@ const reasons = [
 const Reason = z.enum(reasons)
 export type CommandJournalReason = z.infer<typeof Reason>
 export type CommandJournalOutcome = 'not-sent' | 'applied' | 'outcome-unknown'
+/**
+ * Actions whose send was acknowledged but whose effect the printer never
+ * reported back (`state-unconfirmed`). They are shown as an unknown result, yet
+ * must not hold the printer's single active row: nothing later depends on them
+ * the way it depends on an unconfirmed pause, cancel, emergency stop or
+ * firmware restart, and the journal keeps no other way to clear a row.
+ */
+const holdsPrinterWhenUnconfirmed = new Set([
+  'pause',
+  'resume',
+  'cancel',
+  'emergency_stop',
+  'firmware_restart',
+])
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -562,16 +576,27 @@ function finishCommandInternal(
         preSampled ? validateWall(observedWall) : sample(state),
       )
       if (now === null) return false
+      const action = readCommandAction(handle, receipt.cmdId)
+      // Stored as a settled row so it keeps replay protection for the usual
+      // retention but no longer excludes later commands; the reason keeps it
+      // an unknown outcome when read back.
+      const released =
+        outcome === 'outcome-unknown' &&
+        reason === 'state-unconfirmed' &&
+        receipt.marked &&
+        action !== null &&
+        !holdsPrinterWhenUnconfirmed.has(action)
+      const stored = released ? 'applied' : outcome
       return (
         state.database
           .prepare(
             "UPDATE pause_commands SET status=?,reason=?,finished_at=?,retain_until=? WHERE cmd_id=? AND writer_id=? AND status IN ('claimed','write-started')",
           )
           .run(
-            outcome,
+            stored,
             reason,
             now,
-            outcome === 'outcome-unknown' ? null : now + RETENTION_MS,
+            stored === 'outcome-unknown' ? null : now + RETENTION_MS,
             receipt.cmdId,
             state.writerId,
           ).changes === 1
@@ -601,7 +626,9 @@ export function readCommandOutcome(
       return Object.freeze({
         ...parsed,
         status:
-          parsed.status === 'claimed' || parsed.status === 'write-started'
+          parsed.status === 'claimed' ||
+          parsed.status === 'write-started' ||
+          (parsed.status === 'applied' && parsed.reason === 'state-unconfirmed')
             ? 'outcome-unknown'
             : parsed.status,
       })

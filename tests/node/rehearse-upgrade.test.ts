@@ -192,3 +192,45 @@ test('pull failure does not create or remove database resources', async (t) => {
   assert.equal(f.calls.length, 1)
   await assert.rejects(access(dirname(f.calls[0]!.args[4]!)))
 })
+
+for (const snapshot of [
+  { counts: {}, configuration: {} },
+  { counts: { 'farm.printers': '0' }, configuration: {} },
+  {
+    counts: { 'farm.configuration_operations': '0' },
+    configuration: { 'farm.configuration_operations': [] },
+  },
+]) {
+  test('rejects empty restored application data', async (t) => {
+    const f = fake()
+    await assert.rejects(
+      rehearseUpgrade(await fixture(t), async (args, input) => {
+        const result = await f.run(args, input)
+        return args.includes('psql') ? JSON.stringify(snapshot) : result
+      }),
+      /read baseline/,
+    )
+    assert.equal(f.calls.at(-1)!.args[5], 'down')
+  })
+}
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  test(`cleans disposable resources after ${signal}`, async (t) => {
+    const f = fake()
+    const listeners = process.listenerCount(signal)
+    await assert.rejects(
+      rehearseUpgrade(await fixture(t), async (args, input) => {
+        const result = await f.run(args, input)
+        if (args.includes('pg_restore')) process.emit(signal)
+        return result
+      }),
+      /Rehearsal failed/,
+    )
+    assert.deepEqual(f.calls.at(-1)!.args.slice(5), [
+      'down',
+      '--volumes',
+      '--remove-orphans',
+    ])
+    await assert.rejects(access(dirname(f.calls[0]!.args[4]!)))
+    assert.equal(process.listenerCount(signal), listeners)
+  })
+}

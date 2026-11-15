@@ -34,3 +34,54 @@ Após restaurar, o ensaio conta as linhas das tabelas não sistêmicas e calcula
 O comando remove o volume e a rede do próprio projeto mesmo quando a restauração ou a migração falha. Se a limpeza falhar, retorna código 1 e informa o projeto e o manifesto temporário retido. Use exclusivamente esse manifesto e esse projeto para recuperar a limpeza, com `docker compose --project-name <projeto-informado> -f <manifesto-informado> down --volumes --remove-orphans`. Não use o Compose de produção nesse comando. Imagens obtidas permanecem no Docker para reutilização.
 
 Este ensaio verifica dados e configuração persistidos no banco. Não valida permissões de produção, arquivos privados do Connector, hardware ou funcionamento dos comandos de impressão. O dump de uma única base não inclui papéis globais de PostgreSQL; referências a papéis ausentes fazem a restauração ou migração falhar, em vez de produzir um resultado positivo incompleto. Preserve a configuração externa do Connector e o backup original para o upgrade real.
+
+## Ensaio real com duas revisões Docker (opt-in)
+
+```sh
+pnpm run test:upgrade-rehearsal # informa skip; não acessa Docker
+OPENFARM_DOCKER_REHEARSAL=1 pnpm run test:upgrade-rehearsal
+```
+
+Use Node e pnpm nas versões do projeto, Docker com Compose e Buildx e pelo menos
+10 GiB livres. O teste constrói `origin/main~1` e `HEAD` a partir de arquivos Git,
+registra os SHAs completos e usa tags exclusivas. Não usa serviços de produção.
+`check:all` não inclui este ensaio. A referência anterior deve ser ancestral do
+checkout; o relatório registra a revisão efetivamente utilizada.
+
+O teste cria uma conta, uma farm e a associação de proprietário pela API normal
+`/api/auth/bootstrap` da versão anterior. Para os escritores, chama o caminho de
+backup e upgrade de `scripts/self-host/upgrade.ts` e verifica prontidão e contagens
+antes/depois. As imagens são locais: a etapa de pull valida sua existência em vez
+de consultar um registro. O dump customizado também é restaurado em outra base
+descartável e seu snapshot é comparado com o original.
+
+Um volume separado guarda um arquivo privado de coleta v1 do Connector, sem
+credenciais reais. O utilitário `scripts/connector-config-backup.ts` valida e copia
+esse arquivo para backup e restauração; o teste compara bytes e SHA-256 após
+recriar os serviços com a imagem atual. O serviço que mantém esse volume é passivo:
+o ensaio comprova persistência da configuração, sem iniciar coleta nem conexões a
+impressoras. Não comprova hardware nem upgrade de firmware.
+
+Cada execução usa projeto, rede interna, volumes, tags e builder BuildKit próprios.
+O bloco de limpeza remove os serviços, os volumes, a rede, as tags e o builder,
+inclusive em falhas. Não executa prune global. Os logs e os relatórios
+`baseline.json`, `report.json` e `cleanup.json` ficam em um diretório privado fora
+do checkout, informado na saída. `OPENFARM_REHEARSAL_EVIDENCE` permite escolher esse
+diretório. Se a limpeza falhar, o manifesto é retido e o teste falha.
+
+### Evidência executada em 15/11/2026
+
+No Docker OrbStack deste ambiente, o ensaio construiu a revisão anterior
+`bdeba78d49fc46b724f2922c5969712edd3a188b` (`origin/main~1`) e a revisão atual
+`8ed8e3d8004d5fd6e1ba94c903bbe5daa014472a`. Ambas usaram o Dockerfile do produto
+e PostgreSQL 17. As 27 tabelas existentes conservaram suas contagens: uma conta,
+uma credencial, uma farm, uma associação de proprietário, uma sessão, dois
+registros de limite de autenticação e um watermark; as demais ficaram vazias.
+O dump foi restaurado com sucesso em uma segunda base descartável.
+
+A configuração de coleta v1 conservou o SHA-256
+`29fd631b5dd188ab0ae48d8109cb75b44ef4cce3edb202b42ece82b080fa3c06`.
+A restauração pelo utilitário do Connector produziu bytes idênticos aos do volume.
+O teste registra os SHAs e contagens novamente em cada execução; este resultado
+se aplica às revisões acima e aos dados descritos, sem afirmar cobertura de todas
+as versões antigas ou de configurações reais de produção.

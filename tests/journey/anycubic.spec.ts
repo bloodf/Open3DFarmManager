@@ -14,8 +14,9 @@ type Simulator = Awaited<ReturnType<typeof startAnycubicSimulator>>
 
 const STORED_FILE = 'journey.gcode'
 // Pause, resume and cancel are confirmed by the print state they lead to. Any
-// other command is confirmed by the printer's acknowledgement plus a fresh
-// report; each step below also checks what the simulator was told.
+// other command is confirmed only when the printer's next report carries the
+// value that was asked for (target, fan speed, light); each step below also
+// checks what the simulator was told.
 const APPLIED = 'Comando confirmado pelo Connector.'
 
 /** Commands beyond pause, resume and cancel. */
@@ -633,8 +634,7 @@ function suite(title: string) {
               .check()
             return start
           },
-          // Unknown outcome: the printer itself says whether it started.
-          /Impressão iniciada\. O Connector confirmou o comando\.|Resultado desconhecido\. Verifique a impressora/,
+          /Impressão iniciada\. O Connector confirmou o comando\./,
           // Never a second start once the simulated printer left idle.
           () => sim.lifecycle.state === 'idle',
           () => sim.lifecycle.state !== 'idle',

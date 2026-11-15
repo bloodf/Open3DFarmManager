@@ -133,6 +133,12 @@ export async function startAnycubicSimulator({
                 ...(filename ? { filename } : {}),
                 // Made up: the simulated heaters reach a target at once.
                 ...(settings.target_nozzle_temp !== undefined
+                  ? { target_nozzle_temp: settings.target_nozzle_temp }
+                  : {}),
+                ...(settings.target_hotbed_temp !== undefined
+                  ? { target_hotbed_temp: settings.target_hotbed_temp }
+                  : {}),
+                ...(settings.target_nozzle_temp !== undefined
                   ? { curr_nozzle_temp: settings.target_nozzle_temp }
                   : {}),
                 ...(settings.target_hotbed_temp !== undefined

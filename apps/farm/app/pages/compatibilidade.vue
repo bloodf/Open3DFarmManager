@@ -59,6 +59,14 @@ const products = computed(() =>
           <dd>{{ capabilityStatusLabels[status] }}</dd>
         </template>
       </dl>
+      <template v-if="product.firmwareNotes?.length">
+        <h3>Notas de firmware</h3>
+        <ul>
+          <li v-for="(entry, index) in product.firmwareNotes" :key="index">
+            {{ entry.firmware }}: {{ entry.note }}
+          </li>
+        </ul>
+      </template>
       <h3>Limitações</h3>
       <ul>
         <li v-for="limit in product.limitations" :key="limit">{{ limit }}</li>

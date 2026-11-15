@@ -57,8 +57,76 @@ const Observation = z.strictObject({
   readyObservedMono: mono,
   printStateObservedMono: mono,
   receivedMono: mono,
+  effect: z
+    .discriminatedUnion('kind', [
+      z.strictObject({
+        kind: z.literal('file'),
+        filename: z.string(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('temperature'),
+        heater: z.enum(['extruder', 'bed', 'chamber']),
+        target_c: z.number().finite(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('fan'),
+        fan: z.enum(['part', 'aux', 'chamber']),
+        percent: z.number().finite().min(0).max(100),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('light'),
+        on: z.boolean(),
+        observedMono: mono,
+      }),
+    ])
+    .optional(),
 })
 export type ControlObservation = Readonly<z.infer<typeof Observation>>
+export function controlEffectMatches(
+  action: ExtendedControlAction,
+  args: Record<string, unknown>,
+  observation: ControlObservation,
+  sentMono: number,
+): boolean {
+  if (action === 'pause' || action === 'resume' || action === 'cancel')
+    return observation.printState === controlTargetState(action)
+  const effect = observation.effect
+  if (
+    !effect ||
+    effect.observedMono <= sentMono ||
+    effect.observedMono > observation.receivedMono
+  )
+    return false
+  switch (action) {
+    case 'start_print':
+      return (
+        effect.kind === 'file' &&
+        effect.filename === args.file &&
+        (observation.printState === 'printing' ||
+          observation.printState === 'paused')
+      )
+    case 'set_temperature':
+      return (
+        effect.kind === 'temperature' &&
+        effect.heater === args.heater &&
+        effect.target_c === args.target_c
+      )
+    case 'set_fan':
+      return (
+        effect.kind === 'fan' &&
+        effect.fan === args.fan &&
+        typeof args.percent === 'number' &&
+        Math.abs(effect.percent - args.percent) <= 1
+      )
+    case 'set_light':
+      return effect.kind === 'light' && effect.on === args.on
+    default:
+      return false
+  }
+}
 export type ObservationCursor = Readonly<{
   connectionGeneration: number
   sequence: number
@@ -738,19 +806,17 @@ export function createPauseDispatcher(config: {
             return
           }
           const observation = parsed.data
-          // Pause, resume and cancel are confirmed by their target print
-          // state. Any other action has none: its driver acknowledged the one
-          // request and then read a fresh state on the same connection, which
-          // is all a printer offers. Leaving such a command unresolved would
-          // hold the journal's single active row and refuse every later
-          // command for this printer.
-          const lifecycle = ['pause', 'resume', 'cancel'].includes(
-            command.action,
-          )
           if (
             !observation.ready ||
-            (lifecycle &&
-              observation.printState !== controlTargetState(command.action)) ||
+            (observation.effect !== undefined &&
+              observedAt.mono - observation.effect.observedMono >
+                verifier.policy.freshStateMs) ||
+            !controlEffectMatches(
+              command.action,
+              command.args,
+              observation,
+              cursor.sentMono,
+            ) ||
             observation.assignmentId !== mapping.assignment_id ||
             observation.printerKey !== mapping.printer_key ||
             observation.connectionGeneration !== cursor.connectionGeneration ||

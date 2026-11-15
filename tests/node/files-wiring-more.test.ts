@@ -827,7 +827,7 @@ for (const backend of ['creality', 'anycubic', 'kobralink'] as const) {
         control,
       )
       // The fresh state read after the send confirms an extended command.
-      assert.equal(await f.start(filename), 'applied')
+      assert.equal(await f.start(filename), 'outcome-unknown')
       check()
     },
   )
@@ -907,7 +907,7 @@ test(
     ])
     assert.match(
       JSON.stringify(states.at(-1)),
-      /Impressão iniciada\. O Connector confirmou o comando\./,
+      /Resultado desconhecido\. Verifique a impressora antes de tentar novamente\./,
     )
   },
 )

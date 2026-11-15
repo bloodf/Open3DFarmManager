@@ -247,7 +247,8 @@ if (journeyEnabled())
       const lifecycle = (name: string) =>
         controls.getByRole('button', { name, exact: true })
       const action = (name: string) => extended.getByRole('button', { name })
-      const applied = 'Comando confirmado pelo Connector.'
+      const unconfirmed =
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 
       expect(await confirm(lifecycle('Pausar'), PRINTER_KEY)).toBe(
         'Impressão pausada. O Connector confirmou a pausa.',
@@ -262,14 +263,16 @@ if (journeyEnabled())
       await extended.getByLabel('Temperatura em °C').fill('215')
       expect(
         await confirm(action('Definir temperatura'), 'Definir temperatura'),
-      ).toBe(applied)
+      ).toBe(unconfirmed)
       await extended.getByLabel('Ventilador').selectOption('part')
       await extended.getByLabel('Velocidade em %').fill('80')
       expect(
         await confirm(action('Definir ventilador'), 'Definir ventilador'),
-      ).toBe(applied)
+      ).toBe(unconfirmed)
       await extended.getByLabel('Luz').selectOption('off')
-      expect(await confirm(action('Definir luz'), 'Definir luz')).toBe(applied)
+      expect(await confirm(action('Definir luz'), 'Definir luz')).toBe(
+        unconfirmed,
+      )
       // "Velocidade" also starts the fan's "Velocidade em %" label.
       await extended
         .locator('select')
@@ -277,7 +280,7 @@ if (journeyEnabled())
         .selectOption('sport')
       expect(
         await confirm(action('Definir velocidade'), 'Definir velocidade'),
-      ).toBe(applied)
+      ).toBe(unconfirmed)
 
       expect(await confirm(lifecycle('Cancelar'), PRINTER_KEY)).toBe(
         'Impressão cancelada. O Connector confirmou o cancelamento.',
@@ -294,7 +297,7 @@ if (journeyEnabled())
       // Homing needs an idle printer.
       expect(
         await confirm(action('Referenciar eixos'), 'Referenciar eixos'),
-      ).toBe(applied)
+      ).toBe(unconfirmed)
 
       // Exactly one bridge write per command, in order, with the mapped body.
       expect(bridge().commands).toEqual([
@@ -365,7 +368,9 @@ if (journeyEnabled())
           },
           () => starts().length > 0,
         ),
-      ).toBe('Impressão iniciada. O Connector confirmou o comando.')
+      ).toBe(
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+      )
       expect(starts()).toEqual([
         {
           path: 'print',

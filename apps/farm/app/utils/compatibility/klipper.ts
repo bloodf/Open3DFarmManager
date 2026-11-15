@@ -33,6 +33,7 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       {
         firmware: 'Klipper do usuário',
         note: 'A versão e a configuração variam; consulte as mudanças de configuração antes de atualizar. https://www.klipper3d.org/Config_Changes.html',
+        sources: ['https://www.klipper3d.org/Config_Changes.html'],
       },
     ],
     connection:
@@ -64,6 +65,7 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       {
         firmware: 'Firmware K1 da Creality',
         note: 'A Creality publica o código baseado em Klipper; o Moonraker depende de instalação adicional. https://github.com/CrealityOfficial/K1_Series_Klipper',
+        sources: ['https://github.com/CrealityOfficial/K1_Series_Klipper'],
       },
     ],
     connection:
@@ -94,6 +96,7 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       {
         firmware: 'Klipper do montador',
         note: 'A configuração depende da montagem Voron. https://github.com/VoronDesign/Voron-2',
+        sources: ['https://github.com/VoronDesign/Voron-2'],
       },
     ],
     connection:
@@ -123,6 +126,7 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       {
         firmware: 'Firmware SV08 da Sovol',
         note: 'A Sovol publica o firmware baseado em Klipper; a versão instalada varia. https://github.com/Sovol3d/SV08',
+        sources: ['https://github.com/Sovol3d/SV08'],
       },
     ],
     connection:
@@ -150,6 +154,7 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       {
         firmware: 'Klipper do montador',
         note: 'A configuração depende da montagem. https://github.com/VoronDesign/Voron-Trident',
+        sources: ['https://github.com/VoronDesign/Voron-Trident'],
       },
     ],
     connection: 'Moonraker na rede local conforme a montagem',

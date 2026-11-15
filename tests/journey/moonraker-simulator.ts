@@ -89,7 +89,7 @@ const closeServer = (server: Server) =>
 /**
  * Loopback Moonraker speaking the read-only subset the Connector uses today:
  * `/server/info`, `printer.objects.list|subscribe|query` and
- * `notify_status_update`. Commands are not implemented, so none can reach a
+ * `notify_status_update`. It answers no command method, so none can reach a
  * printer. A Spoolman answering an empty inventory accompanies it.
  */
 export async function startMoonrakerSimulator(

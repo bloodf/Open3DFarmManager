@@ -1,9 +1,10 @@
 import dgram from 'node:dgram'
+import { probeAnycubic } from './anycubic.ts'
 import { crealityQuery, isCrealityResponse, probeCreality } from './creality.ts'
 import { isIPv4 } from 'node:net'
 
 export type Printer = {
-  vendor: 'bambu' | 'moonraker' | 'creality'
+  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic'
   host: string
   port?: number
   serial?: string
@@ -192,6 +193,7 @@ type Options = {
   mdnsPort?: number
   queryAddress?: string
   queryPort?: number
+  anycubicPort?: number
   crealityPorts?: { https: number; http: number }
   createSocket?: () => dgram.Socket
 }
@@ -205,6 +207,7 @@ export async function discoverPrinters(
     records: RecordData[] = [],
     printers: Printer[] = []
   const crealityHosts = new Set<string>()
+  const anycubicHosts = new Set<string>()
   const factory =
     options.createSocket ??
     (() => dgram.createSocket({ type: 'udp4', reuseAddr: true }))
@@ -215,6 +218,13 @@ export async function discoverPrinters(
       socket.on('error', reject)
       socket.on('message', (packet, peer) => {
         if (mdns) {
+          if (
+            packet.length >= 12 &&
+            packet.readUInt16BE(2) & 0x8000 &&
+            decodeDns(packet).length &&
+            anycubicHosts.size < 128
+          )
+            anycubicHosts.add(peer.address)
           if (
             crealityHosts.size < 128 &&
             isCrealityResponse(packet, decodeDns(packet))
@@ -267,11 +277,19 @@ export async function discoverPrinters(
         ),
       )
     ).filter((printer): printer is Printer => printer !== undefined)
+    const anycubic = (
+      await Promise.all(
+        [...anycubicHosts].map((host) =>
+          probeAnycubic(host, options.anycubicPort),
+        ),
+      )
+    ).filter((printer): printer is Printer => printer !== undefined)
     const unique = new Map<string, Printer>()
     for (const printer of [
       ...printers,
       ...moonrakerPrinters(records),
       ...creality,
+      ...anycubic,
     ])
       unique.set(
         `${printer.vendor}:${printer.serial ?? printer.host}:${printer.port ?? ''}`,

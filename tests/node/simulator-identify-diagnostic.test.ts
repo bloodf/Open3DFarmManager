@@ -2248,12 +2248,11 @@ test('keeps the ledger outside the repository and every linked worktree', async 
       refused = true
     }
     // Other test files in the same run (pause-authority-tooling) add and
-    // remove linked worktrees. A root removed after the snapshot is no longer
-    // a worktree, so accepting it is correct; any root still listed must be
-    // refused.
+    // remove linked worktrees. Only a root whose path no longer exists may go
+    // unrefused; any root still on disk must be refused.
     if (!refused)
       assert.equal(
-        diagnostic.repositoryExclusionRoots().includes(root),
+        existsSync(root),
         false,
         `${root} must be refused as a ledger root`,
       )

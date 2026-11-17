@@ -13,7 +13,7 @@ import { createRequire } from 'node:module'
 const env = process.env
 const role = env.PROBE_ROLE
 const bind = env.PROBE_BIND ?? 'any' // 'loopback' = Connector policy, 'any' = all interfaces
-const iceTimeoutMs = Number(env.PROBE_ICE_TIMEOUT_MS ?? 20000)
+const iceTimeoutMs = Number(env.PROBE_ICE_TIMEOUT_MS ?? 8000)
 const pings = Number(env.PROBE_PINGS ?? 40)
 if (!['offer', 'answer'].includes(role) || !['any', 'loopback'].includes(bind))
   throw new Error(

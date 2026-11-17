@@ -24,29 +24,58 @@ NETFAULT_OCTET=${NETFAULT_OCTET:-231}
   exit 2
 }
 export NETFAULT_OCTET
-project=${NETFAULT_PROJECT:-o3dfm-netfault}
+project=${NETFAULT_PROJECT:-o3dfm-netfault-$(date +%s)-$$}
+export NETFAULT_PROJECT=$project
 [[ $project =~ ^o3dfm-[a-z0-9-]{1,40}$ ]] || { echo 'invalid NETFAULT_PROJECT' >&2; exit 2; }
-dc() { docker compose -p "$project" -f "$here/docker-compose.yml" "$@"; }
+dc() { docker compose -p "$project" -f "$here/docker-compose.json" "$@"; }
 mkdir -p "$out"
-if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$project") ]]; then
-  echo "Compose project $project already has containers; refusing to reuse them." >&2
+# Refuse every pre-existing project resource, including stopped containers.
+for kind in container network volume; do
+  if [[ -n $(docker "$kind" ls -q --filter "label=com.docker.compose.project=$project") ]]; then
+    echo "Project $project already owns $kind resources; refusing reuse" >&2
+    exit 2
+  fi
+done
+if docker image inspect "$project-router" >/dev/null 2>&1; then
+  echo 'Router image already exists; refusing reuse' >&2
   exit 2
 fi
-# node-datachannel and its native prebuild may live in a global pnpm store outside
-# the checkout; copy just that package closure (dereferenced) for a read-only mount.
 NETFAULT_NDC=$(mktemp -d "${TMPDIR:-/tmp}/o3dfm-netfault-ndc.XXXXXX")
 export NETFAULT_NDC
+cleanup() {
+  # Verify labels before Compose is allowed to delete anything.
+  for kind in container network volume; do
+    while read -r resource; do
+      [[ -z $resource ]] && continue
+      owner=$(docker "$kind" inspect --format '{{ index .Labels "org.open3dfarmmanager.netfault" }}' "$resource" 2>/dev/null) || {
+        [[ $kind == container ]] || return 1
+        owner=$(docker inspect --format '{{ index .Config.Labels "org.open3dfarmmanager.netfault" }}' "$resource")
+      }
+      [[ $owner == "$project" ]] || { echo "Foreign resource $resource; refusing cleanup" >&2; return 1; }
+    done < <(docker "$kind" ls -q --filter "label=com.docker.compose.project=$project")
+  done
+  dc --profile "$scenario" down --volumes
+}
+finish() {
+  status=$?
+  cleanup || status=1
+  if docker image inspect "$project-router" >/dev/null 2>&1; then
+    docker image rm "$project-router" >/dev/null || status=1
+  fi
+  rm -rf "$NETFAULT_NDC"
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 ndc=$(realpath "$here/../../../packages/connector/node_modules/node-datachannel")
 mkdir -p "$NETFAULT_NDC/node_modules"
 cp -rL "$(dirname "$ndc")/." "$NETFAULT_NDC/node_modules/"
 printf '{"private":true}\n' > "$NETFAULT_NDC/package.json"
 chmod -R a+rX "$NETFAULT_NDC"
-cleanup() { dc --profile probe down --volumes --remove-orphans >/dev/null 2>&1 || true; }
-trap 'cleanup; dc --profile probe down --rmi local >/dev/null 2>&1 || true; rm -rf "$NETFAULT_NDC"' EXIT
-
 router() { dc exec -T -e O="$NETFAULT_OCTET" router sh -euc "$1"; }
 apply_fault() {
-  # Interfaces are found by the fixed addresses from docker-compose.yml.
+  # Interfaces are found by the fixed addresses from docker-compose.json.
   router '
     lan=$(ip -o -4 addr show | awk "/10\.$O\.32\.2\//{print \$2}")
     wan=$(ip -o -4 addr show | awk "/10\.$O\.31\.2\//{print \$2}")
@@ -71,9 +100,10 @@ for run in $(seq 1 "$repeats"); do
     apply_fault
     # The lan namespace must not reach the host gateway on the lan bridge.
     dc exec -T lan-gw iptables -C OUTPUT -d "10.$NETFAULT_OCTET.32.1" -j DROP
-    result=$(dc --profile probe run --rm -T -e PROBE_BIND="$bind" connector 2>/dev/null | tail -1 || true)
+    result=$(dc --profile "$scenario" run --rm -T -e PROBE_BIND="$bind" connector | tail -1)
     # A crashed probe prints a stack trace, not a JSON object.
-    [[ $result == '{'* ]] || result=null
+    [[ $result == '{'* ]] || { echo 'Probe produced no JSON' >&2; exit 1; }
+      RESULT="$result" SCENARIO="$scenario" BIND="$bind" node "$here/validate-result.mjs"
     browser=$(dc logs --no-log-prefix browser | grep '"event":"channel"' | tail -1 || true)
     printf '{"scenario":"%s","run":%s,"connector":%s,"browser":%s}\n' \
       "$scenario" "$run" "$result" "${browser:-null}" | tee -a "$out/$scenario.jsonl"

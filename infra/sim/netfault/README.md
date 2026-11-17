@@ -11,7 +11,7 @@ infra/sim/netfault/run.sh netem 3 /path/to/evidence
 infra/sim/netfault/run.sh udp-block 3 /path/to/evidence
 ```
 
-`NETFAULT_PROJECT` (default `o3dfm-netfault`) names the Compose project. The
+`NETFAULT_PROJECT` (default `o3dfm-netfault-<timestamp>-<pid>`) names the Compose project. The
 script refuses a project that already has containers, starts the topology fresh
 for every probe and removes its containers, networks and temporary files on exit.
 
@@ -56,3 +56,31 @@ The probe uses the Connector's ICE-relevant options (no STUN/TURN, no ICE-TCP,
 fingerprint verification on; it does not mirror `disableAutoNegotiation` or
 `maxMessageSize`) and runs twice per repeat: with the Connector's
 `bindAddress: '127.0.0.1'` policy, and bound to all interfaces.
+
+## Ownership and offline checks
+
+The Compose source is `docker-compose.json`, valid YAML written as JSON so
+Node can parse it without Docker or installed dependencies. The `nat`, `netem`
+and `udp-block` profiles select the Connector probe; `run.sh` applies the selected
+fault inside the router namespace.
+
+Every container and network carries `org.open3dfarmmanager.netfault` with its
+project name. The runner refuses existing project containers, networks, volumes
+or its router image. Before teardown it verifies every project resource's owner
+label, then removes only the project and its newly built router image. It does
+not remove orphans or use global prune commands. Docker base images and build
+cache are shared resources and remain under the caller's resource ledger.
+
+```sh
+node --test --test-force-exit tests/node/sim-netfault-harness.test.ts
+```
+
+These checks need no running services. Docker Compose config validation skips
+only when the Docker executable is absent. Installed but broken Docker or
+Compose fails the check.
+
+The probe validates transport only. `assertFarmReadOnly` and
+`assertFarmStatusFlowing`, exported by the farm acceptance helper, enforce a
+10,000 ms bound on farm observations. They must receive real farm observations;
+ICE failure is not proof that the farm UI changed state. The current network
+probe does not launch or observe that UI, so it cannot close issue #185 by itself.

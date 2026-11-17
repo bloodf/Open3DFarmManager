@@ -481,3 +481,9 @@ export async function runSimFarmAcceptance(input: {
     }
   }
 }
+
+export {
+  NETWORK_FAULT_BOUND_MS,
+  assertFarmReadOnly,
+  assertFarmStatusFlowing,
+} from './sim-netfault-observation.ts'

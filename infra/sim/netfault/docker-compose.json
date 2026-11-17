@@ -1,0 +1,140 @@
+{
+  "name": "o3dfm-netfault",
+  "services": {
+    "router": {
+      "build": "./router",
+      "cap_drop": ["ALL"],
+      "cap_add": ["NET_ADMIN"],
+      "security_opt": ["no-new-privileges:true"],
+      "sysctls": {
+        "net.ipv4.ip_forward": 1
+      },
+      "networks": {
+        "lan": {
+          "ipv4_address": "10.${NETFAULT_OCTET:-231}.32.2"
+        },
+        "wan": {
+          "ipv4_address": "10.${NETFAULT_OCTET:-231}.31.2"
+        }
+      },
+      "cpus": 0.5,
+      "mem_limit": "64m",
+      "pids_limit": 32,
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      },
+      "image": "${NETFAULT_PROJECT:?run through run.sh}-router"
+    },
+    "lan-gw": {
+      "cap_drop": ["ALL"],
+      "cap_add": ["NET_ADMIN"],
+      "security_opt": ["no-new-privileges:true"],
+      "command": [
+        "sh",
+        "-c",
+        "ip route replace default via 10.${NETFAULT_OCTET:-231}.32.2 && iptables -A OUTPUT -d 10.${NETFAULT_OCTET:-231}.32.1 -j DROP && exec sleep infinity"
+      ],
+      "networks": {
+        "lan": {
+          "ipv4_address": "10.${NETFAULT_OCTET:-231}.32.10"
+        }
+      },
+      "cpus": 0.25,
+      "mem_limit": "32m",
+      "pids_limit": 16,
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      },
+      "image": "${NETFAULT_PROJECT:?run through run.sh}-router",
+      "pull_policy": "never",
+      "depends_on": ["router"]
+    },
+    "browser": {
+      "image": "node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9",
+      "platform": "linux/amd64",
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "volumes": [
+        "../../..:/repo:ro",
+        "${NETFAULT_NDC:?run through run.sh}:/opt/ndc:ro"
+      ],
+      "working_dir": "/repo",
+      "cpus": 1.0,
+      "mem_limit": "256m",
+      "pids_limit": 64,
+      "command": ["node", "infra/sim/netfault/rtc-probe.mjs"],
+      "environment": {
+        "PROBE_ROLE": "answer"
+      },
+      "networks": {
+        "wan": {
+          "ipv4_address": "10.${NETFAULT_OCTET:-231}.31.20"
+        }
+      },
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      }
+    },
+    "connector": {
+      "image": "node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9",
+      "platform": "linux/amd64",
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "volumes": [
+        "../../..:/repo:ro",
+        "${NETFAULT_NDC:?run through run.sh}:/opt/ndc:ro"
+      ],
+      "working_dir": "/repo",
+      "cpus": 1.0,
+      "mem_limit": "256m",
+      "pids_limit": 64,
+      "profiles": ["nat", "netem", "udp-block"],
+      "network_mode": "service:lan-gw",
+      "command": ["node", "infra/sim/netfault/rtc-probe.mjs"],
+      "environment": {
+        "PROBE_ROLE": "offer",
+        "PROBE_PEER": "10.${NETFAULT_OCTET:-231}.31.20"
+      },
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      }
+    }
+  },
+  "networks": {
+    "lan": {
+      "driver_opts": {
+        "com.docker.network.bridge.enable_ip_masquerade": "false"
+      },
+      "ipam": {
+        "config": [
+          {
+            "subnet": "10.${NETFAULT_OCTET:-231}.32.0/24"
+          }
+        ]
+      },
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      }
+    },
+    "wan": {
+      "internal": true,
+      "driver_opts": {
+        "com.docker.network.bridge.gateway_mode_ipv4": "isolated"
+      },
+      "ipam": {
+        "config": [
+          {
+            "subnet": "10.${NETFAULT_OCTET:-231}.31.0/24"
+          }
+        ]
+      },
+      "labels": {
+        "org.open3dfarmmanager.netfault": "${NETFAULT_PROJECT:?run through run.sh}"
+      }
+    }
+  }
+}

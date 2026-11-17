@@ -285,6 +285,17 @@ export function openFixedMoonrakerPause(input: {
         binary,
         Math.min(4096, selected.limits.maxMessageBytes),
       )
+      console.error(
+        'RTC driver envelope: ' +
+          JSON.stringify(
+            z
+              .object({
+                id: z.number().optional(),
+                method: z.string().max(128).optional(),
+              })
+              .parse(frame),
+          ),
+      )
       if (SideNotification.safeParse(frame).success) return
       const result = Reply.parse(frame)
       if (
@@ -297,7 +308,19 @@ export function openFixedMoonrakerPause(input: {
       pending = undefined
       clearTimeout(request.timer)
       request.resolve(result.result)
-    } catch {
+    } catch (error) {
+      console.error(
+        'RTC driver decode-error: ' +
+          JSON.stringify({
+            pending: pending?.id,
+            errors:
+              error instanceof z.ZodError
+                ? error.issues.map(({ code, path }) => ({ code, path }))
+                : error instanceof Error
+                  ? error.message
+                  : 'unknown',
+          }),
+      )
       stop()
     }
   })

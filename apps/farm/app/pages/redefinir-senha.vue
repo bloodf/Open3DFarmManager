@@ -1,38 +1,43 @@
 <script setup lang="ts">
 const hydrated = ref(false)
-onMounted(() => {
-  hydrated.value = true
-})
 const username = ref('')
 const password = ref('')
 const token = ref('')
 const pending = ref(false)
 const message = ref('')
-async function submit(complete: boolean) {
+onMounted(() => {
+  // The owner-issued link carries user and code in the fragment, never sent to the server.
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  username.value = fragment.get('usuario') ?? ''
+  token.value = fragment.get('codigo') ?? ''
+  if (window.location.hash)
+    history.replaceState(
+      history.state,
+      '',
+      window.location.pathname + window.location.search,
+    )
+  hydrated.value = true
+})
+async function submit() {
   if (pending.value) return
   pending.value = true
   message.value = ''
   try {
     const result = await $fetch<{ message: string }>(
-      complete
-        ? '/api/auth/password-reset-complete'
-        : '/api/auth/password-reset-request',
+      '/api/auth/password-reset-complete',
       {
         method: 'POST',
-        headers: complete ? { 'x-password-reset-token': token.value } : {},
-        body: {
-          username: username.value,
-          password: complete ? password.value : 'reset-request',
-        },
+        headers: { 'x-password-reset-token': token.value },
+        body: { username: username.value, password: password.value },
       },
     )
     message.value = result.message
+    token.value = ''
   } catch {
     message.value =
-      'Não foi possível concluir a solicitação. Verifique o código ou tente novamente mais tarde.'
+      'Não foi possível redefinir a senha. O link pode ter expirado ou já ter sido usado. Peça um novo link ao proprietário da farm.'
   } finally {
     password.value = ''
-    token.value = ''
     pending.value = false
   }
 }
@@ -42,9 +47,11 @@ async function submit(complete: boolean) {
   <main id="conteudo">
     <h1>Redefinir senha</h1>
     <p>
-      Solicite instruções pelo canal cadastrado ou informe o código recebido.
+      Esqueceu a senha? Peça ao proprietário da farm um link de redefinição. O
+      link vale por 15 minutos e pode ser usado uma única vez. Ao redefinir,
+      todas as sessões abertas da conta são encerradas.
     </p>
-    <form :aria-busy="pending" @submit.prevent="submit(true)">
+    <form :aria-busy="pending" @submit.prevent="submit()">
       <label for="reset-username">Usuário</label>
       <input
         id="reset-username"
@@ -58,17 +65,14 @@ async function submit(complete: boolean) {
         pattern="[a-z0-9_\-]{3,64}"
         :disabled="pending"
       />
-      <button
-        type="button"
-        :disabled="pending || !username"
-        @click="submit(false)"
-      >
-        Solicitar instruções
-      </button>
       <label for="reset-token">Código de redefinição</label>
+      <p id="reset-token-hint">
+        Preenchido automaticamente ao abrir o link recebido.
+      </p>
       <input
         id="reset-token"
         v-model="token"
+        aria-describedby="reset-token-hint"
         autocomplete="off"
         autocapitalize="none"
         :spellcheck="false"
@@ -84,6 +88,7 @@ async function submit(complete: boolean) {
         type="password"
         autocomplete="new-password"
         required
+        minlength="12"
         :disabled="pending"
       />
       <button type="submit" :disabled="pending || !hydrated">
@@ -106,6 +111,9 @@ label {
   display: block;
   margin-top: 1rem;
   font-weight: 600;
+}
+#reset-token-hint {
+  margin: 0.25rem 0;
 }
 input {
   display: block;

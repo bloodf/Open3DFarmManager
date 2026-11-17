@@ -52,10 +52,13 @@ export async function passwordResetHttp(event: ResetEvent, complete: boolean) {
         throw createError({
           status: 400,
           message:
-            'Não foi possível redefinir a senha. Solicite um novo código.',
+            'Não foi possível redefinir a senha. Peça um novo link ao proprietário da farm.',
         })
       return { message: 'Senha redefinida. Entre novamente.' }
     }
+    // Self-service requests need a trusted delivery; owner-issued links do not.
+    if (!runtime.queue)
+      throw createError({ status: 404, message: 'Recurso indisponível.' })
     // Identical admission for known, unknown and disabled accounts. Saturation
     // also retains the generic response; no account-dependent work is awaited.
     runtime.queue.enqueue(input.username)

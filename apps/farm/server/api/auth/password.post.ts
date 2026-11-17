@@ -5,6 +5,7 @@ import {
   authenticatedSession,
   mutation,
 } from '../../services/authenticated-session.ts'
+import { parsePasswordChange } from '../../services/password-change.ts'
 import { authRuntime } from '../../utils/auth/runtime.ts'
 import { sealedSessionRecordId } from '../../services/authenticated-session.ts'
 import {
@@ -84,30 +85,14 @@ export default defineEventHandler(async (event) => {
     } catch {
       throw createError({ status: 400, message: 'Dados de senha inválidos.' })
     }
-    if (
-      !input ||
-      typeof input !== 'object' ||
-      Array.isArray(input) ||
-      Object.keys(input).length !== 2 ||
-      !('currentPassword' in input) ||
-      !('newPassword' in input) ||
-      typeof input.currentPassword !== 'string' ||
-      typeof input.newPassword !== 'string' ||
-      input.currentPassword.length < 1 ||
-      input.newPassword.length < 1 ||
-      input.currentPassword.includes('\0') ||
-      input.newPassword.includes('\0') ||
-      Buffer.byteLength(input.currentPassword) > 1024 ||
-      Buffer.byteLength(input.newPassword) > 1024
-    )
-      throw createError({ status: 400, message: 'Dados de senha inválidos.' })
+    const { currentPassword, newPassword } = parsePasswordChange(input)
     const credentials = await runtime.credentials.findByAccount(auth.accountId)
     if (
       !credentials ||
-      !(await verifyPassword(credentials.passwordHash, input.currentPassword))
+      !(await verifyPassword(credentials.passwordHash, currentPassword))
     )
       throw failed()
-    const hash = await hashPassword(input.newPassword)
+    const hash = await hashPassword(newPassword)
     if (!(await runtime.credentials.replacePassword(credentials, hash)))
       throw failed()
     await runtime.sessions.revokeOtherSessions(

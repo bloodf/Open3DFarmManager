@@ -196,6 +196,20 @@ export async function testPrintingPausePage(input: {
       },
       note: input.note,
     })
+  } catch (error) {
+    await input.note(
+      'farm-page-printing-pause-page-state:' +
+        JSON.stringify({
+          path: new URL(page.url()).pathname,
+          text: (
+            await page
+              .locator('body')
+              .innerText()
+              .catch(() => '')
+          ).slice(0, 6000),
+        }),
+    )
+    throw error
   } finally {
     // Cancel only this row's uniquely named file, even after uncertain pause.
     // A cleanup request is never a retry of the signed pause.

@@ -22,6 +22,8 @@ export default defineNuxtConfig({
       sessionSecret: '',
       databaseUrl: '',
       bootstrapToken: '',
+      /** NUXT_AUTH_PASSWORD_RESET=true enables owner-issued reset links. */
+      passwordReset: false,
     },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },

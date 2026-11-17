@@ -85,3 +85,7 @@ A restauração pelo utilitário do Connector produziu bytes idênticos aos do v
 O teste registra os SHAs e contagens novamente em cada execução; este resultado
 se aplica às revisões acima e aos dados descritos, sem afirmar cobertura de todas
 as versões antigas ou de configurações reais de produção.
+
+## Password reset
+
+Owner-issued reset links are off by default. Set `NUXT_AUTH_PASSWORD_RESET=true` to enable them and grant the auth connection role `farm_password_reset`. See [Account creation](ACCOUNT-CREATION.md#password-reset-owner-issued-links).

@@ -22,6 +22,18 @@ Migration `0024_account_registration` adds `farm.account_invites` (immutable exc
 
 An invite is redeemable only while its creator is still an active, non-disabled owner of the farm; revoking or disabling the owner kills their outstanding invites.
 
+## Password reset (owner-issued links)
+
+Password reset is off by default. Enable it with `NUXT_AUTH_PASSWORD_RESET=true` (runtime config `auth.passwordReset`); it also needs `NUXT_AUTH_ENABLED=true` and the auth database settings above. The `password-reset` server plugin then serves the reset endpoints; while it is off they answer 404.
+
+1. **Owner issues a link.** An active owner calls `POST /api/farms/{farmId}/members/{accountId}/reset-link` (same-origin, authenticated, rate-limited). The response carries `{ username, url, expiresAt }` exactly once, with `Cache-Control: no-store`. The link has the form `/redefinir-senha#usuario=<username>&codigo=<token>`, so the token stays in the URL fragment and out of server logs and `Referer`. Only its SHA-256 digest is stored. Non-owners, unknown farms, removed members and disabled accounts all get the same 404. Issuing again replaces any earlier link for that account.
+2. **Member sets a new password.** The page `/redefinir-senha` reads the fragment, removes it from the address bar and posts to `POST /api/auth/password-reset-complete` with the token in `x-password-reset-token`. Passwords need 12 or more characters.
+3. **Guarantees.** A link expires after 15 minutes (database cap), works once, and is void after any password change. A successful reset increments the account's session version, which ends every session of that account.
+
+The owner hands the link over out of band. No email or SMS is sent, and `POST /api/auth/password-reset-request` stays 404 because no self-service delivery is configured; this also stops anonymous requests from replacing an owner-issued link.
+
+Database: migrations `0020_password_reset` (tokens table and `farm_password_reset` role) and `0035_owner_reset_links` (read access to memberships for the owner check). The connection role used by `NUXT_AUTH_DATABASE_URL` must be a member of `farm_password_reset`; otherwise issuance fails closed with 503.
+
 ## Known limits
 
 - Invitation delivery is out of band: the owner copies the link. No email is sent.

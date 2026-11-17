@@ -38,7 +38,8 @@ export async function completePasswordReset(
   if (
     !/^[a-z0-9_-]{3,64}$/.test(input.username) ||
     !/^[A-Za-z0-9_-]{43}$/.test(input.token) ||
-    !input.password.length ||
+    // Same minimum as registration (MIN_PASSWORD_CHARS).
+    [...input.password].length < 12 ||
     input.password.includes('\0') ||
     Buffer.byteLength(input.password) > 1024
   )

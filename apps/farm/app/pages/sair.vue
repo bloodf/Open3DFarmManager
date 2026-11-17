@@ -4,6 +4,7 @@ import { completeAuth } from '../utils/auth-invalidation.ts'
 const pending = ref(false)
 const errorMessage = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
+const allSessions = ref(false)
 
 async function logout() {
   if (pending.value) return
@@ -11,17 +12,21 @@ async function logout() {
   errorMessage.value = ''
   try {
     await completeAuth(() =>
-      $fetch('/api/auth/logout', {
-        method: 'POST',
-        body: {},
-        retry: 0,
-        timeout: 15_000,
-      }),
+      $fetch(
+        allSessions.value ? '/api/auth/sessions/revoke' : '/api/auth/logout',
+        {
+          method: 'POST',
+          body: {},
+          retry: 0,
+          timeout: 15_000,
+        },
+      ),
     )
     await navigateTo('/')
   } catch {
-    errorMessage.value =
-      'Não foi possível sair agora. Tente novamente. Sua sessão pode continuar ativa.'
+    errorMessage.value = allSessions.value
+      ? 'Não foi possível encerrar todas as sessões. Tente novamente.'
+      : 'Não foi possível sair agora. Tente novamente. Sua sessão pode continuar ativa.'
   } finally {
     pending.value = false
     if (errorMessage.value) {
@@ -36,7 +41,9 @@ async function logout() {
   <main id="conteudo">
     <small>Open3DFarmManager</small>
     <h1>Sair da conta</h1>
-    <p>Encerre sua sessão neste navegador.</p>
+    <p>
+      Encerre sua sessão neste navegador ou em todos os dispositivos da conta.
+    </p>
     <form
       method="post"
       action="/api/auth/logout"
@@ -44,8 +51,17 @@ async function logout() {
       @submit.prevent="logout"
     >
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
-      <button type="submit" :disabled="pending">
-        {{ pending ? 'Saindo…' : 'Sair da conta' }}
+      <button type="submit" :disabled="pending" @click="allSessions = false">
+        {{
+          pending
+            ? allSessions
+              ? 'Encerrando sessões…'
+              : 'Saindo…'
+            : 'Sair da conta'
+        }}
+      </button>
+      <button type="submit" :disabled="pending" @click="allSessions = true">
+        {{ pending ? 'Aguarde…' : 'Sair de todos os dispositivos' }}
       </button>
       <p role="status">{{ pending ? 'Encerrando sua sessão.' : '' }}</p>
     </form>

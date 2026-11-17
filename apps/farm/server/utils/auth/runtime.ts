@@ -15,7 +15,8 @@ export interface AuthRuntime {
   origin: string
   cookie: SessionConfig
   sessions: SessionRepository
-  credentials: Pick<PostgresCredentials, 'consumeLimit' | 'find' | 'issue'>
+  credentials: Pick<PostgresCredentials, 'consumeLimit' | 'find' | 'issue'> &
+    Partial<Pick<PostgresCredentials, 'findByAccount' | 'replacePassword'>>
   registration?: Pick<
     PostgresRegistration,
     'bootstrap' | 'createInvite' | 'register'

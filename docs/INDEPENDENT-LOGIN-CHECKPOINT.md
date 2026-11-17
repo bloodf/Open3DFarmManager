@@ -8,7 +8,9 @@ A configuração exige `NUXT_AUTH_ENABLED=true`, `NUXT_AUTH_ORIGIN` com origem H
 
 A role `farm_password_auth` lê credenciais, cria sessões, mantém limites de tentativas e herda as capacidades de revogação de `farm_session_runtime`. Não cria contas nem altera hashes. A migração `0005_password_auth` depende da `0004`; aplique e reverta na ordem correta.
 
-O identificador de login é `username`, com 3 a 64 caracteres ASCII minúsculos, números, `_` ou `-`. Não há associação automática por e-mail. Contas e credenciais pertencem exclusivamente a este produto. Recuperação de senha, cadastro público, OAuth e provisionamento de produção continuam pendentes.
+O identificador de login é `username`, com 3 a 64 caracteres ASCII minúsculos, números, `_` ou `-`. Não há associação automática por e-mail. Contas e credenciais pertencem exclusivamente a este produto. Recuperação de senha por e-mail, cadastro público e provisionamento de produção continuam pendentes.
+
+Atualização posterior: o acesso opcional por OpenID Connect está implementado e desligado por padrão (`NUXT_AUTH_OIDC`). Ele liga um `sub` a uma conta só por convite, nunca por e-mail. A execução Chromium deste checkpoint não exercitou um provedor de identidade. Vários provedores ao mesmo tempo e um provedor de produção continuam de fora. Ver [Account creation](ACCOUNT-CREATION.md#openid-connect).
 
 ## Sessão e proteção
 

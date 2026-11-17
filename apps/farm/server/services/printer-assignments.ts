@@ -108,6 +108,12 @@ function failure(reason: string): never {
       message:
         'Esta chave já tem uma atribuição ativa. Atualize a lista antes de continuar.',
     })
+  // A farm the caller is not a member of does not exist for the caller.
+  if (reason === 'forbidden')
+    throw createError({
+      status: 404,
+      message: 'Farm indisponível para esta conta.',
+    })
   throw createError({
     status: 403,
     message: 'Não foi possível autorizar esta solicitação.',

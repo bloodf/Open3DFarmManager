@@ -229,7 +229,7 @@ async function connectorChild(
       output = Buffer.alloc(0)
       waiter.resolve(reply)
     } catch {
-      fail()
+      fail('invalid-reply')
     }
   })
   const request = async (command: RtcFixtureCommand) => {
@@ -260,10 +260,10 @@ async function connectorChild(
       return await bounded(
         reply,
         input.signal,
-        command.kind === 'start' || command.kind === 'identity' ? 30000 : 2000,
+        command.kind === 'start' || command.kind === 'identity' ? 30000 : 10000,
       )
     } catch {
-      fail()
+      fail('ipc-' + command.kind)
       throw Error('RTC child request failed')
     }
   }
@@ -570,9 +570,13 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           const runtime = await until(
             observeRuntime,
             (value) =>
-              value.queued > 0 && value.requests > 0 && value.listening === 1,
+              value.queued > 0 &&
+              value.requests > 0 &&
+              value.listening === 1 &&
+              (process.env.SIGNALLING_HTTPS_FARM_PAUSE !== 'yes' ||
+                value.pauseInboxReady),
             input.signal,
-            5000,
+            process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes' ? 15000 : 5000,
           )
           await session.note(
             'runtime-fixture-resources:' +

@@ -30,6 +30,14 @@ export default defineNuxtConfig({
     printerAssignments: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
+    telemetryPrune: {
+      enabled: false,
+      databaseUrl: '',
+      intervalMs: 3600000,
+      telemetryRetentionDays: 30,
+      jobHistoryRetentionDays: 365,
+      batchSize: 500,
+    },
     pauseAuthority: {
       enabled: false,
       databaseUrl: '',

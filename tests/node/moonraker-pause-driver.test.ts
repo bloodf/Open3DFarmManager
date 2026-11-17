@@ -550,6 +550,7 @@ test('G-code and history notifications do not replace the pause reply or complet
       signal: f.command.signal,
       after: { connectionGeneration: 7, sequence: 1, sentMono },
     })
+    assert.ok(paused)
     assert.equal(paused.printState, 'paused')
     assert.equal(f.observations.filter(Boolean).length, 2)
     assert.equal(f.remote.counts().pauses, 1)

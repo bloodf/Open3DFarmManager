@@ -5,6 +5,8 @@ import type { SessionRepository } from './session-contract.ts'
 import { PostgresSessionRepository } from '../../storage/postgres-session.ts'
 import { PostgresCredentials } from '../../storage/postgres-credentials.ts'
 import { PostgresRegistration } from '../../storage/postgres-registration.ts'
+import { PostgresMembers } from '../../storage/postgres-members.ts'
+import type { MembersStore } from '../../services/members.ts'
 import {
   configuredAuthOrigin,
   SESSION_COOKIE_ATTRIBUTES,
@@ -21,6 +23,8 @@ export interface AuthRuntime {
     PostgresRegistration,
     'bootstrap' | 'createInvite' | 'register'
   >
+  /** Owner-only member, role and invite management. */
+  members?: MembersStore
   /** SHA-256 of the first-owner bootstrap secret; undefined disables bootstrap. */
   bootstrapTokenDigest?: Buffer | undefined
   idleTimeoutMs: number
@@ -73,6 +77,7 @@ export function authRuntime(): AuthRuntime {
       sessions: new PostgresSessionRepository(sql),
       credentials: new PostgresCredentials(sql),
       registration: new PostgresRegistration(sql),
+      members: new PostgresMembers(sql),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

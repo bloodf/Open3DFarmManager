@@ -30,6 +30,8 @@
     "format": "prettier --write .",
     "sim:seed": "node packages/sim-tools/src/seed-cli.ts",
     "sim:verify": "node packages/sim-tools/src/full-cli.ts",
+    "sim:verify:spoolman": "node packages/sim-tools/src/spoolman-cli.ts",
+    "sim:verify:cams": "node packages/sim-tools/src/camera-cli.ts",
     "sim:verify:rtsp": "node packages/sim-tools/src/rtsp-cli.ts",
     "test:node": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit tests/node/*.test.ts tests/unit/pause-authority-tooling.test.ts tests/unit/pause-authority-timeout.test.ts tests/helpers/kobralink-rtc/cdp-body.test.ts",
     "test:postgres": "node scripts/test-postgres.ts",

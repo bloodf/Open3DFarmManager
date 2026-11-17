@@ -148,6 +148,7 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
   private readonly inboxes = new Set<Inbox>()
   private readonly contexts = new Set<Context>()
   private readonly handles = new WeakMap<Handle, Found>()
+  private readonly provedListeners = new Set<(farmId: string) => void>()
   private authorityTasks = 0
   private cryptoTasks = 0
   private opening = 0
@@ -347,6 +348,10 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
       for (const other of [...this.inboxes])
         if (other !== inbox && other.agentId === inbox.agentId && other.proved)
           this.closeInbox(other)
+      for (const listener of [...this.provedListeners])
+        try {
+          listener(inbox.farmId)
+        } catch {}
       return Object.freeze({
         inboxId: inbox.id,
         issuedAt: now.wall,
@@ -361,6 +366,24 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
     }
   }
 
+  /** Calls back with the farm ID after an inbox passed its credential proof. */
+  onInboxProved(listener: (farmId: string) => void): () => void {
+    this.provedListeners.add(listener)
+    return () => void this.provedListeners.delete(listener)
+  }
+  /** Farm-scoped fan-out to authenticated inboxes only; returns how many accepted it. */
+  sendToFarmInboxes(farmId: string, wire: string): number {
+    let sent = 0
+    for (const inbox of [...this.inboxes])
+      if (inbox.proved && inbox.farmId === farmId && this.inboxLive(inbox))
+        try {
+          inbox.endpoint.send(wire)
+          sent++
+        } catch {
+          this.closeInbox(inbox)
+        }
+    return sent
+  }
   /** Only an authenticated Connector whose operator enabled configuration advertises. */
   advertise(handle: ConfigurationSignallingHandle, input: unknown): boolean {
     const found = this.find(handle)

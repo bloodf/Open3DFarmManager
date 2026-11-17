@@ -16,7 +16,7 @@ jobs:
           version: '12.18.0'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.2'
+          node-version: '24.22.3'
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: bash scripts/test-local-ci.sh
       - run: pnpm run check:all

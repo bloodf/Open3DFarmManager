@@ -95,7 +95,7 @@ code_job() {
   if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
     printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
   fi
-  [[ $(pnpm --version) == 12.18.0 && $(node --version) == v24.22.2 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node 24.22.2.' >&2; return 2; }
+  [[ $(pnpm --version) == 12.18.0 && $(node --version) == v24.22.3 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node 24.22.3.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
   pnpm install --frozen-lockfile --ignore-scripts
   pnpm run lint
@@ -109,7 +109,7 @@ image_job() {
     printf '%s\n' 'Resource name collision; refusing to use pre-existing image or container.' >&2
     return 2
   fi
-  for base in node:24.22.2-alpine; do
+  for base in node:24.22.3-alpine; do
     local platform
     platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base" 2>/dev/null || true)
     if [[ $platform == / ]]; then

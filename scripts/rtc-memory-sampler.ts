@@ -26,6 +26,8 @@ export function sampleRtcMemory(
 ): RtcMemorySample {
   for (const value of [
     elapsedMs,
+    usage.rss,
+    usage.heapUsed,
     queues.sendQueueBytes,
     queues.bufferedAmountBytes,
   ]) {
@@ -48,7 +50,7 @@ export function summarizeRtcMemory(
   if (!samples.length || !Number.isSafeInteger(boundBytes) || boundBytes < 0)
     throw new Error('Invalid RTC memory summary input')
   const peak = (key: keyof RtcMemorySample) =>
-    Math.max(...samples.map((sample) => sample[key] as number))
+    samples.reduce((maximum, sample) => Math.max(maximum, sample[key]), 0)
   return Object.freeze({
     samples: samples.length,
     peakRssBytes: peak('rssBytes'),

@@ -43,3 +43,57 @@ test('RTC memory summary reports peaks and whether a configured bound was reache
     boundsHit: true,
   })
 })
+
+test('sampler rejects missing or nonfinite measurements instead of recording a false zero', () => {
+  for (const invalid of [NaN, Infinity, -1]) {
+    assert.throws(() =>
+      sampleRtcMemory(invalid, { sendQueueBytes: 0, bufferedAmountBytes: 0 }),
+    )
+    assert.throws(() =>
+      sampleRtcMemory(0, { sendQueueBytes: invalid, bufferedAmountBytes: 0 }),
+    )
+    assert.throws(() =>
+      sampleRtcMemory(0, { sendQueueBytes: 0, bufferedAmountBytes: invalid }),
+    )
+    const usage = process.memoryUsage()
+    assert.throws(() =>
+      sampleRtcMemory(
+        0,
+        { sendQueueBytes: 0, bufferedAmountBytes: 0 },
+        { ...usage, rss: invalid },
+      ),
+    )
+    assert.throws(() =>
+      sampleRtcMemory(
+        0,
+        { sendQueueBytes: 0, bufferedAmountBytes: 0 },
+        { ...usage, heapUsed: invalid },
+      ),
+    )
+  }
+})
+
+test('summary distinguishes a drained queue from reaching its bound', () => {
+  const samples = [0, 1023, 0].map((bufferedAmountBytes, elapsedMs) =>
+    sampleRtcMemory(elapsedMs, { sendQueueBytes: 0, bufferedAmountBytes }),
+  )
+  assert.equal(summarizeRtcMemory(samples, 1024).boundsHit, false)
+  assert.equal(summarizeRtcMemory(samples, 1023).boundsHit, true)
+  assert.equal(summarizeRtcMemory(samples, 1024).peakBufferedAmountBytes, 1023)
+  assert.throws(() => summarizeRtcMemory([], 1024))
+  assert.throws(() => summarizeRtcMemory(samples, NaN))
+})
+
+test('summary supports a long sampling history without spreading it onto the stack', () => {
+  const sample = sampleRtcMemory(0, {
+    sendQueueBytes: 0,
+    bufferedAmountBytes: 0,
+  })
+  const result = summarizeRtcMemory(
+    Array.from({ length: 150000 }, () => sample),
+    1024,
+  )
+  assert.equal(result.samples, 150000)
+  assert.equal(result.firstRssBytes, sample.rssBytes)
+  assert.equal(result.lastRssBytes, sample.rssBytes)
+})

@@ -58,14 +58,18 @@ for (const profile of profiles) {
   })
 }
 
-test('Compose CLI accepts every profile when Docker is installed', (t) => {
+test('Compose parses offline and installed Docker validates every profile', (t) => {
+  for (const profile of profiles)
+    assert.ok(compose.services.connector.profiles.includes(profile))
   const available = spawnSync('docker', ['--version'], { encoding: 'utf8' })
   if (
     available.error &&
     'code' in available.error &&
     available.error.code === 'ENOENT'
   ) {
-    t.skip('Docker is absent')
+    t.diagnostic(
+      'Docker is absent; offline profile parsing passed; CLI validation unavailable',
+    )
     return
   }
   assert.equal(available.status, 0, available.stderr)

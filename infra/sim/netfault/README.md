@@ -75,8 +75,8 @@ cache are shared resources and remain under the caller's resource ledger.
 node --test --test-force-exit tests/node/sim-netfault-harness.test.ts
 ```
 
-These checks need no running services. Docker Compose config validation skips
-only when the Docker executable is absent. Installed but broken Docker or
+These checks need no running services. When the Docker executable is absent, the check reports that CLI validation
+is unavailable and still validates the profile source offline. Installed but broken Docker or
 Compose fails the check.
 
 The probe validates transport only. `assertFarmReadOnly` and

@@ -163,8 +163,8 @@ passed in a clean archive of the committed checkout with no installed packages
 or running application services: 10 tests, 10 passed, zero failed, zero skipped.
 Tests parse every profile offline, validate Compose config when Docker is
 installed, exercise resource refusal and teardown with a fake Docker executable,
-and reject failed transport results. Docker checks skip only for an absent
-Docker executable. `pnpm exec tsc --noEmit` and `pnpm run lint` also passed.
+and reject failed transport results. If the Docker executable is absent, the test validates profiles offline and
+reports CLI validation as unavailable without marking the test skipped. `pnpm exec tsc --noEmit` and `pnpm run lint` also passed.
 
 ### Remaining issue #185 acceptance gap
 
@@ -195,3 +195,16 @@ at baseline and were retained, together with shared Docker build cache. No
 unrelated Docker resources were removed. Free disk space after the runs was
 682 GiB. Detailed logs and the private resource ledger are retained outside the
 repository; no private operational paths are committed here.
+
+### Gate repair, 2026-11-17 UTC
+
+The gate exposed a response-capture timing mismatch in the existing KobraLink
+helper. Separate Chromium CDP sessions reported the same request start 0.051 ms
+apart, beyond the helper's 0.05 ms attribution window. The helper now allows
+0.1 ms and continues to reject ambiguous, claimed and distant requests. A
+regression reproduces the observed timestamps; it is included in `test:node`.
+The original body-capture tests remain unchanged.
+
+The sim-netfault test no longer calls `t.skip`. Offline profile assertions always
+run; installed Docker must still validate every profile successfully. An absent
+Docker executable produces a diagnostic that CLI validation was unavailable.

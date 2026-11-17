@@ -56,10 +56,10 @@ const MAX_CAPTURE_BYTES = 1_048_576
 const DURABLE_BUFFER_BYTES = 64 * MAX_CAPTURE_BYTES
 /**
  * Playwright and this session derive the same start stamp from the same
- * Chromium event within float noise (observed <= 0.012 ms); distinct
- * requests of one page are far apart. More than one match is refused.
+ * Chromium event, but separate CDP sessions can stamp wallTime differently
+ * (observed 0.051 ms drift). Allow 0.1 ms; more than one match is refused.
  */
-const START_TOLERANCE_MS = 0.05
+const START_TOLERANCE_MS = 0.1
 const CAPTURED_TYPES = new Set(['Document', 'XHR', 'Fetch'])
 /**
  * The single unclaimed capture whose start stamp is the given one. None or

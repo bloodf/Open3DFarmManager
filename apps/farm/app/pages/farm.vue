@@ -19,6 +19,9 @@ import FarmEnvironment from '../components/FarmEnvironment.vue'
 import { farmJobOutcome } from '../utils/farm-job-outcome.ts'
 import { farmJobView } from '../utils/farm-job-view.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
+import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
+import { offlineCards } from '../composables/useLastKnownStates-core.ts'
+import LastKnownStates from '../components/farm/LastKnownStates.vue'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
 import FarmExtendedControls from '../components/FarmExtendedControls.vue'
@@ -67,6 +70,23 @@ const {
   confirmOrigin,
   cameraFor,
 } = useFarmView()
+// A live feed owns the printers it reports. While none is authenticated, the
+// stored last known states are read so the page is not empty.
+const liveFeedConnected = computed(() =>
+  (ready.value?.rows ?? []).some((row) => row.connection === 'authenticated'),
+)
+const lastKnown = useLastKnownStates({
+  farmId: () => ready.value?.scope?.farmId,
+  live: () => liveFeedConnected.value,
+})
+// The live rows win: a printer the feed reports never gains a second card
+// from the stored snapshot.
+const offlineStates = computed(() =>
+  offlineCards(ready.value?.rows ?? [], lastKnown.states.value),
+)
+const offlineVisible = computed(
+  () => !liveFeedConnected.value && offlineStates.value.length > 0,
+)
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
@@ -1035,6 +1055,23 @@ function dateLabel(time: number) {
             </ul>
           </template>
         </section>
+        <section
+          v-if="offlineVisible"
+          aria-labelledby="last-known-heading"
+          aria-describedby="last-known-description"
+        >
+          <h2 id="last-known-heading">Última observação conhecida</h2>
+          <p id="last-known-description">
+            Sem conexão direta, estes são os últimos estados que o servidor
+            observou. As informações são somente leitura e podem estar
+            desatualizadas.
+          </p>
+          <ul class="last-known-list">
+            <li v-for="state in offlineStates" :key="state.assignmentId">
+              <LastKnownStates :state="state" :now-wall-ms="now.wall" />
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
     <dialog
@@ -1154,6 +1191,10 @@ input[type='url'] {
   word-break: normal;
 }
 .printers {
+  padding: 0;
+  list-style: none;
+}
+.last-known-list {
   padding: 0;
   list-style: none;
 }

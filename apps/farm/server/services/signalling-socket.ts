@@ -48,7 +48,11 @@ export function signallingNativeSocket(
     if (binary !== false) onBinary()
   })
   const send = input.send.bind(input),
-    terminate = input.terminate.bind(input)
+    terminate = input.terminate.bind(input),
+    close =
+      'close' in native && typeof native.close === 'function'
+        ? native.close.bind(native)
+        : undefined
   return {
     request: signallingNodeUpgrade(input.request),
     port: {
@@ -62,6 +66,9 @@ export function signallingNativeSocket(
       terminate: () => {
         terminate()
       },
+      ...(close
+        ? { close: (code: number, reason: string) => close(code, reason) }
+        : {}),
     },
   }
 }

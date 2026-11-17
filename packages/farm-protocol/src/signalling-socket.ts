@@ -126,6 +126,11 @@ export const SignallingServerFrame = z.union([
 ])
 export type SignallingServerFrame = z.infer<typeof SignallingServerFrame>
 export const MAX_SIGNALLING_SOCKET_BYTES = 12 * 1024
+// Permit normal SDP plus trickled ICE bursts while bounding sustained floods.
+export const SIGNALLING_MESSAGE_BUCKET_CAPACITY = 60
+export const SIGNALLING_MESSAGE_REFILL_PER_SECOND = 10
+// RFC 6455 application-defined policy close code for signalling rate limits.
+export const SIGNALLING_RATE_LIMIT_CLOSE_CODE = 4429
 function parse(wire: unknown): unknown {
   if (
     typeof wire !== 'string' ||

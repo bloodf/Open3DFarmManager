@@ -25,6 +25,7 @@ const links = computed(() => [
     : []),
   { to: '/compatibilidade', label: 'Compatibilidade' },
   ...(isOwner.value ? [{ to: '/convites', label: 'Convidar pessoa' }] : []),
+  ...(authenticated.value ? [{ to: '/conta', label: 'Conta' }] : []),
   { to: '/criar-conta', label: 'Criar conta' },
   { to: '/primeiro-acesso', label: 'Primeiro acesso' },
   { to: '/redefinir-senha', label: 'Redefinir senha' },

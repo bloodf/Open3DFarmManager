@@ -337,8 +337,18 @@ export async function testPostgresSignallingSuccessors(
       }
     }
     type Fixture = Awaited<ReturnType<typeof connector>>
-    const current = (fixture: Fixture, jti: string, farmId = fixture.farmId) =>
-      reader.readConnectorCurrent({ agentId: fixture.agentId, farmId, jti })
+    const current = async (
+      fixture: Fixture,
+      jti: string,
+      farmId = fixture.farmId,
+    ) => {
+      const decision = await reader.readConnectorCurrent({
+        agentId: fixture.agentId,
+        farmId,
+        jti,
+      })
+      return decision.kind === 'authorized' ? decision.snapshot : null
+    }
     /** Full signalling proof (issue + signed completion) for one token. */
     async function prove(
       fixture: Fixture,
@@ -441,13 +451,13 @@ export async function testPostgresSignallingSuccessors(
     const other = await b.renew()
     assert.equal(acceptedJti(await prove(b, other.token)), other.jti)
     assert.equal(await current(a, other.jti), null)
-    assert.equal(
+    assert.deepEqual(
       await reader.readConnectorCurrent({
         agentId: b.agentId,
         farmId: a.farmId,
         jti: other.jti,
       }),
-      null,
+      { kind: 'denied' },
     )
     assert.equal(await current(a, first.jti, b.farmId), null)
     assert.equal(acceptedJti(await prove(a, other.token)), null)

@@ -75,7 +75,10 @@ test('portable metadata responses prohibit caching and contain no additional fie
 
 test('actual runtime terminal getter stays latched without constructor or authority changes', () => {
   const runtime = new SignallingRuntime({
-    reader: { read: async () => null, readConnectorCurrent: async () => null },
+    reader: {
+      read: async () => null,
+      readConnectorCurrent: async () => ({ kind: 'denied' }),
+    },
     credentials: {
       issue: async () => ({ ok: false, reason: 'denied' }),
       accept: async () => ({ ok: false, reason: 'denied' }),

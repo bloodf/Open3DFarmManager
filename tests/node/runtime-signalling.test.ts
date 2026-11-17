@@ -244,7 +244,7 @@ test('expiry timer is terminal even when it fires before the sampled clock deadl
   }
 })
 
-test('an admitted session resets reconnect backoff to the minimum; unadmitted sessions still back off', async () => {
+test('immediately revoked admitted sessions and unadmitted sessions both back off', async () => {
   async function gaps(admit: boolean) {
     const controller = new AbortController()
     const starts: number[] = []
@@ -275,6 +275,6 @@ test('an admitted session resets reconnect backoff to the minimum; unadmitted se
   }
   const admitted = await gaps(true)
   const unadmitted = await gaps(false)
-  assert.ok(Math.max(...admitted) < 120, String(admitted))
+  assert.ok(admitted[3]! >= 150, String(admitted))
   assert.ok(unadmitted[3]! >= 150, String(unadmitted))
 })

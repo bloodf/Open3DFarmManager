@@ -14,7 +14,9 @@ describe('signalling successor authorization boundary', () => {
     },
   )
   it('rejects malformed successor identities before opening a transaction', async () => {
-    expect(await reader.readConnectorCurrent({ agentId: 'invalid' })).toBeNull()
+    expect(await reader.readConnectorCurrent({ agentId: 'invalid' })).toEqual({
+      kind: 'denied',
+    })
     expect(begin).not.toHaveBeenCalled()
   })
   it('fails closed when credential storage is unavailable', async () => {
@@ -25,7 +27,7 @@ describe('signalling successor authorization boundary', () => {
         farmId: '22222222-2222-4222-8222-222222222222',
         jti: '33333333-3333-4333-8333-333333333333',
       }),
-    ).toBeNull()
+    ).toEqual({ kind: 'unavailable' })
     expect(begin).toHaveBeenCalledOnce()
   })
 })

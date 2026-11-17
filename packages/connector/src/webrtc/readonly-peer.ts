@@ -65,14 +65,174 @@ type Options = {
 }
 const noop = () => {}
 /** Keep a single status frame bounded while allowing short network stalls. */
-const READONLY_PENDING_BYTES = 1_048_576
+export const READONLY_PENDING_BYTES = 1_048_576
 /** A read-only peer falls back to display-only when congestion persists. */
-const READONLY_BACKPRESSURE_TIMEOUT_MS = 5_000
+export const READONLY_BACKPRESSURE_TIMEOUT_MS = 5_000
+/** Native queue depth that resumes status delivery after backpressure. */
+export const READONLY_STATUS_LOW_WATER_BYTES = 0
+
+/** Native application channel port used by the status queue.
+ * A refused write is backpressure, not a failure. */
+export type StatusChannelPort = Readonly<{
+  sendMessage(wire: string): boolean
+  bufferedAmount(): number
+  isOpen(): boolean
+  onBufferedAmountLow(callback: () => void): void
+}>
+
+/** Result of one native status write. */
+export type StatusWrite = 'sent' | 'coalesced' | 'rejected'
+
+/** Bounded native status queue for a read-only peer.
+ *
+ * A refused native write means the bytes are queued natively, not a failure:
+ * the read-only session survives, the newest frame wins over the older ones
+ * and the frame is delivered once the native channel drains. The #173 bound
+ * closes the peer only when the congestion outlives its timeout. */
+export class ReadonlyStatusQueue<TFrame> {
+  #channel: StatusChannelPort
+  #write: (frame: TFrame) => boolean
+  #onTerminal: (reason: string) => void
+  #pendingBytes: number
+  #timeoutMs: number
+  #pending: TFrame | undefined
+  #congested = false
+  #accepted = false
+  #terminal: string | undefined
+  #timer: ReturnType<typeof setTimeout> | undefined
+  constructor(options: {
+    channel: StatusChannelPort
+    /** Writes one frame through the session; the adapter calls `sendWire`. */
+    write: (frame: TFrame) => boolean
+    /** Congestion outlived the #173 timeout, or the channel is unusable. */
+    onTerminal: (reason: string) => void
+    pendingBytes?: number
+    timeoutMs?: number
+  }) {
+    this.#channel = options.channel
+    this.#write = options.write
+    this.#onTerminal = options.onTerminal
+    this.#pendingBytes = options.pendingBytes ?? READONLY_PENDING_BYTES
+    this.#timeoutMs = options.timeoutMs ?? READONLY_BACKPRESSURE_TIMEOUT_MS
+    this.#channel.onBufferedAmountLow(() => this.#drain())
+  }
+  /** Native queue depth in bytes. */
+  bufferedAmount() {
+    const buffered = this.#channel.bufferedAmount()
+    if (!Number.isSafeInteger(buffered) || buffered < 0) {
+      this.#fail('status-buffer-invalid')
+      return 0
+    }
+    if (buffered > this.#pendingBytes) this.#congest()
+    return buffered
+  }
+  /** Native write performed by the session adapter.
+   * 'coalesced' means the frame stays queued until the channel drains. */
+  sendWire(wire: string): StatusWrite {
+    this.#accepted = false
+    if (this.#terminal) return 'rejected'
+    if (!this.#channel.isOpen()) {
+      this.#fail('status-channel-closed')
+      return 'rejected'
+    }
+    const size = new TextEncoder().encode(wire).byteLength
+    if (size > this.#pendingBytes) return 'rejected'
+    const buffered = this.bufferedAmount()
+    if (this.#terminal) return 'rejected'
+    if (buffered + size > this.#pendingBytes) {
+      this.#congest()
+      return 'coalesced'
+    }
+    if (!this.#channel.sendMessage(wire)) {
+      // Native SCTP backpressure: the bytes are queued natively, not lost.
+      this.#congest()
+      return 'coalesced'
+    }
+    this.#accepted = true
+    return 'sent'
+  }
+  /** Offer one frame. True when the transport took it. */
+  offer(frame: TFrame): boolean {
+    this.#accepted = false
+    if (this.#terminal) return false
+    this.#refresh()
+    if (this.#congested) {
+      // Coalesce: the newest frame replaces the held one.
+      this.#pending = frame
+      return false
+    }
+    if (!this.#write(frame)) return false
+    if (!this.#accepted) {
+      // The native channel refused the frame: keep it for the next drain.
+      this.#pending = frame
+      this.#congest()
+      return false
+    }
+    return true
+  }
+  /** A coalesced frame waiting for the native drain. */
+  pending() {
+    return this.#pending !== undefined
+  }
+  close() {
+    clearTimeout(this.#timer)
+    this.#timer = undefined
+    this.#terminal = this.#terminal ?? 'closed'
+    this.#pending = undefined
+  }
+  /** Observe the native queue; resumes delivery once it drains. */
+  #refresh() {
+    if (this.#terminal || !this.#congested) return
+    const buffered = this.bufferedAmount()
+    if (this.#terminal) return
+    if (buffered > READONLY_STATUS_LOW_WATER_BYTES) return
+    this.#congested = false
+    clearTimeout(this.#timer)
+    this.#timer = undefined
+    this.#flush()
+  }
+  #drain() {
+    this.#refresh()
+  }
+  #flush() {
+    const frame = this.#pending
+    if (frame === undefined) return
+    this.#pending = undefined
+    if (!this.#write(frame)) return
+    if (!this.#accepted) {
+      // Still congested: keep the frame until the next drain.
+      this.#pending = frame
+      this.#congest()
+    }
+  }
+  #congest() {
+    this.#congested = true
+    if (this.#timer) return
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined
+      this.#fail('status-backpressure')
+    }, this.#timeoutMs)
+  }
+  #fail(reason: string) {
+    if (this.#terminal) return
+    this.#terminal = reason
+    clearTimeout(this.#timer)
+    this.#timer = undefined
+    this.#pending = undefined
+    this.#onTerminal(reason)
+  }
+}
+
+/** Coalesced status frame held until the native channel drains. */
+type PendingStatus =
+  | { readonly kind: 'genuine'; readonly input: unknown }
+  | { readonly kind: 'fixture' }
 /** Detached read-only prototype. No enrollment, authorization, media or commands. */
 export class ReadonlyConnectorPeer {
   #peer: PeerConnection
   #proof: DataChannel
   #application: DataChannel
+  #status: ReadonlyStatusQueue<PendingStatus>
   #inbox: RtcProofInbox
   #binding: Promise<RtcSessionBinding>
   #closed: Promise<void>
@@ -102,7 +262,6 @@ export class ReadonlyConnectorPeer {
   #lifetimeDeadline = performance.now() + 30000
   #authTimer: ReturnType<typeof setTimeout>
   #lifetimeTimer: ReturnType<typeof setTimeout>
-  #backpressureTimer: ReturnType<typeof setTimeout> | undefined
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
     if (options.fixtureOnlyMedia && options.cameraMedia)
@@ -154,6 +313,17 @@ export class ReadonlyConnectorPeer {
     this.#application = this.#peer.createDataChannel(
       'readonly-fixture-status-v1',
       { unordered: false },
+    )
+    this.#status = new ReadonlyStatusQueue<PendingStatus>({
+      channel: this.#application,
+      write: (frame) =>
+        frame.kind === 'genuine'
+          ? (this.#session?.sendGenuineStatus(frame.input) ?? false)
+          : (this.#session?.sendStatus() ?? false),
+      onTerminal: (reason) => this.close(reason),
+    })
+    this.#application.setBufferedAmountLowThreshold(
+      READONLY_STATUS_LOW_WATER_BYTES,
     )
     this.#inbox = new RtcProofInbox({
       paused: true,
@@ -398,7 +568,10 @@ export class ReadonlyConnectorPeer {
         this.#sentProofs++
       },
       sendApplication: (wire) => {
-        if (!this.current() || !this.#sendApplication(wire))
+        if (!this.current()) throw Error('Status send failed')
+        // A refused native write is backpressure, not a failure: the frame
+        // stays queued until the channel drains and the session survives.
+        if (this.#status.sendWire(wire) === 'rejected')
           throw Error('Status send failed')
       },
       onVerified: () => {
@@ -439,51 +612,15 @@ export class ReadonlyConnectorPeer {
     return (
       this.current() &&
       this.#application.isOpen() &&
-      this.#withinBackpressureLimit() &&
-      (this.#session?.sendGenuineStatus(input) ?? false)
+      this.#status.offer({ kind: 'genuine', input })
     )
   }
   sendFixtureStatus() {
-    return (
-      this.#application.isOpen() &&
-      this.#withinBackpressureLimit() &&
-      (this.#session?.sendStatus() ?? false)
-    )
+    return this.#application.isOpen() && this.#status.offer({ kind: 'fixture' })
   }
   /** Current native queue size for the Connector's coalescing status sender. */
   bufferedStatusAmount() {
-    const buffered = this.#application.bufferedAmount()
-    this.#withinBackpressureLimit()
-    return buffered
-  }
-  #withinBackpressureLimit() {
-    const buffered = this.#application.bufferedAmount()
-    if (!Number.isSafeInteger(buffered) || buffered < 0) {
-      this.close('status-buffer-invalid')
-      return false
-    }
-    if (buffered > READONLY_PENDING_BYTES) {
-      if (!this.#backpressureTimer)
-        this.#backpressureTimer = setTimeout(
-          () => this.close('status-backpressure'),
-          READONLY_BACKPRESSURE_TIMEOUT_MS,
-        )
-      return false
-    }
-    clearTimeout(this.#backpressureTimer)
-    this.#backpressureTimer = undefined
-    return true
-  }
-  #sendApplication(wire: string) {
-    const size = new TextEncoder().encode(wire).byteLength
-    const buffered = this.#application.bufferedAmount()
-    if (
-      !this.#withinBackpressureLimit() ||
-      size > READONLY_PENDING_BYTES ||
-      buffered + size > READONLY_PENDING_BYTES
-    )
-      return false
-    return this.#application.sendMessage(wire)
+    return this.#status.bufferedAmount()
   }
   close(reason = 'closed') {
     if (this.#terminal) return
@@ -496,7 +633,7 @@ export class ReadonlyConnectorPeer {
     }
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
-    clearTimeout(this.#backpressureTimer)
+    this.#status.close()
     this.#inbox.close(reason)
     this.#session?.close(reason)
     this.#proof.onMessage(noop)

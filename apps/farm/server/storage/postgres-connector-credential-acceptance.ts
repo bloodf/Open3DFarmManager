@@ -1,3 +1,4 @@
+import { recordLatestStates } from './postgres-printer-latest-state.ts'
 import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
@@ -660,6 +661,11 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                await recordLatestStates(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  sorted,
+                )
                 // Finished jobs carried by the snapshots are recorded in the
                 // same transaction as their events; repeats are a no-op.
                 await recordJobs(

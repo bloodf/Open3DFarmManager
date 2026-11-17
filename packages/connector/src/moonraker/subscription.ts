@@ -292,14 +292,6 @@ export function createMoonrakerSubscription(input: {
                 ) {
                   const complete = TemperatureSnapshot.parse(observation.result)
                   const value = Snapshot.parse(complete)
-                  if (
-                    baseline &&
-                    (value.eventtime < baseline.eventtime ||
-                      (value.eventtime === baseline.eventtime &&
-                        JSON.stringify(value.status) !==
-                          JSON.stringify(baseline.status)))
-                  )
-                    throw Error('Ambiguous complete response ordering')
                   const stamp = observation.requestStartedAtMonoMs
                   // A delta received during this query has a newer local field
                   // observation. Discard this overlapping response rather than
@@ -310,6 +302,14 @@ export function createMoonrakerSubscription(input: {
                     stamp < Math.max(...Object.values(fieldTimes))
                   )
                     return
+                  if (
+                    baseline &&
+                    (value.eventtime < baseline.eventtime ||
+                      (value.eventtime === baseline.eventtime &&
+                        JSON.stringify(value.status) !==
+                          JSON.stringify(baseline.status)))
+                  )
+                    throw Error('Ambiguous complete response ordering')
                   fieldTimes = {
                     webhooks: stamp,
                     printState: stamp,

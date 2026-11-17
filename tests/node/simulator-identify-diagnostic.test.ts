@@ -2237,25 +2237,15 @@ test('keeps the ledger outside the repository and every linked worktree', async 
   assert.equal(roots.length > 0, true)
   for (const root of roots) {
     const inside = join(root, 'tmp-identify-ledger')
-    let refused = false
-    try {
-      diagnostic.assertLedgerOutsideRepository(inside)
-    } catch (error) {
-      assert.ok(
-        (error as DiagnosticErrorShape).message.includes('outside'),
-        `${root} refused for an unexpected reason`,
-      )
-      refused = true
-    }
     // Other test files in the same run (pause-authority-tooling) add and
-    // remove linked worktrees. Only a root whose path no longer exists may go
-    // unrefused; any root still on disk must be refused.
-    if (!refused)
-      assert.equal(
-        existsSync(root),
-        false,
-        `${root} must be refused as a ledger root`,
-      )
+    // remove linked worktrees. A root whose path is already gone was removed
+    // after the snapshot; only that root may be skipped.
+    if (!existsSync(root)) continue
+    assert.throws(
+      () => diagnostic.assertLedgerOutsideRepository(inside),
+      (error: DiagnosticErrorShape) => error.message.includes('outside'),
+      `${root} must be refused as a ledger root`,
+    )
     assert.equal(
       existsSync(inside),
       false,

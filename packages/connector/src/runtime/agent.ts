@@ -13,6 +13,11 @@ import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import {
+  readBambuPrinterBinding,
+  readCrealityPrinterBinding,
+} from '../control/printer-binding.ts'
+import { moonrakerWebUiOrigin } from '../config/moonraker.ts'
 import { isLoopbackBindAddress } from '../config/rtc.ts'
 import type {
   PauseControlDiagnostic,
@@ -246,6 +251,26 @@ async function runConnectorAgentOnce(
           assignmentRefs: refs,
           controlsFor: (id) => controlsFor?.(id),
           macrosFor: (id) => macrosFor?.(id),
+          localWebUiOriginFor: (id) => {
+            const assignment = config.assignments.find(
+              (item) => item.assignment_id === id,
+            )
+            if (!assignment) return
+            if ('moonraker_origin' in assignment && assignment.moonraker_origin)
+              return moonrakerWebUiOrigin(assignment.moonraker_origin)
+            const binding = config.bindingFor(id)
+            if (!binding) return
+            const bambu = readBambuPrinterBinding(binding)
+            if (bambu) return `http://${bambu.host}`
+            const creality = readCrealityPrinterBinding(binding)
+            if (creality) {
+              const host = creality.host.includes(':')
+                ? `[${creality.host}]`
+                : creality.host
+              return `http://${host}:${creality.httpPort ?? 80}`
+            }
+            return
+          },
         })
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')

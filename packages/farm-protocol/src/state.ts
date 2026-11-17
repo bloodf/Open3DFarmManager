@@ -1,6 +1,23 @@
 import { z } from 'zod'
 import { ExtendedControlAction, MacroName } from './control-actions.ts'
 
+const LocalWebUiOrigin = z
+  .string()
+  .max(512)
+  .refine((value) => {
+    try {
+      const url = new URL(value)
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.origin === value &&
+        !url.username &&
+        !url.password
+      )
+    } catch {
+      return false
+    }
+  }, 'Expected a credential-free local web UI origin')
+
 export { firmwareUpdateAvailable } from './firmware.ts'
 
 export const PrinterState = z
@@ -36,6 +53,7 @@ export const PrinterState = z
       })
       .optional(),
     printerKey: z.string().min(1).max(128),
+    localWebUiOrigin: LocalWebUiOrigin.optional(),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     progress: z.number().min(0).max(1).optional(),
     materials: z

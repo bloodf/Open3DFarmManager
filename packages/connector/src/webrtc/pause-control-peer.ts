@@ -113,17 +113,7 @@ export class PauseConnectorPeer {
       ...(input.lifetimeDeadline !== undefined
         ? { lifetimeDeadline: input.lifetimeDeadline }
         : {}),
-      send: (wire) => {
-        try {
-          this.sendWire(wire)
-        } catch (error) {
-          console.error(
-            'RTC send failure: ' +
-              (error instanceof Error ? error.message : 'unknown'),
-          )
-          throw error
-        }
-      },
+      send: (wire) => this.sendWire(wire),
       onProofsReady: (value) => {
         if (this.current()) return this.#options.onProofsReady?.(value)
       },
@@ -399,10 +389,7 @@ export class PauseConnectorPeer {
     )
       throw Error('Control outbound limit')
     if (!this.current()) throw Error('Control deadline')
-    if (!channel.sendMessage(wire)) {
-      console.error('RTC send failure: native sendMessage false')
-      throw Error('Control send failed')
-    }
+    if (!channel.sendMessage(wire)) throw Error('Control send failed')
     const after = channel.bufferedAmount()
     if (
       !Number.isSafeInteger(after) ||

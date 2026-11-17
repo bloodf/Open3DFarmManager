@@ -147,7 +147,7 @@ export async function testPrintingPausePage(input: {
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
         const button = row.getByRole('button', {
-          name: 'Pausar impressão',
+          name: 'Pausar',
           exact: true,
         })
         await expect(button).toBeEnabled()

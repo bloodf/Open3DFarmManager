@@ -23,22 +23,21 @@ export async function runSignallingLifecycle(input: {
   credentialExpiresAt: number
   retryMinMs: number
   retryMaxMs: number
-  /**
-   * `onAdmitted` reports that the server admitted this session's credential
-   * proof. The next reconnect then waits only retryMinMs, so a long-lived
-   * Connector keeps its reconnect gap below the offline authority lifetime.
-   */
+  /** Reset retry pressure only after 30 seconds of admitted uptime. */
+  now?: () => number
+  monotonic?: () => number
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   createSession(onTerminal: () => void, onAdmitted: () => void): Session
 }): Promise<void> {
+  const now = input.now ?? Date.now
+  const monotonic = input.monotonic ?? (() => performance.now())
+  const sleep = input.sleep ?? wait
   let backoff = input.retryMinMs
   let expired = false
   const deadlineMono =
-    performance.now() + Math.max(0, input.credentialExpiresAt - Date.now())
+    monotonic() + Math.max(0, input.credentialExpiresAt - now())
   const remaining = () =>
-    Math.min(
-      input.credentialExpiresAt - Date.now(),
-      deadlineMono - performance.now(),
-    )
+    Math.min(input.credentialExpiresAt - now(), deadlineMono - monotonic())
   while (!expired && !input.signal.aborted && remaining() > 0) {
     let finish = () => {}
     const terminal = new Promise<void>((resolve) => {
@@ -46,8 +45,15 @@ export async function runSignallingLifecycle(input: {
     })
     let session: Session | undefined
     let ended = false
+    let admittedAt: number | undefined
     let closeFailure: { error: unknown } | undefined
     const endedSession = () => {
+      if (
+        !ended &&
+        admittedAt !== undefined &&
+        monotonic() - admittedAt >= 30_000
+      )
+        backoff = input.retryMinMs
       ended = true
       finish()
     }
@@ -72,8 +78,8 @@ export async function runSignallingLifecycle(input: {
     input.signal.addEventListener('abort', stop, { once: true })
     try {
       session = input.createSession(endedSession, () => {
-        // A late callback from an ended session never resets backoff.
-        if (!ended) backoff = input.retryMinMs
+        // Measure the first admission only; late callbacks cannot reset pressure.
+        if (!ended && admittedAt === undefined) admittedAt = monotonic()
       })
       if (ended || input.signal.aborted || remaining() <= 0) stop()
       else {
@@ -95,7 +101,7 @@ export async function runSignallingLifecycle(input: {
     }
     if (closeFailure) throw closeFailure.error
     if (expired) return
-    await wait(Math.min(backoff, Math.max(0, remaining())), input.signal)
+    await sleep(Math.min(backoff, Math.max(0, remaining())), input.signal)
     backoff = Math.min(input.retryMaxMs, backoff * 2)
   }
 }

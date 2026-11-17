@@ -55,7 +55,7 @@ test('metadata follows the matching live owner without admission or authority ex
       },
       readConnectorCurrent: async () => {
         reads++
-        return null
+        return { kind: 'denied' }
       },
     },
     credentials: {
@@ -139,7 +139,10 @@ test('a replaced owner during metadata lookup fails closed', () => {
       name: 'fixture',
       password: 'synthetic-fixture-password-123456789',
     },
-    reader: { read: async () => null, readConnectorCurrent: async () => null },
+    reader: {
+      read: async () => null,
+      readConnectorCurrent: async () => ({ kind: 'denied' }),
+    },
     credentials: {
       issue: async () => ({ ok: false, reason: 'denied' }),
       accept: async () => ({ ok: false, reason: 'denied' }),

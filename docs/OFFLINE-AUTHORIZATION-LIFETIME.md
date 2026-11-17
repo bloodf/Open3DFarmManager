@@ -61,24 +61,24 @@ The Connector agent creates one tracker when `pause.control` is configured and p
 
 - **Source:** the server sends `connector.authority-confirm` on the read-only Connector inbox (`/api/signalling/connector`) right after `connector.inbox-ready` and after every successful 5 s current-authority reread (enrollment approved, credential current and unrevoked, unchanged identity pins). That is at most `maxAgeMs / 6`. The frame is sent after the reread result has been applied to the connection. It carries `server_seq`, `farm_id`, `agent_id` and `credential_jti`.
 - **Connector acceptance:** `AuthenticatedConnectorSignallingClient` accepts the frame only after the server admitted the inbox credential proof, and only when farm, agent and credential id match its own scope; anything else is terminal. The agent then calls `confirm({ wall: Date.now(), mono: performance.now() }, server_seq)`. The pause signalling client, the WebRTC peers and browser frames have no path to `confirm()`.
-- **Revocation:** when a reread fails, the server sends `connector.authority-revoked` with `server_seq = previous + 1` and closes the inbox. The agent calls `revoke(server_seq)`. The revocation never uses the app server's wall clock: an app clock ahead of database time would lift the Connector's floor above other instances' confirmations and silently disable pause.
+- **Revocation:** when a reread definitively denies authority, the server sends `connector.authority-revoked` with `server_seq = previous + 1` and closes the inbox. The agent calls `revoke(server_seq)`. The revocation never uses the app server's wall clock: an app clock ahead of database time would lift the Connector's floor above other instances' confirmations and silently disable pause.
 - **Sequence:** `server_seq = max(previous + 1, databaseObservedAtMs * 1000)`, so it strictly increases within a process and, anchored to database time, across restarts and instances.
-- **Backoff:** `runSignallingLifecycle` resets backoff to `retryMinMs` once a session's inbox is admitted, so reconnect gaps stay far below the lifetime.
+- **Backoff:** `runSignallingLifecycle` retains exponential retry pressure through immediately revoked inboxes, up to `retryMaxMs`. At least 30 seconds of admitted uptime resets backoff to `retryMinMs`.
 - **Audit:** every stale transition appends one fsynced JSON line to `<data>/pause-journal/authority-audit.jsonl` (private file, no symlink, 1 MiB bound) and emits `pause-authority-stale`. A failed or full write emits `pause-audit-failed` and never restores authority.
 
 Without the read-only `signalling` section no confirmation arrives and the pause path stays inert.
 
 ## Known follow-ups
 
-- The reader returns no authority for both a definitive denial and a transient database error, so both revoke. A three-state reader should skip one confirmation on a transient error and revoke only on a definitive denial.
-- Each revocation closes the inbox. A Connector that is admitted and then revoked again on every reread reconnects at `retryMinMs` (1 s by default), because backoff resets after each admitted inbox.
+- Resolved (#170): the reader distinguishes authorized, denied and unavailable. An unavailable reread skips confirmation; cached authority still expires after maxAgeMs. Only a definitive denial sends revocation.
+- Resolved (#170): each revocation still closes the inbox. Repeated admission followed by immediate revocation now backs off exponentially to `retryMaxMs`; 30 seconds of admitted uptime resets it.
 
 ## Threat considerations
 
 - **Forged confirmation:** requires the TLS-authenticated server connection after a Connector credential proof-of-possession. Frames before admission or for another credential end the session. WebRTC data channels and browser input cannot reach `confirm()`.
 - **Replay or reordering:** inside one TLS connection frames cannot be replayed; across connections the tracker refuses any `server_seq` at or below its floor.
 - **Clock faults:** a database clock that steps backwards produces lower sequences that the tracker refuses, so authority goes stale (fail closed) until database time passes the floor. Several server instances share database time; a lagging one can only be refused.
-- **Transient failures count as revocation:** the reader returns no authority for both revocation and database errors, so either sends `authority-revoked`. This favours safety; the next admitted inbox confirms again.
+- **Transient database failures:** unavailable rereads skip confirmation without extending cached authority. Repeated failures age out at maxAgeMs; definitive denial still revokes immediately.
 - **Silent loss:** a dropped socket or a server that stops confirming leaves authority to expire after `maxAgeMs` (30 s).
 - **Scope of the attestation:** the confirmation covers Connector enrollment, credential and revocation state. Assignment, membership and browser-key state are still checked by the issuer for each capability, which lives at most 30 s. The issuer keyring is local configuration, not server-provided state.
 - **Compromised server:** it can confirm, but it already issues capabilities; the tracker does not defend against it.

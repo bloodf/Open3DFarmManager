@@ -62,6 +62,8 @@ import {
   signallingMessageText,
 } from './signalling-socket.ts'
 
+class AuthorityUnavailable extends Error {}
+
 type Reader = Pick<
   PostgresSignallingAuthorization,
   'read' | 'readConnectorCurrent'
@@ -600,8 +602,9 @@ export class SignallingRuntime {
           farmId: control.farm_id,
           jti: control.jti,
         })
-        if (!current || connection.closed) throw new Error('Connector denied')
-        const identity = await this.#current(connection, current)
+        if (current.kind !== 'authorized' || connection.closed)
+          throw new Error('Connector denied')
+        const identity = await this.#current(connection, current.snapshot)
         if (!identity) throw new Error('Connector denied')
         connection.state = {
           kind: 'connector.issue',
@@ -873,13 +876,15 @@ export class SignallingRuntime {
     previous: Identity,
   ): Promise<Identity | null> {
     this.#observeClock(connection)
-    const current = await this.#reader.readConnectorCurrent({
+    const decision = await this.#reader.readConnectorCurrent({
       agentId: previous.identity.agent_id,
       farmId: previous.identity.farm_id,
       jti: previous.identity.credential_jti,
     })
+    if (decision.kind === 'unavailable') throw new AuthorityUnavailable()
+    if (decision.kind === 'denied') return null
+    const current = decision.snapshot
     if (
-      !current ||
       connection.closed ||
       identityPins(current) !== identityPins(previous) ||
       current.budget.observedAt < previous.budget.observedAt
@@ -910,7 +915,14 @@ export class SignallingRuntime {
       const state = connection.state
       if (!('identity' in state) || connection.closed) return
       void this.#resources.work(connection.resource, async () => {
-        const current = await this.#current(connection, state.identity)
+        let current: Identity | null
+        try {
+          current = await this.#current(connection, state.identity)
+        } catch (error) {
+          if (!(error instanceof AuthorityUnavailable)) throw error
+          if (!connection.closed) this.#revalidation(connection)
+          return
+        }
         if (!current || connection.closed) {
           this.#revokeAuthority(connection)
           this.#close(connection)
@@ -941,7 +953,7 @@ export class SignallingRuntime {
       credential_jti: current.identity.credential_jti,
     })
   }
-  /** A failed reread revokes the Connector's cached authority before closing. */
+  /** A definitive denial revokes the Connector's cached authority before closing. */
   #revokeAuthority(connection: Connection): void {
     if (connection.mode !== 'read-only' || connection.closed) return
     try {

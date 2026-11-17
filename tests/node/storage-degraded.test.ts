@@ -110,6 +110,16 @@ async function moonrakerFixture() {
         method: string
         params?: { objects?: Record<string, unknown> }
       }
+      if (request.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       const all: Record<string, unknown> = {
         webhooks: { state: 'ready' },
         print_stats: { state },

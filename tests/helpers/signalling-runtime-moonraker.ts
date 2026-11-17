@@ -254,6 +254,19 @@ export async function createRuntimeMoonrakerFixture() {
                 )
               return
             }
+            if (
+              (value as { method?: unknown } | null)?.method ===
+              'server.connection.identify'
+            ) {
+              socket.send(
+                JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: (value as { id: number }).id,
+                  result: { connection_id: 1 },
+                }),
+              )
+              return
+            }
             const request = Request.parse(value)
             socket.send(
               JSON.stringify({

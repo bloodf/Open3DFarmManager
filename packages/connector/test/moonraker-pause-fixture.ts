@@ -66,7 +66,15 @@ export async function pauseFixture(
         params?: unknown
       }
       requests.push(request)
-      if (request.method === 'printer.objects.query') {
+      if (request.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+      } else if (request.method === 'printer.objects.query') {
         const index = ++queries
         if (input.query?.(index, socket, request.id)) return
         socket.send(

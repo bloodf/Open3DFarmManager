@@ -51,6 +51,16 @@ for (const present of [true, false]) {
       onMessage(socket, wire) {
         const request = JSON.parse(wire)
         requests.push(request)
+        if (request.method === 'server.connection.identify') {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: { connection_id: 1 },
+            }),
+          )
+          return
+        }
         const result =
           request.method === 'printer.objects.list'
             ? {
@@ -134,9 +144,13 @@ for (const present of [true, false]) {
       ])
       assert.deepEqual(
         requests.map((request) => request.method),
-        ['printer.objects.list', 'printer.objects.subscribe'],
+        [
+          'server.connection.identify',
+          'printer.objects.list',
+          'printer.objects.subscribe',
+        ],
       )
-      assert.deepEqual(requests[1]?.params?.objects, {
+      assert.deepEqual(requests[2]?.params?.objects, {
         webhooks: ['state'],
         print_stats: ['state'],
         virtual_sdcard: ['progress'],
@@ -206,13 +220,14 @@ for (const present of [true, false]) {
       assert.deepEqual(
         requests.map((request) => request.method),
         [
+          'server.connection.identify',
           'printer.objects.list',
           'printer.objects.subscribe',
           'printer.objects.query',
         ],
       )
-      assert.deepEqual(requests[2]?.params?.objects, {
-        ...requests[1]?.params?.objects,
+      assert.deepEqual(requests[3]?.params?.objects, {
+        ...requests[2]?.params?.objects,
         extruder: ['temperature'],
         heater_bed: ['temperature'],
       })

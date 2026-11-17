@@ -207,7 +207,18 @@ async function fixture(signalling = false) {
     onClose(socket) {
       sockets.delete(socket)
     },
-    onMessage(socket) {
+    onMessage(socket, message) {
+      const call = JSON.parse(message)
+      if (call.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: call.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       socket.send(
         JSON.stringify({
           jsonrpc: '2.0',

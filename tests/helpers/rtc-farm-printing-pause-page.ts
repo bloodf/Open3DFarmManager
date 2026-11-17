@@ -28,6 +28,12 @@ export async function testPrintingPausePage(input: {
   directory: string
   note(value: string): Promise<void>
 }) {
+  const startedAt = performance.now()
+  const stage = (name: string) =>
+    input.note(
+      `farm-page-printing-pause-stage:${name}; ms:${Math.round(performance.now() - startedAt)}`,
+    )
+  await stage('start')
   assert.equal(process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE, 'sv06')
   const origin = process.env.SIGNALLING_HTTPS_SIM_MOONRAKER!
   const url = new URL(origin)
@@ -75,11 +81,15 @@ export async function testPrintingPausePage(input: {
     'Origin must be the sv06 published loopback port',
   )
   const request = async (path: string, init?: RequestInit) => {
+    const requestedAt = performance.now()
     const response = await fetch(origin + path, {
       ...init,
       signal: AbortSignal.timeout(10000),
     })
     assert.ok(response.ok, `${path}: HTTP ${response.status}`)
+    await input.note(
+      `farm-page-printing-pause-http:${path.split('?')[0]}; ms:${Math.round(performance.now() - requestedAt)}`,
+    )
     return response.json()
   }
   const state = async () =>
@@ -112,6 +122,7 @@ export async function testPrintingPausePage(input: {
   try {
     await runPrintingPause({
       async start() {
+        await stage('print-start')
         assert.ok(
           ['standby', 'complete', 'cancelled'].includes(await state()),
           'Owned simulator must be idle',
@@ -133,11 +144,13 @@ export async function testPrintingPausePage(input: {
           { method: 'POST' },
         )
         await expect.poll(state, { timeout: 15000 }).toBe('printing')
+        await stage('printing')
         await page.goto(input.fixture.origin + '/farm', {
           waitUntil: 'domcontentloaded',
         })
       },
       async confirm() {
+        await stage('page-open')
         const assignment = input.fixture.assignmentRefs[0]!
         const row = page.getByRole('article').filter({
           has: page.getByRole('heading', {

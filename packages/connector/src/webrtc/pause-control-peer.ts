@@ -113,7 +113,17 @@ export class PauseConnectorPeer {
       ...(input.lifetimeDeadline !== undefined
         ? { lifetimeDeadline: input.lifetimeDeadline }
         : {}),
-      send: (wire) => this.sendWire(wire),
+      send: (wire) => {
+        try {
+          this.sendWire(wire)
+        } catch (error) {
+          console.error(
+            'RTC send failure: ' +
+              (error instanceof Error ? error.message : 'unknown'),
+          )
+          throw error
+        }
+      },
       onProofsReady: (value) => {
         if (this.current()) return this.#options.onProofsReady?.(value)
       },

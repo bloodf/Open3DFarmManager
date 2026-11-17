@@ -418,6 +418,17 @@ async function run() {
         ),
       )
       .catch((error: unknown) => {
+        if (error instanceof z.ZodError)
+          console.error(
+            'RTC fixture failure: schema ' +
+              JSON.stringify(
+                error.issues.map(({ code, path, ...issue }) => ({
+                  code,
+                  path,
+                  keys: 'keys' in issue ? issue.keys : undefined,
+                })),
+              ),
+          )
         if (error instanceof Error)
           console.error(
             'RTC fixture failure: ' +

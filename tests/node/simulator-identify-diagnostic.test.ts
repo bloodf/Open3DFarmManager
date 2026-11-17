@@ -2237,6 +2237,10 @@ test('keeps the ledger outside the repository and every linked worktree', async 
   assert.equal(roots.length > 0, true)
   for (const root of roots) {
     const inside = join(root, 'tmp-identify-ledger')
+    // Other test files in the same run (pause-authority-tooling) add and
+    // remove linked worktrees. A root whose path is already gone was removed
+    // after the snapshot; only that root may be skipped.
+    if (!existsSync(root)) continue
     assert.throws(
       () => diagnostic.assertLedgerOutsideRepository(inside),
       (error: DiagnosticErrorShape) => error.message.includes('outside'),

@@ -132,7 +132,9 @@ export function readAgentRuntimeConfig(
                 const readonly = provisionReadonlyPrinter(value)
                 const assignment = readRuntimePrinterBinding(readonly)!
                 if (
-                  pause?.control?.assignmentId !== assignment.assignment_id ||
+                  !pause?.control?.assignmentIds.includes(
+                    assignment.assignment_id,
+                  ) ||
                   collection.version !== 2
                 )
                   return readonly
@@ -217,10 +219,10 @@ export function readAgentRuntimeConfig(
       if (matches.length !== 1) throw Error('KobraLink assignment mismatch')
     }
   }
-  if (pause?.control && !provisioned.has(pause.control.assignmentId))
-    throw new Error('Pause control assignment is not provisioned locally')
-  if (pause?.control) {
-    const binding = provisioned.get(pause.control.assignmentId)
+  for (const assignmentId of pause?.control?.assignmentIds ?? []) {
+    if (!provisioned.has(assignmentId))
+      throw new Error('Pause control assignment is not provisioned locally')
+    const binding = provisioned.get(assignmentId)
     if (!binding || !readPrinterBinding(binding))
       throw Error('Backend does not support pause control')
   }

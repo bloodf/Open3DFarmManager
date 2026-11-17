@@ -85,3 +85,9 @@ Werift 0.26.0 foi avaliado e removido antes de executar interoperabilidade Chrom
 A confiança permanece fornecida pela fixture. Uma integração real deverá fornecer identidade aprovada, vínculo conta/farm/Connector, metadados atuais, prova recente de posse, origem/audiência, desafios consumidos uma vez, sinalização autenticada e política de expiração/revogação. Uma credencial de emissão isolada não autentica o transporte. Reconexão, mudança de certificado ou renegociação exigirão nova sessão e nova verificação.
 
 Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém somente leitura; não há caminho de comandos por HTTP, servidor ou TURN. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
+
+## Memória RTC sob carga sustentada — pendente
+
+O sampler offline e o comando opt-in foram adicionados no commit `585ddc86d8817db3cdc803237da4ac33e56556f3`. O teste `tests/node/rtc-memory-sampler.test.ts` valida amostragem de RSS/heap/filas e o resumo de limites sem RTC. `pnpm run lint` e `pnpm run typecheck` passaram; `check:all` permanece inalterado.
+
+A execução nativa de dez minutos ainda não foi realizada. Os helpers RTC autenticados existentes são fixtures limitadas a uma vida curta e não oferecem uma fonte de observações para status, câmera e controle sob um consumidor lento. Não há amostras de RSS nem conclusão sobre crescimento ou limites; nenhum bug foi aberto sem evidência. A execução sustentada e este registro de resultados continuam necessários para fechar o issue #175.

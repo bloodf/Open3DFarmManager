@@ -130,3 +130,68 @@ scenarios, cleanup complete).
   telemetry or the farm page.
 - **NAT/netem/UDP-block on the real farm page.** Blocked by the loopback bind
   policy above until the owner decides on it.
+
+## Issue #185 refresh, 2026-11-17 UTC
+
+Merged `origin/feat/sim-network-faults` using `git merge --no-ff` in merge
+commit `086e3bc334ac77cb1b3b27ca4f140426c0623ab7`. The outage runner and
+outage scenarios retain main's behavior. Harness validation commit:
+`8669b7492bfd9bcf8bd4e2936688d72ceaba62c1`.
+
+The Compose definition is now JSON, a YAML subset that Node can parse offline.
+Named profiles are `nat`, `netem` and `udp-block`. Containers and networks carry
+an owner label, and teardown verifies owner labels before deleting the project.
+Existing project resources and router images cause a refusal. The runner no
+longer removes orphans or hides failed probes or teardown errors. Only the
+router service builds the shared router image, avoiding a concurrent build race
+observed during the preliminary UDP-block run.
+
+Each recorded profile below ran once with both loopback and all-interface bind
+modes, using real Docker and the unmodified committed harness. No host networking
+configuration or physical printers were changed. TCP is test-only SDP signalling;
+there is no HTTP command or live-status fallback and no TURN server.
+
+| Date UTC   | Harness commit | Profile | Observed transport result                                                                                                                                                 |
+| ---------- | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-17 | `8669b749`     | nat     | All-interface RTC opened in 216 ms; 40/40 echoes; median RTT 1 ms. Loopback failed ICE after 8,082 ms. TCP signalling succeeded in both modes.                            |
+| 2026-11-17 | `8669b749`     | netem   | All-interface RTC opened in 1,995 ms; 40/40 echoes; median RTT 212 ms. Loopback failed ICE after 10,322 ms, including signalling. TCP signalling succeeded in both modes. |
+
+| 2026-11-17 | `8669b749` | udp-block | ICE failed closed in both modes: loopback 8,180 ms, all-interface 8,206 ms. TCP signalling succeeded in both modes. No farm-view timing was observed. |
+
+Validation: `node --test --test-force-exit tests/node/sim-netfault-harness.test.ts`
+passed in a clean archive of the committed checkout with no installed packages
+or running application services: 10 tests, 10 passed, zero failed, zero skipped.
+Tests parse every profile offline, validate Compose config when Docker is
+installed, exercise resource refusal and teardown with a fake Docker executable,
+and reject failed transport results. Docker checks skip only for an absent
+Docker executable. `pnpm exec tsc --noEmit` and `pnpm run lint` also passed.
+
+### Remaining issue #185 acceptance gap
+
+**Issue #185 is not proven complete.** These runs observe a Connector-equivalent
+WebRTC probe, not the real Connector and farm page. The loopback-only Connector
+policy prevents a real remote farm connection with the current topology.
+`assertFarmReadOnly` and `assertFarmStatusFlowing`, exported from the farm
+acceptance helper, now enforce a 10,000 ms bound and have boundary tests, but no
+runner supplies real farm observations to them yet. UDP-block transport failure
+must not be reported as a measured farm read-only transition. Likewise, echoed
+probe messages under netem do not establish that real farm status flowed.
+
+Completing this acceptance requires a non-loopback Connector test
+configuration and a farm-page driver wired to the isolated Docker topology.
+Those application changes are outside this work order's file ownership. No
+application build or whole project test suite was run, as requested. Full
+`check:all` and farm integration remain pending before publication.
+
+### Resource audit
+
+All six profile invocations, including preliminary diagnostics, used distinct
+task-owned project names. Their containers, networks, temporary native-library
+copies and router image tags were removed by the harness. No volumes were
+created. The clean-checkout archive and offline-test temporary directories were
+removed after validation. The task worktree and installed dependencies remain
+for coordinator integration. The Node and Alpine base images already existed
+at baseline and were retained, together with shared Docker build cache. No
+unrelated Docker resources were removed. Free disk space after the runs was
+682 GiB. Detailed logs and the private resource ledger are retained outside the
+repository; no private operational paths are committed here.

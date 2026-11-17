@@ -33,11 +33,12 @@ const Reply = z.strictObject({
 // freshness authority; only a matching reply and complete query may do that.
 const SideNotification = z.strictObject({
   jsonrpc: z.literal('2.0'),
-  method: z.enum([
-    'notify_gcode_response',
-    'notify_history_changed',
-    'notify_proc_stat_update',
-  ]),
+  // Unrequested printer-state and Klippy lifecycle messages remain terminal.
+  // Other bounded notifications cannot acknowledge a request or refresh state.
+  method: z
+    .string()
+    .max(128)
+    .regex(/^notify_(?!status_update$|klippy_)[A-Za-z0-9_]+$/),
   params: z.array(z.unknown()).max(16),
 })
 const Snapshot = z.strictObject({
@@ -298,18 +299,14 @@ export function openFixedMoonrakerPause(input: {
     wire: string,
     deadline: number,
     guard?: () => boolean,
-    cap = 500,
+    cap = Math.min(1000, selected.limits.requestTimeoutMs),
   ): Promise<unknown> {
     try {
       const sampled = now()
       readyToWrite()
       // A G-code script replies only once Klipper finished it, so the single
       // extended request may use the whole operation window.
-      const remaining = Math.min(
-        cap,
-        cap === 500 ? selected.limits.requestTimeoutMs : cap,
-        deadline - sampled,
-      )
+      const remaining = Math.min(cap, deadline - sampled)
       if (remaining <= 0) throw failure()
       const promise = new Promise<unknown>((resolve, reject) => {
         pending = { id, resolve, reject, timer: setTimeout(stop, remaining) }
@@ -424,7 +421,13 @@ export function openFixedMoonrakerPause(input: {
         throw failure()
       })
     }
-    return request(2, wire, operationDeadline, beforeSend, cap)
+    return request(
+      2,
+      wire,
+      operationDeadline,
+      beforeSend,
+      cap ?? selected.limits.requestTimeoutMs,
+    )
       .then((result) => {
         current()
         if (now() >= operationDeadline || result !== 'ok') throw failure()

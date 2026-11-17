@@ -78,13 +78,13 @@ function label(reason: string): string {
  * fixture: authenticated pause RTC proofs open a relay peer; the relay verifies
  * the issued capability and the signed command, claims the durable local
  * journal (replay and busy refusal), and only then prepares the fixed Moonraker
- * driver for the single locally provisioned assignment. Every command runs at
+ * driver for its locally provisioned assignment. Every command runs at
  * most once: nothing is retried, queued or sent over HTTP.
  *
  * Runs until `signal` aborts or the credential expires, then closes the relay
  * and keeps the journal open until every driver attempt actually settled.
  */
-export async function runPauseControl(input: {
+type PauseControlInput = {
   config: AgentRuntimeConfig
   credential: RuntimeCredential
   identity: ConnectorIdentity
@@ -108,11 +108,75 @@ export async function runPauseControl(input: {
     scope: PauseConnectorSignallingScope,
     options: ClientOptions,
   ) => PauseClient
-}): Promise<void> {
+}
+
+/** Each opted-in assignment owns its relay, journal handle and signalling lifecycle. */
+export async function runPauseControl(input: PauseControlInput): Promise<void> {
+  const ids = input.config.pause?.control?.assignmentIds
+  if (!ids?.length) throw new Error('Pause control is not enabled')
+  const owner = new AbortController()
+  const abort = () => owner.abort()
+  input.signal.addEventListener('abort', abort, { once: true })
+  if (input.signal.aborted) owner.abort()
+  const controls = new Map<
+    string,
+    (id: string) => readonly ExtendedControlAction[]
+  >()
+  const macros = new Map<
+    string,
+    (id: string) => readonly string[] | undefined
+  >()
+  const tasks = ids.map((assignmentId) =>
+    runAssignmentControl(
+      {
+        ...input,
+        signal: owner.signal,
+        ...(input.onControls
+          ? {
+              onControls: (
+                read: (id: string) => readonly ExtendedControlAction[],
+              ) => {
+                controls.set(assignmentId, read)
+                input.onControls?.((id) => controls.get(id)?.(id) ?? [])
+              },
+            }
+          : {}),
+        ...(input.onMacros
+          ? {
+              onMacros: (
+                read: (id: string) => readonly string[] | undefined,
+              ) => {
+                macros.set(assignmentId, read)
+                input.onMacros?.((id) => macros.get(id)?.(id))
+              },
+            }
+          : {}),
+      },
+      assignmentId,
+    ).catch((error: unknown) => {
+      owner.abort()
+      throw error
+    }),
+  )
+  try {
+    // Drain every assignment even when one fails: no journal or driver is
+    // abandoned while a sibling shuts down.
+    const results = await Promise.allSettled(tasks)
+    for (const result of results)
+      if (result.status === 'rejected') throw result.reason
+  } finally {
+    input.signal.removeEventListener('abort', abort)
+  }
+}
+
+async function runAssignmentControl(
+  input: PauseControlInput,
+  assignmentId: string,
+): Promise<void> {
   const { config, credential } = input
   const pause = config.pause
-  const assignmentId = pause?.control?.assignmentId
-  if (!pause || !assignmentId) throw new Error('Pause control is not enabled')
+  if (!pause || !pause.control?.assignmentIds.includes(assignmentId))
+    throw new Error('Pause control is not enabled')
   const printerBinding = config.bindingFor(assignmentId)
   if (!printerBinding)
     throw new Error('Pause control assignment is not provisioned locally')
@@ -123,6 +187,8 @@ export async function runPauseControl(input: {
   )
   const journal = classified('journal', () =>
     openCommandJournal({
+      // Separate handles retain the legacy durable store. Its assignment and
+      // printer indexes preserve replay/busy safety across config upgrades.
       directory: join(input.dataDirectory, 'pause-journal'),
       clock: Date.now,
     }),
@@ -153,17 +219,11 @@ export async function runPauseControl(input: {
         const binding = config.bindingFor(id)
         return binding ? router.controls(binding) : []
       })
-      await Promise.all(
-        config.assignments.map(async (assignment) => {
-          const binding = config.bindingFor(assignment.assignment_id)
-          if (!binding) return
-          try {
-            await router.detect(binding, input.signal)
-          } catch {
-            // Failed detection retains the driver's conservative capabilities.
-          }
-        }),
-      )
+      try {
+        await router.detect(printerBinding, input.signal)
+      } catch {
+        // Failed detection retains the driver's conservative capabilities.
+      }
     }
     relay = createPauseCommandRelay({
       authority: { issuers, freshness: input.freshness },

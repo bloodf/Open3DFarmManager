@@ -25,6 +25,29 @@ export function migrateConfig(input: unknown): Record<string, unknown> {
     throw Error(
       `Connector configuration schema version ${version} is newer than supported version ${CURRENT_CONFIG_SCHEMA_VERSION}`,
     )
+  // Normalize the legacy control shape before strict runtime validation. Preserve
+  // extra keys so malformed or mixed configurations are still rejected.
+  if (
+    'pause' in config &&
+    config.pause &&
+    typeof config.pause === 'object' &&
+    !Array.isArray(config.pause)
+  ) {
+    const pause = { ...config.pause }
+    if (
+      'control' in pause &&
+      pause.control &&
+      typeof pause.control === 'object' &&
+      !Array.isArray(pause.control)
+    ) {
+      const control = { ...pause.control }
+      if ('assignmentId' in control && !('assignmentIds' in control)) {
+        const { assignmentId, ...rest } = control
+        pause.control = { ...rest, assignmentIds: [assignmentId] }
+        config.pause = pause
+      }
+    }
+  }
   return { ...config, schemaVersion: CURRENT_CONFIG_SCHEMA_VERSION }
 }
 

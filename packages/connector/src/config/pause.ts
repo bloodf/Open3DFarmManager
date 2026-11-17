@@ -38,10 +38,20 @@ export const PauseRuntimeConfigSchema = z.strictObject({
   issuers: z.array(IssuerEntry).min(1).max(MAX_PAUSE_ISSUER_KEYRING),
   /**
    * Explicit opt-in for the pause control path. Absent keeps pause disabled:
-   * no journal, socket or driver is created. The single named assignment is
-   * the only one this Connector will accept a pause for.
+   * no journal, socket or driver is created. Only explicitly named, locally provisioned assignments accept commands.
    */
-  control: z.strictObject({ assignmentId: BrowserDeviceUuid }).optional(),
+  control: z
+    .strictObject({
+      assignmentIds: z
+        .array(BrowserDeviceUuid)
+        .min(1)
+        .max(16)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          'Duplicate control assignment',
+        ),
+    })
+    .optional(),
   signalling: z
     .strictObject({
       endpoint: z.string().max(2048),
@@ -69,7 +79,7 @@ export type PauseIssuerEntry = Readonly<{
 export type PauseRuntimeConfig = Readonly<{
   version: 1
   issuers: readonly PauseIssuerEntry[]
-  control?: Readonly<{ assignmentId: string }> | undefined
+  control?: Readonly<{ assignmentIds: readonly string[] }> | undefined
   signalling: Readonly<z.infer<typeof PauseRuntimeConfigSchema>['signalling']>
 }>
 

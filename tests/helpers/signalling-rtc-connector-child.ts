@@ -85,6 +85,10 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
     packagedFiles: z.number().int().min(0).max(64),
     pauses: z.number().int().min(0).max(64),
     pauseInboxReady: z.boolean(),
+    pauseInboxes: z.number().int().nonnegative(),
+    telemetryDelivered: z.number().int().nonnegative(),
+    telemetryRetained: z.number().int().nonnegative(),
+    recent: z.array(z.string().max(145)).max(24),
   }),
   z.strictObject({
     kind: z.literal('observation'),

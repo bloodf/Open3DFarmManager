@@ -153,6 +153,10 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       packagedFiles: 0,
       pauses: 0,
       pauseInboxReady: false,
+      pauseInboxes: 0,
+      telemetryDelivered: 0,
+      telemetryRetained: 0,
+      recent: [],
     }).success,
     true,
   )
@@ -174,6 +178,10 @@ test('private RTC IPC accepts only bounded controls and the authoritative approv
       packagedFiles: 0,
       pauses: 0,
       pauseInboxReady: false,
+      pauseInboxes: 0,
+      telemetryDelivered: 0,
+      telemetryRetained: 0,
+      recent: [],
     }).success,
     false,
   )
@@ -362,3 +370,32 @@ for (const closure of ['disconnect', 'revocation']) {
     },
   )
 }
+
+test('runtime fixture observation satisfies the real child IPC contract', async () => {
+  const keys = [
+    'SIGNALLING_HTTPS_RTC_RUNTIME',
+    'WS_NO_BUFFER_UTIL',
+    'WS_NO_UTF_8_VALIDATE',
+  ] as const
+  const previous = keys.map((key) => process.env[key])
+  process.env.SIGNALLING_HTTPS_RTC_RUNTIME = 'yes'
+  process.env.WS_NO_BUFFER_UTIL = '1'
+  process.env.WS_NO_UTF_8_VALIDATE = '1'
+  try {
+    const { createRuntimeMoonrakerFixture } =
+      await import('../helpers/signalling-runtime-moonraker.ts')
+    const fixture = await createRuntimeMoonrakerFixture()
+    try {
+      const observation = fixture.observe()
+      assert.deepEqual(RtcFixtureReply.parse(observation), observation)
+    } finally {
+      await fixture.close()
+    }
+  } finally {
+    for (const [index, key] of keys.entries()) {
+      const value = previous[index]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})

@@ -197,6 +197,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       image: 'SIGNALLING_SUCCESSOR_TEST_IMAGE',
     },
   },
+  'test-postgres-telemetry-prune.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'TELEMETRY_PRUNE_SYNTHETIC_TEST_PORT',
+      admitted: 'TELEMETRY_PRUNE_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-startup-gating.ts': {
     migrations: 'none',
     fixture: { admitted: 'STARTUP_GATING_DISPOSABLE' },

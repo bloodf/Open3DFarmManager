@@ -1,5 +1,11 @@
 # Self-hosted upgrades
 
+## Retenção de telemetria e histórico
+
+Com `NUXT_TELEMETRY_PRUNE_ENABLED=true`, o servidor executa uma limpeza a cada hora. Os padrões retêm eventos de telemetria por 30 dias e histórico de trabalhos por 365 dias; cada execução apaga no máximo 500 linhas de cada tabela. Uma execução pode ser limitada por `NUXT_TELEMETRY_PRUNE_INTERVAL_MS` (60.000 a 86.400.000), `NUXT_TELEMETRY_PRUNE_TELEMETRY_RETENTION_DAYS` e `NUXT_TELEMETRY_PRUNE_JOB_HISTORY_RETENTION_DAYS` (1 a 3.650 dias), e `NUXT_TELEMETRY_PRUNE_BATCH_SIZE` (1 a 10.000 linhas). Se houver mais linhas expiradas, a próxima execução continua em outro lote.
+
+Defina `NUXT_TELEMETRY_PRUNE_DATABASE_URL` para um usuário PostgreSQL dedicado, com associação somente ao papel `farm_telemetry_pruner` criado pela migração 0036. O papel não pode apagar diretamente tabelas: só pode executar a função limitada de retenção. A limpeza nunca acessa `farm.printer_latest_state`. A configuração é opcional e permanece desligada sem `enabled=true`.
+
 Use a complete deployment Compose file containing `postgres`, `connector`, and the application. The repository database-only Compose file is insufficient. Every data mount must use an explicitly named volume. Keep the same Compose project, environment file, and volume names across releases. Keep credentials outside this repository.
 
 The application image must interpolate `${O3DFM_VERSION}` and its environment must forward `${NUXT_DATABASE_MIGRATIONS}`. The command sets the latter to `apply`. Use immutable release tags. Configure `/readyz` to validate database readiness.

@@ -29,6 +29,14 @@ export default defineNuxtConfig({
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
+    telemetryPrune: {
+      enabled: false,
+      databaseUrl: '',
+      intervalMs: 3600000,
+      telemetryRetentionDays: 30,
+      jobHistoryRetentionDays: 365,
+      batchSize: 500,
+    },
     pauseAuthority: {
       enabled: false,
       databaseUrl: '',

@@ -1,6 +1,11 @@
 import { Effect } from 'effect'
 import { probePrinter } from './probe.ts'
-import { verifyFourTools, verifyWebcam, verifyCamera } from './verify.ts'
+import {
+  verifyFourTools,
+  verifyToolSwitching,
+  verifyWebcam,
+  verifyCamera,
+} from './verify.ts'
 import { seedSpoolman } from './spoolman.ts'
 
 const sv06 = process.env.SIM_SV06_URL ?? 'http://127.0.0.1:7125'
@@ -21,6 +26,7 @@ try {
     }
   }
   await verifyFourTools(u1)
+  await verifyToolSwitching(u1)
   await verifyWebcam(sv06)
   await verifyWebcam(u1)
   await verifyCamera(camera)
@@ -29,7 +35,7 @@ try {
   if (JSON.stringify(first) !== JSON.stringify(second))
     throw new Error('Seed was not repeatable')
   console.log(
-    'SIM_FULL_OK: 2 ready printers, 4 tools, webcams, synthetic JPEG and 6 seeded spools',
+    'SIM_FULL_OK: 2 ready printers, 4 tools switched with saved state kept over restart, webcams, synthetic JPEG and 6 seeded spools',
   )
 } catch (error) {
   console.error(

@@ -64,6 +64,10 @@ type Options = {
   admittedBinding: Promise<unknown>
 }
 const noop = () => {}
+/** Keep a single status frame bounded while allowing short network stalls. */
+const READONLY_PENDING_BYTES = 1_048_576
+/** A read-only peer falls back to display-only when congestion persists. */
+const READONLY_BACKPRESSURE_TIMEOUT_MS = 5_000
 /** Detached read-only prototype. No enrollment, authorization, media or commands. */
 export class ReadonlyConnectorPeer {
   #peer: PeerConnection
@@ -98,6 +102,7 @@ export class ReadonlyConnectorPeer {
   #lifetimeDeadline = performance.now() + 30000
   #authTimer: ReturnType<typeof setTimeout>
   #lifetimeTimer: ReturnType<typeof setTimeout>
+  #backpressureTimer: ReturnType<typeof setTimeout> | undefined
   constructor(options: Options) {
     BrowserDeviceUuid.parse(options.expectedAgentId)
     if (options.fixtureOnlyMedia && options.cameraMedia)
@@ -393,7 +398,7 @@ export class ReadonlyConnectorPeer {
         this.#sentProofs++
       },
       sendApplication: (wire) => {
-        if (!this.current() || !this.#application.sendMessage(wire))
+        if (!this.current() || !this.#sendApplication(wire))
           throw Error('Status send failed')
       },
       onVerified: () => {
@@ -434,11 +439,51 @@ export class ReadonlyConnectorPeer {
     return (
       this.current() &&
       this.#application.isOpen() &&
+      this.#withinBackpressureLimit() &&
       (this.#session?.sendGenuineStatus(input) ?? false)
     )
   }
   sendFixtureStatus() {
-    return this.#application.isOpen() && (this.#session?.sendStatus() ?? false)
+    return (
+      this.#application.isOpen() &&
+      this.#withinBackpressureLimit() &&
+      (this.#session?.sendStatus() ?? false)
+    )
+  }
+  /** Current native queue size for the Connector's coalescing status sender. */
+  bufferedStatusAmount() {
+    const buffered = this.#application.bufferedAmount()
+    this.#withinBackpressureLimit()
+    return buffered
+  }
+  #withinBackpressureLimit() {
+    const buffered = this.#application.bufferedAmount()
+    if (!Number.isSafeInteger(buffered) || buffered < 0) {
+      this.close('status-buffer-invalid')
+      return false
+    }
+    if (buffered > READONLY_PENDING_BYTES) {
+      if (!this.#backpressureTimer)
+        this.#backpressureTimer = setTimeout(
+          () => this.close('status-backpressure'),
+          READONLY_BACKPRESSURE_TIMEOUT_MS,
+        )
+      return false
+    }
+    clearTimeout(this.#backpressureTimer)
+    this.#backpressureTimer = undefined
+    return true
+  }
+  #sendApplication(wire: string) {
+    const size = new TextEncoder().encode(wire).byteLength
+    const buffered = this.#application.bufferedAmount()
+    if (
+      !this.#withinBackpressureLimit() ||
+      size > READONLY_PENDING_BYTES ||
+      buffered + size > READONLY_PENDING_BYTES
+    )
+      return false
+    return this.#application.sendMessage(wire)
   }
   close(reason = 'closed') {
     if (this.#terminal) return
@@ -451,6 +496,7 @@ export class ReadonlyConnectorPeer {
     }
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
+    clearTimeout(this.#backpressureTimer)
     this.#inbox.close(reason)
     this.#session?.close(reason)
     this.#proof.onMessage(noop)

@@ -156,7 +156,12 @@ async function fixedConnectorSocket(
   }
 }
 type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'> &
-  Partial<Pick<ReadonlyConnectorPeer, 'sendStatus' | 'diagnostics'>>
+  Partial<
+    Pick<
+      ReadonlyConnectorPeer,
+      'sendStatus' | 'diagnostics' | 'bufferedStatusAmount'
+    >
+  >
 type PeerOptions = ConstructorParameters<typeof ReadonlyConnectorPeer>[0]
 type Scope = {
   url: string
@@ -713,6 +718,9 @@ export class AuthenticatedConnectorSignallingClient {
       this.#channel.current() &&
       (this.#peer?.sendStatus?.(input) ?? false)
     )
+  }
+  bufferedAmount() {
+    return this.#peer?.bufferedStatusAmount?.() ?? 0
   }
   close(reason = 'closed') {
     this.#channel.close(reason)

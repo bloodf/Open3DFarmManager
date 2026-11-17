@@ -244,12 +244,14 @@ test('expiry timer is terminal even when it fires before the sampled clock deadl
   }
 })
 
-test('immediately revoked admitted sessions and unadmitted sessions both back off', async () => {
+test('an admitted session resets reconnect backoff to the minimum; unadmitted sessions still back off', async () => {
   async function gaps(admit: boolean) {
     const controller = new AbortController()
     const starts: number[] = []
+    let admittedUptime = 0
     const running = runSignallingLifecycle({
-      credentialExpiresAt: Date.now() + 10000,
+      credentialExpiresAt: Date.now() + 1_000_000,
+      monotonic: () => performance.now() + admittedUptime,
       retryMinMs: 20,
       retryMaxMs: 400,
       signal: controller.signal,
@@ -257,6 +259,8 @@ test('immediately revoked admitted sessions and unadmitted sessions both back of
         starts.push(performance.now())
         setImmediate(() => {
           if (admit) admitted()
+          // Model a healthy admitted session; flapping is covered separately.
+          if (admit) admittedUptime += 30_000
           terminal()
           // A late admission after terminal never resets backoff.
           if (!admit) admitted()
@@ -275,6 +279,6 @@ test('immediately revoked admitted sessions and unadmitted sessions both back of
   }
   const admitted = await gaps(true)
   const unadmitted = await gaps(false)
-  assert.ok(admitted[3]! >= 150, String(admitted))
+  assert.ok(Math.max(...admitted) < 120, String(admitted))
   assert.ok(unadmitted[3]! >= 150, String(unadmitted))
 })

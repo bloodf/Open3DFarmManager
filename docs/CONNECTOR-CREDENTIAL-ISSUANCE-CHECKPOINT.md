@@ -24,7 +24,7 @@ If the proof expires after browser approval, the historical enrollment can remai
 
 If COMMIT succeeds and the response is lost, the request is consumed and its metadata remains, but the JWT cannot be recovered from the database. An ambiguous commit failure must be treated the same way until durable state is inspected. A repeated claim is denied and does not issue a second token. The prototype requires authorized cleanup of the previous enrollment and any issued credential, followed by a fresh pairing to obtain another credential. Migration 0011 records immutable revocation metadata without changing the issuance record. This is not transparent retry. HTTP claim exposure remains gated on authenticated exact-target discovery and the surrounding reviewed HTTP/runtime acceptance flow.
 
-The pure verifier checks signature, strict claims, configured issuer/audience/key and key binding only. Future runtime acceptance must additionally check current enrollment and credential metadata and require a fresh proof of private-key possession. Neither a JWT nor an earlier pairing proof authorizes a command. Status, camera and signed commands remain browser-to-Connector WebRTC, without server command fallback.
+The pure verifier checks signature, strict claims, configured issuer/audience/key and key binding only. Future runtime acceptance must additionally check current enrollment and credential metadata and require a fresh proof of private-key possession. Neither a JWT nor an earlier pairing proof authorizes a command. Status and camera remain browser-to-Connector WebRTC; browser commands stay WebRTC-only with no HTTP fallback, while API-originated commands require owner-granted scopes and issuer-signed envelopes enforced by the Connector.
 
 ## Verification
 

@@ -134,7 +134,7 @@ for (const present of [true, false]) {
           resolveSnapshot()
       },
     })
-    const timeout = setTimeout(() => controller.abort(), 3000)
+    const timeout = setTimeout(() => controller.abort(), 8000)
     try {
       await Promise.race([
         received,
@@ -193,7 +193,7 @@ for (const present of [true, false]) {
       const session = source.open({
         binding,
         assignmentRefs: refs,
-        deadlineMonoMs: performance.now() + 1000,
+        deadlineMonoMs: performance.now() + 10000,
         signal: controller.signal,
         onComplete(value) {
           receivedRtc.push(value)

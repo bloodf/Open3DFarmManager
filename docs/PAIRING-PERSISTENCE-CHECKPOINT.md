@@ -40,6 +40,6 @@ Migrations 0009 and 0010 down/up and their final journals are verified through t
 1. Define the HTTP approval boundary using the existing independent host-only session and origin/CSRF checks. Limit start requests, code guesses and polling without exposing account or code existence.
 2. Wire the reviewed durable challenge and `ConnectorIdentity.signPairingProof` into the CLI and browser interaction, with trusted origin/audience configuration and explicit recovery when the proof window expires. No token may be issued from metadata alone.
 3. Implement and verify explicit lost-response recovery and revocation before exposing the atomic real-credential claim through HTTP. A committed token is not stored for replay; repeated claims are denied. Never substitute a synthetic JWT for delivery recovery.
-4. Wire Connector CLI and browser flow only after these gates, then verify with simulators. Live status, camera and signed commands remain browser-to-Connector WebRTC with no server command fallback.
+4. Wire Connector CLI and browser flow only after these gates, then verify with simulators. Live status and camera remain browser-to-Connector WebRTC; browser commands stay WebRTC-only with no HTTP fallback, while API-originated commands require owner-granted scopes and issuer-signed envelopes enforced by the Connector.
 
 No dependency, public endpoint, simulator, printer command or hardware access was introduced by this slice.

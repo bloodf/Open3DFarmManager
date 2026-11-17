@@ -261,7 +261,7 @@
   "acceptance_constraints": [
     {
       "id": "AC1",
-      "rule": "Authority only over the browser-Connector WebRTC path: no TURN, no relay candidate, no HTTP or server command path; degraded mode is read-only."
+      "rule": "Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason; degraded mode is read-only."
     },
     {
       "id": "AC2",

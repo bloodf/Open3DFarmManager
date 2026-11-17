@@ -84,7 +84,7 @@ Werift 0.26.0 foi avaliado e removido antes de executar interoperabilidade Chrom
 
 A confiança permanece fornecida pela fixture. Uma integração real deverá fornecer identidade aprovada, vínculo conta/farm/Connector, metadados atuais, prova recente de posse, origem/audiência, desafios consumidos uma vez, sinalização autenticada e política de expiração/revogação. Uma credencial de emissão isolada não autentica o transporte. Reconexão, mudança de certificado ou renegociação exigirão nova sessão e nova verificação.
 
-Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém somente leitura; não há caminho de comandos por HTTP, servidor ou TURN. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
+Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém o navegador em modo somente leitura (sem fallback por HTTP ou TURN); comandos pela API requerem escopo concedido pelo proprietário e envelopes assinados pelo emissor validados pelo Connector. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
 
 ## Memória RTC sob carga sustentada: execução concluída
 

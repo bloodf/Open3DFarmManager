@@ -47,4 +47,4 @@ Migration 0009 records observed proof expiry in an immutable `proof_expired_at` 
 
 The verifier SQL role remains trusted, as does a backend that can directly manipulate authorization records. Verified database state is meaningful only through the reviewed service boundaries; a submitted boolean or standalone result is not a transport credential.
 
-Real credential issuance is integrated atomically with consumption as described in the [issuance checkpoint](CONNECTOR-CREDENTIAL-ISSUANCE-CHECKPOINT.md). Delivery/recovery/revocation semantics, independent-session approval endpoints with origin/CSRF and abuse checks, and browser/Connector simulator flows remain pending. This slice sends no printer command and provides no HTTP/server command fallback.
+Real credential issuance is integrated atomically with consumption as described in the [issuance checkpoint](CONNECTOR-CREDENTIAL-ISSUANCE-CHECKPOINT.md). Delivery/recovery/revocation semantics, independent-session approval endpoints with origin/CSRF and abuse checks, and browser/Connector simulator flows remain pending. This slice sends no printer command and provides no browser HTTP fallback.

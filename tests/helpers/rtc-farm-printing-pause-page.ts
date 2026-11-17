@@ -137,14 +137,12 @@ export async function testPrintingPausePage(input: {
       },
       async confirm() {
         const assignment = input.fixture.assignmentRefs[0]!
-        const row = page
-          .getByRole('article')
-          .filter({
-            has: page.getByRole('heading', {
-              name: assignment.printerKey,
-              exact: true,
-            }),
-          })
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', {
+            name: assignment.printerKey,
+            exact: true,
+          }),
+        })
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
@@ -185,14 +183,12 @@ export async function testPrintingPausePage(input: {
       },
       async resumed() {
         await expect.poll(state, { timeout: 10000 }).toBe('printing')
-        const row = page
-          .getByRole('article')
-          .filter({
-            has: page.getByRole('heading', {
-              name: input.fixture.assignmentRefs[0]!.printerKey,
-              exact: true,
-            }),
-          })
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', {
+            name: input.fixture.assignmentRefs[0]!.printerKey,
+            exact: true,
+          }),
+        })
         await expect(row.getByText('Imprimindo', { exact: true })).toBeVisible()
         await page.waitForTimeout(2000)
       },
@@ -222,7 +218,25 @@ export async function testPrintingPausePage(input: {
           )
         )
           await request('/printer/print/cancel', { method: 'POST' })
-        await request('/server/files/gcodes/' + filename, { method: 'DELETE' })
+        // Moonraker can keep the virtual SD file open briefly after cancel.
+        // Retry only deletion of our file, never a printer command.
+        await expect
+          .poll(
+            async () => {
+              const response = await fetch(
+                origin + '/server/files/gcodes/' + filename,
+                { method: 'DELETE', signal: AbortSignal.timeout(10000) },
+              )
+              if (response.status === 403) return false
+              assert.ok(
+                response.ok,
+                `Owned file cleanup: HTTP ${response.status}`,
+              )
+              return true
+            },
+            { timeout: 10000 },
+          )
+          .toBe(true)
       }
     } finally {
       input.fixture.signal.removeEventListener('abort', abort)

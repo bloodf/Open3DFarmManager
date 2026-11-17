@@ -259,6 +259,7 @@ export async function createPauseExecutionRtcBrowserActor(
 
     observe() {
       return {
+        terminalReason: client?.snapshot().reason ?? null,
         terminal,
         failed,
         commandHttpRequests,

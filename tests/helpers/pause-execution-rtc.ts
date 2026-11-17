@@ -31,6 +31,7 @@ type BrowserActor = Awaited<
 >
 
 export const PauseExecutionBrowserObservation = z.strictObject({
+  terminalReason: z.string().max(80).nullable().optional(),
   terminal: z.boolean(),
   failed: z.boolean(),
   proofsReady: z.boolean(),
@@ -1177,6 +1178,14 @@ export function createPauseExecutionRtcFixtureExtension(
         )
         completed = true
       } catch (error) {
+        await session.note(
+          'pause-execution-browser-failure:' +
+            JSON.stringify(
+              await session.actor
+                .evaluate((actor) => actor.observe())
+                .catch(() => null),
+            ),
+        )
         const observation = await session.connector
           .request({ kind: 'observe' })
           .catch(() => null)

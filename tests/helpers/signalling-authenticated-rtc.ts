@@ -255,7 +255,13 @@ async function connectorChild(
       if (error) fail()
     })
     try {
-      return await bounded(reply, input.signal, 2000)
+      // Runtime startup imports the Connector and checks a real simulator's
+      // readiness. Keep short observation calls bounded separately.
+      return await bounded(
+        reply,
+        input.signal,
+        command.kind === 'start' ? 15000 : 2000,
+      )
     } catch {
       fail()
       throw Error('RTC child request failed')
@@ -289,6 +295,9 @@ async function connectorChild(
           ? 'connector-child-owned-kill-close-drained'
           : 'connector-child-close-drained',
         child.pid,
+      )
+      await note(
+        `connector-child-exit:${receipt.code}; signal:${receipt.signal}; reason:${failureReason}; stderr-bytes:${errorBytes}`,
       )
       if (forced || failure || receipt.code !== 0 || receipt.signal !== null)
         throw Error(

@@ -1,3 +1,5 @@
+import { createRuntimeLogger } from './log.ts'
+import type { Logger } from '../../../shared/src/log.ts'
 import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { openLocalStatus } from '../status/local.ts'
@@ -103,8 +105,17 @@ type AgentInput = {
 
 /** Restarts the agent after each persisted, server-confirmed credential renewal. */
 export async function runConnectorAgent(input: AgentInput): Promise<void> {
-  while ((await runConnectorAgentOnce(input)) && !input.signal.aborted) {
-    // Every run re-reads identity, credential and config from disk.
+  const logger = createRuntimeLogger(input.dataDirectory)
+  logger.info('start')
+  try {
+    while (
+      (await runConnectorAgentOnce(input, logger)) &&
+      !input.signal.aborted
+    ) {
+      // Every run re-reads identity, credential and config from disk.
+    }
+  } finally {
+    logger.info('stop')
   }
 }
 
@@ -112,7 +123,10 @@ export async function runConnectorAgent(input: AgentInput): Promise<void> {
  * One scoped queue, one maintained authenticated sender, one serial drain loop.
  * Resolves true when a renewed credential was persisted and a restart is due.
  */
-async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
+async function runConnectorAgentOnce(
+  input: AgentInput,
+  logger: Logger,
+): Promise<boolean> {
   const identity = loadExistingIdentity(input.dataDirectory)
   // Config scope only needs agent/farm, which an expired envelope still binds.
   const config = readAgentRuntimeConfig(
@@ -186,6 +200,11 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     credentialExpired: false,
   }
   function diagnostic(value: AgentDiagnostic) {
+    if (value.kind === 'drain-loss') {
+      logger.warn('queue-loss', { ...value })
+    } else if (value.kind === 'storage-degraded') {
+      logger.warn('storage-degraded', { lost: value.lost })
+    }
     if (value.kind === 'summary' || diagnosticBudget-- > 0)
       input.onDiagnostic(value)
   }
@@ -260,6 +279,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     const offline = config.pause?.control
       ? createOfflineAuthority({
           onStale(reason) {
+            logger.warn('authority-stale', { reason })
             pauseDiagnostic({ kind: 'pause-authority-stale', reason })
             // The fsynced write runs on a later turn, never inside the caller's
             // freshness check or its microtask queue.
@@ -298,6 +318,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           credentialExpiresAt: credential.expires_at,
           retryMinMs: signalling.retryMinMs,
           retryMaxMs: signalling.retryMaxMs,
+          onReconnect: () => logger.info('reconnect'),
           createSession(onTerminal, onAdmitted) {
             const client = new AuthenticatedConnectorSignallingClient(
               {
@@ -320,16 +341,20 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                 },
                 // Callbacks must return nothing; a refused confirm stays stale.
                 onAuthorityConfirm(serverSeq) {
-                  if (
-                    offline &&
-                    !offline.confirm(
-                      { wall: clock.now(), mono: performance.now() },
-                      serverSeq,
-                    )
-                  )
-                    pauseRareDiagnostic({
-                      kind: 'pause-authority-confirm-refused',
-                    })
+                  if (offline) {
+                    if (
+                      offline.confirm(
+                        { wall: clock.now(), mono: performance.now() },
+                        serverSeq,
+                      )
+                    ) {
+                      logger.info('authority-confirmed')
+                    } else {
+                      pauseRareDiagnostic({
+                        kind: 'pause-authority-confirm-refused',
+                      })
+                    }
+                  }
                 },
                 onAuthorityRevoked(serverSeq) {
                   offline?.revoke(serverSeq)
@@ -562,6 +587,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       collectIntoQueue({
         config: config.collection,
         discoverMoonrakerObjects: true,
+        onLoss: (value) => logger.warn('queue-loss', { ...value }),
         ...(input.onInventory || snapshots
           ? {
               onInventory(value: SpoolmanSnapshot) {

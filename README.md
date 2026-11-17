@@ -22,7 +22,7 @@ Administrar várias impressoras envolve mais do que abrir uma interface por máq
 
 - **Uma visão da farm no navegador.** Cadastro de impressoras e Connectors separado do estado recebido de cada máquina, para não confundir uma aprovação com uma conexão ativa.
 - **Acesso que você pode administrar.** Contas próprias, aprovação de Connectors e dispositivos do navegador, com revogação e recuperação de acesso.
-- **Conexão direta por WebRTC.** A arquitetura usa o caminho navegador–Connector para estado ao vivo, câmera e comandos assinados. Sem TURN ou alternativa de comando por HTTP no servidor.
+- **Conexão direta por WebRTC e segurança de comandos.** A arquitetura usa o caminho navegador–Connector para estado ao vivo e câmera. Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests.
 - **Começando por Klipper/Moonraker e Spoolman.** A validação passa por simuladores antes de chegar ao hardware.
 - **Código aberto para acompanhar e contribuir.** Implementação, testes e registros de aceitação ficam disponíveis no repositório.
 
@@ -102,14 +102,14 @@ flowchart LR
   Connector --- Spoolman["Spoolman"]
 ```
 
-O diagrama representa a arquitetura do projeto, incluindo integrações em andamento. O servidor cuida das contas e da sinalização; a validação dos comandos fica no Connector, inclusive durante indisponibilidade do servidor. Sem conexão direta, a experiência é somente leitura.
+O diagrama representa a arquitetura do projeto, incluindo integrações em andamento. O servidor cuida das contas, sinalização e APIs de integração; a validação e aplicação dos comandos fica sempre no Connector, inclusive durante indisponibilidade do servidor. Sem conexão direta pelo navegador, a experiência do navegador é somente leitura.
 
 ## Contribua
 
 Quer ajudar a construir a próxima etapa? Consulte as [issues](https://github.com/bloodf/Open3DFarmManager/issues) e o [registro de aceitação](docs/PHASE-0.md). Relatos com passos para reproduzir, melhorias de acessibilidade e testes em simuladores ajudam a avançar o projeto.
 
 1. Trabalhe em uma branch com uma mudança bem delimitada.
-2. Preserve os limites de segurança descritos em [segurança de comandos](docs/COMMAND-SECURITY.md).
+2. Preserve os limites de segurança descritos em [segurança de comandos](docs/COMMAND-SECURITY.md): Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests.
 3. Execute `pnpm run check:all` e descreva os testes feitos e as integrações ainda pendentes.
 4. Abra um draft PR. Não inclua segredos, identificadores de contas privadas ou configuração de hospedagem.
 

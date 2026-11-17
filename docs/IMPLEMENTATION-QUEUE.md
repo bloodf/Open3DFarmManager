@@ -47,7 +47,7 @@ Work is ordered by dependency. Items marked "partly delivered" have merged slice
 
 ## Phase 0 acceptance still required
 
-Phase 0 must deliver independent login and browser-device approval, authenticated signalling, and actual browser-to-Connector WebRTC for live status, camera and signed commands. The Connector must enforce command safety through server outages. Keep live data and signed commands peer-to-peer: no TURN and no HTTP/server command fallback. Degraded mode stays read-only.
+Phase 0 must deliver independent login and browser-device approval, authenticated signalling, and actual browser-to-Connector WebRTC for live status, camera and signed commands. The Connector must enforce command safety through server outages. Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. Degraded mode stays read-only.
 
 End-to-end evidence must cover signed pause, identity and farm authorization, tampering, replay, revocation, outage and recovery, bounded telemetry drain, and the offline-revocation lifetime tradeoff. The offline authorization lifetime is defined and enforced by [#115](https://github.com/bloodf/Open3DFarmManager/pull/115); its expiry must be verified on the candidate. Test with simulators only; never send automated commands to physical printers.
 

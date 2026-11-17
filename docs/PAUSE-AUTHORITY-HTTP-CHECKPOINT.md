@@ -72,7 +72,7 @@ fixed driver safety boundary.
 The HTTP slice does not implement control signalling, user confirmation,
 Connector issuer-pin provisioning, current simulator state collection or
 browser-to-Connector pause acceptance. Existing read-only status transport
-remains read-only; there is no HTTP/server command fallback.
+remains read-only; browser commands have no HTTP fallback.
 
 ## Validation scope
 

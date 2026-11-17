@@ -15,7 +15,7 @@ This is an independent MIT project. Accounts, sessions, credentials and database
 
 ## Invariants
 
-- No TURN, cloud slicing, server-enqueued commands or HTTP/server command fallback. Status, camera and signed commands use browser-to-Connector WebRTC.
+- No TURN or cloud slicing. Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests. Status and camera use browser-to-Connector WebRTC.
 - The Connector enforces identity, signature, farm/role scope, expiry, revocation, replay protection and safety while the server is unavailable. Offline expiry fails closed; loss of connectivity alone does not stop an ongoing print.
 - Camera/video and bulk files stay on P2P transport. The server receives bounded snapshots and metadata only.
 - Simulators never connect to physical printers. Automated tests never send commands to hardware.
@@ -81,7 +81,7 @@ not close the integrated issuer, signalling, driver and simulator gate below.
 - **Runtime and database:** built application with PostgreSQL readiness, reversible journal-verified migrations, validated configuration and structured diagnostics. Run the final integrated CI on the exact candidate head.
 - **Simulator and integrations:** SV06 plus the existing four-tool fixture; Moonraker identify, status/subscriptions and cameras through RTSP/MediaMTX; read-only Spoolman against its pinned service; startup/restart and network-fault cases. Repeat on required architectures with bounded logs and no hardware.
 - **Login, pairing and inventory:** independent login/logout, authenticated farm approval, rate limits, current membership/session checks, least-privilege discovery and Connector inventory reads. Verify wrong-farm, wrong-role, expired/revoked session and missing-resource behavior.
-- **Browser identity and transport:** register approved browser keys through the authenticated flow; demonstrate actual Node Connector interoperability over browser-to-Connector WebRTC for status and camera. Verify signed pause without TURN or server/HTTP fallback.
+- **Browser identity and transport:** register approved browser keys through the authenticated flow; demonstrate actual Node Connector interoperability over browser-to-Connector WebRTC for status and camera. Verify signed pause over WebRTC without TURN or HTTP fallback.
 - **Safety and recovery:** reject tampered, replayed, expired, wrong-scope and revoked commands; verify credential delivery/recovery after known and ambiguous failures, server/database outage recovery and read-only degradation. Define and enforce the offline authorization lifetime in the Connector.
 - **Farm interface:** verify the built pt-BR interface from login through pairing and farm/device views, including data age and disabled controls when P2P is unavailable.
 

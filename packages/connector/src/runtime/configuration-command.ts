@@ -1,3 +1,9 @@
+import {
+  openTrustedKeyStore,
+  type TrustedKeyStore,
+} from '../auth/trusted-key-store.ts'
+import { readAgentRuntimeConfig } from '../config/runtime.ts'
+import { loadPauseIssuerKeys } from '../config/pause.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readRuntimeCredential } from '../config/credential.ts'
@@ -23,6 +29,7 @@ import {
 } from './configuration.ts'
 
 export interface ConfigurationCommandInput {
+  trustedKeys?: TrustedKeyStore
   provisioningPath: string
   dataDirectory: string
   credentialPath: string
@@ -105,12 +112,28 @@ export async function runConfigurationConnector(
     first.farmId !== config.farm_id
   )
     throw new Error('Credential does not match provisioning scope')
+  let trustedKeys = input.trustedKeys
+  if (!trustedKeys && existsSync(config.runtimeConfigPath)) {
+    const runtimeConfig = readAgentRuntimeConfig(
+      config.runtimeConfigPath,
+      config,
+    )
+    if (runtimeConfig.pause) {
+      trustedKeys = await openTrustedKeyStore({
+        path: join(input.dataDirectory, 'trusted-keys.json'),
+        farmId: config.farm_id,
+        issuers: await loadPauseIssuerKeys(runtimeConfig.pause),
+        onDiagnostic: (kind) => input.onDiagnostic({ kind }),
+      })
+    }
+  }
   const startRuntime =
     input.startRuntime ??
     (async (signal: AbortSignal, configPath: string) => {
       const { runConnectorAgent } = await import('./agent.ts')
       await runConnectorAgent({
         configPath,
+        ...(trustedKeys ? { trustedKeys: trustedKeys.authority } : {}),
         credentialPath: input.credentialPath,
         dataDirectory: input.dataDirectory,
         signal,
@@ -134,6 +157,7 @@ export async function runConfigurationConnector(
   if (!process.env.WS_NO_UTF_8_VALIDATE) process.env.WS_NO_UTF_8_VALIDATE = '1'
   const signalling = createConfigurationSignallingClient({
     identity,
+    ...(trustedKeys ? { trustedKeys } : {}),
     farmOrigin: config.farmOrigin,
     credentialAudience: config.credentialAudience,
     farmId: config.farm_id,

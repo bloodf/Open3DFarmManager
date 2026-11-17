@@ -1,3 +1,8 @@
+import {
+  openTrustedKeyStore,
+  type TrustedKeyAuthority,
+} from '../auth/trusted-key-store.ts'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -102,6 +107,7 @@ type PauseControlInput = {
    * Required offline lifetime gate: the frozen read-only view from
    * `createOfflineAuthority()`. Stale authority rejects every command.
    */
+  trustedKeys?: TrustedKeyAuthority
   freshness: CachedAuthorityFreshness
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
@@ -183,6 +189,18 @@ async function runAssignmentControl(
   if (!printerBinding)
     throw new Error('Pause control assignment is not provisioned locally')
   const issuers = await loadPauseIssuerKeys(pause)
+  const trustedPath = join(input.dataDirectory, 'trusted-keys.json')
+  const trustedKeys =
+    input.trustedKeys ??
+    (existsSync(trustedPath)
+      ? (
+          await openTrustedKeyStore({
+            path: trustedPath,
+            farmId: credential.farm_id,
+            issuers,
+          })
+        ).authority
+      : undefined)
   if (input.signal.aborted) return
   const jti = classified('credential', () =>
     credentialLookupId(credential.device_token),
@@ -228,7 +246,11 @@ async function runAssignmentControl(
       }
     }
     relay = createPauseCommandRelay({
-      authority: { issuers, freshness: input.freshness },
+      authority: {
+        issuers,
+        freshness: input.freshness,
+        ...(trustedKeys ? { trustedKeys } : {}),
+      },
       clock,
       journal,
       driver: router,

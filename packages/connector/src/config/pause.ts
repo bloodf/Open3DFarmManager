@@ -10,8 +10,7 @@ import type { PauseIssuer } from '../auth/pause-capability.ts'
 
 /**
  * Trusted issuer keyring bound. A larger keyring is refused, never truncated.
- * The bound stays far below the verifier bound because a production Connector
- * trusts a small, explicitly provisioned set of issuers.
+ * The verifier and the persisted set use the same bound.
  */
 export const MAX_PAUSE_ISSUER_KEYRING = 8
 
@@ -154,8 +153,21 @@ export async function loadPauseIssuerKeys(
   if (!config) return Object.freeze([])
   // Parse and copy the whole configuration before any await can change it.
   const snapshot = parsePauseRuntimeConfig(config)
+  return importPauseIssuerEntries(snapshot.issuers)
+}
+
+/** Shared bounded importer for configured and signed persisted issuer entries. */
+export async function importPauseIssuerEntries(
+  entries: readonly PauseIssuerEntry[],
+): Promise<readonly PauseIssuer[]> {
+  const parsed = z
+    .array(IssuerEntry)
+    .min(1)
+    .max(MAX_PAUSE_ISSUER_KEYRING)
+    .parse(entries)
+  validateIssuerEntries(parsed)
   const issuers: PauseIssuer[] = []
-  for (const entry of snapshot.issuers) {
+  for (const entry of parsed) {
     const bytes = new Uint8Array(decodeEd25519Spki(entry.publicKeySpki))
     const publicKey = await crypto.subtle.importKey(
       'spki',

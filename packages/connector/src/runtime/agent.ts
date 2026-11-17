@@ -1,3 +1,4 @@
+import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { openLocalStatus } from '../status/local.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
@@ -89,6 +90,7 @@ export type AgentClock = Readonly<{
 const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
+  trustedKeys?: TrustedKeyAuthority
   clock?: AgentClock
   statusPort?: number
   configPath: string
@@ -422,6 +424,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           dataDirectory: input.dataDirectory,
           signal,
           freshness: offline.freshness,
+          ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
           onMacros(read) {

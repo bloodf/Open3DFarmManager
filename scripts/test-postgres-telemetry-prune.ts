@@ -34,7 +34,10 @@ try {
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
-  assert.equal(catalog.at(-1)?.id, '0036_telemetry_prune')
+  assert.equal(
+    catalog.find((entry) => entry.id === '0036_telemetry_prune')?.id,
+    '0036_telemetry_prune',
+  )
   const privileges = await sql`
     SELECT has_table_privilege('farm_telemetry_prune_owner','farm.telemetry_events','SELECT') AS event_select,
            has_table_privilege('farm_telemetry_prune_owner','farm.telemetry_events','DELETE') AS event_delete,

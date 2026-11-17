@@ -541,14 +541,14 @@ test('the storage reader returns only the active assignments of the farm', async
 test('the migration grants a read-only role and has a down file', async () => {
   const up = await readFile(
     new URL(
-      '../../infra/db/migrations/0036_printer_state_reader.up.sql',
+      '../../infra/db/migrations/0037_printer_state_reader.up.sql',
       import.meta.url,
     ),
     'utf8',
   )
   const down = await readFile(
     new URL(
-      '../../infra/db/migrations/0036_printer_state_reader.down.sql',
+      '../../infra/db/migrations/0037_printer_state_reader.down.sql',
       import.meta.url,
     ),
     'utf8',

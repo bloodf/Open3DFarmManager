@@ -121,7 +121,9 @@ export async function testPrintingPausePage(input: {
         // No heating or movement. Long enough to keep printing through admission.
         form.set(
           'file',
-          new Blob(['; acceptance pause\n' + 'G4 P1000\n'.repeat(600)]),
+          // Short individual dwells let Klipper service PAUSE promptly rather
+          // than holding the command behind a one-second G-code operation.
+          new Blob(['; acceptance pause\n' + 'G4 P10\n'.repeat(60000)]),
           filename,
         )
         await request('/server/files/upload', { method: 'POST', body: form })

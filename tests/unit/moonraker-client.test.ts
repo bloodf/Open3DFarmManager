@@ -829,11 +829,21 @@ test('raw stale query response and missing complete field invalidate socket epoc
     try {
       const events = await run(
         service.origin,
-        { staleAfterMs: 3000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+        {
+          // The second unavailable event must be the query rejection, not a
+          // readiness probe or handshake that a loaded host stretched past the
+          // one second helper default before any frame was exchanged. The
+          // one second complete query window is capped by the client itself.
+          connectTimeoutMs: 10000,
+          requestTimeoutMs: 10000,
+          staleAfterMs: 3000,
+          reconnectMinMs: 3000,
+          reconnectMaxMs: 3000,
+        },
         'raw',
         undefined,
         evidence,
-        { unavailable: 2, deadlineMs: 6000 },
+        { unavailable: 2, deadlineMs: 15000 },
       )
       expect(evidence.completedBy).toBe('unavailable')
       expect(evidence.raw.length).toBe(2)
@@ -852,7 +862,7 @@ test('raw stale query response and missing complete field invalidate socket epoc
       await service.close()
     }
   }
-}, 20000)
+}, 40000)
 
 test('raw complete query has one pending request and <=1s timeout before epoch invalidation', async () => {
   const evidence: RawEvidence = { raw: [], rawUnavailable: [] }

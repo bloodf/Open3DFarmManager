@@ -207,3 +207,49 @@ no second confirmation after an uncertain result. Related simulator and
 signalling tests report 16 passed, zero failed, with two pre-existing opt-in
 HTTPS/RTC integration skips. `pnpm run typecheck` passed. No whole-suite run,
 build, simulator, production service or physical printer command was started.
+
+## Issue #196: RTC command rejection rows
+
+Implementation base: `a9c558c68d5d33274390f21f4b6938ddc9a58d52`.
+Implementation commit: `6009fcaa144a23f1cae06f65efd47ebe87dc242a`.
+
+Built-stack status: **Pending built-stack run**. This worktree has no sealed
+farm output. The work order prohibits builds. No real RTC pass is claimed by
+this checkpoint, and #196 remains unaccepted until all rows pass on the built
+stack. Offline tests validate the row table, signed substitutions and rejection
+assertions; they do not substitute for integration evidence.
+
+| Acceptance row                      | Expected evidence                                                                                                      | Built-stack result |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `command-rejected-tampered`         | Invalid signature; rejected; zero driver calls                                                                         | Pending            |
+| `command-rejected-replayed`         | Accepted original, then duplicate over actual RTC; terminal; zero additional driver calls                              | Pending            |
+| `command-rejected-expired`          | Valid signature, expired command; rejected; zero driver calls                                                          | Pending            |
+| `command-rejected-wrong-farm`       | Re-signed farm substitution; rejected; zero driver calls                                                               | Pending            |
+| `command-rejected-wrong-assignment` | Re-signed assignment substitution; rejected; zero driver calls                                                         | Pending            |
+| `command-rejected-revoked-device`   | Received command held before dispatch, device revoked over HTTPS, Connector terminal before release; zero driver calls | Pending            |
+
+Each row requires its exact `rtc-command-rejected:<kind>; driver-call-delta:0;
+pause-delta:0` receipt. The fixture emits it only after checking actual native
+Connector observations. Replay bypasses the browser's one-command API only in
+the disposable fixture page, resending the signed command with the next RTC
+frame sequence. The Connector's duplicate-command guard must terminate the
+session. Its accepted original accounts for one driver call and one synthetic
+Moonraker pause; the rejected replay adds neither. Revocation uses the real
+browser-device revoke endpoint, after delivery and before dispatch. Other
+negative rows must reach the Connector and settle as rejected.
+
+Use the existing admitted runner environment and select the six
+`command-rejected-*` rows explicitly with `RTC_FARM_TEST_SCENARIOS` to collect
+integration results. All listeners remain ephemeral loopback listeners. Docker,
+PostgreSQL and Chromium remain opt-in scripts outside `test:node`; no physical
+printer or unrelated host service is a test target. No dependency was added.
+
+Offline validation at this implementation commit: the required
+`node --test --test-force-exit tests/node/rtc-farm-rejections.test.ts` passes
+3/3. The focused run covering these tests, pause execution, cross-scope,
+simulator scenario registration and the signalling HTTPS catalog, cleanup,
+disconnect IPC, manifest, process, proxy and split pin checks passes 80/80,
+with zero failures or skips. `pnpm run typecheck` passes. No whole-suite run,
+build, container or production service was started. Task evidence is retained
+locally outside the repository; no credentials, keys or session data are
+included here.

@@ -22,6 +22,7 @@
     "test:e2e:auth-session": "node scripts/test-auth-session-e2e.ts",
     "test:rtc-farm": "node scripts/test-rtc-farm-acceptance.ts",
     "test:connector-outage": "node scripts/test-connector-outage-recovery.ts",
+    "test:sim-farm": "node scripts/test-sim-farm-acceptance.ts",
     "check:all": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:node && pnpm run test:rtsp-supervisor && pnpm run test:rtsp-framing && pnpm run build",
     "sim:smoke": "node packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",
@@ -29,7 +30,7 @@
     "sim:seed": "node packages/sim-tools/src/seed-cli.ts",
     "sim:verify": "node packages/sim-tools/src/full-cli.ts",
     "sim:verify:rtsp": "node packages/sim-tools/src/rtsp-cli.ts",
-    "test:node": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit tests/node/*.test.ts tests/unit/pause-authority-tooling.test.ts tests/unit/pause-authority-timeout.test.ts",
+    "test:node": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit tests/node/*.test.ts tests/unit/pause-authority-tooling.test.ts tests/unit/pause-authority-timeout.test.ts tests/helpers/kobralink-rtc/cdp-body.test.ts",
     "test:rtsp-supervisor": "node --test --test-concurrency=1 tools/rtsp-ingest/supervisor/*.test.ts",
     "test:rtsp-framing": "node --test tools/rtsp-ingest/integration/moving-fixture-input.test.ts",
     "test:upgrade-rehearsal": "node --test --test-force-exit --test-timeout=1800000 tests/docker/upgrade-rehearsal.test.ts"

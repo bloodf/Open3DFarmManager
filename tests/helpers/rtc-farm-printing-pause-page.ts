@@ -113,6 +113,19 @@ export async function testPrintingPausePage(input: {
     }
   }
   const page = await input.fixture.ownerContext.newPage()
+  const responses: { path: string; status: number }[] = []
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (
+      url.origin === input.fixture.origin &&
+      url.pathname.startsWith('/api/') &&
+      responses.length < 64
+    )
+      responses.push({
+        path: url.pathname.replace(/[a-f0-9]{8}-[a-f0-9-]{27}/g, ':id'),
+        status: response.status(),
+      })
+  })
   const filename = 'o3dfm-accept-pause-' + randomUUID() + '.gcode'
   let uploaded = false
   const abort = () => {
@@ -214,6 +227,7 @@ export async function testPrintingPausePage(input: {
       'farm-page-printing-pause-page-state:' +
         JSON.stringify({
           path: new URL(page.url()).pathname,
+          responses,
           text: (
             await page
               .locator('body')

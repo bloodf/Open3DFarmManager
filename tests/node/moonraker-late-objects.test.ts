@@ -14,7 +14,15 @@ test('late objects extend the initial subscription', async () => {
     upgrade: () => true,
     onMessage(socket, wire) {
       const request = JSON.parse(wire)
-      if (request.method === 'printer.objects.list') {
+      if (request.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+      } else if (request.method === 'printer.objects.list') {
         setTimeout(
           () =>
             socket.send(

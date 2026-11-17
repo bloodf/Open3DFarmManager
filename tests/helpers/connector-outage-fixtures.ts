@@ -78,6 +78,16 @@ export async function startFakeMoonraker(port: number) {
           if (!message || typeof message !== 'object' || !('id' in message))
             return
           const method = 'method' in message ? message.method : undefined
+          if (method === 'server.connection.identify') {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: message.id,
+                result: { connection_id: 1 },
+              }),
+            )
+            return
+          }
           if (method === 'printer.objects.list') {
             ws.send(
               JSON.stringify({

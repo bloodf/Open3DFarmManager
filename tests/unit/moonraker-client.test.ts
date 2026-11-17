@@ -71,6 +71,18 @@ async function fixture(input: {
       connections++
     },
     onMessage(socket, message) {
+      const call = JSON.parse(message)
+      // Identify is answered by the fixture; its ordering has its own test.
+      if (call.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: call.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       rpcs.push(JSON.parse(message))
       input.subscribe(socket, connections, later, JSON.parse(message))
     },
@@ -641,17 +653,29 @@ test('coalesced subscription reply and delta preserve the baseline and update wi
         accept +
         '\r\n\r\n',
     )
+    function frame(text: string) {
+      const body = Buffer.from(text)
+      const header = Buffer.alloc(4)
+      header[0] = 0x81
+      header[1] = 126
+      header.writeUInt16BE(body.length, 2)
+      return Buffer.concat([header, body])
+    }
+    // The first client frame is the identify call, the second the subscribe.
     socket.once('data', () => {
-      function frame(text: string) {
-        const body = Buffer.from(text)
-        const header = Buffer.alloc(4)
-        header[0] = 0x81
-        header[1] = 126
-        header.writeUInt16BE(body.length, 2)
-        return Buffer.concat([header, body])
-      }
-      // One socket write deliberately supplies both complete frames together.
-      socket.write(Buffer.concat([frame(snapshot()), frame(delta(11, 0.5))]))
+      socket.write(
+        frame(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: Number.MAX_SAFE_INTEGER - 1,
+            result: { connection_id: 1 },
+          }),
+        ),
+      )
+      socket.once('data', () => {
+        // One socket write deliberately supplies both complete frames together.
+        socket.write(Buffer.concat([frame(snapshot()), frame(delta(11, 0.5))]))
+      })
     })
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

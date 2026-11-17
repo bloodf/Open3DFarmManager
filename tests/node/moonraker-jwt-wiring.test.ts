@@ -83,6 +83,16 @@ test('private JWT authenticates HTTP, refresh and oneshot websocket collection',
     assert.equal(req.headers.authorization, undefined)
     peer.on('message', (data) => {
       const request = JSON.parse(data.toString())
+      if (request.method === 'server.connection.identify') {
+        peer.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       assert.equal(request.method, 'printer.objects.subscribe')
       peer.send(
         JSON.stringify({

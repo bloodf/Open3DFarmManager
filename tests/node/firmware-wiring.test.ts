@@ -60,6 +60,16 @@ async function moonrakerFixture() {
       socket.on('message', (data) => {
         const request = JSON.parse(data.toString())
         methods.push(request.method)
+        if (request.method === 'server.connection.identify') {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: { connection_id: 1 },
+            }),
+          )
+          return
+        }
         const result =
           request.method === 'printer.objects.list'
             ? { objects: [] }
@@ -184,6 +194,7 @@ test(
                 assert.ok(
                   remote.methods.every((method) =>
                     [
+                      'server.connection.identify',
                       'printer.objects.list',
                       'printer.objects.subscribe',
                       'printer.objects.query',

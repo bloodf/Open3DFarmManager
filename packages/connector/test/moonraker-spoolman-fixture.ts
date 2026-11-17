@@ -55,6 +55,16 @@ export async function moonrakerSpoolmanFixture() {
     peer = socket
     socket.on('message', (wire) => {
       const request = JSON.parse(wire.toString())
+      if (request.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       socket.send(
         JSON.stringify({
           jsonrpc: '2.0',

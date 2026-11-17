@@ -156,7 +156,9 @@ export async function startMoonrakerSimulator(
       calls[method] = (calls[method] ?? 0) + 1
       const reply = (result: unknown) =>
         socket.send(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }))
-      if (method === 'printer.objects.list') reply({ objects: [...OBJECTS] })
+      if (method === 'server.connection.identify') reply({ connection_id: 1 })
+      else if (method === 'printer.objects.list')
+        reply({ objects: [...OBJECTS] })
       else if (
         method === 'printer.objects.subscribe' ||
         method === 'printer.objects.query'

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
 import { parseMoonrakerServerInfo } from './parse.ts'
+import { parseIdentifyResult } from './discovery-parse.ts'
 import type { MoonrakerLimits } from '../config/moonraker.ts'
 export {
   validateMoonrakerInput,
@@ -89,6 +90,13 @@ export type MoonrakerCompleteObservation = Readonly<{
   requestStartedAtMonoMs: number
   receivedAtMonoMs: number
 }>
+/** Reserved request id for the identify call that precedes every subscription. */
+const IDENTIFY_ID = Number.MAX_SAFE_INTEGER - 1
+const DEFAULT_CLIENT = {
+  name: 'Open3DFarmManager',
+  version: '1',
+  url: 'https://open3dfarmmanager.local',
+}
 const selectedObjects = {
   webhooks: ['state'],
   print_stats: ['state'],
@@ -100,11 +108,22 @@ const completeObjects = {
   heater_bed: ['temperature'],
 }
 
+function parseIdentifyResultSafe(result: unknown): boolean {
+  try {
+    parseIdentifyResult(result)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function openMoonrakerClient(input: {
   origin: string
   limits: MoonrakerLimits
   signal: AbortSignal
   discoverObjects?: boolean
+  /** Connector identity registered with Moonraker on every connection. */
+  client?: { name: string; version: string; url: string }
   onStatus: (params: unknown) => void
   /** Opt-in display evidence; default telemetry transport remains unchanged. */
   onComplete?: (observation: MoonrakerCompleteObservation) => void
@@ -123,6 +142,7 @@ export function openMoonrakerClient(input: {
   let pending: { id: number; started: number } | undefined
   let finished = false
   let subscribed = false
+  let identified = false
   let discovering = input.discoverObjects === true
   let objects: Record<string, string[]> = { ...selectedObjects }
   let queryObjects: Record<string, string[]> = { ...completeObjects }
@@ -185,6 +205,23 @@ export function openMoonrakerClient(input: {
         ? Math.min(1000, input.limits.requestTimeoutMs)
         : input.limits.requestTimeoutMs,
     )
+    // Moonraker must attribute this connection before any subscription.
+    const client = input.client ?? DEFAULT_CLIENT
+    socket!.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: IDENTIFY_ID,
+        method: 'server.connection.identify',
+        params: {
+          client_name: client.name,
+          version: client.version,
+          type: 'agent',
+          url: client.url,
+        },
+      }),
+    )
+  }
+  function begin() {
     pending = { id: 1, started: performance.now() }
     if (discovering) {
       discoveryTimer = setTimeout(
@@ -278,6 +315,19 @@ export function openMoonrakerClient(input: {
         input.limits.maxMessageBytes,
       )
       const reply = Reply.safeParse(value)
+      if (!identified) {
+        // An error reply, a malformed result or any other frame is a failed
+        // identify: close and let the caller back off and reconnect.
+        if (
+          !reply.success ||
+          reply.data.id !== IDENTIFY_ID ||
+          !parseIdentifyResultSafe(reply.data.result)
+        )
+          throw new Error('Identify failed')
+        identified = true
+        begin()
+        return
+      }
       if (reply.success) {
         // Only the discovery request is outstanding until the base subscription.
         if (discovering && reply.data.id !== Number.MAX_SAFE_INTEGER) return

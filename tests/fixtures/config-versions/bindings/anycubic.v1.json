@@ -1,0 +1,29 @@
+{
+  "version": 5,
+  "collection": {
+    "version": 5,
+    "allowedOrigins": [],
+    "printers": [],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    },
+    "anycubic": {
+      "printers": [
+        {
+          "printerKey": "anycubic-a",
+          "host": "192.168.1.70",
+          "port": 9883,
+          "modelId": "KobraS1",
+          "deviceId": "device-anycubic-1",
+          "username": "anycubic-user",
+          "passwordFile": "/run/open3dfarmmanager/private/credentials/anycubic-password.json"
+        }
+      ]
+    }
+  }
+}

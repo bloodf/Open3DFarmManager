@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "collection": {
+    "version": 2,
+    "allowedOrigins": [],
+    "printers": [],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    },
+    "kobralink": {
+      "allowedOrigins": ["http://127.0.0.1:8080"],
+      "printers": [
+        {
+          "backend": "kobralink",
+          "version": 2,
+          "bridgeInstance": "bridge-1",
+          "origin": "http://127.0.0.1:8080",
+          "deviceId": "device-1",
+          "id": "kobra1",
+          "printerKey": "kobralink-a",
+          "revision": 1,
+          "credentialFile": "/run/open3dfarmmanager/private/credentials/kobralink.json"
+        }
+      ]
+    }
+  },
+  "schemaVersion": 2
+}

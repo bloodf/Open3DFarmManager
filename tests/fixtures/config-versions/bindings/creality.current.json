@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "collection": {
+    "version": 4,
+    "allowedOrigins": [],
+    "printers": [],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    },
+    "creality": {
+      "printers": [
+        {
+          "printerKey": "creality-a",
+          "host": "192.168.1.60",
+          "port": 9999,
+          "httpPort": 80
+        }
+      ]
+    }
+  },
+  "schemaVersion": 2
+}

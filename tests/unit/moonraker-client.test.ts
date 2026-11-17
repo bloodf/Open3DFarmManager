@@ -1090,3 +1090,64 @@ test('overlapping progress preserves its value while unchanged readiness receive
     await service.close()
   }
 }, 20000)
+
+test('overlapping query temperatures refresh display evidence without replacing newer progress', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      const reply = (
+        eventtime: number,
+        progress: number,
+        temperature: number,
+      ) =>
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              eventtime,
+              status: {
+                ...status,
+                virtual_sdcard: { progress },
+                extruder: { temperature },
+              },
+            },
+          }),
+        )
+      if (request.id === 1) reply(10, 0.25, 20)
+      else {
+        later(() => socket.send(delta(11, 0.5)), 10)
+        later(() => reply(10.5, 0.4, 21), 30)
+      }
+    },
+  })
+  try {
+    await run(
+      service.origin,
+      { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+      'raw',
+      undefined,
+      evidence,
+      { rawObservations: 3, deadlineMs: 6000 },
+    )
+    expect(evidence.completedBy).toBe('observation')
+    expect(evidence.raw.map((o) => o.printer.progress)).toEqual([
+      0.25, 0.5, 0.5,
+    ])
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBe(
+      evidence.raw[1]!.fieldObservedAtMonoMs.progress,
+    )
+    expect(evidence.raw[2]!.temperatureObservation?.fields.tool).toEqual({
+      kind: 'reading',
+      celsius: 21,
+    })
+    expect(
+      evidence.raw[2]!.temperatureObservation!.observedAtMonoMs,
+    ).toBeLessThan(evidence.raw[1]!.fieldObservedAtMonoMs.progress)
+    expect(
+      evidence.raw[2]!.temperatureObservation!.observedAtMonoMs,
+    ).toBeGreaterThan(evidence.raw[0]!.temperatureObservation!.observedAtMonoMs)
+  } finally {
+    await service.close()
+  }
+}, 20000)

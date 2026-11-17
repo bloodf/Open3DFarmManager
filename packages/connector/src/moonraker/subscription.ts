@@ -326,6 +326,15 @@ export function createMoonrakerSubscription(input: {
                             ? stamp
                             : fieldTimes.progress,
                       }
+                      // Temperature is independent display evidence from this
+                      // complete query. Keep the newer delta's state/progress
+                      // while publishing those conservatively timed readings.
+                      const fields = parseTemperatureFields(complete.status)
+                      if (
+                        fields.tool.kind === 'reading' ||
+                        fields.bed.kind === 'reading'
+                      )
+                        publish(baseline, { fields, observedAtMonoMs: stamp })
                     }
                     return
                   }

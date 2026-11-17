@@ -21,6 +21,7 @@ export async function scanConfigurationDiscovery(
   scan: DiscoveryScanner = discoverPrinters,
   host?: string,
   policy?: PrinterNetworkPolicy,
+  probe: typeof probePrinterHost = probePrinterHost,
 ): Promise<DiscoveryResult> {
   if (active.has(authority))
     return { request_id: requestId, ok: false, reason: 'busy' }
@@ -32,7 +33,7 @@ export async function scanConfigurationDiscovery(
   const work = Promise.resolve().then(async () =>
     host === undefined
       ? scan({ timeout: DISCOVERY_TIMEOUT_MS - 500 })
-      : probePrinterHost(host).then((printer) => (printer ? [printer] : [])),
+      : probe(host).then((printer) => (printer ? [printer] : [])),
   )
   // Keep the lease until the scanner settles, even if it ignores its timeout.
   void work.finally(() => active.delete(authority)).catch(() => {})

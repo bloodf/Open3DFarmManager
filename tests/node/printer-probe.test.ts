@@ -13,22 +13,31 @@ import { probePrinterHost } from '../../packages/connector/src/discovery/probe.t
 const host = '127.0.0.1'
 
 test('detects Moonraker and bridge facade using read-only requests', async () => {
-  for (const port of [7125, 7126]) {
+  for (const bridge of [false, true]) {
     const server = httpServer((req, res) => {
       assert.equal(req.method, 'GET')
       assert.equal(req.url, '/server/info')
       res.end(JSON.stringify({ result: { moonraker_version: 'test' } }))
     })
     await new Promise<void>((resolve, reject) =>
-      server.once('error', reject).listen(port, host, resolve),
+      server.once('error', reject).listen(0, host, resolve),
     )
     try {
-      assert.deepEqual(await probePrinterHost(host, { timeoutMs: 200 }), {
-        vendor: 'moonraker',
-        host,
-        port,
-        ...(port === 7126 ? { hint: 'may be a KobraLink bridge' } : {}),
-      })
+      const address = server.address()
+      assert.ok(address && typeof address !== 'string')
+      const port = address.port
+      assert.deepEqual(
+        await probePrinterHost(host, {
+          timeoutMs: 200,
+          ports: { [bridge ? 7126 : 7125]: port },
+        }),
+        {
+          vendor: 'moonraker',
+          host,
+          port,
+          ...(bridge ? { hint: 'may be a KobraLink bridge' } : {}),
+        },
+      )
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -51,14 +60,23 @@ test('detects a WebSocket upgrade without sending commands', async () => {
     )
   })
   await new Promise<void>((resolve, reject) =>
-    server.once('error', reject).listen(9999, host, resolve),
+    server.once('error', reject).listen(0, host, resolve),
   )
   try {
-    assert.deepEqual(await probePrinterHost(host, { timeoutMs: 200 }), {
-      vendor: 'creality',
-      host,
-      port: 9999,
-    })
+    const address = server.address()
+    assert.ok(address && typeof address !== 'string')
+    const port = address.port
+    assert.deepEqual(
+      await probePrinterHost(host, {
+        timeoutMs: 200,
+        ports: { 9999: port },
+      }),
+      {
+        vendor: 'creality',
+        host,
+        port,
+      },
+    )
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
@@ -88,10 +106,7 @@ test('detects TLS signatures without application data', async () => {
       ],
       { stdio: 'ignore' },
     )
-    for (const [port, vendor] of [
-      [8883, 'bambu'],
-      [9883, 'anycubic'],
-    ] as const) {
+    for (const vendor of ['bambu', 'anycubic'] as const) {
       let bytes = 0
       const server = tlsServer(
         {
@@ -105,14 +120,23 @@ test('detects TLS signatures without application data', async () => {
         },
       )
       await new Promise<void>((resolve, reject) =>
-        server.once('error', reject).listen(port, host, resolve),
+        server.once('error', reject).listen(0, host, resolve),
       )
       try {
-        assert.deepEqual(await probePrinterHost(host, { timeoutMs: 300 }), {
-          vendor,
-          host,
-          port,
-        })
+        const address = server.address()
+        assert.ok(address && typeof address !== 'string')
+        const port = address.port
+        assert.deepEqual(
+          await probePrinterHost(host, {
+            timeoutMs: 300,
+            ports: { [vendor === 'bambu' ? 8883 : 9883]: port },
+          }),
+          {
+            vendor,
+            host,
+            port,
+          },
+        )
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),
@@ -132,17 +156,26 @@ test('times out stalled connections and returns no match', async () => {
     socket.on('close', () => sockets.delete(socket))
   })
   await new Promise<void>((resolve, reject) =>
-    server.once('error', reject).listen(7125, host, resolve),
+    server.once('error', reject).listen(0, host, resolve),
   )
+  const address = server.address()
+  assert.ok(address && typeof address !== 'string')
+  const ports = { 7125: address.port }
   try {
-    assert.equal(await probePrinterHost(host, { timeoutMs: 50 }), undefined)
+    assert.equal(
+      await probePrinterHost(host, { timeoutMs: 50, ports }),
+      undefined,
+    )
   } finally {
     for (const socket of sockets) socket.destroy()
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     )
   }
-  assert.equal(await probePrinterHost(host, { timeoutMs: 50 }), undefined)
+  assert.equal(
+    await probePrinterHost(host, { timeoutMs: 50, ports }),
+    undefined,
+  )
   await assert.rejects(probePrinterHost('localhost/path'), /invalid host/)
   await assert.rejects(
     probePrinterHost(host, { timeoutMs: 3001 }),

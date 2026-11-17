@@ -60,6 +60,7 @@ test('a symlinked or shared audit file and a non-private journal directory are r
   writeFileSync(join(shared, 'pause-journal', 'authority-audit.jsonl'), '', {
     mode: 0o644,
   })
+  chmodSync(join(shared, 'pause-journal', 'authority-audit.jsonl'), 0o644)
   recordAuthorityStale(shared, 'clock', (v) => failures.push(v))
 
   const openDirectory = directory(t)

@@ -7,6 +7,7 @@ import { PostgresCredentials } from '../../storage/postgres-credentials.ts'
 import { PostgresRegistration } from '../../storage/postgres-registration.ts'
 import { PostgresMembers } from '../../storage/postgres-members.ts'
 import { PostgresPasswordReset } from '../../storage/postgres-password-reset.ts'
+import { PostgresOidc } from '../../storage/postgres-oidc.ts'
 import type { MembersStore } from '../../services/members.ts'
 import {
   configuredAuthOrigin,
@@ -28,6 +29,8 @@ export interface AuthRuntime {
   members?: MembersStore
   /** Reset tokens; exposed only when the password-reset plugin is enabled. */
   passwordReset?: PostgresPasswordReset
+  /** OIDC subject links. Present whenever the auth pool exists; the feature flag is separate. */
+  oidc?: PostgresOidc
   /** SHA-256 of the first-owner bootstrap secret; undefined disables bootstrap. */
   bootstrapTokenDigest?: Buffer | undefined
   idleTimeoutMs: number
@@ -82,6 +85,7 @@ export function authRuntime(): AuthRuntime {
       registration: new PostgresRegistration(sql),
       members: new PostgresMembers(sql),
       passwordReset: new PostgresPasswordReset(sql),
+      oidc: new PostgresOidc(sql),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

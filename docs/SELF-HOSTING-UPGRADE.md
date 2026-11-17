@@ -95,3 +95,5 @@ as versões antigas ou de configurações reais de produção.
 ## Password reset
 
 Owner-issued reset links are off by default. Set `NUXT_AUTH_PASSWORD_RESET=true` to enable them and grant the auth connection role `farm_password_reset`. See [Account creation](ACCOUNT-CREATION.md#password-reset-owner-issued-links).
+
+OpenID Connect sign-in is off by default. Set `NUXT_AUTH_OIDC=true` only together with `NUXT_AUTH_ENABLED=true`, `NUXT_AUTH_OIDC_ISSUER` and `NUXT_AUTH_OIDC_CLIENT_ID`. Apply migration `0038_oidc_identities`. The connection role needs `farm_password_auth` to sign in and `farm_account_registration` to attach a new subject through an invite. See [Account creation](ACCOUNT-CREATION.md#openid-connect).

@@ -4,10 +4,13 @@ export default defineNuxtConfig({
   nitro: { preset: 'node-server' },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
   routeRules: Object.fromEntries(
-    ['/primeiro-acesso', '/criar-conta', '/convites'].map((path) => [
-      path,
-      { headers: { 'Referrer-Policy': 'no-referrer' } },
-    ]),
+    [
+      '/primeiro-acesso',
+      '/criar-conta',
+      '/convites',
+      '/api/auth/oidc/start',
+      '/api/auth/oidc/callback',
+    ].map((path) => [path, { headers: { 'Referrer-Policy': 'no-referrer' } }]),
   ),
   runtimeConfig: {
     database: {
@@ -24,6 +27,11 @@ export default defineNuxtConfig({
       bootstrapToken: '',
       /** NUXT_AUTH_PASSWORD_RESET=true enables owner-issued reset links. */
       passwordReset: false,
+      /** NUXT_AUTH_OIDC=true enables one OpenID Connect provider. Off by default. */
+      oidc: false,
+      oidcIssuer: '',
+      oidcClientId: '',
+      oidcClientSecret: '',
     },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },

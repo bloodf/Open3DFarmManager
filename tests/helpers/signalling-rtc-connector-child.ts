@@ -62,7 +62,7 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('runtime-observation'),
     requests: z.number().int().min(0).max(65),
-    queued: z.number().int().min(0).max(64),
+    queued: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     failure: z.boolean(),
     settled: z.boolean(),
     directory: z.string().min(1).max(512),

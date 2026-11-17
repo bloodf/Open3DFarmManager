@@ -300,8 +300,35 @@ export function createMoonrakerSubscription(input: {
                   if (
                     fieldTimes &&
                     stamp < Math.max(...Object.values(fieldTimes))
-                  )
+                  ) {
+                    // A changing progress delta must win over this query. The
+                    // same query can still conservatively confirm unchanged
+                    // fields that have not received a newer delta. Publish no
+                    // stale values; the next delta carries these field clocks.
+                    if (baseline) {
+                      fieldTimes = {
+                        webhooks:
+                          stamp >= fieldTimes.webhooks &&
+                          value.status.webhooks.state ===
+                            baseline.status.webhooks.state
+                            ? stamp
+                            : fieldTimes.webhooks,
+                        printState:
+                          stamp >= fieldTimes.printState &&
+                          value.status.print_stats.state ===
+                            baseline.status.print_stats.state
+                            ? stamp
+                            : fieldTimes.printState,
+                        progress:
+                          stamp >= fieldTimes.progress &&
+                          value.status.virtual_sdcard.progress ===
+                            baseline.status.virtual_sdcard.progress
+                            ? stamp
+                            : fieldTimes.progress,
+                      }
+                    }
                     return
+                  }
                   if (
                     baseline &&
                     (value.eventtime < baseline.eventtime ||

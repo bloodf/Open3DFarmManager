@@ -863,10 +863,6 @@ export function createPauseDispatcher(config: {
           }
           finalize('applied', 'applied', 'applied', observedAt.wall)
         } catch (error) {
-          console.error(
-            'RTC driver failure:' +
-              (error instanceof Error ? error.message : 'unknown'),
-          )
           const carried = ControlResultCode.safeParse(
             (error as { resultCode?: unknown } | null)?.resultCode,
           )

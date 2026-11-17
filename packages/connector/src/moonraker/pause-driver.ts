@@ -6,7 +6,7 @@ import {
 } from '../../../farm-protocol/src/control-actions.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import { z } from 'zod'
-import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
+import { decodeMoonrakerFrame } from './frame.ts'
 import {
   readPrinterBinding,
   type PrinterBinding,
@@ -28,6 +28,13 @@ const Reply = z.strictObject({
   jsonrpc: z.literal('2.0'),
   id: z.number().int(),
   result: z.unknown(),
+})
+// Moonraker broadcasts these while PAUSE runs. They carry no command or
+// freshness authority; only a matching reply and complete query may do that.
+const SideNotification = z.strictObject({
+  jsonrpc: z.literal('2.0'),
+  method: z.enum(['notify_gcode_response', 'notify_history_changed']),
+  params: z.array(z.unknown()).max(16),
 })
 const Snapshot = z.strictObject({
   eventtime: z.number().finite().nonnegative(),
@@ -259,14 +266,13 @@ export function openFixedMoonrakerPause(input: {
         (receivedBytes += data.byteLength) > 32768
       )
         throw failure()
-      const result = Reply.parse(
-        parseBoundedJson(data.toString('utf8'), {
-          maxBytes: Math.min(4096, selected.limits.maxMessageBytes),
-          maxDepth: 5,
-          maxValues: 64,
-          maxStringChars: 128,
-        }),
+      const frame = decodeMoonrakerFrame(
+        data,
+        binary,
+        Math.min(4096, selected.limits.maxMessageBytes),
       )
+      if (SideNotification.safeParse(frame).success) return
+      const result = Reply.parse(frame)
       if (
         !pending ||
         result.id !== pending.id ||

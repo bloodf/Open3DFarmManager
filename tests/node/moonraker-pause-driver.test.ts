@@ -497,3 +497,93 @@ test('another genuine binding cannot select a different endpoint or reuse the pr
     await f.cleanup()
   }
 })
+
+test('G-code and history notifications do not replace the pause reply or complete-state audit', async () => {
+  const f = await fixture({
+    query: (index, socket) => {
+      if (index > 1)
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notify_history_changed',
+            params: [
+              {
+                action: 'added',
+                job: {
+                  filename: 'synthetic.gcode',
+                  metadata: { estimated_time: 600 },
+                },
+              },
+            ],
+          }),
+        )
+      return false
+    },
+    pause: (socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_gcode_response',
+          params: ['// PAUSE called with'],
+        }),
+      )
+      return false
+    },
+  })
+  try {
+    await f.driver.prepare()
+    let sentMono = 0
+    assert.deepEqual(
+      await f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => {
+          sentMono = performance.now()
+          return true
+        },
+      }),
+      { acknowledged: true },
+    )
+    assert.equal(f.observations.filter(Boolean).length, 1)
+    const paused = await f.driver.driver.waitForPaused({
+      binding: f.binding,
+      signal: f.command.signal,
+      after: { connectionGeneration: 7, sequence: 1, sentMono },
+    })
+    assert.equal(paused.printState, 'paused')
+    assert.equal(f.observations.filter(Boolean).length, 2)
+    assert.equal(f.remote.counts().pauses, 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('a G-code notification without a matching RPC reply never acknowledges pause', async () => {
+  const f = await fixture({
+    pause: (socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_gcode_response',
+          params: ['// PAUSE called with'],
+        }),
+      )
+      setImmediate(() => mock.timers.tick(limits.requestTimeoutMs))
+      return true
+    },
+  })
+  try {
+    await f.driver.prepare()
+    await assert.rejects(
+      f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => true,
+      }),
+    )
+    assert.equal(f.remote.counts().pauses, 1)
+    assert.equal(f.observations.filter(Boolean).length, 1)
+  } finally {
+    await f.cleanup()
+  }
+})

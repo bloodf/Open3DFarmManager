@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import type { TrustedKeyAuthority } from './trusted-key-store.ts'
+import { MAX_PAUSE_ISSUER_KEYRING } from '../config/pause.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
   ControlSessionBinding,
@@ -113,6 +115,7 @@ export type PauseCapabilityDecision =
  */
 export function createPauseCapabilityVerifier(config: {
   issuers: readonly PauseIssuer[]
+  trustedKeys?: TrustedKeyAuthority
   clock: PauseAuthorityClock
   policy?: Partial<PausePolicy>
   /** Offline lifetime gate for cached server authority; stale authority denies admission and dispatch. */
@@ -124,7 +127,10 @@ export function createPauseCapabilityVerifier(config: {
       ...PausePolicy.partial().parse(config.policy ?? {}),
     }),
   )
-  if (!config.issuers.length || config.issuers.length > 128)
+  if (
+    !config.issuers.length ||
+    config.issuers.length > MAX_PAUSE_ISSUER_KEYRING
+  )
     throw new Error('Invalid pause issuer keyring')
   const issuers = new Map<string, CryptoKey>()
   for (const entry of config.issuers) {
@@ -147,6 +153,9 @@ export function createPauseCapabilityVerifier(config: {
   const wallNow = config.clock.wallNow.bind(config.clock)
   const monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const freshness = config.freshness
+  const trustedKeys = config.trustedKeys
+  const browserAllowed = (capability: PauseCapabilitySnapshot) =>
+    !trustedKeys || trustedKeys.allowsBrowser(capability)
   function cachedAuthorityFresh(now: ClockSample): boolean {
     try {
       return !freshness || freshness.freshAt(now) === true
@@ -254,6 +263,7 @@ export function createPauseCapabilityVerifier(config: {
       return { ok: false, reason: 'expired-or-inactive' }
     if (
       authority.expired ||
+      !browserAllowed(authority.capability) ||
       !cachedAuthorityFresh(now) ||
       now.mono >= authority.deadline ||
       now.wall < authority.capability.issued_at ||
@@ -435,12 +445,17 @@ export function createPauseCapabilityVerifier(config: {
           capability.issued_at < challenge.issued_at
         )
           return { ok: false, reason: 'scope-mismatch' }
-        const key = issuers.get(capability.issuer + '\0' + capability.kid)
+        const key = trustedKeys
+          ? trustedKeys.issuer(capability.issuer, capability.kid)
+          : issuers.get(capability.issuer + '\0' + capability.kid)
         if (!key) return { ok: false, reason: 'untrusted-issuer' }
         const fresh = () => {
           const now = admissionCurrent(admission)
           return (
             now &&
+            browserAllowed(capability) &&
+            (!trustedKeys ||
+              trustedKeys.issuer(capability.issuer, capability.kid) === key) &&
             now.wall >= capability.issued_at &&
             now.wall < capability.expires_at &&
             now.wall >= challenge.issued_at &&

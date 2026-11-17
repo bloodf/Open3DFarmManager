@@ -30,9 +30,11 @@ async function changePassword() {
     message.value =
       status === 401
         ? 'Não foi possível alterar a senha. Confira a senha atual e tente novamente.'
-        : status === 429
-          ? 'Muitas tentativas. Aguarde um pouco e tente novamente.'
-          : 'Não foi possível alterar a senha agora.'
+        : status === 400
+          ? 'Use uma nova senha com 12 caracteres ou mais.'
+          : status === 429
+            ? 'Muitas tentativas. Aguarde um pouco e tente novamente.'
+            : 'Não foi possível alterar a senha agora.'
     error.value = true
   } finally {
     currentPassword.value = ''
@@ -71,8 +73,11 @@ async function changePassword() {
         type="password"
         autocomplete="new-password"
         required
+        minlength="12"
+        aria-describedby="new-password-help"
         :disabled="pending"
       />
+      <p id="new-password-help" class="help">Use 12 caracteres ou mais.</p>
       <p ref="summary" :role="error ? 'alert' : 'status'" tabindex="-1">
         {{ message }}
       </p>

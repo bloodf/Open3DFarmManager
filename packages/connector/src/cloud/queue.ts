@@ -55,6 +55,13 @@ export interface QueueLoss {
   capacity: number
   partialTail: boolean
 }
+// Errors that mean the disk, not the queue contents, is at fault. They degrade
+// the queue instead of closing it: memory stays authoritative until a retry.
+const STORAGE_CODES = new Set(['ENOSPC', 'EDQUOT', 'EIO', 'EROFS'])
+const storageFault = (error: unknown) =>
+  error instanceof Error &&
+  'code' in error &&
+  STORAGE_CODES.has(String(error.code))
 const emptyLoss = (): QueueLoss => ({
   expired: 0,
   capacity: 0,
@@ -141,6 +148,9 @@ export class TelemetryQueue {
   private readonly maxAgeMs: number
   private closed = false
   private failed = false
+  /** Storage refused a write. Nothing is enqueued or batched until a retry succeeds. */
+  private degraded = false
+  private lost = 0
   private lastNow: number
   private readonly directory: string
   readonly recovery: QueueLoss
@@ -347,9 +357,45 @@ export class TelemetryQueue {
       closeSync(fd)
     }
   }
-  private ready(now: number) {
+  /** Classifies a write failure: storage faults degrade, anything else fails closed. */
+  private fault(error: unknown) {
+    if (storageFault(error)) this.degraded = true
+    else this.failed = true
+  }
+  /** True while storage refuses writes; see `retryStorage`. */
+  get storageDegraded(): boolean {
+    return this.degraded
+  }
+  /** Records dropped because storage was degraded when they were observed. */
+  get storageLost(): number {
+    return this.lost
+  }
+  /**
+   * One bounded recovery attempt: rewrites the log from the in-memory records,
+   * which include every acknowledgement accepted while degraded. Returns false
+   * while storage still refuses writes. Other failures close the queue.
+   */
+  retryStorage(): boolean {
     if (this.closed || this.failed)
       throw new Error('Queue is closed or requires recovery')
+    if (!this.degraded) return true
+    try {
+      for (const leftover of [this.temporary, this.cursorTemporary])
+        if (lstatSync(leftover, { throwIfNoEntry: false })) unlinkSync(leftover)
+      this.degraded = false
+      this.replace(this.records)
+      return true
+    } catch (error) {
+      this.fault(error)
+      if (this.failed) throw error
+      return false
+    }
+  }
+  private ready(now: number, whileDegraded = false) {
+    if (this.closed || this.failed)
+      throw new Error('Queue is closed or requires recovery')
+    if (this.degraded && !whileDegraded)
+      throw new Error('Queue storage is degraded')
     clock(now)
     if (now < this.lastNow) throw new Error('Queue clock regressed')
     this.lastNow = now
@@ -387,7 +433,7 @@ export class TelemetryQueue {
       this.records = records
       this.ackedBytes = 0
     } catch (error) {
-      this.failed = true
+      this.fault(error)
       throw error
     } finally {
       if (created && existsSync(temporary)) unlinkSync(temporary)
@@ -420,6 +466,12 @@ export class TelemetryQueue {
       | { kind: 'printer-transition'; transition: PrinterTransition },
     now: number,
   ): { eventId: string; loss: QueueLoss } {
+    // Degraded storage stops enqueueing: the record is counted, never stored.
+    const dropped = () => {
+      this.lost++
+      return { eventId: randomUUID(), loss: emptyLoss() }
+    }
+    if (this.degraded && !this.closed && !this.failed) return dropped()
     this.ready(now)
     const record: TelemetryRecord = {
       eventId: randomUUID(),
@@ -430,9 +482,14 @@ export class TelemetryQueue {
     if (Buffer.byteLength(serialized) > Math.min(MAX_RECORD, this.maxBytes))
       throw new Error('Queue record exceeds size limit')
     const bounded = this.bound([...this.records, record], now)
-    if (bounded.loss.expired || bounded.loss.capacity)
-      this.replace(bounded.records)
-    else {
+    if (bounded.loss.expired || bounded.loss.capacity) {
+      try {
+        this.replace(bounded.records)
+      } catch (error) {
+        if (!this.degraded || this.failed) throw error
+        return dropped()
+      }
+    } else {
       try {
         const fd = openSync(
           this.path,
@@ -456,8 +513,10 @@ export class TelemetryQueue {
         }
         this.records.push(record)
       } catch (error) {
-        this.failed = true
-        throw error
+        this.fault(error)
+        if (this.failed) throw error
+        // A torn tail left by this write is rewritten by `retryStorage`.
+        return dropped()
       }
     }
     return { eventId: record.eventId, loss: bounded.loss }
@@ -492,7 +551,8 @@ export class TelemetryQueue {
     return { records, loss: bounded.loss }
   }
   acknowledge(eventIds: readonly string[], now: number): void {
-    this.ready(now)
+    // A delivery in flight when storage degraded still settles in memory.
+    this.ready(now, true)
     if (!Array.isArray(eventIds) || eventIds.length > this.records.length)
       throw new Error('Acknowledgement must match the current FIFO prefix')
     for (let index = 0; index < eventIds.length; index++) {
@@ -504,16 +564,29 @@ export class TelemetryQueue {
     }
     if (!eventIds.length) return
     const rest = this.records.slice(eventIds.length)
-    try {
-      this.writeCursor(eventIds.at(-1)!)
-    } catch (error) {
-      this.failed = true
-      throw error
+    // The server durably accepted these records. On a storage fault the
+    // acknowledgement is kept in memory and persisted by `retryStorage`; a crash
+    // before then resends them, which the server deduplicates by event ID.
+    if (!this.degraded) {
+      try {
+        this.writeCursor(eventIds.at(-1)!)
+      } catch (error) {
+        this.fault(error)
+        if (this.failed) throw error
+      }
     }
     this.ackedBytes += bytes(this.records.slice(0, eventIds.length))
     this.records = rest
-    if (this.ackedBytes >= this.compactAfterBytes || rest.length === 0)
-      this.replace(rest)
+    if (
+      !this.degraded &&
+      (this.ackedBytes >= this.compactAfterBytes || rest.length === 0)
+    ) {
+      try {
+        this.replace(rest)
+      } catch (error) {
+        if (!this.degraded || this.failed) throw error
+      }
+    }
   }
   get depth(): number {
     return this.records.length

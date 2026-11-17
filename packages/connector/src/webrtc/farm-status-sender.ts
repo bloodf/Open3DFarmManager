@@ -62,6 +62,7 @@ export class FarmStatusSender {
   #refs: readonly AssignmentRef[]
   #open: FarmSnapshotProvider
   #signal: AbortSignal
+  #storageDegraded: () => boolean
   #controller = new AbortController()
   #unsubscribe = () => {}
   #unsubscribeTerminal = () => {}
@@ -81,7 +82,10 @@ export class FarmStatusSender {
     assignmentRefs: readonly AssignmentRef[]
     openSnapshots: FarmSnapshotProvider
     signal: AbortSignal
+    /** Read per frame; true marks the snapshot `storage: 'degraded'`. */
+    storageDegraded?: () => boolean
   }) {
+    this.#storageDegraded = options.storageDegraded ?? (() => false)
     this.#rtcScope = isLoopbackBindAddress(
       options.bindAddress ?? DEFAULT_RTC_BIND_ADDRESS,
     )
@@ -239,6 +243,9 @@ export class FarmStatusSender {
           seq: this.#seq,
           printers: input.printers,
           ...(input.inventory ? { inventory: input.inventory } : {}),
+          ...(this.#storageDegraded() === true
+            ? { storage: 'degraded' as const }
+            : {}),
         },
         this.#refs,
       )

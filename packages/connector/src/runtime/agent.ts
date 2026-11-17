@@ -36,6 +36,8 @@ type AgentDiagnostic =
   | { kind: 'readonly-terminal'; reason: string }
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
+  | { kind: 'storage-degraded'; lost: number }
+  | { kind: 'storage-recovered'; lost: number }
   | {
       kind: 'agent-summary'
       delivered: number
@@ -43,6 +45,7 @@ type AgentDiagnostic =
       expired: number
       capacity: number
       credentialExpired: boolean
+      storageLost: number
     }
 
 let bootstrapped = false
@@ -210,6 +213,8 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           retries: totals.retries,
           credentialExpired:
             totals.credentialExpired || clock.now() >= credential.expires_at,
+          storageDegraded: queue.storageDegraded,
+          storageLost: queue.storageLost,
         }),
         onError: fail,
       })
@@ -351,6 +356,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                 assignmentRefs: refs,
                 openSnapshots: source.open,
                 signal,
+                storageDegraded: () => queue.storageDegraded,
               })
             } catch (error) {
               client.close('runtime-setup-failed')
@@ -416,6 +422,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           dataDirectory: input.dataDirectory,
           signal,
           freshness: offline.freshness,
+          storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
           onMacros(read) {
             macrosFor = read
@@ -435,7 +442,29 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     async function drainLoop() {
       let backoff = config.telemetry.retryMinMs
       let notBefore = 0
+      let storageReported = false
+      let storageBackoff = config.telemetry.retryMinMs
       while (!signal.aborted) {
+        // Degraded storage: collection, RTC status and local status keep
+        // running; uploads wait for a bounded, backed-off storage retry.
+        if (queue.storageDegraded) {
+          if (!storageReported) {
+            storageReported = true
+            diagnostic({ kind: 'storage-degraded', lost: queue.storageLost })
+          }
+          await pause(storageBackoff, signal)
+          if (signal.aborted) return
+          storageBackoff = Math.min(
+            config.telemetry.retryMaxMs,
+            storageBackoff * 2,
+          )
+          if (queue.retryStorage()) {
+            storageReported = false
+            storageBackoff = config.telemetry.retryMinMs
+            diagnostic({ kind: 'storage-recovered', lost: queue.storageLost })
+          }
+          continue
+        }
         if (clock.now() >= credential.expires_at) {
           totals.credentialExpired = true
           diagnostic({ kind: 'credential-expired' })
@@ -493,6 +522,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
               capacity: result.loss.capacity,
             })
         }
+        if (result.status === 'delivered') totals.delivered += result.count
+        // A storage fault during this attempt is handled at the top of the loop.
+        if (queue.storageDegraded) continue
         if (
           result.status === 'uncertain' ||
           (result.status === 'retained' &&
@@ -501,7 +533,6 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return
         if (result.status === 'delivered') {
-          totals.delivered += result.count
           diagnostic({
             kind: 'delivery',
             status: 'delivered',
@@ -566,7 +597,11 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
       fail(error)
     }
     try {
-      input.onDiagnostic({ kind: 'agent-summary', ...totals })
+      input.onDiagnostic({
+        kind: 'agent-summary',
+        ...totals,
+        storageLost: queue.storageLost,
+      })
     } catch (error) {
       fail(error)
     }

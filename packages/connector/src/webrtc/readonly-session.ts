@@ -42,6 +42,8 @@ export type ReadonlyStatusMessage = Readonly<{
   printers: readonly Readonly<
     ReturnType<typeof StatusMessage.parse>['printers'][number]
   >[]
+  /** Connector queue storage refuses writes; status stays read-only live. */
+  storage?: 'degraded' | undefined
   inventory?:
     | Readonly<
         Omit<SpoolInventory, 'spools'> & {

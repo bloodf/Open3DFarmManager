@@ -212,6 +212,8 @@ export function createPauseDispatcher(config: {
   driver: PreparedPauseDriver
   controlLimits?: ControlLimits
   resultTimeoutMs?: number
+  /** True refuses every command with `storage` before the journal is touched. */
+  storageDegraded?: () => boolean
 }) {
   const verifier = createPauseCapabilityVerifier({
     ...config.authority,
@@ -379,6 +381,15 @@ export function createPauseDispatcher(config: {
       if (closed) return Promise.resolve({ kind: 'rejected', reason: 'closed' })
       if (signal?.aborted)
         return Promise.resolve({ kind: 'rejected', reason: 'aborted' })
+      // Fail closed: a gate that throws counts as degraded storage.
+      let degraded = true
+      try {
+        degraded = config.storageDegraded?.() ?? false
+      } catch {
+        // Keeps the refusal.
+      }
+      if (degraded)
+        return Promise.resolve({ kind: 'rejected', reason: 'storage' })
       let command: SignedCommandV2
       try {
         command = decodeCommandV2(input.wire)

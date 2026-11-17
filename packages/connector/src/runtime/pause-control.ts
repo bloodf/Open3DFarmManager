@@ -103,6 +103,8 @@ type PauseControlInput = {
    * `createOfflineAuthority()`. Stale authority rejects every command.
    */
   freshness: CachedAuthorityFreshness
+  /** True while local storage is degraded: commands are refused with `storage`. */
+  storageDegraded?: () => boolean
   /** Transport seam for tests. Defaults to the authenticated pause client. */
   createClient?: (
     scope: PauseConnectorSignallingScope,
@@ -230,6 +232,9 @@ async function runAssignmentControl(
       clock,
       journal,
       driver: router,
+      ...(input.storageDegraded
+        ? { storageDegraded: input.storageDegraded }
+        : {}),
       bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
     })
   } catch (error) {

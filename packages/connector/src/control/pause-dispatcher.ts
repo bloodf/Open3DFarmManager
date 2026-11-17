@@ -1,3 +1,4 @@
+import { authorityConfirmation } from '../auth/offline-authority.ts'
 import {
   controlWithinLimits,
   type ControlLimits,
@@ -225,6 +226,7 @@ export function createPauseDispatcher(config: {
     throw new Error('Invalid pause result deadline')
   const wallNow = config.clock.wallNow.bind(config.clock),
     monotonicNow = config.clock.monotonicNow.bind(config.clock)
+  const freshness = config.authority.freshness
   const journal = config.journal
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
@@ -237,6 +239,8 @@ export function createPauseDispatcher(config: {
   })
   let closed = false,
     clockBroken = false
+  let skewBroken = false
+  let confirmation: Sample | null | undefined
   let previous: Sample | undefined, baseline: Sample | undefined
   const observations = new WeakMap<PrinterBinding, ControlObservation>()
   const observationVersions = new WeakMap<PrinterBinding, object>()
@@ -261,15 +265,33 @@ export function createPauseDispatcher(config: {
         !Number.isFinite(now.mono) ||
         now.mono < 0 ||
         now.mono > Number.MAX_SAFE_INTEGER - 30_000 ||
-        (previous && (now.wall < previous.wall || now.mono < previous.mono)) ||
-        (baseline &&
-          Math.abs(now.wall - baseline.wall - (now.mono - baseline.mono)) >
-            1000)
+        (previous && (now.wall < previous.wall || now.mono < previous.mono))
       )
         throw new Error('Invalid local clock')
+      const confirmed = authorityConfirmation(freshness)
+      if (confirmed && confirmed !== confirmation) {
+        if (
+          !Number.isSafeInteger(confirmed.wall) ||
+          confirmed.wall < 0 ||
+          !Number.isFinite(confirmed.mono) ||
+          confirmed.mono < 0 ||
+          confirmed.wall > now.wall ||
+          confirmed.mono > now.mono ||
+          (previous &&
+            (confirmed.wall < previous.wall || confirmed.mono < previous.mono))
+        )
+          throw new Error('Invalid confirmation clock')
+        confirmation = confirmed
+        baseline = confirmed
+        skewBroken = false
+      }
       previous = now
       baseline ??= now
-      return now
+      if (
+        Math.abs(now.wall - baseline.wall - (now.mono - baseline.mono)) > 1000
+      )
+        skewBroken = true
+      return skewBroken ? null : now
     } catch {
       clockBroken = true
       return null
@@ -558,6 +580,7 @@ export function createPauseDispatcher(config: {
           !terminal &&
           !contractBroken &&
           !clockBroken &&
+          !skewBroken &&
           observationVersions.get(printerBinding) === observationVersion &&
           !!capability &&
           readPrinterBinding(printerBinding) === mapping &&

@@ -18,6 +18,18 @@ export interface CachedAuthorityFreshness {
   freshAt(now: AuthoritySample): boolean
 }
 
+const confirmations = new WeakMap<
+  CachedAuthorityFreshness,
+  () => AuthoritySample | null
+>()
+
+/** Only tracker-created freshness views can expose an authenticated confirmation. */
+export function authorityConfirmation(
+  freshness: CachedAuthorityFreshness | undefined,
+): AuthoritySample | null {
+  return freshness ? (confirmations.get(freshness)?.() ?? null) : null
+}
+
 function validSample(now: AuthoritySample): boolean {
   return (
     Number.isSafeInteger(now.wall) &&
@@ -44,6 +56,7 @@ export function createOfflineAuthority(
   const onStale = config.onStale
   let anchor: AuthoritySample | null = null
   let previous: AuthoritySample | null = null
+  let latestConfirmation: AuthoritySample | null = null
   // Server sequence floor: a confirm at or below it (stale or pre-revocation) never restores authority.
   let floor = -1
 
@@ -81,10 +94,14 @@ export function createOfflineAuthority(
     }
   }
 
+  const freshness = Object.freeze({
+    freshAt,
+  }) satisfies CachedAuthorityFreshness
+  confirmations.set(freshness, () => latestConfirmation)
   return Object.freeze({
     maxAgeMs,
     /** Read-only view to hand to verifiers; it cannot confirm or revoke. */
-    freshness: Object.freeze({ freshAt }) as CachedAuthorityFreshness,
+    freshness,
     /**
      * The server just confirmed cached authority. `serverSeq` must strictly increase
      * past every earlier confirm and revocation; anything else is refused.
@@ -96,9 +113,12 @@ export function createOfflineAuthority(
         serverSeq <= floor
       )
         return false
+      if (previous && (now.wall < previous.wall || now.mono < previous.mono))
+        return stale('clock')
       floor = serverSeq
       anchor = Object.freeze({ wall: now.wall, mono: now.mono })
       previous = anchor
+      latestConfirmation = anchor
       return true
     },
     /** Stale immediately. A server sequence raises the floor so older confirms cannot revive authority. */

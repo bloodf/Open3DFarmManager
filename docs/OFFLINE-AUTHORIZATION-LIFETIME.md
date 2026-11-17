@@ -86,4 +86,4 @@ Without the read-only `signalling` section no confirmation arrives and the pause
 
 ## Follow-up
 
-The pause verifier and dispatcher latch a wall/monotonic skew baseline from their first sample and fail permanently after more than 1 s of drift. On long-lived objects, normal crystal drift reaches this limit after about 14 h at 20 ppm, and pause stops working. Re-anchor the baseline on each authenticated confirmation, or rebuild these objects regularly.
+The pause verifier and dispatcher re-anchor their skew baseline on each accepted authenticated confirmation. A forward clock step over 1 s refuses commands until a newer confirmation; an expired capability still requires replacement. A backward wall or monotonic sample permanently fails the affected clock checker. A backward confirmation is refused and makes cached authority stale. The 30 s default offline authority lifetime remains unchanged.

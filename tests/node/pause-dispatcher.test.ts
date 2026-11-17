@@ -11,6 +11,7 @@ import {
   readCommandOutcome,
 } from '../../packages/connector/src/control/command-journal.ts'
 import { createPauseDispatcher } from '../../packages/connector/src/control/pause-dispatcher.ts'
+import { createOfflineAuthority } from '../../packages/connector/src/auth/offline-authority.ts'
 import {
   createPrinterBindingRegistry,
   readPrinterBinding,
@@ -204,7 +205,11 @@ function waitForDriverCount(
   })
 }
 
-async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
+async function fixture(
+  shortCapability = false,
+  resultTimeoutMs = 1000,
+  offline?: ReturnType<typeof createOfflineAuthority>,
+) {
   const f = await authorityFixture(),
     directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
@@ -387,8 +392,10 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
       }
     }
   }
+  offline?.confirm({ wall, mono }, 1)
   const dispatcher = createPauseDispatcher({
     authority: {
+      ...(offline ? { freshness: offline.freshness } : {}),
       issuers: [
         {
           issuer: f.capability.issuer,
@@ -627,6 +634,13 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
       dispatcher.observe(printerBinding, value)
     },
     getState: () => state,
+    stepWall: (n: number) => {
+      wall += n
+    },
+    stepMono: (n: number) => {
+      mono += n
+    },
+    confirm: (seq: number) => offline?.confirm({ wall, mono }, seq),
     advance: (n: number) => {
       wall += n
       mono += n
@@ -1509,5 +1523,65 @@ test('abort reentered from the journal claim returns a correlated not-sent resul
     )
   } finally {
     f.cleanup()
+  }
+})
+
+test('dispatcher refuses a forward step until authenticated confirmation', async () => {
+  const offline = createOfflineAuthority()
+  const f = await fixture(false, 1000, offline)
+  try {
+    const input = {
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+    }
+    f.stepWall(1001)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'expired',
+    })
+    assert.equal(f.getWrites(), 0)
+    assert.equal(f.confirm(1), false)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'expired',
+    })
+    assert.equal(f.confirm(2), true)
+    const result = await f.dispatcher.dispatch(input)
+    assert.equal(result.kind, 'applied', JSON.stringify(result))
+    assert.equal(f.getWrites(), 1)
+  } finally {
+    f.cleanup()
+  }
+})
+
+test('dispatcher continues refusing a backward clock after confirmation', async (t) => {
+  for (const clock of ['wall', 'monotonic'] as const) {
+    await t.test(clock, async () => {
+      const f = await fixture(false, 1000, createOfflineAuthority())
+      try {
+        const input = {
+          wire: f.wire,
+          capability: f.handle,
+          printerBinding: f.printerBinding,
+        }
+        if (clock === 'wall') f.stepWall(-1)
+        else f.stepMono(-1)
+        assert.deepEqual(await f.dispatcher.dispatch(input), {
+          kind: 'rejected',
+          reason: 'expired',
+        })
+        assert.equal(f.confirm(2), false)
+        f.advance(2)
+        assert.equal(f.confirm(3), true)
+        assert.deepEqual(await f.dispatcher.dispatch(input), {
+          kind: 'rejected',
+          reason: 'expired',
+        })
+        assert.equal(f.getWrites(), 0)
+      } finally {
+        f.cleanup()
+      }
+    })
   }
 })

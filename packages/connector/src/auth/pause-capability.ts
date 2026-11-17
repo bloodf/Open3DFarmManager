@@ -20,7 +20,10 @@ import {
   readPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
-import type { CachedAuthorityFreshness } from './offline-authority.ts'
+import {
+  authorityConfirmation,
+  type CachedAuthorityFreshness,
+} from './offline-authority.ts'
 
 export type PauseAuthorityClock = { wallNow(): number; monotonicNow(): number }
 export type PauseIssuer = { issuer: string; kid: string; publicKey: CryptoKey }
@@ -154,6 +157,8 @@ export function createPauseCapabilityVerifier(config: {
   let baseline: ClockSample | undefined
   let previous: ClockSample | undefined
   let clockBroken = false
+  let skewBroken = false
+  let confirmation: ClockSample | null | undefined
   const admissions = new WeakMap<AdmissionToken, Admission>()
   const handles = new WeakMap<CapabilityHandle, Authority>()
   const peers = new WeakMap<PeerHandle, PeerState>()
@@ -166,16 +171,33 @@ export function createPauseCapabilityVerifier(config: {
         !Number.isFinite(next.mono) ||
         next.mono < 0 ||
         next.mono > Number.MAX_SAFE_INTEGER - policy.capabilityMs ||
-        (previous &&
-          (next.wall < previous.wall || next.mono < previous.mono)) ||
-        (baseline &&
-          Math.abs(next.wall - baseline.wall - (next.mono - baseline.mono)) >
-            1000)
+        (previous && (next.wall < previous.wall || next.mono < previous.mono))
       )
         throw new Error('Untrustworthy local clock')
+      const confirmed = authorityConfirmation(freshness)
+      if (confirmed && confirmed !== confirmation) {
+        if (
+          !Number.isSafeInteger(confirmed.wall) ||
+          confirmed.wall < 0 ||
+          !Number.isFinite(confirmed.mono) ||
+          confirmed.mono < 0 ||
+          confirmed.wall > next.wall ||
+          confirmed.mono > next.mono ||
+          (previous &&
+            (confirmed.wall < previous.wall || confirmed.mono < previous.mono))
+        )
+          throw new Error('Untrustworthy confirmation clock')
+        confirmation = confirmed
+        baseline = confirmed
+        skewBroken = false
+      }
       baseline ??= next
       previous = next
-      return next
+      if (
+        Math.abs(next.wall - baseline.wall - (next.mono - baseline.mono)) > 1000
+      )
+        skewBroken = true
+      return skewBroken ? null : next
     } catch {
       clockBroken = true
       return null
@@ -206,7 +228,8 @@ export function createPauseCapabilityVerifier(config: {
   function inspectLifecycle(handle: unknown) {
     if (!(handle instanceof CapabilityHandle)) return false
     const authority = handles.get(handle)
-    if (!authority || authority.revoked || clockBroken) return false
+    if (!authority || authority.revoked || clockBroken || skewBroken)
+      return false
     if (!lifecycleCurrent(authority)) {
       authority.revoked = true
       return false

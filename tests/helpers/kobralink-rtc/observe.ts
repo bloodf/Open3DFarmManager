@@ -567,7 +567,7 @@ export async function instrumentPage(input: {
               })
           })
         pending.set(task, { entry, capture })
-        void task.then(() => pending.delete(task))
+        void task.finally(() => pending.delete(task))
       }
     } catch {
       /* Observation only. */
@@ -655,10 +655,19 @@ export async function instrumentPage(input: {
     async scan(secrets: readonly Secret[]) {
       // Bounded: a response body that never arrives is reported as
       // unobserved, never silently treated as clean.
-      await Promise.race([
-        Promise.allSettled([...pending.keys()]),
-        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
-      ])
+      // A response event can arrive after the first wait starts (the reload
+      // document under load). Keep waiting for tasks that show up before the
+      // deadline instead of counting them unread immediately.
+      const deadline = Date.now() + 8000
+      while (pending.size > 0 && Date.now() < deadline) {
+        await Promise.race([
+          Promise.allSettled([...pending.keys()]),
+          new Promise<void>((resolve) =>
+            setTimeout(resolve, Math.max(0, deadline - Date.now())),
+          ),
+        ])
+        await Promise.resolve()
+      }
       for (const { entry, capture } of pending.values()) {
         const live = await Promise.race([
           capture,

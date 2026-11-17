@@ -26,6 +26,8 @@ describe('password hash upgrade compatibility', () => {
     },
   )
 
+  // N=131072 is several serial scrypt derivations. Vitest's 5s default
+  // fires when the host is loaded. The cost under test stays 131072.
   test('keeps explicit production cost, salt size and key length', async () => {
     const password = 'synthetic-upgrade-password-á'
     const first = await hashPassword(password)
@@ -38,8 +40,9 @@ describe('password hash upgrade compatibility', () => {
     expect(await verifyPassword(first, password + 'x')).toBe(false)
     expect(await verifyPassword(first, password + '\0')).toBe(false)
     expect(await verifyPassword(first, password.toUpperCase())).toBe(false)
-  })
+  }, 60_000)
 
+  // The dummy hash is production cost (N=131072). Same loaded-host budget.
   test('rejects malformed hashes and other algorithms', async () => {
     for (const hash of [
       '',
@@ -52,8 +55,9 @@ describe('password hash upgrade compatibility', () => {
       expect(await verifyPassword(hash, 'password')).toBe(false)
     }
     expect(await verifyPassword(DUMMY_PASSWORD_HASH, 'password')).toBe(false)
-  })
+  }, 60_000)
 
+  // Two production-cost verifies run together. Same loaded-host budget.
   test('rejects a third derivation and releases capacity after completion', async () => {
     const first = verifyPassword(DUMMY_PASSWORD_HASH, 'synthetic-first')
     const second = verifyPassword(DUMMY_PASSWORD_HASH, 'synthetic-second')
@@ -65,5 +69,5 @@ describe('password hash upgrade compatibility', () => {
       expect(await Promise.all([first, second])).toEqual([false, false])
     }
     expect(await verifyPassword(legacyHash, 'password')).toBe(true)
-  })
+  }, 60_000)
 })

@@ -62,8 +62,8 @@ Detailed artifacts, limitations and historical failures remain in the
 [native session result](SIMULATOR-ARM64-NATIVE-SESSION-RESULT.md) and
 [Spoolman service validation](SPOOLMAN-ACTUAL-API-VALIDATION.md).
 
-At `origin/main` `36d1198` the official migration catalog is contiguous through
-0023 and the toolchain is pnpm 12.18.0 with Node 24.22.3. The combined
+This ledger does not pin a head; the current migration catalog and toolchain are
+recorded in the [implementation queue](IMPLEMENTATION-QUEUE.md). The combined
 acceptance command has now run on candidate `1e3a029`; its summary is retained
 with local task evidence outside the repository. The result validates outage
 recovery and the three network-fault profiles, while the failed and unavailable

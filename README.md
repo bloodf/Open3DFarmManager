@@ -14,7 +14,7 @@ Um projeto open source para reunir impressoras Klipper/Moonraker, materiais do S
 
 ![Página inicial real do Open3DFarmManager, com navegação para Connectors, dispositivos e login.](docs/images/app-home.png)
 
-> **Prévia de desenvolvimento.** A Fase 0 está em andamento. O projeto já tem autenticação, pareamento, inventário e componentes de comunicação direta, mas câmera e pausa de impressão ainda dependem de integração e aceitação. Não é uma versão pronta para operar uma farm em produção.
+> **Prévia de desenvolvimento.** A Fase 0 está em andamento. O projeto já tem autenticação, pareamento, inventário, visão da farm, câmera e pausa assinada, atrás de flags e configuração explícita. Nada disso está comprovado em hardware físico (not proven on hardware), e a aceitação integrada ainda não foi concluída. Não é uma versão pronta para operar uma farm em produção.
 
 ## Por que este projeto?
 
@@ -45,14 +45,19 @@ Veja a [origem e as instruções para atualizar as capturas](docs/images/README.
 
 ## O que já existe e o que vem a seguir
 
-| Área                      | Estado atual                                                                                                                                                          |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Contas e acesso           | Login, sessões próprias e autorização por farm implementados; serviços dependem de configuração explícita.                                                            |
-| Connectors e dispositivos | Pareamento, inventário, aprovação, revogação e provas de identidade implementados.                                                                                    |
-| Visão da farm             | Página somente leitura sob feature flag, com inventário e estado autenticado. Há evidência integrada com HTTPS, PostgreSQL, RTC e uma fixture de protocolo Moonraker. |
-| Spoolman                  | Cliente e contratos HTTP com testes; a experiência integrada de materiais ainda está em desenvolvimento.                                                              |
-| Pausa assinada            | Transporte, autoridade, relay e emissão de capacidade implementados em etapas; o controle no produto continua desabilitado.                                           |
-| Câmera e simulador        | Existem testes e provas parciais. Vídeo em movimento e pausa genuína no simulador ainda têm critérios de aceitação pendentes.                                         |
+| Área                      | Estado atual                                                                                                                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contas e acesso           | Login, sessões próprias, convites, redefinição de senha e autorização por farm implementados; serviços dependem de configuração explícita.                                                                                            |
+| Connectors e dispositivos | Pareamento, aprovação, inventário, revogação, provas de identidade e renovação de credenciais implementados. CLI com pareamento e status disponível.                                                                                  |
+| Visão da farm             | Página `/farm` atrás da feature flag `farmView`, desligada por padrão: inventário, estado ao vivo por WebRTC direto, idade dos dados e reconexão com recuo. Aceitação integrada com simuladores ainda incompleta.                     |
+| Câmera                    | Vídeo RTSP levado ao navegador pelo canal WebRTC autorizado, exibido na visão da farm. Medição de memória nativa e aceitação de ponta a ponta com MediaMTX pendentes.                                                                 |
+| Pausa assinada            | Pausa confirmada e assinada pela página da farm, enviada somente por WebRTC ao Connector e liberada apenas quando todas as condições de disponibilidade são atendidas. Sinal de prontidão do Connector após reconexão ainda pendente. |
+| Impressoras e simuladores | Identificação Moonraker, várias ferramentas e webcams. Simuladores Klipper com cenários de falha de rede; aceitação do SV06 e do cenário de quatro ferramentas pendente.                                                              |
+| Arquivos e histórico      | Páginas de arquivos da impressora e de histórico de trabalhos. Envio completo de arquivos para o Connector e importação de histórico Moonraker ainda em desenvolvimento.                                                              |
+| Compatibilidade           | Catálogo por família (Klipper/Moonraker, Creality, Anycubic e Bambu), com capacidades marcadas como simuladas, documentadas ou não comprovadas. Nenhuma delas comprovada em hardware físico (not proven on hardware).                 |
+| Spoolman                  | Inventário somente leitura na visão da farm. Integração por farm e registro de uso de filamento por trabalho em desenvolvimento.                                                                                                      |
+
+Nada desta tabela está comprovado em hardware físico (not proven on hardware). Testes locais, integração com fixtures e aceitação com simuladores são evidências diferentes.
 
 **KobraLink (Anycubic Kobra X).** A integração exibe telemetria somente leitura de impressoras Kobra X dentro da interface OpenFarm, sem um segundo painel. O serviço KobraLink é instalado e operado separadamente; veja o [guia de hospedagem](docs/KOBRALINK-SELF-HOSTING.md). O [registro de aceitação RTC](docs/KOBRALINK-RTC-ACCEPTANCE.md) traz a evidência atual e seus limites. A [matriz documental FDM](docs/compatibility/fdm-matrix-final.md) lista 15 identidades candidatas, mas a ordem por recência não está verificada, e a matriz não comprova suporte a firmware ou hardware. Câmera e controles não fazem parte desta integração, e o projeto não é uma versão pronta para produção.
 

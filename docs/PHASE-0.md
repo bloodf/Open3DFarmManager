@@ -63,7 +63,7 @@ Detailed artifacts, limitations and historical failures remain in the
 [Spoolman service validation](SPOOLMAN-ACTUAL-API-VALIDATION.md).
 
 At `origin/main` `36d1198` the official migration catalog is contiguous through
-0023 and the toolchain is pnpm 12.18.0 with Node 24.22.2. The table above was
+0023 and the toolchain is pnpm 12.18.0 with Node 24.22.3. The table above was
 recorded earlier and was not re-run on this head; no integrated gate exists for
 it. The [implementation queue](IMPLEMENTATION-QUEUE.md) lists the remaining work
 in dependency order. Use this ledger and the exact checkpoint receipts when

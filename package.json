@@ -39,8 +39,8 @@
     "@types/node": "24.19.2",
     "@playwright/test": "1.65.0",
     "@axe-core/playwright": "4.14.0",
-    "prettier": "3.9.10",
-    "effect": "4.1.2",
+    "prettier": "3.10.1",
+    "effect": "4.1.4",
     "vitest": "5.1.0",
     "esbuild": "0.28.2"
   },
@@ -48,6 +48,6 @@
     "@open3dfarmmanager/farm-protocol": "workspace:*",
     "@open3dfarmmanager/shared": "workspace:*",
     "@open3dfarmmanager/sim-tools": "workspace:*",
-    "postgres": "4.1.0"
+    "postgres": "4.1.1"
   }
 }

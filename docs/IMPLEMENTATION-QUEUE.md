@@ -4,7 +4,7 @@ This queue tracks the independent MIT project without private deployment configu
 
 ## Current checkpoint
 
-The reference head is `36d1198` on `origin/main`. The official migration catalog is contiguous through `0023` (`infra/db/migrations`). The toolchain is pnpm 12.18.0 with Node 24.22.2; the gate is `pnpm run check:all`. No integrated gate has been run on this head. Earlier gate counts in checkpoint records describe their named sources only. Run the gate on the final committed candidate and report PostgreSQL, browser/WebRTC and simulator checks for that same head separately.
+The reference head is `36d1198` on `origin/main`. The official migration catalog is contiguous through `0023` (`infra/db/migrations`). The toolchain is pnpm 12.18.0 with Node 24.22.3; the gate is `pnpm run check:all`. No integrated gate has been run on this head. Earlier gate counts in checkpoint records describe their named sources only. Run the gate on the final committed candidate and report PostgreSQL, browser/WebRTC and simulator checks for that same head separately.
 
 - **0013 browser-device registry and 0014 credential proof — accepted slices:** see [browser key checkpoint](BROWSER-KEY-CHECKPOINT.md) and [credential acceptance checkpoint](CONNECTOR-CREDENTIAL-ACCEPTANCE-CHECKPOINT.md). The 0014 receipt is point-in-time context, not durable authorization.
 - **0015 printer ownership — committed and accepted on real PostgreSQL:** eleven synthetic behavior groups passed on a disposable cluster through the official contiguous runner, again after a PostgreSQL restart, with official 0015 down/up. See [printer ownership checkpoint](PRINTER-OWNERSHIP-CHECKPOINT.md).

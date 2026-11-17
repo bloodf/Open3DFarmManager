@@ -6,6 +6,7 @@ import {
 import type { TelemetryEventStore } from '../services/telemetry.ts'
 import { jobsFromEvents } from '../services/job-history-core.ts'
 import { recordJobs } from './job-history-store.ts'
+import { recordLatestStates } from './postgres-printer-latest-state.ts'
 class EventConflict extends Error {}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -49,6 +50,7 @@ export class PostgresTelemetryStore implements TelemetryEventStore {
           if (rows.length !== 1 || rows[0]?.matches !== true)
             throw new EventConflict()
         }
+        await recordLatestStates(tx, { farmId, agentId }, snapshot)
         // Finished jobs ride along in the same transaction; repeats are a no-op.
         await recordJobs(tx, { farmId, agentId }, jobsFromEvents(snapshot))
       })

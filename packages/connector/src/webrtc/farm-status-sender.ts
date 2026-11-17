@@ -70,6 +70,8 @@ export class FarmStatusSender {
   #admission: VerifiedRtcAdmission | undefined
   #terminal = false
   #seq = 0
+  /** Frames the client accepted. Congested attempts stay out of the budget. */
+  #delivered = 0
   #captured = -1
   #sourceDeadline = Infinity
   #sending = false
@@ -231,7 +233,7 @@ export class FarmStatusSender {
         until < 0 ||
         now >= until ||
         until > this.#admission.deadlineMonoMs ||
-        this.#seq >= 1024
+        this.#delivered >= 1024
       )
         throw Error('Incomplete or stale source')
       const message = validatedStatusMessage(
@@ -262,31 +264,39 @@ export class FarmStatusSender {
         wireBytes > FARM_STATUS_PENDING_BYTES ||
         buffered + wireBytes > FARM_STATUS_PENDING_BYTES
       ) {
-        if (!this.#backpressureTimer)
-          this.#backpressureTimer = setTimeout(
-            () => this.close('status-backpressure'),
-            FARM_STATUS_BACKPRESSURE_TIMEOUT_MS,
-          )
+        this.#armBackpressure()
         return
       }
-      clearTimeout(this.#backpressureTimer)
-      this.#backpressureTimer = undefined
       this.#captured = captured
       this.#seq++
       this.#sending = true
       this.#sourceDeadline = until
       const outcome = this.#client.sendStatus(message)
       if (outcome !== true) {
-        runSynchronous(() => outcome)
-        this.close('status-send')
+        // Native backpressure: the peer coalesces the frame until its channel
+        // drains. The newest snapshot wins, nothing is lost and the session
+        // stays open until the #173 timeout.
+        this.#armBackpressure()
+        if (this.current()) this.schedule(until)
         return
       }
+      this.#delivered++
+      clearTimeout(this.#backpressureTimer)
+      this.#backpressureTimer = undefined
       if (this.current()) this.schedule(until)
     } catch {
       this.close('source-invalid')
     } finally {
       this.#sending = false
     }
+  }
+  /** Close a read-only session whose status queue stays congested. */
+  #armBackpressure() {
+    if (this.#backpressureTimer) return
+    this.#backpressureTimer = setTimeout(
+      () => this.close('status-backpressure'),
+      FARM_STATUS_BACKPRESSURE_TIMEOUT_MS,
+    )
   }
   close(reason = 'closed') {
     if (this.#terminal) return

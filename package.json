@@ -35,7 +35,8 @@
     "test:postgres": "node scripts/test-postgres.ts",
     "test:rtsp-supervisor": "node --test --test-concurrency=1 tools/rtsp-ingest/supervisor/*.test.ts",
     "test:rtsp-framing": "node --test tools/rtsp-ingest/integration/moving-fixture-input.test.ts",
-    "test:upgrade-rehearsal": "node --test --test-force-exit --test-timeout=1800000 tests/docker/upgrade-rehearsal.test.ts"
+    "test:upgrade-rehearsal": "node --test --test-force-exit --test-timeout=1800000 tests/docker/upgrade-rehearsal.test.ts",
+    "test:rtc-memory": "node scripts/test-rtc-memory.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

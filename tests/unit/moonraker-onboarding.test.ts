@@ -25,6 +25,8 @@ import {
   encodeConfigurationResponse,
   type ConfigurationRequestFrame,
 } from '../../packages/farm-protocol/src/configuration-frames.ts'
+import { moonrakerIdentity } from '../../packages/connector/src/provisioning/moonraker.ts'
+import { configurationOpaqueId } from '../../packages/farm-protocol/src/configuration-common.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { createProvisioningEngine } from '../../packages/connector/src/provisioning/engine.ts'
 import {
@@ -214,6 +216,19 @@ async function apply(
 }
 
 describe('Moonraker signed onboarding', () => {
+  it('preserves valid identities and fixes non-alphanumeric digest prefixes', () => {
+    for (const [origin, expected] of [
+      ['http://127.0.0.1:7125', 'Uv7anHdw_zlIK7jGMdYQgh8P0YfhGemDpZxw1vvXM3g'],
+      ['http://127.0.0.1:1069', 'm_o6e44RElczUdMuenccOLYNObiLUzrHPqR2v_sbPRw8'],
+      ['http://127.0.0.1:1162', 'm-FSTvIXZ5yCbYwEBeqKWKH9c4BAqGUo9HW9rspBeur0'],
+    ]) {
+      const identity = moonrakerIdentity(origin!)
+      expect(identity.device_id).toBe(expected)
+      expect(configurationOpaqueId.safeParse(identity.device_id).success).toBe(
+        true,
+      )
+    }
+  })
   it('validates the closed contract and binds the key to the signed target hash', async () => {
     const input = target('https://printer.local:7125/', 'synthetic_key')
     expect(input).toMatchObject({

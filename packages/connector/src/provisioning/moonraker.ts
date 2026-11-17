@@ -47,7 +47,8 @@ export function moonrakerIdentity(origin: string) {
   const digest = createHash('sha256')
     .update(new URL(origin).origin)
     .digest('base64url')
-  return { bridge_instance_id: 'moonraker-' + digest, device_id: digest }
+  const deviceId = /^[A-Za-z0-9]/.test(digest) ? digest : `m${digest}`
+  return { bridge_instance_id: 'moonraker-' + digest, device_id: deviceId }
 }
 export function moonrakerCredentialPath(
   directory: string,

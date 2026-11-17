@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   allAcceptanceRows,
   buildAcceptanceSummary,
+  parseLastJson,
   runnableAcceptanceRows,
 } from '../../scripts/rtc-farm-all-mode.ts'
 
@@ -29,5 +30,14 @@ test('summary binds row pass/fail results to the candidate commit', () => {
         { suite: 'network-fault', row: 'udp-block', passed: false },
       ],
     },
+  )
+})
+
+test('runner reports are parsed before trailing failure diagnostics', () => {
+  assert.deepEqual(
+    parseLastJson(
+      'build output\n{\n  "result": "failed",\n  "results": [{"scenario":"x","passed":false}]\n}\nError: suite failed',
+    ),
+    { result: 'failed', results: [{ scenario: 'x', passed: false }] },
   )
 })

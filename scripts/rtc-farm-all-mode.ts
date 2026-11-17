@@ -62,15 +62,31 @@ export function buildAcceptanceSummary(
   }
 }
 
-function lastJson(output: string): unknown {
-  const starts = [...output.matchAll(/(?:^|\n)\s*\{/g)].map(
+export function parseLastJson(output: string): unknown {
+  const starts = [...output.matchAll(/(?:^|\n)\{/g)].map(
     (match) => match.index! + match[0].lastIndexOf('{'),
   )
   for (const start of starts.reverse()) {
-    try {
-      return JSON.parse(output.slice(start).trim())
-    } catch {
-      // Logs may contain JSON fragments; the runner's final line is the report.
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let end = start; end < output.length; end++) {
+      const char = output[end]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') inString = true
+      else if (char === '{') depth++
+      else if (char === '}' && --depth === 0) {
+        try {
+          return JSON.parse(output.slice(start, end + 1))
+        } catch {
+          break
+        }
+      }
     }
   }
   return undefined
@@ -136,7 +152,7 @@ export async function runAllAcceptance(checkout: string) {
     [join(checkout, 'scripts/test-rtc-farm-acceptance.ts')],
     { RTC_FARM_TEST_SCENARIOS: runnableRows.join(',') },
   )
-  const rtcReport = lastJson(rtc.output) as
+  const rtcReport = parseLastJson(rtc.output) as
     { results?: { scenario: string; passed: boolean }[] } | undefined
   for (const row of rtcRows) {
     if (!runnableRows.includes(row)) {
@@ -169,7 +185,7 @@ export async function runAllAcceptance(checkout: string) {
   const outage = await execute('connector-outage', process.execPath, [
     join(checkout, 'scripts/test-connector-outage-recovery.ts'),
   ])
-  const outageReport = lastJson(outage.output) as
+  const outageReport = parseLastJson(outage.output) as
     | {
         result?: string
         scenarios?: { name: string; result: string }[]

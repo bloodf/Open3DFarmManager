@@ -319,14 +319,20 @@ export async function runConnectorOutageScenarios(input: {
     async function startConnectorAndBaseline(timeoutMs = 30000) {
       const current = launchConnector()
       // The first subscription snapshot after each start is a new observation.
-      await until(
-        () => {
-          if (!current.running) throw new Error('Connector exited at startup')
-          return current.count('queued') >= 1
-        },
-        timeoutMs,
-        'connector baseline queued',
-      )
+      try {
+        await until(
+          () => {
+            if (!current.running) throw new Error('Connector exited at startup')
+            return current.count('queued') >= 1
+          },
+          timeoutMs,
+          'connector baseline queued',
+        )
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; fixture=${JSON.stringify({ moonrakerClients: moon.clients, moonrakerSubscriptions: moon.subscriptions, handlerErrors, connectorDiagnostics: current.diagnostics })}`,
+        )
+      }
       expected.push(moon.progress)
       assert.ok(current.running, 'connector alive after baseline')
       return current

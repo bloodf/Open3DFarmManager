@@ -77,8 +77,28 @@ export async function startFakeMoonraker(port: number) {
           const message: unknown = JSON.parse(data.toString())
           if (!message || typeof message !== 'object' || !('id' in message))
             return
-          subscriptions++
-          baselines.push(progress)
+          const method = 'method' in message ? message.method : undefined
+          if (method === 'printer.objects.list') {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: message.id,
+                result: { objects: [] },
+              }),
+            )
+            return
+          }
+          if (
+            method !== 'printer.objects.subscribe' &&
+            method !== 'printer.objects.query'
+          )
+            throw new Error(
+              `Unexpected synthetic Moonraker request: ${String(method)}`,
+            )
+          if (method === 'printer.objects.subscribe') {
+            subscriptions++
+            baselines.push(progress)
+          }
           ws.send(
             JSON.stringify({
               jsonrpc: '2.0',

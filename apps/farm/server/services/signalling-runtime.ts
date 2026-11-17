@@ -1,10 +1,12 @@
 import type { IncomingMessage } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { createLogger } from '@open3dfarmmanager/shared'
 import type { SessionConfig } from 'nuxt/server'
 import {
   decodeSignallingClientFrame,
   encodeSignallingServerFrame,
   SignallingServerFrame,
+  SIGNALLING_RATE_LIMIT_CLOSE_CODE,
 } from '../../../../packages/farm-protocol/src/signalling-socket.ts'
 import {
   decodePauseSignallingClientFrame,
@@ -55,6 +57,8 @@ import {
   SignallingWebSocketResources,
   type SignallingResourceHandle,
   type SignallingSocketPort,
+  acceptSignallingMessage,
+  type SignallingMessageBucket,
 } from './signalling-websocket-limits.ts'
 import {
   destroySignallingUpgrade,
@@ -63,6 +67,7 @@ import {
 } from './signalling-socket.ts'
 
 class AuthorityUnavailable extends Error {}
+const signallingLog = createLogger('farm-server')
 
 type Reader = Pick<
   PostgresSignallingAuthorization,
@@ -130,6 +135,7 @@ interface Connection {
   inboxGeneration: number
   state: State
   native: SignallingSocketPort | null
+  messageBucket: SignallingMessageBucket
   closed: boolean
   readonly abort: AbortController
   inboxDeadline: number
@@ -254,6 +260,7 @@ export class SignallingRuntime {
           if (connection) this.#close(connection)
           else request.socket.destroy()
         },
+        close: (code, reason) => connection?.native?.close?.(code, reason),
       })
       if (!resource || request.socket.destroyed) throw new Error('Capacity')
       connection = {
@@ -270,6 +277,7 @@ export class SignallingRuntime {
             ? { kind: 'browser.begin', sessionId: '' }
             : { kind: 'connector.begin' },
         native: null,
+        messageBucket: { tokens: 60, updatedAt: start.monotonic },
         closed: false,
         abort: new AbortController(),
         inboxDeadline: start.monotonic + 30_000,
@@ -332,6 +340,24 @@ export class SignallingRuntime {
       this.#close(connection)
       return
     }
+    if (
+      !acceptSignallingMessage(
+        connection.messageBucket,
+        this.#clock.monotonic(),
+        connection.native!,
+        () => {
+          signallingLog.warn('signalling-socket-closed', {
+            reason: 'message-rate-limit',
+            closeCode: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+          })
+          this.#close(connection, {
+            code: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+            reason: 'Signalling message rate limit exceeded',
+          })
+        },
+      )
+    )
+      return
     try {
       const text = signallingMessageText(message)
       this.#resources.receive(connection.resource, text, async (wire) => {
@@ -968,7 +994,10 @@ export class SignallingRuntime {
       // Closing still ends the session; the offline lifetime bounds the rest.
     }
   }
-  #close(connection: Connection): void {
+  #close(
+    connection: Connection,
+    closeCode?: { code: number; reason: string },
+  ): void {
     if (connection.closed) return
     connection.closed = true
     connection.abort.abort()
@@ -994,8 +1023,10 @@ export class SignallingRuntime {
     }
     // Drop any retained JWT from preauthentication/retry state before termination.
     connection.state = { kind: 'connector.begin' }
-    this.#resources.close(connection.resource)
-    connection.native?.terminate()
-    connection.request.socket.destroy()
+    this.#resources.close(connection.resource, closeCode)
+    if (!closeCode) {
+      connection.native?.terminate()
+      connection.request.socket.destroy()
+    }
   }
 }

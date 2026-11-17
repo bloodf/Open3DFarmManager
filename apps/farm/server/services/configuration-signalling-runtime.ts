@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'node:http'
+import { createLogger } from '@open3dfarmmanager/shared'
 import type { SessionConfig } from 'nuxt/server'
 import {
   inspectSignallingUpgrade,
@@ -12,6 +13,11 @@ import {
   signallingNativeSocket,
 } from './signalling-socket.ts'
 import type { SignallingSocketPort } from './signalling-websocket-limits.ts'
+import {
+  acceptSignallingMessage,
+  type SignallingMessageBucket,
+} from './signalling-websocket-limits.ts'
+import { SIGNALLING_RATE_LIMIT_CLOSE_CODE } from '../../../../packages/farm-protocol/src/signalling-socket.ts'
 import type {
   ConfigurationSignallingCoordinator,
   ConfigurationSignallingTimers,
@@ -31,7 +37,9 @@ type Connection = {
   running: boolean
   closed: boolean
   cancelOpen: () => void
+  messageBucket: SignallingMessageBucket
 }
+const signallingLog = createLogger('farm-server')
 const defaultTimers: ConfigurationSignallingTimers = {
   after(ms, callback) {
     const timer = setTimeout(callback, ms)
@@ -89,6 +97,7 @@ export class ConfigurationSignallingRuntime {
         running: false,
         closed: false,
         cancelOpen: () => {},
+        messageBucket: { tokens: 60, updatedAt: performance.now() },
       }
       const owned = request
       this.#connections.set(owned, connection)
@@ -163,6 +172,24 @@ export class ConfigurationSignallingRuntime {
     const connection = request && this.#connections.get(request)
     if (!request || !connection || connection.closed || !connection.session)
       return
+    if (
+      !acceptSignallingMessage(
+        connection.messageBucket,
+        performance.now(),
+        connection.native!,
+        () => {
+          signallingLog.warn('signalling-socket-closed', {
+            reason: 'message-rate-limit',
+            closeCode: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+          })
+          this.#close(request, {
+            code: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+            reason: 'Signalling message rate limit exceeded',
+          })
+        },
+      )
+    )
+      return
     try {
       const text = signallingMessageText(message)
       const bytes = Buffer.byteLength(text)
@@ -211,7 +238,10 @@ export class ConfigurationSignallingRuntime {
       return undefined
     }
   }
-  #close(request: IncomingMessage): void {
+  #close(
+    request: IncomingMessage,
+    closeCode?: { code: number; reason: string },
+  ): void {
     const connection = this.#connections.get(request)
     if (!connection || connection.closed) return
     connection.closed = true
@@ -219,9 +249,15 @@ export class ConfigurationSignallingRuntime {
     connection.queue.length = 0
     connection.cancelOpen()
     connection.session?.close()
-    try {
-      connection.native?.terminate()
-    } catch {}
+    if (closeCode) {
+      try {
+        connection.native?.close?.(closeCode.code, closeCode.reason)
+      } catch {}
+    } else {
+      try {
+        connection.native?.terminate()
+      } catch {}
+    }
   }
 }
 

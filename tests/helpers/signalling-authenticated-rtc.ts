@@ -260,7 +260,7 @@ async function connectorChild(
       return await bounded(
         reply,
         input.signal,
-        command.kind === 'start' ? 15000 : 2000,
+        command.kind === 'start' || command.kind === 'identity' ? 30000 : 2000,
       )
     } catch {
       fail()

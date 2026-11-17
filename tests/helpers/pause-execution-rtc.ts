@@ -474,7 +474,11 @@ async function connectorChild(
       }
     | undefined
 
-  const fail = () => {
+  const fail = (reason: unknown = 'io') => {
+    if (!failure)
+      void note(
+        `connector-child-failure:${typeof reason === 'string' ? reason : 'io'}; requests:${requests}; output-bytes:${outputBytes}; stderr-bytes:${errorBytes}`,
+      )
     failure = true
     pending?.reject(Error('RTC execution child rejected or closed'))
     pending = undefined
@@ -500,7 +504,7 @@ async function connectorChild(
       outputBytes > 65_536 ||
       output.byteLength + chunk.byteLength > PAUSE_EXECUTION_RTC_IPC_BYTES
     ) {
-      fail()
+      fail('output-bound')
       return
     }
     output = Buffer.concat([output, chunk])
@@ -528,7 +532,7 @@ async function connectorChild(
       output = Buffer.alloc(0)
       waiter.resolve(reply)
     } catch {
-      fail()
+      fail('invalid-reply')
     }
   })
 
@@ -559,10 +563,10 @@ async function connectorChild(
       return await bounded(
         reply,
         input.signal,
-        command.kind === 'start' ? 15000 : 3000,
+        command.kind === 'start' || command.kind === 'identity' ? 30000 : 3000,
       )
     } catch {
-      fail()
+      fail('ipc-' + command.kind)
       throw Error('RTC execution child request failed')
     }
   }

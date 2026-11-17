@@ -20,6 +20,7 @@ import {
   until,
 } from './connector-outage-fixtures.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
+import { runOutagePauseScenarios } from './connector-outage-pause.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -726,6 +727,19 @@ export async function runConnectorOutageScenarios(input: {
         dropRoleLater: (role) => created.push(role),
       }),
     )
+    await app?.stop()
+    const pauseScenarios = await runOutagePauseScenarios(
+      join(workDir, 'pause-runtime'),
+    )
+    for (const entry of pauseScenarios.scenarios) {
+      const recorded = { durationMs: 0, ...entry }
+      report.scenarios.push(recorded)
+      appendFileSync(
+        join(workDir, 'progress.jsonl'),
+        JSON.stringify(recorded) + '\n',
+      )
+    }
+    await startApp(renewalEnv)
     return report
   } finally {
     const failures: string[] = []

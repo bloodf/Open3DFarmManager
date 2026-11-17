@@ -2,6 +2,12 @@
 
 Issue #6 (E3). `pnpm run test:connector-outage` (`scripts/test-connector-outage-recovery.ts`) runs one integrated, reproducible acceptance of the Connector's durable telemetry path across server outages and its own restarts. It contributes the "outage and recovery, bounded telemetry drain" evidence required by [PHASE-0.md](PHASE-0.md); it is not the combined Phase 0 acceptance.
 
+## Issue #182 — pause authority during outages
+
+The opt-in runner now includes scenarios 7–9 for a signed pause refused after offline authority expiry, accepted after authenticated confirmation, and stale-authority audit entries retained in order across a runtime restart. `tests/node/outage-pause-scenarios.test.ts` verifies scenario names/order, signature verification, the real offline-authority tracker, and the durable audit writer without Docker or a printer.
+
+The required real opt-in runs were attempted twice on 2026-11-17 with the pinned PostgreSQL image and isolated loopback port ranges. Both stopped before scenario 1 because the Connector could not queue its synthetic Moonraker baseline: it emitted `{"kind":"unavailable","reason":"invalid-response"}`. The farm app was ready, the proxy had received no telemetry request, and each run removed its owned PostgreSQL container and roles. No pause scenario was reached in either run. Bounded diagnostics are retained outside the repository under `/tmp/o3dfm-p1-outage-pause/` for this startup failure. The real-run criterion remains unverified until the Moonraker fixture startup failure is resolved.
+
 ## What runs
 
 - A fresh, disposable, digest-pinned PostgreSQL 17 container (read-only root, tmpfs data, all capabilities dropped, loopback port), migrated to the current catalog. The runner never pulls an image or accepts a database URL, and removes only its own container, verified by ID, name and label.

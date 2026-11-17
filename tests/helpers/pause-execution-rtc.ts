@@ -1,3 +1,4 @@
+import { rtcRejectionKind, verifyRtcRejection } from './rtc-farm-rejections.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { appendFile, open, realpath } from 'node:fs/promises'
@@ -623,6 +624,7 @@ export type PauseExecutionFixtureOptions = Readonly<{
     | 'reassigned'
     | 'peer-closed'
     | 'late-close'
+  rejection?: string | undefined
   testReplay?: boolean
 }>
 
@@ -635,6 +637,10 @@ export function createPauseExecutionRtcFixtureExtension(
   options: PauseExecutionFixtureOptions = {},
 ): SignallingFixtureExtension {
   const closureMode = options.closure ?? 'standard'
+  const rejection =
+    options.rejection === undefined
+      ? undefined
+      : rtcRejectionKind(options.rejection)
   let current:
     | {
         input: SignallingIdentityInput
@@ -750,6 +756,7 @@ export function createPauseExecutionRtcFixtureExtension(
                 issuer: issuer.issuer,
                 kid: issuer.kid,
                 publicKeySpki: issuer.publicKeySpki,
+                ...(rejection ? { rejection } : {}),
               },
             },
           ),
@@ -870,7 +877,9 @@ export function createPauseExecutionRtcFixtureExtension(
             closureMode === 'peer-closed' ||
             closureMode === 'late-close'
               ? closureMode
-              : 'none',
+              : rejection === 'revoked-device'
+                ? 'revoked-device'
+                : 'none',
           origin: input.origin,
           credentialAudience: input.audience,
           issuer: session.issuer,
@@ -923,6 +932,80 @@ export function createPauseExecutionRtcFixtureExtension(
             10000,
           ),
         ])
+
+        if (rejection) {
+          let before = await observeNative()
+          const outcome = session.actor.evaluate((actor) => actor.pause())
+          if (rejection === 'replayed') {
+            assert.equal(await outcome, 'applied')
+            before = await until(
+              observeNative,
+              (v) => v.commandOutcome === 'applied',
+              input.signal,
+              10000,
+            )
+            assert.equal(
+              await session.actor.evaluate((actor) =>
+                actor.adversarialReplay(),
+              ),
+              true,
+            )
+            const after = await until(
+              observeNative,
+              (v) => v.terminal,
+              input.signal,
+              8000,
+            )
+            await session.note(verifyRtcRejection(rejection, before, after))
+          } else if (rejection === 'revoked-device') {
+            await until(
+              observeNative,
+              (v) => v.commandReceived,
+              input.signal,
+              10000,
+            )
+            await input.adminPage.evaluate(
+              async (body) => {
+                const response = await fetch('/api/browser-devices/revoke', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(body),
+                })
+                if (!response.ok)
+                  throw Error('Fixture device revocation failed')
+              },
+              {
+                farm_id: input.farmId,
+                key_id: input.browserKeyId,
+                expected_thumbprint: input.browserThumbprint,
+              },
+            )
+            await until(observeNative, (v) => v.terminal, input.signal, 8000)
+            assert.equal(
+              (await session.connector.request({ kind: 'release' })).kind,
+              'released',
+            )
+            const after = await until(
+              observeNative,
+              (v) => v.commandOutcome !== null,
+              input.signal,
+              8000,
+            )
+            assert.notEqual(await outcome, 'applied')
+            await session.note(verifyRtcRejection(rejection, before, after))
+          } else {
+            const after = await until(
+              observeNative,
+              (v) => v.commandOutcome !== null,
+              input.signal,
+              10000,
+            )
+            assert.equal(await outcome, 'rejected')
+            await session.note(verifyRtcRejection(rejection, before, after))
+          }
+          completed = true
+          return
+        }
 
         if (closureMode === 'revocation') {
           // Negative row: Mutate authority during active session before command send

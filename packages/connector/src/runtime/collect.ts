@@ -86,6 +86,7 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   discoverMoonrakerObjects?: boolean
   bambuTransport?: (
     options: Parameters<typeof createBambuTransport>[0],
@@ -130,8 +131,10 @@ export async function collectIntoQueue(input: {
     totals.expired += value.expired
     totals.capacity += value.capacity
     totals.partialTail ||= value.partialTail
-    if (value.expired || value.capacity || value.partialTail)
+    if (value.expired || value.capacity || value.partialTail) {
+      input.onLoss?.({ kind: 'loss', phase, ...value })
       diagnostic({ kind: 'loss', phase, ...value })
+    }
   }
   function fail(error: unknown) {
     failure ??= { error }

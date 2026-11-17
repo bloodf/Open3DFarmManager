@@ -27,6 +27,7 @@ export async function runSignallingLifecycle(input: {
   now?: () => number
   monotonic?: () => number
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  onReconnect?: () => void
   createSession(onTerminal: () => void, onAdmitted: () => void): Session
 }): Promise<void> {
   const now = input.now ?? Date.now
@@ -102,6 +103,7 @@ export async function runSignallingLifecycle(input: {
     if (closeFailure) throw closeFailure.error
     if (expired) return
     await sleep(Math.min(backoff, Math.max(0, remaining())), input.signal)
+    if (!input.signal.aborted && remaining() > 0) input.onReconnect?.()
     backoff = Math.min(input.retryMaxMs, backoff * 2)
   }
 }

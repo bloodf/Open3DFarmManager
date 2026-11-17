@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "collection": {
+    "version": 1,
+    "allowedOrigins": ["http://127.0.0.1:7125"],
+    "printers": [
+      {
+        "printerKey": "moonraker-login",
+        "origin": "http://127.0.0.1:7125",
+        "apiKeyFile": "/run/open3dfarmmanager/private/credentials/moonraker-login.json"
+      }
+    ],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    }
+  }
+}

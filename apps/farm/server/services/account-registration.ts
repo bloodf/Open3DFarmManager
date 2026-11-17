@@ -17,6 +17,9 @@ type AuthEvent = Pick<RequestEvent, 'req' | 'res'>
 
 export const INVITE_TTL_MS = 72 * 60 * 60 * 1000
 export const MIN_PASSWORD_CHARS = 12
+/** Counts code points, so the minimum is not met by multi-unit characters alone. */
+export const passwordTooShort = (password: string) =>
+  [...password].length < MIN_PASSWORD_CHARS
 const farmUuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const inviteRoles: readonly string[] = ['admin', 'operator', 'viewer']
@@ -57,7 +60,7 @@ async function createAccount(
   )
   const input = await readLoginBody(event.req)
   await limit(runtime, 'a', 'register:' + input.username)
-  if ([...input.password].length < MIN_PASSWORD_CHARS) throw refused()
+  if (passwordTooShort(input.password)) throw refused()
   let created: boolean
   if (!precheck()) throw refused()
   try {

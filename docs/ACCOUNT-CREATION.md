@@ -42,7 +42,7 @@ The flow is authorization code with S256 PKCE, a fresh `state` and a fresh `nonc
 
 A subject that is already linked signs in to that account and does not change memberships. A subject that is not linked can be attached only by presenting a valid farm invite (`POST /api/auth/oidc/start` with `x-invite-token` and `{ "username" }`). That path consumes the invite, creates the account and sets the membership role from the invite row. A random unknown password hash is stored so the credential row stays valid; the person does not learn it. An owner reset link can set a password later. Matching an unverified email to an existing account is not implemented. Multiple providers at once are not implemented. This repository's node test uses a local fake provider on an ephemeral port. It does not prove a deployment against a production identity provider.
 
-While the flag is off, `GET /api/auth/oidc` answers 404 and the sign-in page does not offer the provider. Migration `0038_oidc_identities` adds `farm.oidc_identities` (immutable; no email or role columns). Sign-in needs `SELECT` (`farm_password_auth`). Invite linking needs `INSERT` (`farm_account_registration`) plus the registration grants from `0024`.
+While the flag is off, `GET /api/auth/oidc` answers 404 and the sign-in page does not offer the provider. Migration `0039_oidc_identities` adds `farm.oidc_identities` (immutable; no email or role columns). Sign-in needs `SELECT` (`farm_password_auth`). Invite linking needs `INSERT` (`farm_account_registration`) plus the registration grants from `0024`.
 
 ## Known limits
 

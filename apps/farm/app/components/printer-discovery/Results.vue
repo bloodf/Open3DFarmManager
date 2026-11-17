@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { DiscoveryResult } from '../../../../../packages/farm-protocol/src/configuration-discovery.ts'
+import { discoveryLabel } from '../../utils/printer-discovery-view.ts'
 type Printer = Extract<DiscoveryResult, { ok: true }>['printers'][number]
 defineProps<{ printers: Printer[] }>()
 defineEmits<{ select: [printer: Printer] }>()
@@ -8,11 +9,7 @@ defineEmits<{ select: [printer: Printer] }>()
 <template>
   <ul v-if="printers.length">
     <li v-for="(printer, index) in printers" :key="index">
-      {{
-        printer.name ||
-        printer.model ||
-        (printer.vendor === 'bambu' ? 'Bambu Lab' : 'Moonraker')
-      }}
+      {{ discoveryLabel(printer) }}
       · {{ printer.host }}
       <button type="button" @click="$emit('select', printer)">
         Selecionar {{ printer.name || printer.host }}

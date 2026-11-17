@@ -203,31 +203,34 @@ async function searchPrinters(host?: string) {
 function selectDiscovery(
   printer: Extract<DiscoveryResult, { ok: true }>['printers'][number],
 ) {
-  if (printer.vendor === 'creality' || printer.vendor === 'anycubic') {
-    closeKobraSession()
-    onboardingFamily.value =
-      printer.vendor === 'creality' ? 'creality-native' : 'anycubic-lan'
-    if (printer.vendor === 'creality') crealityHost.value = printer.host
-    else {
-      anycubicHost.value = printer.host
-      anycubicUsername.value = ''
-      anycubicPassword.value = ''
-    }
-    return
-  }
   const prefill = discoveryPrefill(printer)
   closeKobraSession()
   onboardingFamily.value = prefill.family
   kobraLabel.value = prefill.label
-  if (prefill.family === 'bambu-lan') {
-    bambuIp.value = prefill.ip
-    bambuSerial.value = prefill.serial
-    bambuAccessCode.value = ''
-  } else {
-    moonrakerOrigin.value = prefill.origin
-    moonrakerApiKey.value = ''
-    moonrakerUsername.value = ''
-    moonrakerPassword.value = ''
+  switch (prefill.family) {
+    case 'bambu-lan':
+      bambuIp.value = prefill.ip
+      bambuSerial.value = prefill.serial
+      bambuAccessCode.value = ''
+      break
+    case 'klipper-moonraker':
+      moonrakerOrigin.value = prefill.origin
+      moonrakerApiKey.value = ''
+      moonrakerUsername.value = ''
+      moonrakerPassword.value = ''
+      break
+    case 'creality-native':
+      crealityHost.value = prefill.host
+      break
+    case 'anycubic-lan':
+      anycubicHost.value = prefill.host
+      anycubicUsername.value = ''
+      anycubicPassword.value = ''
+      break
+    default: {
+      const _exhaustive: never = prefill
+      return _exhaustive
+    }
   }
 }
 const onboardingFamily = ref<

@@ -144,6 +144,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'PAIRING_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-password-reset.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'PASSWORD_RESET_SYNTHETIC_TEST_PORT',
+      admitted: 'PASSWORD_RESET_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-pause-authority.ts': {
     migrations: '0018_pause_authority',
     fixture: {

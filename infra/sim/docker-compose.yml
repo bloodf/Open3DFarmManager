@@ -17,7 +17,7 @@ services:
   sv06:
     <<: *printer
     ports:
-      - '127.0.0.1:7125:7125'
+      - '127.0.0.1:${SIM_SV06_PORT:-7125}:7125'
       - '127.0.0.1:8110:8080'
     volumes:
       - sv06-data:/home/printer/printer_data
@@ -38,7 +38,7 @@ services:
     platform: linux/amd64
     profiles: [spoolman]
     ports:
-      - '127.0.0.1:7912:8000'
+      - '127.0.0.1:${SIM_SPOOLMAN_PORT:-7912}:8000'
     environment:
       SPOOLMAN_LOGGING_LEVEL: WARNING
     volumes:

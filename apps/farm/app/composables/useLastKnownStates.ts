@@ -10,7 +10,7 @@ import {
   parseLastKnownStates,
   type LastKnownState,
   type LastKnownStatesState,
-} from '../utils/last-known-states.ts'
+} from './useLastKnownStates-core.ts'
 
 type Read = (path: string, signal: AbortSignal) => Promise<unknown>
 

@@ -10,12 +10,12 @@ import {
   offlineCards,
   parseLastKnownStates,
   type LastKnownState,
-} from '../../apps/farm/app/utils/last-known-states.ts'
-import { renderFarmComponent } from '../../apps/farm/app/utils/render-farm-component.ts'
+} from '../../apps/farm/app/composables/useLastKnownStates-core.ts'
+import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
 import {
   farmRef,
   settleFarmUpdates,
-} from '../../apps/farm/app/utils/farm-ref.ts'
+} from '../../apps/farm/app/composables/useLastKnownStates-ref.ts'
 import {
   createLastKnownStates,
   useLastKnownStates,

@@ -4,7 +4,7 @@ import {
   OFFLINE_CONNECTION_LABEL,
   lastKnownStateAgeLabel,
   type LastKnownState,
-} from '../../utils/last-known-states.ts'
+} from '../../composables/useLastKnownStates-core.ts'
 import { printerStateLabel } from '../../utils/farm-view.ts'
 
 const props = defineProps<{

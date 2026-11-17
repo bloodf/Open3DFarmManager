@@ -166,11 +166,9 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
     await new Promise((r) => setTimeout(r, 5))
   }
 }
-// The command journal is SQLite with synchronous=FULL, so opening it costs
-// several fsyncs. On a disk-backed tmpdir shared with other test gates those
-// fsyncs queue behind unrelated I/O and stalled the fixture for 10s+ (the
-// whole 15s test budget). Nothing here asserts on durability, so keep the
-// fixture state on memory-backed storage when the host has it.
+// The command journal uses SQLite synchronous=FULL. This fixture does not
+// assert durability, so use memory-backed storage when available to avoid
+// competing with other test gates for disk I/O.
 const fixtureRoot = (() => {
   try {
     accessSync('/dev/shm', constants.W_OK)
@@ -324,6 +322,9 @@ async function connect(
   const offer = await connector.offer()
   const answer = await browser.answer(offer)
   connector.answer(answer)
+  // The binding allows at most 30,000 ms. Separate clock reads can cross a
+  // millisecond boundary under load and make both peers reject the binding.
+  const bindingIssuedAt = Date.now()
   const binding: ControlSessionBinding = {
     v: 1,
     purpose: 'pause-rtc',
@@ -342,15 +343,23 @@ async function connect(
     credential_jti: randomUUID(),
     browser_nonce: nonce(),
     connector_nonce: nonce(),
-    issued_at: Date.now(),
-    expires_at: Date.now() + 30000,
+    issued_at: bindingIssuedAt,
+    expires_at: bindingIssuedAt + 30000,
     offer_sha256: await controlSdpHash(offer),
     answer_sha256: await controlSdpHash(answer),
     browser_dtls: controlDtlsFingerprint(answer),
     connector_dtls: controlDtlsFingerprint(offer),
   }
   bindingReady.resolve(binding)
-  const phase = await challenge.promise
+  const phase = await Promise.race([
+    challenge.promise,
+    browser.closed.then(() => {
+      throw Error('Browser closed before admission challenge')
+    }),
+    connector.closed.then(() => {
+      throw Error('Connector closed before admission challenge')
+    }),
+  ])
   const issuedAt = Date.now()
   const common = {
     farm_id: binding.farm_id,

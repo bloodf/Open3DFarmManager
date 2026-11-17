@@ -24,7 +24,12 @@ const links = computed(() => [
     ? [{ to: '/parear', label: 'Aprovar Connector' }]
     : []),
   { to: '/compatibilidade', label: 'Compatibilidade' },
-  ...(isOwner.value ? [{ to: '/convites', label: 'Convidar pessoa' }] : []),
+  ...(isOwner.value
+    ? [
+        { to: '/membros', label: 'Membros' },
+        { to: '/convites', label: 'Convidar pessoa' },
+      ]
+    : []),
   ...(authenticated.value ? [{ to: '/conta', label: 'Conta' }] : []),
   { to: '/criar-conta', label: 'Criar conta' },
   { to: '/primeiro-acesso', label: 'Primeiro acesso' },

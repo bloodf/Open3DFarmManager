@@ -109,6 +109,7 @@ async function submit() {
         @focus="(e) => (e.target as HTMLInputElement).select()"
       />
     </section>
+    <p><NuxtLink to="/membros">Gerenciar membros e convites</NuxtLink></p>
     <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
   </main>
 </template>

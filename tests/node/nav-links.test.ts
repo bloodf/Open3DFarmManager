@@ -48,5 +48,7 @@ test('sign-in and sign-out reflect authentication, and invitations require owner
   assert.match(layout, /\$fetch\('\/api\/auth\/me'/)
   assert.match(layout, /authenticated\.value\s*\?\s*\[\{ to: '\/sair'/)
   assert.match(layout, /:\s*\[\{ to: '\/entrar'/)
-  assert.match(layout, /isOwner\.value\s*\?\s*\[\{ to: '\/convites'/)
+  assert.match(layout, /to: '\/membros'/)
+  assert.match(layout, /to: '\/convites'/)
+  assert.match(layout, /isOwner\.value/)
 })

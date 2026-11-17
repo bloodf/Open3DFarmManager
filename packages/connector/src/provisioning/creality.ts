@@ -13,12 +13,17 @@ import type { CommitPlan } from './journal.ts'
 export type CrealityProbe = (input: {
   host: string
   signal: AbortSignal
+  port?: number
 }) => Promise<boolean>
 /** No requests or commands: accept only an unsolicited stock telemetry report. */
-export const probeCreality: CrealityProbe = ({ host, signal }) =>
+export const probeCreality: CrealityProbe = ({
+  host,
+  signal,
+  port = CREALITY_NATIVE_PORT,
+}) =>
   new Promise((resolve) => {
     if (signal.aborted) return resolve(false)
-    const socket = new WebSocket(`ws://${host}:${CREALITY_NATIVE_PORT}`, {
+    const socket = new WebSocket(`ws://${host}:${port}`, {
       maxPayload: 65536,
       handshakeTimeout: 5000,
       perMessageDeflate: false,

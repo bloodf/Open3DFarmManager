@@ -353,7 +353,7 @@ describe('Creality native onboarding', () => {
   it('reads loopback stock telemetry without sending any application frame', async () => {
     const require = createRequire(resolve('packages/connector/package.json'))
     const { WebSocketServer } = require('ws')
-    const server = new WebSocketServer({ host: '127.0.0.1', port: 9999 })
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
     cleanups.push(
       () =>
         new Promise<void>((resolve) => {
@@ -365,6 +365,7 @@ describe('Creality native onboarding', () => {
       server.once('listening', resolve)
       server.once('error', reject)
     })
+    const port = server.address().port
     const messages: unknown[] = []
     let connectionCount = 0
     server.on(
@@ -384,12 +385,14 @@ describe('Creality native onboarding', () => {
     expect(
       await probeCreality({
         host: '127.0.0.1',
+        port,
         signal: AbortSignal.timeout(100),
       }),
     ).toBe(false)
     expect(
       await probeCreality({
         host: '127.0.0.1',
+        port,
         signal: AbortSignal.timeout(1000),
       }),
     ).toBe(true)

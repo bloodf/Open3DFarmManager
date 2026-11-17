@@ -18,6 +18,7 @@ import {
   readCrealityPrinterBinding,
 } from '../control/printer-binding.ts'
 import { moonrakerWebUiOrigin } from '../config/moonraker.ts'
+import { crealityWebUiOrigin } from '../config/creality.ts'
 import { isLoopbackBindAddress } from '../config/rtc.ts'
 import type {
   PauseControlDiagnostic,
@@ -263,12 +264,7 @@ async function runConnectorAgentOnce(
             const bambu = readBambuPrinterBinding(binding)
             if (bambu) return `http://${bambu.host}`
             const creality = readCrealityPrinterBinding(binding)
-            if (creality) {
-              const host = creality.host.includes(':')
-                ? `[${creality.host}]`
-                : creality.host
-              return `http://${host}:${creality.httpPort ?? 80}`
-            }
+            if (creality) return crealityWebUiOrigin(creality)
             return
           },
         })

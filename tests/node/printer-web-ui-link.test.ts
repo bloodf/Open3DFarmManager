@@ -7,6 +7,7 @@ import type { FarmSnapshotProvider } from '../../packages/connector/src/webrtc/f
 import { localInterfaceOrigin } from '../../apps/farm/app/utils/farm-view.ts'
 import { resolvedLocalInterfaceOrigin } from '../../apps/farm/app/utils/farm-view.ts'
 import { moonrakerWebUiOrigin } from '../../packages/connector/src/config/moonraker.ts'
+import { crealityWebUiOrigin } from '../../packages/connector/src/config/creality.ts'
 
 test('snapshot inventory carries a validated binding web UI origin', () => {
   const agentId = randomUUID()
@@ -86,6 +87,23 @@ test('snapshot inventory carries a validated binding web UI origin', () => {
 })
 
 test('web UI origins reject credentials and the manual override remains credential-free', () => {
+  assert.equal(
+    crealityWebUiOrigin({ host: 'printer.local' }),
+    'http://printer.local',
+  )
+  assert.equal(
+    crealityWebUiOrigin({ host: 'printer.local', httpPort: 8080 }),
+    'http://printer.local:8080',
+  )
+  assert.equal(
+    PrinterState.safeParse({
+      printerKey: 'printer-a',
+      state: 'offline',
+      observedAt: 10,
+      localWebUiOrigin: crealityWebUiOrigin({ host: 'printer.local' }),
+    }).success,
+    true,
+  )
   assert.equal(
     PrinterState.safeParse({
       printerKey: 'printer-a',

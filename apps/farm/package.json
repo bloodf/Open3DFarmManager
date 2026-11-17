@@ -14,7 +14,7 @@
     "@open3dfarmmanager/shared": "workspace:*",
     "jose": "6.2.17",
     "nuxt": "4.6.4",
-    "postgres": "4.1.0",
+    "postgres": "4.1.1",
     "vue": "3.5.45",
     "vue-router": "5.5.1",
     "zod": "4.6.7"

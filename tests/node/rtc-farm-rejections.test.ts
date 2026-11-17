@@ -138,4 +138,32 @@ test('checkpoint states actual built-stack evidence rather than treating offline
     assert.ok(doc.includes(`command-rejected-${kind}`))
   assert.match(doc, /[a-f0-9]{40}/)
   assert.match(doc, /Built-stack status/)
+  const rejectionSection = doc.slice(doc.indexOf('## Issue #196'))
+  assert.match(rejectionSection, /Built-stack status: \*\*passed\*\*/)
+  assert.match(rejectionSection, /Validated source commit: `[a-f0-9]{40}`/)
+  const rows = rejectionSection
+    .split('\n')
+    .filter((line) => /^\|\s*`command-rejected-/.test(line))
+  assert.equal(rows.length, RTC_REJECTION_KINDS.length)
+  for (const kind of RTC_REJECTION_KINDS) {
+    const matching = rows.filter(
+      (line) => line.split('|')[1]?.trim() === `\`command-rejected-${kind}\``,
+    )
+    assert.equal(matching.length, 1)
+    assert.equal(matching[0]!.split('|')[3]?.trim(), 'pass')
+  }
+  const printingSection = doc.slice(
+    doc.indexOf('### `farm-page-printing-pause` row (#195'),
+    doc.indexOf('## Issue #196'),
+  )
+  const printingRows = printingSection
+    .split('\n')
+    .filter((line) => /^\|\s*[123]\s*\|/.test(line))
+  assert.equal(printingRows.length, 3)
+  assert.deepEqual(
+    printingRows.map((line) => line.split('|')[1]?.trim()),
+    ['1', '2', '3'],
+  )
+  for (const line of printingRows)
+    assert.equal(line.split('|')[2]?.trim(), 'pass')
 })

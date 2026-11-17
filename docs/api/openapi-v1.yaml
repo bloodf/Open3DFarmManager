@@ -535,10 +535,9 @@ paths:
       tags: [Actions]
       summary: Send a printer action
       description: |
-        `pause`, `resume`, `cancel` and `emergency_stop` require
-        `control:basic`; every other action requires `control:extended`. An
-        action the printer does not advertise answers 422 `unsupported` and is
-        never delivered. Otherwise the action is delivered to the Connector or,
+        `pause`, `resume` and `cancel` require `control:basic`; every other
+        action requires `control:extended`. An action the printer does not
+        advertise answers 422 `unsupported` and is never delivered. Otherwise the action is delivered to the Connector or,
         when the grant requires approval, held. A retry with the same
         `Idempotency-Key` and body returns the same action.
       security:
@@ -1070,8 +1069,8 @@ components:
             inventory:read: Read Spoolman inventory snapshots.
             jobs:read: Read job history and API-submitted jobs.
             jobs:start: Submit print jobs.
-            control:basic: Pause, resume, cancel and emergency stop.
-            control:extended: Temperatures, fans, lights, speed, homing, filament, macros and firmware restart; list macros.
+            control:basic: Pause, resume and cancel.
+            control:extended: Temperatures, fans, lights, speed, homing, filament and macros; list macros.
             events:subscribe: Manage webhook subscriptions and receive events.
   parameters:
     PrinterId:
@@ -2010,13 +2009,11 @@ components:
         - pause
         - resume
         - cancel
-        - emergency_stop
         - set_temperature
         - set_fan
         - home
         - set_light
         - set_speed
-        - firmware_restart
         - run_macro
         - load_filament
         - unload_filament
@@ -2029,15 +2026,7 @@ components:
           properties:
             action:
               type: string
-              enum:
-                [
-                  pause,
-                  resume,
-                  cancel,
-                  emergency_stop,
-                  firmware_restart,
-                  unload_filament,
-                ]
+              enum: [pause, resume, cancel, unload_filament]
             args:
               type: object
               additionalProperties: false

@@ -137,14 +137,12 @@ export async function testPrintingPausePage(input: {
       },
       async confirm() {
         const assignment = input.fixture.assignmentRefs[0]!
-        const row = page
-          .getByRole('article')
-          .filter({
-            has: page.getByRole('heading', {
-              name: assignment.printerKey,
-              exact: true,
-            }),
-          })
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', {
+            name: assignment.printerKey,
+            exact: true,
+          }),
+        })
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
@@ -185,14 +183,12 @@ export async function testPrintingPausePage(input: {
       },
       async resumed() {
         await expect.poll(state, { timeout: 10000 }).toBe('printing')
-        const row = page
-          .getByRole('article')
-          .filter({
-            has: page.getByRole('heading', {
-              name: input.fixture.assignmentRefs[0]!.printerKey,
-              exact: true,
-            }),
-          })
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', {
+            name: input.fixture.assignmentRefs[0]!.printerKey,
+            exact: true,
+          }),
+        })
         await expect(row.getByText('Imprimindo', { exact: true })).toBeVisible()
         await page.waitForTimeout(2000)
       },

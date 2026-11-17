@@ -15,6 +15,11 @@ import {
 } from './readonly-session.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 
+/** Bound queued read-only status data to a small number of recent frames. */
+export const FARM_STATUS_PENDING_BYTES = 1_048_576
+/** Close a read-only session when its native send queue stays congested. */
+export const FARM_STATUS_BACKPRESSURE_TIMEOUT_MS = 5_000
+
 /** Trusted provider evidence uses this Connector's performance.now() clock.
  * The provider owns current assignment authority and complete aggregation.
  * StatusMessage itself carries neither assignment IDs nor freshness evidence.
@@ -45,6 +50,7 @@ type Client = {
   ): () => void
   subscribeTerminal(listener: (reason: string) => void): () => void
   sendStatus(message: unknown): boolean
+  bufferedAmount?(): number
   close(reason?: string): void
 }
 /** Display-only sender. No production provider is installed by this module.
@@ -67,6 +73,7 @@ export class FarmStatusSender {
   #sourceDeadline = Infinity
   #sending = false
   #timer: ReturnType<typeof setTimeout> | undefined
+  #backpressureTimer: ReturnType<typeof setTimeout> | undefined
   #abort = () => this.close('aborted')
   constructor(options: {
     client: Client
@@ -238,6 +245,25 @@ export class FarmStatusSender {
       // Parsed copies precede the external send callback; no caller array survives.
       if (!this.current()) return
       if (performance.now() >= until) throw Error('Expired source')
+      const buffered = this.#client.bufferedAmount?.() ?? 0
+      if (!Number.isSafeInteger(buffered) || buffered < 0)
+        throw Error('Invalid status buffer')
+      const wireBytes = new TextEncoder().encode(
+        JSON.stringify(message),
+      ).byteLength
+      if (
+        wireBytes > FARM_STATUS_PENDING_BYTES ||
+        buffered + wireBytes > FARM_STATUS_PENDING_BYTES
+      ) {
+        if (!this.#backpressureTimer)
+          this.#backpressureTimer = setTimeout(
+            () => this.close('status-backpressure'),
+            FARM_STATUS_BACKPRESSURE_TIMEOUT_MS,
+          )
+        return
+      }
+      clearTimeout(this.#backpressureTimer)
+      this.#backpressureTimer = undefined
       this.#captured = captured
       this.#seq++
       this.#sending = true
@@ -259,6 +285,7 @@ export class FarmStatusSender {
     if (this.#terminal) return
     this.#terminal = true
     clearTimeout(this.#timer)
+    clearTimeout(this.#backpressureTimer)
     this.#controller.abort()
     this.#signal.removeEventListener('abort', this.#abort)
     try {

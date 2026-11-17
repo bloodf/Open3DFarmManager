@@ -501,6 +501,13 @@ test('another genuine binding cannot select a different endpoint or reuse the pr
 test('G-code and history notifications do not replace the pause reply or complete-state audit', async () => {
   const f = await fixture({
     query: (index, socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_proc_stat_update',
+          params: [{ moonraker_stats: { cpu_usage: 1 } }],
+        }),
+      )
       if (index > 1)
         socket.send(
           JSON.stringify({

@@ -33,7 +33,11 @@ const Reply = z.strictObject({
 // freshness authority; only a matching reply and complete query may do that.
 const SideNotification = z.strictObject({
   jsonrpc: z.literal('2.0'),
-  method: z.enum(['notify_gcode_response', 'notify_history_changed']),
+  method: z.enum([
+    'notify_gcode_response',
+    'notify_history_changed',
+    'notify_proc_stat_update',
+  ]),
   params: z.array(z.unknown()).max(16),
 })
 const Snapshot = z.strictObject({
@@ -174,10 +178,6 @@ export function openFixedMoonrakerPause(input: {
   }
   function stop() {
     if (terminal) return
-    console.error(
-      'RTC driver stop: ' +
-        new Error().stack?.split('\n').slice(1, 5).join(' '),
-    )
     terminal = true
     clearTimeout(operationTimer)
     clearTimeout(lifetimeTimer)
@@ -209,17 +209,7 @@ export function openFixedMoonrakerPause(input: {
     let value: number
     try {
       value = mono()
-    } catch (error) {
-      console.error(
-        'RTC driver frame: ' +
-          (error instanceof z.ZodError
-            ? JSON.stringify(
-                error.issues.map(({ code, path }) => ({ code, path })),
-              )
-            : error instanceof Error
-              ? error.message
-              : 'unknown'),
-      )
+    } catch {
       stop()
       throw failure()
     }
@@ -285,17 +275,6 @@ export function openFixedMoonrakerPause(input: {
         binary,
         Math.min(4096, selected.limits.maxMessageBytes),
       )
-      console.error(
-        'RTC driver envelope: ' +
-          JSON.stringify(
-            z
-              .object({
-                id: z.number().optional(),
-                method: z.string().max(128).optional(),
-              })
-              .parse(frame),
-          ),
-      )
       if (SideNotification.safeParse(frame).success) return
       const result = Reply.parse(frame)
       if (
@@ -308,19 +287,7 @@ export function openFixedMoonrakerPause(input: {
       pending = undefined
       clearTimeout(request.timer)
       request.resolve(result.result)
-    } catch (error) {
-      console.error(
-        'RTC driver decode-error: ' +
-          JSON.stringify({
-            pending: pending?.id,
-            errors:
-              error instanceof z.ZodError
-                ? error.issues.map(({ code, path }) => ({ code, path }))
-                : error instanceof Error
-                  ? error.message
-                  : 'unknown',
-          }),
-      )
+    } catch {
       stop()
     }
   })
@@ -345,15 +312,7 @@ export function openFixedMoonrakerPause(input: {
       )
       if (remaining <= 0) throw failure()
       const promise = new Promise<unknown>((resolve, reject) => {
-        pending = {
-          id,
-          resolve,
-          reject,
-          timer: setTimeout(() => {
-            console.error('RTC driver timer: ' + id + ' ' + remaining)
-            stop()
-          }, remaining),
-        }
+        pending = { id, resolve, reject, timer: setTimeout(stop, remaining) }
       })
       void promise.catch(() => {})
       // The request slot and bytes are prepared before the guard. Nothing awaits, samples
@@ -383,16 +342,8 @@ export function openFixedMoonrakerPause(input: {
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
       current()
-      if (received >= deadline || snapshot.eventtime <= sourceTime) {
-        console.error(
-          'RTC query timing',
-          index,
-          snapshot.eventtime,
-          sourceTime,
-          received >= deadline,
-        )
+      if (received >= deadline || snapshot.eventtime <= sourceTime)
         throw failure()
-      }
       sourceTime = snapshot.eventtime
       const state = snapshot.status.print_stats.state
       const observation: ControlObservation = Object.freeze({
@@ -415,11 +366,7 @@ export function openFixedMoonrakerPause(input: {
       publish(observation)
       current()
       return observation
-    } catch (error) {
-      console.error(
-        'RTC query error',
-        error instanceof Error ? error.message : 'unknown',
-      )
+    } catch {
       stop()
       await closed
       throw failure()

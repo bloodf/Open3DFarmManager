@@ -291,7 +291,9 @@ async function connectorChild(
         child.pid,
       )
       if (forced || failure || receipt.code !== 0 || receipt.signal !== null)
-        throw Error('RTC child cleanup required forced or failed exit')
+        throw Error(
+          `RTC child cleanup required forced or failed exit (${failureReason}, exit ${receipt.code}, signal ${receipt.signal}, stderr ${errorBytes} B)`,
+        )
     })()
     return disposing
   }
@@ -807,6 +809,10 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               connector: lastNative,
               browser: lastBrowser,
             }),
+        )
+        await session.note(
+          'rtc-failure-kind:' +
+            (error instanceof Error ? error.message : 'unknown'),
         )
         throw error
       } finally {

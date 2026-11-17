@@ -444,6 +444,7 @@ async function connectorChild(
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         NODE_OPTIONS: '',
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,
         NODE_TLS_REJECT_UNAUTHORIZED: '1',
         WS_NO_BUFFER_UTIL: '1',
@@ -1173,6 +1174,14 @@ export function createPauseExecutionRtcFixtureExtension(
           'authenticated-pause-execution-correlated-pause-applied-verified; exact 1 simulator pause',
         )
         completed = true
+      } catch (error) {
+        const observation = await session.connector
+          .request({ kind: 'observe' })
+          .catch(() => null)
+        await session.note(
+          'pause-execution-failure-observation:' + JSON.stringify(observation),
+        )
+        throw error
       } finally {
         try {
           await input.identities.dispose()

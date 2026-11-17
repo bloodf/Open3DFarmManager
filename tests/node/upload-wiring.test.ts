@@ -7,6 +7,7 @@ import {
   randomUUID,
   X509Certificate,
 } from 'node:crypto'
+import { accessSync, constants } from 'node:fs'
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -165,6 +166,19 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
     await new Promise((r) => setTimeout(r, 5))
   }
 }
+// The command journal is SQLite with synchronous=FULL, so opening it costs
+// several fsyncs. On a disk-backed tmpdir shared with other test gates those
+// fsyncs queue behind unrelated I/O and stalled the fixture for 10s+ (the
+// whole 15s test budget). Nothing here asserts on durability, so keep the
+// fixture state on memory-backed storage when the host has it.
+const fixtureRoot = (() => {
+  try {
+    accessSync('/dev/shm', constants.W_OK)
+    return '/dev/shm'
+  } catch {
+    return tmpdir()
+  }
+})()
 const nonce = () => randomBytes(32).toString('base64url')
 
 async function connect(
@@ -173,7 +187,7 @@ async function connect(
   actions: ('pause' | 'start_print')[] = ['start_print'],
   admit = true,
 ) {
-  const dir = await mkdtemp(join(tmpdir(), 'upload-wiring-'))
+  const dir = await mkdtemp(join(fixtureRoot, 'upload-wiring-'))
   const staging = join(dir, 'staging')
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,

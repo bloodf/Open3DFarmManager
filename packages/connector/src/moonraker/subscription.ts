@@ -292,14 +292,6 @@ export function createMoonrakerSubscription(input: {
                 ) {
                   const complete = TemperatureSnapshot.parse(observation.result)
                   const value = Snapshot.parse(complete)
-                  if (
-                    baseline &&
-                    (value.eventtime < baseline.eventtime ||
-                      (value.eventtime === baseline.eventtime &&
-                        JSON.stringify(value.status) !==
-                          JSON.stringify(baseline.status)))
-                  )
-                    throw Error('Ambiguous complete response ordering')
                   const stamp = observation.requestStartedAtMonoMs
                   // A delta received during this query has a newer local field
                   // observation. Discard this overlapping response rather than
@@ -308,8 +300,52 @@ export function createMoonrakerSubscription(input: {
                   if (
                     fieldTimes &&
                     stamp < Math.max(...Object.values(fieldTimes))
-                  )
+                  ) {
+                    // A changing progress delta must win over this query. The
+                    // same query can still conservatively confirm unchanged
+                    // fields that have not received a newer delta. Publish no
+                    // stale values; the next delta carries these field clocks.
+                    if (baseline) {
+                      fieldTimes = {
+                        webhooks:
+                          stamp >= fieldTimes.webhooks &&
+                          value.status.webhooks.state ===
+                            baseline.status.webhooks.state
+                            ? stamp
+                            : fieldTimes.webhooks,
+                        printState:
+                          stamp >= fieldTimes.printState &&
+                          value.status.print_stats.state ===
+                            baseline.status.print_stats.state
+                            ? stamp
+                            : fieldTimes.printState,
+                        progress:
+                          stamp >= fieldTimes.progress &&
+                          value.status.virtual_sdcard.progress ===
+                            baseline.status.virtual_sdcard.progress
+                            ? stamp
+                            : fieldTimes.progress,
+                      }
+                      // Temperature is independent display evidence from this
+                      // complete query. Keep the newer delta's state/progress
+                      // while publishing those conservatively timed readings.
+                      const fields = parseTemperatureFields(complete.status)
+                      if (
+                        fields.tool.kind === 'reading' ||
+                        fields.bed.kind === 'reading'
+                      )
+                        publish(baseline, { fields, observedAtMonoMs: stamp })
+                    }
                     return
+                  }
+                  if (
+                    baseline &&
+                    (value.eventtime < baseline.eventtime ||
+                      (value.eventtime === baseline.eventtime &&
+                        JSON.stringify(value.status) !==
+                          JSON.stringify(baseline.status)))
+                  )
+                    throw Error('Ambiguous complete response ordering')
                   fieldTimes = {
                     webhooks: stamp,
                     printState: stamp,

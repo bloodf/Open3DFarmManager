@@ -379,6 +379,7 @@ if (mode === '--prepare-layer') {
                   executionModule.createPauseExecutionRtcFixtureExtension({
                     closure: pauseExecutionClosure(),
                     testReplay: true,
+                    rejection: process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                   }),
                 extensionKind: 'pause-execution-rtc' as const,
                 caPath: ca,
@@ -848,6 +849,8 @@ if (mode === '--prepare-layer') {
                 'yes'
                   ? {
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE: 'yes',
+                      SIGNALLING_HTTPS_RTC_REJECTION:
+                        process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_ROW:
                         pauseExecutionClosure(),
                     }

@@ -21,6 +21,7 @@ const limits = {
 async function fixture(
   mode: Parameters<typeof pauseFixture>[0] = {},
   clock: () => number = () => performance.now(),
+  requestTimeoutMs = limits.requestTimeoutMs,
 ) {
   const remote = await pauseFixture(mode)
   const registry = createPrinterBindingRegistry({
@@ -39,7 +40,7 @@ async function fixture(
   const driver = openFixedMoonrakerPause({
     binding,
     allowedOrigins: [remote.origin],
-    limits,
+    limits: { ...limits, requestTimeoutMs },
     connectionGeneration: 7,
     clock: { monotonicNow: clock },
     publish: (observation) => {
@@ -493,6 +494,155 @@ test('another genuine binding cannot select a different endpoint or reuse the pr
     await f.driver.closed
     assert.equal(f.remote.counts().pauses, 0)
     assert.equal(f.observations.at(-1), null)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('G-code and history notifications do not replace the pause reply or complete-state audit', async () => {
+  const f = await fixture({
+    query: (index, socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_filelist_changed',
+          params: [
+            { action: 'modify_file', item: { path: 'synthetic.gcode' } },
+          ],
+        }),
+      )
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_plugin_health',
+          params: [{ state: 'paused' }],
+        }),
+      )
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_proc_stat_update',
+          params: [{ moonraker_stats: { cpu_usage: 1 } }],
+        }),
+      )
+      if (index > 1)
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'notify_history_changed',
+            params: [
+              {
+                action: 'added',
+                job: {
+                  filename: 'synthetic.gcode',
+                  metadata: { estimated_time: 600 },
+                },
+              },
+            ],
+          }),
+        )
+      return false
+    },
+    pause: (socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_gcode_response',
+          params: ['// PAUSE called with'],
+        }),
+      )
+      return false
+    },
+  })
+  try {
+    await f.driver.prepare()
+    let sentMono = 0
+    assert.deepEqual(
+      await f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => {
+          sentMono = performance.now()
+          return true
+        },
+      }),
+      { acknowledged: true },
+    )
+    assert.equal(f.observations.filter(Boolean).length, 1)
+    const paused = await f.driver.driver.waitForPaused({
+      binding: f.binding,
+      signal: f.command.signal,
+      after: { connectionGeneration: 7, sequence: 1, sentMono },
+    })
+    assert.ok(paused)
+    assert.equal(paused.printState, 'paused')
+    assert.equal(f.observations.filter(Boolean).length, 2)
+    assert.equal(f.remote.counts().pauses, 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('a G-code notification without a matching RPC reply never acknowledges pause', async () => {
+  const f = await fixture({
+    pause: (socket) => {
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_gcode_response',
+          params: ['// PAUSE called with'],
+        }),
+      )
+      setImmediate(() => mock.timers.tick(limits.requestTimeoutMs))
+      return true
+    },
+  })
+  try {
+    await f.driver.prepare()
+    await assert.rejects(
+      f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => true,
+      }),
+    )
+    assert.equal(f.remote.counts().pauses, 1)
+    assert.equal(f.observations.filter(Boolean).length, 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('configured acknowledgement timeout permits one slow reply without a second command', async () => {
+  const f = await fixture(
+    {
+      pause: (socket, id) => {
+        setTimeout(
+          () =>
+            socket.send(JSON.stringify({ jsonrpc: '2.0', id, result: 'ok' })),
+          600,
+        )
+        setImmediate(() => mock.timers.tick(600))
+        return true
+      },
+    },
+    () => performance.now(),
+    1500,
+  )
+  try {
+    await f.driver.prepare()
+    let guards = 0
+    const ack = await f.driver.driver.pauseOnce({
+      binding: f.binding,
+      signal: f.command.signal,
+      beforeSend: () => {
+        guards++
+        return true
+      },
+    })
+    assert.deepEqual(ack, { acknowledged: true })
+    assert.equal(guards, 1)
+    assert.equal(f.remote.counts().pauses, 1)
   } finally {
     await f.cleanup()
   }

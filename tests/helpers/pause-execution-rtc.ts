@@ -1,3 +1,4 @@
+import { rtcRejectionKind, verifyRtcRejection } from './rtc-farm-rejections.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { appendFile, open, realpath } from 'node:fs/promises'
@@ -30,6 +31,7 @@ type BrowserActor = Awaited<
 >
 
 export const PauseExecutionBrowserObservation = z.strictObject({
+  terminalReason: z.string().max(80).nullable().optional(),
   terminal: z.boolean(),
   failed: z.boolean(),
   proofsReady: z.boolean(),
@@ -443,6 +445,7 @@ async function connectorChild(
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         NODE_OPTIONS: '',
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,
         NODE_TLS_REJECT_UNAUTHORIZED: '1',
         WS_NO_BUFFER_UTIL: '1',
@@ -471,7 +474,11 @@ async function connectorChild(
       }
     | undefined
 
-  const fail = () => {
+  const fail = (reason: unknown = 'io') => {
+    if (!failure)
+      void note(
+        `connector-child-failure:${typeof reason === 'string' ? reason : 'io'}; requests:${requests}; output-bytes:${outputBytes}; stderr-bytes:${errorBytes}`,
+      )
     failure = true
     pending?.reject(Error('RTC execution child rejected or closed'))
     pending = undefined
@@ -497,7 +504,7 @@ async function connectorChild(
       outputBytes > 65_536 ||
       output.byteLength + chunk.byteLength > PAUSE_EXECUTION_RTC_IPC_BYTES
     ) {
-      fail()
+      fail('output-bound')
       return
     }
     output = Buffer.concat([output, chunk])
@@ -525,7 +532,7 @@ async function connectorChild(
       output = Buffer.alloc(0)
       waiter.resolve(reply)
     } catch {
-      fail()
+      fail('invalid-reply')
     }
   })
 
@@ -553,9 +560,13 @@ async function connectorChild(
       if (error) fail()
     })
     try {
-      return await bounded(reply, input.signal, 3000)
+      return await bounded(
+        reply,
+        input.signal,
+        command.kind === 'start' || command.kind === 'identity' ? 30000 : 3000,
+      )
     } catch {
-      fail()
+      fail('ipc-' + command.kind)
       throw Error('RTC execution child request failed')
     }
   }
@@ -623,6 +634,7 @@ export type PauseExecutionFixtureOptions = Readonly<{
     | 'reassigned'
     | 'peer-closed'
     | 'late-close'
+  rejection?: string | undefined
   testReplay?: boolean
 }>
 
@@ -635,6 +647,10 @@ export function createPauseExecutionRtcFixtureExtension(
   options: PauseExecutionFixtureOptions = {},
 ): SignallingFixtureExtension {
   const closureMode = options.closure ?? 'standard'
+  const rejection =
+    options.rejection === undefined
+      ? undefined
+      : rtcRejectionKind(options.rejection)
   let current:
     | {
         input: SignallingIdentityInput
@@ -750,6 +766,7 @@ export function createPauseExecutionRtcFixtureExtension(
                 issuer: issuer.issuer,
                 kid: issuer.kid,
                 publicKeySpki: issuer.publicKeySpki,
+                ...(rejection ? { rejection } : {}),
               },
             },
           ),
@@ -870,7 +887,9 @@ export function createPauseExecutionRtcFixtureExtension(
             closureMode === 'peer-closed' ||
             closureMode === 'late-close'
               ? closureMode
-              : 'none',
+              : rejection === 'revoked-device'
+                ? 'revoked-device'
+                : 'none',
           origin: input.origin,
           credentialAudience: input.audience,
           issuer: session.issuer,
@@ -923,6 +942,80 @@ export function createPauseExecutionRtcFixtureExtension(
             10000,
           ),
         ])
+
+        if (rejection) {
+          let before = await observeNative()
+          const outcome = session.actor.evaluate((actor) => actor.pause())
+          if (rejection === 'replayed') {
+            assert.equal(await outcome, 'applied')
+            before = await until(
+              observeNative,
+              (v) => v.commandOutcome === 'applied',
+              input.signal,
+              10000,
+            )
+            assert.equal(
+              await session.actor.evaluate((actor) =>
+                actor.adversarialReplay(),
+              ),
+              true,
+            )
+            const after = await until(
+              observeNative,
+              (v) => v.terminal,
+              input.signal,
+              8000,
+            )
+            await session.note(verifyRtcRejection(rejection, before, after))
+          } else if (rejection === 'revoked-device') {
+            await until(
+              observeNative,
+              (v) => v.commandReceived,
+              input.signal,
+              10000,
+            )
+            await input.adminPage.evaluate(
+              async (body) => {
+                const response = await fetch('/api/browser-devices/revoke', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(body),
+                })
+                if (!response.ok)
+                  throw Error('Fixture device revocation failed')
+              },
+              {
+                farm_id: input.farmId,
+                key_id: input.browserKeyId,
+                expected_thumbprint: input.browserThumbprint,
+              },
+            )
+            await until(observeNative, (v) => v.terminal, input.signal, 8000)
+            assert.equal(
+              (await session.connector.request({ kind: 'release' })).kind,
+              'released',
+            )
+            const after = await until(
+              observeNative,
+              (v) => v.commandOutcome !== null,
+              input.signal,
+              8000,
+            )
+            assert.notEqual(await outcome, 'applied')
+            await session.note(verifyRtcRejection(rejection, before, after))
+          } else {
+            const after = await until(
+              observeNative,
+              (v) => v.commandOutcome !== null,
+              input.signal,
+              10000,
+            )
+            assert.equal(await outcome, 'rejected')
+            await session.note(verifyRtcRejection(rejection, before, after))
+          }
+          completed = true
+          return
+        }
 
         if (closureMode === 'revocation') {
           // Negative row: Mutate authority during active session before command send
@@ -1090,6 +1183,22 @@ export function createPauseExecutionRtcFixtureExtension(
           'authenticated-pause-execution-correlated-pause-applied-verified; exact 1 simulator pause',
         )
         completed = true
+      } catch (error) {
+        await session.note(
+          'pause-execution-browser-failure:' +
+            JSON.stringify(
+              await session.actor
+                .evaluate((actor) => actor.observe())
+                .catch(() => null),
+            ),
+        )
+        const observation = await session.connector
+          .request({ kind: 'observe' })
+          .catch(() => null)
+        await session.note(
+          'pause-execution-failure-observation:' + JSON.stringify(observation),
+        )
+        throw error
       } finally {
         try {
           await input.identities.dispose()

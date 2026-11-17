@@ -382,15 +382,18 @@ try {
           timeoutMs: 300000,
         },
       )
-      const text = [rowLedger, rowLedger + '.rtc-resources.jsonl'].filter(
-        existsSync,
-      )
+      const text = [
+        rowLedger,
+        rowLedger + '.rtc-resources.jsonl',
+        rowLedger + '.pause-execution-rtc-resources.jsonl',
+      ].filter(existsSync)
       const combined = (
         await Promise.all(text.map((path) => readFile(path, 'utf8')))
       ).join('\n')
       for (const path of [
         rowLedger,
         rowLedger + '.rtc-resources.jsonl',
+        rowLedger + '.pause-execution-rtc-resources.jsonl',
         rowLedger + '.app-log.txt',
       ])
         if (existsSync(path))

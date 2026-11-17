@@ -62,7 +62,7 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('runtime-observation'),
     requests: z.number().int().min(0).max(65),
-    queued: z.number().int().min(0).max(64),
+    queued: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     failure: z.boolean(),
     settled: z.boolean(),
     directory: z.string().min(1).max(512),
@@ -85,6 +85,10 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
     packagedFiles: z.number().int().min(0).max(64),
     pauses: z.number().int().min(0).max(64),
     pauseInboxReady: z.boolean(),
+    pauseInboxes: z.number().int().nonnegative(),
+    telemetryDelivered: z.number().int().nonnegative(),
+    telemetryRetained: z.number().int().nonnegative(),
+    recent: z.array(z.string().max(145)).max(24).readonly(),
   }),
   z.strictObject({
     kind: z.literal('observation'),

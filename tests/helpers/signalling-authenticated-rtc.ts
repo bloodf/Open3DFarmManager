@@ -229,7 +229,7 @@ async function connectorChild(
       output = Buffer.alloc(0)
       waiter.resolve(reply)
     } catch {
-      fail()
+      fail('invalid-reply')
     }
   })
   const request = async (command: RtcFixtureCommand) => {
@@ -255,9 +255,15 @@ async function connectorChild(
       if (error) fail()
     })
     try {
-      return await bounded(reply, input.signal, 2000)
+      // Runtime startup imports the Connector and checks a real simulator's
+      // readiness. Keep short observation calls bounded separately.
+      return await bounded(
+        reply,
+        input.signal,
+        command.kind === 'start' || command.kind === 'identity' ? 30000 : 10000,
+      )
     } catch {
-      fail()
+      fail('ipc-' + command.kind)
       throw Error('RTC child request failed')
     }
   }
@@ -290,8 +296,13 @@ async function connectorChild(
           : 'connector-child-close-drained',
         child.pid,
       )
+      await note(
+        `connector-child-exit:${receipt.code}; signal:${receipt.signal}; reason:${failureReason}; stderr-bytes:${errorBytes}`,
+      )
       if (forced || failure || receipt.code !== 0 || receipt.signal !== null)
-        throw Error('RTC child cleanup required forced or failed exit')
+        throw Error(
+          `RTC child cleanup required forced or failed exit (${failureReason}, exit ${receipt.code}, signal ${receipt.signal}, stderr ${errorBytes} B)`,
+        )
     })()
     return disposing
   }
@@ -559,9 +570,13 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           const runtime = await until(
             observeRuntime,
             (value) =>
-              value.queued > 0 && value.requests > 0 && value.listening === 1,
+              value.queued > 0 &&
+              value.requests > 0 &&
+              value.listening === 1 &&
+              (process.env.SIGNALLING_HTTPS_FARM_PAUSE !== 'yes' ||
+                value.pauseInboxReady),
             input.signal,
-            5000,
+            process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes' ? 15000 : 5000,
           )
           await session.note(
             'runtime-fixture-resources:' +
@@ -807,6 +822,10 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               connector: lastNative,
               browser: lastBrowser,
             }),
+        )
+        await session.note(
+          'rtc-failure-kind:' +
+            (error instanceof Error ? error.message : 'unknown'),
         )
         throw error
       } finally {

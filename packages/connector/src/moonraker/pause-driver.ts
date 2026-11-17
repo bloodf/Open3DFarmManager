@@ -6,7 +6,7 @@ import {
 } from '../../../farm-protocol/src/control-actions.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import { z } from 'zod'
-import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
+import { decodeMoonrakerFrame } from './frame.ts'
 import {
   readPrinterBinding,
   type PrinterBinding,
@@ -28,6 +28,18 @@ const Reply = z.strictObject({
   jsonrpc: z.literal('2.0'),
   id: z.number().int(),
   result: z.unknown(),
+})
+// Moonraker broadcasts these while PAUSE runs. They carry no command or
+// freshness authority; only a matching reply and complete query may do that.
+const SideNotification = z.strictObject({
+  jsonrpc: z.literal('2.0'),
+  // Unrequested printer-state and Klippy lifecycle messages remain terminal.
+  // Other bounded notifications cannot acknowledge a request or refresh state.
+  method: z
+    .string()
+    .max(128)
+    .regex(/^notify_(?!status_update$|klippy_)[A-Za-z0-9_]+$/),
+  params: z.array(z.unknown()).max(16),
 })
 const Snapshot = z.strictObject({
   eventtime: z.number().finite().nonnegative(),
@@ -259,14 +271,13 @@ export function openFixedMoonrakerPause(input: {
         (receivedBytes += data.byteLength) > 32768
       )
         throw failure()
-      const result = Reply.parse(
-        parseBoundedJson(data.toString('utf8'), {
-          maxBytes: Math.min(4096, selected.limits.maxMessageBytes),
-          maxDepth: 5,
-          maxValues: 64,
-          maxStringChars: 128,
-        }),
+      const frame = decodeMoonrakerFrame(
+        data,
+        binary,
+        Math.min(4096, selected.limits.maxMessageBytes),
       )
+      if (SideNotification.safeParse(frame).success) return
+      const result = Reply.parse(frame)
       if (
         !pending ||
         result.id !== pending.id ||
@@ -288,18 +299,14 @@ export function openFixedMoonrakerPause(input: {
     wire: string,
     deadline: number,
     guard?: () => boolean,
-    cap = 500,
+    cap = Math.min(1000, selected.limits.requestTimeoutMs),
   ): Promise<unknown> {
     try {
       const sampled = now()
       readyToWrite()
       // A G-code script replies only once Klipper finished it, so the single
       // extended request may use the whole operation window.
-      const remaining = Math.min(
-        cap,
-        cap === 500 ? selected.limits.requestTimeoutMs : cap,
-        deadline - sampled,
-      )
+      const remaining = Math.min(cap, deadline - sampled)
       if (remaining <= 0) throw failure()
       const promise = new Promise<unknown>((resolve, reject) => {
         pending = { id, resolve, reject, timer: setTimeout(stop, remaining) }
@@ -414,7 +421,13 @@ export function openFixedMoonrakerPause(input: {
         throw failure()
       })
     }
-    return request(2, wire, operationDeadline, beforeSend, cap)
+    return request(
+      2,
+      wire,
+      operationDeadline,
+      beforeSend,
+      cap ?? selected.limits.requestTimeoutMs,
+    )
       .then((result) => {
         current()
         if (now() >= operationDeadline || result !== 'ok') throw failure()

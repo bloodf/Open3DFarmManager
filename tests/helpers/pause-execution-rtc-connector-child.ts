@@ -57,7 +57,14 @@ export const PauseExecutionRtcCommand = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('start'),
     barrier: z
-      .enum(['none', 'stale', 'reassigned', 'peer-closed', 'late-close'])
+      .enum([
+        'none',
+        'stale',
+        'reassigned',
+        'peer-closed',
+        'late-close',
+        'revoked-device',
+      ])
       .default('none'),
     origin: PairingProofOrigin,
     credentialAudience: PairingProofAudience,

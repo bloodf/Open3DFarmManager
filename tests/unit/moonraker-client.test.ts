@@ -885,64 +885,68 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
   }
 }, 20000)
 
-test('overlapping complete query is discarded without regressing fields or stopping collection', async () => {
-  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
-  const service = await fixture({
-    subscribe(socket, _connection, later, request) {
-      const reply = (eventtime: number, progress: number) =>
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: request.id,
-            result: {
-              eventtime,
-              status: { ...status, virtual_sdcard: { progress } },
-            },
-          }),
-        )
-      if (request.id === 1) reply(10, 0.25)
-      else if (request.id === 2) {
-        later(() => socket.send(delta(11, 0.5)), 10)
-        later(() => reply(12, 0.6), 30)
-      } else reply(13, 0.7)
-    },
-  })
-  try {
-    const events = await run(
-      service.origin,
-      { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
-      'raw',
-      undefined,
-      evidence,
-      { rawObservations: 3, deadlineMs: 6000 },
-    )
-    expect(evidence.completedBy).toBe('observation')
-    expect(service.rpcs.length).toBe(3)
-    expect(
-      events
-        .filter((event) => event.kind === 'snapshot')
-        .map((event) => event.printer?.progress),
-    ).toEqual([0.25, 0.5, 0.7])
-    expect(evidence.raw.map((value) => value.printer.progress)).toEqual([
-      0.25, 0.5, 0.7,
-    ])
-    expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
-      evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
-    )
-    expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBeGreaterThan(
-      evidence.raw[1]!.fieldObservedAtMonoMs.progress,
-    )
-    expect(
-      events.filter(
-        (event) =>
-          event.reason === 'invalid-response' || event.reason === 'stale',
-      ),
-    ).toEqual([])
-    expect(evidence.rawUnavailable.length).toBe(1)
-  } finally {
-    await service.close()
-  }
-}, 20000)
+test.each([10.5, 11, 12])(
+  'overlapping complete query at source time %s is discarded without regressing fields or stopping collection',
+  async (queryTime) => {
+    const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+    const service = await fixture({
+      subscribe(socket, _connection, later, request) {
+        const reply = (eventtime: number, progress: number) =>
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: {
+                eventtime,
+                status: { ...status, virtual_sdcard: { progress } },
+              },
+            }),
+          )
+        if (request.id === 1) reply(10, 0.25)
+        else if (request.id === 2) {
+          later(() => socket.send(delta(11, 0.5)), 10)
+          later(() => reply(queryTime, 0.6), 30)
+        } else reply(13, 0.7)
+      },
+    })
+    try {
+      const events = await run(
+        service.origin,
+        { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+        'raw',
+        undefined,
+        evidence,
+        { rawObservations: 3, deadlineMs: 6000 },
+      )
+      expect(evidence.completedBy).toBe('observation')
+      expect(service.rpcs.length).toBe(3)
+      expect(
+        events
+          .filter((event) => event.kind === 'snapshot')
+          .map((event) => event.printer?.progress),
+      ).toEqual([0.25, 0.5, 0.7])
+      expect(evidence.raw.map((value) => value.printer.progress)).toEqual([
+        0.25, 0.5, 0.7,
+      ])
+      expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
+        evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
+      )
+      expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBeGreaterThan(
+        evidence.raw[1]!.fieldObservedAtMonoMs.progress,
+      )
+      expect(
+        events.filter(
+          (event) =>
+            event.reason === 'invalid-response' || event.reason === 'stale',
+        ),
+      ).toEqual([])
+      expect(evidence.rawUnavailable.length).toBe(1)
+    } finally {
+      await service.close()
+    }
+  },
+  20000,
+)
 
 test('complete temperature responses reach raw display evidence but never normalized queue snapshots', async () => {
   const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
@@ -1028,3 +1032,122 @@ test('complete temperature responses reach raw display evidence but never normal
     await service.close()
   }
 }, 15000)
+
+test('overlapping progress preserves its value while unchanged readiness receives conservative query evidence', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      const reply = (eventtime: number, progress: number) =>
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              eventtime,
+              status: { ...status, virtual_sdcard: { progress } },
+            },
+          }),
+        )
+      if (request.id === 1) reply(10, 0.25)
+      else {
+        later(() => socket.send(delta(11, 0.5)), 10)
+        later(() => reply(10.5, 0.4), 30)
+        later(() => socket.send(delta(12, 0.6)), 50)
+      }
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+      'raw',
+      undefined,
+      evidence,
+      { rawObservations: 3, deadlineMs: 6000 },
+    )
+    expect(evidence.completedBy).toBe('observation')
+    expect(evidence.raw.map((o) => o.printer.progress)).toEqual([
+      0.25, 0.5, 0.6,
+    ])
+    expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
+      evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.webhooks).toBeGreaterThan(
+      evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.webhooks).toBeLessThan(
+      evidence.raw[1]!.fieldObservedAtMonoMs.progress,
+    )
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.printState).toBe(
+      evidence.raw[2]!.fieldObservedAtMonoMs.webhooks,
+    )
+    expect(
+      events.filter(
+        (e) => e.reason === 'invalid-response' || e.reason === 'stale',
+      ),
+    ).toEqual([])
+  } finally {
+    await service.close()
+  }
+}, 20000)
+
+test('overlapping query temperatures refresh display evidence without replacing newer progress', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, later, request) {
+      const reply = (
+        eventtime: number,
+        progress: number,
+        temperature: number,
+      ) =>
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              eventtime,
+              status: {
+                ...status,
+                virtual_sdcard: { progress },
+                extruder: { temperature },
+              },
+            },
+          }),
+        )
+      if (request.id === 1) reply(10, 0.25, 20)
+      else {
+        later(() => socket.send(delta(11, 0.5)), 10)
+        later(() => reply(10.5, 0.4, 21), 30)
+      }
+    },
+  })
+  try {
+    await run(
+      service.origin,
+      { staleAfterMs: 5000, reconnectMinMs: 3000, reconnectMaxMs: 3000 },
+      'raw',
+      undefined,
+      evidence,
+      { rawObservations: 3, deadlineMs: 6000 },
+    )
+    expect(evidence.completedBy).toBe('observation')
+    expect(evidence.raw.map((o) => o.printer.progress)).toEqual([
+      0.25, 0.5, 0.5,
+    ])
+    expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBe(
+      evidence.raw[1]!.fieldObservedAtMonoMs.progress,
+    )
+    expect(evidence.raw[2]!.temperatureObservation?.fields.tool).toEqual({
+      kind: 'reading',
+      celsius: 21,
+    })
+    expect(
+      evidence.raw[2]!.temperatureObservation!.observedAtMonoMs,
+    ).toBeLessThan(evidence.raw[1]!.fieldObservedAtMonoMs.progress)
+    expect(
+      evidence.raw[2]!.temperatureObservation!.observedAtMonoMs,
+    ).toBeGreaterThan(evidence.raw[0]!.temperatureObservation!.observedAtMonoMs)
+  } finally {
+    await service.close()
+  }
+}, 20000)

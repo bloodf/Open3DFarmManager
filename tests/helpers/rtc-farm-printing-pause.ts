@@ -33,6 +33,10 @@ export async function runPrintingPause(input: {
         'farm-page-printing-pause-uncertain:evidence-unavailable',
       )
     }
+    await input.note(
+      'farm-page-printing-pause-confirmation-error:' +
+        (error instanceof Error ? error.message.slice(0, 4000) : 'unknown'),
+    )
     throw error
   }
   const evidence = await input.observe()

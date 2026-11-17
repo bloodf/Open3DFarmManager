@@ -28,6 +28,12 @@ export async function testPrintingPausePage(input: {
   directory: string
   note(value: string): Promise<void>
 }) {
+  const startedAt = performance.now()
+  const stage = (name: string) =>
+    input.note(
+      `farm-page-printing-pause-stage:${name}; ms:${Math.round(performance.now() - startedAt)}`,
+    )
+  await stage('start')
   assert.equal(process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE, 'sv06')
   const origin = process.env.SIGNALLING_HTTPS_SIM_MOONRAKER!
   const url = new URL(origin)
@@ -75,11 +81,15 @@ export async function testPrintingPausePage(input: {
     'Origin must be the sv06 published loopback port',
   )
   const request = async (path: string, init?: RequestInit) => {
+    const requestedAt = performance.now()
     const response = await fetch(origin + path, {
       ...init,
       signal: AbortSignal.timeout(10000),
     })
     assert.ok(response.ok, `${path}: HTTP ${response.status}`)
+    await input.note(
+      `farm-page-printing-pause-http:${path.split('?')[0]}; ms:${Math.round(performance.now() - requestedAt)}`,
+    )
     return response.json()
   }
   const state = async () =>
@@ -103,6 +113,19 @@ export async function testPrintingPausePage(input: {
     }
   }
   const page = await input.fixture.ownerContext.newPage()
+  const responses: { path: string; status: number }[] = []
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (
+      url.origin === input.fixture.origin &&
+      url.pathname.startsWith('/api/') &&
+      responses.length < 64
+    )
+      responses.push({
+        path: url.pathname.replace(/[a-f0-9]{8}-[a-f0-9-]{27}/g, ':id'),
+        status: response.status(),
+      })
+  })
   const filename = 'o3dfm-accept-pause-' + randomUUID() + '.gcode'
   let uploaded = false
   const abort = () => {
@@ -112,6 +135,7 @@ export async function testPrintingPausePage(input: {
   try {
     await runPrintingPause({
       async start() {
+        await stage('print-start')
         assert.ok(
           ['standby', 'complete', 'cancelled'].includes(await state()),
           'Owned simulator must be idle',
@@ -121,7 +145,9 @@ export async function testPrintingPausePage(input: {
         // No heating or movement. Long enough to keep printing through admission.
         form.set(
           'file',
-          new Blob(['; acceptance pause\n' + 'G4 P1000\n'.repeat(600)]),
+          // Short individual dwells let Klipper service PAUSE promptly rather
+          // than holding the command behind a one-second G-code operation.
+          new Blob(['; acceptance pause\n' + 'G4 P10\n'.repeat(60000)]),
           filename,
         )
         await request('/server/files/upload', { method: 'POST', body: form })
@@ -131,11 +157,13 @@ export async function testPrintingPausePage(input: {
           { method: 'POST' },
         )
         await expect.poll(state, { timeout: 15000 }).toBe('printing')
+        await stage('printing')
         await page.goto(input.fixture.origin + '/farm', {
           waitUntil: 'domcontentloaded',
         })
       },
       async confirm() {
+        await stage('page-open')
         const assignment = input.fixture.assignmentRefs[0]!
         const row = page.getByRole('article').filter({
           has: page.getByRole('heading', {
@@ -147,7 +175,7 @@ export async function testPrintingPausePage(input: {
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
         const button = row.getByRole('button', {
-          name: 'Pausar impressão',
+          name: 'Pausar',
           exact: true,
         })
         await expect(button).toBeEnabled()
@@ -194,6 +222,21 @@ export async function testPrintingPausePage(input: {
       },
       note: input.note,
     })
+  } catch (error) {
+    await input.note(
+      'farm-page-printing-pause-page-state:' +
+        JSON.stringify({
+          path: new URL(page.url()).pathname,
+          responses,
+          text: (
+            await page
+              .locator('body')
+              .innerText()
+              .catch(() => '')
+          ).slice(0, 6000),
+        }),
+    )
+    throw error
   } finally {
     // Cancel only this row's uniquely named file, even after uncertain pause.
     // A cleanup request is never a retry of the signed pause.
@@ -218,7 +261,25 @@ export async function testPrintingPausePage(input: {
           )
         )
           await request('/printer/print/cancel', { method: 'POST' })
-        await request('/server/files/gcodes/' + filename, { method: 'DELETE' })
+        // Moonraker can keep the virtual SD file open briefly after cancel.
+        // Retry only deletion of our file, never a printer command.
+        await expect
+          .poll(
+            async () => {
+              const response = await fetch(
+                origin + '/server/files/gcodes/' + filename,
+                { method: 'DELETE', signal: AbortSignal.timeout(10000) },
+              )
+              if (response.status === 403) return false
+              assert.ok(
+                response.ok,
+                `Owned file cleanup: HTTP ${response.status}`,
+              )
+              return true
+            },
+            { timeout: 10000 },
+          )
+          .toBe(true)
       }
     } finally {
       input.fixture.signal.removeEventListener('abort', abort)

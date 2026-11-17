@@ -1,3 +1,4 @@
+import { rtcRejectionScenarios } from './rtc-farm-rejections.ts'
 import { simulatorRtcFarmScenarios } from './rtc-farm-acceptance-sim-scenarios.ts'
 
 /**
@@ -79,6 +80,7 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         'farm-page-camera-detached-no-helper',
       ],
     },
+    ...rtcRejectionScenarios(),
     // Opt-in genuine-simulator row; absent unless its origins are set.
     ...simulatorRtcFarmScenarios(),
   })

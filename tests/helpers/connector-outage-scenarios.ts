@@ -20,6 +20,7 @@ import {
   until,
 } from './connector-outage-fixtures.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
+import { runOutagePauseScenarios } from './connector-outage-pause.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -318,14 +319,20 @@ export async function runConnectorOutageScenarios(input: {
     async function startConnectorAndBaseline(timeoutMs = 30000) {
       const current = launchConnector()
       // The first subscription snapshot after each start is a new observation.
-      await until(
-        () => {
-          if (!current.running) throw new Error('Connector exited at startup')
-          return current.count('queued') >= 1
-        },
-        timeoutMs,
-        'connector baseline queued',
-      )
+      try {
+        await until(
+          () => {
+            if (!current.running) throw new Error('Connector exited at startup')
+            return current.count('queued') >= 1
+          },
+          timeoutMs,
+          'connector baseline queued',
+        )
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; fixture=${JSON.stringify({ moonrakerClients: moon.clients, moonrakerSubscriptions: moon.subscriptions, handlerErrors, connectorDiagnostics: current.diagnostics })}`,
+        )
+      }
       expected.push(moon.progress)
       assert.ok(current.running, 'connector alive after baseline')
       return current
@@ -726,6 +733,19 @@ export async function runConnectorOutageScenarios(input: {
         dropRoleLater: (role) => created.push(role),
       }),
     )
+    await app?.stop()
+    const pauseScenarios = await runOutagePauseScenarios(
+      join(workDir, 'pause-runtime'),
+    )
+    for (const entry of pauseScenarios.scenarios) {
+      const recorded = { durationMs: 0, ...entry }
+      report.scenarios.push(recorded)
+      appendFileSync(
+        join(workDir, 'progress.jsonl'),
+        JSON.stringify(recorded) + '\n',
+      )
+    }
+    await startApp(renewalEnv)
     return report
   } finally {
     const failures: string[] = []

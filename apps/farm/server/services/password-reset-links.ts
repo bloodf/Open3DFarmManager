@@ -10,18 +10,24 @@ export interface IssuedResetLink {
   username: string
   expiresAt: Date
 }
+/** Why an owner may not reset an account that is otherwise in their farm. */
+export interface ResetLinkRefusal {
+  refused: 'self' | 'shared-account'
+}
 export interface ResetLinkStore {
   /**
    * One transaction: the actor is an active owner of the farm and the target an
-   * active, enabled member with a password. Replaces that account's only reset
-   * digest. Null when any check fails, so non-owners learn nothing.
+   * active, enabled member with a password whose only active membership is this
+   * farm. Replaces that account's only reset digest and binds it to the farm.
+   * Null when the owner or membership check fails, so non-owners learn nothing;
+   * a refusal when the target is the actor or also belongs to another farm.
    */
   issueForMember(
     actorId: string,
     farmId: string,
     accountId: string,
     digest: string,
-  ): Promise<IssuedResetLink | null>
+  ): Promise<IssuedResetLink | ResetLinkRefusal | null>
 }
 export interface ResetLinkDeps {
   origin: string
@@ -70,6 +76,16 @@ export async function issueResetLink(
     resetTokenDigest(token),
   )
   if (!issued) throw notFound()
+  if ('refused' in issued)
+    throw issued.refused === 'self'
+      ? new MembersError(
+          409,
+          'Use a alteração de senha da sua conta em vez de um link de redefinição.',
+        )
+      : new MembersError(
+          409,
+          'Esta conta também participa de outra fazenda; só ela pode redefinir a própria senha.',
+        )
   return {
     username: issued.username,
     url: resetLinkUrl(deps.origin, issued.username, token),

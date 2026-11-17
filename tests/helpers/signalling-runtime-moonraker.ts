@@ -35,6 +35,11 @@ const PauseRequest = z.union([
     method: z.literal('printer.print.pause'),
   }),
 ])
+const ListRequest = z.strictObject({
+  jsonrpc: z.literal('2.0'),
+  id: z.number().int().positive(),
+  method: z.literal('printer.objects.list'),
+})
 const Request = z.strictObject({
   jsonrpc: z.literal('2.0'),
   id: z.number().int().positive(),
@@ -263,6 +268,25 @@ export async function createRuntimeMoonrakerFixture() {
                   jsonrpc: '2.0',
                   id: (value as { id: number }).id,
                   result: { connection_id: 1 },
+                }),
+              )
+              return
+            }
+            const list = ListRequest.safeParse(value)
+            if (list.success) {
+              socket.send(
+                JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: list.data.id,
+                  result: {
+                    objects: [
+                      'webhooks',
+                      'print_stats',
+                      'virtual_sdcard',
+                      'extruder',
+                      'heater_bed',
+                    ],
+                  },
                 }),
               )
               return

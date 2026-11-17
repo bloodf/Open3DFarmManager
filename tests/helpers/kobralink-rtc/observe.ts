@@ -535,7 +535,17 @@ export async function instrumentPage(input: {
               ),
             ])
             if (body === null) {
-              const captured = (await capture).read()
+              const capturedBody = await capture
+              // Playwright can lose the page-side body as navigation commits,
+              // while the independent CDP capture is still finishing its
+              // durable-body read. Do not snapshot that capture before its
+              // completion signal; otherwise a complete response is reported
+              // as unread just because the reload won the race.
+              await Promise.race([
+                capturedBody.finished,
+                new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+              ])
+              const captured = capturedBody.read()
               facts = captured.facts
               body = captured.body
             }

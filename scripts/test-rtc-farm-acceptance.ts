@@ -28,10 +28,13 @@ import {
 } from './db/migrations.ts'
 import { selectRtcFarmScenarios } from '../tests/helpers/rtc-farm-acceptance-scenarios.ts'
 import { startRtspCamera } from '../tests/helpers/rtc-farm-rtsp-camera.ts'
+import { runAllAcceptance } from './rtc-farm-all-mode.ts'
 
 const exec = promisify(execFile)
 const env = process.env
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
+if (process.argv.length === 3 && process.argv[2] === '--all')
+  process.exit(await runAllAcceptance(checkout))
 const image = env.RTC_FARM_TEST_IMAGE
 const dbPort = Number(env.RTC_FARM_TEST_DB_PORT)
 const workRoot = env.RTC_FARM_TEST_WORK_ROOT

@@ -123,6 +123,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'ENROLLMENT_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-members.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'MEMBERS_SYNTHETIC_TEST_PORT',
+      admitted: 'MEMBERS_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-pairing.ts': {
     migrations: 'full',
     fixture: {

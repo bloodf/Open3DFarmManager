@@ -8,11 +8,14 @@ x-printer: &printer
   profiles: [klipper]
   tmpfs:
     - /tmp:noexec
-    - /home/printer/printer_data/comms:noexec
+    - /home/printer/printer_data/comms:noexec,uid=1000,gid=1000
   networks: [sim]
   cpus: 2.0
   mem_limit: 1g
   pids_limit: 256
+  user: printer
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
 services:
   sv06:
     <<: *printer

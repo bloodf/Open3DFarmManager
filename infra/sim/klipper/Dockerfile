@@ -45,4 +45,11 @@ RUN echo "$SIMULAVR_PACING_RATE" | grep -Eq '^(0\.[0-9]*[1-9][0-9]*|1(\.0+)?)$' 
   || { echo "SIMULAVR_PACING_RATE must be a number in (0, 1]" >&2; exit 1; }
 RUN sed -i "s|/home/printer/klipper/scripts/avrsim.py |&-r ${SIMULAVR_PACING_RATE} |" /etc/supervisor/supervisord.conf \
   && grep -q "avrsim.py -r ${SIMULAVR_PACING_RATE} " /etc/supervisor/supervisord.conf
+# Prepare upstream startup for no-new-privileges: all runtime writes belong to
+# printer, and Supervisor stores its PID in the writable temporary filesystem.
+RUN mkdir -p /home/printer/printer_data \
+ && chown printer:printer /home/printer/printer_data \
+ && ln -s /bin/service_control /bin/systemctl \
+ && sed -i 's|pidfile=/var/run/supervisord.pid|pidfile=/tmp/supervisord.pid|' /etc/supervisor/supervisord.conf \
+ && sed -i '/\[\[ ! -e \/bin\/systemctl \]\]/d; /sudo -S rm \/bin\/systemctl/d; /sudo -S ln -s \/bin\/service_control/d; s/sudo chown printer:printer "${folder}"/exit 1/' /bin/start
 USER printer

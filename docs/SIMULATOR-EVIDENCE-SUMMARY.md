@@ -53,3 +53,15 @@ process was delayed or establish causation.
 
 The current evidence does not justify relaxing readiness, changing firmware
 timeouts, or promoting an experimental launcher to the default harness.
+
+## Manual profile workflow (issue #189)
+
+The dispatch-only Simulator workflow runs `spoolman` (seed + verify), `cams`
+and `rtsp` on a matrix of `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm`
+(arm64). Each profile job has a pass/fail verification step and uploads a
+bounded diagnostics artifact on failure. Pull requests do not start these jobs.
+
+Successful run links per architecture (owner must dispatch; agents must not):
+
+- amd64 (`ubuntu-24.04`): pending: owner dispatch
+- arm64 (`ubuntu-24.04-arm`): pending: owner dispatch

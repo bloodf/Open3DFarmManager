@@ -25,3 +25,115 @@ jobs:
         run: node scripts/klipper-diagnostics.mjs
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down
+  spoolman:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: '12.18.0'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: docker compose -f infra/sim/docker-compose.yml --profile spoolman config --quiet
+      - run: docker compose -f infra/sim/docker-compose.yml --profile spoolman up -d
+      - name: Seed and verify Spoolman
+        run: |
+          set -o pipefail
+          pnpm run sim:seed
+          node packages/sim-tools/src/spoolman-cli.ts 2>&1 | tee /tmp/sim-spoolman.log | tail -c 200000
+      - if: failure()
+        run: node scripts/sim-profile-diagnostics.mjs spoolman sim-diagnostics/spoolman-${{ matrix.arch }}.json
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sim-spoolman-${{ matrix.arch }}
+          path: sim-diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+      - if: always()
+        run: docker compose -f infra/sim/docker-compose.yml --profile spoolman down
+  cams:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: '12.18.0'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: docker compose -f infra/sim/docker-compose.yml --profile cams config --quiet
+      - run: docker compose -f infra/sim/docker-compose.yml --profile cams up -d --build
+      - name: Verify cams JPEG
+        run: |
+          set -o pipefail
+          node packages/sim-tools/src/camera-cli.ts 2>&1 | tee /tmp/sim-cams.log | tail -c 200000
+      - if: failure()
+        run: node scripts/sim-profile-diagnostics.mjs cams sim-diagnostics/cams-${{ matrix.arch }}.json
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sim-cams-${{ matrix.arch }}
+          path: sim-diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+      - if: always()
+        run: docker compose -f infra/sim/docker-compose.yml --profile cams down
+  rtsp:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: '12.18.0'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: docker compose -f infra/sim/docker-compose.yml --profile rtsp config --quiet
+      - run: docker compose -f infra/sim/docker-compose.yml --profile rtsp up -d
+      - name: Verify RTSP
+        run: |
+          set -o pipefail
+          pnpm run sim:verify:rtsp 2>&1 | tee /tmp/sim-rtsp.log | tail -c 200000
+      - if: failure()
+        run: node scripts/sim-profile-diagnostics.mjs rtsp sim-diagnostics/rtsp-${{ matrix.arch }}.json
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sim-rtsp-${{ matrix.arch }}
+          path: sim-diagnostics/
+          retention-days: 7
+          if-no-files-found: ignore
+      - if: always()
+        run: docker compose -f infra/sim/docker-compose.yml --profile rtsp down

@@ -3,14 +3,22 @@ import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 
 /**
  * Camera opt-in for the RTC farm-page row, set by the acceptance runner from
- * its task-owned RTSP simulator and verified ingest helper. Absent: no camera.
+ * its task-owned simulator and verified local encoder or ingest helper. Absent: no camera.
  */
-export const CameraFixture = z.strictObject({
+const Helper = z.strictObject({
   helperPath: z.string().refine(isAbsolute),
   helperSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  rtspPort: z.number().int().min(1024).max(65535),
-  rtspPath: z.string().regex(/^\/[A-Za-z0-9_-]{1,64}$/),
 })
+export const CameraFixture = z.union([
+  Helper.extend({
+    rtspPort: z.number().int().min(1024).max(65535),
+    rtspPath: z.string().regex(/^\/[A-Za-z0-9_-]{1,64}$/),
+  }),
+  Helper.extend({
+    kind: z.literal('moonraker-snapshot'),
+    snapshotPort: z.number().int().min(1).max(65535),
+  }),
+])
 export type CameraFixture = z.infer<typeof CameraFixture>
 export function cameraFixtureFromEnv(): CameraFixture | undefined {
   const raw = process.env.SIGNALLING_HTTPS_CAMERA
@@ -29,11 +37,23 @@ export function cameraRuntimeSection(
       {
         cameraId: 'fixture-camera',
         assignmentId,
-        source: {
-          address: '127.0.0.1',
-          port: camera.rtspPort,
-          path: camera.rtspPath,
-        },
+        source:
+          'kind' in camera
+            ? {
+                kind: camera.kind,
+                address: '127.0.0.1',
+                port: camera.snapshotPort,
+                path: '/?action=snapshot',
+                ffmpeg: {
+                  path: camera.helperPath,
+                  sha256: camera.helperSha256,
+                },
+              }
+            : {
+                address: '127.0.0.1',
+                port: camera.rtspPort,
+                path: camera.rtspPath,
+              },
       },
     ],
   }

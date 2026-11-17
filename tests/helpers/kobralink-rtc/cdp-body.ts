@@ -270,18 +270,36 @@ export async function captureBodies(page: Page, origin: string) {
     /**
      * Pairs one Playwright response with its own network capture: same
      * method, URL and status and the same Chromium request start stamp.
-     * Anything but exactly one unclaimed match stays uncaptured. The capture
-     * may be announced slightly after Playwright's event. `finished` settles
-     * only once the captured body is complete.
+     * Anything but exactly one unclaimed match stays uncaptured, except a
+     * lone capture whose stamp drifted past that tolerance: two sessions do
+     * not share wallTime under load, and dropping it loses a finished body.
+     * The capture may be announced slightly after Playwright's event.
+     * `finished` settles only once the captured body is complete.
      */
     async take(method: string, url: string, status: number, startMs: number) {
       const key = keyOf(method, url, status)
       let entry: Entry | null = null
       for (let i = 0; i < 50 && !entry; i++) {
-        const match = uniqueMatch(queues.get(key) ?? [], startMs)
+        const queue = queues.get(key) ?? []
+        const match = uniqueMatch(queue, startMs)
         if (match === 'ambiguous') break
         if (match) {
           entry = match
+          entry.claimed = true
+          continue
+        }
+        // Two CDP sessions stamp wallTime further apart than 0.1 ms when the
+        // host is loaded (observed 0.11–0.37 ms). The finished body is then
+        // the only unclaimed capture within 1 ms and must still be claimed.
+        const open = queue.filter((candidate) => !candidate.claimed)
+        const only = open.length === 1 ? open[0] : undefined
+        if (
+          only &&
+          complete(only) &&
+          Math.abs(only.startMs - startMs) < 1 &&
+          (queue.length === 1 || queue.some((candidate) => candidate.claimed))
+        ) {
+          entry = only
           entry.claimed = true
         } else await new Promise((resolve) => setTimeout(resolve, 20))
       }

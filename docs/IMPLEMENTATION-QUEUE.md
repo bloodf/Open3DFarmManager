@@ -6,7 +6,7 @@ This queue tracks the independent MIT project without private deployment configu
 
 This file does not pin a head. Each checkpoint names the commit it proves, and the gate must be run on the exact candidate that is being accepted.
 
-- **Migrations:** the official catalog in `infra/db/migrations` is contiguous through `0032`.
+- **Migrations:** the official catalog in `infra/db/migrations` is contiguous through `0036`.
 - **Toolchain:** pnpm 12.18.0 with Node 24.22.3. The gate is `pnpm run check:all`.
 - **Integrated acceptance:** not complete. The last combined run, on candidate `1e3a029`, validated outage recovery and the three network-fault profiles, but three browser status/pause rows failed and the camera and two simulator rows were unavailable. See the [Phase 0 ledger](PHASE-0.md) and the [rendered farm checkpoint](FARM-VIEW-CHECKPOINT.md).
 - **Accepted slices:** 0013 browser-device registry and 0014 credential proof ([browser key checkpoint](BROWSER-KEY-CHECKPOINT.md), [credential acceptance checkpoint](CONNECTOR-CREDENTIAL-ACCEPTANCE-CHECKPOINT.md)); 0015 printer ownership ([printer ownership checkpoint](PRINTER-OWNERSHIP-CHECKPOINT.md)); 0016 operation-bound telemetry ([atomic telemetry checkpoint](ATOMIC-TELEMETRY-CHECKPOINT.md)). The 0014 receipt is point-in-time context, not durable authorization.

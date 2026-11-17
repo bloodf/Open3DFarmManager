@@ -1,19 +1,58 @@
 import type { DiscoveryResult } from '../../../../packages/farm-protocol/src/configuration-discovery.ts'
 
 type Printer = Extract<DiscoveryResult, { ok: true }>['printers'][number]
+
+export function discoveryLabel(printer: Printer): string {
+  if (printer.name) return printer.name
+  if (printer.model) return printer.model
+  switch (printer.vendor) {
+    case 'bambu':
+      return 'Bambu Lab'
+    case 'moonraker':
+      return 'Moonraker'
+    case 'creality':
+      return 'Creality'
+    case 'anycubic':
+      return 'Anycubic'
+    default: {
+      const _exhaustive: never = printer.vendor
+      return _exhaustive
+    }
+  }
+}
+
 export function discoveryPrefill(printer: Printer) {
-  return printer.vendor === 'bambu'
-    ? {
+  switch (printer.vendor) {
+    case 'bambu':
+      return {
         family: 'bambu-lan' as const,
         ip: printer.host,
         serial: printer.serial ?? '',
         label: printer.name ?? '',
       }
-    : {
+    case 'moonraker':
+      return {
         family: 'klipper-moonraker' as const,
         origin: `http://${printer.host}${printer.port ? `:${printer.port}` : ''}`,
         label: printer.name ?? '',
       }
+    case 'creality':
+      return {
+        family: 'creality-native' as const,
+        host: printer.host,
+        label: printer.name ?? '',
+      }
+    case 'anycubic':
+      return {
+        family: 'anycubic-lan' as const,
+        host: printer.host,
+        label: printer.name ?? '',
+      }
+    default: {
+      const _exhaustive: never = printer.vendor
+      return _exhaustive
+    }
+  }
 }
 export function discoveryStatus(result: DiscoveryResult): string {
   if (!result.ok)

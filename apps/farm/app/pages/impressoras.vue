@@ -2572,8 +2572,7 @@ onBeforeRouteLeave(clear)
         </h3>
         <p>
           Operação:
-          <span class="exact-key">{{ kobraOperation.operationId }}</span
-          >.
+          <span class="exact-key">{{ kobraOperation.operationId }}</span>.
           {{ kobraUnknownNotice }}
         </p>
         <p>
@@ -2603,8 +2602,8 @@ onBeforeRouteLeave(clear)
         <h3 id="kobra-recovery-heading">Recuperação pendente no Connector</h3>
         <p>
           Operação:
-          <span class="exact-key">{{ kobraOperation.operationId }}</span
-          >. Motivo: {{ describeRecoveryReason(kobraRecoveryReason) }}
+          <span class="exact-key">{{ kobraOperation.operationId }}</span>.
+          Motivo: {{ describeRecoveryReason(kobraRecoveryReason) }}
         </p>
         <p>
           A ativação automática desta impressora foi bloqueada para proteger as
@@ -2720,8 +2719,8 @@ onBeforeRouteLeave(clear)
     <section v-if="revokeTarget" aria-labelledby="revoke-heading">
       <h2 id="revoke-heading">Confirmar revogação permanente</h2>
       <p>
-        Chave: <span class="exact-key">{{ revokeTarget.printerKey }}</span
-        >. Connector: {{ revokeTarget.agentId }}.
+        Chave: <span class="exact-key">{{ revokeTarget.printerKey }}</span>.
+        Connector: {{ revokeTarget.agentId }}.
       </p>
       <label
         ><input v-model="revokeConfirmed" type="checkbox" :disabled="pending" />

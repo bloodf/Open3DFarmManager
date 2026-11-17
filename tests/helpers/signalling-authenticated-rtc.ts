@@ -144,7 +144,11 @@ async function connectorChild(
           ? { SIGNALLING_HTTPS_CAMERA: process.env.SIGNALLING_HTTPS_CAMERA }
           : {}),
         ...Object.fromEntries(
-          ['SIGNALLING_HTTPS_SIM_MOONRAKER', 'SIGNALLING_HTTPS_SIM_SPOOLMAN']
+          [
+            'SIGNALLING_HTTPS_SIM_MOONRAKER',
+            'SIGNALLING_HTTPS_SIM_SPOOLMAN',
+            'SIGNALLING_HTTPS_SIM_PRINTING_PAUSE',
+          ]
             .filter((key) => process.env[key])
             .map((key) => [key, process.env[key]!]),
         ),
@@ -570,6 +574,16 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 packagedFiles: runtime.packagedFiles,
               }),
           )
+          if (process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE === 'sv06') {
+            const { testPrintingPausePage } =
+              await import('./rtc-farm-printing-pause-page.ts')
+            await testPrintingPausePage({
+              fixture: input,
+              directory: runtime.directory,
+              note: session.note,
+            })
+            return
+          }
           if (process.env.SIGNALLING_HTTPS_SIM_MOONRAKER) {
             const { testSimulatorFarmPage } =
               await import('./signalling-sim-farm-page.ts')

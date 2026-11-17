@@ -323,14 +323,14 @@ export async function testPostgresConnectorInventory(
       base + '/api/farms/' + otherFarm + '/connectors',
       { headers: { cookie: pair } },
     )
-    assert.equal(wrong.status, 403)
+    assert.equal(wrong.status, 404)
     assert.equal(wrong.headers.get('cache-control'), 'no-store')
     await admin`UPDATE farm.memberships SET revoked_at = 101 WHERE farm_id = ${farms[0]!}::uuid AND account_id = ${httpAccount}`
     const memberRevoked = await fetch(
       base + '/api/farms/' + farms[0] + '/connectors',
       { headers: { cookie: pair } },
     )
-    assert.equal(memberRevoked.status, 403)
+    assert.equal(memberRevoked.status, 404)
     await admin`UPDATE farm.account_sessions SET revoked_at = ${Date.now()} WHERE account_id = ${httpAccount}`
     const sessionRevoked = await fetch(base + '/api/farms', {
       headers: { cookie: pair },

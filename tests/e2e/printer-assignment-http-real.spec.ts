@@ -135,7 +135,7 @@ test('real login scopes registration and preserves opaque printer keys', async (
         ),
       ).toBe(true)
       expect((await get(page, `/api/farms/${otherFarm}/printers`)).status).toBe(
-        403,
+        404,
       )
     }
     for (const agentId of [foreignAgent, revokedAgent])
@@ -280,7 +280,7 @@ test('real login scopes registration and preserves opaque printer keys', async (
         if (kind === 'downgrade')
           await db`UPDATE farm.memberships SET role='owner' WHERE farm_id=${farm}::uuid AND account_id=${ownerAccount}`
       }
-      expect((await get(owner, path)).status).toBe(403)
+      expect((await get(owner, path)).status).toBe(404)
       const session =
         await db`SELECT id FROM farm.account_sessions WHERE account_id=${ownerAccount} AND revoked_at IS NULL`
       expect(session).toHaveLength(1)

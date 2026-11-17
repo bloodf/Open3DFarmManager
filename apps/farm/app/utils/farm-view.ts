@@ -410,7 +410,7 @@ export function createFarmView(deps: Dependencies) {
     publish({
       kind: 'error',
       reason:
-        status === 403
+        status === 403 || status === 404
           ? 'forbidden'
           : status === 429
             ? 'rate-limit'

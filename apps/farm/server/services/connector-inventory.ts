@@ -37,7 +37,7 @@ function inventoryError(failure: InventoryFailure): never {
       })
     case 'forbidden':
       throw createError({
-        status: 403,
+        status: 404,
         message: 'Farm indisponível para esta conta.',
       })
     case 'storage-unavailable':

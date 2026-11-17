@@ -116,6 +116,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       image: 'SUCCESSOR_TEST_IMAGE',
     },
   },
+  'test-postgres-cross-farm-http.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'CROSS_FARM_HTTP_SYNTHETIC_TEST_PORT',
+      admitted: 'CROSS_FARM_HTTP_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-enrollment.ts': {
     migrations: 'none',
     fixture: {

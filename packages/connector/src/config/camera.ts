@@ -45,18 +45,29 @@ const Source = z.strictObject({
     .max(1024)
     .regex(/^\/(?!\/)[^?#@\\\s]*$/),
 })
+const Executable = z.strictObject({
+  path: z.string().refine(isAbsolute),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+})
 const CameraRuntime = z.strictObject({
-  helper: z.strictObject({
-    path: z.string().refine(isAbsolute),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }),
+  helper: Executable,
   maxSessions: z.number().int().min(1).max(4).default(1),
   cameras: z
     .array(
       z.strictObject({
         cameraId: textId,
         assignmentId: BrowserDeviceUuid,
-        source: Source,
+        source: z.union([
+          Source,
+          Source.extend({
+            kind: z.literal('moonraker-snapshot'),
+            ffmpeg: Executable,
+            path: z
+              .string()
+              .max(2048)
+              .regex(/^\/(?!\/)[^#@\\\s]*$/),
+          }),
+        ]),
       }),
     )
     .min(1)

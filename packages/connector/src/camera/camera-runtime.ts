@@ -14,6 +14,7 @@ import type { HelperExecutable } from '../../../../tools/rtsp-ingest/supervisor/
 import type { CameraRuntimeConfig } from '../config/camera.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { AssignmentRef } from '../webrtc/readonly-session.ts'
+import { createMoonrakerSnapshotSource } from '../moonraker/snapshot.ts'
 import { ConnectorCameraMedia } from './camera-media.ts'
 
 /** Builds one ConnectorCameraMedia per RTC peer from the opt-in camera config.
@@ -57,10 +58,30 @@ export async function createCameraMediaFactory(input: {
   const { config, identity, agentId, farmId } = input
   const helper = Object.freeze({ ...config.helper })
   const sources = new Map(
-    config.cameras.map((camera, index) => [
-      'camera-' + index,
-      Object.freeze({ ...camera.source }),
-    ]),
+    config.cameras.flatMap((camera, index) =>
+      'kind' in camera.source
+        ? []
+        : [['camera-' + index, Object.freeze({ ...camera.source })]],
+    ),
+  )
+  const snapshots = new Map(
+    config.cameras.flatMap((camera, index) => {
+      if (!('kind' in camera.source)) return []
+      const { address, port, path } = camera.source
+      const host = address.includes(':') ? '[' + address + ']' : address
+      return [
+        [
+          'camera-' + index,
+          {
+            ffmpeg: Object.freeze({ ...camera.source.ffmpeg }),
+            reader: createMoonrakerSnapshotSource({
+              webcamOrigin: `http://${host}:${port}`,
+              snapshotUrl: path,
+            }),
+          },
+        ],
+      ] as const
+    }),
   )
   const cameras = config.cameras.map((camera, index) => ({
     cameraId: camera.cameraId,
@@ -133,6 +154,29 @@ export async function createCameraMediaFactory(input: {
           expectedAgentId: agentId,
         }),
       openSource: (handle, signal, expiresAtMonoMs, isCurrent) => {
+        const snapshot = snapshots.get(handle)
+        if (snapshot) {
+          if (
+            !isCurrent() ||
+            signal.aborted ||
+            expiresAtMonoMs <= performance.now() ||
+            expiresAtMonoMs - performance.now() > 30000
+          )
+            throw Error('Moonraker camera admission expired')
+          return openBambuCameraSource({
+            source: { model: 'A1', host: '127.0.0.1', accessCode: 'unused' },
+            ffmpeg: snapshot.ffmpeg,
+            isCurrent,
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(
+                Math.max(1, Math.ceil(expiresAtMonoMs - performance.now())),
+              ),
+            ]),
+            jpegStream: ({ signal: jpegSignal }) =>
+              snapshot.reader.stream(jpegSignal),
+          })
+        }
         const anycubicSource = anycubic.get(handle)
         if (anycubicSource && anycubicFfmpeg) {
           if (

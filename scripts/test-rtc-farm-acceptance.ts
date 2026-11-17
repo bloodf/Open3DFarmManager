@@ -27,6 +27,7 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { selectRtcFarmScenarios } from '../tests/helpers/rtc-farm-acceptance-scenarios.ts'
+import { startSnapshotCamera } from '../tests/helpers/rtc-farm-snapshot-camera.ts'
 import { startRtspCamera } from '../tests/helpers/rtc-farm-rtsp-camera.ts'
 import { runAllAcceptance } from './rtc-farm-all-mode.ts'
 
@@ -62,6 +63,7 @@ if (
 const scenarios = selectRtcFarmScenarios(env.RTC_FARM_TEST_SCENARIOS)
 // Camera rows need a prebuilt ingest helper (its hash is pinned in tracked
 // code) and a loopback RTSP port.
+const snapshotCamera = env.RTC_FARM_TEST_CAMERA_SOURCE === 'moonraker-snapshot'
 const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   ? {
       helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
@@ -71,10 +73,11 @@ const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
 if (
   camera &&
   (!isAbsolute(camera.helper) ||
-    !Number.isInteger(camera.port) ||
-    camera.port < 1024 ||
-    camera.port > 65535 ||
-    camera.port === dbPort)
+    (!snapshotCamera &&
+      (!Number.isInteger(camera.port) ||
+        camera.port < 1024 ||
+        camera.port > 65535 ||
+        camera.port === dbPort)))
 )
   throw new Error(
     'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute) and RTC_FARM_TEST_RTSP_PORT',
@@ -356,14 +359,20 @@ try {
   )
 
   if (camera)
-    rtsp = await startRtspCamera({
-      checkout,
-      workDir,
-      project: name + '-rtsp',
-      port: camera.port,
-      helper: camera.helper,
-      ledger,
-    })
+    rtsp = snapshotCamera
+      ? await startSnapshotCamera({
+          workDir,
+          helper: camera.helper,
+          ledger,
+        })
+      : await startRtspCamera({
+          checkout,
+          workDir,
+          project: name + '-rtsp',
+          port: camera.port,
+          helper: camera.helper,
+          ledger,
+        })
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)

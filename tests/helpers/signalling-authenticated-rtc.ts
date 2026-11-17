@@ -23,7 +23,7 @@ import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src
 import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
 import { snapshotAssignmentRefs } from '../../packages/connector/src/webrtc/readonly-session.ts'
 import { testAuthenticatedFarmPage } from './signalling-farm-page.ts'
-import { cameraFixtureFromEnv } from './signalling-camera-fixture.ts'
+import { cameraFixtureFromEnv } from './signalling-snapshot-camera-fixture.ts'
 
 type BrowserActor = Awaited<ReturnType<typeof createSignallingRtcBrowserActor>>
 type Closure = 'disconnect' | 'revocation'

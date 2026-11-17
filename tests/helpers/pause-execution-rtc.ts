@@ -490,6 +490,8 @@ async function connectorChild(
   })
   child.stderr.on('data', (chunk: Buffer) => {
     errorBytes += chunk.byteLength
+    if (chunk.toString().startsWith('RTC send failure:'))
+      void note(chunk.toString().slice(0, 1600))
     if (errorBytes > 8192) fail()
   })
   child.stdout.on('data', (chunk: Buffer) => {

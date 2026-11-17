@@ -417,7 +417,14 @@ async function run() {
           ),
         ),
       )
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof Error)
+          console.error(
+            'RTC fixture failure: ' +
+              error.name +
+              ' ' +
+              error.stack?.split('\n').slice(1, 4).join(' '),
+          )
         stop()
         output({ kind: 'failed' })
       })

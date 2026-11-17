@@ -192,6 +192,8 @@ async function connectorChild(
   child.stderr.on('data', (chunk: Buffer) => {
     // Drain without storing or logging native output, SDP, or library errors.
     errorBytes += chunk.byteLength
+    if (chunk.toString().startsWith('RTC driver failure:'))
+      void note(chunk.toString().slice(0, 600))
     if (errorBytes > 8192) fail('stderr-bound')
   })
   child.stdout.on('data', (chunk: Buffer) => {

@@ -556,7 +556,11 @@ async function connectorChild(
       if (error) fail()
     })
     try {
-      return await bounded(reply, input.signal, 3000)
+      return await bounded(
+        reply,
+        input.signal,
+        command.kind === 'start' ? 15000 : 3000,
+      )
     } catch {
       fail()
       throw Error('RTC execution child request failed')

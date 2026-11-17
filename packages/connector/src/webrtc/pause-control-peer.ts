@@ -50,8 +50,6 @@ type Options = Readonly<{
   onData?: (frame: Readonly<PauseDataFrame>) => void
   onTerminal?: (reason: string) => void
 }>
-/** How long a file message waits for the capability admission in progress. */
-const FILE_ADMISSION_WAIT_MS = 5000
 const noop = () => {}
 function controlOnly(sdp: string): void {
   controlDtlsFingerprint(sdp)
@@ -212,31 +210,11 @@ export class PauseConnectorPeer {
               this.current() ? this.#session.admittedHandle : undefined,
             send,
           })
-        // The browser may use the file channel as soon as it has sent its
-        // admission proof, while this side is still verifying it. Messages
-        // keep their order and wait, bounded, for that verification; without
-        // an admitted capability the operation is still refused.
-        let admission: Promise<void> | undefined
-        const admitted = () =>
-          (admission ??= new Promise<void>((resolve) => {
-            const until = performance.now() + FILE_ADMISSION_WAIT_MS
-            const check = () => {
-              if (
-                !this.current() ||
-                this.#session.admittedHandle ||
-                performance.now() >= until
-              )
-                resolve()
-              else setTimeout(check, 25)
-            }
-            check()
-          }))
-        let queue: Promise<void> = Promise.resolve()
+        // Each file handler already bounds its wait for admission. A second
+        // channel-level wait delays refusals after authority has been revoked.
         channel.onMessage((raw) => {
-          queue = queue.then(admitted).then(() => {
-            if (this.current() && !this.#list?.receive(raw))
-              this.#upload?.receive(raw)
-          })
+          if (this.current() && !this.#list?.receive(raw))
+            this.#upload?.receive(raw)
         })
         channel.onClosed(() => {
           this.#list?.close()

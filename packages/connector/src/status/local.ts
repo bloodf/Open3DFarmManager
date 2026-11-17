@@ -13,6 +13,10 @@ export type LocalStatus = {
   delivered: number
   retries: number
   credentialExpired: boolean
+  /** Queue storage refuses writes: telemetry is not being recorded. */
+  storageDegraded?: boolean
+  /** Records dropped while storage was degraded. */
+  storageLost?: number
 }
 
 // Construct the public response field by field. Never serialize runtime config.
@@ -24,6 +28,13 @@ export function projectStatus(value: LocalStatus) {
     delivered: count(value.delivered),
     retries: count(value.retries),
     credentialExpired: value.credentialExpired === true,
+    // Present only when relevant, so a healthy response keeps its shape.
+    ...(value.storageDegraded === true
+      ? { storage: 'storage-degraded' as const }
+      : {}),
+    ...(count(value.storageLost ?? 0) > 0
+      ? { storageLost: count(value.storageLost ?? 0) }
+      : {}),
   }
 }
 
@@ -77,7 +88,7 @@ export async function openLocalStatus(input: {
         res
           .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           .end(
-            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
+            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd><dt>Armazenamento da fila</dt><dd>${'storage' in status ? 'Degradado: sem espaço ou erro de disco. Novos registros não são gravados e os comandos são recusados.' : 'Normal'}</dd><dt>Registros perdidos por falha de armazenamento</dt><dd>${'storageLost' in status ? status.storageLost : 0}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
           )
       }
     } catch {

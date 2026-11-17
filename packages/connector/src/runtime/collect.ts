@@ -147,6 +147,8 @@ export async function collectIntoQueue(input: {
         diagnostic({ kind: 'unavailable', reason: event.reason })
       } else {
         const now = Date.now()
+        // Degraded storage drops records; they count as lost, never as queued.
+        const lostBefore = queue.storageLost
         const previous = lastState.get(event.printer.printerKey)
         lastState.set(event.printer.printerKey, event.printer.state)
         if (previous !== undefined && previous !== event.printer.state) {
@@ -165,8 +167,10 @@ export async function collectIntoQueue(input: {
         const receipt = queue.enqueue(event.printer, now)
         totals.queued++
         loss(receipt.loss, 'retention')
+        const dropped = queue.storageLost - lostBefore
+        totals.queued -= dropped
         // enqueue returns only after its append/compaction and fsync succeed.
-        diagnostic({ kind: 'queued', depth: queue.depth })
+        if (!dropped) diagnostic({ kind: 'queued', depth: queue.depth })
       }
     } catch (error) {
       fail(error)

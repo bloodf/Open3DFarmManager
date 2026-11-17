@@ -55,6 +55,8 @@ export type PauseRelayConfig = Readonly<{
    * origin, URL or printer key ever arrives from the peer.
    */
   bindingFor(assignmentId: string): PrinterBinding | undefined
+  /** Local storage gate, passed to the dispatcher: true refuses with `storage`. */
+  storageDegraded?: () => boolean
 }>
 
 export type PauseRelayPeerInput = Readonly<{
@@ -238,6 +240,9 @@ export function createPauseCommandRelay(
     clock: config.clock,
     journal: config.journal,
     driver: config.driver,
+    ...(config.storageDegraded
+      ? { storageDegraded: config.storageDegraded }
+      : {}),
   })
   const peers = new Map<string, Peer>()
   const pending = new Set<Promise<unknown>>()

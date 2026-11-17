@@ -315,6 +315,9 @@ async function connect(
   const offer = await connector.offer()
   const answer = await browser.answer(offer)
   connector.answer(answer)
+  // The binding allows at most 30,000 ms. Separate clock reads can cross a
+  // millisecond boundary under load and make both peers reject the binding.
+  const bindingIssuedAt = Date.now()
   const binding: ControlSessionBinding = {
     v: 1,
     purpose: 'pause-rtc',
@@ -333,15 +336,23 @@ async function connect(
     credential_jti: randomUUID(),
     browser_nonce: nonce(),
     connector_nonce: nonce(),
-    issued_at: Date.now(),
-    expires_at: Date.now() + 30000,
+    issued_at: bindingIssuedAt,
+    expires_at: bindingIssuedAt + 30000,
     offer_sha256: await controlSdpHash(offer),
     answer_sha256: await controlSdpHash(answer),
     browser_dtls: controlDtlsFingerprint(answer),
     connector_dtls: controlDtlsFingerprint(offer),
   }
   bindingReady.resolve(binding)
-  const phase = await challenge.promise
+  const phase = await Promise.race([
+    challenge.promise,
+    browser.closed.then(() => {
+      throw Error('Browser closed before admission challenge')
+    }),
+    connector.closed.then(() => {
+      throw Error('Connector closed before admission challenge')
+    }),
+  ])
   const issuedAt = Date.now()
   const common = {
     farm_id: binding.farm_id,

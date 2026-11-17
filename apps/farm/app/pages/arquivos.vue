@@ -24,7 +24,6 @@ import {
 } from '../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-definePageMeta({ middleware: 'farm-flag' })
 const { state, ready, now, discover, selectFarm, selectKey } = useFarmView()
 const printer = ref('')
 const files = shallowRef<PrinterFile[]>([])

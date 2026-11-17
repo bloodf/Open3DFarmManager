@@ -59,7 +59,6 @@ import {
   isKobraXAssignment,
 } from '../utils/kobralink-onboarding.ts'
 
-definePageMeta({ middleware: 'farm-flag' })
 const {
   state,
   ready,

@@ -107,7 +107,7 @@ async function stopChild(child: ChildProcess | undefined) {
  */
 export async function startFarmApp(
   database: JourneyDatabase,
-  options: { farmView?: boolean; history?: boolean } = {},
+  options: { history?: boolean } = {},
 ): Promise<FarmApp> {
   const directory = await mkdtemp(join(tmpdir(), 'o3dfm-journey-'))
   await chmod(directory, 0o700)
@@ -267,7 +267,6 @@ export async function startFarmApp(
       NUXT_AUTH_DATABASE_URL: url(0),
       NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
       NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: url(8),
-      NUXT_PUBLIC_FLAGS_FARM_VIEW: String(options.farmView ?? true),
       NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
       NUXT_CONNECTOR_INVENTORY_DATABASE_URL: url(1),
       NUXT_BROWSER_DEVICES_ENABLED: 'true',

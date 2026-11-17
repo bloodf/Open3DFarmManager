@@ -3,12 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { renderSpoolInventory } from './render-spool-inventory.ts'
 import { cameraDisplayBundle } from './mount-camera-display.ts'
 
-// Isolated UI checks only. Use playwright.farm-view.config.ts with a built app.
-// FARM_VIEW_E2E=true selects these tests; the default flag-off suite stays unchanged.
-test.skip(
-  process.env.FARM_VIEW_E2E !== 'true',
-  'Requires an opt-in farmView build; does not prove real DB/auth/RTC acceptance.',
-)
+// Isolated UI checks only; mocked routes do not prove real DB/auth/RTC acceptance.
 const farm = '00000000-0000-4000-8000-000000000001'
 const agent = '00000000-0000-4000-8000-000000000002'
 const assignment = '00000000-0000-4000-8000-000000000003'

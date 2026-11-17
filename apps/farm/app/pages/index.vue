@@ -1,5 +1,4 @@
 <script setup lang="ts">
-const farmViewEnabled = useFlag('farmView')
 const heading = ref<HTMLElement | null>(null)
 
 onMounted(() => heading.value?.focus())
@@ -10,7 +9,7 @@ onMounted(() => heading.value?.focus())
     <small>Open3DFarmManager · Desenvolvimento</small>
     <h1 ref="heading" tabindex="-1">Sua farm de impressão, em um só lugar.</h1>
     <nav aria-label="Navegação principal">
-      <NuxtLink v-if="farmViewEnabled" to="/farm">Minha farm</NuxtLink>
+      <NuxtLink to="/farm">Minha farm</NuxtLink>
       <NuxtLink to="/connectors">Consultar Connectors</NuxtLink>
       <NuxtLink to="/parear">Aprovar Connector</NuxtLink>
       <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>

@@ -86,7 +86,6 @@ export default defineNuxtConfig({
       proofTtlMs: '',
       bodyTimeoutMs: '',
     },
-    public: { flags: { farmView: false } },
   },
   typescript: { strict: true },
   css: ['~/assets/main.css'],

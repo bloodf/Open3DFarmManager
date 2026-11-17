@@ -1,0 +1,2345 @@
+openapi: 3.1.0
+info:
+  title: OpenFarm Integration API
+  version: 1.0.0
+  summary: Versioned API for third-party applications to observe and control a farm.
+  description: |
+    Contract for `/api/integrations/v1`. This file is the source of truth; the
+    server publishes it unchanged (as JSON) at
+    `/api/integrations/v1/openapi.json`. Versioning and deprecation rules are in
+    `docs/INTEGRATION-API.md`.
+
+    **Authentication.** Every operation except the spec and the token endpoint
+    requires `Authorization: Bearer <access token>` issued by the OAuth 2.0
+    client-credentials token endpoint. Session cookies are never accepted on
+    these routes. Each token is bound to the app's grants: scope, farm and,
+    optionally, printer. Sandbox apps are only ever granted sandbox farms.
+
+    **Authorization.** A missing, expired, malformed or revoked token answers
+    401 (`invalid-token`). A token lacking the operation's scope answers 403
+    (`insufficient-scope`). A farm, printer, job, action or webhook outside the
+    app's grants answers 404 (`not-found`) so that existence is not disclosed.
+
+    **Errors.** Every error except those of the token endpoint is an RFC 9457
+    `application/problem+json` document with a stable machine-readable `code`.
+    Clients branch on `code`, never on `title` or `detail`.
+
+    **Pagination.** List operations use opaque cursors: pass `cursor` from the
+    previous page's `nextCursor`; `nextCursor` is `null` on the last page.
+    Pages are stable under concurrent inserts.
+
+    **Rate limits.** Each app has separate read (GET) and write (POST, DELETE)
+    token buckets. Every authenticated response carries `RateLimit-Limit`,
+    `RateLimit-Remaining` and `RateLimit-Reset` for the bucket the request
+    consumed; a 429 also carries `Retry-After`.
+
+    **Idempotency.** Creating a job or action requires an `Idempotency-Key`
+    header. Retrying with the same key and the same body returns the original
+    resource; the same key with a different body answers 409
+    (`idempotency-key-reused`). Keys are kept for at least 24 hours.
+
+    **Commands.** Jobs and actions are delivered to the printer's Connector as
+    signed envelopes. The Connector alone decides whether to execute and
+    refuses unsafe or unauthorized commands with a refusal code. The
+    integrator is responsible for checking printer state before sending a
+    command; a command whose delivery is uncertain is never retried
+    automatically and ends as `outcome-unknown`.
+
+    **Time.** All timestamps are integer milliseconds since the Unix epoch (UTC).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /api/integrations/v1
+    description: This farm server
+security:
+  - clientCredentials: []
+tags:
+  - name: Meta
+    description: The published contract.
+  - name: Authentication
+    description: OAuth 2.0 client-credentials tokens.
+  - name: Farm link
+    description: Intent registration, owner consent and grant redemption.
+  - name: Printers
+    description: Printers, their status, files and macros.
+  - name: Inventory
+    description: Read-only filament inventory mirrored from Spoolman.
+  - name: Jobs
+    description: Job history and API-submitted print jobs.
+  - name: Actions
+    description: Printer actions such as pause, resume and cancel.
+  - name: Webhooks
+    description: Signed event delivery subscriptions.
+paths:
+  /openapi.json:
+    get:
+      operationId: getOpenApiSpec
+      tags: [Meta]
+      summary: This specification as JSON
+      description: Public; no authentication and no rate-limit headers.
+      security: []
+      responses:
+        '200':
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema:
+                type: object
+        '4XX':
+          description: |
+            Client error outside this contract, such as a method other than
+            GET or HEAD. No body is guaranteed.
+  /oauth/token:
+    post:
+      operationId: createAccessToken
+      tags: [Authentication]
+      summary: Issue an access token (client credentials)
+      description: |
+        RFC 6749 section 4.4. The client authenticates with HTTP Basic
+        (`client_secret_basic`) or with `client_id` and `client_secret` in the
+        form body (`client_secret_post`), not both. Errors on this endpoint use
+        the RFC 6749 error format, not problem+json. The token's lifetime is
+        server configuration and is reported in `expires_in`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Access token issued.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Malformed request, unsupported grant type or invalid scope.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '401':
+          description: Unknown client, wrong secret or revoked credential.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            WWW-Authenticate:
+              description: '`Basic realm="openfarm-integrations"`.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Too many token requests for this client.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/Retry-After'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+  /intents:
+    post:
+      operationId: registerIntent
+      tags: [Farm link]
+      summary: Register a farm-link intent
+      description: |
+        Registers an intent for the owner to consent to. Idempotent on
+        `intentRef`: repeating an identical request returns the same
+        `consentRef`; reusing `intentRef` with any different field answers 409
+        `intent-conflict`. `expiresAtMs` must lie in the future and at most
+        5 minutes ahead of the server clock, allowing 30 seconds of clock
+        skew; otherwise 422 `intent-expired` or `intent-too-long`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntentRequest'
+      responses:
+        '200':
+          description: Intent registered (or the identical intent already was).
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /grants/redeem:
+    post:
+      operationId: redeemGrant
+      tags: [Farm link]
+      summary: Redeem a consented intent for a grant
+      description: |
+        Answers `pending_consent` until the owner approves the intent, then
+        issues exactly one grant per `requestId`, echoing `requestId`,
+        `intentRef`, `clientId`, the expiry and the full scope. Repeating the
+        same `requestId` returns the same answer. No grant is ever issued after
+        the intent has expired (`intent-expired`), and a refused consent
+        answers `consent_denied`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedeemRequest'
+      responses:
+        '200':
+          description: Pending, denied or granted.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedeemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /grants/receipt:
+    post:
+      operationId: getGrantReceipt
+      tags: [Farm link]
+      summary: Read the stored outcome of a redeem request
+      description: |
+        Returns the stored outcome of a redeem `requestId` for the lifetime of
+        the grant. An unknown or no longer retained `requestId` answers 200
+        with `status: absent`; a request whose consent is still open answers
+        `pending_consent`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptRequest'
+      responses:
+        '200':
+          description: The stored outcome.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers:
+    get:
+      operationId: listPrinters
+      tags: [Printers]
+      summary: List printers the app may read
+      description: Only printers covered by a `printers:read` grant appear.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/{printerId}/status:
+    get:
+      operationId: getPrinterStatus
+      tags: [Printers]
+      summary: Latest observed status of a printer
+      description: |
+        From the server's latest-state projection. When nothing has been
+        observed, or the last observation cannot be published, `state` is
+        `unknown` and the optional readings are absent; values are never
+        guessed.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+      responses:
+        '200':
+          description: The printer's latest status.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/{printerId}/files:
+    get:
+      operationId: listPrinterFiles
+      tags: [Printers]
+      summary: List files stored on a printer
+      description: |
+        Answered live by the printer's Connector. Printer families without file
+        listing answer 422 `unsupported`; an unreachable Connector answers 503
+        `connector-unavailable` and a Connector that does not answer in time
+        answers 504 `connector-timeout`.
+      security:
+        - clientCredentials: ['files:read']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of files.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterFilePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /printers/{printerId}/macros:
+    get:
+      operationId: listPrinterMacros
+      tags: [Printers]
+      summary: List macros a printer exposes
+      description: |
+        Answered live by the printer's Connector. Families without macros
+        answer 422 `unsupported`.
+      security:
+        - clientCredentials: ['control:extended']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of macros.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacroPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /printers/{printerId}/jobs:
+    post:
+      operationId: submitJob
+      tags: [Jobs]
+      summary: Submit a print job
+      description: |
+        Stores the job and either delivers it to the Connector or, when the
+        grant requires operator approval, holds it (`held`). The server never
+        downloads or stores the file: the Connector fetches `fileUrl` over
+        HTTPS, verifies `sha256` and `sizeBytes`, uploads and starts. A
+        retry with the same `Idempotency-Key` and body returns the same job.
+      security:
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobRequest'
+      responses:
+        '202':
+          description: Job accepted (new or replayed).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/{printerId}/actions:
+    post:
+      operationId: submitAction
+      tags: [Actions]
+      summary: Send a printer action
+      description: |
+        `pause`, `resume`, `cancel` and `emergency_stop` require
+        `control:basic`; every other action requires `control:extended`. An
+        action the printer does not advertise answers 422 `unsupported` and is
+        never delivered. Otherwise the action is delivered to the Connector or,
+        when the grant requires approval, held. A retry with the same
+        `Idempotency-Key` and body returns the same action.
+      security:
+        - clientCredentials: ['control:basic']
+        - clientCredentials: ['control:extended']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      responses:
+        '202':
+          description: Action accepted (new or replayed).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Action'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory:
+    get:
+      operationId: listInventory
+      tags: [Inventory]
+      summary: Latest Spoolman inventory snapshots
+      description: |
+        One entry per Connector that reported a snapshot, for farms covered by
+        an `inventory:read` grant. Snapshots are read-only display evidence.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of inventory snapshots.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /jobs:
+    get:
+      operationId: listJobHistory
+      tags: [Jobs]
+      summary: List ended jobs (job history)
+      description: |
+        Ended jobs from the farm's job history, newest first, for printers
+        covered by a `jobs:read` grant. `since` and `until` filter on `endedAt`
+        (inclusive, exclusive).
+      security:
+        - clientCredentials: ['jobs:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - name: printerId
+          in: query
+          description: Only entries of this printer.
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: since
+          in: query
+          description: Only entries with `endedAt` at or after this time.
+          schema:
+            $ref: '#/components/schemas/TimestampMs'
+        - name: until
+          in: query
+          description: Only entries with `endedAt` before this time.
+          schema:
+            $ref: '#/components/schemas/TimestampMs'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of job history entries.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobHistoryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /jobs/{jobId}:
+    get:
+      operationId: getJob
+      tags: [Jobs]
+      summary: Status of a job submitted through the API
+      description: |
+        `jobId` is the `id` returned by `submitJob`. The status comes from
+        Connector results and job history only, never assumed, and moves
+        forward only.
+      security:
+        - clientCredentials: ['jobs:read']
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The job.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /actions/{actionId}:
+    get:
+      operationId: getAction
+      tags: [Actions]
+      summary: Status of an action submitted through the API
+      description: |
+        The status comes from Connector results only, never assumed, and moves
+        forward only.
+      security:
+        - clientCredentials: ['control:basic']
+        - clientCredentials: ['control:extended']
+      parameters:
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The action.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Action'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /webhooks:
+    get:
+      operationId: listWebhooks
+      tags: [Webhooks]
+      summary: List the app's webhook subscriptions
+      security:
+        - clientCredentials: ['events:subscribe']
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of subscriptions.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createWebhook
+      tags: [Webhooks]
+      summary: Subscribe a URL to events
+      description: |
+        The target must be HTTPS. Loopback, link-local and private-network
+        targets are refused (422 `unsafe-target`) unless the app is a sandbox
+        app. Events are delivered only for farms and printers within the app's
+        grants. The signing secret is returned once, in this response only.
+      security:
+        - clientCredentials: ['events:subscribe']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookRequest'
+      responses:
+        '201':
+          description: Subscription created.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /webhooks/{webhookId}:
+    delete:
+      operationId: deleteWebhook
+      tags: [Webhooks]
+      summary: Remove a subscription
+      description: Deliveries stop; events already in flight may still arrive once.
+      security:
+        - clientCredentials: ['events:subscribe']
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+      responses:
+        '204':
+          description: Subscription removed.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /webhooks/{webhookId}/test:
+    post:
+      operationId: testWebhook
+      tags: [Webhooks]
+      summary: Queue a signed `webhook.test` delivery
+      description: |
+        Queues one `webhook.test` event for this subscription, signed and
+        retried like any other event. No request body.
+      security:
+        - clientCredentials: ['events:subscribe']
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+      responses:
+        '202':
+          description: Test event queued.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookTestQueued'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+webhooks:
+  printer.state_changed:
+    post:
+      operationId: onPrinterStateChanged
+      summary: A printer's observed state changed
+      description: Sent when `state` of a granted printer changes.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterStateChangedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  job.status_changed:
+    post:
+      operationId: onJobStatusChanged
+      summary: An API-submitted job changed status
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobStatusChangedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  action.status_changed:
+    post:
+      operationId: onActionStatusChanged
+      summary: An API-submitted action changed status
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionStatusChangedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  job.ended:
+    post:
+      operationId: onJobEnded
+      summary: A job ended on a printer (any origin)
+      description: Sent when a job history entry is recorded, with filament usage when known.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobEndedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  inventory.changed:
+    post:
+      operationId: onInventoryChanged
+      summary: A Connector reported a newer inventory snapshot that differs
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryChangedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  webhook.test:
+    post:
+      operationId: onWebhookTest
+      summary: Test delivery requested with `testWebhook`
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookTestEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      description: |
+        OAuth 2.0 client credentials. Access tokens are short-lived signed
+        bearer tokens bound to the app's grants.
+      flows:
+        clientCredentials:
+          tokenUrl: /api/integrations/v1/oauth/token
+          scopes:
+            printers:read: Read printers and their status.
+            files:read: List files stored on printers.
+            inventory:read: Read Spoolman inventory snapshots.
+            jobs:read: Read job history and API-submitted jobs.
+            jobs:start: Submit print jobs.
+            control:basic: Pause, resume, cancel and emergency stop.
+            control:extended: Temperatures, fans, lights, speed, homing, filament, macros and firmware restart; list macros.
+            events:subscribe: Manage webhook subscriptions and receive events.
+  parameters:
+    PrinterId:
+      name: printerId
+      in: path
+      required: true
+      description: The printer assignment ID.
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    FarmIdFilter:
+      name: farmId
+      in: query
+      description: Only results from this farm.
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `nextCursor`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+        pattern: '^[A-Za-z0-9_-]+$'
+    Limit:
+      name: limit
+      in: query
+      description: Maximum items per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-chosen key, unique per logical request and app.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9_.:-]+$'
+    WebhookEventId:
+      name: OpenFarm-Event-Id
+      in: header
+      required: true
+      description: Stable event ID; identical across retries. Use it to de-duplicate.
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    WebhookTimestamp:
+      name: OpenFarm-Timestamp
+      in: header
+      required: true
+      description: Unix time in seconds when this delivery attempt was signed.
+      schema:
+        type: string
+        pattern: '^[0-9]{1,12}$'
+    WebhookSignature:
+      name: OpenFarm-Signature
+      in: header
+      required: true
+      description: |
+        `v1=<hex>` where `<hex>` is the lowercase hex HMAC-SHA256, keyed with
+        the subscription's signing secret, of `<OpenFarm-Timestamp>.<raw
+        request body>`. Several comma-separated `v1=` values may appear during
+        secret rotation; accept the request if any matches. Compare in constant
+        time and reject timestamps more than 5 minutes from your clock.
+      schema:
+        type: string
+        pattern: '^v1=[0-9a-f]{64}(,v1=[0-9a-f]{64})*$'
+  headers:
+    RateLimit-Limit:
+      description: Requests allowed in the current window of the consumed bucket.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimit-Remaining:
+      description: Requests left in the current window of the consumed bucket.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimit-Reset:
+      description: Seconds until the consumed bucket is full again.
+      schema:
+        type: integer
+        minimum: 0
+    Retry-After:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+        minimum: 0
+    Location:
+      description: URL of the created resource.
+      schema:
+        type: string
+    CacheControlNoStore:
+      description: Always `no-store`.
+      schema:
+        type: string
+        const: no-store
+  responses:
+    BadRequest:
+      description: Malformed request (`invalid-request`).
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing, malformed, expired or revoked token (`invalid-token`).
+      headers:
+        WWW-Authenticate:
+          description: '`Bearer realm="openfarm-integrations"`, with `error="invalid_token"` when a token was sent.'
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The token lacks the required scope (`insufficient-scope`).
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Unknown, or outside the app's grants (`not-found`, `intent-not-found`).
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: |
+        `idempotency-key-reused`, `intent-conflict`, `request-conflict` or
+        `webhook-limit-reached`.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: Request body over the limit (`payload-too-large`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnsupportedMediaType:
+      description: Body is not `application/json` (`unsupported-media-type`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: |
+        Well-formed but refused: `validation-failed`, `unsupported`,
+        `unsafe-target`, `intent-expired`, `intent-too-long`.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: Rate limit exceeded (`rate-limited`).
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InternalError:
+      description: Unexpected server error (`internal-error`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ServiceUnavailable:
+      description: |
+        Storage unavailable (`service-unavailable`) or the printer's Connector
+        is unreachable (`connector-unavailable`).
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    GatewayTimeout:
+      description: The Connector did not answer in time (`connector-timeout`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    WebhookAccepted:
+      description: |
+        Any 2xx acknowledges the delivery. Anything else, or no answer within
+        10 seconds, is retried with exponential backoff until the retry window
+        ends; the event is then dead and not delivered again.
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    TimestampMs:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Milliseconds since the Unix epoch.
+    Ref:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[A-Za-z0-9_.:-]+$'
+    Scope:
+      type: string
+      enum:
+        - printers:read
+        - files:read
+        - inventory:read
+        - jobs:read
+        - jobs:start
+        - control:basic
+        - control:extended
+        - events:subscribe
+    ProblemCode:
+      type: string
+      description: |
+        Stable machine-readable error code. New codes may be added within v1;
+        treat an unknown code according to the HTTP status.
+      enum:
+        - invalid-request
+        - validation-failed
+        - invalid-token
+        - insufficient-scope
+        - not-found
+        - intent-not-found
+        - method-not-allowed
+        - idempotency-key-reused
+        - intent-conflict
+        - request-conflict
+        - webhook-limit-reached
+        - payload-too-large
+        - unsupported-media-type
+        - unsupported
+        - unsafe-target
+        - intent-expired
+        - intent-too-long
+        - rate-limited
+        - internal-error
+        - service-unavailable
+        - connector-unavailable
+        - connector-timeout
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: '`https://openfarm.dev/problems/<code>` or `about:blank`.'
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 1000
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+        errors:
+          type: array
+          maxItems: 50
+          description: Per-field validation failures (`invalid-request`, `validation-failed`).
+          items:
+            type: object
+            required: [pointer, detail]
+            additionalProperties: false
+            properties:
+              pointer:
+                type: string
+                description: JSON Pointer (RFC 6901) into the request, or `/header/<name>` / `/query/<name>`.
+                maxLength: 256
+              detail:
+                type: string
+                maxLength: 200
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_request
+            - invalid_client
+            - invalid_scope
+            - unauthorized_client
+            - unsupported_grant_type
+            - rate_limited
+        error_description:
+          type: string
+          maxLength: 200
+    TokenRequest:
+      type: object
+      required: [grant_type]
+      properties:
+        grant_type:
+          type: string
+          const: client_credentials
+        scope:
+          type: string
+          maxLength: 512
+          description: Space-separated subset of the app's granted scopes; all granted scopes when omitted.
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Only with `client_secret_post`.
+        client_secret:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Only with `client_secret_post`.
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, scope]
+      additionalProperties: false
+      properties:
+        access_token:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          minimum: 1
+          description: Lifetime in seconds.
+        scope:
+          type: string
+          description: Space-separated scopes the token carries.
+    IntentRequest:
+      type: object
+      required:
+        [
+          intentRef,
+          clientId,
+          deploymentId,
+          registryRevision,
+          machineRef,
+          expiresAtMs,
+        ]
+      additionalProperties: false
+      properties:
+        intentRef:
+          $ref: '#/components/schemas/Ref'
+        clientId:
+          $ref: '#/components/schemas/Ref'
+        deploymentId:
+          $ref: '#/components/schemas/Ref'
+        registryRevision:
+          $ref: '#/components/schemas/Ref'
+        machineRef:
+          $ref: '#/components/schemas/Ref'
+        expiresAtMs:
+          $ref: '#/components/schemas/TimestampMs'
+    IntentResponse:
+      type: object
+      required: [intentRef, consentRef, expiresAtMs]
+      additionalProperties: false
+      properties:
+        intentRef:
+          $ref: '#/components/schemas/Ref'
+        consentRef:
+          $ref: '#/components/schemas/Ref'
+        expiresAtMs:
+          $ref: '#/components/schemas/TimestampMs'
+    RedeemRequest:
+      type: object
+      required: [requestId, intentRef, clientId]
+      additionalProperties: false
+      properties:
+        requestId:
+          $ref: '#/components/schemas/Ref'
+        intentRef:
+          $ref: '#/components/schemas/Ref'
+        clientId:
+          $ref: '#/components/schemas/Ref'
+    Grant:
+      type: object
+      required:
+        [grantId, requestId, intentRef, clientId, farmId, scopes, expiresAtMs]
+      additionalProperties: false
+      properties:
+        grantId:
+          $ref: '#/components/schemas/Uuid'
+        requestId:
+          $ref: '#/components/schemas/Ref'
+        intentRef:
+          $ref: '#/components/schemas/Ref'
+        clientId:
+          $ref: '#/components/schemas/Ref'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerIds:
+          type: array
+          maxItems: 500
+          description: Present when the grant is limited to these printers.
+          items:
+            $ref: '#/components/schemas/Uuid'
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Scope'
+        requiresApproval:
+          type: boolean
+        expiresAtMs:
+          $ref: '#/components/schemas/TimestampMs'
+    RedeemResponse:
+      oneOf:
+        - type: object
+          required: [status, requestId, intentRef]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              const: pending_consent
+            requestId:
+              $ref: '#/components/schemas/Ref'
+            intentRef:
+              $ref: '#/components/schemas/Ref'
+            retryAfterMs:
+              type: integer
+              minimum: 0
+              description: Suggested wait before redeeming again.
+        - type: object
+          required: [status, requestId, intentRef]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              const: consent_denied
+            requestId:
+              $ref: '#/components/schemas/Ref'
+            intentRef:
+              $ref: '#/components/schemas/Ref'
+        - type: object
+          required: [status, grant]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              const: granted
+            grant:
+              $ref: '#/components/schemas/Grant'
+    ReceiptRequest:
+      type: object
+      required: [requestId]
+      additionalProperties: false
+      properties:
+        requestId:
+          $ref: '#/components/schemas/Ref'
+    ReceiptResponse:
+      oneOf:
+        - type: object
+          required: [status, requestId]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              enum: [absent, pending_consent, consent_denied, expired]
+            requestId:
+              $ref: '#/components/schemas/Ref'
+        - type: object
+          required: [status, requestId, grant]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              const: granted
+            requestId:
+              $ref: '#/components/schemas/Ref'
+            grant:
+              $ref: '#/components/schemas/Grant'
+    PageInfo:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          type: [string, 'null']
+          description: Cursor for the next page; `null` on the last page.
+    Printer:
+      type: object
+      required: [id, farmId, printerKey, controls, sandbox]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The printer's key within its Connector.
+        displayName:
+          type: string
+          maxLength: 255
+        vendor:
+          type: string
+          maxLength: 255
+        model:
+          type: string
+          maxLength: 1024
+        controls:
+          type: array
+          description: Actions the printer currently advertises.
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ActionName'
+        sandbox:
+          type: boolean
+    PrinterPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/Printer'
+    PrinterStatus:
+      type: object
+      required: [printerId, farmId, printerKey, state]
+      additionalProperties: false
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+        vendor:
+          type: string
+          maxLength: 255
+        model:
+          type: string
+          maxLength: 1024
+        state:
+          type: string
+          description: '`unknown` when nothing publishable has been observed.'
+          enum: [idle, printing, paused, error, offline, unknown]
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction complete; absent when unknown.
+        filename:
+          type: string
+          maxLength: 255
+        estimatedRemainingSeconds:
+          type: number
+          minimum: 0
+        temperatures:
+          type: object
+          additionalProperties: false
+          properties:
+            toolCelsius:
+              type: number
+            bedCelsius:
+              type: number
+        activeSpool:
+          $ref: '#/components/schemas/ActiveSpool'
+        observedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    ActiveSpool:
+      type: object
+      description: The spool or slot currently feeding the printer, when known.
+      additionalProperties: false
+      properties:
+        slot:
+          type: string
+          maxLength: 32
+        name:
+          type: string
+          maxLength: 32
+        material:
+          type: string
+          maxLength: 64
+        colorHex:
+          type: string
+          pattern: '^[0-9a-f]{6}$'
+        remainingGrams:
+          type: integer
+        remainingPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+    PrinterFile:
+      type: object
+      required: [name, sizeBytes, modifiedAt]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Relative path on the printer.
+        sizeBytes:
+          type: integer
+          minimum: 0
+        modifiedAt:
+          $ref: '#/components/schemas/TimestampMs'
+        estimatedSeconds:
+          type: number
+          minimum: 0
+    PrinterFilePage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/PrinterFile'
+    Macro:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: '#/components/schemas/MacroName'
+    MacroName:
+      type: string
+      pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+    MacroPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/Macro'
+    Spool:
+      type: object
+      required: [name, material, colorHex, remainingGrams, location, archived]
+      additionalProperties: false
+      properties:
+        name:
+          type: [string, 'null']
+          maxLength: 32
+        material:
+          type: [string, 'null']
+          maxLength: 16
+        colorHex:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{6}$'
+        remainingGrams:
+          type: [integer, 'null']
+          description: Negative values are reported as stored, never clamped.
+        location:
+          type: [string, 'null']
+          maxLength: 32
+        archived:
+          type: boolean
+    InventorySnapshot:
+      type: object
+      required: [farmId, connectorId, observedAt, stale, total, spools]
+      additionalProperties: false
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        connectorId:
+          $ref: '#/components/schemas/Uuid'
+        observedAt:
+          $ref: '#/components/schemas/TimestampMs'
+        stale:
+          type: boolean
+        total:
+          type: integer
+          minimum: 0
+          description: Spools known to Spoolman; `spools` may be a bounded subset.
+        spools:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Spool'
+    InventoryPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/InventorySnapshot'
+    FilamentUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        grams:
+          type: number
+          minimum: 0
+        millimetres:
+          type: number
+          minimum: 0
+        spoolName:
+          type: string
+          maxLength: 32
+        material:
+          type: string
+          maxLength: 64
+    JobHistoryEntry:
+      type: object
+      required: [id, farmId, printerId, outcome, endedAt]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          pattern: '^[0-9]{1,19}$'
+          description: Job history entry ID.
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        jobId:
+          $ref: '#/components/schemas/Uuid'
+          description: Present when the job was submitted through this API.
+        outcome:
+          type: string
+          enum: [completed, cancelled, failed]
+        filename:
+          type: string
+          maxLength: 255
+        printDurationSeconds:
+          type: number
+          minimum: 0
+        totalDurationSeconds:
+          type: number
+          minimum: 0
+        filamentUsage:
+          $ref: '#/components/schemas/FilamentUsage'
+        endedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    JobHistoryPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/JobHistoryEntry'
+    JobRequest:
+      type: object
+      required: [fileUrl, sha256, sizeBytes, displayName]
+      additionalProperties: false
+      properties:
+        fileUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+          description: HTTPS URL the Connector downloads; redirects to non-HTTPS are refused.
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Lowercase hex SHA-256 of the file.
+        sizeBytes:
+          type: integer
+          minimum: 1
+          description: Exact file size; the server enforces a configured maximum.
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 255
+    RefusalCode:
+      type: string
+      description: |
+        Why the Connector refused a command. New codes may be added within v1;
+        treat an unknown code as a refusal.
+      enum:
+        - printer-busy
+        - not-ready
+        - wrong-state
+        - checksum-mismatch
+        - grant-revoked
+        - expired
+        - unsupported
+    CommandRefusal:
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code:
+          $ref: '#/components/schemas/RefusalCode'
+        detail:
+          type: string
+          maxLength: 500
+    Job:
+      type: object
+      required:
+        [
+          id,
+          farmId,
+          printerId,
+          status,
+          displayName,
+          fileUrl,
+          sha256,
+          sizeBytes,
+          createdAt,
+          updatedAt,
+        ]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          description: |
+            `held` awaits operator approval; `rejected` was refused by an
+            operator; `expired` was never delivered before its expiry;
+            `delivered` reached the Connector; `refused` was refused by the
+            Connector (see `refusal`); `started`, `completed`, `cancelled` and
+            `failed` follow the print; `outcome-unknown` means delivery or
+            execution could not be confirmed and nothing was retried. Final
+            states never change.
+          enum:
+            - held
+            - rejected
+            - expired
+            - delivered
+            - refused
+            - started
+            - completed
+            - cancelled
+            - failed
+            - outcome-unknown
+        refusal:
+          $ref: '#/components/schemas/CommandRefusal'
+        displayName:
+          type: string
+          maxLength: 255
+        fileUrl:
+          type: string
+          maxLength: 2048
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        sizeBytes:
+          type: integer
+          minimum: 1
+        historyEntryId:
+          type: string
+          pattern: '^[0-9]{1,19}$'
+          description: The job history entry once the print has ended.
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+        updatedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    ActionName:
+      type: string
+      enum:
+        - pause
+        - resume
+        - cancel
+        - emergency_stop
+        - set_temperature
+        - set_fan
+        - home
+        - set_light
+        - set_speed
+        - firmware_restart
+        - run_macro
+        - load_filament
+        - unload_filament
+    ActionRequest:
+      description: One action and its arguments; `args` is required and `{}` for actions without arguments.
+      oneOf:
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              enum:
+                [
+                  pause,
+                  resume,
+                  cancel,
+                  emergency_stop,
+                  firmware_restart,
+                  unload_filament,
+                ]
+            args:
+              type: object
+              additionalProperties: false
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: set_temperature
+            args:
+              type: object
+              required: [heater, targetCelsius]
+              additionalProperties: false
+              properties:
+                heater:
+                  type: string
+                  enum: [extruder, bed, chamber]
+                targetCelsius:
+                  type: integer
+                  minimum: 0
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: set_fan
+            args:
+              type: object
+              required: [fan, percent]
+              additionalProperties: false
+              properties:
+                fan:
+                  type: string
+                  enum: [part, aux, chamber]
+                percent:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: home
+            args:
+              type: object
+              required: [axes]
+              additionalProperties: false
+              properties:
+                axes:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum: [x, y, z]
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: set_light
+            args:
+              type: object
+              required: ['on']
+              additionalProperties: false
+              properties:
+                'on':
+                  type: boolean
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: set_speed
+            args:
+              type: object
+              required: [level]
+              additionalProperties: false
+              properties:
+                level:
+                  type: string
+                  enum: [silent, standard, sport, ludicrous]
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: run_macro
+            args:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name:
+                  $ref: '#/components/schemas/MacroName'
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: load_filament
+            args:
+              type: object
+              additionalProperties: false
+              properties:
+                tray:
+                  type: integer
+                  minimum: 0
+                  maximum: 15
+    Action:
+      type: object
+      required:
+        [id, farmId, printerId, action, args, status, createdAt, updatedAt]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        action:
+          $ref: '#/components/schemas/ActionName'
+        args:
+          type: object
+          description: The arguments as submitted.
+        status:
+          type: string
+          description: |
+            `held`, `rejected`, `expired`, `delivered` and `refused` as for
+            jobs; `completed` and `failed` report the Connector's result;
+            `outcome-unknown` means the result could not be confirmed and
+            nothing was retried. Final states never change.
+          enum:
+            - held
+            - rejected
+            - expired
+            - delivered
+            - refused
+            - completed
+            - failed
+            - outcome-unknown
+        refusal:
+          $ref: '#/components/schemas/CommandRefusal'
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+        updatedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    EventType:
+      type: string
+      enum:
+        - printer.state_changed
+        - job.status_changed
+        - action.status_changed
+        - job.ended
+        - inventory.changed
+        - webhook.test
+    WebhookRequest:
+      type: object
+      required: [url, events]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+        events:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/EventType'
+        description:
+          type: string
+          maxLength: 255
+    Webhook:
+      type: object
+      required: [id, url, events, createdAt]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        url:
+          type: string
+          maxLength: 2048
+        events:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/EventType'
+        description:
+          type: string
+          maxLength: 255
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+    WebhookCreated:
+      allOf:
+        - $ref: '#/components/schemas/Webhook'
+        - type: object
+          required: [signingSecret]
+          properties:
+            signingSecret:
+              type: string
+              minLength: 32
+              maxLength: 256
+              description: Shown only in this response; it cannot be retrieved again.
+    WebhookPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/Webhook'
+    WebhookTestQueued:
+      type: object
+      required: [eventId]
+      additionalProperties: false
+      properties:
+        eventId:
+          $ref: '#/components/schemas/Uuid'
+    EventEnvelope:
+      type: object
+      required: [id, type, occurredAt, data]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        type:
+          $ref: '#/components/schemas/EventType'
+        occurredAt:
+          $ref: '#/components/schemas/TimestampMs'
+        data:
+          type: object
+    PrinterStateChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: printer.state_changed
+            data:
+              $ref: '#/components/schemas/PrinterStatus'
+    JobStatusChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: job.status_changed
+            data:
+              $ref: '#/components/schemas/Job'
+    ActionStatusChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: action.status_changed
+            data:
+              $ref: '#/components/schemas/Action'
+    JobEndedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: job.ended
+            data:
+              $ref: '#/components/schemas/JobHistoryEntry'
+    InventoryChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: inventory.changed
+            data:
+              $ref: '#/components/schemas/InventorySnapshot'
+    WebhookTestEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: webhook.test
+            data:
+              type: object
+              required: [webhookId]
+              additionalProperties: false
+              properties:
+                webhookId:
+                  $ref: '#/components/schemas/Uuid'

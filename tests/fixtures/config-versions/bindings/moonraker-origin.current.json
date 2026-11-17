@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "collection": {
+    "version": 1,
+    "allowedOrigins": ["http://127.0.0.1:7125"],
+    "printers": [
+      {
+        "printerKey": "moonraker-origin",
+        "origin": "http://127.0.0.1:7125"
+      }
+    ],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    }
+  },
+  "schemaVersion": 2
+}

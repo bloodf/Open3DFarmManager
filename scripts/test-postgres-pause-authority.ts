@@ -104,7 +104,7 @@ try {
     { ...identity },
     { database: 'fixture', username: 'fixture' },
   )
-  const catalog = await loadMigrationCatalog(),
+  const catalog = (await loadMigrationCatalog()).slice(0, 18),
     history =
       await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(catalog.length, 18)

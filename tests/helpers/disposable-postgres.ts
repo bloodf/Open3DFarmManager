@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict'
 import postgres from 'postgres'
 import {
+  catalogThrough,
   loadMigrationCatalog,
   runMigrations,
   validateMigrationHistory,
@@ -23,12 +24,23 @@ export function disposablePostgres(input: {
   labelValue: string
   port: number
   ledger: (value: object) => void
+  /**
+   * Migration journal state to leave on the fixture database: omitted applies
+   * the full catalog, a migration id applies only through that migration,
+   * false leaves the fixture database untouched.
+   */
+  through?: string | false
+  postgresArgs?: string[]
 }) {
   const { docker, name, ledger } = input
   const label = `${input.labelKey}=${input.labelValue}`
   let container: string | undefined
   let sql: ReturnType<typeof postgres> | undefined
+  let port = input.port
   return {
+    get port() {
+      return port
+    },
     get container() {
       return container
     },
@@ -51,11 +63,12 @@ export function disposablePostgres(input: {
         ...['--tmpfs', '/var/lib/postgresql/data:rw,mode=1777'],
         ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
         ...['--tmpfs', '/tmp:rw,mode=1777'],
-        ...['-p', `127.0.0.1:${input.port}:5432`],
+        ...['-p', `127.0.0.1:${input.port || ''}:5432`],
         ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
         ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
         ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
         input.image,
+        ...(input.postgresArgs ?? []),
       )
       container = await docker('inspect', '--format', '{{.Id}}', name)
       assert.match(container, /^[a-f0-9]{64}$/)
@@ -67,9 +80,15 @@ export function disposablePostgres(input: {
         ...['exec', container, 'sh', '-c'],
         'n=0; until pg_isready -h 127.0.0.1 -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
       )
+      if (port === 0) {
+        const mapping = await docker('port', container, '5432/tcp')
+        assert.match(mapping, /^127\.0\.0\.1:[0-9]+$/)
+        port = Number(mapping.split(':')[1])
+      }
       sql = postgres({
         host: '127.0.0.1',
-        port: input.port,
+        port,
+        onnotice: () => {},
         database: 'fixture',
         username: 'fixture',
         password: '',
@@ -84,6 +103,23 @@ export function disposablePostgres(input: {
         'fresh task-owned cluster only',
       )
       assert.match((await sql`SHOW server_version`)[0]?.server_version, /^17\./)
+      if (input.through !== undefined) {
+        // Optional fixture journal state for explicit runners: none at all, or
+        // an exact catalog prefix; omitted keeps the full migrated catalog.
+        if (input.through === false) return sql
+        const prefix = catalogThrough(
+          await loadMigrationCatalog(),
+          input.through,
+        )
+        await runMigrations(sql, prefix, { kind: 'up' })
+        const prefixJournal =
+          await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
+        assert.equal(
+          validateMigrationHistory(prefix, [...prefixJournal]),
+          prefix.length,
+        )
+        return sql
+      }
       const catalog = await loadMigrationCatalog()
       await runMigrations(sql, catalog, { kind: 'up' })
       const journal =

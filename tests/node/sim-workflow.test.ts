@@ -172,13 +172,14 @@ test('spoolman, cams and rtsp jobs matrix amd64 and arm64 runners', () => {
 
 test('each profile has a pass/fail verify step and bounded failure artifact', () => {
   assert.ok(packageJson.scripts['sim:seed'])
-  assert.ok(packageJson.scripts['sim:verify:spoolman'])
-  assert.ok(packageJson.scripts['sim:verify:cams'])
   assert.ok(packageJson.scripts['sim:verify:rtsp'])
+  assert.equal(packageJson.scripts['sim:verify:spoolman'], undefined)
+  assert.equal(packageJson.scripts['sim:verify:cams'], undefined)
 
   const expectedVerify: Record<(typeof PROFILE_JOBS)[number], RegExp> = {
-    spoolman: /pnpm run sim:seed[\s\S]*pnpm run sim:verify:spoolman/,
-    cams: /pnpm run sim:verify:cams/,
+    spoolman:
+      /pnpm run sim:seed[\s\S]*node packages\/sim-tools\/src\/spoolman-cli\.ts/,
+    cams: /node packages\/sim-tools\/src\/camera-cli\.ts/,
     rtsp: /pnpm run sim:verify:rtsp/,
   }
 

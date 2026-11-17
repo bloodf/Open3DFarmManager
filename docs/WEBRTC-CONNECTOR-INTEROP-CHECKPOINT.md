@@ -86,36 +86,32 @@ A confiança permanece fornecida pela fixture. Uma integração real deverá for
 
 Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém somente leitura; não há caminho de comandos por HTTP, servidor ou TURN. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
 
-## Memória RTC sob carga sustentada: bloqueio nativo reproduzido
+## Memória RTC sob carga sustentada: execução concluída
 
-Em 2026-11-17, o comando opt-in foi executado neste host a partir do commit limpo `076491bdd5375b2380e2ff6631d9d972729ece22`, com Node 24.22.2 e libdatachannel 0.24.6. A duração configurada foi a padrão, 600.000 ms. **A execução abortou após 231 ms de amostragem; os dez minutos não foram concluídos e o issue #175 continua aberto.**
+Em 2026-11-17, `OPENFARM_RTC_MEMORY=1 node scripts/test-rtc-memory.ts` completou os 600.000 ms padrão a partir do commit limpo `596551ad1f848e82d073d595a697c71804f03627`, com Node 24.22.2 e libdatachannel 0.24.6. Foram gravadas 1.471 amostras. A tabela mostra a amostra mais próxima de cada minuto; RSS inclui o processo Node e a biblioteca nativa do Connector, não o consumidor separado.
 
-O harness mantém o processo do Connector e um consumidor nativo separado, ambos com ICE direto em loopback e portas efêmeras. Ele usa `ReadonlyConnectorPeer` e `FarmStatusSender` de produção para status, `ReadonlyRtcSession` e `ConnectorCameraMedia` para câmera, e `PauseControlSession` para controle. Os três peers completaram as provas de papel antes da primeira amostra. A admissão é sintética, seguindo o padrão das fixtures RTC; não testa login, WSS ou banco. Controle permanece sem autorização de comando ou dispatcher. A câmera envia payload Annex-B sintético pelo packetizer H.264/RTP real, sem alegar decodificação de vídeo ou cobertura de RTSP/hardware.
+| Tempo  | RSS (MiB) |
+| ------ | --------- |
+| 0 min  | 114,270   |
+| 1 min  | 139,957   |
+| 2 min  | 141,082   |
+| 3 min  | 141,082   |
+| 4 min  | 128,660   |
+| 5 min  | 130,723   |
+| 6 min  | 127,039   |
+| 7 min  | 127,414   |
+| 8 min  | 128,352   |
+| 9 min  | 128,727   |
+| 10 min | 128,727   |
 
-O consumidor tem janela SCTP de 65.536 bytes e recebe `SIGSTOP` durante a rajada, com confirmação de estado em `/proc`. Isso suspende as leituras nativas, não apenas o callback JavaScript. O plano é retomar após um segundo, renovar os peers a cada 18 segundos e preservar os limites de sessão de 30 segundos. A primeira rajada impediu alcançar essa renovação. O produtor limita os envios a 900 por geração, abaixo do limite de 1.024, e espera que o emissor suprima tentativas adicionais quando a fila atingir sua capacidade.
+RSS inicial/pico/final: **114,270 / 142,020 / 128,727 MiB**; o pico ocorreu aos 218,485 s. A série caiu após o pico e terminou 14,457 MiB acima do início. Esta execução não mostrou crescimento contínuo ou sem limite; uma única execução não prova comportamento em outros hosts ou cargas.
 
-| Tempo após peers prontos | RSS (MiB) | Heap usado (MiB) | Status enviados | Peers prontos |
-| ------------------------ | --------- | ---------------- | --------------- | ------------- |
-| 1,393 ms                 | 115,090   | 22,662           | 0               | 3             |
-| 65,012 ms                | 118,090   | 21,363           | 101             | 3             |
-| 130,665 ms               | 123,902   | 24,345           | 301             | 3             |
-| 203,901 ms               | 124,652   | 22,778           | 601             | 3             |
-| 231,332 ms               | 124,840   | 20,280           | 723             | 2             |
+O consumidor nativo foi efetivamente suspenso por `SIGSTOP` durante as rajadas. Houve 33 gerações de peers, três peers prontos ao final, 108.141 tentativas de status suprimidas/coalescidas sob backpressure e 108.141 eventos `boundHits` do harness. Esse contador registra tentativas sem novo envio, não violações independentes do teto de 1.048.576 bytes. O pico amostrado de `bufferedAmount` foi 1.449 bytes e a fila JavaScript permaneceu em zero; o teto não foi excedido. Foram enviados 11.572 access units sintéticos de câmera. A observação final do consumidor recebeu 24.518 status e 1.943 pacotes de câmera (2.222.323 bytes).
 
-RSS inicial/pico/final das dez amostras: **115,090 / 124,840 / 124,840 MiB**. Esses valores incluem o processo Node e a biblioteca nativa do Connector, mas não o consumidor separado. São uma observação curta de aquecimento e falha, insuficiente para concluir crescimento sem limite; não foi aberto um bug de vazamento sem essa evidência.
+O resumo foi gravado com `dirty: false` e o commit exato acima. A observação final terminou antes do fechamento dos peers. Na limpeza, porém, o ledger registrou o consumidor encerrando com `signal: SIGSEGV`; o Connector fechou normalmente e a execução de 10 minutos já havia terminado. Esse sinal de saída não invalida as amostras concluídas, mas deixa a limpeza do processo consumidor como limitação a investigar. Não foi aberto issue de vazamento porque os dados desta execução não indicam crescimento sem limite.
 
-O erro exato foi `Error: ReadonlyConnectorPeer terminal: session-readonly`. O snapshot terminal da sessão registra `reason: "status-frame"`, uma prova enviada e uma recebida, certificado correspondente, `closeCount: 1` e conexão fechada. Foram 724 tentativas, 723 status enviados e cinco access units de câmera enviados. O limite de 1.048.576 bytes do emissor não foi observado: zero supressões e zero eventos de limite. As leituras amostradas de `bufferedAmount` foram zero; o fechamento já havia esvaziado o canal na última amostra. Elas não demonstram ausência de pressão no transporte.
+O harness mantém o Connector e um consumidor nativo separado, com ICE direto em loopback e portas efêmeras. Usa `ReadonlyConnectorPeer` e `FarmStatusSender` para status, `ReadonlyRtcSession` e `ConnectorCameraMedia` para câmera, e `PauseControlSession` para controle. A admissão é sintética e não testa login, WSS ou banco; controle não autoriza comandos nem usa dispatcher. A câmera envia payload Annex-B sintético pelo packetizer H.264/RTP, sem alegar decodificação de vídeo ou cobertura de RTSP/hardware.
 
-Um probe anterior do adaptador de sessão registrou `sendMessage() === false`, com 1.449 bytes enfileirados na tentativa 724. O peer de produção trata esse retorno como falha de envio e fecha a sessão, antes de o limite de fila do emissor ser observado. A correção dessa interação está fora dos arquivos autorizados desta unidade. O harness falha de forma explícita, sem converter a degradação em sucesso, suprimir a falha ou fabricar amostras para completar o período.
+Cada linha JSONL inclui RSS, heap, filas observáveis por canal, contadores e estado dos peers. `null` indica métrica indisponível no canal privado de prova ou track RTP. Os contadores de câmera medem access units, não perda de pacotes nem frames decodificados. O arquivo da execução e o ledger de processos ficam fora do checkout. Os padrões são dez minutos e amostragem a cada cinco segundos; duração e intervalo podem ser ajustados para probes curtos.
 
-Cada registro JSONL inclui RSS, heap, filas observáveis por canal, contadores de produção/envio/supressão e estado dos peers. `sendQueueBytes: 0` representa a ausência de fila JavaScript no produtor. `null` marca métricas indisponíveis: o canal de prova privado de `ReadonlyConnectorPeer` e o track RTP, cujo objeto nativo não implementa `bufferedAmount`. Os contadores de câmera medem access units produzidos/enviados, não perda de pacotes nem frames decodificados. A falha produz um JSON separado com commit, estado final e memória. Caminhos privados, PIDs e logs ficam somente no ledger externo da tarefa.
-
-Para repetir após corrigir o fechamento nativo:
-
-```sh
-OPENFARM_RTC_MEMORY=1 OPENFARM_RTC_MEMORY_OUTPUT=/tmp/rtc-memory-nova-execucao.jsonl node scripts/test-rtc-memory.ts
-```
-
-O arquivo deve ser novo e externo ao checkout. `OPENFARM_RTC_MEMORY_DURATION_MS` e `OPENFARM_RTC_MEMORY_INTERVAL_MS` permitem probes curtos; os padrões são dez minutos e cinco segundos, com amostras adicionais durante a rajada. O runtime retoma o consumidor em `finally`, fecha os peers e encerra o processo filho. A execução registrada confirmou saída normal do consumidor e fechamento do Connector, sem criar containers ou serviços.
-
-Validação desta unidade: os cinco testes do sampler, `pnpm run lint` e `pnpm run typecheck` passaram. A verificação completa `pnpm run check:all` e as integrações RTC autenticadas permanecem pendentes; não houve publicação. A medição sustentada continua bloqueada pelo erro nativo acima.
+Validação desta unidade: `node --test --test-force-exit tests/node/rtc-memory-sampler.test.ts`, a busca por `RSS` neste documento e `pnpm run lint` passaram. A verificação completa `pnpm run check:all` e as integrações RTC autenticadas permanecem pendentes; não houve publicação.

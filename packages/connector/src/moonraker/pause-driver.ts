@@ -174,6 +174,10 @@ export function openFixedMoonrakerPause(input: {
   }
   function stop() {
     if (terminal) return
+    console.error(
+      'RTC driver stop: ' +
+        new Error().stack?.split('\n').slice(1, 5).join(' '),
+    )
     terminal = true
     clearTimeout(operationTimer)
     clearTimeout(lifetimeTimer)
@@ -205,7 +209,17 @@ export function openFixedMoonrakerPause(input: {
     let value: number
     try {
       value = mono()
-    } catch {
+    } catch (error) {
+      console.error(
+        'RTC driver frame: ' +
+          (error instanceof z.ZodError
+            ? JSON.stringify(
+                error.issues.map(({ code, path }) => ({ code, path })),
+              )
+            : error instanceof Error
+              ? error.message
+              : 'unknown'),
+      )
       stop()
       throw failure()
     }
@@ -308,7 +322,15 @@ export function openFixedMoonrakerPause(input: {
       )
       if (remaining <= 0) throw failure()
       const promise = new Promise<unknown>((resolve, reject) => {
-        pending = { id, resolve, reject, timer: setTimeout(stop, remaining) }
+        pending = {
+          id,
+          resolve,
+          reject,
+          timer: setTimeout(() => {
+            console.error('RTC driver timer: ' + id + ' ' + remaining)
+            stop()
+          }, remaining),
+        }
       })
       void promise.catch(() => {})
       // The request slot and bytes are prepared before the guard. Nothing awaits, samples
@@ -338,8 +360,16 @@ export function openFixedMoonrakerPause(input: {
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
       current()
-      if (received >= deadline || snapshot.eventtime <= sourceTime)
+      if (received >= deadline || snapshot.eventtime <= sourceTime) {
+        console.error(
+          'RTC query timing',
+          index,
+          snapshot.eventtime,
+          sourceTime,
+          received >= deadline,
+        )
         throw failure()
+      }
       sourceTime = snapshot.eventtime
       const state = snapshot.status.print_stats.state
       const observation: ControlObservation = Object.freeze({
@@ -362,7 +392,11 @@ export function openFixedMoonrakerPause(input: {
       publish(observation)
       current()
       return observation
-    } catch {
+    } catch (error) {
+      console.error(
+        'RTC query error',
+        error instanceof Error ? error.message : 'unknown',
+      )
       stop()
       await closed
       throw failure()

@@ -62,6 +62,13 @@ export function buildAcceptanceSummary(
   }
 }
 
+export function rowPassed(
+  rows: { row: string; passed: boolean }[] | undefined,
+  row: string,
+) {
+  return rows?.find((entry) => entry.row === row)?.passed
+}
+
 export function parseLastJson(output: string): unknown {
   const starts = [...output.matchAll(/(?:^|\n)\{/g)].map(
     (match) => match.index! + match[0].lastIndexOf('{'),
@@ -154,6 +161,10 @@ export async function runAllAcceptance(checkout: string) {
   )
   const rtcReport = parseLastJson(rtc.output) as
     { results?: { scenario: string; passed: boolean }[] } | undefined
+  const rtcResults = rtcReport?.results?.map((entry) => ({
+    row: entry.scenario,
+    passed: entry.passed,
+  }))
   for (const row of rtcRows) {
     if (!runnableRows.includes(row)) {
       const missing =
@@ -165,14 +176,27 @@ export async function runAllAcceptance(checkout: string) {
       rows.push({ suite: 'rtc-farm', row, passed: false, detail: missing })
       continue
     }
-    const result = rtcReport?.results?.find((entry) => entry.scenario === row)
+    const passed = rowPassed(rtcResults, row)
     rows.push({
       suite: 'rtc-farm',
       row,
-      passed: result?.passed === true && rtc.code === 0,
-      ...(result ? {} : { detail: 'No row result in runner output' }),
+      passed: passed === true,
+      ...(passed === undefined
+        ? { detail: 'No row result in runner output' }
+        : {}),
     })
   }
+  if (
+    rtc.code !== 0 &&
+    rtcResults?.length &&
+    rtcResults.every((entry) => entry.passed)
+  )
+    rows.push({
+      suite: 'rtc-farm',
+      row: 'runner-cleanup',
+      passed: false,
+      detail: 'Suite exited nonzero after every selected row passed',
+    })
 
   // Outage acceptance consumes the same checkout's built farm artifact. Build
   // once here so the outage runner never silently uses a stale .output tree.

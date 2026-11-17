@@ -4,6 +4,7 @@ import {
   allAcceptanceRows,
   buildAcceptanceSummary,
   parseLastJson,
+  rowPassed,
   runnableAcceptanceRows,
 } from '../../scripts/rtc-farm-all-mode.ts'
 
@@ -39,5 +40,18 @@ test('runner reports are parsed before trailing failure diagnostics', () => {
       'build output\n{\n  "result": "failed",\n  "results": [{"scenario":"x","passed":false}]\n}\nError: suite failed',
     ),
     { result: 'failed', results: [{ scenario: 'x', passed: false }] },
+  )
+})
+
+test('an overall suite failure preserves each row outcome', () => {
+  assert.equal(
+    rowPassed(
+      [
+        { row: 'farm-page-disconnect', passed: false },
+        { row: 'command-rejected-tampered', passed: true },
+      ],
+      'command-rejected-tampered',
+    ),
+    true,
   )
 })

@@ -15,7 +15,7 @@ export type RtcFarmScenario = {
    * Task-owned resources the runner starts once for every row that needs them.
    * Rows with resources are opt-in: they run only when named explicitly.
    */
-  resources?: readonly 'rtsp-camera'[]
+  resources?: readonly ('rtsp-camera' | 'printing-simulator')[]
 }
 
 const farmPage = {

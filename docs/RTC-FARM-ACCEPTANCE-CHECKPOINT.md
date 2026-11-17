@@ -154,3 +154,56 @@ Notes on the non-passing results:
     - The dialog was opened before the Connector had re-admitted its pause inbox after the drop. The row now waits for that.
 
 Every pause run that reached the confirmation recorded exactly one `printer.print.pause` on the synthetic Moonraker, and none after revocation. No physical printer was contacted.
+
+### `farm-page-printing-pause` row (#195, 2026-11-17)
+
+Implementation commit: `4abf49ab`. This opt-in row uploads a uniquely named,
+movement-free, heater-free dwell print to an explicitly supplied `infra/sim`
+sv06 container. It uses the built farm page's signed pause over WebRTC, reads
+Klipper's `print_stats.state`, and reads the Connector's durable SQLite journal.
+Passing requires the UI's confirmed pause text, the live card showing `Pausada`,
+Klipper reporting `paused`, and exactly one journal entry with status and reason
+`applied`. It resumes the simulator through Moonraker as test setup/teardown,
+checks Klipper and the live card return to printing, and checks that the journal
+has no late duplicate. Resume is not claimed as a farm-page feature.
+
+The row confirms once. An uncertain response records available state, UI and
+journal evidence and fails; it never confirms again. Cleanup cancels only this
+row's uniquely named print and deletes its uploaded file. It does not stop or
+reset a shared simulator. Before sending simulator commands, the row checks that
+the supplied container is Compose service `sv06`, uses the `infra/sim` Compose
+file, and owns the exact loopback Moonraker port. Supply only a task-owned
+simulator, never a host service forwarding to hardware.
+
+Use the existing admitted runner environment (digest-pinned PostgreSQL 17,
+private external work root, unused loopback DB port), plus:
+
+```sh
+RTC_FARM_TEST_SCENARIOS=farm-page-printing-pause \
+RTC_FARM_TEST_SIM_PRINTING_PAUSE=sv06 \
+RTC_FARM_TEST_SIM_CONTAINER=<full-task-owned-sv06-container-id> \
+RTC_FARM_TEST_SIM_MOONRAKER=http://127.0.0.1:<isolated-sv06-port> \
+RTC_FARM_TEST_SIM_SPOOLMAN=http://127.0.0.1:<isolated-spoolman-port> \
+RTC_FARM_TEST_REPEAT=3 pnpm run test:rtc-farm
+```
+
+Provision sv06 and seeded Spoolman with isolated loopback port overrides; the
+host's ports 7125, 7100 and 9999 belong to unrelated services. This row stays out
+of the default scenarios even when its environment is present. Docker,
+PostgreSQL and browser execution remain opt-in and outside `test:node`.
+
+| Run | Result at `4abf49ab` | Evidence                                                                                        |
+| --- | -------------------- | ----------------------------------------------------------------------------------------------- |
+| 1   | Not run              | No running sv06 simulator or built farm artifact in this worktree; work order prohibits builds. |
+| 2   | Not run              | Same prerequisite; no result claimed.                                                           |
+| 3   | Not run              | Same prerequisite; no result claimed.                                                           |
+
+Three consecutive real passes and real Klipper/journal/UI agreement remain
+pending; #195 is not accepted on offline evidence alone. The service-free
+`node --test --test-force-exit tests/node/rtc-farm-printing-pause.test.ts`
+passes in the clean implementation checkout (10 tests). It proves agreement
+validation, rejection of mismatched/unknown outcomes and late duplicates, and
+no second confirmation after an uncertain result. Related simulator and
+signalling tests report 16 passed, zero failed, with two pre-existing opt-in
+HTTPS/RTC integration skips. `pnpm run typecheck` passed. No whole-suite run,
+build, simulator, production service or physical printer command was started.

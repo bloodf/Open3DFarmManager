@@ -40,6 +40,35 @@ export function simulatorRtcFarmScenarios(
       'Set both RTC_FARM_TEST_SIM_MOONRAKER and RTC_FARM_TEST_SIM_SPOOLMAN',
     )
   return {
+    ...(env.RTC_FARM_TEST_SIM_PRINTING_PAUSE === 'sv06'
+      ? {
+          'farm-page-printing-pause': {
+            resources: ['printing-simulator'],
+            env: {
+              SIGNALLING_HTTPS_RTC_FIXTURE: 'yes',
+              SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',
+              SIGNALLING_HTTPS_FARM_PAGE: 'yes',
+              SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+              SIGNALLING_HTTPS_SIM_PRINTING_PAUSE: 'sv06',
+              SIGNALLING_HTTPS_SIM_CONTAINER:
+                env.RTC_FARM_TEST_SIM_CONTAINER ?? '',
+              SIGNALLING_HTTPS_SIM_MOONRAKER: loopbackOrigin(
+                'RTC_FARM_TEST_SIM_MOONRAKER',
+                moonraker,
+              ),
+              SIGNALLING_HTTPS_SIM_SPOOLMAN: loopbackOrigin(
+                'RTC_FARM_TEST_SIM_SPOOLMAN',
+                spoolman,
+              ),
+            },
+            expect: [
+              'farm-page-printing-pause-outcome:',
+              'farm-page-printing-pause-agreement-no-retry-resumed',
+              'PASS real generated Nitro HTTPS/WSS',
+            ],
+          },
+        }
+      : {}),
     // login → paired Connector on a genuine simulator → live state, tool and bed
     // temperatures and the Spoolman inventory → disconnect → read-only ≤10 s
     'farm-page-simulator-inventory': {

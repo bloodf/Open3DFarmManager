@@ -86,8 +86,36 @@ A confiança permanece fornecida pela fixture. Uma integração real deverá for
 
 Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém somente leitura; não há caminho de comandos por HTTP, servidor ou TURN. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
 
-## Memória RTC sob carga sustentada — pendente
+## Memória RTC sob carga sustentada: bloqueio nativo reproduzido
 
-O sampler offline e o comando opt-in foram adicionados no commit `585ddc86d8817db3cdc803237da4ac33e56556f3`. O teste `tests/node/rtc-memory-sampler.test.ts` valida amostragem de RSS/heap/filas e o resumo de limites sem RTC. `pnpm run lint` e `pnpm run typecheck` passaram; `check:all` permanece inalterado.
+Em 2026-11-17, o comando opt-in foi executado neste host a partir do commit limpo `076491bdd5375b2380e2ff6631d9d972729ece22`, com Node 24.22.2 e libdatachannel 0.24.6. A duração configurada foi a padrão, 600.000 ms. **A execução abortou após 231 ms de amostragem; os dez minutos não foram concluídos e o issue #175 continua aberto.**
 
-A execução nativa de dez minutos ainda não foi realizada. Os helpers RTC autenticados existentes são fixtures limitadas a uma vida curta e não oferecem uma fonte de observações para status, câmera e controle sob um consumidor lento. Não há amostras de RSS nem conclusão sobre crescimento ou limites; nenhum bug foi aberto sem evidência. A execução sustentada e este registro de resultados continuam necessários para fechar o issue #175.
+O harness mantém o processo do Connector e um consumidor nativo separado, ambos com ICE direto em loopback e portas efêmeras. Ele usa `ReadonlyConnectorPeer` e `FarmStatusSender` de produção para status, `ReadonlyRtcSession` e `ConnectorCameraMedia` para câmera, e `PauseControlSession` para controle. Os três peers completaram as provas de papel antes da primeira amostra. A admissão é sintética, seguindo o padrão das fixtures RTC; não testa login, WSS ou banco. Controle permanece sem autorização de comando ou dispatcher. A câmera envia payload Annex-B sintético pelo packetizer H.264/RTP real, sem alegar decodificação de vídeo ou cobertura de RTSP/hardware.
+
+O consumidor tem janela SCTP de 65.536 bytes e recebe `SIGSTOP` durante a rajada, com confirmação de estado em `/proc`. Isso suspende as leituras nativas, não apenas o callback JavaScript. O plano é retomar após um segundo, renovar os peers a cada 18 segundos e preservar os limites de sessão de 30 segundos. A primeira rajada impediu alcançar essa renovação. O produtor limita os envios a 900 por geração, abaixo do limite de 1.024, e espera que o emissor suprima tentativas adicionais quando a fila atingir sua capacidade.
+
+| Tempo após peers prontos | RSS (MiB) | Heap usado (MiB) | Status enviados | Peers prontos |
+| ------------------------ | --------- | ---------------- | --------------- | ------------- |
+| 1,393 ms                 | 115,090   | 22,662           | 0               | 3             |
+| 65,012 ms                | 118,090   | 21,363           | 101             | 3             |
+| 130,665 ms               | 123,902   | 24,345           | 301             | 3             |
+| 203,901 ms               | 124,652   | 22,778           | 601             | 3             |
+| 231,332 ms               | 124,840   | 20,280           | 723             | 2             |
+
+RSS inicial/pico/final das dez amostras: **115,090 / 124,840 / 124,840 MiB**. Esses valores incluem o processo Node e a biblioteca nativa do Connector, mas não o consumidor separado. São uma observação curta de aquecimento e falha, insuficiente para concluir crescimento sem limite; não foi aberto um bug de vazamento sem essa evidência.
+
+O erro exato foi `Error: ReadonlyConnectorPeer terminal: session-readonly`. O snapshot terminal da sessão registra `reason: "status-frame"`, uma prova enviada e uma recebida, certificado correspondente, `closeCount: 1` e conexão fechada. Foram 724 tentativas, 723 status enviados e cinco access units de câmera enviados. O limite de 1.048.576 bytes do emissor não foi observado: zero supressões e zero eventos de limite. As leituras amostradas de `bufferedAmount` foram zero; o fechamento já havia esvaziado o canal na última amostra. Elas não demonstram ausência de pressão no transporte.
+
+Um probe anterior do adaptador de sessão registrou `sendMessage() === false`, com 1.449 bytes enfileirados na tentativa 724. O peer de produção trata esse retorno como falha de envio e fecha a sessão, antes de o limite de fila do emissor ser observado. A correção dessa interação está fora dos arquivos autorizados desta unidade. O harness falha de forma explícita, sem converter a degradação em sucesso, suprimir a falha ou fabricar amostras para completar o período.
+
+Cada registro JSONL inclui RSS, heap, filas observáveis por canal, contadores de produção/envio/supressão e estado dos peers. `sendQueueBytes: 0` representa a ausência de fila JavaScript no produtor. `null` marca métricas indisponíveis: o canal de prova privado de `ReadonlyConnectorPeer` e o track RTP, cujo objeto nativo não implementa `bufferedAmount`. Os contadores de câmera medem access units produzidos/enviados, não perda de pacotes nem frames decodificados. A falha produz um JSON separado com commit, estado final e memória. Caminhos privados, PIDs e logs ficam somente no ledger externo da tarefa.
+
+Para repetir após corrigir o fechamento nativo:
+
+```sh
+OPENFARM_RTC_MEMORY=1 OPENFARM_RTC_MEMORY_OUTPUT=/tmp/rtc-memory-nova-execucao.jsonl node scripts/test-rtc-memory.ts
+```
+
+O arquivo deve ser novo e externo ao checkout. `OPENFARM_RTC_MEMORY_DURATION_MS` e `OPENFARM_RTC_MEMORY_INTERVAL_MS` permitem probes curtos; os padrões são dez minutos e cinco segundos, com amostras adicionais durante a rajada. O runtime retoma o consumidor em `finally`, fecha os peers e encerra o processo filho. A execução registrada confirmou saída normal do consumidor e fechamento do Connector, sem criar containers ou serviços.
+
+Validação desta unidade: os cinco testes do sampler, `pnpm run lint` e `pnpm run typecheck` passaram. A verificação completa `pnpm run check:all` e as integrações RTC autenticadas permanecem pendentes; não houve publicação. A medição sustentada continua bloqueada pelo erro nativo acima.

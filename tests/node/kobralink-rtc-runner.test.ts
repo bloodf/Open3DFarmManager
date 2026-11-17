@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from '@playwright/test'
+import { chromium, type Page } from '@playwright/test'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
@@ -424,7 +424,59 @@ test('capture pairs only exactly one unclaimed request with the same start', () 
   assert.equal(uniqueMatch([{ ...a, claimed: true }, c], 1000), null)
 })
 
-test('network capture reads only complete undrained bodies, never a prefix', async () => {
+type BodyClaim = () => ReturnType<
+  Awaited<ReturnType<typeof captureBodies>>['take']
+>
+
+async function observeSessionBodies(
+  t: TestContext,
+  page: Page,
+  origin: string,
+  onResponse: (path: string, claim: BodyClaim) => void,
+) {
+  const context = page.context()
+  const session = await context.newCDPSession(page)
+  // CDP sessions sample wallTime independently. Playwright's start stamp
+  // can differ by more than the capture's 0.05 ms matching tolerance, even
+  // for the same request. This test covers body completeness: claim from
+  // the capture session's own events, without changing matching tolerance.
+  const sessionFactory = t.mock.method(
+    context,
+    'newCDPSession',
+    async () => session,
+  )
+  const network = await captureBodies(page, origin)
+  sessionFactory.mock.restore()
+  const starts = new Map<
+    string,
+    { method: string; wallTime: number; timestamp: number }
+  >()
+  session.on('Network.requestWillBeSent', (event) => {
+    starts.set(event.requestId, {
+      method: event.request.method,
+      wallTime: event.wallTime,
+      timestamp: event.timestamp,
+    })
+  })
+  session.on('Network.responseReceived', (event) => {
+    const path = new URL(event.response.url).pathname
+    if (!path.startsWith('/api/')) return
+    const sent = starts.get(event.requestId)
+    assert.ok(sent)
+    const requestTime = event.response.timing?.requestTime
+    assert.ok(typeof requestTime === 'number')
+    onResponse(path, () =>
+      network.take(
+        sent.method,
+        event.response.url,
+        event.response.status,
+        (sent.wallTime + (requestTime - sent.timestamp)) * 1000,
+      ),
+    )
+  })
+}
+
+test('network capture reads only complete undrained bodies, never a prefix', async (t) => {
   const SECRET = 'secret-after-retained-prefix'
   const server = createServer((req, res) => {
     if (req.url === '/') return res.end('<html>ok</html>')
@@ -457,20 +509,11 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/')
-    const network = await captureBodies(page, origin)
-    const takes = new Map<string, ReturnType<typeof network.take>>()
-    const twice: ReturnType<typeof network.take>[] = []
-    page.on('response', (res) => {
-      const path = new URL(res.url()).pathname
-      if (!path.startsWith('/api/')) return
-      const args = [
-        res.request().method(),
-        res.url(),
-        res.status(),
-        res.request().timing().startTime,
-      ] as const
-      takes.set(path, network.take(...args))
-      if (path === '/api/complete') twice.push(network.take(...args))
+    const takes = new Map<string, ReturnType<BodyClaim>>()
+    const twice: ReturnType<BodyClaim>[] = []
+    await observeSessionBodies(t, page, origin, (path, claim) => {
+      takes.set(path, claim())
+      if (path === '/api/complete') twice.push(claim())
     })
     // The page reads only statuses: no body is ever drained by page code.
     for (const path of [
@@ -493,6 +536,7 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     const short = await read('/api/short')
     assert.equal(short.body, null)
     assert.equal(short.facts.declaredLength, 100)
+    assert.ok(short.facts.receivedBytes > 0)
     assert.ok(short.facts.receivedBytes < 100)
     const overflow = await read('/api/overflow')
     assert.equal(overflow.body, null)
@@ -506,7 +550,7 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
   }
 })
 
-test('network capture keeps a finished body the page navigated away from', async () => {
+test('network capture keeps a finished body the page navigated away from', async (t) => {
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/page')) return res.end('<html>ok</html>')
     res.setHeader('content-type', 'application/json')
@@ -518,16 +562,9 @@ test('network capture keeps a finished body the page navigated away from', async
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/page')
-    const network = await captureBodies(page, origin)
-    let take: ReturnType<typeof network.take> | undefined
-    page.on('response', (res) => {
-      if (!res.url().endsWith('/api/me')) return
-      take = network.take(
-        res.request().method(),
-        res.url(),
-        res.status(),
-        res.request().timing().startTime,
-      )
+    let take: ReturnType<BodyClaim> | undefined
+    await observeSessionBodies(t, page, origin, (path, claim) => {
+      if (path === '/api/me') take = claim()
     })
     // Run e5d289c7: the page read the body, the load finished before any
     // streaming began, and a navigation followed before the observer read it.

@@ -664,6 +664,41 @@ test('real verified capability and P-256 command reach one guarded synthetic pau
   }
 })
 
+test('each bound command field rejects a re-signed cross-scope substitution before driver entry', async (t) => {
+  const fields = [
+    'farm_id', 'agent_id', 'account_id', 'key_id', 'transport_id',
+    'capability_id', 'assignment_id', 'cmd_id', 'nonce',
+  ] as const
+  const f = await fixture()
+  try {
+    for (const field of fields) {
+      await t.test(field, {
+        todo: field === 'cmd_id' || field === 'nonce'
+          ? `cross-scope gap: ${field}`
+          : undefined,
+      }, async () => {
+        const { sig: _sig, ...original } = JSON.parse(f.wire) as typeof f.f.command & { sig: string }
+        const replacement = field === 'account_id' ? 'other-account' :
+          field === 'nonce' ? randomBytes(16).toString('base64url') : randomUUID()
+        const substituted = await signCommandV2(
+          { ...original, [field]: replacement },
+          f.f.pair.privateKey,
+        )
+        const result = await f.dispatcher.dispatch({
+          wire: encodeCommandV2(substituted),
+          capability: f.handle,
+          printerBinding: f.printerBinding,
+        })
+        assert.deepEqual(result, { kind: 'rejected', reason: 'scope' })
+        assert.equal(f.getWrites(), 0)
+        assert.equal(f.driverEntryCount(), 0)
+      })
+    }
+  } finally {
+    f.cleanup()
+  }
+})
+
 test('forged authority, modified command, revoked capability and stale fields never write', async () => {
   for (const scenario of [
     'forged',

@@ -113,10 +113,12 @@ async function fixture(
     resolvePeer = resolve
   })
   let ready = 0
+  let readyDeadline: number | undefined
   const client = new PauseBrowserSignallingClient(scope, {
     clock: { now: () => now, wallNow: () => wall },
     ...(extra.abort ? { signal: extra.abort } : {}),
-    onProofsReady: () => {
+    onProofsReady: (value) => {
+      readyDeadline = value.deadlineMonoMs
       ready++
     },
     peerFactory: (options) => {
@@ -212,10 +214,10 @@ async function fixture(
     emit({ v: 1, t: 'pause.binding', binding })
     assert.deepEqual(await peerOptions?.expectedBinding, binding)
   }
-  function verified() {
+  function verified(deadlineMonoMs = 31000) {
     peerOptions?.onProofsReady?.({
       binding,
-      deadlineMonoMs: 31000,
+      deadlineMonoMs,
       browserProofWire: 'fixture-browser-proof',
       connectorProofWire: 'fixture-connector-proof',
     })
@@ -233,6 +235,7 @@ async function fixture(
     bind,
     verified,
     peer: () => peerOptions,
+    readyDeadline: () => readyDeadline,
     counts: () => ({ closes, peerCloses, phaseSends, ready }),
     advance: (ms: number) => {
       now += ms
@@ -498,5 +501,24 @@ test('browser socket validates exact HTTPS origin, pause path and credentials be
   } finally {
     if (previous) Object.defineProperty(globalThis, 'location', previous)
     else Reflect.deleteProperty(globalThis, 'location')
+  }
+})
+
+test('peer readiness is capped to the signalling lease after separate clock conversion', async () => {
+  const f = await fixture()
+  try {
+    await f.prove()
+    await f.offer()
+    // Binding is more restrictive than the earlier pause.ready lease.
+    f.binding.expires_at -= 1000
+    await f.bind()
+    // The peer converted wall time to monotonic time a fraction of a ms later.
+    f.verified(30000.25)
+    await f.started
+    assert.equal(f.counts().ready, 1)
+    assert.equal(f.readyDeadline(), 30000)
+    assert.equal(f.client.snapshot().reason, undefined)
+  } finally {
+    await f.client.dispose(1000)
   }
 })

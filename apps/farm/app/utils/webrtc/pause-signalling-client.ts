@@ -368,8 +368,7 @@ export class PauseBrowserSignallingClient {
       !this.#bindingValue ||
       canonicalize(value.binding) !== canonicalize(this.#bindingValue) ||
       !Number.isFinite(value.deadlineMonoMs) ||
-      value.deadlineMonoMs <= this.#channel.now() ||
-      value.deadlineMonoMs > this.#channel.deadlines().lifetimeDeadline
+      value.deadlineMonoMs <= this.#channel.now()
     ) {
       this.close('unexpected-control-proof')
       return
@@ -377,7 +376,15 @@ export class PauseBrowserSignallingClient {
     this.#proofsReady = true
     this.#channel.completeAdmission()
     try {
-      const copy = structuredClone(value)
+      // The peer and signalling channel convert the same wall-clock lease
+      // separately. Clamp to both caps instead of rejecting sub-ms drift.
+      const copy = {
+        ...structuredClone(value),
+        deadlineMonoMs: Math.min(
+          value.deadlineMonoMs,
+          this.#channel.deadlines().lifetimeDeadline,
+        ),
+      }
       Object.freeze(copy.binding.browser_public_key)
       Object.freeze(copy.binding)
       Object.freeze(copy)

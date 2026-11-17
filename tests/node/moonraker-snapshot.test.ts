@@ -8,7 +8,7 @@ import { createCameraServer } from '../../packages/sim-cams/src/server.ts'
 import {
   CameraFixture,
   cameraRuntimeSection,
-} from '../helpers/signalling-camera-fixture.ts'
+} from '../helpers/signalling-snapshot-camera-fixture.ts'
 import { parseCameraRuntimeConfig } from '../../packages/connector/src/config/camera.ts'
 import {
   createMoonrakerSnapshotSource,
@@ -186,4 +186,33 @@ test('farm acceptance fixture selects the snapshot runtime without RTSP', () => 
     path: '/?action=snapshot',
     ffmpeg: { path: '/usr/bin/ffmpeg', sha256: 'a'.repeat(64) },
   })
+})
+
+test('snapshot adapter preserves the original strict RTSP fixture', async () => {
+  const { CameraFixture: RtspFixture, cameraRuntimeSection: rtspRuntime } =
+    await import('../helpers/signalling-camera-fixture.ts')
+  const input = {
+    helperPath: '/usr/bin/rtsp-ingest',
+    helperSha256: 'b'.repeat(64),
+    rtspPort: 8554,
+    rtspPath: '/test',
+  }
+  const assignmentId = '11111111-1111-4111-8111-111111111111'
+  assert.deepEqual(CameraFixture.parse(input), RtspFixture.parse(input))
+  assert.deepEqual(
+    cameraRuntimeSection(CameraFixture.parse(input), assignmentId),
+    rtspRuntime(RtspFixture.parse(input), assignmentId),
+  )
+  for (const patch of [
+    { helperPath: 'relative' },
+    { helperSha256: 'invalid' },
+    { rtspPort: 1023 },
+    { rtspPort: 65536 },
+    { rtspPath: '//foreign/path' },
+    { unexpected: true },
+    { kind: 'moonraker-snapshot', snapshotPort: 8112 },
+  ]) {
+    assert.throws(() => RtspFixture.parse({ ...input, ...patch }))
+    assert.throws(() => CameraFixture.parse({ ...input, ...patch }))
+  }
 })

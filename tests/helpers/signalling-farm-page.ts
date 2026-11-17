@@ -5,7 +5,7 @@ import {
   assertCameraDetached,
   assertCameraPlaying,
 } from './signalling-farm-camera.ts'
-import type { CameraFixture } from './signalling-camera-fixture.ts'
+import type { CameraFixture } from './signalling-snapshot-camera-fixture.ts'
 
 /** Mirrors REOPEN_MAX_MS in apps/farm/app/utils/farm-view.ts (#121). */
 const REOPEN_BACKOFF_CAP_MS = 30_000

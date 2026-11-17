@@ -13,7 +13,7 @@ import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairi
 import {
   cameraFixtureFromEnv,
   cameraRuntimeSection,
-} from './signalling-camera-fixture.ts'
+} from './signalling-snapshot-camera-fixture.ts'
 
 // The pause driver opens its own socket: one fixed state query shape and the
 // fixed pause request. Only accepted when the farm pause row opted in.

@@ -622,8 +622,17 @@ describe('Bambu Lab form dispatch', () => {
     const require = createRequire(resolve('apps/farm/package.json'))
     const { parse, compileScript } = require('vue/compiler-sfc')
     const source = readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8')
-    expect(source).toContain('BAMBU_LAN_COMMAND_NOTE')
-    expect(source).toContain('<option value="bambu-lan">')
+    // The Bambu form now lives in the extracted printer-setup components.
+    const form = ['BambuFields', 'SetupForm']
+      .map((name) =>
+        readFileSync(
+          `apps/farm/app/components/printer-setup/${name}.vue`,
+          'utf8',
+        ),
+      )
+      .join('\n')
+    expect(form).toContain('BAMBU_LAN_COMMAND_NOTE')
+    expect(form).toContain('<option value="bambu-lan">')
     const { descriptor } = parse(source)
     const compiled = compileScript(descriptor, { id: 'bambu-presend' })
     const node = compiled.scriptSetupAst.find(

@@ -53,7 +53,7 @@ export function createTelemetryHttpSender(options: {
       TelemetryBatch.parse(
         parseBoundedJson(body, {
           maxBytes: 65536,
-          maxDepth: 5,
+          maxDepth: 7,
           maxValues: 2000,
           maxStringChars: 128,
         }),

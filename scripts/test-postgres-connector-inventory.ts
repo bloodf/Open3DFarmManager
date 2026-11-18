@@ -31,6 +31,7 @@ const options = {
   ssl: false as const,
   max: 6,
   connect_timeout: 3,
+  backoff: 0,
 }
 const admin = postgres({ ...options, username: 'fixture' })
 const runtime = postgres({

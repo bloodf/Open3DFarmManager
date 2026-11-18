@@ -15,6 +15,11 @@ export async function recordLatestStates(
     .sort((a, b) =>
       Buffer.compare(Buffer.from(a.printerKey), Buffer.from(b.printerKey)),
     )
+  if (!states.length) return
+  const exists = (
+    await tx`SELECT to_regclass('farm.printer_latest_state') AS t`
+  )[0]?.t
+  if (!exists) return
   for (const state of states)
     await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
       VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb)

@@ -16,6 +16,7 @@ import postgres, { type Sql } from 'postgres'
 import {
   POSTGRES_IMAGE_PATTERN,
   disposablePostgres,
+  findPostgresBin,
 } from '../tests/helpers/disposable-postgres.ts'
 import { testPostgresMigrations } from '../tests/helpers/postgres-migrations-integration.ts'
 
@@ -29,6 +30,7 @@ export interface FixtureContext {
   url: string
   systemId: string
   image?: string
+  logPath?: string
 }
 
 export interface PgSuiteContract {
@@ -192,8 +194,9 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       port: 'PAUSE_AUTHORITY_SYNTHETIC_TEST_PORT',
       admitted: 'PAUSE_AUTHORITY_SYNTHETIC_TEST_DISPOSABLE',
     },
-    extra: () => ({
-      PAUSE_AUTHORITY_SYNTHETIC_SERVER_LOG: PAUSE_AUTHORITY_SERVER_LOG,
+    extra: (ctx) => ({
+      PAUSE_AUTHORITY_SYNTHETIC_SERVER_LOG:
+        ctx.logPath ?? PAUSE_AUTHORITY_SERVER_LOG,
     }),
   },
   'test-postgres-pause-negotiation.ts': {
@@ -380,24 +383,49 @@ interface JobHandle {
 async function main(): Promise<number> {
   if (process.argv.length !== 2) throw new Error(USAGE)
   const env = process.env
-  const image =
-    env.POSTGRES_TEST_IMAGE ??
-    (await exec(
-      'docker',
-      [
-        'image',
+  const isDocker = env.OPENFARM_PG === 'docker'
+  let image: string | undefined
+  let docker: ((...args: string[]) => Promise<string>) | undefined
+  if (isDocker) {
+    image =
+      env.POSTGRES_TEST_IMAGE ??
+      (await exec(
+        'docker',
+        [
+          'image',
+          'inspect',
+          'postgres:17',
+          '--format',
+          '{{index .RepoDigests 0}}',
+        ],
+        { timeout: 60000 },
+      ).then(({ stdout }) =>
+        stdout.trim().replace(/^postgres@/, 'postgres:17@'),
+      ))
+    if (!image || !POSTGRES_IMAGE_PATTERN.test(image)) throw new Error(USAGE)
+
+    docker = async (...args: string[]): Promise<string> =>
+      (
+        await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+      ).stdout.trim()
+
+    const endpoint =
+      env.DOCKER_HOST ??
+      (await docker(
+        'context',
         'inspect',
-        'postgres:17',
         '--format',
-        '{{index .RepoDigests 0}}',
-      ],
-      { timeout: 60000 },
-    ).then(({ stdout }) => stdout.trim().replace(/^postgres@/, 'postgres:17@')))
-  if (env.POSTGRES_TEST_URL)
-    throw new Error(
-      'POSTGRES_TEST_URL is not supported: suites require isolated clusters and roles',
+        '{{.Endpoints.docker.Host}}',
+      ))
+    assert.match(
+      endpoint,
+      /^unix:\/\//,
+      'Only a local Docker daemon is allowed',
     )
-  if (!image || !POSTGRES_IMAGE_PATTERN.test(image)) throw new Error(USAGE)
+  } else if (!env.OPENFARM_TEST_DATABASE_URL) {
+    const bins = findPostgresBin()
+    console.log(`[test-postgres] using PostgreSQL cluster with ${bins.version}`)
+  }
 
   const scriptsDir = new URL('./', import.meta.url)
   const repoRoot = new URL('../', import.meta.url)
@@ -433,21 +461,6 @@ async function main(): Promise<number> {
     suites: order,
     skipped,
   })
-
-  const docker = async (...args: string[]): Promise<string> =>
-    (
-      await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
-    ).stdout.trim()
-
-  const endpoint =
-    env.DOCKER_HOST ??
-    (await docker(
-      'context',
-      'inspect',
-      '--format',
-      '{{.Endpoints.docker.Host}}',
-    ))
-  assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
 
   let current: {
     kill?: (() => void) | undefined
@@ -491,15 +504,13 @@ async function main(): Promise<number> {
     name: string,
     state: MigrationState,
   ): Promise<JobHandle> {
-    if (!image) throw new Error(USAGE)
     const database = disposablePostgres({
-      docker,
-      image,
       name: `o3dfm-pg-runner-${id.slice(0, 8)}-${name.replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`,
       labelKey: RUNNER_LABEL,
       labelValue: id,
       port: 0,
       ledger,
+      ...(isDocker ? { docker, image } : {}),
       ...(name === 'test-postgres-pause-authority.ts'
         ? {
             postgresArgs: [
@@ -532,16 +543,19 @@ async function main(): Promise<number> {
     }
     try {
       const port = database.port
-      const systemId = String(
-        (
-          await sql`SELECT system_identifier::text AS id FROM pg_control_system()`
-        )[0]?.id ?? '',
-      )
+      const systemId =
+        database.systemId ??
+        String(
+          (
+            await sql`SELECT system_identifier::text AS id FROM pg_control_system()`
+          )[0]?.id ?? '',
+        )
       const ctx: FixtureContext = {
         port,
         url: `postgres://fixture@127.0.0.1:${port}/fixture`,
         systemId,
         image,
+        logPath: database.logPath,
       }
       const contract = PG_SUITE_CONTRACTS[name]
       const additions: Record<string, string> = {}

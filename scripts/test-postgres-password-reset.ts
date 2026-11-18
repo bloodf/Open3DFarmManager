@@ -53,9 +53,11 @@ try {
     ['alice', 'bob', 'carol', 'dave'].map((n) => [n, n + '_' + suffix]),
   ) as Record<'alice' | 'bob' | 'carol' | 'dave', string>
   await admin`INSERT INTO farm.farms (id) VALUES (${farmA}), (${farmB})`
+  const originalHash = 'hash:original:' + '0'.repeat(32)
+  const newHash = 'hash:new:' + '1'.repeat(32)
   for (const id of Object.values(ids)) {
     await admin`INSERT INTO farm.session_accounts (id) VALUES (${id})`
-    await admin`INSERT INTO farm.password_credentials (account_id, username, password_hash) VALUES (${id}, ${id}, 'hash:original')`
+    await admin`INSERT INTO farm.password_credentials (account_id, username, password_hash) VALUES (${id}, ${id}, ${originalHash})`
   }
   const join = (farm: string, id: string, r: string) =>
     admin`INSERT INTO farm.memberships (farm_id, account_id, role) VALUES (${farm}::uuid, ${id}, ${r})`
@@ -103,8 +105,8 @@ try {
     )[0]!.owner_farm_id,
     farmA,
   )
-  assert.equal(await store.consume(ids.carol, digest('3'), 'hash:new'), true)
-  assert.equal(await passwordHash(ids.carol), 'hash:new')
+  assert.equal(await store.consume(ids.carol, digest('3'), newHash), true)
+  assert.equal(await passwordHash(ids.carol), newHash)
   checks.push('sole-member issue and redemption allowed')
 
   const later = await store.issueForMember(
@@ -115,8 +117,8 @@ try {
   )
   assert.ok(later && !('refused' in later))
   await join(farmB, ids.dave, 'operator')
-  assert.equal(await store.consume(ids.dave, digest('4'), 'hash:new'), false)
-  assert.equal(await passwordHash(ids.dave), 'hash:original')
+  assert.equal(await store.consume(ids.dave, digest('4'), newHash), false)
+  assert.equal(await passwordHash(ids.dave), originalHash)
   assert.equal(await tokenCount(ids.dave), 0)
   checks.push('redemption refused after joining another farm')
 
@@ -124,7 +126,7 @@ try {
   // issuing transaction cannot read a stale membership set: it waits and times out.
   const carolNew = 'erin_' + suffix
   await admin`INSERT INTO farm.session_accounts (id) VALUES (${carolNew})`
-  await admin`INSERT INTO farm.password_credentials (account_id, username, password_hash) VALUES (${carolNew}, ${carolNew}, 'hash:original')`
+  await admin`INSERT INTO farm.password_credentials (account_id, username, password_hash) VALUES (${carolNew}, ${carolNew}, ${originalHash})`
   await join(farmA, carolNew, 'viewer')
   let release!: () => void
   const held = new Promise<void>((resolve) => (release = resolve))

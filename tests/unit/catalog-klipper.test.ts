@@ -78,7 +78,9 @@ describe('catálogo Klipper/Moonraker', () => {
       // `createFileTargets` never builds a Moonraker file target, so file
       // listing and upload stay unreachable for the whole family.
       expect(c.files).toBe('unknown')
-      // Materials come from the configured Spoolman mirror.
+      // Materials come from the configured Spoolman mirror: the active spool
+      // reaches the Moonraker snapshot, so the status is no longer unknown.
+      expect(c.materials).not.toBe('unknown')
       expect(c.materials).toBe('simulated')
       for (const status of Object.values(c)) {
         expect(capabilityStatusLabels[status]).toBeTruthy()

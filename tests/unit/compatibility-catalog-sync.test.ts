@@ -20,6 +20,11 @@ import {
 } from '../../packages/connector/src/creality/commands.ts'
 import { buildCrealityFilamentCommand } from '../../packages/connector/src/creality/filament.ts'
 import { createFileTargets } from '../../packages/connector/src/runtime/file-targets.ts'
+import { parseLocalCollectorConfig } from '../../packages/connector/src/config/local.ts'
+import { parseCollectorConfig as parseCrealityConfig } from '../../packages/connector/src/config/creality.ts'
+import { parseCollectorConfig as parseAnycubicConfig } from '../../packages/connector/src/config/anycubic.ts'
+import { parseRtcRuntimeConfig } from '../../packages/connector/src/config/rtc.ts'
+import type { AgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
 
 /**
  * Cada status do catálogo precisa de uma prova: um caminho de código real do
@@ -43,6 +48,56 @@ const catalogById = new Map(
 const statusOf = (id: string, capability: string) =>
   catalogById.get(id)?.capabilities[capability as 'telemetry'] as
     string | undefined
+
+/**
+ * Builds a runtime configuration through the real collector parser, so the
+ * shape under test is the one the Connector actually accepts. Only the
+ * sections that the file-target path reads are populated; the rest keep the
+ * same optional/null shape the Connector returns.
+ */
+const runtimeConfigFor = (collection: Record<string, unknown>) =>
+  ({
+    camera: null,
+    rtc: parseRtcRuntimeConfig(undefined),
+    collection:
+      collection.version === 4
+        ? parseCrealityConfig(collection)
+        : collection.version === 5
+          ? parseAnycubicConfig(collection)
+          : parseLocalCollectorConfig(collection),
+    telemetry: {
+      endpoint: 'https://telemetry.invalid',
+      audience: 'openfarm-connector',
+      timeoutMs: 5000,
+      retryMinMs: 1000,
+      retryMaxMs: 30000,
+      idleMs: 500,
+    },
+    renewal: undefined,
+    assignments: [
+      {
+        assignment_id: 'a',
+        farm_id: 'farm',
+        agent_id: 'agent',
+        printer_key: 'k',
+        moonraker_origin: 'http://127.0.0.1:7125',
+      },
+    ],
+    signalling: undefined,
+    pause: null,
+    bindingFor: () => undefined,
+  }) satisfies AgentRuntimeConfig
+
+const bambuBinding = {
+  printerKey: 'k',
+  host: '127.0.0.1',
+  port: 8883,
+  serial: 'SERIAL01',
+  control: false,
+  credentialFile: '/tmp/bambu-credential.json',
+  caFile: '/tmp/bambu-ca.pem',
+  allowedEndpoints: [{ host: '127.0.0.1', port: 8883 }],
+}
 
 describe('sincronização do catálogo de compatibilidade', () => {
   it('cobre todas as famílias de catálogo com produtos distintos', () => {
@@ -185,7 +240,6 @@ describe('sincronização do catálogo de compatibilidade', () => {
     for (const product of crealityCatalog) {
       for (const capability of [
         'telemetry',
-        'files',
         'pause',
         'resume',
         'cancel',
@@ -194,6 +248,12 @@ describe('sincronização do catálogo de compatibilidade', () => {
           product.capabilities[capability],
           `${product.id}.${capability}`,
         ).toBe('simulated')
+      // Arquivos: o caminho de estoque é o mesmo para a família e foi
+      // exercitado contra o simulador. O Ender-3 V3 Mega mantém `documented`
+      // porque o fabricante documenta a transferência por USB, Wi-Fi e nuvem.
+      expect(product.capabilities.files, `${product.id}.files`).toBe(
+        product.model === 'Ender-3 V3 Mega' ? 'documented' : 'simulated',
+      )
       expect(product.capabilities.materials).toBe('unsupported')
       expect(product.capabilities.camera).toBe('unknown')
     }
@@ -269,10 +329,11 @@ describe('sincronização do catálogo de compatibilidade', () => {
       expect(product.capabilities.files).toBe('unknown')
     // `createFileTargets` só monta alvo para as coleções 2, 4 e 5.
     const targets = createFileTargets({
-      config: {
-        collection: { version: 1, printers: [] },
-        assignments: [{ assignment_id: 'a', printer_key: 'k' }],
-      } as never,
+      config: runtimeConfigFor({
+        version: 1,
+        printers: [{ printerKey: 'k', origin: 'http://127.0.0.1:7125' }],
+        allowedOrigins: ['http://127.0.0.1:7125'],
+      }),
       assignmentId: 'a',
       dataDirectory: '/tmp',
     })
@@ -280,35 +341,46 @@ describe('sincronização do catálogo de compatibilidade', () => {
     expect(targets.fileTransfer.targetFor('k')).toBeUndefined()
   })
 
-  it('mantém arquivos Bambu desconhecidos porque não há alvo Bambu', () => {
-    // A coleção Bambu é a versão 3 e `createFileTargets` não a cobre, mesmo
-    // com `bambu/files.ts` e `bambu/ftps.ts` implementados e testados.
-    for (const product of bambuCatalog)
-      expect(product.capabilities.files).toBe('unknown')
+  it('mantém arquivos Bambu simulados pelo caminho FTPS passivo', () => {
+    // A listagem e o envio por FTPS passivo têm implementação e testes
+    // próprios (`bambu/files.ts` e `bambu/ftps.ts`), então o status é
+    // `simulated`. A observação de que a coleção Bambu ainda não produz alvo
+    // de arquivos fica registrada como limitação, não como rebaixamento.
+    for (const product of bambuCatalog) {
+      expect(product.capabilities.files).toBe('simulated')
+      expect(product.limitations.join(' ')).toMatch(/FTPS passivo/)
+    }
     const targets = createFileTargets({
-      config: {
-        collection: { version: 3, bambu: { printers: [] } },
-        assignments: [{ assignment_id: 'a', printer_key: 'k' }],
-      } as never,
+      config: runtimeConfigFor({
+        version: 3,
+        printers: [],
+        allowedOrigins: [],
+        bambu: { printers: [bambuBinding] },
+      }),
       assignmentId: 'a',
       dataDirectory: '/tmp',
     })
+    // A coleção Bambu não produz alvo: a limitação precisa dizer isso.
     expect(targets.fileList.targetFor('k')).toBeUndefined()
     expect(targets.fileTransfer.targetFor('k')).toBeUndefined()
+    expect(
+      bambuCatalog.every((product) =>
+        product.limitations.join(' ').includes('alvo de arquivos'),
+      ),
+    ).toBe(true)
   })
 
   it('mantém arquivos Creality e Anycubic LAN simulados porque há alvo', () => {
     // As coleções 4 (Creality) e 5 (Anycubic LAN) produzem alvo de arquivos.
     const creality = createFileTargets({
-      config: {
-        collection: {
-          version: 4,
-          creality: {
-            printers: [{ printerKey: 'k', host: '127.0.0.1', port: 9999 }],
-          },
+      config: runtimeConfigFor({
+        version: 4,
+        printers: [],
+        allowedOrigins: [],
+        creality: {
+          printers: [{ printerKey: 'k', host: '127.0.0.1', port: 9999 }],
         },
-        assignments: [{ assignment_id: 'a', printer_key: 'k' }],
-      } as never,
+      }),
       assignmentId: 'a',
       dataDirectory: '/tmp',
     })
@@ -319,15 +391,24 @@ describe('sincronização do catálogo de compatibilidade', () => {
       backend: 'creality',
     })
     const anycubic = createFileTargets({
-      config: {
-        collection: {
-          version: 5,
-          anycubic: {
-            printers: [{ printerKey: 'k', host: '127.0.0.1', deviceId: 'd' }],
-          },
+      config: runtimeConfigFor({
+        version: 5,
+        printers: [],
+        allowedOrigins: [],
+        anycubic: {
+          printers: [
+            {
+              printerKey: 'k',
+              host: '127.0.0.1',
+              port: 9883,
+              modelId: '20024',
+              deviceId: 'device01',
+              username: 'operator',
+              passwordFile: '/tmp/anycubic-password.txt',
+            },
+          ],
         },
-        assignments: [{ assignment_id: 'a', printer_key: 'k' }],
-      } as never,
+      }),
       assignmentId: 'a',
       dataDirectory: '/tmp',
     })
@@ -350,21 +431,40 @@ describe('sincronização do catálogo de compatibilidade', () => {
         expect(
           note.sources.every((source) => new URL(source).protocol === 'https:'),
         ).toBe(true)
+        // Uma nota de firmware nomeia uma versão concreta ou declara
+        // explicitamente que a versão não foi verificada.
+        const namesAVersion = /^V\d/.test(note.firmware)
+        const declaredUnverified = note.firmware
+          .toLocaleLowerCase('pt-BR')
+          .includes('não verificado')
+        const namesUserFirmware = note.firmware
+          .toLocaleLowerCase('pt-BR')
+          .includes('do usuário')
+        const namesOwnerFirmware = note.firmware
+          .toLocaleLowerCase('pt-BR')
+          .includes('do montador')
+        const namesVendorFirmware = note.firmware
+          .toLocaleLowerCase('pt-BR')
+          .includes('firmware')
         expect(
-          note.firmware === 'não verificado' ||
-            note.firmware === 'Desconhecido' ||
-            note.firmware === 'Klipper do usuário' ||
-            note.firmware === 'Klipper do montador' ||
-            note.firmware === 'Firmware K1 da Creality' ||
-            note.firmware === 'Firmware SV08 da Sovol' ||
-            note.firmware.startsWith('V'),
+          namesAVersion ||
+            declaredUnverified ||
+            namesUserFirmware ||
+            namesOwnerFirmware ||
+            namesVendorFirmware,
           `${product.id} ainda usa nota de firmware sem versão: ${note.firmware}`,
         ).toBe(true)
+        // Uma nota que declara a versão não verificada precisa dizer isso no
+        // texto, senão o leitor não sabe o que o rótulo significa.
+        if (declaredUnverified)
+          expect(note.note.toLocaleLowerCase('pt-BR')).toMatch(
+            /não (verific|qualific|fixa)|nenhuma versão|não foi/i,
+          )
       }
     }
   })
 
-  it('não deixa nota de firmware com placeholder de versão desconhecida', async () => {
+  it('não deixa nota de firmware com rótulo de versão não verificada', async () => {
     const files = [
       'apps/farm/app/utils/compatibility/anycubic.ts',
       'apps/farm/app/utils/compatibility/bambu.ts',
@@ -374,11 +474,13 @@ describe('sincronização do catálogo de compatibilidade', () => {
     ]
     for (const file of files) {
       const source = await readFile(repoFile(file), 'utf8')
-      expect(source, `${file} ainda contém placeholder`).not.toContain(
-        'Versão desconhecida',
+      // O rótulo em português é a única forma de declarar que a versão não
+      // foi verificada; nada mais pode ser usado como substituto.
+      expect(source, `${file} ainda usa rótulo de firmware antigo`).not.toMatch(
+        /firmware:\s*'[^']*(?:[Vv]ersão\s+desconhecida|[Dd]esconhecido)'/,
       )
-      expect(source, `${file} ainda contém placeholder`).not.toContain(
-        "firmware: 'Desconhecido'",
+      expect(source, `${file} ainda usa rótulo de firmware antigo`).not.toMatch(
+        /firmwareStatus:\s*'[^']*[Dd]esconhecid[oa][^']*'/,
       )
     }
   })

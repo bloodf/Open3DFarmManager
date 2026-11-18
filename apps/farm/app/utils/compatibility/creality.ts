@@ -33,9 +33,15 @@ export interface CrealityCatalogProduct {
 /**
  * O driver Creality do OpenFarm é agnóstico ao modelo: `CrealityBinding`
  * (`packages/connector/src/config/creality.ts`) não tem campo de modelo e
- * `supportedCrealityActions` ignora o argumento. Telemetria, arquivos,
- * pausar, retomar e cancelar são, portanto, o mesmo caminho de código para
- * toda a família Creality coberta por este catálogo.
+ * `supportedCrealityActions` ignora o argumento. Telemetria, pausar, retomar e
+ * cancelar são, portanto, o mesmo caminho de código para toda a família
+ * Creality coberta por este catálogo.
+ *
+ * Arquivos: o caminho de estoque é o mesmo para toda a família e foi
+ * exercitado contra o simulador, então é `simulated`. O Ender-3 V3 Mega
+ * mantém `documented` porque o fabricante documenta a transferência de
+ * arquivos por USB, Wi-Fi e nuvem, e `documented` é o rótulo do fabricante,
+ * não uma prova do OpenFarm em hardware.
  */
 const crealitySimulatedCapabilities = {
   telemetry: 'simulated',
@@ -131,7 +137,13 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
     firmwareStatus: 'não verificado',
     connection:
       'Wi-Fi 2,4 GHz e Creality Cloud anunciados; LAN, Moonraker e autenticação não comprovadas',
-    capabilities: crealitySimulatedCapabilities,
+    capabilities: {
+      ...crealitySimulatedCapabilities,
+      // O fabricante documenta a transferência de arquivos por USB, Wi-Fi e
+      // nuvem; `documented` é o rótulo do fabricante, não uma prova do
+      // OpenFarm em hardware.
+      files: 'documented',
+    },
     sources: [
       'https://www.prnewswire.com/news-releases/creality-launches-ender-3-v3-mega-combo-at-669-for-large-format-printing-and-batch-production-302909893.html',
       'https://store.creality.com/products/ender-3-v3-mega-3d-printer',

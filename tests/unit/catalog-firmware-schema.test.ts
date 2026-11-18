@@ -8,12 +8,19 @@ import type { AnycubicCatalogProduct } from '../../apps/farm/app/utils/compatibi
 describe('catalog firmware notes', () => {
   it('keeps entries without notes valid alongside documented firmware', () => {
     expect(compatibilityPageCatalog.length).toBeGreaterThan(0)
-    // Notes stay optional on the catalog type: every current product carries
-    // one, but a product built without the key must still type-check.
+    // Notes stay optional on the catalog type: a product built without the
+    // key must still type-check and read as absent.
     const { firmwareNotes: _omitted, ...withoutNotes } =
       compatibilityPageCatalog[0]!
     const product: AnycubicCatalogProduct = withoutNotes
     expect(product.firmwareNotes).toBeUndefined()
+    // Every product in the page catalog now carries a sourced note, so no
+    // entry is left without firmware evidence.
+    expect(
+      compatibilityPageCatalog.some(
+        (product) => product.firmwareNotes === undefined,
+      ),
+    ).toBe(false)
   })
 
   it('preserves separate firmware notes for each model during search', () => {

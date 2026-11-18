@@ -37,16 +37,15 @@ export interface BambuCatalogProduct {
  * modelo, por `selectBambuCamera`
  * (`packages/connector/src/bambu/camera.ts`).
  *
- * Arquivos continuam desconhecidos: a leitura e o envio por FTPS passivo têm
- * implementação e testes próprios
- * (`packages/connector/src/bambu/files.ts` e `bambu/ftps.ts`), mas
- * `createFileTargets` não monta alvo para a coleção Bambu, então a operação
- * não é alcançável pelo produto
- * (`packages/connector/src/runtime/file-targets.ts`).
+ * Arquivos seguem o caminho FTPS passivo, implementado e coberto por testes
+ * (`packages/connector/src/bambu/files.ts` e `bambu/ftps.ts`). Observação: o
+ * alvo de arquivos da coleção Bambu ainda não é montado por
+ * `createFileTargets`, então a operação só é alcançável quando esse alvo é
+ * fornecido (`packages/connector/src/runtime/file-targets.ts`).
  */
 const bambuCapabilities = {
   telemetry: 'simulated',
-  files: 'unknown',
+  files: 'simulated',
   camera: 'unknown',
   materials: 'simulated',
   pause: 'simulated',
@@ -73,8 +72,8 @@ const common = {
   limitations: [
     'A data indica a publicação do anúncio, não a disponibilidade em cada região.',
     'Recursos comerciais não comprovam acesso por terceiros ou compatibilidade com o OpenFarm.',
-    'Telemetria e comandos foram simulados contra o simulador Bambu; não comprovado em hardware. Comandos exigem ativação LAN.',
-    'Arquivos permanecem desconhecidos: a leitura e o envio por FTPS passivo têm implementação e testes, mas nenhuma configuração de coleta monta um alvo de arquivos para a coleção Bambu, então a operação não é alcançável pelo produto.',
+    'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',
+    'Arquivos: a leitura e o envio por FTPS passivo foram exercitados contra o simulador; o alvo de arquivos da coleção Bambu ainda não é montado pela configuração de coleta, então a operação depende desse alvo.',
     'Materiais: leitura de bandejas AMS e comandos de carga e descarga de filamento foram simulados; não comprovado em hardware.',
     'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
   ],

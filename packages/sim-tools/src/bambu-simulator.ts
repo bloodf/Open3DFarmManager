@@ -2,7 +2,7 @@ import { createServer } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 
 // Public disposable synthetic identity. Never use for a real printer.
-const cert = `-----BEGIN CERTIFICATE-----
+export const syntheticBambuCertificate = `-----BEGIN CERTIFICATE-----
 MIIDDzCCAfegAwIBAgIUIz5W9pVEWkuHCHkhRPa1b/Gp/BAwDQYJKoZIhvcNAQEL
 BQAwHzEdMBsGA1UEAwwUU1lOVEhFVElDLUJBTUJVLU9OTFkwHhcNMjYxMTE0MDgx
 NzI0WhcNMzYxMTExMDgxNzI0WjAfMR0wGwYDVQQDDBRTWU5USEVUSUMtQkFNQlUt
@@ -22,6 +22,7 @@ iuqR6YDi9FxrT2nMoDB/zqBJn0phcCjeFpsh2uOLnZih1MhiXH+IHgvRthu4NfVO
 2Qch7i7xHkiDog0JmvgNxH6oTg==
 -----END CERTIFICATE-----
 `
+const cert = syntheticBambuCertificate
 const key = `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDUPwd+0InyUZxm
 CMSuZzcSFrsd+emhPkieCK7sz+6AhwJ7pVuwfPc4kGbJNYwrP8JDcP8g5SVEvU9o
@@ -172,7 +173,7 @@ export async function startBambuSimulator({
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
   const server = createServer(
-    { cert, key, handshakeTimeout: 3000 },
+    { cert: syntheticBambuCertificate, key, handshakeTimeout: 3000 },
     (socket) => {
       let buffer = Buffer.alloc(0)
       let connected = false

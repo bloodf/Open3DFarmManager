@@ -26,6 +26,7 @@ export async function enrollConnector(input: {
   origin: string
   workDir: string
   printerKeys: readonly string[]
+  sandbox?: boolean
 }) {
   const { admin, identity, origin } = input
   const keyFile = join(input.workDir, 'keys.json')
@@ -45,7 +46,9 @@ export async function enrollConnector(input: {
     farmId = randomUUID()
   await admin`INSERT INTO farm.session_accounts(id) VALUES(${actor})`
   await admin`INSERT INTO farm.account_sessions(id,account_id,account_version,created_at,last_seen_at,absolute_expires_at) VALUES(${actor},${actor},0,${now},${now},${now + 3_600_000})`
-  await admin`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
+  if (input.sandbox)
+    await admin`INSERT INTO farm.farms(id, sandbox) VALUES(${farmId}::uuid,true)`
+  else await admin`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
   await admin`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${actor},'owner')`
   const binding = { origin, audience: 'open3dfarmmanager:pairing' }
   const pairing = new PostgresPairing(input.pairSql, binding)

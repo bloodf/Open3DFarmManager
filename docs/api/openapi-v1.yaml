@@ -2034,7 +2034,8 @@ components:
           type: string
           description: |
             `held` awaits operator approval; `rejected` was refused by an
-            operator; `expired` was never delivered before its expiry;
+            operator; `queued` was accepted and waits for the Connector to
+            confirm delivery; `expired` was never delivered before its expiry;
             `delivered` reached the Connector; `refused` was refused by the
             Connector (see `refusal`); `started`, `completed`, `cancelled` and
             `failed` follow the print; `outcome-unknown` means delivery or
@@ -2043,6 +2044,7 @@ components:
           enum:
             - held
             - rejected
+            - queued
             - expired
             - delivered
             - refused

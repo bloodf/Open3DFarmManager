@@ -161,6 +161,11 @@ const problems = {
   'invalid-request': [400, 'Solicitação inválida.'],
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
+  'validation-failed': [422, 'Solicitação não aceita.'],
+  'idempotency-key-reused': [
+    409,
+    'Chave de idempotência já usada com outra solicitação.',
+  ],
   'method-not-allowed': [405, 'Método não permitido.'],
   'rate-limited': [429, 'Limite de solicitações atingido.'],
   'service-unavailable': [503, 'Serviço temporariamente indisponível.'],

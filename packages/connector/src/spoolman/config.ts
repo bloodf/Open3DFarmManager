@@ -21,5 +21,7 @@ export const SpoolmanConfig = z.strictObject({
   farmId: z.string().uuid(),
   serviceId: z.string().uuid(),
   limit: z.number().int().min(1).max(200).default(200),
+  /** Private file written by config-v1 holding optional Spoolman credentials. */
+  credentialFile: z.string().min(1).max(4096).optional(),
 })
 export type SpoolmanConfig = z.infer<typeof SpoolmanConfig>

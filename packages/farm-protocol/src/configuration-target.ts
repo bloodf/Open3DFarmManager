@@ -193,7 +193,53 @@ export const AnycubicConfigurationTarget = z.strictObject({
 export type AnycubicConfigurationTarget = z.infer<
   typeof AnycubicConfigurationTarget
 >
+/**
+ * One Spoolman per farm. The browser sends the origin and optional
+ * credentials over the authenticated RTC session; the Connector keeps the
+ * credentials in private custody and the server never receives them.
+ */
+export const SpoolmanConfigurationTarget = z
+  .strictObject({
+    v: z.literal(1),
+    protocol: z.literal(CONFIGURATION_PROTOCOL),
+    backend: z.literal('spoolman'),
+    model: z.strictObject({
+      family: z.literal('spoolman'),
+      provisional: z.literal(true),
+    }),
+    origin: ConfigurationMoonrakerOrigin,
+    /** Bearer token for a reverse proxy in front of Spoolman. */
+    token: z
+      .string()
+      .regex(/^[\x21-\x7e]{1,256}$/)
+      .optional(),
+    username: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine(
+        (value) =>
+          !value.includes(':') && !/[\u0000-\u001f\u007f]/u.test(value),
+      )
+      .optional(),
+    password: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value))
+      .optional(),
+    device_id: configurationOpaqueId.optional(),
+  })
+  .refine(
+    (v) =>
+      Boolean(v.username) === Boolean(v.password) && !(v.token && v.username),
+    { message: 'Choose one Spoolman credential method' },
+  )
+export type SpoolmanConfigurationTarget = z.infer<
+  typeof SpoolmanConfigurationTarget
+>
 export const ConfigurationTarget = z.discriminatedUnion('backend', [
+  SpoolmanConfigurationTarget,
   AnycubicConfigurationTarget,
   KobraConfigurationTarget,
   MoonrakerConfigurationTarget,

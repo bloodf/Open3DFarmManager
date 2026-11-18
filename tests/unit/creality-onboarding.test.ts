@@ -151,7 +151,11 @@ async function apply(w: ReturnType<typeof world>, revision = 0) {
   return { prepare, prepared, commit, committed }
 }
 
-describe('Creality native onboarding', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 5 s on a loaded host, so the suite gets
+// an explicit timeout rather than moving fixtures off os.tmpdir().
+describe('Creality native onboarding', { timeout: 30_000 }, () => {
   it('accepts the provisional stock contract and keeps Moonraker separate', () => {
     expect(ConfigurationTarget.parse(target())).toEqual({
       v: 1,
@@ -406,92 +410,102 @@ describe('Creality native onboarding', () => {
 })
 
 describe('Creality form', () => {
-  it('dispatches the validated host through the signed session and persists recovery state', async () => {
-    const require = createRequire(resolve('apps/farm/package.json'))
-    const { parse, compileScript } = require('vue/compiler-sfc')
-    const { descriptor } = parse(
-      readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8'),
-    )
-    const compiled = compileScript(descriptor, { id: 'creality-form' })
-    const routeNode = compiled.scriptSetupAst.find(
-      (item: { type: string; id?: { name: string } }) =>
-        item.type === 'FunctionDeclaration' &&
-        item.id?.name === 'selectCrealityMoonraker',
-    )
-    const routeJavascript = transformSync(
-      descriptor.scriptSetup.content.slice(routeNode.start, routeNode.end),
-      { loader: 'ts', target: 'es2022' },
-    ).code
-    const routeContext = {
-      closeKobraSession: vi.fn(),
-      onboardingFamily: { value: 'creality-native' },
-    }
-    new Function(
-      'context',
-      `with (context) { ${routeJavascript}; selectCrealityMoonraker() }`,
-    )(routeContext)
-    expect(routeContext.onboardingFamily.value).toBe('klipper-moonraker')
-    expect(routeContext.closeKobraSession).toHaveBeenCalledOnce()
-    const node = compiled.scriptSetupAst.find(
-      (item: { type: string; id?: { name: string } }) =>
-        item.type === 'FunctionDeclaration' &&
-        item.id?.name === 'prepareCrealityPrinter',
-    )
-    const javascript = transformSync(
-      descriptor.scriptSetup.content.slice(node.start, node.end),
-      { loader: 'ts', target: 'es2022' },
-    ).code
-    const ref = <T>(value: T) => ({ value })
-    const persisted: unknown[] = []
-    const sent: unknown[] = []
-    const context = {
-      kobraBusy: ref(false),
-      kobraBootstrap: ref({
-        kind: 'ready',
-        data: { bootstrap: { revision: 0 } },
-      }),
-      kobraError: ref(''),
-      kobraStatus: ref(''),
-      crealityHost: ref('192.168.1.60'),
-      kobraLabel: ref('K1'),
-      kobraGeneration: 1,
-      kobraController: null,
-      kobraStage: ref('idle'),
-      kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
-      farmId: ref(randomUUID()),
-      kobraAgentId: ref(randomUUID()),
-      kobraKeyId: ref(randomUUID()),
-      kobraOperation: ref<unknown>(null),
-      validateCrealityTargetInput,
-      configurationTargetHash,
-      crypto,
-      AbortController,
-      persistPendingOperation: (input: unknown) => persisted.push(input),
-      ensureKobraSession: async () => ({
-        async prepare(input: { target: unknown; beforeDispatch: () => void }) {
-          input.beforeDispatch()
-          sent.push(input.target)
-          return { kind: 'prepared' }
-        },
-      }),
-      applySessionOutcome: vi.fn(),
-      handleKobraException: vi.fn(),
-      nextTick: async () => {},
-      kobraErrorSummary: ref(null),
-    }
-    const prepare = new Function(
-      'context',
-      `with (context) { ${javascript}; return prepareCrealityPrinter }`,
-    )(context)
-    await prepare()
-    expect(sent).toEqual([target()])
-    expect(persisted).toHaveLength(1)
-    expect(context.applySessionOutcome).toHaveBeenCalledOnce()
-    expect(context.handleKobraException).not.toHaveBeenCalled()
-    context.crealityHost.value = 'http://user:private@host'
-    await prepare()
-    expect(sent).toHaveLength(1)
-    expect(context.kobraError.value).not.toContain('private')
-    expect(context.kobraError.value).toContain('IPv4')
-  })
+  // Loading vue/compiler-sfc and compiling the full impressoras.vue page is
+  // inherently heavy (about 0.5 s idle, several seconds on a loaded CI host),
+  // so this test gets an explicit timeout instead of the 5 s default.
+  it(
+    'dispatches the validated host through the signed session and persists recovery state',
+    { timeout: 30_000 },
+    async () => {
+      const require = createRequire(resolve('apps/farm/package.json'))
+      const { parse, compileScript } = require('vue/compiler-sfc')
+      const { descriptor } = parse(
+        readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8'),
+      )
+      const compiled = compileScript(descriptor, { id: 'creality-form' })
+      const routeNode = compiled.scriptSetupAst.find(
+        (item: { type: string; id?: { name: string } }) =>
+          item.type === 'FunctionDeclaration' &&
+          item.id?.name === 'selectCrealityMoonraker',
+      )
+      const routeJavascript = transformSync(
+        descriptor.scriptSetup.content.slice(routeNode.start, routeNode.end),
+        { loader: 'ts', target: 'es2022' },
+      ).code
+      const routeContext = {
+        closeKobraSession: vi.fn(),
+        onboardingFamily: { value: 'creality-native' },
+      }
+      new Function(
+        'context',
+        `with (context) { ${routeJavascript}; selectCrealityMoonraker() }`,
+      )(routeContext)
+      expect(routeContext.onboardingFamily.value).toBe('klipper-moonraker')
+      expect(routeContext.closeKobraSession).toHaveBeenCalledOnce()
+      const node = compiled.scriptSetupAst.find(
+        (item: { type: string; id?: { name: string } }) =>
+          item.type === 'FunctionDeclaration' &&
+          item.id?.name === 'prepareCrealityPrinter',
+      )
+      const javascript = transformSync(
+        descriptor.scriptSetup.content.slice(node.start, node.end),
+        { loader: 'ts', target: 'es2022' },
+      ).code
+      const ref = <T>(value: T) => ({ value })
+      const persisted: unknown[] = []
+      const sent: unknown[] = []
+      const context = {
+        kobraBusy: ref(false),
+        kobraBootstrap: ref({
+          kind: 'ready',
+          data: { bootstrap: { revision: 0 } },
+        }),
+        kobraError: ref(''),
+        kobraStatus: ref(''),
+        crealityHost: ref('192.168.1.60'),
+        kobraLabel: ref('K1'),
+        kobraGeneration: 1,
+        kobraController: null,
+        kobraStage: ref('idle'),
+        kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
+        farmId: ref(randomUUID()),
+        kobraAgentId: ref(randomUUID()),
+        kobraKeyId: ref(randomUUID()),
+        kobraOperation: ref<unknown>(null),
+        validateCrealityTargetInput,
+        configurationTargetHash,
+        crypto,
+        AbortController,
+        persistPendingOperation: (input: unknown) => persisted.push(input),
+        ensureKobraSession: async () => ({
+          async prepare(input: {
+            target: unknown
+            beforeDispatch: () => void
+          }) {
+            input.beforeDispatch()
+            sent.push(input.target)
+            return { kind: 'prepared' }
+          },
+        }),
+        applySessionOutcome: vi.fn(),
+        handleKobraException: vi.fn(),
+        nextTick: async () => {},
+        kobraErrorSummary: ref(null),
+      }
+      const prepare = new Function(
+        'context',
+        `with (context) { ${javascript}; return prepareCrealityPrinter }`,
+      )(context)
+      await prepare()
+      expect(sent).toEqual([target()])
+      expect(persisted).toHaveLength(1)
+      expect(context.applySessionOutcome).toHaveBeenCalledOnce()
+      expect(context.handleKobraException).not.toHaveBeenCalled()
+      context.crealityHost.value = 'http://user:private@host'
+      await prepare()
+      expect(sent).toHaveLength(1)
+      expect(context.kobraError.value).not.toContain('private')
+      expect(context.kobraError.value).toContain('IPv4')
+    },
+  )
 })

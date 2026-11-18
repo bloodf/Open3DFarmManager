@@ -46,10 +46,6 @@ import {
   describeAnycubicTarget,
 } from '../../apps/farm/app/utils/anycubic-onboarding.ts'
 
-// The provisioning engine fsyncs every durable write. On a disk-backed TMPDIR
-// under load those fsyncs alone exceed the default timeout, so fixtures use
-// tmpfs when the host has one; durability semantics are unchanged.
-const scratchRoot = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const directories: string[] = []
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => {
@@ -70,9 +66,7 @@ function target(host = '192.168.1.60') {
   return value.target
 }
 function world(reachable = true) {
-  const dir = realpathSync(
-    mkdtempSync(join(scratchRoot, 'anycubic-onboarding-')),
-  )
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'anycubic-onboarding-')))
   directories.push(dir)
   const signer = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -173,7 +167,11 @@ async function apply(w: ReturnType<typeof world>, revision = 0) {
   return { prepare, prepared, commit, committed }
 }
 
-describe('Anycubic native onboarding', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 5 s on a loaded host, so the suite gets
+// an explicit timeout rather than moving fixtures off os.tmpdir().
+describe('Anycubic native onboarding', { timeout: 30_000 }, () => {
   it('accepts the provisional LAN contract and defaults to port 9883', () => {
     expect(ConfigurationTarget.parse(target())).toMatchObject({
       backend: 'anycubic',

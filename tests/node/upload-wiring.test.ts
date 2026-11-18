@@ -7,7 +7,6 @@ import {
   randomUUID,
   X509Certificate,
 } from 'node:crypto'
-import { accessSync, constants } from 'node:fs'
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -166,17 +165,7 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
     await new Promise((r) => setTimeout(r, 5))
   }
 }
-// The command journal uses SQLite synchronous=FULL. This fixture does not
-// assert durability, so use memory-backed storage when available to avoid
-// competing with other test gates for disk I/O.
-const fixtureRoot = (() => {
-  try {
-    accessSync('/dev/shm', constants.W_OK)
-    return '/dev/shm'
-  } catch {
-    return tmpdir()
-  }
-})()
+const fixtureRoot = tmpdir()
 const nonce = () => randomBytes(32).toString('base64url')
 
 async function connect(

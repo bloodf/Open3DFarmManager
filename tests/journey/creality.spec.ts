@@ -281,13 +281,6 @@ if (journeyEnabled())
       await journey.expectProgress(0.4)
     })
 
-    test('the farm page shows decoded camera frames from the printer', async () => {
-      test.setTimeout(2 * 60_000)
-      const journey = started()
-      await expectCameraFrames(journey)
-      expect(journey.simulatorObservation()).toMatchObject({ failure: false })
-    })
-
     test('pause and resume are confirmed by the printer state', async () => {
       test.setTimeout(3 * 60_000)
       const page = started().ownerPage
@@ -480,6 +473,15 @@ if (journeyEnabled())
       expect(simulator().state).toMatchObject({ state: 0, printProgress: 100 })
 
       await expectHistory(page, 'Concluído', UPLOAD)
+      expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+    })
+
+    test('the farm page shows decoded camera frames from the printer', async () => {
+      test.setTimeout(2 * 60_000)
+      const journey = started()
+      // A fresh farm page: the camera runs after every control step.
+      await journey.openFarm()
+      await expectCameraFrames(journey)
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
   })

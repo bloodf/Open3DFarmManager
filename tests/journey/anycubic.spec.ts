@@ -504,15 +504,6 @@ function suite(title: string) {
       })
     })
 
-    test('the farm page shows decoded camera frames from the printer', async () => {
-      test.setTimeout(5 * 60_000)
-      await step(async () => {
-        const journey = started()
-        await expectCameraFrames(journey)
-        expect(journey.simulatorObservation()).toMatchObject({ failure: false })
-      })
-    })
-
     for (const extra of EXTENDED) extendedTest(extra)
 
     test('pause, resume and cancel reach the simulator', async () => {
@@ -709,6 +700,17 @@ function suite(title: string) {
         const cancelled = jobs.filter({ hasText: 'Cancelado' })
         await expect(cancelled).toHaveCount(1)
         await expect(cancelled).toContainText(journey.printerKey)
+        expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+      })
+    })
+
+    test('the farm page shows decoded camera frames from the printer', async () => {
+      test.setTimeout(5 * 60_000)
+      await step(async () => {
+        const journey = started()
+        // A fresh farm page: the camera runs after every control step.
+        await journey.openFarm()
+        await expectCameraFrames(journey)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })
       })
     })

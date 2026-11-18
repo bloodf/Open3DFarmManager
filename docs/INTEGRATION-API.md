@@ -7,24 +7,24 @@ as JSON at `/api/integrations/v1/openapi.json`. Use that document for exact
 request and response schemas, scopes and error codes. This guide gives the
 operational flow; the contract wins if the two disagree.
 
-## Register an application and obtain consent
+## Register an application and grant access
 
-Create an integration app through the farm's supported app registration
-process. Registration provides a client ID and secret; store the secret in a
-secret manager and never put it in browser code, source control or logs. Ask
-for only the scopes and farms required. An owner must approve the requested
-grant. Sandbox apps can be granted sandbox farms only; they cannot be attached
-to a non-sandbox farm.
+A farm owner registers an app in the pt-BR **Integrações** page. The client ID and secret are returned once; copy the secret immediately because it is never stored in recoverable form or shown again. Store it in a secret manager, never in browser code, source control or logs.
 
-For programmatic farm linking, register the owner-consent intent with
-`POST /intents`, supplying unique `intentRef`, `clientId`, `deploymentId`,
-`registryRevision`, `machineRef` and `expiresAtMs` values. The expiry must be
-within five minutes. After presenting that consent request to the owner, poll
-`POST /grants/redeem` with a stable `requestId`, `intentRef` and `clientId`;
-`pending_consent` is not a grant. A `granted` result contains the farm, scopes
-and expiry. Repeated identical intent or redemption requests are safe with
-their same reference IDs. See the schema for the exact identifiers and
-response variants.
+Owners can grant one or more scopes across a farm or limit them to a printer assignment, and can require owner approval for actions. Removing a grant immediately removes that access and invalidates tokens covering it. Only an active farm owner can use these session-authenticated management routes:
+
+- `GET /api/farms/{farmId}/integrations/apps` lists apps and active printer assignments.
+- `POST /api/farms/{farmId}/integrations/apps` registers an app and returns its client secret once.
+- `DELETE /api/farms/{farmId}/integrations/apps/{appId}` revokes an app and all of its credentials and grants.
+- `DELETE /api/farms/{farmId}/integrations/credentials/{credentialId}` revokes one app credential.
+- `GET` and `POST /api/farms/{farmId}/integrations/apps/{appId}/grants` list or grant scopes.
+- `DELETE /api/farms/{farmId}/integrations/grants/{grantId}` removes a grant.
+
+Revocations are audited and take effect on the next API request. Revoking an app
+also makes its webhook subscriptions ineligible for delivery, including events
+already waiting in the outbox.
+
+The OpenAPI document below describes the separate client-facing API. Sandbox apps can be granted sandbox farms only; they cannot be attached to a non-sandbox farm.
 
 ## Authenticate
 

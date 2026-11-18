@@ -968,3 +968,76 @@ test('API delivery and results use only the proved read-only Connector inbox', a
     f.close()
   }
 })
+
+test('read queries correlate replies only on their proved Connector inbox and settle on close', async () => {
+  const f = await fixture()
+  try {
+    const input = {
+      assignment_id: randomUUID(),
+      kind: 'macros',
+      offset: 0,
+      limit: 1,
+    } as const
+    const query = (farm = f.farm) =>
+      f.runtime.queryAgentInbox(farm, f.agent, input)
+    const unavailable = { kind: 'error', error: 'connector-unavailable' }
+    assert.deepEqual(await query(), unavailable)
+    const pause = await f.inbox('pause')
+    assert.deepEqual(await query(), unavailable)
+    const legacy = await f.inbox()
+    assert.deepEqual(await query(), unavailable)
+    assert.equal(legacy.raw.socket.destroyed, false)
+    legacy.native.terminate()
+    await flush()
+    const machine = f.peer('connector', ['Open3dfarm-Api-Query', '1'])
+    assert.equal(
+      await f.runtime.upgrade(machine.request, 'connector', 'read-only'),
+      undefined,
+    )
+    f.runtime.open(machine)
+    await f.send(machine, {
+      v: 1,
+      t: 'connector.begin',
+      agent_id: f.agent,
+      farm_id: f.farm,
+      jti: f.jti,
+      token: f.token,
+    })
+    const challenge = machine.wires.at(-1)
+    assert.equal(challenge?.t, 'connector.inbox-challenge')
+    await f.send(machine, {
+      v: 1,
+      t: 'connector.inbox-proof',
+      signature: await f.sign(challenge.challenge),
+    })
+    assert.ok(machine.wires.some((wire) => wire.t === 'connector.inbox-ready'))
+    assert.deepEqual(await query(randomUUID()), unavailable)
+    const pending = query()
+    const sent = machine.wires.at(-1)
+    assert.equal(sent?.t, 'connector.api-query')
+    assert.deepEqual(sent, {
+      v: 1,
+      t: 'connector.api-query',
+      request_id: sent.request_id,
+      ...input,
+    })
+    assert.ok(!pause.wires.some((wire) => wire.t === sent.t))
+    const result = { kind: 'macros', data: [{ name: 'PARK' }], nextOffset: 1 }
+    const rawData = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        t: 'connector.api-query-result',
+        request_id: sent.request_id,
+        wire: JSON.stringify(result),
+      }),
+    )
+    machine.native.emit('message', rawData, false)
+    f.runtime.message(machine, { rawData })
+    assert.deepEqual(await pending, result)
+    const abandoned = query()
+    f.close()
+    assert.deepEqual(await abandoned, unavailable)
+  } finally {
+    f.close()
+  }
+})

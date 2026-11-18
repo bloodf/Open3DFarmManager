@@ -43,6 +43,9 @@ async function fixture(
     'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand'
   > = {},
   bindAddress?: string,
+  onApiQuery?: NonNullable<
+    ConstructorParameters<typeof AuthenticatedConnectorSignallingClient>[1]
+  >['onApiQuery'],
 ) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -99,6 +102,7 @@ async function fixture(
     },
     ...(onAdmission ? { onVerifiedAdmission: onAdmission } : {}),
     ...authority,
+    ...(onApiQuery ? { onApiQuery } : {}),
     clock: { now: () => now, wallNow: () => wall },
     socketFactory: () => socket,
     peerFactory: async (options) => {
@@ -787,6 +791,64 @@ test('API commands and results require a proved credential inbox', async () => {
       v: 1,
       t: 'connector.api-result',
       wire: 'result',
+    })
+  } finally {
+    admitted.client.close()
+  }
+})
+
+test('API queries are handled only after credential inbox admission', async () => {
+  const seen: string[] = []
+  const onApiQuery: NonNullable<Parameters<typeof fixture>[5]> = (
+    frame,
+    report,
+  ) => {
+    seen.push(frame.kind)
+    report({
+      v: 1,
+      t: 'connector.api-query-result',
+      request_id: frame.request_id,
+      wire: '{"kind":"macros","data":[],"nextOffset":null}',
+    })
+  }
+  const query = {
+    v: 1,
+    t: 'connector.api-query',
+    request_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assignment_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    kind: 'macros',
+    offset: 0,
+    limit: 1,
+  }
+  const early = await fixture(
+    false,
+    undefined,
+    false,
+    {},
+    undefined,
+    onApiQuery,
+  )
+  await early.push(query)
+  await assert.rejects(early.pending)
+  assert.deepEqual(seen, [])
+
+  const admitted = await fixture(
+    false,
+    undefined,
+    false,
+    {},
+    undefined,
+    onApiQuery,
+  )
+  try {
+    await admitted.inbox()
+    await admitted.push(query)
+    assert.deepEqual(seen, ['macros'])
+    assert.deepEqual(admitted.sent.at(-1), {
+      v: 1,
+      t: 'connector.api-query-result',
+      request_id: query.request_id,
+      wire: '{"kind":"macros","data":[],"nextOffset":null}',
     })
   } finally {
     admitted.client.close()

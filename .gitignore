@@ -11,3 +11,6 @@ test-results/
 .DS_Store
 *.log
 .data/
+
+# Local agent tooling state
+.omc/

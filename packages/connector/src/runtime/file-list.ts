@@ -115,63 +115,14 @@ export function createFileList(
           }
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
-          if (target.backend === 'creality' || target.backend === 'anycubic')
-            throw Error('unsupported')
-          const entries =
-            target.backend === 'kobralink'
-              ? (
-                  await Promise.race([
-                    (async () => {
-                      const client = await target.client(controller.signal)
-                      try {
-                        if (!authorized()) throw Error('unauthorized')
-                        return await client.listLibraryFiles(target.binding)
-                      } finally {
-                        client.clearSession()
-                      }
-                    })(),
-                    deadline,
-                  ])
-                ).map((file) => ({
-                  name: file.filename,
-                  size: file.sizeBytes,
-                  modified: 0,
-                  printRef: `kobralink-library:${file.id}`,
-                }))
-              : target.backend === 'moonraker'
-                ? await Promise.race([
-                    listMoonrakerFiles(
-                      {
-                        request: (method, params) =>
-                          target.client.request(method, params),
-                        ...(target.thumbnailSource
-                          ? {
-                              downloadThumbnail: createThumbnailDownload({
-                                ...target.thumbnailSource,
-                                signal: controller.signal,
-                              }),
-                            }
-                          : target.client.downloadThumbnail
-                            ? {
-                                downloadThumbnail: (path) =>
-                                  target.client.downloadThumbnail!(path),
-                              }
-                            : {}),
-                      },
-                      { limit: 200 },
-                    ),
-                    deadline,
-                  ])
-                : (
-                    await Promise.race([
-                      listBambuFiles({ ...target, signal: controller.signal }),
-                      deadline,
-                    ])
-                  ).map(({ name, size, modifiedAt }) => ({
-                    name,
-                    size,
-                    modified: Date.parse(modifiedAt) / 1000,
-                  }))
+          const entries = await Promise.race([
+            readPrinterFiles(target, {
+              signal: controller.signal,
+              authorized,
+              previews: true,
+            }),
+            deadline,
+          ])
           const files = entries
             .flatMap((entry) => {
               const file = PrinterFile.safeParse(entry)
@@ -231,5 +182,58 @@ export function createFileList(
     async settled() {
       await work
     },
+  }
+}
+
+export async function readPrinterFiles(
+  target: FileListTarget,
+  input: { signal: AbortSignal; authorized(): boolean; previews: boolean },
+) {
+  switch (target.backend) {
+    case 'creality':
+    case 'anycubic':
+      throw Error('unsupported')
+    case 'kobralink': {
+      const client = await target.client(input.signal)
+      try {
+        if (!input.authorized()) throw Error('unauthorized')
+        return (await client.listLibraryFiles(target.binding)).map((file) => ({
+          name: file.filename,
+          size: file.sizeBytes,
+          modified: 0,
+          printRef: `kobralink-library:${file.id}`,
+        }))
+      } finally {
+        client.clearSession()
+      }
+    }
+    case 'moonraker':
+      return listMoonrakerFiles(
+        {
+          request: (method, params) => target.client.request(method, params),
+          ...(input.previews && target.thumbnailSource
+            ? {
+                downloadThumbnail: createThumbnailDownload({
+                  ...target.thumbnailSource,
+                  signal: input.signal,
+                }),
+              }
+            : input.previews && target.client.downloadThumbnail
+              ? {
+                  downloadThumbnail: (path) =>
+                    target.client.downloadThumbnail!(path),
+                }
+              : {}),
+        },
+        { limit: 200, metadata: input.previews },
+      )
+    case 'bambu':
+      return (await listBambuFiles({ ...target, signal: input.signal })).map(
+        ({ name, size, modifiedAt }) => ({
+          name,
+          size,
+          modified: Date.parse(modifiedAt) / 1000,
+        }),
+      )
   }
 }

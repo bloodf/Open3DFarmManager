@@ -45,7 +45,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
       throw cause
     }
   }
-  /** Active owner or admin of the farm; the membership and account rows stay locked until commit. */
+  /** Active owner of the farm; the membership and account rows stay locked until commit. */
   private async manages(
     tx: TransactionSql,
     actorId: string,
@@ -53,7 +53,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
   ): Promise<boolean> {
     if (!uuid.test(farmId) || typeof actorId !== 'string') return false
     const rows =
-      await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${actorId} AND m.role IN ('owner', 'admin') AND m.revoked_at IS NULL AND NOT a.disabled FOR SHARE OF m, a`
+      await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${actorId} AND m.role = 'owner' AND m.revoked_at IS NULL AND NOT a.disabled FOR SHARE OF m, a`
     return rows.length > 0
   }
   private async activeApp(
@@ -137,6 +137,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
     actorId: string,
     credentialId: string,
     now: number,
+    expectedFarmId?: string,
   ): Promise<'ok' | StoreFailure> {
     if (!validTime(now) || !uuid.test(credentialId)) return 'invalid-input'
     return await this.run<'ok' | StoreFailure>(async (tx) => {
@@ -146,6 +147,8 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
       if (!row) return 'not-found'
       const farm =
         await tx`SELECT farm_id FROM farm.integration_apps WHERE id = ${row.app_id as string}::uuid`
+      if (expectedFarmId !== undefined && farm[0]?.farm_id !== expectedFarmId)
+        return 'not-found'
       if (!(await this.manages(tx, actorId, farm[0]?.farm_id as string)))
         return 'not-found'
       if (now < (row.created as number)) return 'invalid-input'
@@ -296,7 +299,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
   async readPrinter(printerId: string): Promise<IntegrationPrinterRow | null> {
     if (!uuid.test(printerId)) return null
     const rows = await this.sql<IntegrationPrinterRow[]>`
-      SELECT a.id, a.farm_id AS "farmId", a.printer_key AS "printerKey",
+      SELECT a.id, a.farm_id AS "farmId", a.agent_id AS "agentId", a.printer_key AS "printerKey",
         f.sandbox, s.state, s.observed_at::float8 AS "observedAt"
       FROM farm.printer_assignments a
       JOIN farm.farms f ON f.id = a.farm_id

@@ -75,8 +75,18 @@ export async function startRtspCamera(input: {
     const mock = await startCameraMock({ rtspPort: input.port })
     input.ledger({ resource: 'rtsp-mock', port: input.port })
     return {
-      env: { SIGNALLING_HTTPS_CAMERA: JSON.stringify({ helperPath, helperSha256, rtspPort: input.port, rtspPath: RTSP_PATH }) },
-      async stop() { await mock.close(); input.ledger({ removed: 'rtsp-mock' }) },
+      env: {
+        SIGNALLING_HTTPS_CAMERA: JSON.stringify({
+          helperPath,
+          helperSha256,
+          rtspPort: input.port,
+          rtspPath: RTSP_PATH,
+        }),
+      },
+      async stop() {
+        await mock.close()
+        input.ledger({ removed: 'rtsp-mock' })
+      },
     }
   }
 

@@ -189,6 +189,10 @@ type Options = {
   onAuthorityConfirm?: (serverSeq: number) => void
   /** Server reread failed: cached authority must go stale immediately. */
   onAuthorityRevoked?: (serverSeq: number) => void
+  onApiCommand?: (
+    frame: Extract<SignallingServerFrame, { t: 'connector.api-command' }>,
+    report: (wire: string) => void,
+  ) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   /** Opt-in camera media per peer; violations close this session. */
@@ -393,6 +397,20 @@ export class AuthenticatedConnectorSignallingClient {
   }
   private async frame(frame: SignallingServerFrame) {
     if (!this.#channel.current()) return
+    if (frame.t === 'connector.api-command') {
+      if (
+        this.#phase === 'open' ||
+        this.#phase === 'inbox-challenge' ||
+        this.#phase === 'inbox-ready'
+      )
+        throw Error('Unexpected API command')
+      runSynchronous(() =>
+        this.#options.onApiCommand?.(frame, (wire) => {
+          this.#channel.send({ v: 1, t: 'connector.api-result', wire })
+        }),
+      )
+      return
+    }
     if (
       frame.t === 'connector.authority-confirm' ||
       frame.t === 'connector.authority-revoked'

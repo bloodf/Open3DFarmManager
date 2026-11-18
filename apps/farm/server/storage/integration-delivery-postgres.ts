@@ -23,7 +23,12 @@ const authorityActive = (sql: Sql) => sql`
     SELECT 1 FROM farm.integration_app_grants g
     JOIN farm.integration_apps a ON a.id = g.app_id
     JOIN farm.printer_assignments p ON p.id = e.printer_assignment_id
-    WHERE g.id = e.grant_id AND g.disabled_at IS NULL AND a.revoked_at IS NULL
+  JOIN farm.farms f ON f.id = e.farm_id
+    WHERE g.id = e.grant_id AND g.app_id = e.app_id AND g.farm_id = e.farm_id
+    AND (g.printer_assignment_id IS NULL OR g.printer_assignment_id = p.id)
+    AND e.required_scope = ANY(g.scopes)
+    AND (NOT a.sandbox OR f.sandbox)
+    AND g.disabled_at IS NULL AND a.revoked_at IS NULL
       AND p.revoked_at IS NULL AND p.farm_id = e.farm_id AND p.agent_id = e.agent_id)`
 
 /** The farm_integration_delivery role is the least-privilege caller. */

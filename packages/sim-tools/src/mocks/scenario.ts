@@ -16,11 +16,7 @@ export interface ScenarioStep<TState = unknown> {
 }
 
 export type ScenarioStatus =
-  | 'idle'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'stopped'
+  'idle' | 'running' | 'paused' | 'completed' | 'stopped'
 
 export class ScenarioController<TState = unknown> {
   private steps: ScenarioStep<TState>[]
@@ -163,14 +159,17 @@ export class ScenarioController<TState = unknown> {
     const step = this.steps[this.stepIndex]!
     const delay = step.delayMs ?? (step.atMs !== undefined ? step.atMs : 10)
 
-    this.activeTimer = setTimeout(() => {
-      this.activeTimer = undefined
-      void (async () => {
-        await this.step()
-        if (this._status === 'running') {
-          this.scheduleNext()
-        }
-      })()
-    }, Math.max(0, delay))
+    this.activeTimer = setTimeout(
+      () => {
+        this.activeTimer = undefined
+        void (async () => {
+          await this.step()
+          if (this._status === 'running') {
+            this.scheduleNext()
+          }
+        })()
+      },
+      Math.max(0, delay),
+    )
   }
 }

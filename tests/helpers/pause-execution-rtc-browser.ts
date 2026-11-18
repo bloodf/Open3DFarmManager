@@ -1,6 +1,6 @@
 import { rejectionWire } from './rtc-farm-rejection-wire.ts'
 import type { RtcRejectionKind } from './rtc-farm-rejections.ts'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import {
   BrowserDeviceProofChallenge,
   signBrowserDeviceProof,

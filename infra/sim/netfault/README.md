@@ -5,7 +5,7 @@ UDP-block. Results and their meaning for the product are in
 [SIMULATOR-NETWORK-FAULTS-CHECKPOINT.md](../../../docs/SIMULATOR-NETWORK-FAULTS-CHECKPOINT.md).
 
 ```sh
-pnpm install --frozen-lockfile --ignore-scripts
+npm ci --ignore-scripts
 infra/sim/netfault/run.sh nat 3 /path/to/evidence
 infra/sim/netfault/run.sh netem 3 /path/to/evidence
 infra/sim/netfault/run.sh udp-block 3 /path/to/evidence
@@ -42,7 +42,7 @@ octets; Docker refuses overlapping pools.
 
 The probes run as UID 1000 with a read-only root, no capabilities and the
 repository mounted read-only. `node-datachannel` is copied (dereferenced) into a
-temporary directory and mounted read-only, because pnpm may keep it in a store
+temporary directory and mounted read-only, because npm may keep it in a store
 outside the checkout. A probe that crashes is recorded as `null`.
 
 Faults are applied with `iptables` and `tc` inside the router:

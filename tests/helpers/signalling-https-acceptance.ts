@@ -112,7 +112,7 @@ export async function testRawUpgradeRejection(input: {
 }
 
 import { createRequire } from 'node:module'
-import type WebSocketType from '../../packages/connector/node_modules/@types/ws'
+import type WebSocketType from 'ws'
 const WebSocket: typeof WebSocketType = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('ws')

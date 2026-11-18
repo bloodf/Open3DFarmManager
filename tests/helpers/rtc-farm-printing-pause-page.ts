@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { expect } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import type { ProvisionedSignallingFixture } from './signalling-https-fixture-contract.ts'
 import { runPrintingPause, PAUSED_UI } from './rtc-farm-printing-pause.ts'
 

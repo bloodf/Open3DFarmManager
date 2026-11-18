@@ -26,26 +26,23 @@ const root = process.argv[2];
 const read = path => readFileSync(`${root}/${path}`, 'utf8');
 const workflow = read('.github/workflows/ci.yml');
 const one = (pattern, text, label) => {
-  const matches = [...text.matchAll(pattern)];
-  if (matches.length !== 1) throw new Error(`Expected one exact ${label} pin`);
-  return matches[0][1];
+  const pins = new Set([...text.matchAll(pattern)].map(match => match[1]));
+  if (pins.size !== 1) throw new Error(`Expected one exact ${label} pin`);
+  return [...pins][0];
 };
-const pnpm = one(/^          version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow pnpm');
 const node = one(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow Node');
-const manager = JSON.parse(read('package.json')).packageManager;
-if (manager !== `pnpm@${pnpm}` || read('.nvmrc').trim() !== node) {
-  throw new Error('Workflow pins disagree with packageManager or .nvmrc');
+if (read('.nvmrc').trim() !== node) {
+  throw new Error('Workflow pins disagree with .nvmrc');
 }
-console.log(pnpm, node);
+console.log(node);
 EOF
 )
-read -r LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE <<< "$pins"
-export LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE
-cat > "$scratch/bin/pnpm" <<'EOF'
+LOCAL_CI_PIN_NODE=$pins
+export LOCAL_CI_PIN_NODE
+cat > "$scratch/bin/npm" <<'EOF'
 #!/usr/bin/env bash
-if [[ ${1:-} == --version ]]; then printf '%s\n' "$LOCAL_CI_PIN_PNPM"; exit 0; fi
 printf '%s\n' "$*" >> "$TMPDIR/calls"
-if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == install ]]; then exit 0; fi
+if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 && ${1:-} == ci ]]; then exit 0; fi
 exit 42
 EOF
 cat > "$scratch/bin/node" <<'EOF'
@@ -92,7 +89,7 @@ fi
 if [[ ( $1 == image || $1 == container ) && ${2:-} == inspect ]]; then exit 1; fi
 exit 0
 EOF
-chmod +x "$scratch/bin/pnpm" "$scratch/bin/node" "$scratch/bin/docker"
+chmod +x "$scratch/bin/npm" "$scratch/bin/node" "$scratch/bin/docker"
 expect_status() {
   local expected=$1 actual
   shift
@@ -126,7 +123,7 @@ for mode in explicit-error explicit-empty explicit-mismatch default-mismatch def
 done
 unset LOCAL_CI_FAKE_BASE
 expect_status 42 code
-[[ $(cat "$scratch/calls") == 'install --frozen-lockfile --ignore-scripts' ]]
+[[ $(cat "$scratch/calls") == 'ci --ignore-scripts' ]]
 if grep -q 'Selected local job(s) passed' "$scratch/output"; then exit 1; fi
 ledger=$(sed -n 's/^Evidence ledger: //p' "$scratch/output")
 [[ $ledger == "$scratch"/open3d-local-ci.* && -f $ledger/disk-before.txt && -f $ledger/disk-after.txt ]]

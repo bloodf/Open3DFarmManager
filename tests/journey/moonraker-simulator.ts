@@ -1,10 +1,7 @@
 import { once } from 'node:events'
 import { createServer, type Server } from 'node:http'
 import { createRequire } from 'node:module'
-import type {
-  WebSocket,
-  WebSocketServer,
-} from '../../packages/connector/node_modules/@types/ws'
+import type { WebSocket, WebSocketServer } from 'ws'
 
 /** What the simulated printer reports; journeys change it with `update`. */
 export type PrinterModel = Readonly<{

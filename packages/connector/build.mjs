@@ -2,12 +2,17 @@
 // esbuild API: ESM output, platform node, code splitting and the same external
 // native boundary. esbuild carries the entry hashbang over to dist/cli.js.
 import { copyFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
 
 const packageDirectory = dirname(fileURLToPath(import.meta.url))
 const outputDirectory = join(packageDirectory, 'dist')
+// Dependencies resolve through npm workspace module resolution from this package.
+const packageRequire = createRequire(join(packageDirectory, 'package.json'))
+const licenseOf = (name) =>
+  join(dirname(packageRequire.resolve(`${name}/package.json`)), 'LICENSE')
 
 // node-datachannel is a native addon and must stay a runtime import.
 const external = ['node-datachannel']
@@ -44,9 +49,9 @@ await esbuild.build({
 const licenseCopies = [
   ['../../LICENSE', 'LICENSE'],
   ['../../THIRD_PARTY.md', 'THIRD_PARTY.md'],
-  ['node_modules/zod/LICENSE', 'ZOD-LICENSE'],
-  ['node_modules/ws/LICENSE', 'WS-LICENSE'],
+  [licenseOf('zod'), 'ZOD-LICENSE'],
+  [licenseOf('ws'), 'WS-LICENSE'],
 ]
 for (const [from, to] of licenseCopies) {
-  copyFileSync(join(packageDirectory, from), join(outputDirectory, to))
+  copyFileSync(resolve(packageDirectory, from), join(outputDirectory, to))
 }

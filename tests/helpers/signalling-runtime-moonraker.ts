@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
@@ -159,12 +159,9 @@ export async function createRuntimeMoonrakerFixture() {
       const ref = input.assignmentRefs[0]!
       if (ref.agentId !== input.claim.agent_id)
         throw Error('Runtime fixture agent')
-      const {
-        WebSocketServer,
-      }: typeof import('../../packages/connector/node_modules/@types/ws') =
-        createRequire(
-          new URL('../../packages/connector/package.json', import.meta.url),
-        )('ws')
+      const { WebSocketServer }: typeof import('ws') = createRequire(
+        new URL('../../packages/connector/package.json', import.meta.url),
+      )('ws')
       const sockets = new WebSocketServer({
         noServer: true,
         maxPayload: 4096,

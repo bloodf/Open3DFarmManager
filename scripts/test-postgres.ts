@@ -1,4 +1,4 @@
-// pnpm run test:postgres: the migration round trip (up/down/up, 0001..latest)
+// npm run test:postgres: the migration round trip (up/down/up, 0001..latest)
 // followed by every scripts/test-postgres-*.ts suite, each on its own
 // disposable PostgreSQL 17 fixture, with a summary that names failing suites.
 // Each fixture uses a label-verified, digest-pinned container; no image is pulled.

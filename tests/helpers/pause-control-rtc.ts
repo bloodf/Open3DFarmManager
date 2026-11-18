@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { browserBundle } from './browser-bundle.ts'
 import { chromium, type Browser, type Page } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { BrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
   ControlSessionBinding,

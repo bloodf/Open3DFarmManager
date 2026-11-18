@@ -2,7 +2,7 @@
 // HTTP and is refused exactly as for a farm that does not exist. The real route
 // files run behind a loopback server on an ephemeral port; the stores are an
 // in-memory model with the membership rules of the PostgreSQL stores. The same
-// scenario runs against PostgreSQL in `pnpm run test:postgres`
+// scenario runs against PostgreSQL in `npm run test:postgres`
 // (scripts/test-postgres-cross-farm-http.ts). No service, port or file is needed.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'

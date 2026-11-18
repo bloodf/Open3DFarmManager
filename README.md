@@ -65,13 +65,13 @@ Testes locais, integração com fixtures e aceitação com simuladores são evid
 
 ## Execute localmente
 
-Você precisa de **Node.js 24.22.3 na série 24.x** e **pnpm 12.18.0**. Os fluxos de CI usam Node 24.22.3. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
+Você precisa de **Node.js 24.22.3 na série 24.x** e **npm (incluído no Node.js)**. Os fluxos de CI usam Node 24.22.3. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
 
 ```sh
 git clone https://github.com/bloodf/Open3DFarmManager.git
 cd Open3DFarmManager
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm run dev
+npm ci --ignore-scripts
+npm run dev
 ```
 
 Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse comando não cria contas, configura banco de dados ou conecta impressoras. Autenticação e integrações começam desabilitadas e exigem configuração própria. A rota `/farm` também depende da feature flag `farmView`.
@@ -82,11 +82,11 @@ Para entender a configuração, comece pelos contratos de [sessão](docs/SESSION
 
 ```sh
 # Formatação, tipos, testes e builds
-pnpm run check:all
+npm run check:all
 
 # Testes de interface sobre o app compilado
-pnpm exec playwright install chromium
-pnpm run test:e2e
+npx playwright install chromium
+npm run test:e2e
 ```
 
 O segundo fluxo requer o build produzido pelo primeiro. Para reproduzir os jobs e seus pré-requisitos, consulte [CI local](docs/LOCAL-CI.md). Para Klipper, veja o [guia do simulador](infra/sim/README.md). Os testes automatizados não devem enviar comandos a impressoras físicas.
@@ -110,7 +110,7 @@ Quer ajudar a construir a próxima etapa? Consulte as [issues](https://github.co
 
 1. Trabalhe em uma branch com uma mudança bem delimitada.
 2. Preserve os limites de segurança descritos em [segurança de comandos](docs/COMMAND-SECURITY.md): Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests.
-3. Execute `pnpm run check:all` e descreva os testes feitos e as integrações ainda pendentes.
+3. Execute `npm run check:all` e descreva os testes feitos e as integrações ainda pendentes.
 4. Abra um draft PR. Não inclua segredos, identificadores de contas privadas ou configuração de hospedagem.
 
 ## Licença

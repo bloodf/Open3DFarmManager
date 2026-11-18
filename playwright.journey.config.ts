@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-// Opt-in journey harness. Not part of check:all; run with `pnpm run test:journey`.
+// Opt-in journey harness. Not part of check:all; run with `npm run test:journey`.
 // The harness starts its own database, farm app, Connector and simulator.
 export default defineConfig({
   testDir: './tests/journey',

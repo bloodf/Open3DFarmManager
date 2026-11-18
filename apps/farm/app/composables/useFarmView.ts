@@ -23,7 +23,7 @@ export function useFarmView() {
     read: (path, signal, query) =>
       $fetch<unknown>(path, {
         signal,
-        query,
+        ...(query === undefined ? {} : { query }),
         retry: 0,
         timeout: 10_000,
         cache: 'no-store',

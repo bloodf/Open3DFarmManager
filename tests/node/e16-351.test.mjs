@@ -173,14 +173,11 @@ test('Fault hooks on HTTP mock: delay, drop, malformed, refuse, stall', async ()
 
     // 6. Stall fault (aborted by client timeout)
     mock.control.faults.setFault({ type: 'stall' })
-    await assert.rejects(
-      async () => {
-        await fetch(`${mock.origin}/test`, {
-          signal: AbortSignal.timeout(50),
-        })
-      },
-      /timeout|abort/i,
-    )
+    await assert.rejects(async () => {
+      await fetch(`${mock.origin}/test`, {
+        signal: AbortSignal.timeout(50),
+      })
+    }, /timeout|abort/i)
 
     mock.control.faults.clearFaults()
     const resNormalAgain = await fetch(`${mock.origin}/test`)
@@ -275,33 +272,50 @@ test('Network guard enforces loopback-only sockets across all mocks', async () =
   try {
     // 1. All mocks start and pass guard because they bind to 127.0.0.1
     const httpMock = await startMock('http')
-    assertLoopbackAddress(httpMock.ports.default ? { address: '127.0.0.1', port: httpMock.ports.default, family: 'IPv4' } : null)
+    assertLoopbackAddress(
+      httpMock.ports.default
+        ? { address: '127.0.0.1', port: httpMock.ports.default, family: 'IPv4' }
+        : null,
+    )
     await httpMock.close()
 
     const mqttMock = await startMock('mqtt', { reuseSharedTls: true })
-    assertLoopbackAddress({ address: '127.0.0.1', port: mqttMock.ports.default, family: 'IPv4' })
+    assertLoopbackAddress({
+      address: '127.0.0.1',
+      port: mqttMock.ports.default,
+      family: 'IPv4',
+    })
     await mqttMock.close()
 
     const bambuMock = await startMock('bambu', { reuseSharedTls: true })
-    assertLoopbackAddress({ address: '127.0.0.1', port: bambuMock.ports.default, family: 'IPv4' })
+    assertLoopbackAddress({
+      address: '127.0.0.1',
+      port: bambuMock.ports.default,
+      family: 'IPv4',
+    })
     await bambuMock.close()
 
     const kobraMock = await startMock('kobra-x', { reuseSharedTls: true })
-    assertLoopbackAddress({ address: '127.0.0.1', port: kobraMock.ports.default, family: 'IPv4' })
+    assertLoopbackAddress({
+      address: '127.0.0.1',
+      port: kobraMock.ports.default,
+      family: 'IPv4',
+    })
     await kobraMock.close()
 
     const moonrakerMock = await startMock('moonraker')
-    assertLoopbackAddress({ address: '127.0.0.1', port: moonrakerMock.ports.default, family: 'IPv4' })
+    assertLoopbackAddress({
+      address: '127.0.0.1',
+      port: moonrakerMock.ports.default,
+      family: 'IPv4',
+    })
     await moonrakerMock.close()
 
     // 2. Guard rejects non-loopback bind attempts
     const badServer = net.createServer()
-    assert.throws(
-      () => {
-        badServer.listen(0, '0.0.0.0')
-      },
-      /Network guard violation/i,
-    )
+    assert.throws(() => {
+      badServer.listen(0, '0.0.0.0')
+    }, /Network guard violation/i)
   } finally {
     uninstallNetworkGuard()
   }

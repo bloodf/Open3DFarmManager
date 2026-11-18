@@ -15,6 +15,7 @@ import {
   authorizeIntegrationRequest,
   integrationBase,
   integrationGrantFor,
+  integrationPath,
   integrationPolicy,
   integrationTokenRequest,
 } from '../../apps/farm/server/utils/integration-auth-http.ts'
@@ -309,6 +310,92 @@ test('action scopes are selected from the body and cannot cross grant boundaries
   assert.ok(!((await action(printerC, 'home', all)) instanceof Response))
 })
 
+test('the token lifetime and the signing key are configuration', async () => {
+  const key = Buffer.alloc(32, 7).toString('base64url')
+  assert.deepEqual(
+    parseIntegrationTokenConfig({ signingKey: key, tokenTtlSeconds: 45 }),
+    { key: Buffer.alloc(32, 7), ttl: 45 },
+  )
+  assert.equal(
+    parseIntegrationTokenConfig({ signingKey: key, tokenTtlSeconds: '45' }).ttl,
+    45,
+  )
+  for (const invalid of [
+    { signingKey: '', tokenTtlSeconds: 45 },
+    {
+      signingKey: Buffer.alloc(31, 7).toString('base64url'),
+      tokenTtlSeconds: 45,
+    },
+    { signingKey: key, tokenTtlSeconds: 0 },
+    { signingKey: key, tokenTtlSeconds: 3601 },
+    { signingKey: key, tokenTtlSeconds: 1.5 },
+    { signingKey: key, tokenTtlSeconds: 'soon' },
+  ])
+    assert.throws(() => parseIntegrationTokenConfig(invalid))
+  const farm = fixture(45)
+  const response = await farm.exchange(credentials)
+  assert.equal(response.status, 200)
+  assert.equal(
+    ((await response.json()) as { expires_in: number }).expires_in,
+    45,
+    'the lifetime is the configured one',
+  )
+})
+
+test('the published spec and the token endpoint stay outside the token check', () => {
+  const url = (path: string) =>
+    new URL('http://localhost' + integrationBase + path)
+  assert.equal(integrationPath(url('/openapi.json')), '/openapi.json')
+  assert.equal(integrationPath(url('/oauth/token')), '/oauth/token')
+  assert.equal(integrationPath(url('/printers')), '/printers')
+  assert.equal(integrationPath(url('/printers/')), '/printers')
+  assert.equal(
+    integrationPath(new URL('http://localhost/api/auth/login')),
+    null,
+  )
+  assert.equal(
+    integrationPath(new URL('http://localhost/api/integrations')),
+    null,
+  )
+})
+
+test('a path called with another method answers 405 with the allowed methods', async () => {
+  const farm = fixture()
+  const token = await issue(farm)
+  const wrongMethod = await problem(
+    await farm.request('/printers/' + printerA + '/jobs', token, {
+      method: 'GET',
+    }),
+    405,
+    'method-not-allowed',
+  )
+  assert.equal(wrongMethod.headers.get('allow'), 'POST')
+  await problem(await farm.request('/not-a-route', token), 404, 'not-found')
+})
+
+test('an action needs a JSON body that names the action', async () => {
+  const farm = fixture()
+  const token = await issue(farm)
+  const action = (body: string, contentType: string) =>
+    farm.request('/printers/' + printerA + '/actions', token, {
+      method: 'POST',
+      headers: { 'content-type': contentType },
+      body,
+    })
+  await problem(
+    await action('pause', 'text/plain'),
+    415,
+    'unsupported-media-type',
+  )
+  await problem(await action('{}', 'application/json'), 400, 'invalid-request')
+  const allowed = await action(
+    JSON.stringify({ action: 'pause' }),
+    'application/json',
+  )
+  assert.ok(!(allowed instanceof Response))
+  assert.deepEqual(allowed.principal.scopes, ['control:basic'])
+})
+
 test('credentials, tokens and error causes are absent from logs and failure responses', async (t) => {
   const output: string[] = []
   for (const stream of [process.stdout, process.stderr])
@@ -318,6 +405,9 @@ test('credentials, tokens and error causes are absent from logs and failure resp
     })
   const farm = fixture()
   const token = await issue(farm)
+  const allowed = await farm.request('/printers', token)
+  assert.ok(!(allowed instanceof Response))
+  assert.ok(!output.join('').includes(token), 'a token is never logged')
   farm.fail([secret, basic, token].join(' '))
   const exchange = await farm.exchange(credentials)
   const response = await farm.request('/printers', token)

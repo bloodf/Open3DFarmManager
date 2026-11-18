@@ -22,6 +22,7 @@ import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
 import LastKnownStates from '../components/farm/LastKnownStates.vue'
+import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
 import FarmExtendedControls from '../components/FarmExtendedControls.vue'
@@ -562,6 +563,7 @@ function dateLabel(time: number) {
         </div>
       </section>
       <template v-if="ready.scope">
+        <ApprovalPanel :farm-id="ready.scope.farmId" />
         <section aria-label="Conexão e dispositivo do navegador">
           <p role="status">{{ connectionNotice }}</p>
           <p v-if="ready.keys.kind !== 'available'">

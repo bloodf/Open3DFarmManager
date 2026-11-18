@@ -6,6 +6,7 @@ import {
 } from '../services/integration-delivery.ts'
 import { IntegrationAuditService } from '../services/integration-audit.ts'
 import { IntegrationActionsService } from '../services/integration-actions.ts'
+import { IntegrationApprovalService } from '../services/integration-approval.ts'
 import {
   DEFAULT_JOB_ENVELOPE_TTL_MS,
   DEFAULT_MAX_JOB_BYTES,
@@ -15,6 +16,7 @@ import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.
 import { PostgresIntegrationDelivery } from '../storage/integration-delivery-postgres.ts'
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
 import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
+import { PostgresIntegrationApprovals } from '../storage/integration-approval-postgres.ts'
 
 /** Until the Connector inbox registers itself, envelopes stay queued for `deliverPending`. */
 const noInbox: EnvelopeInbox = { sendToAgentInbox: () => 'no-inbox' }
@@ -30,6 +32,7 @@ let active:
       pool: ReturnType<typeof postgres>
       service: IntegrationJobsService
       actions: IntegrationActionsService
+      approvals: IntegrationApprovalService
       delivery: IntegrationDeliveryService | undefined
     }
   | undefined
@@ -76,7 +79,7 @@ export async function integrationJobsRuntime() {
           signingKey: await importSigningKey(config.envelopeSigningKey),
         }
       : undefined
-  // The login is a member of farm_integration_jobs and farm_integration_delivery.
+  // The login is a member of farm_integration_jobs, farm_integration_approvals and farm_integration_delivery.
   const pool = postgres(url.toString(), {
     max: 3,
     connect_timeout: 3,
@@ -126,7 +129,20 @@ export async function integrationJobsRuntime() {
       : {}),
     ttlMs: positive(config.envelopeTtlMs, DEFAULT_JOB_ENVELOPE_TTL_MS),
   })
-  active = { pool, service, actions, delivery }
+  const approvals = new IntegrationApprovalService({
+    store: new PostgresIntegrationApprovals(pool),
+    ...(delivery
+      ? {
+          envelopes: {
+            issue: (input) => delivery.issue(input),
+            deliver: (cmdId) => delivery.deliver(cmdId),
+            get: (cmdId) => deliveryStore.get(cmdId),
+          },
+        }
+      : {}),
+    envelopeTtlMs: positive(config.envelopeTtlMs, DEFAULT_JOB_ENVELOPE_TTL_MS),
+  })
+  active = { pool, service, actions, approvals, delivery }
   return active
 }
 

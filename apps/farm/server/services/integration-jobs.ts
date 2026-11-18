@@ -25,7 +25,9 @@ export const DEFAULT_JOB_ENVELOPE_TTL_MS = 300_000
 const MAX_JOB_FIELDS_BYTES = 3000
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/
 
-export type StoredJobStatus = 'held' | 'submitted' | 'rejected'
+/** A held item no operator decided within this window expires and is never delivered. */
+export const HELD_TTL_MS = 86_400_000
+export type StoredJobStatus = 'held' | 'submitted' | 'rejected' | 'expired'
 /** `queued` is a submitted job whose envelope the Connector has not yet confirmed. */
 export type JobStatus =
   | 'held'
@@ -121,7 +123,9 @@ const PENDING_DELIVERY: readonly EnvelopeStatus[] = [
 export function jobStatusOf(
   stored: StoredJobStatus,
   envelope: EnvelopeRecord | null,
+  heldExpired = false,
 ): JobStatus {
+  if (stored === 'held' && heldExpired) return 'expired'
   if (stored !== 'submitted') return stored
   if (!envelope || PENDING_DELIVERY.includes(envelope.status)) return 'queued'
   // A rejected envelope lost its authority before delivery: the job never ran.
@@ -133,12 +137,17 @@ export function jobStatusOf(
 export function jobView(
   record: JobRecord,
   envelope: EnvelopeRecord | null,
+  now?: number,
 ): JobView {
   const view: JobView = {
     id: record.id,
     farmId: record.farmId,
     printerId: record.printerAssignmentId,
-    status: jobStatusOf(record.status, envelope),
+    status: jobStatusOf(
+      record.status,
+      envelope,
+      now !== undefined && now >= record.createdAt + HELD_TTL_MS,
+    ),
     displayName: record.displayName,
     fileUrl: record.fileUrl,
     sha256: record.sha256,

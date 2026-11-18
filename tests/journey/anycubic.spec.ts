@@ -462,6 +462,10 @@ function suite(title: string) {
         await expect(
           assignments.getByText('Aprovado', { exact: true }),
         ).toBeVisible()
+        // The Anycubic (LAN) setup family is offered by the product.
+        await expect(
+          page.locator('#onboarding-family option[value="anycubic-lan"]'),
+        ).toHaveText('Anycubic (LAN)')
       })
     })
 

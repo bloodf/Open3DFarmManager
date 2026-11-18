@@ -5,6 +5,7 @@ import {
   type EnvelopeInbox,
 } from '../services/integration-delivery.ts'
 import { IntegrationAuditService } from '../services/integration-audit.ts'
+import { IntegrationActionsService } from '../services/integration-actions.ts'
 import {
   DEFAULT_JOB_ENVELOPE_TTL_MS,
   DEFAULT_MAX_JOB_BYTES,
@@ -13,6 +14,7 @@ import {
 import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
 import { PostgresIntegrationDelivery } from '../storage/integration-delivery-postgres.ts'
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
+import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
 
 /** Until the Connector inbox registers itself, envelopes stay queued for `deliverPending`. */
 const noInbox: EnvelopeInbox = { sendToAgentInbox: () => 'no-inbox' }
@@ -27,6 +29,7 @@ let active:
   | {
       pool: ReturnType<typeof postgres>
       service: IntegrationJobsService
+      actions: IntegrationActionsService
       delivery: IntegrationDeliveryService | undefined
     }
   | undefined
@@ -110,7 +113,20 @@ export async function integrationJobsRuntime() {
     maxFileBytes: positive(config.maxFileBytes, DEFAULT_MAX_JOB_BYTES),
     envelopeTtlMs: positive(config.envelopeTtlMs, DEFAULT_JOB_ENVELOPE_TTL_MS),
   })
-  active = { pool, service, delivery }
+  const actions = new IntegrationActionsService({
+    store: new PostgresIntegrationActions(pool),
+    ...(delivery
+      ? {
+          envelopes: {
+            issue: (input) => delivery.issue(input),
+            deliver: (cmdId) => delivery.deliver(cmdId),
+            get: (cmdId) => deliveryStore.get(cmdId),
+          },
+        }
+      : {}),
+    ttlMs: positive(config.envelopeTtlMs, DEFAULT_JOB_ENVELOPE_TTL_MS),
+  })
+  active = { pool, service, actions, delivery }
   return active
 }
 

@@ -1,3 +1,11 @@
+import {
+  API_QUERY_SUPPORT_HEADER,
+  MAX_API_QUERY_ITEMS,
+  MAX_API_QUERY_RESULT_BYTES,
+  ApiQueryResult,
+  type ApiQueryReply,
+  type ApiQueryRequest,
+} from '../../../../packages/farm-protocol/src/api-query.ts'
 import type {
   EnvelopeInbox,
   IntegrationDeliveryService,
@@ -135,6 +143,7 @@ interface Connection {
   readonly resource: SignallingResourceHandle
   readonly start: SignallingClockSample
   lastSample: SignallingClockSample
+  readonly supportsApiQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
   state: State
@@ -199,6 +208,16 @@ export class SignallingRuntime {
   /** Strictly increasing confirmation sequence, anchored to database time. */
   #authoritySeq = 0
   readonly #inboxes = new Map<string, Connection>()
+  readonly #apiQueries = new Map<
+    string,
+    {
+      connection: Connection
+      query: ApiQueryRequest
+      finish(
+        result: ApiQueryResult | { kind: 'error'; error: 'connector-timeout' },
+      ): void
+    }
+  >()
   #closed = false
   #apiDelivery?: Pick<
     IntegrationDeliveryService,
@@ -260,6 +279,86 @@ export class SignallingRuntime {
     })
     return 'sent'
   }
+  async queryAgentInbox(
+    farmId: string,
+    agentId: string,
+    input: Pick<ApiQueryRequest, 'assignment_id' | 'kind' | 'offset' | 'limit'>,
+    signal?: AbortSignal,
+  ): Promise<ApiQueryResult | { kind: 'error'; error: 'connector-timeout' }> {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    const unavailable = {
+      kind: 'error',
+      error: 'connector-unavailable',
+    } as const
+    if (
+      !connection?.supportsApiQueries ||
+      this.#apiIdentity(connection)?.farm_id !== farmId ||
+      signal?.aborted ||
+      this.#apiQueries.size >= 32 ||
+      [...this.#apiQueries.values()].filter(
+        (pending) => pending.connection === connection,
+      ).length >= 4
+    )
+      return unavailable
+
+    const requestId = randomUUID()
+    const query = {
+      v: 1,
+      t: 'connector.api-query',
+      request_id: requestId,
+      ...input,
+    } as const
+    return new Promise((resolve) => {
+      const cancel = () => finish(unavailable)
+      const timeout = setTimeout(
+        () => finish({ kind: 'error', error: 'connector-timeout' }),
+        10_000,
+      )
+      const finish = (
+        result: ApiQueryResult | { kind: 'error'; error: 'connector-timeout' },
+      ) => {
+        if (!this.#apiQueries.delete(requestId)) return
+        clearTimeout(timeout)
+        connection.abort.signal.removeEventListener('abort', cancel)
+        signal?.removeEventListener('abort', cancel)
+        resolve(result)
+      }
+      this.#apiQueries.set(requestId, { connection, query, finish })
+      connection.abort.signal.addEventListener('abort', cancel, { once: true })
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        this.#send(connection, query)
+      } catch {
+        cancel()
+      }
+    })
+  }
+
+  #receiveApiQuery(connection: Connection, reply: ApiQueryReply) {
+    if (!this.#apiIdentity(connection)) throw Error('API query result denied')
+    const pending = this.#apiQueries.get(reply.request_id)
+    if (!pending || pending.connection !== connection) return
+    try {
+      if (Buffer.byteLength(reply.wire) > MAX_API_QUERY_RESULT_BYTES)
+        throw Error('Oversized API query result')
+      const result = ApiQueryResult.parse(JSON.parse(reply.wire))
+      const { kind, limit, offset } = pending.query
+      if (
+        result.kind !== 'error' &&
+        (result.kind !== kind ||
+          result.data.length > limit ||
+          offset + result.data.length > MAX_API_QUERY_ITEMS ||
+          (result.nextOffset !== null &&
+            (!result.data.length ||
+              result.nextOffset !== offset + result.data.length)))
+      )
+        throw Error('Mismatched API query result')
+      pending.finish(result)
+    } catch {
+      pending.finish({ kind: 'error', error: 'connector-unavailable' })
+    }
+  }
+
   readonly #pauseConfig: PauseConfiguration | undefined
   #pauseOwner: PauseOwner | undefined
   constructor(input: {
@@ -334,6 +433,11 @@ export class SignallingRuntime {
         resource,
         start,
         lastSample: start,
+        // Older Connectors reject unfamiliar frames. This hint carries no authority.
+        supportsApiQueries:
+          role === 'connector' &&
+          mode === 'read-only' &&
+          inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
         inboxId: randomUUID(),
         inboxGeneration: 0,
         state:
@@ -592,6 +696,9 @@ export class SignallingRuntime {
     // The switch is explicit: an authenticated machine cannot act as a browser.
     const control = frame
     switch (control.t) {
+      case 'connector.api-query-result':
+        this.#receiveApiQuery(connection, control)
+        return
       case 'connector.api-result': {
         const identity = this.#apiIdentity(connection)
         if (!identity || !this.#apiDelivery) throw Error('API result denied')

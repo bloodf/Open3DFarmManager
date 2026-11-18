@@ -299,7 +299,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
   async readPrinter(printerId: string): Promise<IntegrationPrinterRow | null> {
     if (!uuid.test(printerId)) return null
     const rows = await this.sql<IntegrationPrinterRow[]>`
-      SELECT a.id, a.farm_id AS "farmId", a.printer_key AS "printerKey",
+      SELECT a.id, a.farm_id AS "farmId", a.agent_id AS "agentId", a.printer_key AS "printerKey",
         f.sandbox, s.state, s.observed_at::float8 AS "observedAt"
       FROM farm.printer_assignments a
       JOIN farm.farms f ON f.id = a.farm_id

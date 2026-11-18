@@ -36,6 +36,7 @@ import {
   type VendorName,
   type VendorSimulator,
 } from './harness-vendors.ts'
+import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
 export type {
   VendorControls,
@@ -94,6 +95,8 @@ export type JourneyOptions = Readonly<{
     agentId: string
     printerKey: string
     vendor: VendorSimulator | undefined
+    configurator:
+      Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
   }): Promise<void>
 }>
 
@@ -222,6 +225,22 @@ function machinePoster(origin: string, ca: Buffer) {
 /** Removes every resource a failed start already created. */
 type Undo = () => Promise<void>
 
+function journeyPrinterHost() {
+  const route = execFileSync('ip', ['route', 'get', '1.1.1.1'], {
+    encoding: 'utf8',
+  })
+  const host = /\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(route)?.[1]
+  if (!host) throw new Error('No private route address for the Bambu simulator')
+  const [first, second] = host.split('.').map(Number)
+  const privateAddress =
+    first === 10 ||
+    (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  if (!privateAddress)
+    throw new Error('The Bambu simulator needs a private route address')
+  return host
+}
+
 export async function startJourneyHarness(
   options: JourneyOptions,
 ): Promise<JourneyHarness> {
@@ -231,6 +250,8 @@ export async function startJourneyHarness(
   if (!Object.hasOwn(SIMULATORS, simulator))
     throw new Error(`Unknown simulator "${simulator}"`)
   const printerKey = options.printerKey ?? `journey-${simulator}`
+  const bambuHost =
+    simulator === 'bambu' && options.setup ? journeyPrinterHost() : undefined
   const runId = randomUUID().slice(0, 8)
   const undo: Undo[] = []
   let appOutput: (() => string) | undefined
@@ -311,6 +332,7 @@ export async function startJourneyHarness(
       vendor = await startVendorSimulator(simulator as VendorName, {
         printerKey,
         ...(options.control === undefined ? {} : { control: options.control }),
+        ...(bambuHost ? { host: bambuHost } : {}),
       })
       const started = vendor
       undo.push(() => started.close())
@@ -456,6 +478,44 @@ export async function startJourneyHarness(
     if (claim.status !== 'approved' || claim.farm_id !== database.farmId)
       throw new Error('Connector pairing did not complete')
 
+    let configurator: Configurator | undefined
+    if (options.discovery || (options.setup && simulator === 'bambu')) {
+      let probes: {
+        creality?: number
+        anycubic?: number
+        bambuPort?: number
+      } = {}
+      if (options.discovery) {
+        const port = vendor?.discovery?.port
+        if (
+          port === undefined ||
+          (simulator !== 'creality' && simulator !== 'anycubic')
+        )
+          throw new Error(
+            'Page discovery needs the Creality or Anycubic simulator',
+          )
+        probes =
+          simulator === 'creality' ? { creality: port } : { anycubic: port }
+      } else if (simulator === 'bambu') {
+        const bambu = vendor?.raw as
+          Awaited<ReturnType<typeof startBambuSimulator>> | undefined
+        if (!bambu) throw new Error('Bambu simulator missing')
+        probes = { bambuPort: bambu.port }
+      }
+      configurator = await startConfigurator({
+        origin,
+        audience: AUDIENCE,
+        farmId: database.farmId,
+        certificatePath: app.certificatePath,
+        ownerPage,
+        machinePost,
+        probes,
+        ...(bambuHost ? { printerNetworks: [`${bambuHost}/32`] } : {}),
+      })
+      const started = configurator
+      undo.push(() => started.close())
+    }
+
     // Assign the printer, then read the assignment back.
     const path = `/api/farms/${database.farmId}/printers`
     let assignmentId: string
@@ -467,6 +527,7 @@ export async function startJourneyHarness(
         agentId: claim.agent_id,
         printerKey,
         vendor,
+        configurator,
       })
       const listed = (await ownerPage.evaluate(async (url) => {
         const response = await fetch(url, { cache: 'no-store' })
@@ -516,29 +577,6 @@ export async function startJourneyHarness(
         : {}),
     })
 
-    let configurator: Configurator | undefined
-    if (options.discovery) {
-      const port = vendor?.discovery?.port
-      if (
-        port === undefined ||
-        (simulator !== 'creality' && simulator !== 'anycubic')
-      )
-        throw new Error(
-          'Page discovery needs the Creality or Anycubic simulator',
-        )
-      configurator = await startConfigurator({
-        origin,
-        audience: AUDIENCE,
-        farmId: database.farmId,
-        certificatePath: app.certificatePath,
-        ownerPage,
-        machinePost,
-        probes:
-          simulator === 'creality' ? { creality: port } : { anycubic: port },
-      })
-      const started = configurator
-      undo.push(() => started.close())
-    }
     const openFarm = async (page: Page = ownerPage) => {
       const response = await page.goto(origin + '/farm', {
         waitUntil: 'domcontentloaded',

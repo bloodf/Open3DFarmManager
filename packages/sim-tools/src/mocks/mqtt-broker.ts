@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: MIT
-import { createServer as createTlsServer, type Server as TlsServer, type TLSSocket } from 'node:tls'
+import {
+  createServer as createTlsServer,
+  type Server as TlsServer,
+  type TLSSocket,
+} from 'node:tls'
 import { once } from 'node:events'
 import { FaultController, type FaultFilterContext } from './faults.ts'
 import { ScenarioController, type ScenarioStep } from './scenario.ts'
-import { generateThrowawayTls, getSharedThrowawayTls, type ThrowawayTlsMaterial } from './tls.ts'
+import {
+  generateThrowawayTls,
+  getSharedThrowawayTls,
+  type ThrowawayTlsMaterial,
+} from './tls.ts'
 
 const MAX_PACKET = 65536
 
@@ -28,7 +36,12 @@ export interface MqttMessage {
 }
 
 export interface MqttBrokerOptions {
-  tls?: ({ key: Buffer; cert: Buffer; ca?: Buffer | undefined } | ThrowawayTlsMaterial) | undefined
+  tls?:
+    | (
+        | { key: Buffer; cert: Buffer; ca?: Buffer | undefined }
+        | ThrowawayTlsMaterial
+      )
+    | undefined
   reuseSharedTls?: boolean | undefined
   scenario?: ScenarioStep[] | undefined
   auth?: { username: string; password?: string | undefined } | undefined
@@ -88,10 +101,16 @@ export async function startMqttBroker(
     callCounts[key] = (callCounts[key] ?? 0) + 1
   }
 
-  function publishToSubscribers(topic: string, payload: unknown, qos: 0 | 1 = 0) {
+  function publishToSubscribers(
+    topic: string,
+    payload: unknown,
+    qos: 0 | 1 = 0,
+  ) {
     const buffer = Buffer.isBuffer(payload)
       ? payload
-      : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload))
+      : Buffer.from(
+          typeof payload === 'string' ? payload : JSON.stringify(payload),
+        )
     const topicBuf = Buffer.from(topic)
     const lenBuf = Buffer.alloc(2)
     lenBuf.writeUInt16BE(topicBuf.length)
@@ -111,7 +130,10 @@ export async function startMqttBroker(
     const pkt = encodePacket(header, body)
 
     for (const [sock, topics] of subscriptions.entries()) {
-      if (sock.writable && (topics.has(topic) || topics.has('#') || topics.has('+'))) {
+      if (
+        sock.writable &&
+        (topics.has(topic) || topics.has('#') || topics.has('+'))
+      ) {
         sock.write(pkt)
       }
     }
@@ -164,7 +186,8 @@ export async function startMqttBroker(
               if (offset >= buffer.length) return
               const digit = buffer[offset++]!
               size += (digit & 127) * factor
-              if (size > MAX_PACKET || offset > 5) throw new Error('Packet limit')
+              if (size > MAX_PACKET || offset > 5)
+                throw new Error('Packet limit')
               if (!(digit & 128)) break
               factor *= 128
             }
@@ -180,7 +203,10 @@ export async function startMqttBroker(
             // 1. CONNECT (packet type 1 = 0x10)
             if (!connected && packetType === 1) {
               recordCall('CONNECT')
-              const fault = faults.matchFault({ packetType: 1, method: 'CONNECT' })
+              const fault = faults.matchFault({
+                packetType: 1,
+                method: 'CONNECT',
+              })
               if (fault) {
                 if (fault.type === 'drop') {
                   socket.destroy()
@@ -236,14 +262,20 @@ export async function startMqttBroker(
               while (cur < body.length) {
                 const topicLen = body.readUInt16BE(cur)
                 cur += 2
-                const topic = body.subarray(cur, cur + topicLen).toString('utf8')
+                const topic = body
+                  .subarray(cur, cur + topicLen)
+                  .toString('utf8')
                 cur += topicLen
                 const qos = body[cur++] ?? 0
 
                 subscriptions.get(socket)?.add(topic)
                 recordCall(`SUBSCRIBE:${topic}`)
 
-                const fault = faults.matchFault({ topic, packetType: 8, method: 'SUBSCRIBE' })
+                const fault = faults.matchFault({
+                  topic,
+                  packetType: 8,
+                  method: 'SUBSCRIBE',
+                })
                 if (fault) {
                   if (fault.type === 'drop') {
                     socket.destroy()
@@ -271,7 +303,12 @@ export async function startMqttBroker(
 
               socket.write(
                 Buffer.concat([
-                  Buffer.from([0x90, 2 + granted.length, packetIdMsb, packetIdLsb]),
+                  Buffer.from([
+                    0x90,
+                    2 + granted.length,
+                    packetIdMsb,
+                    packetIdLsb,
+                  ]),
                   Buffer.from(granted),
                 ]),
               )
@@ -303,7 +340,11 @@ export async function startMqttBroker(
               recordCall('PUBLISH')
               recordCall(`PUBLISH:${topic}`)
 
-              const fault = faults.matchFault({ topic, packetType: 3, method: 'PUBLISH' })
+              const fault = faults.matchFault({
+                topic,
+                packetType: 3,
+                method: 'PUBLISH',
+              })
               if (fault) {
                 if (fault.type === 'drop') {
                   socket.destroy()

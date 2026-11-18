@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
+import {
+  createServer,
+  type Server,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http'
 import { createHash } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import { FaultController } from './faults.ts'
 import { ScenarioController, type ScenarioStep } from './scenario.ts'
 
 export type MoonrakerState =
-  | 'standby'
-  | 'printing'
-  | 'paused'
-  | 'complete'
-  | 'cancelled'
-  | 'error'
+  'standby' | 'printing' | 'paused' | 'complete' | 'cancelled' | 'error'
 
 export interface MoonrakerModel {
   state: MoonrakerState
@@ -283,7 +283,11 @@ export async function startMoonrakerMock(
             const req = JSON.parse(raw)
             if (req.method) {
               recordCall(req.method)
-              rpcCalls.push({ method: req.method, params: req.params, timestamp: Date.now() })
+              rpcCalls.push({
+                method: req.method,
+                params: req.params,
+                timestamp: Date.now(),
+              })
 
               if (req.method === 'server.info') {
                 sendWs(
@@ -301,7 +305,10 @@ export async function startMoonrakerMock(
                     result: { objects: OBJECTS },
                   }),
                 )
-              } else if (req.method === 'printer.objects.query' || req.method === 'printer.objects.subscribe') {
+              } else if (
+                req.method === 'printer.objects.query' ||
+                req.method === 'printer.objects.subscribe'
+              ) {
                 sendWs(
                   JSON.stringify({
                     jsonrpc: '2.0',

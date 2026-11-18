@@ -29,11 +29,7 @@ export interface StallFault {
 }
 
 export type FaultHook =
-  | DelayFault
-  | DropFault
-  | RefuseFault
-  | MalformedFault
-  | StallFault
+  DelayFault | DropFault | RefuseFault | MalformedFault | StallFault
 
 export interface FaultFilterContext {
   path?: string | undefined

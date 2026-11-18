@@ -70,6 +70,7 @@ const principalOf = (
 
 class MemoryJobs implements IntegrationJobsStore {
   jobs: JobRecord[] = []
+  envelopes?: MemoryEnvelopes
   audit: { jobId: string; outcome: string }[] = []
   envelopeOf = new Map<string, string>()
   targets = new Map<string, JobTarget>([
@@ -77,6 +78,15 @@ class MemoryJobs implements IntegrationJobsStore {
   ])
   async target(id: string) {
     return this.targets.get(id) ?? null
+  }
+  async get(id: string, appId: string) {
+    const record = this.jobs.find((job) => job.id === id && job.appId === appId)
+    if (!record) return null
+    const cmdId = this.envelopeOf.get(record.id)
+    return {
+      record,
+      envelope: cmdId ? ((await this.envelopes?.get(cmdId)) ?? null) : null,
+    }
   }
   async create(job: NewJob, now: number): Promise<CreateJobOutcome> {
     const found = this.jobs.find(
@@ -174,6 +184,7 @@ async function fixture(
 ) {
   const jobs = new MemoryJobs()
   const envelopes = new MemoryEnvelopes()
+  jobs.envelopes = envelopes
   const sent: string[] = []
   const inbox: EnvelopeInbox & { live: boolean } = {
     live: true,
@@ -617,10 +628,27 @@ test('the Connector outcome shows through the job status', async () => {
     return f.delivery.recordResult(farm, agent, wire)
   }
   assert.equal(
-    await report('refused', { refusal_code: 'printer-busy', detail: 'busy' }),
+    await report('refused', {
+      refusal_code: 'printer-busy',
+      detail: 'busy',
+    }),
     'recorded',
   )
   f.jobs.envelopeOf.set(result.job.id, row!.cmdId)
+  const outcome = await f.service.get(principalOf([grant()]), result.job.id)
+  assert.equal('error' in outcome ? outcome.error : outcome.status, 'refused')
+  if (!('error' in outcome)) {
+    assert.deepEqual(outcome.refusal, { code: 'printer-busy', detail: 'busy' })
+  }
+  assert.equal(await report('started'), 'ignored')
+  const stillRefused = await f.service.get(
+    principalOf([grant()]),
+    result.job.id,
+  )
+  assert.equal(
+    'error' in stillRefused ? stillRefused.error : stillRefused.status,
+    'refused',
+  )
   const replay = await f.service.submit(
     principalOf([grant()]),
     printer,

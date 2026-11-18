@@ -103,6 +103,7 @@ class World {
   jobsStore: IntegrationJobsStore = {
     target: async (id) =>
       id === printer ? { farmId: farm, agentId: agent } : null,
+    get: async () => null,
     create: async (job: NewJob, now): Promise<CreateJobOutcome> => {
       const found = this.jobs.find(
         (j) => j.appId === job.appId && j.idempotencyKey === job.idempotencyKey,

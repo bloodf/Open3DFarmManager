@@ -6,6 +6,7 @@ import type {
   JobTarget,
   NewJob,
 } from '../services/integration-jobs.ts'
+import type { EnvelopeRecord } from '../services/integration-delivery.ts'
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const validTime = (value: number) => Number.isSafeInteger(value) && value >= 0
@@ -14,12 +15,28 @@ const columns = (sql: Sql) =>
   sql`j.id::text AS "id", j.app_id::text AS "appId", j.grant_id::text AS "grantId", j.farm_id::text AS "farmId", j.printer_assignment_id::text AS "printerAssignmentId", j.idempotency_key AS "idempotencyKey", j.request_hash AS "requestHash", j.file_url AS "fileUrl", j.sha256, j.size_bytes::float8 AS "sizeBytes", j.display_name AS "displayName", j.status, j.created_at::float8 AS "createdAt", j.updated_at::float8 AS "updatedAt"`
 const returning = (sql: Sql) =>
   sql`id::text AS "id", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", printer_assignment_id::text AS "printerAssignmentId", idempotency_key AS "idempotencyKey", request_hash AS "requestHash", file_url AS "fileUrl", sha256, size_bytes::float8 AS "sizeBytes", display_name AS "displayName", status, created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
+const envelopeColumns = (sql: Sql) =>
+  sql`e.cmd_id::text AS "cmdId", e.app_id::text AS "appId", e.grant_id::text AS "grantId", e.farm_id::text AS "farmId", e.agent_id::text AS "agentId", e.printer_assignment_id::text AS "printerAssignmentId", e.kind, e.resource_id::text AS "resourceId", e.required_scope AS "requiredScope", e.nonce, e.wire, e.issued_at::float8 AS "issuedAt", e.expires_at::float8 AS "expiresAt", e.status, e.refusal_code AS "refusalCode", e.result_detail AS "resultDetail", e.history_entry_id AS "historyEntryId", e.created_at::float8 AS "createdAt", e.updated_at::float8 AS "updatedAt"`
 
 /** The farm_integration_jobs role is the least-privilege caller. */
 export class PostgresIntegrationJobs implements IntegrationJobsStore {
   private readonly sql: Sql
   constructor(sql: Sql) {
     this.sql = sql
+  }
+  async get(id: string, appId: string) {
+    if (!uuid.test(id) || !uuid.test(appId)) return null
+    const rows = await this.sql<
+      JobRecord[]
+    >`SELECT ${columns(this.sql)} FROM farm.integration_jobs j WHERE j.id = ${id}::uuid AND j.app_id = ${appId}::uuid`
+    if (!rows[0]) return null
+    const envelopes = await this.sql<
+      EnvelopeRecord[]
+    >`SELECT ${envelopeColumns(this.sql)} FROM farm.integration_envelopes e WHERE e.kind = 'job' AND e.resource_id = ${id}::uuid`
+    return {
+      record: { ...rows[0] },
+      envelope: envelopes[0] ? { ...envelopes[0] } : null,
+    }
   }
   async target(printerAssignmentId: string): Promise<JobTarget | null> {
     if (!uuid.test(printerAssignmentId)) return null

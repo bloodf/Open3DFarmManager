@@ -25,6 +25,7 @@ export type IntegrationAuthStore = Pick<
 }
 
 export interface IntegrationPrinterRow {
+  agentId?: string
   id: string
   farmId: string
   printerKey: string

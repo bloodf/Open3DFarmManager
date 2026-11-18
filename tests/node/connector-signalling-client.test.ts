@@ -40,7 +40,7 @@ async function fixture(
     NonNullable<
       ConstructorParameters<typeof AuthenticatedConnectorSignallingClient>[1]
     >,
-    'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand'
+    'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand' | 'onApiQuery'
   > = {},
   bindAddress?: string,
 ) {
@@ -517,6 +517,7 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
         loads++
         return { WebSocket: FakeSocket }
       },
+      true,
     )
     assert.deepEqual(options, {
       rejectUnauthorized: true,
@@ -528,6 +529,7 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
       maxFragments: 16,
       maxBufferedChunks: 16,
       autoPong: false,
+      headers: { 'open3dfarm-api-query': '1' },
     })
     let messages = 0,
       errors = 0
@@ -787,6 +789,49 @@ test('API commands and results require a proved credential inbox', async () => {
       v: 1,
       t: 'connector.api-result',
       wire: 'result',
+    })
+  } finally {
+    admitted.client.close()
+  }
+})
+
+test('API queries are handled only after credential inbox admission', async () => {
+  const seen: string[] = []
+  const options: NonNullable<Parameters<typeof fixture>[3]> = {
+    onApiQuery(frame, report) {
+      seen.push(frame.kind)
+      report({
+        v: 1,
+        t: 'connector.api-query-result',
+        request_id: frame.request_id,
+        wire: '{"kind":"macros","data":[],"nextOffset":null}',
+      })
+    },
+  }
+  const query = {
+    v: 1,
+    t: 'connector.api-query',
+    request_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assignment_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    kind: 'macros',
+    offset: 0,
+    limit: 1,
+  }
+  const early = await fixture(false, undefined, false, options)
+  await early.push(query)
+  await assert.rejects(early.pending)
+  assert.deepEqual(seen, [])
+
+  const admitted = await fixture(false, undefined, false, options)
+  try {
+    await admitted.inbox()
+    await admitted.push(query)
+    assert.deepEqual(seen, ['macros'])
+    assert.deepEqual(admitted.sent.at(-1), {
+      v: 1,
+      t: 'connector.api-query-result',
+      request_id: query.request_id,
+      wire: '{"kind":"macros","data":[],"nextOffset":null}',
     })
   } finally {
     admitted.client.close()

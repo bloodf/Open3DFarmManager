@@ -251,8 +251,11 @@ paths:
       tags: [Printers]
       summary: List files stored on a printer
       description: |
-        Answered live by the printer's Connector. Printer families without file
-        listing answer 422 `unsupported`; an unreachable Connector answers 503
+        Answered live over the credential-authenticated Connector inbox. The
+        Connector lists up to 200 files and may return fewer than `limit` in
+        a page to fit its response budget. Follow `nextCursor` until it is
+        null. Each page reads the current listing, which can change between
+        requests. Printer families without file listing answer 422 `unsupported`; an unreachable Connector answers 503
         `connector-unavailable` and a Connector that does not answer in time
         answers 504 `connector-timeout`.
       security:
@@ -301,8 +304,13 @@ paths:
       tags: [Printers]
       summary: List macros a printer exposes
       description: |
-        Answered live by the printer's Connector. Families without macros
-        answer 422 `unsupported`.
+        Answered live over the credential-authenticated Connector inbox.
+        Moonraker returns up to 50 discoverable macros. Follow `nextCursor`
+        until it is null. Each page reads the current listing, which can
+        change between requests. Families without macro discovery answer 422
+        `unsupported`. An unavailable Connector answers 503
+        `connector-unavailable` and a reply deadline answers 504
+        `connector-timeout`.
       security:
         - clientCredentials: ['control:extended']
       parameters:

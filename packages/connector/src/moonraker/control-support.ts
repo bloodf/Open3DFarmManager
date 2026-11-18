@@ -16,7 +16,7 @@ import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
 const MAX_OBJECTS = 512
-const ObjectList = z.strictObject({
+export const MoonrakerObjectList = z.strictObject({
   objects: z.array(z.string().min(1).max(128)).max(MAX_OBJECTS),
 })
 
@@ -104,7 +104,9 @@ export function detectMoonrakerObjects(input: {
           decodeMoonrakerFrame(data, binary, selected.limits.maxMessageBytes),
         )
         if (reply.id !== 1) throw new Error('Unexpected reply')
-        finish(Object.freeze([...ObjectList.parse(reply.result).objects]))
+        finish(
+          Object.freeze([...MoonrakerObjectList.parse(reply.result).objects]),
+        )
       } catch {
         abort()
       }

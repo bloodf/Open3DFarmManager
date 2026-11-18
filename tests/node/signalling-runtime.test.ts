@@ -989,7 +989,28 @@ test('read queries correlate replies only on their proved Connector inbox and se
     assert.equal(legacy.raw.socket.destroyed, false)
     legacy.native.terminate()
     await flush()
-    const machine = await f.inbox('read-only', ['Open3dfarm-Api-Query', '1'])
+    const machine = f.peer('connector', ['Open3dfarm-Api-Query', '1'])
+    assert.equal(
+      await f.runtime.upgrade(machine.request, 'connector', 'read-only'),
+      undefined,
+    )
+    f.runtime.open(machine)
+    await f.send(machine, {
+      v: 1,
+      t: 'connector.begin',
+      agent_id: f.agent,
+      farm_id: f.farm,
+      jti: f.jti,
+      token: f.token,
+    })
+    const challenge = machine.wires.at(-1)
+    assert.equal(challenge?.t, 'connector.inbox-challenge')
+    await f.send(machine, {
+      v: 1,
+      t: 'connector.inbox-proof',
+      signature: await f.sign(challenge.challenge),
+    })
+    assert.ok(machine.wires.some((wire) => wire.t === 'connector.inbox-ready'))
     assert.deepEqual(await query(randomUUID()), unavailable)
     const pending = query()
     const sent = machine.wires.at(-1)

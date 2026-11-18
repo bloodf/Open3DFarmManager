@@ -40,9 +40,12 @@ async function fixture(
     NonNullable<
       ConstructorParameters<typeof AuthenticatedConnectorSignallingClient>[1]
     >,
-    'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand' | 'onApiQuery'
+    'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand'
   > = {},
   bindAddress?: string,
+  onApiQuery?: NonNullable<
+    ConstructorParameters<typeof AuthenticatedConnectorSignallingClient>[1]
+  >['onApiQuery'],
 ) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -99,6 +102,7 @@ async function fixture(
     },
     ...(onAdmission ? { onVerifiedAdmission: onAdmission } : {}),
     ...authority,
+    ...(onApiQuery ? { onApiQuery } : {}),
     clock: { now: () => now, wallNow: () => wall },
     socketFactory: () => socket,
     peerFactory: async (options) => {
@@ -517,7 +521,6 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
         loads++
         return { WebSocket: FakeSocket }
       },
-      true,
     )
     assert.deepEqual(options, {
       rejectUnauthorized: true,
@@ -529,7 +532,6 @@ test('ws startup flags gate lazy loading and explicit pure-JS bounded socket opt
       maxFragments: 16,
       maxBufferedChunks: 16,
       autoPong: false,
-      headers: { 'open3dfarm-api-query': '1' },
     })
     let messages = 0,
       errors = 0
@@ -797,16 +799,17 @@ test('API commands and results require a proved credential inbox', async () => {
 
 test('API queries are handled only after credential inbox admission', async () => {
   const seen: string[] = []
-  const options: NonNullable<Parameters<typeof fixture>[3]> = {
-    onApiQuery(frame, report) {
-      seen.push(frame.kind)
-      report({
-        v: 1,
-        t: 'connector.api-query-result',
-        request_id: frame.request_id,
-        wire: '{"kind":"macros","data":[],"nextOffset":null}',
-      })
-    },
+  const onApiQuery: NonNullable<Parameters<typeof fixture>[5]> = (
+    frame,
+    report,
+  ) => {
+    seen.push(frame.kind)
+    report({
+      v: 1,
+      t: 'connector.api-query-result',
+      request_id: frame.request_id,
+      wire: '{"kind":"macros","data":[],"nextOffset":null}',
+    })
   }
   const query = {
     v: 1,
@@ -817,12 +820,26 @@ test('API queries are handled only after credential inbox admission', async () =
     offset: 0,
     limit: 1,
   }
-  const early = await fixture(false, undefined, false, options)
+  const early = await fixture(
+    false,
+    undefined,
+    false,
+    {},
+    undefined,
+    onApiQuery,
+  )
   await early.push(query)
   await assert.rejects(early.pending)
   assert.deepEqual(seen, [])
 
-  const admitted = await fixture(false, undefined, false, options)
+  const admitted = await fixture(
+    false,
+    undefined,
+    false,
+    {},
+    undefined,
+    onApiQuery,
+  )
   try {
     await admitted.inbox()
     await admitted.push(query)

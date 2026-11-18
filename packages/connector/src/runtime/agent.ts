@@ -1,4 +1,3 @@
-import { answerApiQuery, createApiQueryReader } from './api-query.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
 import type { Logger } from '../../../shared/src/log.ts'
@@ -327,6 +326,8 @@ async function runConnectorAgentOnce(
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
+      const { answerApiQuery, createApiQueryReader } =
+        await import('./api-query.ts')
       const signalling = config.signalling
       const readApiQuery = createApiQueryReader(config, input.dataDirectory)
       const source = snapshots

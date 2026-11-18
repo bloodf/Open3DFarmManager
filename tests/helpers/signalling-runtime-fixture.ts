@@ -426,9 +426,8 @@ export async function fixture(
   async function connect(
     role: 'browser' | 'connector',
     mode: SignallingMode = 'read-only',
-    headers: string[] = [],
   ) {
-    const p = peer(role, headers, mode)
+    const p = peer(role, [], mode)
     assert.equal(await runtime.upgrade(p.request, role, mode), undefined)
     runtime.open(p)
     assert.equal(p.raw.socket.destroyed, false)
@@ -493,11 +492,8 @@ export async function fixture(
       ),
     )
   }
-  async function inbox(
-    mode: SignallingMode = 'read-only',
-    headers: string[] = [],
-  ) {
-    const p = await connect('connector', mode, headers)
+  async function inbox(mode: SignallingMode = 'read-only') {
+    const p = await connect('connector', mode)
     await send(p, {
       v: 1,
       t: mode === 'pause' ? 'pause.connector-begin' : 'connector.begin',

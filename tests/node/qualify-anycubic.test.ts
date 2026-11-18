@@ -10,7 +10,7 @@ test('Anycubic defaults to 9883 and authenticates with LAN credentials', async (
     password: 'synthetic-lan-password',
   }
   const sim = await startAnycubicSimulator({
-    port: 9883,
+    port: 0,
     initialState: 'RUNNING',
     credentials,
   })
@@ -21,7 +21,12 @@ test('Anycubic defaults to 9883 and authenticates with LAN credentials', async (
       .digest('hex'),
   }
   try {
-    const options = { vendor: 'anycubic', host: sim.host, timeoutMs: 1000 }
+    const options = {
+      vendor: 'anycubic',
+      host: sim.host,
+      port: sim.port,
+      timeoutMs: 1000,
+    }
     const rejected = await qualifyAnycubic(options, {
       ...credentials,
       ...trust,

@@ -1070,6 +1070,7 @@ webhooks:
   inventory.changed:
     post:
       operationId: onInventoryChanged
+      description: Reserved for a durable Spoolman inventory source.
       summary: A Connector reported a newer inventory snapshot that differs
       security: []
       parameters:
@@ -2244,6 +2245,7 @@ components:
           enum:
             - held
             - rejected
+            - queued
             - expired
             - delivered
             - refused
@@ -2305,16 +2307,25 @@ components:
         createdAt:
           $ref: '#/components/schemas/TimestampMs'
     WebhookCreated:
-      allOf:
-        - $ref: '#/components/schemas/Webhook'
-        - type: object
-          required: [signingSecret]
-          properties:
-            signingSecret:
-              type: string
-              minLength: 32
-              maxLength: 256
-              description: Shown only in this response; it cannot be retrieved again.
+      type: object
+      required: [id, url, events, createdAt, signingSecret]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Webhook/properties/id'
+        url:
+          $ref: '#/components/schemas/Webhook/properties/url'
+        events:
+          $ref: '#/components/schemas/Webhook/properties/events'
+        description:
+          $ref: '#/components/schemas/Webhook/properties/description'
+        createdAt:
+          $ref: '#/components/schemas/Webhook/properties/createdAt'
+        signingSecret:
+          type: string
+          minLength: 32
+          maxLength: 256
+          description: Shown only in this response; it cannot be retrieved again.
     WebhookPage:
       allOf:
         - $ref: '#/components/schemas/PageInfo'

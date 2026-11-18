@@ -9,8 +9,8 @@ import {
 let active:
   { pool: ReturnType<typeof postgres>; auth: IntegrationAuth } | undefined
 
-export function integrationAuthRuntime() {
-  if (active) return active.auth
+function integrationRuntime() {
+  if (active) return active
   const config = useRuntimeConfig().integrationAuth
   if (config.enabled !== true)
     throw new Error('Autenticação de integrações indisponível.')
@@ -36,7 +36,15 @@ export function integrationAuthRuntime() {
   })
   const auth = new IntegrationAuth(new PostgresIntegrationApps(pool), token)
   active = { pool, auth }
-  return auth
+  return active
+}
+
+export function integrationAuthRuntime() {
+  return integrationRuntime().auth
+}
+
+export function integrationAuthPool() {
+  return integrationRuntime().pool
 }
 
 export async function closeIntegrationAuthRuntime() {

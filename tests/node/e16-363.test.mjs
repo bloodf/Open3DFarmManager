@@ -27,7 +27,10 @@ const sectionBodies = () => {
 }
 
 test('spec document exists with MIT clean-room statement and status legend', () => {
-  assert.match(doc, /^# Anycubic Kobra X LAN protocol \(clean-room specification\)/m)
+  assert.match(
+    doc,
+    /^# Anycubic Kobra X LAN protocol \(clean-room specification\)/m,
+  )
   assert.match(doc, /License of this document: MIT/)
   assert.match(doc, /## Purpose and clean-room rules/)
   assert.match(doc, /## Status and source legend/)
@@ -114,7 +117,10 @@ test('covers topic layout, message types, ack and report semantics and the three
   ]) {
     assert.ok(doc.includes(type), `message type ${type} missing`)
   }
-  assert.match(doc, /empty `type` and empty\s+`action`, `code` 0, and the request's `msgid`/)
+  assert.match(
+    doc,
+    /empty `type` and empty\s+`action`, `code` 0, and the request's `msgid`/,
+  )
   assert.match(doc, /Confirmed/)
   assert.match(doc, /Refused/)
   assert.match(doc, /Received without result/)
@@ -190,7 +196,9 @@ test('states firmware scope 2.0.2.8 with verified and unverified lists', () => {
     'The AES key and IV for the credential blob',
     'The multipart field name for `gcode_upload`',
   ]
-  const unverified = doc.split('### Unverified items')[1].split('## Security notes')[0]
+  const unverified = doc
+    .split('### Unverified items')[1]
+    .split('## Security notes')[0]
   for (const item of unverifiedNeeded) {
     assert.ok(unverified.includes(item), `unverified item "${item}" not listed`)
   }
@@ -199,9 +207,12 @@ test('states firmware scope 2.0.2.8 with verified and unverified lists', () => {
 test('every protocol section carries an observed, reported or not verified status', () => {
   const protocolSections = sectionBodies().filter(
     (s) =>
-      !['Purpose and clean-room rules', 'Status and source legend', 'Security notes', 'Sources'].includes(
-        s.title,
-      ),
+      ![
+        'Purpose and clean-room rules',
+        'Status and source legend',
+        'Security notes',
+        'Sources',
+      ].includes(s.title),
   )
   assert.ok(protocolSections.length >= 8)
   for (const section of protocolSections) {
@@ -243,7 +254,9 @@ test('contains no key, certificate, private path, real address, email or AI attr
   assert.doesNotMatch(doc, /\/Users\/|\/home\/|~\/|Developer\/github|\.t3\//)
   assert.doesNotMatch(doc, /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)
   assert.doesNotMatch(doc, /[A-Fa-f0-9]{32,}/)
-  const addresses = [...doc.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g)].map((m) => m[0])
+  const addresses = [...doc.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g)].map(
+    (m) => m[0],
+  )
   assert.deepEqual(
     // 2.0.2.8 (printer firmware) and 2.0.0.3 (slicer version) are versions, not addresses.
     [...new Set(addresses)].filter(
@@ -252,7 +265,10 @@ test('contains no key, certificate, private path, real address, email or AI attr
     [],
     'only the SSDP multicast group may appear as a literal address',
   )
-  assert.doesNotMatch(doc, /\bClaude\b|\bAnthropic\b|\bLLM\b|\bGPT\b|🤖|Co-Authored-By|Generated with/i)
+  assert.doesNotMatch(
+    doc,
+    /\bClaude\b|\bAnthropic\b|\bLLM\b|\bGPT\b|🤖|Co-Authored-By|Generated with/i,
+  )
 })
 
 test('internal links resolve to headings in the document', () => {

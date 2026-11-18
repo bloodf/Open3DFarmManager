@@ -16,9 +16,9 @@ access for the cmake-js headers and the libdatachannel submodules.
 `webrtc/rtc-backend.ts` loads the native module once at agent startup and
 reports a fixed vocabulary:
 
-| `backend`          | `mode`               | `reason`                                         |
-| ------------------ | -------------------- | ------------------------------------------------ |
-| `node-datachannel` | `direct`             | none                                             |
+| `backend`          | `mode`               | `reason`                                        |
+| ------------------ | -------------------- | ----------------------------------------------- |
+| `node-datachannel` | `direct`             | none                                            |
 | `none`             | `read-only-degraded` | `native-binary-missing` or `native-load-failed` |
 
 The probe never exposes an error message or a file path. The result is:
@@ -54,17 +54,17 @@ a test against an unmeasured backend would prove nothing.
 
 The list comes from the `node-datachannel` calls the peers make today.
 
-| Requirement                                                                                   | Used by                          | Status for `werift`                            |
-| --------------------------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------- |
-| `iceServers: []`, no TURN, no STUN                                                            | all peers                        | to verify: gathering with no servers           |
-| Bind ICE to one literal address (`bindAddress`, loopback default)                             | all peers                        | to verify: per-peer interface restriction      |
-| ICE over UDP only (`enableIceTcp: false`)                                                     | all peers                        | to verify                                      |
-| Read the actual remote DTLS fingerprint (`remoteFingerprint()`) and pin it to the signed SDP | all peers                        | to verify: API for the remote leaf certificate |
-| Manual negotiation (`disableAutoNegotiation`, explicit local/remote descriptions)             | all peers                        | to verify                                      |
-| Ordered reliable channels, `maxMessageSize` per channel family (proof wire, frame limits)     | all peers                        | to measure: SCTP max message size and refusal  |
-| `bufferedAmount()` and `onBufferedAmountLow` back-pressure                                    | read-only peer                   | to verify                                      |
-| Selected candidate pair (`getSelectedCandidatePair`) to prove no relay                        | read-only peer                   | to verify                                      |
-| Send-only H.264 track from RTP packets (`H264RtpPacketizer`, SSRC, media handler)             | `camera-media.ts`                | to verify: payload type, SPS/PPS, keyframes    |
+| Requirement                                                                                  | Used by           | Status for `werift`                            |
+| -------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------- |
+| `iceServers: []`, no TURN, no STUN                                                           | all peers         | to verify: gathering with no servers           |
+| Bind ICE to one literal address (`bindAddress`, loopback default)                            | all peers         | to verify: per-peer interface restriction      |
+| ICE over UDP only (`enableIceTcp: false`)                                                    | all peers         | to verify                                      |
+| Read the actual remote DTLS fingerprint (`remoteFingerprint()`) and pin it to the signed SDP | all peers         | to verify: API for the remote leaf certificate |
+| Manual negotiation (`disableAutoNegotiation`, explicit local/remote descriptions)            | all peers         | to verify                                      |
+| Ordered reliable channels, `maxMessageSize` per channel family (proof wire, frame limits)    | all peers         | to measure: SCTP max message size and refusal  |
+| `bufferedAmount()` and `onBufferedAmountLow` back-pressure                                   | read-only peer    | to verify                                      |
+| Selected candidate pair (`getSelectedCandidatePair`) to prove no relay                       | read-only peer    | to verify                                      |
+| Send-only H.264 track from RTP packets (`H264RtpPacketizer`, SSRC, media handler)            | `camera-media.ts` | to verify: payload type, SPS/PPS, keyframes    |
 
 ### Measurements required before adoption
 

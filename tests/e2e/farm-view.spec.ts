@@ -184,7 +184,7 @@ async function violations(page: Page) {
   }))
 }
 
-for (const width of [320, 1280]) {
+for (const width of [320, 768, 1024, 1280]) {
   test(`axe finds no WCAG A/AA violations in the farm inventory at ${width}px`, async ({
     page,
   }) => {
@@ -192,6 +192,15 @@ for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 800 })
     await page.goto('/farm')
     await expect(page.locator(`#printer-${assignment}`)).toHaveText(key)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true)
+    const cardColumns = await page
+      .locator('.printers')
+      .evaluate((element) => getComputedStyle(element).gridTemplateColumns)
+    expect(cardColumns.split(' ').length).toBe(width >= 768 ? 2 : 1)
     expect(await violations(page)).toEqual([])
   })
 }

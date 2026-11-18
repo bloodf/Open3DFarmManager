@@ -30,7 +30,9 @@ kobraKeyState.value = { kind: 'available', accountId: 'synthetic', choices: [{ k
 kobraController = new AbortController()
 </script>`,
     )
-  const start = page.indexOf('      <div v-if="kobraStage === \'idle\'">')
+  const start = page.indexOf(
+    '      <div v-if="kobraStage === \'idle\'" class="setup-columns">',
+  )
   const end = page.indexOf('      <div v-if="kobraBusy"', start)
   if (start < 0 || end < 0) throw new Error('Setup form not found')
   const source = `${script}<template><main><p v-if="kobraError" ref="kobraErrorSummary" role="alert" tabindex="-1">{{ kobraError }}</p>${page.slice(start, end)}</main></template>`

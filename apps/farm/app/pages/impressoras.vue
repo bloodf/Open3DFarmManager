@@ -575,10 +575,13 @@ onBeforeRouteLeave(setup.clear)
         }}
       </p>
       <ConnectorContext />
-      <div v-if="kobraStage === 'idle'">
-        <DiscoveryPanel />
+      <div v-if="kobraStage === 'idle'" class="setup-columns">
+        <div class="kobra-card">
+          <h3>Descobrir impressoras</h3>
+          <DiscoveryPanel />
+        </div>
+        <SetupForm />
       </div>
-      <SetupForm />
       <div v-if="kobraBusy" class="kobra-actions">
         <button type="button" @click="setup.abortLocalKobraWait">
           Interromper espera local

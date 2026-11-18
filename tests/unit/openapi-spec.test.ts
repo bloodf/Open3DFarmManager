@@ -86,9 +86,6 @@ describe('integration API v1 OpenAPI spec', () => {
       [
         '/openapi.json',
         '/oauth/token',
-        '/intents',
-        '/grants/redeem',
-        '/grants/receipt',
         '/printers',
         '/printers/{printerId}/status',
         '/printers/{printerId}/files',

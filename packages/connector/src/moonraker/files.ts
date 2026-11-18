@@ -19,7 +19,7 @@ const File = z.object({
 
 export async function listMoonrakerFiles(
   client: MoonrakerFilesClient,
-  { limit }: { limit: number },
+  { limit, metadata = true }: { limit: number; metadata?: boolean },
 ): Promise<
   Array<{
     name: string
@@ -54,6 +54,8 @@ export async function listMoonrakerFiles(
     })
     .sort((a, b) => b.modified - a.modified)
     .slice(0, count)
+  if (!metadata)
+    return files.map(({ name, size, modified }) => ({ name, size, modified }))
   return Promise.all(
     files.map(async ({ path, ...file }, index) => {
       try {

@@ -19,6 +19,7 @@ import {
 } from '../config/anycubic.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
+import { createMoonrakerHistoryImport } from '../moonraker/history-import.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import {
   createSpoolmanProvider,
@@ -89,6 +90,8 @@ export async function collectLocalTelemetry(input: {
 export async function collectIntoQueue(input: {
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   discoverMoonrakerObjects?: boolean
+  /** Import Moonraker's finished-job history on connect and after reconnects. */
+  importMoonrakerHistory?: boolean
   bambuTransport?: (
     options: Parameters<typeof createBambuTransport>[0],
   ) => Pick<ReturnType<typeof createBambuTransport>, 'done' | 'close'>
@@ -224,6 +227,24 @@ export async function collectIntoQueue(input: {
       let nextFirmwareRead = -Infinity
       let firmwarePending = false
       let latest: RawPrinterObservation | undefined
+      const history = input.importMoonrakerHistory
+        ? createMoonrakerHistoryImport({
+            printerKey: assignment.printerKey,
+            selected,
+            signal,
+            record(state) {
+              try {
+                const lostBefore = queue.storageLost
+                const receipt = queue.enqueue(state, Date.now())
+                totals.queued++
+                loss(receipt.loss, 'retention')
+                totals.queued -= queue.storageLost - lostBefore
+              } catch (error) {
+                fail(error)
+              }
+            },
+          })
+        : undefined
       const subscription = createMoonrakerSubscription({
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         assignment,
@@ -392,7 +413,13 @@ export async function collectIntoQueue(input: {
               },
             }
           : {}),
-        onEvent,
+        onEvent: history
+          ? (event) => {
+              onEvent(event)
+              if (event.kind === 'unavailable') history.reconnecting()
+              else history.observe(event.printer.state)
+            }
+          : onEvent,
       })
       // Attach rejection handling immediately, before starting another printer.
       subscriptions.push({ done: subscription.done.catch(fail) })

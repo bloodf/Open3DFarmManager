@@ -1,3 +1,4 @@
+import { ApiQueryReply, ApiQueryRequest } from './api-query.ts'
 import { z } from 'zod'
 import { MAX_API_ENVELOPE_WIRE_BYTES } from './api-envelope.ts'
 import { parseBoundedJson } from './json.ts'
@@ -45,6 +46,7 @@ export const SignallingClientControl = z.discriminatedUnion('t', [
     signature,
   }),
   z.strictObject({ ...base, t: z.literal('connector.retry') }),
+  ApiQueryReply,
   z.strictObject({
     ...base,
     t: z.literal('connector.api-result'),
@@ -102,6 +104,7 @@ export const SignallingServerControl = z
       t: z.literal('rtc.binding'),
       binding: RtcSessionBinding,
     }),
+    ApiQueryRequest,
     // A fresh database claim authorizes exactly the attached signed envelope.
     z.strictObject({
       ...base,

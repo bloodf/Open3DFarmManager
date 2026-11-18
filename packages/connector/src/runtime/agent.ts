@@ -351,7 +351,10 @@ async function runConnectorAgentOnce(
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
+      const { answerApiQuery, createApiQueryReader } =
+        await import('./api-query.ts')
       const signalling = config.signalling
+      const readApiQuery = createApiQueryReader(config, input.dataDirectory)
       const source = snapshots
       const cameraMedia = config.camera
         ? await (
@@ -373,6 +376,7 @@ async function runConnectorAgentOnce(
           onReconnect: () => logger.info('reconnect'),
           createSession(onTerminal, onAdmitted) {
             const inbox = new AbortController()
+            let pendingQueries = 0
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
@@ -408,6 +412,24 @@ async function runConnectorAgentOnce(
                       })
                     }
                   }
+                },
+                onApiQuery(frame, report) {
+                  if (inbox.signal.aborted || pendingQueries >= 4) return
+                  pendingQueries++
+                  const querySignal = AbortSignal.any([
+                    inbox.signal,
+                    signal,
+                    AbortSignal.timeout(8000),
+                  ])
+                  void answerApiQuery(frame, readApiQuery, querySignal)
+                    .then((reply) => {
+                      if (!inbox.signal.aborted && !signal.aborted)
+                        report(reply)
+                    })
+                    .catch(() => {})
+                    .finally(() => {
+                      pendingQueries--
+                    })
                 },
                 onApiCommand(frame, report) {
                   if (!offline || inbox.signal.aborted) return
@@ -655,6 +677,7 @@ async function runConnectorAgentOnce(
       collectIntoQueue({
         config: config.collection,
         discoverMoonrakerObjects: true,
+        importMoonrakerHistory: true,
         onLoss: (value) => logger.warn('queue-loss', { ...value }),
         ...(input.onInventory || snapshots
           ? {

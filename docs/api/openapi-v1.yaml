@@ -13,7 +13,8 @@ info:
     requires `Authorization: Bearer <access token>` issued by the OAuth 2.0
     client-credentials token endpoint. Session cookies are never accepted on
     these routes. Each token is bound to the app's grants: scope, farm and,
-    optionally, printer. Sandbox apps are only ever granted sandbox farms.
+    optionally, printer. Changes to the grants covered by a token invalidate it.
+    Sandbox apps are only ever granted sandbox farms.
 
     **Authorization.** A missing, expired, malformed or revoked token answers
     401 (`invalid-token`). A token lacking the operation's scope answers 403
@@ -145,6 +146,15 @@ paths:
           headers:
             Retry-After:
               $ref: '#/components/headers/Retry-After'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '503':
+          description: Token issuance is temporarily unavailable.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
           content:
             application/json:
               schema:
@@ -327,6 +337,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -597,7 +609,7 @@ paths:
       summary: Latest Spoolman inventory snapshots
       description: |
         One entry per Connector that reported a snapshot, for farms covered by
-        an `inventory:read` grant. Snapshots are read-only display evidence.
+        a farm-wide `inventory:read` grant. Snapshots are read-only display evidence.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -624,6 +636,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -680,6 +694,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1421,6 +1437,7 @@ components:
             - unauthorized_client
             - unsupported_grant_type
             - rate_limited
+            - temporarily_unavailable
         error_description:
           type: string
           maxLength: 200

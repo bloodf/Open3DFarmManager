@@ -6,6 +6,12 @@ import {
   hashClientSecret,
 } from '../../apps/farm/server/services/integration-apps.ts'
 import { PostgresIntegrationApps } from '../../apps/farm/server/storage/integration-apps-postgres.ts'
+import { IntegrationAuth } from '../../apps/farm/server/utils/integration-auth.ts'
+import {
+  authorizeIntegrationRequest,
+  integrationBase,
+  integrationTokenRequest,
+} from '../../apps/farm/server/utils/integration-auth-http.ts'
 
 const denied = async (promise: PromiseLike<unknown>, what: string) => {
   await assert.rejects(Promise.resolve(promise), Error, what)
@@ -230,8 +236,52 @@ export async function testPostgresIntegrationApps(
     4,
     'two farm-wide and two printer-scoped grants are effective',
   )
+  const auth = new IntegrationAuth(store, { key: Buffer.alloc(32, 1), ttl: 60 })
+  const issueToken = async () => {
+    const response = await integrationTokenRequest(
+      new Request('http://localhost' + integrationBase + '/oauth/token', {
+        method: 'POST',
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: second.credential.clientId,
+          client_secret: second.secret,
+        }),
+      }),
+      () => auth,
+    )
+    assert.equal(response.status, 200)
+    return (await response.json()).access_token as string
+  }
+  const statusRequest = (printerId: string, token: string) => {
+    const path = '/printers/' + printerId + '/status'
+    return authorizeIntegrationRequest(
+      new Request('http://localhost' + integrationBase + path, {
+        headers: { authorization: 'Bearer ' + token },
+      }),
+      path,
+      () => auth,
+    )
+  }
+  const originalToken = await issueToken()
+  assert.ok(
+    !((await statusRequest(printerA, originalToken)) instanceof Response),
+  )
+  assert.equal(await store.activePrinterFarm(printerA), farm)
+
   // The revoker is the printer-ownership role: it has no right on grants, so the cascade must not depend on it.
   await ownership`UPDATE farm.printer_assignments SET revoked_at = 2000000, revoked_by = ${owner} WHERE id = ${printerA}::uuid`
+  const revokedToken = await statusRequest(printerA, originalToken)
+  assert.ok(revokedToken instanceof Response)
+  assert.equal(revokedToken.status, 401)
+  const replacementToken = await issueToken()
+  const revokedPrinter = await statusRequest(printerA, replacementToken)
+  assert.ok(revokedPrinter instanceof Response)
+  assert.equal(revokedPrinter.status, 404)
+  assert.ok(
+    !((await statusRequest(printerB, replacementToken)) instanceof Response),
+  )
+  checks.push('oauth-token-grants-and-active-printer-checked-in-postgres')
+
   const after = await store.listGrants(owner, app.id)
   const byId = new Map(after?.map((g) => [g.id, g]))
   assert.equal(byId.get(scopedA.id)?.disabledAt, 2_000_000)

@@ -27,7 +27,9 @@ describe('catálogo Anycubic', () => {
   it('mantém datas, firmware e capacidades não comprovadas conservadores', () => {
     for (const item of anycubicCatalog) {
       expect(item.releaseDate).toBeNull()
-      expect(item.firmwareStatus).toContain('desconhecida')
+      // Firmware sem versão qualificada em hardware é declarado como não
+      // verificado; a Kobra X publica versões, mas nenhuma foi qualificada.
+      expect(item.firmwareStatus).toMatch(/não verificado|não qualificadas/)
       for (const [capability, status] of Object.entries(item.capabilities)) {
         if (status === 'documented')
           expect(item.sources.length).toBeGreaterThan(0)

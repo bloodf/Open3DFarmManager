@@ -21,14 +21,17 @@ describe('Bambu catalog', () => {
 
   it('does not infer integration or firmware support from announcements', () => {
     for (const product of bambuCatalog) {
-      expect(product.firmwareStatus).toContain('Desconhecido')
+      expect(product.firmwareStatus).toContain('não verificado')
       expect(product.capabilities).toEqual({
         telemetry: 'simulated',
-        files: 'simulated',
+        // FTPS listing and upload are implemented and tested, but no
+        // collection configuration builds a Bambu file target.
+        files: 'unknown',
         camera: ['H2C', 'P2S', 'H2S'].includes(product.model)
           ? 'simulated'
           : 'unknown',
-        materials: 'unknown',
+        // AMS tray reading and load/unload commands are covered by tests.
+        materials: 'simulated',
         pause: 'simulated',
         resume: 'simulated',
         cancel: 'simulated',

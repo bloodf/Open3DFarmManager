@@ -9,12 +9,14 @@ describe('catálogo atualizado', () => {
     for (const product of bambuCatalog) {
       for (const capability of [
         'telemetry',
-        'files',
         'pause',
         'resume',
         'cancel',
       ] as const)
         expect(product.capabilities[capability]).toBe('simulated')
+      // A coleção Bambu não produz alvo de arquivos, então a operação não é
+      // alcançável pelo produto.
+      expect(product.capabilities.files).toBe('unknown')
       expect(product.capabilities.camera).toBe(
         ['H2C', 'P2S', 'H2S'].includes(product.model) ? 'simulated' : 'unknown',
       )

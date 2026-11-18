@@ -52,21 +52,19 @@ describe('catálogo Creality', () => {
         expect(value).not.toBe('permission')
       }
 
-      // K3 declares Klipper base, but does not claim proven Moonraker interface
-      if (product.model === 'K3') {
-        expect(product.capabilities.pause).toBe('unknown')
-        expect(product.capabilities.resume).toBe('unknown')
-        expect(product.capabilities.cancel).toBe('unknown')
-      }
-
-      // Ender-3 V3 Mega documents file transfer via USB/Wi-Fi/Cloud, while unverified methods remain unknown
-      if (product.model === 'Ender-3 V3 Mega') {
-        expect(product.capabilities.files).toBe('documented')
-        expect(product.capabilities.pause).toBe('unknown')
-        expect(product.capabilities.resume).toBe('unknown')
-        expect(product.capabilities.cancel).toBe('unknown')
-      } else {
-        expect(product.capabilities.files).toBe('unknown')
+      // The Creality driver is model-agnostic (`CrealityBinding` has no model
+      // field and `supportedCrealityActions` ignores its argument), so the
+      // stock LAN path covers the whole family the same way.
+      for (const product of crealityCatalog) {
+        expect(product.capabilities.telemetry).toBe('simulated')
+        expect(product.capabilities.files).toBe('simulated')
+        expect(product.capabilities.pause).toBe('simulated')
+        expect(product.capabilities.resume).toBe('simulated')
+        expect(product.capabilities.cancel).toBe('simulated')
+        // The camera module is not wired into the agent configuration path.
+        expect(product.capabilities.camera).toBe('unknown')
+        // The connector refuses undocumented filament commands outright.
+        expect(product.capabilities.materials).toBe('unsupported')
       }
 
       // Ender-3 V4 release date is unconfirmed

@@ -175,15 +175,16 @@ describe('compatibility-match', () => {
       )
     })
 
-    it('preserves files documented status for Ender-3 V3 Mega', () => {
+    it('preserves files simulated status for Ender-3 V3 Mega', () => {
       const match = matchCompatibility({
         vendor: 'Creality',
         model: 'Ender-3 V3 Mega',
       })
       expect(match.identified).toBe(true)
       if (match.identified) {
-        expect(match.capabilityStatuses.files).toBe('documented')
-        expect(match.statusLabels.files).toBe('Documentado')
+        // The stock LAN file path is exercised against the simulator only.
+        expect(match.capabilityStatuses.files).toBe('simulated')
+        expect(match.statusLabels.files).toBe('Simulado')
       }
     })
   })

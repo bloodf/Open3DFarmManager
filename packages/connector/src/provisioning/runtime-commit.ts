@@ -84,6 +84,7 @@ export function bindingFor(
     printerKey: plan.printer_key,
     revision: plan.committed_revision,
     credentialFile: plan.credential_file,
+    ...(plan.client_cert_file ? { clientCertFile: plan.client_cert_file } : {}),
   }
 }
 
@@ -202,7 +203,8 @@ export function commitRuntimeAssignment(
   })
 }
 
-/** Removes a credential file written for a commit that never landed. */
+/** Removes credential files written for a commit that never landed. */
 export function discardPlannedCredential(plan: CommitPlan): void {
   removePrivateFile(plan.credential_file)
+  if (plan.client_cert_file) removePrivateFile(plan.client_cert_file)
 }

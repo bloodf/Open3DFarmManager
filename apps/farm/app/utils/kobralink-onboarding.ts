@@ -48,6 +48,7 @@ import {
   ConfigurationIpv4,
   ConfigurationTarget,
   configurationTargetHash,
+  type KobraClientCertificateInput,
 } from '../../../../packages/farm-protocol/src/configuration-target.ts'
 import type { LocalDeviceKey } from './device-key.ts'
 import type { ConfigurationProofsReady } from './webrtc/configuration-browser-peer.ts'
@@ -199,6 +200,7 @@ export function validateKobraXTargetInput(input: {
   ipv4: string
   displayLabel?: string
   expectedDeviceId?: string
+  clientCertificate?: KobraClientCertificateInput
 }): ValidatedKobraXInput {
   const rawIp = input.ipv4.trim()
   if (!rawIp) {
@@ -258,6 +260,9 @@ export function validateKobraXTargetInput(input: {
     endpoint: { ipv4: rawIp, port: KOBRA_X_PRINTER_PORT },
     ...(expectedDeviceId ? { device_id: expectedDeviceId } : {}),
     bridge: { kind: 'connector-managed' },
+    ...(input.clientCertificate
+      ? { client_certificate: input.clientCertificate }
+      : {}),
   })
   return { ok: true, target, displayLabel, expectedDeviceId }
 }
@@ -266,6 +271,14 @@ export function describeConfigurationError(
   code: ConfigurationErrorCode | string,
 ): string {
   switch (code) {
+    case 'client-cert-missing':
+      return 'Certificado do cliente ausente (client certificate missing): importe o certificado PEM/PKCS#12 ou informe um caminho válido do Anycubic Slicer Next.'
+    case 'client-cert-unreadable':
+      return 'Certificado do cliente ou chave ilegível (unreadable): confira permissões, integridade do arquivo e senha.'
+    case 'client-cert-wrong-subject':
+      return 'Subject do certificado inválido (wrong subject): esperado certificado com CN=AnycubicSlicer.'
+    case 'client-cert-expired':
+      return 'Certificado do cliente expirado ou fora da janela de validade (expired).'
     case 'invalid-request':
       return 'O Connector recusou os parâmetros de configuração (verifique se o endereço IPv4 pertence à sub-rede permitida no Connector).'
     case 'unsupported-version':

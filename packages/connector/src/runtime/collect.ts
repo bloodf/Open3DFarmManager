@@ -17,6 +17,7 @@ import {
   readCollectorConfig,
   type AnycubicCollectorConfig,
 } from '../config/anycubic.ts'
+import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
 import { createMoonrakerHistoryImport } from '../moonraker/history-import.ts'
@@ -441,7 +442,38 @@ export async function collectIntoQueue(input: {
         // credential proof slot signalling shares, permanently busy. The live
         // view still receives every raw observation.
         let queuedState: string | undefined
+        const certMissing = () =>
+          Boolean(
+            binding.clientCertFile &&
+            !readKobraClientCertMaterial(binding.clientCertFile).ok,
+          )
+        const emitMissingCert = () => {
+          const now = performance.now()
+          disconnectedMono = now
+          const printer: PrinterState = {
+            printerKey: binding.printerKey,
+            state: 'offline',
+            statusReason: 'client-certificate-missing',
+            observedAt: Date.now(),
+          }
+          input.onRawObservation?.({
+            printerKey: binding.printerKey,
+            epoch,
+            printer,
+            receivedAtMonoMs: now,
+            fieldObservedAtMonoMs: { connection: now },
+          })
+          const key = 'offline:client-certificate-missing'
+          if (queuedState !== key) {
+            queuedState = key
+            onEvent({ kind: 'snapshot', printer })
+          }
+        }
         const unavailable = () => {
+          if (certMissing()) {
+            emitMissingCert()
+            return
+          }
           queuedState = undefined
           input.onRawUnavailable?.({
             printerKey: binding.printerKey,
@@ -453,6 +485,7 @@ export async function collectIntoQueue(input: {
             reason: 'offline',
           })
         }
+        if (certMissing()) emitMissingCert()
         const sub = createKobraLinkRuntimeSubscription({
           binding,
           allowedOrigins: config.kobralink.allowedOrigins,
@@ -461,11 +494,17 @@ export async function collectIntoQueue(input: {
           onUnavailable: unavailable,
           onStatus(status) {
             const now = performance.now()
-            if (status.availability === 'disconnected') {
+            const missingCert =
+              status.connectionReason === 'client_certificate_missing' ||
+              certMissing()
+            if (status.availability === 'disconnected' || missingCert) {
               disconnectedMono = now
               const printer: PrinterState = {
                 printerKey: binding.printerKey,
                 state: 'offline',
+                ...(missingCert
+                  ? { statusReason: 'client-certificate-missing' }
+                  : {}),
                 observedAt: Date.now(),
               }
               input.onRawObservation?.({
@@ -475,8 +514,11 @@ export async function collectIntoQueue(input: {
                 receivedAtMonoMs: now,
                 fieldObservedAtMonoMs: { connection: now },
               })
-              if (queuedState !== 'offline') {
-                queuedState = 'offline'
+              const nextKey = missingCert
+                ? 'offline:client-certificate-missing'
+                : 'offline'
+              if (queuedState !== nextKey) {
+                queuedState = nextKey
                 onEvent({ kind: 'snapshot', printer })
               }
               return

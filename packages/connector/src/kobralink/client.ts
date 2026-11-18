@@ -86,7 +86,8 @@ export interface PrinterIdentity extends PrinterBinding {
   firmware: string | null
 }
 export interface PrinterObservation extends PrinterStatus {
-  connectionReason?: 'lost' | 'unreachable' | 'unreachable_ip'
+  connectionReason?:
+    'lost' | 'unreachable' | 'unreachable_ip' | 'client_certificate_missing'
   progress: number | null
   observedAt: number | null
   lastJob?: {
@@ -372,7 +373,8 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       ...(live?.connected === false &&
       (live.connectionError?.code === 'lost' ||
         live.connectionError?.code === 'unreachable' ||
-        live.connectionError?.code === 'unreachable_ip')
+        live.connectionError?.code === 'unreachable_ip' ||
+        live.connectionError?.code === 'client_certificate_missing')
         ? { connectionReason: live.connectionError.code }
         : {}),
       printState,

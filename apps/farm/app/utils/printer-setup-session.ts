@@ -1,5 +1,6 @@
 import { withoutAnycubicCredentials } from './anycubic-onboarding.ts'
 import { withoutBambuAccessCode } from './bambu-onboarding.ts'
+import { sanitizeTargetForClientStorage } from './kobra-client-cert-ui.ts'
 import {
   openConfigurationBrowserSession,
   type ConfigurationBrowserSession,
@@ -43,7 +44,7 @@ export function createPendingOperationStore(state: PrinterSetupRefs) {
           farmId: op.farmId,
           agentId: op.agentId,
           keyId: op.keyId,
-          target:
+          target: sanitizeTargetForClientStorage(
             op.target.backend === 'anycubic'
               ? withoutAnycubicCredentials(op.target)
               : op.target.backend === 'moonraker'
@@ -51,6 +52,7 @@ export function createPendingOperationStore(state: PrinterSetupRefs) {
                 : op.target.backend === 'bambu'
                   ? withoutBambuAccessCode(op.target)
                   : op.target,
+          ),
           targetSha256: op.targetSha256,
           expectedRevision: op.expectedRevision,
           displayLabel: op.displayLabel,
@@ -164,6 +166,7 @@ export function createConfigurationSession(
     }
     anycubicUsername.value = ''
     anycubicPassword.value = ''
+    state.clearKobraClientCert()
   }
 
   async function ensureKobraSession(

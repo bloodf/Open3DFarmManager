@@ -5,7 +5,7 @@ import {
   lastKnownStateAgeLabel,
   type LastKnownState,
 } from '../../composables/useLastKnownStates-core.ts'
-import { printerStateLabel } from '../../utils/farm-view.ts'
+import { formatPrinterStateLabel } from '../../utils/farm-view.ts'
 
 const props = defineProps<{
   state: LastKnownState
@@ -43,7 +43,7 @@ function temperatureLabel(value: number | undefined): string {
     </p>
     <dl>
       <dt>Estado informado</dt>
-      <dd>{{ printerStateLabel[state.state] }}</dd>
+      <dd>{{ formatPrinterStateLabel(state) }}</dd>
       <dt>Idade da observação</dt>
       <dd>{{ observed.age }}</dd>
       <dt>Temperatura do bico</dt>

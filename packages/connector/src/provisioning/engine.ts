@@ -49,7 +49,15 @@ import {
   type SignedConfigurationReceipt,
 } from '../../../farm-protocol/src/configuration-receipt.ts'
 import { deriveConfigurationAssignmentIdentity } from '../../../farm-protocol/src/configuration-inventory.ts'
-import { configurationTargetHash } from '../../../farm-protocol/src/configuration-target.ts'
+import {
+  configurationTargetHash,
+  withoutKobraClientCertificate,
+} from '../../../farm-protocol/src/configuration-target.ts'
+import {
+  commitStagedKobraClientCert,
+  discardStagedKobraCert,
+  stageKobraClientCert,
+} from '../config/kobra-x-cert.ts'
 import {
   createKobraLinkClient,
   KobraLinkError,
@@ -427,6 +435,8 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       discardStagedAnycubic(options.stateDirectory, op.operation_id)
     if (op.target.backend === 'bambu')
       discardStagedBambu(options.stateDirectory, op.operation_id)
+    if (op.target.backend === 'kobralink-anycubic')
+      discardStagedKobraCert(options.stateDirectory, op.operation_id)
     const failed = save(op, 'failed', { failure: code })
     finish(failed)
     return failed
@@ -685,7 +695,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
               }) => safe)(frame.target)
             : frame.target.backend === 'bambu'
               ? (({ access_code: _code, ...safe }) => safe)(frame.target)
-              : frame.target,
+              : frame.target.backend === 'kobralink-anycubic'
+                ? withoutKobraClientCertificate(frame.target)
+                : frame.target,
       target_sha256: targetHash,
       expected_revision: frame.expected_revision,
       bridge_instance_id: null,
@@ -864,6 +876,18 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         frame,
         save(op, 'prepared', { prepared, latest: prepared }),
       )
+    }
+    if (
+      frame.target.backend === 'kobralink-anycubic' &&
+      frame.target.client_certificate
+    ) {
+      const staged = await stageKobraClientCert(
+        options.stateDirectory,
+        op.operation_id,
+        frame.target.client_certificate,
+        clock(),
+      )
+      if (!staged.ok) return describe(frame, await fail(op, staged.code))
     }
     const bridge = await resolveBridge(op)
     if (typeof bridge === 'string')
@@ -1106,6 +1130,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (!(await stillCurrent(context)))
       return errorFrame(frame.request_id, 'capability-rejected')
     const assignmentId = identity.assignment_id
+    ensurePrivateDirectory(join(options.stateDirectory, 'credentials'))
+    const clientCertFile = commitStagedKobraClientCert(
+      options.stateDirectory,
+      op.operation_id,
+      assignmentId,
+    )
     const plan = {
       assignment_id: assignmentId,
       printer_key: identity.printer_key,
@@ -1114,9 +1144,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         'credentials',
         `${assignmentId}.json`,
       ),
+      ...(clientCertFile ? { client_cert_file: clientCertFile } : {}),
       committed_revision: op.expected_revision + 1,
     }
-    ensurePrivateDirectory(join(options.stateDirectory, 'credentials'))
     const committing = save(op, 'committing', { plan })
     try {
       commitRuntimeAssignment(options.runtime, plan, bridge, op.printer)
@@ -1163,6 +1193,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       op.stage !== 'inventory-confirmed'
     )
       discardStagedBambu(options.stateDirectory, op.operation_id)
+    if (
+      op.target.backend === 'kobralink-anycubic' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      discardStagedKobraCert(options.stateDirectory, op.operation_id)
     switch (op.stage) {
       case 'local-committed':
       case 'inventory-confirmed':

@@ -55,6 +55,7 @@ export const PrinterState = z
     printerKey: z.string().min(1).max(128),
     localWebUiOrigin: LocalWebUiOrigin.optional(),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
+    statusReason: z.enum(['client-certificate-missing']).optional(),
     progress: z.number().min(0).max(1).optional(),
     materials: z
       .array(

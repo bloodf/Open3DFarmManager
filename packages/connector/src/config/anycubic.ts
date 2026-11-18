@@ -22,6 +22,7 @@ export const AnycubicBinding = z.strictObject({
     .regex(/^[a-fA-F0-9]{64}$/)
     .optional(),
   passwordFile: z.string().min(1).max(4096),
+  clientCertFile: z.string().min(1).max(4096).optional(),
 })
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })

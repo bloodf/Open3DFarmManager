@@ -301,6 +301,18 @@ export const printerStateLabel: Record<
   offline: 'Indisponível segundo o Connector',
 }
 
+export function formatPrinterStateLabel(
+  printer: Pick<z.infer<typeof PrinterState>, 'state' | 'statusReason'>,
+): string {
+  if (
+    printer.state === 'offline' &&
+    printer.statusReason === 'client-certificate-missing'
+  ) {
+    return 'Certificado do cliente ausente (client certificate missing)'
+  }
+  return printerStateLabel[printer.state]
+}
+
 /** Live-region copy: only stable live/unavailable changes, never transient steps. */
 export function farmConnectionNotice(rows: readonly FarmRow[]) {
   return rows.some((row) => row.connection === 'authenticated')

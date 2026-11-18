@@ -7,6 +7,8 @@ import ConnectorContext from '../components/printer-setup/ConnectorContext.vue'
 import DiscoveryPanel from '../components/printer-setup/DiscoveryPanel.vue'
 import OperationStatus from '../components/printer-setup/OperationStatus.vue'
 import PreparedReview from '../components/printer-setup/PreparedReview.vue'
+import PrintersFarmSelector from '../components/printer-setup/PrintersFarmSelector.vue'
+import PrintersNavIntro from '../components/printer-setup/PrintersNavIntro.vue'
 import RegisterAssignment from '../components/printer-setup/RegisterAssignment.vue'
 import RevokeConfirmation from '../components/printer-setup/RevokeConfirmation.vue'
 import SetupForm from '../components/printer-setup/SetupForm.vue'
@@ -19,6 +21,10 @@ import {
   withoutBambuAccessCode,
 } from '../utils/bambu-onboarding.ts'
 import { validateCrealityTargetInput } from '../utils/creality-onboarding.ts'
+import {
+  buildKobraCertTargetOption,
+  sanitizeTargetForClientStorage,
+} from '../utils/kobra-client-cert-ui.ts'
 import { validateKobraXTargetInput } from '../utils/kobralink-onboarding.ts'
 import {
   validateMoonrakerTargetInput,
@@ -35,11 +41,13 @@ import {
 } from '../utils/printer-setup-state.ts'
 
 const state = createPrinterSetupState()
-const { farms, farmId, nextFarm, canManage, pending, error, message } = state
+const { farmId, canManage, pending, error, message } = state
 const { heading, errorSummary, kobraErrorSummary, revokeTarget } = state
 const { kobraBusy, kobraBootstrap, kobraError, kobraStatus, kobraStage } = state
 const { kobraKeyState, kobraAgentId, kobraKeyId, kobraOperation } = state
 const { kobraIp, kobraLabel, kobraExpectedDeviceId, kobraUnknownNotice } = state
+const { kobraCertSource, kobraCertInstallPath, kobraCertError } = state
+const { kobraCertInline, clearKobraClientCert } = state
 const { onboardingFamily, anycubicHost, anycubicPort, anycubicModelId } = state
 const { anycubicDeviceId, anycubicUsername, anycubicPassword } = state
 const { anycubicCaFile, anycubicPin, crealityHost } = state
@@ -139,10 +147,29 @@ async function prepareKobraX() {
   if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
   kobraError.value = ''
   kobraStatus.value = ''
+  const certOption =
+    typeof buildKobraCertTargetOption === 'function' &&
+    typeof kobraCertSource !== 'undefined'
+      ? buildKobraCertTargetOption({
+          source: kobraCertSource.value,
+          installPath: kobraCertInstallPath.value,
+          inlinePayload: kobraCertInline.value,
+          certError: kobraCertError.value,
+        })
+      : { ok: true as const, clientCertificate: undefined }
+  if (!certOption.ok) {
+    kobraError.value = certOption.error
+    await nextTick()
+    kobraErrorSummary.value?.focus()
+    return
+  }
   const validated = validateKobraXTargetInput({
     ipv4: kobraIp.value,
     displayLabel: kobraLabel.value,
     expectedDeviceId: kobraExpectedDeviceId.value,
+    ...(certOption.clientCertificate
+      ? { clientCertificate: certOption.clientCertificate }
+      : {}),
   })
   const expectedRevision = kobraBootstrap.value.data.bootstrap.revision
   if (!validated.ok || expectedRevision === null) {
@@ -165,13 +192,17 @@ async function prepareKobraX() {
     if (kobraKeyState.value.kind !== 'available')
       throw new Error('Approved browser key required')
     if (token !== kobraGeneration || opController.signal.aborted) return
+    const safeTarget =
+      typeof sanitizeTargetForClientStorage === 'function'
+        ? sanitizeTargetForClientStorage(validated.target)
+        : validated.target
     const candidate: KobraOperationContext = {
       accountId: kobraKeyState.value.accountId,
       operationId: crypto.randomUUID(),
       farmId: farmId.value,
       agentId: kobraAgentId.value,
       keyId: kobraKeyId.value,
-      target: validated.target,
+      target: safeTarget,
       targetSha256,
       expectedRevision,
       displayLabel: validated.displayLabel,
@@ -182,12 +213,13 @@ async function prepareKobraX() {
     if (token !== kobraGeneration) return
     const outcome = await session.prepare({
       operationId: candidate.operationId,
-      target: candidate.target,
+      target: validated.target,
       expectedRevision: candidate.expectedRevision,
       signal: opController.signal,
       beforeDispatch: () => {
         if (token !== kobraGeneration || opController.signal.aborted)
           throw new Error('Configuration context changed before dispatch')
+        if (typeof clearKobraClientCert === 'function') clearKobraClientCert()
         persistPendingOperation(candidate, 'awaiting-reconcile')
         opContext = candidate
         kobraOperation.value = candidate
@@ -504,48 +536,12 @@ onBeforeRouteLeave(setup.clear)
 <template>
   <main id="conteudo">
     <h1 ref="heading" tabindex="-1">Impressoras da farm</h1>
-    <p>
-      <NuxtLink to="/compatibilidade"
-        >Consultar compatibilidade de impressoras</NuxtLink
-      >
-    </p>
-    <nav aria-label="Conta">
-      <NuxtLink to="/">Início</NuxtLink> ·
-      <NuxtLink to="/farm">Minha farm</NuxtLink> ·
-      <NuxtLink to="/connectors">Connectors</NuxtLink> ·
-      <NuxtLink to="/parear">Aprovar Connector</NuxtLink> ·
-      <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink> ·
-      <NuxtLink to="/sair">Sair da conta</NuxtLink>
-    </nav>
-    <p>
-      Consulte as atribuições de impressoras. Sem conexão direta com o
-      Connector, o modo degradado é somente leitura para operação: esta página
-      não envia comandos de impressão nem acessa câmeras.
-    </p>
+    <PrintersNavIntro />
     <p v-if="error" ref="errorSummary" role="alert" tabindex="-1">
       {{ error }} <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
     </p>
     <p role="status" aria-live="polite">{{ pending ? 'Aguarde.' : message }}</p>
-    <label for="printer-farm">Farm</label
-    ><select
-      id="printer-farm"
-      v-model="farmId"
-      :disabled="pending"
-      @change="setup.selectFarm"
-    >
-      <option value="">Selecione uma farm</option>
-      <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
-        {{ farm.farmId }}
-      </option>
-    </select>
-    <button
-      v-if="nextFarm"
-      type="button"
-      :disabled="pending"
-      @click="setup.loadFarms(nextFarm)"
-    >
-      Próximas farms
-    </button>
+    <PrintersFarmSelector />
     <AssignmentList />
     <section
       v-if="farmId && canManage"

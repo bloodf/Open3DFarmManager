@@ -273,6 +273,7 @@ export function createFarmSnapshotSource(input: {
           ...(
             [
               'identity',
+              'statusReason',
               'progress',
               'filename',
               'materials',
@@ -404,6 +405,9 @@ export function createFarmSnapshotSource(input: {
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.statusReason
+        ? { statusReason: parsedPrinter.data.statusReason }
+        : {}),
       ...(parsedPrinter.data.fans ? { fans: parsedPrinter.data.fans } : {}),
       ...(parsedPrinter.data.light ? { light: parsedPrinter.data.light } : {}),
       ...(parsedPrinter.data.progress === undefined

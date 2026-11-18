@@ -5,7 +5,7 @@ import { appendFile, open, realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
 import { browserBundle } from './browser-bundle.ts'
 import type { JSHandle } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import type {
   FixtureIdentityHandles,
   ProvisionedSignallingFixture,

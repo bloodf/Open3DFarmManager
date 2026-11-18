@@ -76,7 +76,7 @@ test('CI workflow includes manual-trigger Node 22 job next to Node 24 job', () =
   assert.match(workflow, /^\s{2}code-node22:\s*$/m)
   assert.match(
     workflow,
-    /code-node22:[\s\S]*?node-version:\s*'22\.23\.5'[\s\S]*?run:\s*pnpm run check:all/,
+    /code-node22:[\s\S]*?node-version:\s*'22\.23\.5'[\s\S]*?run:\s*npm run check:all/,
   )
 })
 

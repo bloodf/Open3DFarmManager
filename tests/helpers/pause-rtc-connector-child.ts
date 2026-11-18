@@ -1,4 +1,4 @@
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { pathToFileURL } from 'node:url'
 import { generateKeyPairSync } from 'node:crypto'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'

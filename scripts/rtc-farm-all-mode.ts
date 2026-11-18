@@ -200,10 +200,11 @@ export async function runAllAcceptance(checkout: string) {
 
   // Outage acceptance consumes the same checkout's built farm artifact. Build
   // once here so the outage runner never silently uses a stale .output tree.
-  const build = await execute('farm-build', 'pnpm', [
-    '--dir',
-    'apps/farm',
+  const build = await execute('farm-build', 'npm', [
+    'run',
     'build',
+    '-w',
+    '@open3dfarmmanager/farm',
   ])
   rows.push({ suite: 'build', row: 'apps/farm', passed: build.code === 0 })
   const outage = await execute('connector-outage', process.execPath, [

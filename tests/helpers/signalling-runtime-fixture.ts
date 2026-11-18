@@ -19,7 +19,7 @@ import { IncomingMessage } from 'node:http'
 import { Socket } from 'node:net'
 import { EventEmitter } from 'node:events'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import { SignallingRuntime } from '../../apps/farm/server/services/signalling-runtime.ts'
 import { signallingSocketHooks } from '../../apps/farm/server/services/signalling-routes.ts'
 import {

@@ -56,7 +56,7 @@ window.cameraDisplay = {
       __VUE_PROD_DEVTOOLS__: 'false',
       __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
     },
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
   })
   return {
     js: bundled.outputFiles[0]!.text,

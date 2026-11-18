@@ -44,7 +44,7 @@ export const render = (props) => __render(__create(__component, props))`
     platform: 'node',
     format: 'esm',
     write: false,
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
   })
   const dir = mkdtempSync(join(tmpdir(), 'o3dfm-spool-'))
   try {

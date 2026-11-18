@@ -1,7 +1,7 @@
 // Explicit test-only runner: Connector outage and restart acceptance (issue #6).
 // Built farm server, real Connector CLI process and a synthetic loopback
 // Moonraker. Never contacts a physical printer, never accepts a database URL or
-// an existing container. Needs a built app: pnpm --dir apps/farm build
+// an existing container. Needs a built app: npm run build -w @open3dfarmmanager/farm
 //   OPENFARM_SIM=mock (default): disposable local PostgreSQL 17 cluster behind the
 //     loopback fault proxy; a database freeze is a proxy blackhole. No Docker.
 //   OPENFARM_SIM=docker (opt-in): disposable digest-pinned PostgreSQL 17 container

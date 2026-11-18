@@ -1,11 +1,10 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { createRequire } from 'node:module'
-const native: typeof import('../../packages/connector/node_modules/node-datachannel') =
-  createRequire(
-    new URL('../../packages/connector/package.json', import.meta.url),
-  )('node-datachannel')
+const native: typeof import('node-datachannel') = createRequire(
+  new URL('../../packages/connector/package.json', import.meta.url),
+)('node-datachannel')
 const { cleanup, getLibraryVersion } = native
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { PauseConnectorPeer } from '../../packages/connector/src/webrtc/pause-control-peer.ts'
 import {

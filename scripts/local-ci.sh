@@ -92,19 +92,19 @@ if ((containers)); then
   if ((available < 10485760)); then printf '%s\n' 'Insufficient free disk for container jobs (10 GiB minimum).'; exit 2; fi
 fi
 code_job() {
-  if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
-    printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
+  if ! command -v npm >/dev/null || ! command -v node >/dev/null; then
+    printf '%s\n' 'UNSUPPORTED: npm and Node are required.' >&2; return 2
   fi
   local node_ver
   node_ver=$(node --version)
-  [[ $(pnpm --version) == 12.18.0 && $node_ver =~ ^v(22\.(1[89]|[2-9][0-9])\.[0-9]+|2[34]\.[0-9]+\.[0-9]+)$ ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node >=22.18.0 <25.' >&2; return 2; }
+  [[ $node_ver =~ ^v(22\.(1[89]|[2-9][0-9])\.[0-9]+|2[34]\.[0-9]+\.[0-9]+)$ ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Node >=22.18.0 <25.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
-  pnpm install --frozen-lockfile --ignore-scripts
-  pnpm run lint
-  pnpm run check:all
+  npm ci --ignore-scripts
+  npm run lint
+  npm run check:all
   node packages/connector/dist/cli.js --version
   # Browser and OS libraries must already be installed; never install system packages implicitly.
-  pnpm run test:e2e
+  npm run test:e2e
 }
 image_job() {
   if docker image inspect "$image_tag" >/dev/null 2>&1 || docker container inspect "$container_name" >/dev/null 2>&1; then
@@ -145,10 +145,10 @@ image_job() {
   return 1
 }
 klipper_job() {
-  if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
-    printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
+  if ! command -v npm >/dev/null || ! command -v node >/dev/null; then
+    printf '%s\n' 'UNSUPPORTED: npm and Node are required.' >&2; return 2
   fi
-  [[ $(pnpm --version) == 12.18.0 && -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: pnpm 12.18.0 and existing workspace dependencies are required.' >&2; return 2; }
+  [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: existing workspace dependencies are required.' >&2; return 2; }
   if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker volume ls -q --filter "label=com.docker.compose.project=$project_name") ||
         -n $(docker network ls -q --filter "label=com.docker.compose.project=$project_name") ]]; then
@@ -168,7 +168,7 @@ klipper_job() {
     return 2
   fi
   if ! docker image inspect "$sim_image" >/dev/null 2>&1; then sim_image_preexisting=0; fi
-  pnpm install --frozen-lockfile --ignore-scripts
+  npm ci --ignore-scripts
   docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper config --quiet
   sim_started=1
   local failure
@@ -177,7 +177,7 @@ klipper_job() {
     node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
     return "$failure"
   fi
-  if env -u SIM_SV06_URL -u SIM_U1_URL pnpm run sim:smoke; then :; else
+  if env -u SIM_SV06_URL -u SIM_U1_URL npm run sim:smoke; then :; else
     failure=$?
     node scripts/klipper-diagnostics.mjs "$project_name" > "$ledger/simulator-failure.log" 2>&1 || true
     return "$failure"

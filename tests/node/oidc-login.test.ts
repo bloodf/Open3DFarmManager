@@ -14,7 +14,7 @@ import {
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import * as client from '../../apps/farm/node_modules/openid-client/build/index.js'
+import * as client from 'openid-client'
 import { PostgresOidc } from '../../apps/farm/server/storage/postgres-oidc.ts'
 import { readOidcConfig } from '../../apps/farm/server/utils/oidc-config.ts'
 import {

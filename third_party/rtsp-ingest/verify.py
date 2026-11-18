@@ -80,7 +80,7 @@ assert graph["coverage"]["unretained_declarations"] == [edge for edge in edges i
 notices = (root / "THIRD_PARTY_NOTICES.txt").read_text()
 assert sum(line.startswith("Source ") for line in notices.splitlines()) == 44
 mod = (repo / "tools/rtsp-ingest/go.mod").read_text()
-assert mod.startswith("module open3dfarm.local/rtsp-ingest\n\ngo 1.27.1\n")
+assert mod.startswith("module open3dfarm.local/rtsp-ingest\n\ngo 1.26.0\n")
 assert not re.search(r"(?m)^toolchain\s", mod)
 assert len(requirements) == len(graph["main_require_pins"])
 assert (repo / "tools/rtsp-ingest/go.sum").read_bytes() == (root / "sources/github.com--bluenviron--gortsplib--v5/go.sum").read_bytes()

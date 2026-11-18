@@ -1,4 +1,4 @@
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { pathToFileURL } from 'node:url'
 import { BrowserDeviceUuid } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
@@ -159,9 +159,7 @@ async function run() {
     providerClosed = false,
     admissionDeadline = 0,
     sourceDeadline = 0
-  let native:
-    | typeof import('../../packages/connector/node_modules/node-datachannel')
-    | undefined
+  let native: typeof import('node-datachannel') | undefined
   let pending = Buffer.alloc(0),
     receivedBytes = 0,
     requests = 0

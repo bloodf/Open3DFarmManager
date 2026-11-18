@@ -2,7 +2,7 @@
 // acceptance (issue #2). Starts the infra/sim Compose stack under its own
 // project, a disposable digest-pinned PostgreSQL 17, the built farm server and
 // the real Connector CLI. Read-only: never sends a printer command and never
-// contacts a physical printer. Needs a built app: pnpm --dir apps/farm build
+// contacts a physical printer. Needs a built app: npm run build -w @open3dfarmmanager/farm
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'

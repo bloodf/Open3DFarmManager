@@ -68,9 +68,10 @@ finish() {
 trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-ndc=$(realpath "$here/../../../packages/connector/node_modules/node-datachannel")
+modules=$(realpath "$here/../../../node_modules")
 mkdir -p "$NETFAULT_NDC/node_modules"
-cp -rL "$(dirname "$ndc")/." "$NETFAULT_NDC/node_modules/"
+# Mount only node-datachannel and its runtime dependency into the router.
+cp -rL "$modules/node-datachannel" "$modules/detect-libc" "$NETFAULT_NDC/node_modules/"
 printf '{"private":true}\n' > "$NETFAULT_NDC/package.json"
 chmod -R a+rX "$NETFAULT_NDC"
 router() { dc exec -T -e O="$NETFAULT_OCTET" router sh -euc "$1"; }

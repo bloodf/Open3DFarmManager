@@ -14,7 +14,7 @@ export default defineConfig({
   },
   webServer: {
     env: { BROWSERSLIST: 'last 1 Chrome version' },
-    command: 'pnpm --dir apps/farm dev --port 3197',
+    command: 'npm run dev -w @open3dfarmmanager/farm -- --port 3197',
     url: 'http://127.0.0.1:3197/impressoras',
     reuseExistingServer: false,
     timeout: 120_000,

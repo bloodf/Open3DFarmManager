@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 
 const uuid = z.uuid()
 const digest = z.string().regex(/^[A-Za-z0-9_-]{43}$/)

@@ -1,5 +1,8 @@
-import { createServer } from 'node:http'
+// SPDX-License-Identifier: MIT
 import { createRequire } from 'node:module'
+import { FaultController } from './mocks/faults.ts'
+import { startHttpMock } from './mocks/http-mock.ts'
+import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
 
 const require = createRequire(
   new URL('../../connector/package.json', import.meta.url),
@@ -7,20 +10,23 @@ const require = createRequire(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { WebSocketServer } = require('ws') as any
 
+export interface CrealitySimulatorOptions {
+  durationMs?: number | undefined
+  totalLayers?: number | undefined
+  fail?: boolean | undefined
+  /**
+   * Re-sends the current status at this interval, as stock firmware keeps
+   * pushing status while connected. Absent: frames only on change.
+   */
+  heartbeatMs?: number | undefined
+  scenario?: ScenarioStep<Record<string, unknown>>[] | undefined
+}
+
 export async function createCrealitySimulator(
   initialFrame: object = { state: 0 },
-  options: {
-    durationMs?: number
-    totalLayers?: number
-    fail?: boolean
-    /**
-     * Re-sends the current status at this interval, as stock firmware keeps
-     * pushing status while connected. Absent: frames only on change.
-     */
-    heartbeatMs?: number
-  } = {},
+  options: CrealitySimulatorOptions = {},
 ) {
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  const faults = new FaultController()
   const received: string[] = []
   const requests: Array<{ method: string; params: Record<string, unknown> }> =
     []
@@ -32,30 +38,89 @@ export async function createCrealitySimulator(
   let timer: ReturnType<typeof setInterval> | undefined
   let elapsed = 0
   let lastTick = 0
+  let closed = false
+  const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
   const duration = Math.max(1, options.durationMs ?? 1000)
   const layers = Math.max(1, Math.floor(options.totalLayers ?? 10))
 
-  const heartbeat =
-    options.heartbeatMs === undefined
-      ? undefined
-      : setInterval(
-          () => broadcast(currentFrame),
-          Math.max(10, options.heartbeatMs),
-        )
+  const wss = new WebSocketServer({ noServer: true })
 
   function stopTimer() {
     if (timer) clearInterval(timer)
     timer = undefined
   }
 
-  function broadcast(payload: object) {
-    const data = JSON.stringify(payload)
+  function disconnect() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const client of server.clients as Set<any>) {
+    for (const socket of wss.clients as Set<any>) socket.terminate()
+  }
+
+  function sendRaw(data: string, targets?: Iterable<any>) {
+    const sockets = targets ?? (wss.clients as Set<any>)
+    for (const client of sockets) {
       if (client.readyState === 1 /* OPEN */) {
         client.send(data)
       }
     }
+  }
+
+  function formatMalformed(payload?: Buffer | string): string {
+    if (typeof payload === 'string') return payload
+    if (Buffer.isBuffer(payload)) return payload.toString('utf8')
+    return '{malformed'
+  }
+
+  function broadcast(payload: object, targets?: Iterable<any>) {
+    const fault = faults.matchFault({ path: '/', method: 'REPORT' })
+    if (fault) {
+      if (fault.type === 'drop') {
+        disconnect()
+        return
+      }
+      if (fault.type === 'refuse' || fault.type === 'stall') {
+        return
+      }
+      if (fault.type === 'malformed') {
+        sendRaw(formatMalformed(fault.payload), targets)
+        return
+      }
+      if (fault.type === 'delay') {
+        const data = JSON.stringify(payload)
+        const delayTimer = setTimeout(() => {
+          pendingTimers.delete(delayTimer)
+          if (!closed) sendRaw(data, targets)
+        }, fault.delayMs)
+        pendingTimers.add(delayTimer)
+        return
+      }
+    }
+    sendRaw(JSON.stringify(payload), targets)
+  }
+
+  function emitWithAckFault(payload: object) {
+    const ackFault = faults.matchFault({ path: '/', method: 'ACK' })
+    if (ackFault) {
+      if (ackFault.type === 'drop') {
+        disconnect()
+        return
+      }
+      if (ackFault.type === 'refuse' || ackFault.type === 'stall') {
+        return
+      }
+      if (ackFault.type === 'malformed') {
+        sendRaw(formatMalformed(ackFault.payload))
+        return
+      }
+      if (ackFault.type === 'delay') {
+        const delayTimer = setTimeout(() => {
+          pendingTimers.delete(delayTimer)
+          if (!closed) broadcast(payload)
+        }, ackFault.delayMs)
+        pendingTimers.add(delayTimer)
+        return
+      }
+    }
+    broadcast(payload)
   }
 
   function startPrint(name: string) {
@@ -72,7 +137,7 @@ export async function createCrealitySimulator(
       totalLayer: layers,
       TotalLayer: layers,
     })
-    broadcast(currentFrame)
+    emitWithAckFault(currentFrame)
     timer = setInterval(
       () => {
         const now = Date.now()
@@ -118,7 +183,7 @@ export async function createCrealitySimulator(
       )
       const busy = currentFrame.state === 1 || currentFrame.state === 2
       if (stored.has(name) && !timer && !busy) startPrint(name)
-      else broadcast(currentFrame)
+      else emitWithAckFault(currentFrame)
       return
     }
 
@@ -164,15 +229,41 @@ export async function createCrealitySimulator(
       currentFrame.autohome = params.autohome
     }
 
-    broadcast(currentFrame)
+    emitWithAckFault(currentFrame)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  server.on('connection', (socket: any) => {
+  wss.on('connection', (socket: any) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     socket.on('message', (data: any) => {
       const raw = data.toString()
       received.push(raw)
+      const msgFault = faults.matchFault({ path: '/', method: 'PUBLISH' })
+      if (msgFault) {
+        if (msgFault.type === 'drop') {
+          socket.terminate()
+          return
+        }
+        if (msgFault.type === 'refuse' || msgFault.type === 'stall') {
+          return
+        }
+        if (msgFault.type === 'delay') {
+          const delayTimer = setTimeout(() => {
+            pendingTimers.delete(delayTimer)
+            if (closed) return
+            try {
+              const parsed = JSON.parse(raw)
+              if (parsed && typeof parsed === 'object') {
+                applyCommand(parsed.method, parsed.params)
+              }
+            } catch {
+              // ignore malformed message in raw simulator stream
+            }
+          }, msgFault.delayMs)
+          pendingTimers.add(delayTimer)
+          return
+        }
+      }
       try {
         const parsed = JSON.parse(raw)
         if (parsed && typeof parsed === 'object') {
@@ -182,54 +273,98 @@ export async function createCrealitySimulator(
         // ignore malformed message in raw simulator stream
       }
     })
-    socket.send(JSON.stringify(currentFrame))
+    broadcast(currentFrame, [socket])
   })
 
-  await new Promise<void>((resolve) => server.once('listening', resolve))
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Missing address')
+  const wsHttp = await startHttpMock({
+    faults,
+    onUpgrade: (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws: unknown) => {
+        wss.emit('connection', ws, req)
+      })
+    },
+  })
 
   // Stock HTTP upload: POST /upload/<name> with a multipart body. The body is
   // drained and counted, never parsed or kept.
-  const http = createServer((request, response) => {
-    const match = /^\/upload\/([^/?#]+)$/.exec(request.url ?? '')
-    if (request.method !== 'POST' || !match) {
-      request.resume()
-      response.writeHead(404).end()
-      return
-    }
-    let name: string
-    try {
-      name = decodeURIComponent(match[1]!)
-    } catch {
-      request.resume()
-      response.writeHead(400).end()
-      return
-    }
-    let bytes = 0
-    request.on('data', (chunk: Buffer) => {
-      bytes += chunk.length
-    })
-    request.on('end', () => {
-      stored.set(name, bytes)
+  const uploadHttp = await startHttpMock({
+    faults,
+    handler: (request, response, body) => {
+      const match = /^\/upload\/([^/?#]+)$/.exec(request.url ?? '')
+      if (request.method !== 'POST' || !match) {
+        response.writeHead(404).end()
+        return
+      }
+      let name: string
+      try {
+        name = decodeURIComponent(match[1]!)
+      } catch {
+        response.writeHead(400).end()
+        return
+      }
+      stored.set(name, body.length)
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ code: 200 }))
-    })
-    request.on('error', () => response.destroy())
+    },
   })
-  await new Promise<void>((resolve, reject) => {
-    http.once('error', reject)
-    http.listen(0, '127.0.0.1', resolve)
+
+  const heartbeat =
+    options.heartbeatMs === undefined
+      ? undefined
+      : setInterval(
+          () => {
+            if (wss.clients.size > 0) broadcast(currentFrame)
+          },
+          Math.max(10, options.heartbeatMs),
+        )
+
+  const scenario = new ScenarioController<Record<string, unknown>>({
+    steps: options.scenario,
+    applyState: (patch) => {
+      Object.assign(currentFrame, patch)
+    },
+    publishReport: (report) => {
+      if (report && typeof report === 'object') {
+        broadcast(report as object)
+      } else if (typeof report === 'string') {
+        sendRaw(report)
+      }
+    },
+    getState: () => ({ ...currentFrame }),
   })
-  const httpAddress = http.address()
-  if (!httpAddress || typeof httpAddress === 'string')
-    throw new Error('Missing HTTP address')
+
+  const ports = Object.assign(
+    [wsHttp.ports.default, uploadHttp.ports.default],
+    {
+      default: wsHttp.ports.default,
+      ws: wsHttp.ports.default,
+      http: uploadHttp.ports.default,
+    },
+  ) as { default: number; ws: number; http: number } & number[]
+
+  let closing: Promise<void> | undefined
 
   return {
-    port: address.port,
+    port: wsHttp.ports.default,
     /** Loopback port of the stock HTTP upload endpoint. */
-    httpPort: httpAddress.port,
+    httpPort: uploadHttp.ports.default,
+    origin: wsHttp.origin.replace(/^http:/, 'ws:'),
+    ports,
+    calls: wsHttp.calls,
+    httpCalls: uploadHttp.calls,
+    control: {
+      faults,
+      scenario,
+      disconnect,
+      setFrame(patch: object) {
+        Object.assign(currentFrame, patch)
+        broadcast(currentFrame)
+      },
+      emitFrame(frame: object) {
+        broadcast(frame)
+      },
+      getState: () => ({ ...currentFrame }),
+    },
     /** Names stored over HTTP, with the received body size in bytes. */
     get uploads() {
       return new Map(stored)
@@ -247,22 +382,22 @@ export async function createCrealitySimulator(
     emitFrame(frame: object) {
       broadcast(frame)
     },
-    disconnect() {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const socket of server.clients as Set<any>) socket.terminate()
-    },
-    async close() {
+    disconnect,
+    close() {
+      closed = true
       stopTimer()
       clearInterval(heartbeat)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const socket of server.clients as Set<any>) socket.terminate()
-      await new Promise<void>((resolve, reject) =>
-        server.close((error: unknown) => (error ? reject(error) : resolve())),
-      )
-      http.closeAllConnections()
-      await new Promise<void>((resolve, reject) =>
-        http.close((error) => (error ? reject(error) : resolve())),
-      )
+      scenario.stop()
+      for (const pending of pendingTimers) clearTimeout(pending)
+      pendingTimers.clear()
+      closing ??= (async () => {
+        disconnect()
+        await new Promise<void>((resolve, reject) =>
+          wss.close((error: unknown) => (error ? reject(error) : resolve())),
+        )
+        await Promise.all([wsHttp.close(), uploadHttp.close()])
+      })()
+      return closing
     },
   }
 }

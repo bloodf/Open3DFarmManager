@@ -41,12 +41,9 @@ export async function until(
 
 /** Synthetic Moonraker: subscribe baseline plus explicit notify_status_update pushes. */
 export async function startFakeMoonraker(port: number) {
-  const {
-    WebSocketServer,
-  }: typeof import('../../packages/connector/node_modules/@types/ws') =
-    createRequire(
-      new URL('../../packages/connector/package.json', import.meta.url),
-    )('ws')
+  const { WebSocketServer }: typeof import('ws') = createRequire(
+    new URL('../../packages/connector/package.json', import.meta.url),
+  )('ws')
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 4096 })
   let eventtime = 1
   let state: 'printing' | 'paused' = 'printing'

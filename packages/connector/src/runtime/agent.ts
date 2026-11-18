@@ -630,6 +630,7 @@ async function runConnectorAgentOnce(
       collectIntoQueue({
         config: config.collection,
         discoverMoonrakerObjects: true,
+        importMoonrakerHistory: true,
         onLoss: (value) => logger.warn('queue-loss', { ...value }),
         ...(input.onInventory || snapshots
           ? {

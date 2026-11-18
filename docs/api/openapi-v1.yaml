@@ -524,7 +524,10 @@ paths:
       description: |
         Ended jobs from the farm's job history, newest first, for printers
         covered by a `jobs:read` grant. `since` and `until` filter on `endedAt`
-        (inclusive, exclusive).
+        (inclusive, exclusive). Finished jobs the Connector did not watch end
+        are imported from Moonraker's own print history on connect and after
+        reconnects (bounded pages, at most 200 recent jobs). An import never
+        repeats a job already recorded for the printer and end time.
       security:
         - clientCredentials: ['jobs:read']
       parameters:

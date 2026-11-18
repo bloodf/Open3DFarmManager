@@ -72,12 +72,26 @@ test('simulator applies extended requests', async () => {
     for (let i = 0; i < 100 && peer.requests.length < 6; i++)
       await new Promise((resolve) => setTimeout(resolve, 10))
     assert.deepEqual(peer.extendedState, {
+      nozzle_temper: 210,
+      bed_temper: 60,
+      ams: {
+        ams: [
+          {
+            id: 0,
+            tray: [
+              { id: 0, tray_type: 'PLA', tray_color: 'FFFFFFFF', remain: 100 },
+            ],
+          },
+        ],
+      },
       M104: 200,
       'M106 P1': 255,
       homed_axes: 'X Y',
       light: 'on',
       speed: '3',
       file: 'file:///sdcard/test.3mf',
+      subtask_name: 'test.3mf',
+      gcode_file: 'test.3mf',
     })
     assert.equal(peer.gcodeState, 'RUNNING')
   } finally {

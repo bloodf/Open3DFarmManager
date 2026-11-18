@@ -1,5 +1,8 @@
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
+import { readBambuCredentials } from '../bambu/credentials.ts'
+import { readBambuPrinterBinding } from '../control/printer-binding.ts'
 import { createKobraLinkFilesTarget } from '../kobralink/runtime.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import type { FileListOptions, FileListTarget } from './file-list.ts'
@@ -28,6 +31,40 @@ export function createFileTargets(input: {
   )?.printer_key
   const targets = (): Targets | undefined => {
     if (controlledKey === undefined) return undefined
+    if (collection.version === 3) {
+      const handle = input.config.bindingFor(input.assignmentId)
+      const binding = handle && readBambuPrinterBinding(handle)
+      if (!binding || binding.printerKey !== controlledKey) return undefined
+      const credentials = readBambuCredentials(binding)
+      return {
+        upload: {
+          backend: 'bambu',
+          host: binding.host,
+          serial: binding.serial,
+          accessCode: credentials.password,
+          port: binding.ftpsPort,
+          trust: {
+            ...(binding.caFile
+              ? { caPem: readFileSync(binding.caFile, 'utf8') }
+              : {}),
+            ...(binding.pinSha256 ? { pinSha256: binding.pinSha256 } : {}),
+          },
+        },
+        list: {
+          backend: 'bambu',
+          host: binding.host,
+          serial: binding.serial,
+          accessCode: credentials.password,
+          port: binding.ftpsPort,
+          trust: {
+            ...(binding.caFile
+              ? { caPem: readFileSync(binding.caFile, 'utf8') }
+              : {}),
+            ...(binding.pinSha256 ? { pinSha256: binding.pinSha256 } : {}),
+          },
+        },
+      }
+    }
     if (collection.version === 2) {
       const binding = collection.kobralink.printers.find(
         (printer) => printer.printerKey === controlledKey,

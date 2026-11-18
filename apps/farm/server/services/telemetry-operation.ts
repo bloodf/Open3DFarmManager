@@ -14,6 +14,7 @@ export interface TelemetryOperation {
   bodyHash: string
   bodyBytes: number
   records: TelemetryEvent[]
+  inventorySnapshots: Extract<TelemetryEvent, { kind: 'inventory-snapshot' }>[]
 }
 export function prepareTelemetryOperation(input: unknown): TelemetryOperation {
   if (
@@ -27,13 +28,14 @@ export function prepareTelemetryOperation(input: unknown): TelemetryOperation {
   const records = TelemetryBatch.parse(
     parseBoundedJson(text, {
       maxBytes: 65536,
-      maxDepth: 5,
+      maxDepth: 7,
       maxValues: 2000,
       maxStringChars: 128,
     }),
   )
   for (const record of records) {
     const key = telemetryPrinterKey(record)
+    if (key === null) continue
     if (
       key.includes('\0') ||
       /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
@@ -49,5 +51,11 @@ export function prepareTelemetryOperation(input: unknown): TelemetryOperation {
     bodyHash: createHash('sha256').update(bytes).digest('base64url'),
     bodyBytes: bytes.byteLength,
     records,
+    inventorySnapshots: records.filter(
+      (
+        record,
+      ): record is Extract<TelemetryEvent, { kind: 'inventory-snapshot' }> =>
+        record.kind === 'inventory-snapshot',
+    ),
   }
 }

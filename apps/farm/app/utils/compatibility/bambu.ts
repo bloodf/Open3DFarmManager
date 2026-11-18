@@ -38,10 +38,8 @@ export interface BambuCatalogProduct {
  * (`packages/connector/src/bambu/camera.ts`).
  *
  * Arquivos seguem o caminho FTPS passivo, implementado e coberto por testes
- * (`packages/connector/src/bambu/files.ts` e `bambu/ftps.ts`). Observação: o
- * alvo de arquivos da coleção Bambu ainda não é montado por
- * `createFileTargets`, então a operação só é alcançável quando esse alvo é
- * fornecido (`packages/connector/src/runtime/file-targets.ts`).
+ * (`packages/connector/src/bambu/files.ts` e `bambu/ftps.ts`). O alvo usa a
+ * atribuição local provisionada e a credencial privada do Connector.
  */
 const bambuCapabilities = {
   telemetry: 'simulated',
@@ -73,7 +71,7 @@ const common = {
     'A data indica a publicação do anúncio, não a disponibilidade em cada região.',
     'Recursos comerciais não comprovam acesso por terceiros ou compatibilidade com o OpenFarm.',
     'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',
-    'Arquivos: a leitura e o envio por FTPS passivo foram exercitados contra o simulador; o alvo de arquivos da coleção Bambu ainda não é montado pela configuração de coleta, então a operação depende desse alvo.',
+    'Arquivos: leitura e envio por FTPS passivo foram exercitados contra o simulador com endereço local, TLS fixado e credencial privada; não comprovado em hardware.',
     'Materiais: leitura de bandejas AMS e comandos de carga e descarga de filamento foram simulados; não comprovado em hardware.',
     'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
   ],

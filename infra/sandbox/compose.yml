@@ -1,0 +1,72 @@
+x-node: &node
+  image: node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+  profiles: [sandbox]
+  working_dir: /workspace
+  user: '${SANDBOX_UID:?}:${SANDBOX_GID:?}'
+  volumes:
+    - ../..:/workspace:ro
+    - ${SANDBOX_STATE:?}:/sandbox:ro
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+services:
+  postgres:
+    image: postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232
+    profiles: [sandbox]
+    environment:
+      POSTGRES_USER: sandbox_bootstrap
+      POSTGRES_DB: sandbox
+      POSTGRES_PASSWORD: ${SANDBOX_DB_PASSWORD:?}
+    healthcheck:
+      test:
+        [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U sandbox_bootstrap -d sandbox']
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    ports:
+      - '127.0.0.1::5432'
+    volumes:
+      - database:/var/lib/postgresql/data
+  klipper:
+    extends:
+      file: ../sim/docker-compose.yml
+      service: sv06
+    profiles: [sandbox]
+    image: open3dfarmmanager-sandbox-klipper
+    ports: !override
+      - '127.0.0.1::7125'
+    volumes: !override
+      - klipper-data:/home/printer/printer_data
+      - ../sim/sv06/moonraker.conf:/home/printer/example-configs/moonraker.conf:ro
+    networks: !override [default]
+  bambu:
+    <<: *node
+    command: [node, infra/sandbox/bambu.ts]
+    ports:
+      - '127.0.0.1::9999'
+  app:
+    <<: *node
+    command: [node, --env-file=/sandbox/app.env, infra/sandbox/app.ts]
+    ports:
+      - '127.0.0.1::3000'
+  connector:
+    <<: *node
+    network_mode: service:bambu
+    depends_on: [app, bambu, klipper]
+    environment:
+      NODE_EXTRA_CA_CERTS: /sandbox/tls.crt
+    volumes: !override
+      - ../..:/workspace:ro
+      - ${SANDBOX_STATE:?}:/sandbox
+    command:
+      - node
+      - packages/connector/dist/cli.js
+      - run
+      - --config
+      - /sandbox/runtime.json
+      - --credential-file
+      - /sandbox/credential.json
+      - --data-dir
+      - /sandbox/connector-data
+volumes:
+  database:
+  klipper-data:

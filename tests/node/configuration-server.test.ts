@@ -815,6 +815,26 @@ test('authority is revalidated on every prepare/commit admission', async () => {
     deniedResult,
     'commit needs a prepared operation',
   )
+  assert.equal(
+    (
+      await f.challenge(session, {
+        action: 'status',
+        operationId: randomUUID(),
+        targetSha256,
+      })
+    ).ok,
+    true,
+    'printer discovery is a status request on a new operation',
+  )
+  assert.deepEqual(
+    await f.challenge(session, {
+      action: 'cancel',
+      operationId: randomUUID(),
+      targetSha256,
+    }),
+    deniedResult,
+    'cancel needs a prepared operation',
+  )
   const pinned = digest()
   assert.equal(
     (

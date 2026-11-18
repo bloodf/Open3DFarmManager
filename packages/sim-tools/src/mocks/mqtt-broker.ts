@@ -50,6 +50,8 @@ export interface MqttMessage {
 
 export interface MqttBrokerOptions {
   port?: number | undefined
+  /** Listen address; defaults to loopback. Non-loopback is an explicit opt-in (e.g. Docker sandbox). */
+  host?: string | undefined
   handshakeTimeout?: number | undefined
   socketTimeout?: number | undefined
   strictConnect?: boolean | undefined
@@ -605,7 +607,7 @@ export async function startMqttBroker(
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(options.port ?? 0, '127.0.0.1', () => {
+    server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => {
       server.removeListener('error', reject)
       resolve()
     })
@@ -617,7 +619,7 @@ export async function startMqttBroker(
   }
 
   const port = addr.port
-  const origin = `mqtts://127.0.0.1:${port}`
+  const origin = `mqtts://${options.host ?? '127.0.0.1'}:${port}`
 
   const ports = Object.assign([port], {
     default: port,

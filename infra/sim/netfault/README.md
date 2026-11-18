@@ -4,6 +4,52 @@ Opt-in WebRTC reachability checks for issue #2: NAT, latency/loss (netem) and
 UDP-block. Results and their meaning for the product are in
 [SIMULATOR-NETWORK-FAULTS-CHECKPOINT.md](../../../docs/SIMULATOR-NETWORK-FAULTS-CHECKPOINT.md).
 
+## Modes
+
+`OPENFARM_SIM=mock` (the default) needs no Docker and no root: the loopback fault
+proxy below covers the network faults. `OPENFARM_SIM=docker` keeps the Compose
+topology in this directory as an explicit opt-in; nothing here starts it unless
+`run.sh` is invoked.
+
+## Loopback fault proxy (no Docker)
+
+`fault-proxy.ts` forwards TCP and UDP on 127.0.0.1 to a loopback target. One
+fault set is shared by every forwarder and can change while traffic flows:
+
+```ts
+import { createNetFaultProxy } from './fault-proxy.ts'
+const proxy = createNetFaultProxy({ seed: 1 }) // seeded: loss and jitter reproduce
+const tcp = await proxy.forwardTcp({ targetPort: 5432 })
+const udp = await proxy.forwardUdp({ targetPort: 40000 })
+proxy.set({ latencyMs: 100, jitterMs: 10, loss: 0.05 }) // per direction
+proxy.set({ bandwidthBytesPerSec: 50_000 })
+proxy.set({ udpBlock: true }) // UDP-only block; TCP keeps flowing
+proxy.set({ blackhole: true }) // hold TCP (delivered on lift), drop UDP
+proxy.set({ reset: true }) // RST open connections, reset new ones
+proxy.clear()
+```
+
+| Fault     | TCP                                                  | UDP                                         |
+| --------- | ---------------------------------------------------- | ------------------------------------------- |
+| latency   | delays each chunk, order kept                        | delays each datagram; jitter may reorder    |
+| loss      | chunk delivered `retransmitMs` late (TCP hides loss) | datagram dropped                            |
+| bandwidth | serialises bytes at the cap, back-pressures senders  | serialises, tail-drops past 500 ms of queue |
+| reset     | RST on open connections, new ones reset immediately  | n/a                                         |
+| blackhole | accepts and holds data, delivers it when lifted      | dropped                                     |
+| udpBlock  | no effect                                            | dropped                                     |
+
+Targets must be loopback. Used by `scripts/test-connector-outage-recovery.ts`
+(a database freeze is a blackhole in front of a disposable local PostgreSQL, where
+Docker mode uses `docker pause`) and by `rtc-loopback.ts`: its signalling mock
+rewrites both peers' host candidates (`sdp-rewrite.ts`) to proxy UDP ports and drops
+every unproxied candidate, so ICE, DTLS and SCTP all cross the proxy both ways.
+`tests/node/e16-356.test.mjs` shows a data channel surviving 5 % loss with a
+200 ms round trip and failing cleanly under a UDP block.
+
+Not reproduced without Docker (network namespaces and root): NAT mapping and
+filtering, a second routed subnet, and kernel `tc`/`iptables` behaviour. NAT
+traversal results come only from the Docker topology below.
+
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
 infra/sim/netfault/run.sh nat 3 /path/to/evidence

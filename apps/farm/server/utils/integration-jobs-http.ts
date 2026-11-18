@@ -73,3 +73,23 @@ export async function submitIntegrationJobRequest(
     return integrationProblem('service-unavailable', headers)
   }
 }
+
+export async function getIntegrationJobRequest(
+  principal: IntegrationPrincipal,
+  jobId: string,
+  service: IntegrationJobsService,
+  headers?: HeadersInit,
+) {
+  try {
+    const result = await service.get(principal, jobId)
+    if ('error' in result) return integrationProblem(result.error, headers)
+    return Response.json(result, {
+      headers: {
+        ...Object.fromEntries(new Headers(headers)),
+        'cache-control': 'no-store',
+      },
+    })
+  } catch {
+    return integrationProblem('service-unavailable', headers)
+  }
+}

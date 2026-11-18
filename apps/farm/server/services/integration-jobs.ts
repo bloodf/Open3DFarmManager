@@ -81,6 +81,10 @@ export interface IntegrationJobsStore {
    * A retry of (app, key) returns the stored job and writes nothing.
    */
   create(job: NewJob, now: number): Promise<CreateJobOutcome>
+  get(
+    id: string,
+    appId: string,
+  ): Promise<{ record: JobRecord; envelope: EnvelopeRecord | null } | null>
 }
 export interface JobEnvelopes {
   issue(input: IssueEnvelope): Promise<IssueResult>
@@ -228,6 +232,35 @@ export class IntegrationJobsService {
 
   get maxFileBytes() {
     return this.o.maxFileBytes ?? DEFAULT_MAX_JOB_BYTES
+  }
+
+  async get(principal: IntegrationPrincipal, jobId: string) {
+    if (!uuidPattern.test(jobId)) return { error: 'not-found' as const }
+    const result = await this.o.store.get(jobId, principal.appId)
+    if (!result) return { error: 'not-found' as const }
+    if (
+      !principal.scopes.includes('jobs:read') &&
+      !principal.scopes.includes('jobs:start')
+    ) {
+      return { error: 'insufficient-scope' as const }
+    }
+    if (
+      !integrationGrantFor(
+        principal,
+        'jobs:read',
+        result.record.farmId,
+        result.record.printerAssignmentId,
+      ) &&
+      !integrationGrantFor(
+        principal,
+        'jobs:start',
+        result.record.farmId,
+        result.record.printerAssignmentId,
+      )
+    ) {
+      return { error: 'not-found' as const }
+    }
+    return jobView(result.record, result.envelope, this.now())
   }
 
   /**

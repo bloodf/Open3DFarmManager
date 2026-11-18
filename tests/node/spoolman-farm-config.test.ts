@@ -457,3 +457,180 @@ test('existing Connector-local Spoolman configs keep working unchanged', async (
   )
   assert.equal(readSpoolmanAuthorization(path, ORIGIN), undefined)
 })
+
+// --- Browser flow (mocked session): credentials ride only the RTC session ---
+import {
+  configureSpoolmanOnConnectors,
+  describeSpoolmanConfigurationError,
+  validateSpoolmanTargetInput,
+  withoutSpoolmanCredentials,
+  type SpoolmanOutcome,
+  type SpoolmanSession,
+} from '../../apps/farm/app/utils/spoolman-onboarding.ts'
+
+function fakeSession(script: {
+  prepare: SpoolmanOutcome
+  commit?: SpoolmanOutcome
+}) {
+  const log: string[] = []
+  const sent: unknown[] = []
+  const session: SpoolmanSession = {
+    advertisedRevision: 3,
+    async prepare(input) {
+      log.push('prepare')
+      sent.push(input.target)
+      assert.equal(input.expectedRevision, 3)
+      return script.prepare
+    },
+    async commit(input) {
+      log.push('commit')
+      assert.equal(input.completeInventory, false)
+      return script.commit ?? { kind: 'local-committed' }
+    },
+    async cancel() {
+      log.push('cancel')
+    },
+    close() {
+      log.push('close')
+    },
+  }
+  return { session, log, sent }
+}
+
+test('form validation rejects URLs with secrets/paths and never echoes input', () => {
+  const ok = validateSpoolmanTargetInput({
+    origin: ' http://192.168.1.60:7912/ ',
+    token: SECRET,
+  })
+  assert.equal(ok.ok, true)
+  if (ok.ok) assert.equal(ok.target.origin, ORIGIN)
+  for (const bad of [
+    { origin: 'http://u:p@host:1' },
+    { origin: 'http://host:1/x?y=1' },
+    { origin: 'http://host:1', username: 'only-user' },
+    { origin: 'http://host:1', token: SECRET, username: 'a', password: 'b' },
+  ]) {
+    const result = validateSpoolmanTargetInput(bad)
+    assert.equal(result.ok, false)
+    assert.equal(JSON.stringify(result).includes(SECRET), false)
+    assert.equal(JSON.stringify(result).includes('http://u:p@host'), false)
+  }
+  assert.deepEqual(
+    withoutSpoolmanCredentials(target({ token: SECRET })).origin,
+    ORIGIN,
+  )
+  assert.equal(
+    'token' in withoutSpoolmanCredentials(target({ token: SECRET })),
+    false,
+  )
+  assert.match(
+    describeSpoolmanConfigurationError('spoolman-unauthorized') ?? '',
+    /recusou as credenciais/,
+  )
+})
+
+test('page flow reports reachable, unreachable and unauthorized per Connector', async () => {
+  const scripts: Record<string, Parameters<typeof fakeSession>[0]> = {
+    a: {
+      prepare: { kind: 'prepared', targetSha256: 'h', receiptSha256: 'r' },
+    },
+    b: { prepare: { kind: 'error', code: 'spoolman-unreachable' } },
+    c: { prepare: { kind: 'error', code: 'spoolman-unauthorized' } },
+    d: { prepare: { kind: 'error', code: 'busy' } },
+    e: {
+      prepare: { kind: 'prepared', targetSha256: 'h', receiptSha256: 'r' },
+      commit: { kind: 'error', code: 'not-available' },
+    },
+  }
+  const sessions = new Map(
+    Object.entries(scripts).map(([id, s]) => [id, fakeSession(s)]),
+  )
+  const reports: Record<string, unknown>[] = []
+  const results = await configureSpoolmanOnConnectors({
+    target: target({ token: SECRET }),
+    agentIds: ['a', 'b', 'c', 'd', 'e'],
+    signal: new AbortController().signal,
+    openSession: async (id) => sessions.get(id)!.session,
+    report: async (r) => {
+      reports.push({ ...r })
+    },
+  })
+  assert.deepEqual(
+    results.map((r) => [r.agentId, r.status, r.configured]),
+    [
+      ['a', 'reachable', true],
+      ['b', 'unreachable', false],
+      ['c', 'unauthorized', false],
+      ['d', 'failed', false],
+      ['e', 'failed', false],
+    ],
+  )
+  // Server report is non-secret and only exists for definite outcomes.
+  assert.deepEqual(
+    reports.map((r) => [r.agentId, r.status, r.configured]),
+    [
+      ['a', 'reachable', true],
+      ['b', 'unreachable', false],
+      ['c', 'unauthorized', false],
+    ],
+  )
+  for (const report of reports) {
+    assert.deepEqual(Object.keys(report).sort(), [
+      'agentId',
+      'configured',
+      'origin',
+      'status',
+    ])
+    assert.equal(JSON.stringify(report).includes(SECRET), false)
+  }
+  // Failed commit cancels the staged credentials; every session is closed.
+  assert.deepEqual(sessions.get('e')!.log, [
+    'prepare',
+    'commit',
+    'cancel',
+    'close',
+  ])
+  for (const { log } of sessions.values()) assert.equal(log.at(-1), 'close')
+})
+
+test('an unreachable Connector session does not stop the others', async () => {
+  const ok = fakeSession({
+    prepare: { kind: 'prepared', targetSha256: 'h', receiptSha256: 'r' },
+  })
+  const results = await configureSpoolmanOnConnectors({
+    target: target(),
+    agentIds: ['down', 'up'],
+    signal: new AbortController().signal,
+    openSession: async (id) => {
+      if (id === 'down') throw new Error('offline')
+      return ok.session
+    },
+    report: async () => {},
+  })
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ['failed', 'reachable'],
+  )
+})
+
+test('server schema has no credential column and the migration is paired', () => {
+  const up = readFileSync(
+    new URL(
+      '../../infra/db/migrations/0052_spoolman_farm_settings.up.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const down = readFileSync(
+    new URL(
+      '../../infra/db/migrations/0052_spoolman_farm_settings.down.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const sql = up.replace(/^--.*$/gm, '')
+  assert.equal(/password|token|secret|credential|api_key/i.test(sql), false)
+  assert.match(up, /CREATE TABLE farm\.spoolman_connector_settings/)
+  assert.match(down, /DROP TABLE farm\.spoolman_connector_settings/)
+  assert.match(down, /DROP ROLE farm_spoolman_settings/)
+})

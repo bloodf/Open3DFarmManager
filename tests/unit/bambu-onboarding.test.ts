@@ -58,10 +58,6 @@ import {
 const SERIAL = '01S00C123456789'
 const CODE = 'Synth3t1cC0de'
 const PIN = 'ab'.repeat(32)
-// The provisioning engine fsyncs every durable write. On a disk-backed TMPDIR
-// under load those fsyncs alone exceed the default timeout, so fixtures use
-// tmpfs when the host has one; durability semantics are unchanged.
-const scratchRoot = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const directories: string[] = []
 afterEach(() => {
   for (const directory of directories.splice(0))
@@ -81,7 +77,7 @@ function target(
   return value.target
 }
 function world(options: { reachable?: boolean } = {}) {
-  const dir = realpathSync(mkdtempSync(join(scratchRoot, 'bambu-onboarding-')))
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'bambu-onboarding-')))
   directories.push(dir)
   const signer = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -358,7 +354,12 @@ describe('Bambu Lab form validation', () => {
   })
 })
 
-describe('Bambu Lab Connector apply', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Bambu Lab Connector apply', { timeout: 120_000 }, () => {
   it('probes read-only, writes the private binding and replays idempotently', async () => {
     const w = world()
     const log = vi.spyOn(console, 'log')
@@ -595,7 +596,7 @@ describe('Bambu Lab Connector apply', () => {
       expect(() => parseBambuOnboardedConfig(tampered, w.scope)).toThrow()
   })
   it('default probe fails closed against a loopback port that is not a printer', async () => {
-    const dir = realpathSync(mkdtempSync(join(scratchRoot, 'bambu-probe-')))
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'bambu-probe-')))
     directories.push(dir)
     const credentialFile = join(dir, 'credential.json')
     writeFileSync(credentialFile, JSON.stringify({ accessCode: CODE }), {

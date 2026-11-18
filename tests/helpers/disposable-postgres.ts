@@ -132,17 +132,17 @@ export interface DisposablePostgresInput {
    */
   through?: string | false
   postgresArgs?: string[]
-  docker?: DockerCommand
-  image?: string
+  docker?: DockerCommand | undefined
+  image?: string | undefined
 }
 
 export interface DisposablePostgresFixture {
   readonly port: number
-  readonly container?: string
-  readonly dataDir?: string
-  readonly tempDir?: string
-  readonly logPath?: string
-  readonly systemId?: string
+  readonly container?: string | undefined
+  readonly dataDir?: string | undefined
+  readonly tempDir?: string | undefined
+  readonly logPath?: string | undefined
+  readonly systemId?: string | undefined
   start(): Promise<Sql>
   logs(): Promise<string>
   stop(): Promise<void>
@@ -325,8 +325,9 @@ log_timezone = 'UTC'
           if (input.postgresArgs && input.postgresArgs.length > 0) {
             for (let i = 0; i < input.postgresArgs.length; i++) {
               const arg = input.postgresArgs[i]
-              if (arg === '-c' && input.postgresArgs[i + 1]) {
-                const setting = input.postgresArgs[i + 1]
+              if (arg === undefined) continue
+              const setting = input.postgresArgs[i + 1]
+              if (arg === '-c' && setting) {
                 const eqIdx = setting.indexOf('=')
                 if (eqIdx !== -1) {
                   const key = setting.slice(0, eqIdx).trim()

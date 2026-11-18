@@ -19,7 +19,6 @@ export type MoonrakerProfile = 'sv06' | 'u1'
 
 export type MoonrakerState =
   'standby' | 'printing' | 'paused' | 'complete' | 'cancelled' | 'error'
-
 export type KlippyState =
   'ready' | 'startup' | 'shutdown' | 'error' | 'disconnected'
 

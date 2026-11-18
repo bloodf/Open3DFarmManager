@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
+import {
+  createServer,
+  type Server,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http'
 import type { Socket } from 'node:net'
 import { FaultController } from './faults.ts'
 import { ScenarioController, type ScenarioStep } from './scenario.ts'
@@ -21,7 +26,16 @@ export type HttpHandler = (
 
 export interface HttpMockOptions {
   handler?: HttpHandler | undefined
-  routes?: Record<string, (req: IncomingMessage, res: ServerResponse, body: Buffer) => void | Promise<void>> | undefined
+  routes?:
+    | Record<
+        string,
+        (
+          req: IncomingMessage,
+          res: ServerResponse,
+          body: Buffer,
+        ) => void | Promise<void>
+      >
+    | undefined
   scenario?: ScenarioStep[] | undefined
   initialState?: Record<string, unknown> | undefined
 }

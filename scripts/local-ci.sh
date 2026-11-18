@@ -95,7 +95,9 @@ code_job() {
   if ! command -v pnpm >/dev/null || ! command -v node >/dev/null; then
     printf '%s\n' 'UNSUPPORTED: pnpm and Node are required.' >&2; return 2
   fi
-  [[ $(pnpm --version) == 12.18.0 && $(node --version) == v24.22.3 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node 24.22.3.' >&2; return 2; }
+  local node_ver
+  node_ver=$(node --version)
+  [[ $(pnpm --version) == 12.18.0 && $node_ver =~ ^v(22\.(1[89]|[2-9][0-9])\.[0-9]+|2[34]\.[0-9]+\.[0-9]+)$ ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires pnpm 12.18.0 and Node >=22.18.0 <25.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
   pnpm install --frozen-lockfile --ignore-scripts
   pnpm run lint

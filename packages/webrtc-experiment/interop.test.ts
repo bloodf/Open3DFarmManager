@@ -4,7 +4,8 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { expect, chromium, type Browser } from '@playwright/test'
+import { expect, type Browser } from '@playwright/test'
+import { launchBrowser } from '../../tests/helpers/browser.ts'
 import { randomNonce } from '../connector/src/webrtc/synthetic-session.ts'
 import type { InteropScenario } from './interop-browser.ts'
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -215,7 +216,7 @@ test(
     let browser: Browser | undefined
     let child: FixtureProcess | undefined
     try {
-      browser = await chromium.launch({ headless: true })
+      browser = await launchBrowser()
       console.info(
         JSON.stringify({
           chromium: browser.version(),

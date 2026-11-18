@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
-import { startMqttBroker, type MqttMessage, type MqttMockInstance } from './mqtt-broker.ts'
+import {
+  startMqttBroker,
+  type MqttMessage,
+  type MqttMockInstance,
+} from './mqtt-broker.ts'
 import type { ThrowawayTlsMaterial } from './tls.ts'
 import type { ScenarioStep } from './scenario.ts'
 import type { FaultController } from './faults.ts'
@@ -28,8 +32,15 @@ export interface BambuMockInstance {
     finishPrint: () => void
     failPrint: () => void
     uploadFile: (name: string, data: Uint8Array) => void
-    getState: () => { gcodeState?: string | undefined; extended: Record<string, unknown> }
-    requests: Array<{ command: string; sequence_id: string; param?: unknown | undefined }>
+    getState: () => {
+      gcodeState?: string | undefined
+      extended: Record<string, unknown>
+    }
+    requests: Array<{
+      command: string
+      sequence_id: string
+      param?: unknown | undefined
+    }>
   }
   calls: MqttMockInstance['calls']
   close: () => Promise<void>
@@ -49,7 +60,11 @@ export async function startBambuMock(
       ? { nozzle_target_temper: options.initialTargetTemperature }
       : {}
 
-  const requests: Array<{ command: string; sequence_id: string; param?: unknown }> = []
+  const requests: Array<{
+    command: string
+    sequence_id: string
+    param?: unknown
+  }> = []
   const uploads = new Set<string>()
 
   let timer: ReturnType<typeof setInterval> | undefined
@@ -67,24 +82,31 @@ export async function startBambuMock(
     if (options.printDurationMs === undefined) return
     stopPrintTimer()
     lastTick = Date.now()
-    timer = setInterval(() => {
-      const now = Date.now()
-      elapsed += now - lastTick
-      lastTick = now
-      const fraction = Math.min(elapsed / options.printDurationMs!, 1)
-      extended.mc_percent = Math.floor(fraction * 100)
-      extended.layer_num = Math.floor(fraction * totalLayers)
-      extended.total_layer_num = totalLayers
+    timer = setInterval(
+      () => {
+        const now = Date.now()
+        elapsed += now - lastTick
+        lastTick = now
+        const fraction = Math.min(elapsed / options.printDurationMs!, 1)
+        extended.mc_percent = Math.floor(fraction * 100)
+        extended.layer_num = Math.floor(fraction * totalLayers)
+        extended.total_layer_num = totalLayers
 
-      if (fraction >= 1) {
-        gcodeState = 'FINISH'
-        stopPrintTimer()
-      }
+        if (fraction >= 1) {
+          gcodeState = 'FINISH'
+          stopPrintTimer()
+        }
 
-      broker.control.publish(reportTopic, {
-        print: { gcode_state: gcodeState, mc_percent: extended.mc_percent, ...extended },
-      })
-    }, Math.min(100, Math.max(5, options.printDurationMs / 10)))
+        broker.control.publish(reportTopic, {
+          print: {
+            gcode_state: gcodeState,
+            mc_percent: extended.mc_percent,
+            ...extended,
+          },
+        })
+      },
+      Math.min(100, Math.max(5, options.printDurationMs / 10)),
+    )
   }
 
   let brokerInstance: MqttMockInstance | undefined
@@ -104,7 +126,10 @@ export async function startBambuMock(
             })
             if (options.versionModules) {
               broker.control.publish(reportTopic, {
-                info: { command: 'get_version', module: options.versionModules },
+                info: {
+                  command: 'get_version',
+                  module: options.versionModules,
+                },
               })
             }
             return
@@ -133,7 +158,10 @@ export async function startBambuMock(
                 extended.light = request.led_mode
               } else if (command === 'print_speed' && request.param) {
                 extended.speed = request.param
-              } else if (command === 'project_file' && typeof request.url === 'string') {
+              } else if (
+                command === 'project_file' &&
+                typeof request.url === 'string'
+              ) {
                 extended.file = request.url
                 gcodeState = 'RUNNING'
                 elapsed = 0

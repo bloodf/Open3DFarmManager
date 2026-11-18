@@ -28,6 +28,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import postgres from 'postgres'
 import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
+import { assertSupportedNodeRuntime } from '../tests/helpers/node-version.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
 import { assertSignallingCatalog } from '../tests/helpers/signalling-https-catalog.ts'
 import {
@@ -239,8 +240,7 @@ function fixtureMode() {
   }
 }
 const mode = process.argv[2]
-if (process.versions.bun || !process.versions.node.startsWith('24.'))
-  throw new Error('Node 24 is required')
+assertSupportedNodeRuntime()
 if (mode === '--prepare-layer') {
   if (process.argv.length !== 4 || !process.argv[3])
     throw new Error('Provide a new private layer directory')

@@ -169,9 +169,10 @@ async function apply(w: ReturnType<typeof world>, revision = 0) {
 
 // Every engine call here fsyncs its journal, credential and binding writes
 // (the durability the suite asserts), and these tests chain many such calls.
-// That is about 1-4 s idle but over 5 s on a loaded host, so the suite gets
-// an explicit timeout rather than moving fixtures off os.tmpdir().
-describe('Anycubic native onboarding', { timeout: 30_000 }, () => {
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Anycubic native onboarding', { timeout: 120_000 }, () => {
   it('accepts the provisional LAN contract and defaults to port 9883', () => {
     expect(ConfigurationTarget.parse(target())).toMatchObject({
       backend: 'anycubic',

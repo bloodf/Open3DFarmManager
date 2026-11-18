@@ -356,9 +356,10 @@ describe('Bambu Lab form validation', () => {
 
 // Every engine call here fsyncs its journal, credential and binding writes
 // (the durability the suite asserts), and these tests chain many such calls.
-// That is about 1-4 s idle but over 5 s on a loaded host, so the suite gets
-// an explicit timeout rather than moving fixtures off os.tmpdir().
-describe('Bambu Lab Connector apply', { timeout: 30_000 }, () => {
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Bambu Lab Connector apply', { timeout: 120_000 }, () => {
   it('probes read-only, writes the private binding and replays idempotently', async () => {
     const w = world()
     const log = vi.spyOn(console, 'log')

@@ -47,7 +47,7 @@ export default defineNuxtConfig({
     },
     integrationJobs: {
       enabled: false,
-      /** A login that is a member of farm_integration_jobs and farm_integration_delivery. */
+      /** A login that is a member of farm_integration_jobs, farm_integration_approvals and farm_integration_delivery. */
       databaseUrl: '',
       /** NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY: the API issuer's Ed25519 PKCS#8 key, base64url. Empty holds jobs only. */
       envelopeSigningKey: '',

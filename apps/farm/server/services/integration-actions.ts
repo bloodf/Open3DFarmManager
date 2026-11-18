@@ -12,7 +12,7 @@ import type {
 } from './integration-delivery.ts'
 import { integrationGrantFor } from '../utils/integration-auth-http.ts'
 import type { IntegrationScope } from './integration-apps.ts'
-import { IDEMPOTENCY_KEY_PATTERN } from './integration-jobs.ts'
+import { HELD_TTL_MS, IDEMPOTENCY_KEY_PATTERN } from './integration-jobs.ts'
 import {
   uuidPattern,
   type IntegrationPrincipal,
@@ -23,7 +23,7 @@ export type ActionTarget = {
   agentId: string
   controls: readonly string[]
 }
-export type StoredActionStatus = 'held' | 'submitted' | 'rejected'
+export type StoredActionStatus = 'held' | 'submitted' | 'rejected' | 'expired'
 export interface NewAction {
   id: string
   appId: string
@@ -135,7 +135,9 @@ export function actionRequestHash(
 function statusOf(
   stored: StoredActionStatus,
   envelope: EnvelopeRecord | null,
+  heldExpired: boolean,
 ): ActionStatus {
+  if (stored === 'held' && heldExpired) return 'expired'
   if (stored !== 'submitted') return stored
   if (!envelope || PENDING.includes(envelope.status)) return 'queued'
   return envelope.status as ActionStatus
@@ -144,6 +146,7 @@ function statusOf(
 export function actionView(
   record: ActionRecord,
   envelope: EnvelopeRecord | null,
+  now?: number,
 ): ActionView {
   const args =
     record.action.action === 'set_temperature'
@@ -158,7 +161,11 @@ export function actionView(
     printerId: record.printerAssignmentId,
     action: record.action.action,
     args: args as Record<string, unknown>,
-    status: statusOf(record.status, envelope),
+    status: statusOf(
+      record.status,
+      envelope,
+      now !== undefined && now >= record.createdAt + HELD_TTL_MS,
+    ),
     createdAt: record.createdAt,
     updatedAt: Math.max(record.updatedAt, envelope?.updatedAt ?? 0),
   }
@@ -317,6 +324,6 @@ export class IntegrationActionsService {
       )
     )
       return { error: 'not-found' as const }
-    return actionView(result.record, result.envelope)
+    return actionView(result.record, result.envelope, this.options.now())
   }
 }

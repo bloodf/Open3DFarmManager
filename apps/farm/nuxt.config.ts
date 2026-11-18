@@ -33,6 +33,14 @@ export default defineNuxtConfig({
       oidcClientId: '',
       oidcClientSecret: '',
     },
+    integrationAuth: {
+      enabled: false,
+      /** Use a dedicated login in the farm_integration_apps role. */
+      databaseUrl: '',
+      /** NUXT_INTEGRATION_AUTH_SIGNING_KEY is 32 random bytes encoded as base64url. */
+      signingKey: '',
+      tokenTtlSeconds: 300,
+    },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },

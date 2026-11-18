@@ -13,7 +13,8 @@ info:
     requires `Authorization: Bearer <access token>` issued by the OAuth 2.0
     client-credentials token endpoint. Session cookies are never accepted on
     these routes. Each token is bound to the app's grants: scope, farm and,
-    optionally, printer. Sandbox apps are only ever granted sandbox farms.
+    optionally, printer. Changes to the grants covered by a token invalidate it.
+    Sandbox apps are only ever granted sandbox farms.
 
     **Authorization.** A missing, expired, malformed or revoked token answers
     401 (`invalid-token`). A token lacking the operation's scope answers 403
@@ -149,6 +150,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OAuthError'
+        '503':
+          description: Token issuance is temporarily unavailable.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
   /intents:
     post:
       operationId: registerIntent
@@ -185,6 +195,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -237,6 +249,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -285,6 +299,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -327,6 +343,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -369,6 +389,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -413,6 +435,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
@@ -459,6 +483,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
@@ -515,6 +541,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -576,6 +604,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -597,7 +627,7 @@ paths:
       summary: Latest Spoolman inventory snapshots
       description: |
         One entry per Connector that reported a snapshot, for farms covered by
-        an `inventory:read` grant. Snapshots are read-only display evidence.
+        a farm-wide `inventory:read` grant. Snapshots are read-only display evidence.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -624,6 +654,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -680,6 +714,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -726,6 +764,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -771,6 +811,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -807,6 +849,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -854,6 +898,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '409':
           $ref: '#/components/responses/Conflict'
         '413':
@@ -896,6 +942,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -936,6 +984,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1216,6 +1266,25 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    MethodNotAllowed:
+      description: |
+        The path exists but not with this method (`method-not-allowed`). The
+        `Allow` header lists the methods the path accepts.
+      headers:
+        Allow:
+          description: The methods the path accepts.
+          schema:
+            type: string
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     NotFound:
       description: Unknown, or outside the app's grants (`not-found`, `intent-not-found`).
       headers:
@@ -1421,6 +1490,7 @@ components:
             - unauthorized_client
             - unsupported_grant_type
             - rate_limited
+            - temporarily_unavailable
         error_description:
           type: string
           maxLength: 200

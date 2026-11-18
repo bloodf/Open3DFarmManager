@@ -253,6 +253,15 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
     return rows[0] ? { ...rows[0] } : null
   }
 
+  async activePrinterFarm(printerId: string): Promise<string | null> {
+    if (!uuid.test(printerId)) return null
+    const rows = await this.sql<{ farmId: string }[]>`
+      SELECT farm_id AS "farmId" FROM farm.printer_assignments
+      WHERE id = ${printerId}::uuid AND revoked_at IS NULL
+    `
+    return rows[0]?.farmId ?? null
+  }
+
   async effectiveGrants(appId: string): Promise<IntegrationGrant[]> {
     if (!uuid.test(appId)) return []
     const rows = await this.sql<

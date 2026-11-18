@@ -22,6 +22,7 @@ import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
 import LastKnownStates from '../components/farm/LastKnownStates.vue'
+import ActiveSpoolAssign from '../components/farm/ActiveSpoolAssign.vue'
 import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
 import CameraDisplay from '../components/CameraDisplay.vue'
 import PrinterControls from '../components/PrinterControls.vue'
@@ -92,6 +93,28 @@ function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
     : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+}
+
+const DEFAULT_SPOOL_SLOTS = [
+  'external',
+  'ams:0:0',
+  'ams:0:1',
+  'ams:0:2',
+  'ams:0:3',
+]
+
+function moonrakerActiveSpool(row: FarmRow): boolean {
+  const materials = row.observation?.state.materials ?? []
+  return materials.some(
+    (material) => material.slot === 'external' && material.active === true,
+  )
+}
+
+function activeSpoolSlots(row: FarmRow): string[] {
+  const fromMaterials = (row.observation?.state.materials ?? []).map(
+    (material) => material.slot,
+  )
+  return fromMaterials.length ? fromMaterials : [...DEFAULT_SPOOL_SLOTS]
 }
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
@@ -768,6 +791,13 @@ function dateLabel(time: number) {
                     </dl>
                     <FarmMaterials
                       :materials="row.observation.state.materials"
+                    />
+                    <ActiveSpoolAssign
+                      v-if="ready.scope?.farmId"
+                      :farm-id="ready.scope.farmId"
+                      :printer-key="row.assignment.printerKey"
+                      :slots="activeSpoolSlots(row)"
+                      :moonraker-managed="moonrakerActiveSpool(row)"
                     />
                     <FarmEnvironment
                       :fans="row.observation.state.fans"

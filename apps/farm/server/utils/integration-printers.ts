@@ -1,4 +1,7 @@
-import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  PrinterState,
+  activeSpoolsFromMaterials,
+} from '@open3dfarmmanager/farm-protocol'
 import {
   type IntegrationPrincipal,
   type IntegrationPrinterRow,
@@ -160,6 +163,7 @@ export async function getIntegrationPrinterStatus(
     temperatures?: { toolCelsius?: number; bedCelsius?: number }
     vendor?: string
     model?: string
+    activeSpools?: ReturnType<typeof activeSpoolsFromMaterials>
     observedAt?: number
   } = {
     printerId: row.id,
@@ -185,6 +189,8 @@ export async function getIntegrationPrinterStatus(
     const { vendor, model } = parsed.data.identity ?? {}
     if (vendor !== undefined) status.vendor = vendor
     if (model !== undefined) status.model = model
+    const activeSpools = activeSpoolsFromMaterials(parsed.data.materials)
+    if (activeSpools?.length) status.activeSpools = activeSpools
   }
   if (row.observedAt !== null) status.observedAt = row.observedAt
   return status

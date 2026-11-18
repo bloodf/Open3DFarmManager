@@ -1476,18 +1476,25 @@ components:
               type: number
             bedCelsius:
               type: number
-        activeSpool:
-          $ref: '#/components/schemas/ActiveSpool'
+        activeSpools:
+          type: array
+          description: Active spool per tool or AMS slot, when known.
+          maxItems: 17
+          items:
+            $ref: '#/components/schemas/ActiveSpool'
         observedAt:
           $ref: '#/components/schemas/TimestampMs'
     ActiveSpool:
       type: object
-      description: The spool or slot currently feeding the printer, when known.
+      description: Spool assigned to one printer tool or AMS slot.
+      required: [slot]
       additionalProperties: false
       properties:
         slot:
           type: string
+          minLength: 1
           maxLength: 32
+          description: Tool or AMS tray identifier (for example `external` or `ams:0:1`).
         name:
           type: string
           maxLength: 32
@@ -1503,6 +1510,10 @@ components:
           type: number
           minimum: 0
           maximum: 100
+        spoolId:
+          type: integer
+          minimum: 1
+          description: Spoolman spool id when known.
     PrinterFile:
       type: object
       required: [name, sizeBytes, modifiedAt]

@@ -36,10 +36,12 @@ async function fixture(
   holdPeer = false,
   onAdmission?: () => void,
   observedClose = false,
-  authority: {
-    onAuthorityConfirm?: (serverSeq: number) => void
-    onAuthorityRevoked?: (serverSeq: number) => void
-  } = {},
+  authority: Pick<
+    NonNullable<
+      ConstructorParameters<typeof AuthenticatedConnectorSignallingClient>[1]
+    >,
+    'onAuthorityConfirm' | 'onAuthorityRevoked' | 'onApiCommand'
+  > = {},
   bindAddress?: string,
 ) {
   const identity = new ConnectorIdentity(
@@ -753,5 +755,40 @@ test('the configured RTC bind address reaches the read-only peer; absent keeps t
       f.client.close()
       await assert.rejects(f.pending)
     }
+  }
+})
+
+test('API commands and results require a proved credential inbox', async () => {
+  const seen: string[] = []
+  const options = {
+    onApiCommand(frame: { wire: string }, report: (wire: string) => void) {
+      seen.push(frame.wire)
+      report('result')
+    },
+  }
+  const command = {
+    v: 1,
+    t: 'connector.api-command',
+    wire: 'signed-envelope',
+    scope: 'control:basic',
+    confirmed_at: Date.now(),
+  }
+  const early = await fixture(false, undefined, false, options)
+  await early.push(command)
+  await assert.rejects(early.pending)
+  assert.deepEqual(seen, [])
+
+  const admitted = await fixture(false, undefined, false, options)
+  try {
+    await admitted.inbox()
+    await admitted.push(command)
+    assert.deepEqual(seen, ['signed-envelope'])
+    assert.deepEqual(admitted.sent.at(-1), {
+      v: 1,
+      t: 'connector.api-result',
+      wire: 'result',
+    })
+  } finally {
+    admitted.client.close()
   }
 })

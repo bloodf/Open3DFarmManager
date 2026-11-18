@@ -122,10 +122,17 @@ export interface IntegrationDeliveryStore {
 }
 /** `no-inbox`: no live authenticated socket, so nothing was written. A throw is an uncertain write. */
 export interface EnvelopeInbox {
+  bindApiDelivery?(
+    delivery: Pick<
+      IntegrationDeliveryService,
+      'deliverPending' | 'recordResult'
+    >,
+  ): void
   sendToAgentInbox(
     farmId: string,
     agentId: string,
     wire: string,
+    authority: { scope: RequiredScope; confirmedAt: number },
   ): 'sent' | 'no-inbox'
 }
 export interface IssueEnvelope {
@@ -206,6 +213,7 @@ export class IntegrationDeliveryService {
   constructor(options: IntegrationDeliveryOptions) {
     this.o = options
     this.now = options.now ?? Date.now
+    options.inbox.bindApiDelivery?.(this)
   }
   private fail(site: DeliveryErrorSite) {
     try {
@@ -326,6 +334,7 @@ export class IntegrationDeliveryService {
         claimed.farmId,
         claimed.agentId,
         claimed.wire,
+        { scope: claimed.requiredScope, confirmedAt: now },
       )
     } catch {
       // The write may have reached the Connector: never resend.

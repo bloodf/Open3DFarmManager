@@ -9,6 +9,7 @@ export * from './http-mock.ts'
 export * from './bambu-mock.ts'
 export * from './kobra-x-mock.ts'
 export * from './moonraker-mock.ts'
+export * from './spoolman-mock.ts'
 
 import {
   startHttpMock,
@@ -35,9 +36,14 @@ import {
   type MoonrakerMockOptions,
   type MoonrakerMockInstance,
 } from './moonraker-mock.ts'
+import {
+  startSpoolmanMock,
+  type SpoolmanMockOptions,
+  type SpoolmanMockInstance,
+} from './spoolman-mock.ts'
 
 export type MockKind =
-  'http' | 'mqtt' | 'bambu' | 'kobra-x' | 'anycubic' | 'moonraker'
+  'http' | 'mqtt' | 'bambu' | 'kobra-x' | 'anycubic' | 'moonraker' | 'spoolman'
 
 export type MockOptionsMap = {
   http: HttpMockOptions
@@ -46,6 +52,7 @@ export type MockOptionsMap = {
   'kobra-x': KobraXMockOptions
   anycubic: KobraXMockOptions
   moonraker: MoonrakerMockOptions
+  spoolman: SpoolmanMockOptions
 }
 
 export type MockInstanceMap = {
@@ -55,6 +62,7 @@ export type MockInstanceMap = {
   'kobra-x': KobraXMockInstance
   anycubic: KobraXMockInstance
   moonraker: MoonrakerMockInstance
+  spoolman: SpoolmanMockInstance
 }
 
 export type AnyMockInstance =
@@ -63,6 +71,7 @@ export type AnyMockInstance =
   | BambuMockInstance
   | KobraXMockInstance
   | MoonrakerMockInstance
+  | SpoolmanMockInstance
 
 /**
  * Unified entry point to start an in-process mock.
@@ -94,6 +103,10 @@ export async function startMock<K extends MockKind>(
     case 'moonraker':
       return (await startMoonrakerMock(
         options as MoonrakerMockOptions,
+      )) as MockInstanceMap[K]
+    case 'spoolman':
+      return (await startSpoolmanMock(
+        options as SpoolmanMockOptions,
       )) as MockInstanceMap[K]
     default:
       throw new Error(`Unsupported mock kind: ${String(kind)}`)

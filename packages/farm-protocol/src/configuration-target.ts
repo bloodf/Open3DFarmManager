@@ -47,6 +47,40 @@ export type ConfigurationBridgeSelection = z.infer<
   typeof ConfigurationBridgeSelection
 >
 
+export const KobraClientCertificateInline = z
+  .strictObject({
+    kind: z.literal('inline'),
+    format: z.enum(['pem', 'pkcs12']),
+    certificate_pem: z.string().min(1).max(8192).optional(),
+    key_pem: z.string().min(1).max(8192).optional(),
+    pkcs12_base64: z.string().min(1).max(12288).optional(),
+    passphrase: z.string().max(256).optional(),
+  })
+  .refine(
+    (value) =>
+      value.format === 'pem'
+        ? Boolean(
+            value.certificate_pem && value.key_pem && !value.pkcs12_base64,
+          )
+        : Boolean(
+            value.pkcs12_base64 && !value.certificate_pem && !value.key_pem,
+          ),
+    { message: 'Provide matching PEM or PKCS#12 client certificate material' },
+  )
+
+export const KobraClientCertificateInstallPath = z.strictObject({
+  kind: z.literal('install-path'),
+  path: z.string().min(1).max(1024),
+})
+
+export const KobraClientCertificateInput = z.discriminatedUnion('kind', [
+  KobraClientCertificateInline,
+  KobraClientCertificateInstallPath,
+])
+export type KobraClientCertificateInput = z.infer<
+  typeof KobraClientCertificateInput
+>
+
 /**
  * Browser-supplied prepare intent. Contains no password, cookie, key, URL,
  * method or header. `device_id` is an optional expectation: first discovery
@@ -54,8 +88,10 @@ export type ConfigurationBridgeSelection = z.infer<
  * the printer. The observed identity is pinned by the signed prepared receipt
  * (`ConfigurationImmutableTarget` always requires it) and commit binds that
  * receipt's hash, so an omitted expectation never weakens commit.
+ * `client_certificate` is transit-only to Connector private custody and is
+ * stripped before any journal or browser storage persistence.
  */
-const KobraConfigurationTarget = z.strictObject({
+export const KobraConfigurationTarget = z.strictObject({
   v: z.literal(1),
   protocol: z.literal(CONFIGURATION_PROTOCOL),
   backend: z.literal('kobralink-anycubic'),
@@ -63,7 +99,15 @@ const KobraConfigurationTarget = z.strictObject({
   endpoint: ConfigurationEndpoint,
   device_id: configurationOpaqueId.optional(),
   bridge: ConfigurationBridgeSelection,
+  client_certificate: KobraClientCertificateInput.optional(),
 })
+export type KobraConfigurationTarget = z.infer<typeof KobraConfigurationTarget>
+export function withoutKobraClientCertificate(
+  target: KobraConfigurationTarget,
+): KobraConfigurationTarget {
+  const { client_certificate: _clientCertificate, ...safe } = target
+  return safe
+}
 /** Origin only: reject URL normalization that could hide credentials or a path. */
 export const ConfigurationMoonrakerOrigin = z
   .string()

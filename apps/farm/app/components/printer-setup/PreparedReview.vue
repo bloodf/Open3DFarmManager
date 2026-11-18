@@ -125,6 +125,18 @@ const { commitKobraX, cancelKobraX } = usePrinterSetupActions()
         <dd>{{ cap.statusText }} — {{ cap.reason }}</dd>
       </div>
     </dl>
+    <p
+      v-if="
+        !isAnycubicOnboarding &&
+        !isMoonrakerOnboarding &&
+        !isBambuOnboarding &&
+        !isCrealityOnboarding
+      "
+    >
+      Certificado de cliente MQTT: validado e retido somente no armazenamento
+      privado do Connector (0600); a chave privada nunca é salva no servidor nem
+      exibida novamente.
+    </p>
     <label class="confirmation">
       <input
         id="kobra-confirm-checkbox"

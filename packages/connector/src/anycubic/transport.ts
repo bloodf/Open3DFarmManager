@@ -8,6 +8,8 @@ export interface AnycubicLanClientOptions {
   serial: string
   credentials: { username: string; password: string }
   caPem?: string
+  certPem?: string
+  keyPem?: string
   pinSha256?: string
   limits: {
     maxFrameBytes: number
@@ -83,6 +85,9 @@ export function createAnycubicLanClient(options: AnycubicLanClientOptions) {
         host,
         port,
         ca: options.caPem,
+        ...(options.certPem && options.keyPem
+          ? { cert: options.certPem, key: options.keyPem }
+          : {}),
         minVersion: 'TLSv1.2',
         // A configured exact certificate pin is an alternative trust anchor.
         rejectUnauthorized: !options.pinSha256,

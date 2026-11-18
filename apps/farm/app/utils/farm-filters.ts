@@ -1,4 +1,9 @@
-import { observationAge, printerStateLabel, type FarmRow } from './farm-view.ts'
+import {
+  formatPrinterStateLabel,
+  observationAge,
+  printerStateLabel,
+  type FarmRow,
+} from './farm-view.ts'
 
 export type FarmFilter =
   | 'all'
@@ -27,7 +32,7 @@ export function filterFarmRows<T extends FarmRow>(
       row.assignment.printerKey,
       row.assignment.assignmentId,
       row.assignment.agentId,
-      observation && printerStateLabel[observation.state.state],
+      observation && formatPrinterStateLabel(observation.state),
     ].some((value) => value?.toLocaleLowerCase('pt-BR').includes(search))
     if (!matches) return false
     if (filter === 'all') return true

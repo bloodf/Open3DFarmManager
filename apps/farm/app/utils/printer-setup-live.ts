@@ -1,6 +1,6 @@
 import {
+  formatPrinterStateLabel,
   observationAge,
-  printerStateLabel,
   type FarmHealth,
   type FarmSnapshot,
 } from './farm-view.ts'
@@ -171,6 +171,6 @@ export function livePrinterStateText(
   const obs = liveObservations.value[assignmentId]
   if (!obs) return 'Nenhum estado recebido'
   const age = observationAge(obs, { wall: Date.now(), mono: performance.now() })
-  const label = printerStateLabel[obs.state.state]
+  const label = formatPrinterStateLabel(obs.state)
   return age.stale ? label + ' (desatualizado)' : label
 }

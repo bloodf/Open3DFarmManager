@@ -1,10 +1,18 @@
 import { computed, inject, ref, shallowRef, type InjectionKey } from 'vue'
 import type { DiscoveryResult } from '../../../../packages/farm-protocol/src/configuration-discovery.ts'
 import type { SignedConfigurationReceipt } from '../../../../packages/farm-protocol/src/configuration-receipt.ts'
-import type { ConfigurationTarget } from '../../../../packages/farm-protocol/src/configuration-target.ts'
+import type {
+  ConfigurationTarget,
+  KobraClientCertificateInput,
+} from '../../../../packages/farm-protocol/src/configuration-target.ts'
 import { describeAnycubicTarget } from './anycubic-onboarding.ts'
 import type { LocalDeviceKey } from './device-key.ts'
 import type { FarmObservation } from './farm-view.ts'
+import type {
+  KobraCertCachedFile,
+  KobraCertSourceMode,
+  KobraCertUiSummary,
+} from './kobra-client-cert-ui.ts'
 import type {
   ConfigurationSessionOutcome,
   LoadedConfigurationBootstrap,
@@ -144,6 +152,14 @@ export function createPrinterSetupState() {
     kobraKeyState = shallowRef<KobraKeyState>({ kind: 'idle' }),
     kobraBootstrap = shallowRef<KobraBootstrapState>({ kind: 'idle' }),
     kobraIp = ref(''),
+    kobraCertSource = ref<KobraCertSourceMode>('file'),
+    kobraCertPassphrase = ref(''),
+    kobraCertInstallPath = ref(''),
+    kobraCertFileName = ref(''),
+    kobraCertSummary = shallowRef<KobraCertUiSummary | null>(null),
+    kobraCertError = ref(''),
+    kobraCertInline = shallowRef<KobraClientCertificateInput | null>(null),
+    kobraCertFiles = shallowRef<readonly KobraCertCachedFile[]>([]),
     kobraLabel = ref(''),
     kobraExpectedDeviceId = ref(''),
     kobraBusy = ref(false),
@@ -153,6 +169,11 @@ export function createPrinterSetupState() {
     kobraCommitConfirmed = ref(false),
     kobraUnknownNotice = ref(''),
     kobraRecoveryReason = ref<string | null>(null)
+  const clearKobraClientCert = () => {
+    kobraCertPassphrase.value = ''
+    kobraCertInline.value = null
+    kobraCertFiles.value = []
+  }
   const kobraOperation = shallowRef<KobraOperationContext | null>(null)
   const kobraPrepared = shallowRef<Extract<
     ConfigurationSessionOutcome,
@@ -268,6 +289,15 @@ export function createPrinterSetupState() {
     kobraKeyState,
     kobraBootstrap,
     kobraIp,
+    kobraCertSource,
+    kobraCertPassphrase,
+    kobraCertInstallPath,
+    kobraCertFileName,
+    kobraCertSummary,
+    kobraCertError,
+    kobraCertInline,
+    kobraCertFiles,
+    clearKobraClientCert,
     kobraLabel,
     kobraExpectedDeviceId,
     kobraBusy,

@@ -83,6 +83,7 @@ export const CommitPlan = z.strictObject({
   assignment_id: BrowserDeviceUuid,
   printer_key: z.string().min(1).max(128),
   credential_file: z.string().min(1).max(4096),
+  client_cert_file: z.string().min(1).max(4096).optional(),
   committed_revision: revision.min(1),
 })
 export type CommitPlan = z.infer<typeof CommitPlan>

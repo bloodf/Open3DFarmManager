@@ -56,6 +56,45 @@ export type FileUploadResult =
         | 'offline'
         | 'invalid-transfer'
     }
+export function supportsFileUpload(
+  target: FileUploadTarget,
+  name: string,
+): boolean {
+  return (
+    target.backend !== 'anycubic' &&
+    (!(target.backend === 'creality' || target.backend === 'kobralink') ||
+      /\.gcode$/i.test(name))
+  )
+}
+
+export async function uploadFile(input: {
+  target: FileUploadTarget
+  filePath: string
+  name: string
+  signal: AbortSignal
+  authorize(): boolean
+}): Promise<void> {
+  const { target, filePath, name, signal } = input
+  if (!supportsFileUpload(target, name)) throw Error('unsupported')
+  if (!input.authorize()) throw Error('unauthorized')
+  const common = { filePath, name, signal }
+  if (target.backend === 'moonraker')
+    await uploadMoonrakerFile({ ...target, ...common })
+  else if (target.backend === 'bambu')
+    await uploadBambuFile({ ...target, ...common })
+  else if (target.backend === 'creality')
+    await uploadCrealityFile({ ...target, ...common })
+  else if (target.backend === 'kobralink') {
+    signal.throwIfAborted()
+    const client = await target.client(signal)
+    try {
+      if (!input.authorize()) throw Error('unauthorized')
+      await client.uploadFile(target.binding, filePath, name)
+    } finally {
+      client.clearSession()
+    }
+  } else throw Error('unsupported')
+}
 const terminal = z.strictObject({ type: z.enum(['complete', 'abort']) })
 
 /** One stop-and-wait transfer per control peer. No remote destination or credential is accepted. */
@@ -110,12 +149,7 @@ export function createFileUpload(
         }
         const target = input.targetFor(offer.printer_key)
         if (!target) throw Error('offline')
-        if (
-          target.backend === 'anycubic' ||
-          ((target.backend === 'creality' || target.backend === 'kobralink') &&
-            !/\.gcode$/i.test(offer.name))
-        )
-          throw Error('unsupported')
+        if (!supportsFileUpload(target, offer.name)) throw Error('unsupported')
         transfer = await receiver.offer(offer)
         if (closed || !authorized()) throw Error('unauthorized')
         send({ type: 'accept' })
@@ -144,29 +178,15 @@ export function createFileUpload(
         if (closed || !authorized()) throw Error('unauthorized')
         const target = input.targetFor(staged.offer.printer_key)
         if (!target) throw Error('offline')
-        const common = {
+        forwarding = true
+        library = target.backend === 'kobralink'
+        await uploadFile({
+          target,
           filePath,
           name: staged.offer.name,
           signal: controller.signal,
-        }
-        forwarding = true
-        library = target.backend === 'kobralink'
-        if (target.backend === 'moonraker')
-          await uploadMoonrakerFile({ ...target, ...common })
-        else if (target.backend === 'bambu')
-          await uploadBambuFile({ ...target, ...common })
-        else if (target.backend === 'creality')
-          await uploadCrealityFile({ ...target, ...common })
-        else if (target.backend === 'kobralink') {
-          controller.signal.throwIfAborted()
-          const client = await target.client(controller.signal)
-          try {
-            if (closed || !authorized()) throw Error('unauthorized')
-            await client.uploadFile(target.binding, filePath, common.name)
-          } finally {
-            client.clearSession()
-          }
-        } else throw Error('unsupported')
+          authorize: () => !closed && authorized(),
+        })
       })
       send({
         type: 'result',

@@ -4,6 +4,7 @@ import { runtimeBootstrap } from '../config/provisioning.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { createProvisioningEngine } from '../provisioning/engine.ts'
+import type { BambuProbe } from '../provisioning/bambu.ts'
 import type { InventoryConfirmationInput } from '../provisioning/authority.ts'
 import { readDurableRevision } from '../provisioning/revision.ts'
 import {
@@ -28,6 +29,8 @@ export interface ConfigurationRuntimeOptions {
   fetch?: KobraLinkFetch
   /** Scanner behind discovery requests (default: the LAN scan). */
   discovery?: DiscoveryScanner
+  /** Read-only Bambu LAN probe override used by loopback journey simulators. */
+  bambuProbe?: BambuProbe
   clock?: () => number
   onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void
 }
@@ -75,6 +78,7 @@ export function createConfigurationRuntime(
     managedBridge: config.managedBridge,
     printerNetworks: config.printerNetworks,
     ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.bambuProbe ? { bambuProbe: options.bambuProbe } : {}),
     clock,
   })
   const printerNetworkPolicy = createPrinterNetworkPolicy(

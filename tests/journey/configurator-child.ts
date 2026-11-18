@@ -5,9 +5,14 @@
 import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.ts'
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
 import type { Printer } from '../../packages/connector/src/discovery/index.ts'
+import { probeBambuLan } from '../../packages/connector/src/provisioning/bambu.ts'
 import { runConfigurationConnector } from '../../packages/connector/src/runtime/configuration-command.ts'
 
-type Probes = Readonly<{ creality?: number; anycubic?: number }>
+type Probes = Readonly<{
+  creality?: number
+  anycubic?: number
+  bambuPort?: number
+}>
 
 async function main() {
   const env = process.env
@@ -45,6 +50,12 @@ async function main() {
         (printer): printer is Printer => printer !== undefined,
       )
     },
+    ...(probes.bambuPort === undefined
+      ? {}
+      : {
+          bambuProbe: (input) =>
+            probeBambuLan({ ...input, port: probes.bambuPort! }),
+        }),
   })
 }
 

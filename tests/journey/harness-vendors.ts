@@ -37,6 +37,10 @@ export type VendorOptions = Readonly<{
   printerKey: string
   /** Bambu only: opt the binding in to control commands (default false). */
   control?: boolean
+  /** Bambu simulator FTPS port; zero selects an ephemeral loopback port. */
+  ftpsPort?: number
+  /** Bambu simulator address for its browser onboarding journey. */
+  host?: string
 }>
 
 export type RuntimeScope = Readonly<{
@@ -249,7 +253,13 @@ export async function startVendorSimulator(
       const serial = 'JOURNEYBAMBU'
       const sim = await startBambuSimulator({
         serial,
+        accessCode: 'journey-access',
+        ...(options.host === undefined ? {} : { host: options.host }),
         initialState: 'RUNNING',
+        printDurationMs: 15_000,
+        ...(options.ftpsPort === undefined
+          ? {}
+          : { ftpsPort: options.ftpsPort }),
       })
       undo.push(() => sim.close())
       raw = sim
@@ -274,6 +284,7 @@ export async function startVendorSimulator(
                   serial,
                   host: sim.host,
                   port: sim.port,
+                  ftpsPort: sim.ftpsPort,
                   control: options.control === true,
                   credentialFile,
                   pinSha256: pinOf(sim.syntheticTrust),

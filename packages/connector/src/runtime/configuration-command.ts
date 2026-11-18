@@ -28,6 +28,7 @@ import {
   createConfigurationRuntime,
   type ConfigurationRuntime,
 } from './configuration.ts'
+import type { BambuProbe } from '../provisioning/bambu.ts'
 
 export interface ConfigurationCommandInput {
   trustedKeys?: TrustedKeyStore
@@ -42,6 +43,8 @@ export interface ConfigurationCommandInput {
   startRuntime?: (signal: AbortSignal, configPath: string) => Promise<void>
   /** Network scan behind "search printers"; production scans the LAN. */
   discovery?: DiscoveryScanner
+  /** Read-only Bambu LAN probe override, normally unset in production. */
+  bambuProbe?: BambuProbe
   clock?: () => number
 }
 
@@ -187,6 +190,7 @@ export async function runConfigurationConnector(
     serverOnline: signalling.online,
     credentialJti: () => credential()?.jti ?? null,
     ...(input.discovery ? { discovery: input.discovery } : {}),
+    ...(input.bambuProbe ? { bambuProbe: input.bambuProbe } : {}),
     clock,
     onDiagnostic: input.onDiagnostic,
   })

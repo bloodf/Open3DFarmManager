@@ -33,7 +33,9 @@ export async function startConfigurator(input: {
   ownerPage: Page
   machinePost(path: string, body: unknown): Promise<unknown>
   /** Loopback discovery responder ports (info endpoints) per vendor. */
-  probes: Readonly<{ creality?: number; anycubic?: number }>
+  probes: Readonly<{ creality?: number; anycubic?: number; bambuPort?: number }>
+  /** Private host route allowed for the loopback Bambu simulator. */
+  printerNetworks?: readonly string[]
 }): Promise<Configurator> {
   const root = await mkdtemp(join(tmpdir(), 'journey-configurator-'))
   const dataDirectory = join(root, 'identity')
@@ -96,7 +98,7 @@ export async function startConfigurator(input: {
       credentialAudience: input.audience,
       stateDirectory: join(root, 'state'),
       runtimeConfigPath: join(root, 'runtime.json'),
-      printerNetworks: ['172.30.78.0/24'],
+      printerNetworks: input.printerNetworks ?? ['172.30.78.0/24'],
       managedBridge: null,
       runtimeTemplate: {
         telemetry: {

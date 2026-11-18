@@ -264,7 +264,7 @@ export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
 
   // Revoked authority.
   const goneGrant = await grant(appId, farm, ['jobs:start'], printerGone.id)
-  await admin`UPDATE farm.printer_assignments SET revoked_at = 2 WHERE id = ${printerGone.id}::uuid`
+  await admin`UPDATE farm.printer_assignments SET revoked_at = 2, revoked_by = ${owner} WHERE id = ${printerGone.id}::uuid`
   assert.equal(await store.target(printerGone.id), null)
   await refused(
     base({ grantId: goneGrant, printerAssignmentId: printerGone.id }),
@@ -282,7 +282,10 @@ export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
   )
   await denied(runtime`DELETE FROM farm.integration_jobs`, 'delete')
   await denied(runtime`TRUNCATE farm.integration_jobs`, 'truncate')
-  await denied(runtime`SELECT * FROM farm.integration_apps`, 'apps')
+  await denied(
+    runtime`INSERT INTO farm.integration_apps (id, farm_id, name, sandbox, created_at, created_by) VALUES (${randomUUID()}::uuid, ${farm}::uuid, 'x', false, 1, ${owner})`,
+    'app insert',
+  )
   await denied(runtime`SELECT * FROM farm.integration_audit`, 'audit read')
   await denied(runtime`DELETE FROM farm.integration_audit`, 'audit delete')
   await denied(

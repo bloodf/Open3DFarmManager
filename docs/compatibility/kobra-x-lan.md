@@ -24,33 +24,33 @@ Rules for anyone editing this document or implementing from it:
 
 Status tags on every fact:
 
-| Tag | Meaning |
-|---|---|
-| `observed` | Seen on a real Kobra X running firmware 2.0.2.8 (captured by the source owner). |
-| `reported` | Stated by a source that did not capture it on a Kobra X here: GPL/AGPL projects or strings in an Anycubic binary. Not verified by OpenFarm. |
-| `not verified` | Named in a source as a message or option, but no answer or effect has been captured. Do not depend on it. |
+| Tag            | Meaning                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `observed`     | Seen on a real Kobra X running firmware 2.0.2.8 (captured by the source owner).                                                             |
+| `reported`     | Stated by a source that did not capture it on a Kobra X here: GPL/AGPL projects or strings in an Anycubic binary. Not verified by OpenFarm. |
+| `not verified` | Named in a source as a message or option, but no answer or effect has been captured. Do not depend on it.                                   |
 
 Source tags:
 
-| Tag | Source | License | How it is used here |
-|---|---|---|---|
-| S1 | kobracontrol protocol notes (owner-provided `docs/protocol.md`) | owner-provided | Primary fact source. Carries the owner's observations on firmware 2.0.2.8. |
-| S2 | Kobralink `packages/kobra-protocol` (as summarized in S1) | GPL-3.0 | Reported facts only. No code was read or copied. |
-| S3 | KX-Bridge (as summarized in S1) | GPL-3.0 | Reported facts only. No code was read or copied. |
-| S4 | Anycubic Slicer Next 1.x and 2.0.0.3 strings (as summarized in S1) | Anycubic proprietary | Reported facts only. No binary content is reproduced. |
-| S5 | anycubic-orca-plugin, `anycubic_lan.py` (as summarized in S1) | AGPL-3.0 | Reported facts only. No code was read or copied. |
+| Tag | Source                                                             | License              | How it is used here                                                        |
+| --- | ------------------------------------------------------------------ | -------------------- | -------------------------------------------------------------------------- |
+| S1  | kobracontrol protocol notes (owner-provided `docs/protocol.md`)    | owner-provided       | Primary fact source. Carries the owner's observations on firmware 2.0.2.8. |
+| S2  | Kobralink `packages/kobra-protocol` (as summarized in S1)          | GPL-3.0              | Reported facts only. No code was read or copied.                           |
+| S3  | KX-Bridge (as summarized in S1)                                    | GPL-3.0              | Reported facts only. No code was read or copied.                           |
+| S4  | Anycubic Slicer Next 1.x and 2.0.0.3 strings (as summarized in S1) | Anycubic proprietary | Reported facts only. No binary content is reproduced.                      |
+| S5  | anycubic-orca-plugin, `anycubic_lan.py` (as summarized in S1)      | AGPL-3.0             | Reported facts only. No code was read or copied.                           |
 
 S2 to S5 are cited as S1 reports them. OpenFarm has not read their code for this document. Their
 facts stay `reported` until a Kobra X capture confirms them.
 
 ## Transports
 
-| Port | Protocol | Use | Status / source |
-|---|---|---|---|
-| 1900 (UDP, multicast group 239.255.255.250) | SSDP | Printer discovery | observed (S1) |
-| 18910 | HTTP | `/info`, `/ctrl` credential recovery, `/gcode_upload` | `/info` observed (S1); `/ctrl` and upload observed in the owner's flow (S1) |
-| 9883 | MQTT 3.1.1 over mutual TLS | Status reports, commands, print start | observed (S1) |
-| 18088 | HTTP-FLV | Camera stream | observed (S1) |
+| Port                                        | Protocol                   | Use                                                   | Status / source                                                             |
+| ------------------------------------------- | -------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1900 (UDP, multicast group 239.255.255.250) | SSDP                       | Printer discovery                                     | observed (S1)                                                               |
+| 18910                                       | HTTP                       | `/info`, `/ctrl` credential recovery, `/gcode_upload` | `/info` observed (S1); `/ctrl` and upload observed in the owner's flow (S1) |
+| 9883                                        | MQTT 3.1.1 over mutual TLS | Status reports, commands, print start                 | observed (S1)                                                               |
+| 18088                                       | HTTP-FLV                   | Camera stream                                         | observed (S1)                                                               |
 
 The printer must have LAN mode enabled. There is no cloud path. Anycubic Cloud and access from
 outside the LAN are out of scope for this protocol. (observed, S1)
@@ -104,20 +104,20 @@ that answered. (observed design in S1; the rules themselves are the owner's poli
 
 Observed on firmware 2.0.2.8 (S1). Fields:
 
-| Field | Type / value | Note |
-|---|---|---|
-| `cn` | string | Used in the slicer's log line (S4). |
-| `ctrlInfoUrl` | URL | Points at `http://<printer-ip>:18910/ctrl` on the printer's own address. Adapter must not follow it (see above). |
-| `ctrlType` | `lan` | LAN mode indicator. |
-| `deviceName` | string, e.g. `Anycubic Kobra X` | Display name. |
-| `deviceType` | `fdm` | Device class. |
-| `env` | string | Environment field. Value not documented in S1. |
-| `ip` | string | Printer address. |
-| `modelId` | string, e.g. `20030` for Kobra X | Used in MQTT topic paths. |
-| `modelName` | string | Model name. |
-| `token` | string, 32 characters | Needed for `/gcode_upload` and the camera URL. Never commit a real token. |
-| `usn` | string | Unique service name field. |
-| `zone` | string | Zone field. Value not documented in S1. |
+| Field         | Type / value                     | Note                                                                                                             |
+| ------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `cn`          | string                           | Used in the slicer's log line (S4).                                                                              |
+| `ctrlInfoUrl` | URL                              | Points at `http://<printer-ip>:18910/ctrl` on the printer's own address. Adapter must not follow it (see above). |
+| `ctrlType`    | `lan`                            | LAN mode indicator.                                                                                              |
+| `deviceName`  | string, e.g. `Anycubic Kobra X`  | Display name.                                                                                                    |
+| `deviceType`  | `fdm`                            | Device class.                                                                                                    |
+| `env`         | string                           | Environment field. Value not documented in S1.                                                                   |
+| `ip`          | string                           | Printer address.                                                                                                 |
+| `modelId`     | string, e.g. `20030` for Kobra X | Used in MQTT topic paths.                                                                                        |
+| `modelName`   | string                           | Model name.                                                                                                      |
+| `token`       | string, 32 characters            | Needed for `/gcode_upload` and the camera URL. Never commit a real token.                                        |
+| `usn`         | string                           | Unique service name field.                                                                                       |
+| `zone`        | string                           | Zone field. Value not documented in S1.                                                                          |
 
 ### Credential recovery: `POST /ctrl`
 
@@ -199,12 +199,12 @@ spelling), `multiColorBox`, `light`, `fan`, `file`, `axis`, `skip`, `video`.
 
 Request envelope fields used in S1 (observed):
 
-| Field | Meaning |
-|---|---|
-| `msgid` | Request identifier. The printer's own reports carry a different `msgid`. |
-| `action` | Action name, e.g. `query`, `start`, `move`, `set`. |
-| `type` | Message type (see above). |
-| `data` | Payload object. Shape depends on the action. |
+| Field    | Meaning                                                                  |
+| -------- | ------------------------------------------------------------------------ |
+| `msgid`  | Request identifier. The printer's own reports carry a different `msgid`. |
+| `action` | Action name, e.g. `query`, `start`, `move`, `set`.                       |
+| `type`   | Message type (see above).                                                |
+| `data`   | Payload object. Shape depends on the action.                             |
 
 ## Requests, acknowledgements and outcomes
 
@@ -221,11 +221,11 @@ Observed on firmware 2.0.2.8 (S1):
 
 Three outcomes of a request:
 
-| Outcome | Meaning | Example |
-|---|---|---|
-| Confirmed | A successful report arrives. | `print/start` answered with a success report. |
-| Refused | A report with `state` `failed`, or a `code` other than 0 or 200. | `print` error with code 10111 (see jobs). |
-| Received without result | Only the ack arrived. | `print/query` on an idle printer. (observed, S1) |
+| Outcome                 | Meaning                                                          | Example                                          |
+| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
+| Confirmed               | A successful report arrives.                                     | `print/start` answered with a success report.    |
+| Refused                 | A report with `state` `failed`, or a `code` other than 0 or 200. | `print` error with code 10111 (see jobs).        |
+| Received without result | Only the ack arrived.                                            | `print/query` on an idle printer. (observed, S1) |
 
 Multiple clients: observed on firmware 2.0.2.8 (S1). Two MQTT sessions coexisted: another client
 (Kobralink) stayed connected the whole time, and each client sees reports caused by the other. The
@@ -247,29 +247,29 @@ connection per printer on its side.
 
 Box fields (observed):
 
-| Field | Meaning |
-|---|---|
-| `auto_feed` | Auto-feed state. |
+| Field           | Meaning                                                            |
+| --------------- | ------------------------------------------------------------------ |
+| `auto_feed`     | Auto-feed state.                                                   |
 | `drying_status` | Object with `status`, `target_temp`, `duration` and `remain_time`. |
-| `humidity` | Box humidity. |
-| `temp` | Box temperature. |
-| `loaded_slot` | Currently loaded slot. |
-| `model_id` | Box model identifier. |
+| `humidity`      | Box humidity.                                                      |
+| `temp`          | Box temperature.                                                   |
+| `loaded_slot`   | Currently loaded slot.                                             |
+| `model_id`      | Box model identifier.                                              |
 
 - `drying_status.remain_time` counts minutes. (observed, measured in S1)
 - `drying_status.duration` reported as 86400 is not used by S1 for display. Its meaning is unverified.
 
 Slot fields (observed):
 
-| Field | Meaning |
-|---|---|
-| `brand_name` | Filament brand. |
-| `color` | Slot colour. |
+| Field                 | Meaning                     |
+| --------------------- | --------------------------- |
+| `brand_name`          | Filament brand.             |
+| `color`               | Slot colour.                |
 | `consumables_percent` | Remaining material percent. |
-| `material_name` | Material name. |
-| `status` | Slot status. |
-| `type` | Material type. |
-| `weight` | Spool weight. |
+| `material_name`       | Material name.              |
+| `status`              | Slot status.                |
+| `type`                | Material type.              |
+| `weight`              | Spool weight.               |
 
 ### `file/report`
 
@@ -288,6 +288,7 @@ Slot fields (observed):
 
 Observed on firmware 2.0.2.8 (S1):
 
+<!-- prettier-ignore-start -->
 | Field | Value | Note |
 |---|---|---|
 | `filepath` | `/` | Must be the folder `/`. |
@@ -295,6 +296,7 @@ Observed on firmware 2.0.2.8 (S1):
 | `taskid` | `"-1"` | For LAN jobs. |
 | `ams_settings.ams_box_mapping` | filament-to-slot mapping | Chosen in the slicer's print dialog. |
 | `task_settings` | object of print options | See the table below. |
+<!-- prettier-ignore-end -->
 
 Important: `filepath` set to `/<name>` makes the printer end the task with code 10111
 ("abnormal end of task") about one second after the start. (observed, S1) A start report alone is
@@ -303,12 +305,12 @@ start before it treats the job as running.
 
 ### Print options (`task_settings`)
 
-| Option | Field | Source | Status |
-|---|---|---|---|
-| Auto-leveling | `auto_leveling` 0 or 1 | S2, S3 | observed (verified by S1 on the printer) |
-| Vibration compensation | `vibration_compensation` 0 or 1 | S2, S3 | sent; effect not checked (S1) |
-| Flow calibration | `flow_calibration` 0 or 1 | S4 | not verified (not yet tried, S1) |
-| Time-lapse | `timelapse` `{status: 0 or 1, count: 0, type: 64}` | `timelapse` field from S4; `type` 64 from S2, S3 | not verified (not yet tried, S1) |
+| Option                 | Field                                              | Source                                           | Status                                   |
+| ---------------------- | -------------------------------------------------- | ------------------------------------------------ | ---------------------------------------- |
+| Auto-leveling          | `auto_leveling` 0 or 1                             | S2, S3                                           | observed (verified by S1 on the printer) |
+| Vibration compensation | `vibration_compensation` 0 or 1                    | S2, S3                                           | sent; effect not checked (S1)            |
+| Flow calibration       | `flow_calibration` 0 or 1                          | S4                                               | not verified (not yet tried, S1)         |
+| Time-lapse             | `timelapse` `{status: 0 or 1, count: 0, type: 64}` | `timelapse` field from S4; `type` 64 from S2, S3 | not verified (not yet tried, S1)         |
 
 - The printer echoes `bed_leveling`, `flow_calibration` and `time_lapse` in `buried/report` with
   action `PrintStart`. A test print can confirm them. (reported, S1; the echo itself not verified)
@@ -336,36 +338,36 @@ During a job, the printer reports its phase on `print/report` with action `start
 
 ## Remaining commands
 
-| Command | Message and data | Status |
-|---|---|---|
-| Home all axes | `axis/move` with `{axis: 5, move_type: 2}` | observed. Answers only when finished, after about 23 to 41 s. `info` state is `busy` meanwhile. |
-| Jog | `axis/move`: `axis` 1 = X, 2 = Y, 3 = Z; `move_type` 1 = plus, 0 = minus | observed |
-| Idle heating | `tempature/set` with `type` 2 and `target_nozzle_temp` or `target_hotbed_temp` | observed |
-| Camera light | `light/control` with `{type: 3, status, brightness}`; brightness 100 on, 0 off | sent as Anycubic Slicer Next sends it (S4, reported); the field values are reported in S1 |
-| Fan speed | `fan/setSpeed` | reported in S1; no answer captured. An accompanying `print/update` with `{taskid, settings: {fan_speed_pct}}` applies it during a print. Not verified. |
+| Command       | Message and data                                                               | Status                                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Home all axes | `axis/move` with `{axis: 5, move_type: 2}`                                     | observed. Answers only when finished, after about 23 to 41 s. `info` state is `busy` meanwhile.                                                        |
+| Jog           | `axis/move`: `axis` 1 = X, 2 = Y, 3 = Z; `move_type` 1 = plus, 0 = minus       | observed                                                                                                                                               |
+| Idle heating  | `tempature/set` with `type` 2 and `target_nozzle_temp` or `target_hotbed_temp` | observed                                                                                                                                               |
+| Camera light  | `light/control` with `{type: 3, status, brightness}`; brightness 100 on, 0 off | sent as Anycubic Slicer Next sends it (S4, reported); the field values are reported in S1                                                              |
+| Fan speed     | `fan/setSpeed`                                                                 | reported in S1; no answer captured. An accompanying `print/update` with `{taskid, settings: {fan_speed_pct}}` applies it during a print. Not verified. |
 
 Commands named in S1 that are not yet verified on the printer are listed in
 [Unverified items](#unverified-items).
 
 ## Time-lapse videos
 
-| Message | Data | Status |
-|---|---|---|
-| `file/listVideo` | `{page_num: 1, page_size: 200, path: "/", keyword: ""}` | observed |
-| `file/deleteVideo` | `{path: "/", filename}` | not verified |
+| Message            | Data                                                    | Status       |
+| ------------------ | ------------------------------------------------------- | ------------ |
+| `file/listVideo`   | `{page_num: 1, page_size: 200, path: "/", keyword: ""}` | observed     |
+| `file/deleteVideo` | `{path: "/", filename}`                                 | not verified |
 
 `listVideo` is answered on `file/report` with action `listVideo`, `code` 200 and `data.records`, one
 record per video. Record fields (observed):
 
-| Field | Meaning |
-|---|---|
-| `filename` | Video file name. |
-| `main_file_name` | The print the video belongs to. |
-| `createTime` | Unix seconds. `listLocal` uses milliseconds. |
-| `duration` | Seconds. |
-| `fileSize` | Bytes. |
-| `fileKey` | Key of the file. |
-| `file_image` | Name of a cover picture on the printer. |
+| Field            | Meaning                                      |
+| ---------------- | -------------------------------------------- |
+| `filename`       | Video file name.                             |
+| `main_file_name` | The print the video belongs to.              |
+| `createTime`     | Unix seconds. `listLocal` uses milliseconds. |
+| `duration`       | Seconds.                                     |
+| `fileSize`       | Bytes.                                       |
+| `fileKey`        | Key of the file.                             |
+| `file_image`     | Name of a cover picture on the printer.      |
 
 - A print stopped before its first frame leaves a record with `duration` 0 and about 156 bytes.
   (observed)
@@ -390,13 +392,13 @@ record per video. Record fields (observed):
 The messages below come from S4's Workbench page (its web bundle, `libWorkbench`). They are sent on
 the `web` topic. S1 states that none of these answers has been captured from a Kobra X.
 
-| Message | Data | Answer read | Status |
-|---|---|---|---|
-| `info/net` | `{}` | `info/report` field `mac` or `machine_mac` | not verified |
-| `info/statistic-query` | none | `info/report` fields `print_total_minutes`, `print_count`, `material_used_gram_value` or `material_used_value` (grams). Also pushed as `statistic-reported`. | not verified |
-| `info/setPrinterName` | `{printerName}` | `info/report` action `setPrinterName` | not verified |
-| `properties/read` | `["assistant_settings"]` | `properties/report` with `assistant_settings: [{option, value}]` | not verified |
-| `properties/write` | `{assistant_settings: [{option, value}]}` | `properties/report` with action `write` | not verified |
+| Message                | Data                                      | Answer read                                                                                                                                                  | Status       |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| `info/net`             | `{}`                                      | `info/report` field `mac` or `machine_mac`                                                                                                                   | not verified |
+| `info/statistic-query` | none                                      | `info/report` fields `print_total_minutes`, `print_count`, `material_used_gram_value` or `material_used_value` (grams). Also pushed as `statistic-reported`. | not verified |
+| `info/setPrinterName`  | `{printerName}`                           | `info/report` action `setPrinterName`                                                                                                                        | not verified |
+| `properties/read`      | `["assistant_settings"]`                  | `properties/report` with `assistant_settings: [{option, value}]`                                                                                             | not verified |
+| `properties/write`     | `{assistant_settings: [{option, value}]}` | `properties/report` with action `write`                                                                                                                      | not verified |
 
 - Print Assist option numbers, from S4: 0 belt detection, 1 lost-step recovery, 3 filament break
   alert, 4 filament jam alert, 5 remaining filament detection. An option missing from the answer is

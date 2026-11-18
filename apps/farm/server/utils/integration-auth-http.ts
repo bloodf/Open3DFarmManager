@@ -171,6 +171,8 @@ const problems = {
   ],
   'method-not-allowed': [405, 'Método não permitido.'],
   'rate-limited': [429, 'Limite de solicitações atingido.'],
+  'connector-unavailable': [503, 'Conector indisponível.'],
+  'connector-timeout': [504, 'O conector não respondeu a tempo.'],
   'service-unavailable': [503, 'Serviço temporariamente indisponível.'],
 } as const
 

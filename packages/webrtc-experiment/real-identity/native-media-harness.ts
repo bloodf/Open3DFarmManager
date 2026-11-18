@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
-import { chromium, type Browser } from '@playwright/test'
+import { launchBrowser, type Browser } from '../../../tests/helpers/browser.ts'
 import {
   RtcSessionBinding,
   rtcDtlsFingerprint,
@@ -248,7 +248,7 @@ export async function runFiniteMediaPhase(
     const address = server.address()
     if (!address || typeof address === 'string')
       throw Error('Missing fixture port')
-    browser = await chromium.launch({ headless: true, timeout: 10000 })
+    browser = await launchBrowser({ timeout: 10000 })
     timer = setTimeout(
       () => {
         void browser?.close()

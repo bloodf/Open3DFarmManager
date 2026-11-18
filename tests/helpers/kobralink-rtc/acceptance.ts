@@ -1,11 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-} from '@playwright/test'
+import { launchBrowser } from '../browser.ts'
+import { type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { loadOrCreateIdentity } from '../../../packages/connector/src/identity/store.ts'
 import {
   PairingStartResponse,
@@ -327,7 +323,7 @@ export async function runQualificationWorld(input: {
   const allowedConsole: RegExp[] = []
   let host: ConnectorHost | undefined
   stage('chromium-launch')
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   let failed: unknown
   try {
     const bundle = await browserBundle(

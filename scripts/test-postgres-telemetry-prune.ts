@@ -34,8 +34,8 @@ try {
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
-  assert.equal(catalog.at(-2)?.id, '0038_reset_link_owner_farm')
-  assert.equal(catalog.at(-1)?.id, '0039_oidc_identities')
+  assert.equal(catalog.at(-2)?.id, '0046_integration_approvals')
+  assert.equal(catalog.at(-1)?.id, '0047_integration_webhooks')
   assert.equal(
     catalog.find((entry) => entry.id === '0036_telemetry_prune')?.id,
     '0036_telemetry_prune',

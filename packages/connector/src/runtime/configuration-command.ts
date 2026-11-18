@@ -18,6 +18,7 @@ import {
   createConfigurationSignallingClient,
   type ConfigurationSocket,
 } from '../webrtc/configuration-signalling.ts'
+import type { DiscoveryScanner } from './configuration-discovery.ts'
 import { createRuntimeActivator } from './configuration-activation.ts'
 import {
   createConfigurationIssuerSource,
@@ -27,6 +28,7 @@ import {
   createConfigurationRuntime,
   type ConfigurationRuntime,
 } from './configuration.ts'
+import type { BambuProbe } from '../provisioning/bambu.ts'
 
 export interface ConfigurationCommandInput {
   trustedKeys?: TrustedKeyStore
@@ -39,6 +41,10 @@ export interface ConfigurationCommandInput {
   issuerFetch?: IssuerFetch
   socket?: () => Promise<ConfigurationSocket>
   startRuntime?: (signal: AbortSignal, configPath: string) => Promise<void>
+  /** Network scan behind "search printers"; production scans the LAN. */
+  discovery?: DiscoveryScanner
+  /** Read-only Bambu LAN probe override, normally unset in production. */
+  bambuProbe?: BambuProbe
   clock?: () => number
 }
 
@@ -183,6 +189,8 @@ export async function runConfigurationConnector(
     activator,
     serverOnline: signalling.online,
     credentialJti: () => credential()?.jti ?? null,
+    ...(input.discovery ? { discovery: input.discovery } : {}),
+    ...(input.bambuProbe ? { bambuProbe: input.bambuProbe } : {}),
     clock,
     onDiagnostic: input.onDiagnostic,
   })

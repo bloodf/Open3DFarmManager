@@ -4,6 +4,7 @@ import { runtimeBootstrap } from '../config/provisioning.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { createProvisioningEngine } from '../provisioning/engine.ts'
+import type { BambuProbe } from '../provisioning/bambu.ts'
 import type { InventoryConfirmationInput } from '../provisioning/authority.ts'
 import { readDurableRevision } from '../provisioning/revision.ts'
 import {
@@ -11,6 +12,7 @@ import {
   type ConfigurationExpectedContext,
   type InventoryOutcome,
 } from '../webrtc/configuration-session.ts'
+import type { DiscoveryScanner } from './configuration-discovery.ts'
 import type { RuntimeActivator } from './configuration-activation.ts'
 import { createConfigurationAuthority } from './configuration-authority.ts'
 import type { ConfigurationIssuerSource } from './configuration-issuer.ts'
@@ -25,6 +27,10 @@ export interface ConfigurationRuntimeOptions {
   /** Current unexpired credential JTI, or null. */
   credentialJti: () => string | null
   fetch?: KobraLinkFetch
+  /** Scanner behind discovery requests (default: the LAN scan). */
+  discovery?: DiscoveryScanner
+  /** Read-only Bambu LAN probe override used by loopback journey simulators. */
+  bambuProbe?: BambuProbe
   clock?: () => number
   onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void
 }
@@ -72,6 +78,7 @@ export function createConfigurationRuntime(
     managedBridge: config.managedBridge,
     printerNetworks: config.printerNetworks,
     ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.bambuProbe ? { bambuProbe: options.bambuProbe } : {}),
     clock,
   })
   const printerNetworkPolicy = createPrinterNetworkPolicy(
@@ -153,6 +160,7 @@ export function createConfigurationRuntime(
       const session = new ConfigurationConnectorSession({
         identity,
         printerNetworkPolicy,
+        ...(options.discovery ? { discovery: options.discovery } : {}),
         expected: input.expected,
         issuers: options.issuers,
         authority,

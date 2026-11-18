@@ -1,79 +1,169 @@
 # Integration API
 
-The OpenFarm integration API lets third-party applications observe and control
-a farm under scopes an owner grants. The contract is
-[`docs/api/openapi-v1.yaml`](api/openapi-v1.yaml); each server publishes it
-unchanged, as JSON, at `GET /api/integrations/v1/openapi.json` (public, no
-authentication). Where this document and the spec disagree, the spec wins.
+The OpenFarm Integration API lets an application observe printers and inventory
+and request actions under grants approved by a farm owner. The authoritative
+contract is [`api/openapi-v1.yaml`](api/openapi-v1.yaml), published unchanged
+as JSON at `/api/integrations/v1/openapi.json`. Use that document for exact
+request and response schemas, scopes and error codes. This guide gives the
+operational flow; the contract wins if the two disagree.
 
-## Rate limits
+## Register an application and obtain consent
 
-Authenticated requests have separate per-app token buckets. The defaults are
-120 read requests and 30 write requests per minute. Override them with
-`NUXT_INTEGRATION_AUTH_READ_LIMIT` and
-`NUXT_INTEGRATION_AUTH_WRITE_LIMIT`; each value must be an integer from 1 to
-1,000,000. Reads are `GET` and `HEAD`; other methods use the write bucket.
-Authenticated responses report the consumed bucket in `RateLimit-Limit`,
-`RateLimit-Remaining` and `RateLimit-Reset`. A 429 also includes `Retry-After`.
+Create an integration app through the farm's supported app registration
+process. Registration provides a client ID and secret; store the secret in a
+secret manager and never put it in browser code, source control or logs. Ask
+for only the scopes and farms required. An owner must approve the requested
+grant. Sandbox apps can be granted sandbox farms only; they cannot be attached
+to a non-sandbox farm.
 
-## Versioning
+For programmatic farm linking, register the owner-consent intent with
+`POST /intents`, supplying unique `intentRef`, `clientId`, `deploymentId`,
+`registryRevision`, `machineRef` and `expiresAtMs` values. The expiry must be
+within five minutes. After presenting that consent request to the owner, poll
+`POST /grants/redeem` with a stable `requestId`, `intentRef` and `clientId`;
+`pending_consent` is not a grant. A `granted` result contains the farm, scopes
+and expiry. Repeated identical intent or redemption requests are safe with
+their same reference IDs. See the schema for the exact identifiers and
+response variants.
 
-- The major version is part of the path: `/api/integrations/v1`. A new major
-  version gets a new path (`/api/integrations/v2`) and runs alongside the old
-  one for at least the deprecation notice period below.
-- `info.version` in the spec follows semantic versioning. Its major number is
-  always the path version; minor releases add compatible features; patch
-  releases fix documentation or bring the implementation back in line with the
-  spec.
-- Every change to the spec is listed in the release notes of the release that
-  ships it.
+## Authenticate
 
-## Compatibility guarantees within v1
+Exchange the client credentials at `POST /api/integrations/v1/oauth/token`
+using OAuth 2.0 client credentials. HTTP Basic (`client_secret_basic`) and
+form-body (`client_secret_post`) are supported; do not send both. The response
+includes `access_token`, `token_type` and `expires_in`. Cache the token only
+until its reported expiry and send it as `Authorization: Bearer <token>`.
+Session cookies are not accepted. A changed or revoked grant invalidates its
+tokens. The token endpoint returns OAuth errors; other API errors use RFC 9457
+`application/problem+json` and a stable `code`.
 
-Within v1 the server will not, for any existing operation:
+```sh
+curl -u "$CLIENT_ID:$CLIENT_SECRET" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'scope=printers:read inventory:read' \
+  "$OPENFARM_URL/api/integrations/v1/oauth/token"
+```
 
-- remove or rename a path, operation, parameter, request or response field,
-  header, scope, event type or error `code`;
-- change a field's type or meaning, or turn an optional response field into
-  an absent one;
-- make an optional request field or parameter required, add a new required
-  request field, or narrow the values a request field accepts;
-- require a broader scope than before;
-- change the webhook signature scheme `v1` (HMAC-SHA256 over
-  `<timestamp>.<body>`, sent as `OpenFarm-Signature: v1=<hex>`) or the meaning
-  of `OpenFarm-Event-Id` and `OpenFarm-Timestamp`.
+## Read printers, state and inventory
 
-Within v1 the server may, and clients must tolerate:
+Use `GET /printers` with `printers:read`; follow the opaque `nextCursor` as
+`cursor` until it is `null`. `GET /printers/{printerId}/status` returns the
+latest observed projection. Its `state` can be `unknown`, and optional readings
+may be absent: do not infer readiness from missing data. `GET /inventory`
+requires `inventory:read` and returns the Spoolman snapshot, including its
+`stale` and `observedAt` fields. A snapshot may be stale and its spools list may
+be a bounded subset of `total`.
 
-- new operations, paths, optional request fields and optional query
-  parameters;
-- new fields in response bodies and webhook payloads (ignore unknown fields);
-- new values in response-only enumerations, including job and action
-  `status`, `refusal.code`, problem `code` and event types a client did not
-  subscribe to (treat an unknown status as not final, an unknown refusal code
-  as a refusal and an unknown problem code by its HTTP status);
-- new response headers, and new error responses using an already documented
-  status code family;
-- additional signatures in `OpenFarm-Signature` during secret or scheme
-  rotation (accept the request if any `v1=` value verifies);
-- changes to rate-limit budgets, token lifetime and page sizes within the
-  documented bounds; clients follow `RateLimit-*`, `Retry-After`,
-  `expires_in` and `nextCursor` instead of hard-coding them.
+Other read operations include printer files (`files:read`), macros
+(`control:extended`), job history (`jobs:read`) and individual job/action
+status. File and macro listing are answered live by the Connector and may be
+unavailable even when the printer list and status projection are readable.
 
-Security fixes are the only exception: when keeping a behaviour would expose
-owners or printers to harm, it may change within v1 without notice, and the
-release notes say so.
+## Start and track a job
 
-## Deprecation
+Before submitting, fetch printer status and decide from current state whether
+the operation is appropriate. Submit
+`POST /printers/{printerId}/jobs` with `jobs:start` and a unique
+`Idempotency-Key`. The JSON body contains an HTTPS `fileUrl`, lowercase SHA-256,
+exact `sizeBytes` and `displayName`. The Connector fetches the file, verifies
+its digest and size, then uploads and starts it. The server does not host the
+file. A grant may hold the job for operator approval. Track it with the
+returned job ID at `GET /jobs/{jobId}`; status can be `held`, `queued`,
+`delivered`, `refused`, `started`, a final result, or `outcome-unknown`.
 
-- A feature is deprecated by marking it `deprecated: true` in the spec, noting
-  it in the release notes, and sending `Deprecation` and `Sunset` response
-  headers (RFC 9745, RFC 8594) on every call that uses it, with a `Link` to the
-  release notes.
-- A deprecated feature keeps working for the rest of v1: removal happens only
-  in a new major version, never within v1.
-- The notice period is at least **6 months** between the release that first
-  announces a deprecation and the release of the major version that removes
-  it, and at least **12 months** between the release of a new major version
-  and the removal of the previous one (`/api/integrations/v1` keeps answering
-  until then).
+## Request actions
+
+`POST /printers/{printerId}/actions` also requires an `Idempotency-Key`.
+`pause`, `resume` and `cancel` require `control:basic`; other supported actions
+require `control:extended`. Send the action and its `args` as specified by the
+OpenAPI schema (use `{}` for actions without arguments), then track the result
+with `GET /actions/{actionId}`. The printer must advertise the action. Check
+printer state immediately before each command and account for the possibility
+that it changes between the check and delivery.
+
+Never automatically retry an uncertain command. Reuse the same idempotency key
+and identical body only when intentionally retrying a request whose outcome is
+known to be safe; changed bodies with a reused key receive
+`idempotency-key-reused`.
+
+## Handle errors and Connector refusals
+
+For API errors, branch on the problem `code`, not its human-readable `title` or
+`detail`. `401 invalid-token` means obtain a valid token; `403 insufficient-scope`
+means the owner must grant the required scope. Out-of-grant resources return
+`404 not-found` to avoid disclosing their existence. `429` includes
+`Retry-After`; honor it. Authenticated responses include `RateLimit-Limit`,
+`RateLimit-Remaining` and `RateLimit-Reset` for the bucket used. Read and write
+limits are separate, per app, and can change; follow these headers rather than
+hard-coding budgets.
+
+The Connector is the final safety authority and can refuse a signed command.
+Job or action responses carry a `refusal.code` when status is `refused`. Current
+codes are `printer-busy`, `not-ready`, `wrong-state`, `checksum-mismatch`,
+`grant-revoked`, `expired` and `unsupported`. Treat every refusal, including an
+unknown future code, as a refusal; do not work around it or automatically
+resubmit. Surface the reason and check printer state before taking any further
+action. `outcome-unknown` means delivery or execution could not be confirmed;
+the system did not retry it. Reconcile against current printer state and job
+history before deciding what to do.
+
+## Webhooks
+
+Create a subscription with `POST /webhooks` (`events:subscribe`), then keep the
+returned `signingSecret` private; it is shown only once. Verify the exact raw
+request bytes before parsing JSON. The signature is HMAC-SHA256 over the UTF-8
+bytes of `<OpenFarm-Timestamp>.<raw-body>`, encoded as lowercase hex in
+`OpenFarm-Signature: v1=<hex>`. Compare signatures in constant time, enforce a
+reasonable timestamp age, and use `OpenFarm-Event-Id` for deduplication. During
+secret rotation the header may contain multiple signatures; accept if any
+`v1=` signature verifies. Respond successfully only after accepting the event
+for processing. Treat event payloads as extensible and ignore unknown fields
+and event types.
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifyWebhook(
+  rawBody: Buffer,
+  timestamp: string,
+  signatureHeader: string,
+  secret: string,
+): boolean {
+  if (!/^\d{1,16}$/.test(timestamp)) return false
+  const expected = createHmac('sha256', secret)
+    .update(`${timestamp}.`)
+    .update(rawBody)
+    .digest()
+  return signatureHeader.split(',').some((item) => {
+    const match = /^\s*v1=([0-9a-f]{64})\s*$/.exec(item)
+    if (!match) return false
+    const candidate = Buffer.from(match[1]!, 'hex')
+    return (
+      candidate.length === expected.length &&
+      timingSafeEqual(candidate, expected)
+    )
+  })
+}
+```
+
+## Sandbox and reference client
+
+Use a sandbox app and sandbox farm for development. Sandbox credentials can
+never authorize a non-sandbox farm. Keep sandbox and production credentials,
+data and base URLs separate. The reference client in
+[`../examples/integration-client/`](../examples/integration-client/) has
+offline tests and an explicitly opt-in sandbox test. The latter needs a
+sandbox URL, client credentials and a printer ID; it reads printer state and
+inventory without sending a physical command.
+
+## Versioning and compatibility
+
+The major version is in the path (`/api/integrations/v1`). Compatible additions
+may introduce optional fields, operations, event types and response enum
+values. Ignore unknown response fields, treat an unknown status as non-final,
+an unknown refusal code as a refusal, and use HTTP status when an error code is
+unrecognized. Follow cursors, token lifetime and rate limit headers rather
+than assuming fixed values. Deprecation notices and the minimum notice periods
+are defined by the OpenAPI contract and release notes. Security fixes may
+change behavior within v1 when needed to protect owners or printers.

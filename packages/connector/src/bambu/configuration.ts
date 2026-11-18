@@ -36,6 +36,7 @@ const schema = endpoint.extend({
     .max(128)
     .regex(/^[A-Za-z0-9_-]+$/),
   control: z.boolean().default(false),
+  ftpsPort: z.number().int().min(1).max(65535).default(990),
   credentialFile: path,
   caFile: path.optional(),
   pinSha256: z

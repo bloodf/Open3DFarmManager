@@ -2,7 +2,7 @@ import { createServer } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 
 // Public disposable synthetic identity. Never use for a real printer.
-const cert = `-----BEGIN CERTIFICATE-----
+export const syntheticBambuCertificate = `-----BEGIN CERTIFICATE-----
 MIIDDzCCAfegAwIBAgIUIz5W9pVEWkuHCHkhRPa1b/Gp/BAwDQYJKoZIhvcNAQEL
 BQAwHzEdMBsGA1UEAwwUU1lOVEhFVElDLUJBTUJVLU9OTFkwHhcNMjYxMTE0MDgx
 NzI0WhcNMzYxMTExMDgxNzI0WjAfMR0wGwYDVQQDDBRTWU5USEVUSUMtQkFNQlUt
@@ -22,6 +22,7 @@ iuqR6YDi9FxrT2nMoDB/zqBJn0phcCjeFpsh2uOLnZih1MhiXH+IHgvRthu4NfVO
 2Qch7i7xHkiDog0JmvgNxH6oTg==
 -----END CERTIFICATE-----
 `
+const cert = syntheticBambuCertificate
 const key = `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDUPwd+0InyUZxm
 CMSuZzcSFrsd+emhPkieCK7sz+6AhwJ7pVuwfPc4kGbJNYwrP8JDcP8g5SVEvU9o
@@ -65,7 +66,10 @@ export function packet(header: number, body: Buffer) {
 }
 export async function startBambuSimulator({
   serial = 'SYNTHETIC',
+  accessCode = 'secret',
+  host = '127.0.0.1',
   port = 0,
+  ftpsPort = 0,
   initialState,
   initialTargetTemperature,
   confirmCommands = true,
@@ -76,7 +80,10 @@ export async function startBambuSimulator({
   printDurationMs?: number
   totalLayers?: number
   serial?: string
+  accessCode?: string
+  host?: string
   port?: number
+  ftpsPort?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
   initialTargetTemperature?: number
   versionModules?: { name: string; sw_ver: string }[]
@@ -84,6 +91,8 @@ export async function startBambuSimulator({
 } = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
+  if (!accessCode || /[\r\n]/.test(accessCode))
+    throw new Error('Invalid synthetic access code')
   if (
     printDurationMs !== undefined &&
     (!Number.isFinite(printDurationMs) ||
@@ -92,16 +101,29 @@ export async function startBambuSimulator({
       totalLayers < 1)
   )
     throw new Error('Invalid print configuration')
-  const uploads = new Set<string>()
+  const uploads = new Map<string, Buffer>()
   let timer: ReturnType<typeof setInterval> | undefined
   let elapsed = 0
   let lastTick = 0
   const reportTopic = `device/${serial}/report`
   let gcodeState: string | undefined = initialState
-  const extended: Record<string, unknown> =
-    initialTargetTemperature === undefined
+  const extended: Record<string, unknown> = {
+    nozzle_temper: 210,
+    bed_temper: 60,
+    ams: {
+      ams: [
+        {
+          id: 0,
+          tray: [
+            { id: 0, tray_type: 'PLA', tray_color: 'FFFFFFFF', remain: 100 },
+          ],
+        },
+      ],
+    },
+    ...(initialTargetTemperature === undefined
       ? {}
-      : { nozzle_target_temper: initialTargetTemperature }
+      : { nozzle_target_temper: initialTargetTemperature }),
+  }
   const requests: { command: string; sequence_id: string }[] = []
   function report(socket: TLSSocket) {
     const topic = Buffer.from(reportTopic)
@@ -151,7 +173,7 @@ export async function startBambuSimulator({
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
   const server = createServer(
-    { cert, key, handshakeTimeout: 3000 },
+    { cert: syntheticBambuCertificate, key, handshakeTimeout: 3000 },
     (socket) => {
       let buffer = Buffer.alloc(0)
       let connected = false
@@ -302,10 +324,19 @@ export async function startBambuSimulator({
                 ) {
                   if (
                     printDurationMs !== undefined &&
-                    !uploads.has(request.url)
+                    !uploads.has(
+                      decodeURIComponent(
+                        request.url.slice('file:///sdcard/'.length),
+                      ),
+                    )
                   )
                     throw new Error('File not uploaded')
                   extended.file = request.url
+                  const fileName = decodeURIComponent(
+                    request.url.slice('file:///sdcard/'.length),
+                  )
+                  extended.subtask_name = fileName
+                  extended.gcode_file = fileName
                   gcodeState = 'RUNNING'
                   elapsed = 0
                   extended.mc_percent = 0
@@ -351,6 +382,117 @@ export async function startBambuSimulator({
       })
     },
   )
+  const ftpsSockets = new Set<TLSSocket>()
+  const passiveServers = new Set<ReturnType<typeof createServer>>()
+  const ftps = createServer({ cert, key }, (control) => {
+    ftpsSockets.add(control)
+    control.on('error', () => {})
+    control.on('close', () => ftpsSockets.delete(control))
+    control.write('220 Bambu simulator ready\r\n')
+    let buffer = ''
+    let dataServer: ReturnType<typeof createServer> | undefined
+    let dataSocket: TLSSocket | undefined
+    control.on('data', (chunk) => {
+      buffer += chunk.toString()
+      if (buffer.length > 65536) return control.destroy()
+      let end: number
+      while ((end = buffer.indexOf('\r\n')) >= 0) {
+        const line = buffer.slice(0, end)
+        buffer = buffer.slice(end + 2)
+        if (line === 'USER bblp') control.write('331 password required\r\n')
+        else if (line.startsWith('PASS '))
+          control.write(
+            line === `PASS ${accessCode}`
+              ? '230 logged in\r\n'
+              : '530 invalid credentials\r\n',
+          )
+        else if (line === 'PASV') {
+          dataServer?.close()
+          dataSocket = undefined
+          dataServer = createServer({ cert, key }, (socket) => {
+            ftpsSockets.add(socket)
+            dataSocket = socket
+            socket.on('error', () => {})
+            socket.on('close', () => ftpsSockets.delete(socket))
+          })
+          passiveServers.add(dataServer)
+          dataServer.once('close', () => passiveServers.delete(dataServer!))
+          dataServer.listen(0, host, () => {
+            const address = dataServer!.address()
+            if (!address || typeof address === 'string')
+              return control.destroy()
+            const octets = host.split('.').map(Number)
+            control.write(
+              `227 Entering Passive Mode (${[...octets, address.port >> 8, address.port & 255].join(',')})\r\n`,
+            )
+          })
+        } else if (line === 'MLSD') {
+          control.write('150 Opening protected data connection\r\n')
+          const writeListing = () => {
+            if (!dataSocket) return control.destroy()
+            const listing = [...uploads]
+              .map(
+                ([name, data]) =>
+                  `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`,
+              )
+              .join('')
+            dataSocket.end(listing, () => {
+              control.write('226 Listing complete\r\n')
+              dataServer?.close()
+            })
+          }
+          if (dataSocket) writeListing()
+          else
+            dataServer?.once('secureConnection', (socket) => {
+              dataSocket = socket
+              ftpsSockets.add(socket)
+              socket.on('error', () => {})
+              socket.on('close', () => ftpsSockets.delete(socket))
+              writeListing()
+            })
+        } else if (line.startsWith('STOR ')) {
+          const name = line.slice(5)
+          if (!/^[A-Za-z0-9_. -]{1,255}$/.test(name)) {
+            control.write('550 Invalid name\r\n')
+            continue
+          }
+          control.write('150 Opening protected data connection\r\n')
+          const receiveFile = (socket: TLSSocket) => {
+            const chunks: Buffer[] = []
+            socket.on('data', (data: Buffer) => chunks.push(data))
+            socket.on('end', () => {
+              uploads.set(name, Buffer.concat(chunks))
+              control.write('226 Transfer complete\r\n')
+              dataServer?.close()
+            })
+          }
+          if (dataSocket) receiveFile(dataSocket)
+          else
+            dataServer?.once('secureConnection', (socket) => {
+              dataSocket = socket
+              ftpsSockets.add(socket)
+              socket.on('error', () => {})
+              socket.on('close', () => ftpsSockets.delete(socket))
+              receiveFile(socket)
+            })
+        } else if (line === 'QUIT') {
+          control.write('221 goodbye\r\n')
+          control.end()
+        } else control.write('200 ok\r\n')
+      }
+    })
+  })
+  ftps.on('tlsClientError', () => {})
+  await new Promise<void>((resolve, reject) => {
+    ftps.once('error', reject)
+    ftps.listen(ftpsPort, host, () => {
+      ftps.removeListener('error', reject)
+      resolve()
+    })
+  })
+  const ftpsAddress = ftps.address()
+  if (!ftpsAddress || typeof ftpsAddress === 'string')
+    throw new Error('Missing FTPS listener')
   server.on('connection', (socket) => {
     sockets.add(socket as TLSSocket)
     socket.on('error', () => {})
@@ -361,7 +503,7 @@ export async function startBambuSimulator({
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, host, () => {
       server.removeListener('error', reject)
       resolve()
     })
@@ -382,11 +524,13 @@ export async function startBambuSimulator({
   }
   let closing: Promise<void> | undefined
   return {
-    host: '127.0.0.1',
+    host,
     port: address.port,
+    ftpsPort: ftpsAddress.port,
     syntheticTrust: cert,
     reportTopic,
     requests,
+    uploads,
     get extendedState() {
       return { ...extended }
     },
@@ -410,7 +554,7 @@ export async function startBambuSimulator({
     uploadFile(name: string, data: Uint8Array) {
       if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
         throw new Error('Invalid upload')
-      uploads.add(`file:///sdcard/${name}`)
+      uploads.set(name, Buffer.from(data))
     },
     /** Journey control: a print in progress at a fixed percentage. */
     setPrintProgress(percent: number) {
@@ -441,6 +585,13 @@ export async function startBambuSimulator({
     close() {
       stopTimer()
       closing ??= (async () => {
+        for (const socket of ftpsSockets) socket.destroy()
+        await Promise.all(
+          [ftps, ...passiveServers].map(
+            (listener) =>
+              new Promise<void>((resolve) => listener.close(() => resolve())),
+          ),
+        )
         const closed = new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),
         )

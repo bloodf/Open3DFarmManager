@@ -162,6 +162,7 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
+  unsupported: [422, 'Ação não suportada por esta impressora.'],
   'idempotency-key-reused': [
     409,
     'Chave de idempotência já usada com outra solicitação.',

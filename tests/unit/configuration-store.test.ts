@@ -488,30 +488,37 @@ it('rolls back assignment and receipt together after a transaction failure', asy
   ).toBe(true)
 })
 
-it('executes the production plugin disabled path without opening pools', async () => {
-  vi.stubGlobal('defineNitroPlugin', (callback: unknown) => callback)
-  vi.doMock('nuxt/server', async (importOriginal) => ({
-    ...(await importOriginal<object>()),
-    useRuntimeConfig: () => ({}),
-  }))
-  const saved = process.env.OPEN3DFARM_CONFIGURATION
-  delete process.env.OPEN3DFARM_CONFIGURATION
-  try {
-    const modulePath =
-      '../../apps/farm/server/plugins/configuration-lifecycle.ts'
-    const { default: plugin } = await import(modulePath)
-    const hook = vi.fn()
-    const run = plugin as unknown as (nitro: {
-      hooks: { hook: typeof hook }
-    }) => void
-    run({ hooks: { hook } })
-    expect(hook).not.toHaveBeenCalled()
-  } finally {
-    if (saved !== undefined) process.env.OPEN3DFARM_CONFIGURATION = saved
-    vi.doUnmock('nuxt/server')
-    vi.unstubAllGlobals()
-  }
-})
+// The cold dynamic import transforms the plugin's server-side module graph
+// (postgres client, migration catalog, auth runtime) on first use. That takes
+// about a second on an idle host and several seconds on a loaded CI host, so
+// this test gets an explicit timeout instead of the 5 s default.
+it(
+  'executes the production plugin disabled path without opening pools',
+  { timeout: 30_000 },
+  async () => {
+    vi.stubGlobal('defineNitroPlugin', (callback: unknown) => callback)
+    // Only useRuntimeConfig is needed; loading the real nuxt/server module just
+    // to spread its exports was the most expensive part of this test.
+    vi.doMock('nuxt/server', () => ({ useRuntimeConfig: () => ({}) }))
+    const saved = process.env.OPEN3DFARM_CONFIGURATION
+    delete process.env.OPEN3DFARM_CONFIGURATION
+    try {
+      const modulePath =
+        '../../apps/farm/server/plugins/configuration-lifecycle.ts'
+      const { default: plugin } = await import(modulePath)
+      const hook = vi.fn()
+      const run = plugin as unknown as (nitro: {
+        hooks: { hook: typeof hook }
+      }) => void
+      run({ hooks: { hook } })
+      expect(hook).not.toHaveBeenCalled()
+    } finally {
+      if (saved !== undefined) process.env.OPEN3DFARM_CONFIGURATION = saved
+      vi.doUnmock('nuxt/server')
+      vi.unstubAllGlobals()
+    }
+  },
+)
 
 it('retains challenge replay identities across adapter restart', async () => {
   const db = database()

@@ -29,6 +29,8 @@ import {
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
+import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
+import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
 export type ApiGrant = Readonly<{
@@ -62,6 +64,7 @@ const IDLE_ONLY = new Set([
   'load_filament',
   'unload_filament',
   'run_macro',
+  'start_print',
 ])
 const MAX_EXECUTE_MS = 5000
 
@@ -101,6 +104,11 @@ export function createApiCommandRunner(config: {
   ) => Promise<boolean>
   storageDegraded?: () => boolean
   signal?: AbortSignal
+  jobFiles?: {
+    directory: string
+    targetFor(printerKey: string): FileUploadTarget | undefined
+    ca?: string | Buffer
+  }
 }) {
   const sample = (): AuthoritySample => ({
     wall: config.clock.wallNow(),
@@ -108,7 +116,7 @@ export function createApiCommandRunner(config: {
   })
   function send(
     envelope: ApiEnvelopeV1,
-    outcome: 'refused' | 'completed',
+    outcome: 'refused' | 'completed' | 'started',
     code?: ApiEnvelopeRefusalCode,
     detail?: string,
   ) {
@@ -161,12 +169,31 @@ export function createApiCommandRunner(config: {
       return ['grant-revoked', 'action outside the granted scope']
     return null
   }
+  function jobTarget(binding: PrinterBinding): FileUploadTarget | undefined {
+    const mapping = readPrinterBinding(binding)
+    if (!mapping) return undefined
+    try {
+      return config.jobFiles?.targetFor(mapping.printer_key)
+    } catch {
+      return undefined
+    }
+  }
   function safetyRefusal(
     envelope: ApiEnvelopeV1,
     binding: PrinterBinding,
   ): [ApiEnvelopeRefusalCode, string] | null {
-    if (envelope.kind === 'job')
-      return ['unsupported', 'job delivery is not supported yet']
+    if (envelope.kind === 'job') {
+      const target = jobTarget(binding)
+      if (
+        !target ||
+        !envelope.job ||
+        !supportsFileUpload(target, envelope.job.display_name) ||
+        !config.driver.execute ||
+        !(config.driver.controls?.(binding) ?? []).includes('start_print')
+      )
+        return ['unsupported', 'job delivery is not supported by this printer']
+      return null
+    }
     const { action, args } = envelope.action!
     if (
       !config.driver.execute ||
@@ -198,6 +225,8 @@ export function createApiCommandRunner(config: {
       (observed.printState === 'printing' || observed.printState === 'paused')
     )
       return ['printer-busy', 'printer is printing']
+    if (action === 'start_print' && observed.printState !== 'idle')
+      return ['wrong-state', `printer is ${observed.printState}`]
     if (!controlSourceState(action, observed.printState))
       return ['wrong-state', `printer is ${observed.printState}`]
     return null
@@ -276,10 +305,16 @@ export function createApiCommandRunner(config: {
       finishCommand(config.journal, receipt, 'not-sent', 'guard-denied')
       return refuse(envelope, ...unsafe)
     }
-    const request = envelope.action
+    const request =
+      envelope.kind === 'job' && envelope.job
+        ? {
+            action: 'start_print' as const,
+            args: { file: envelope.job.display_name },
+          }
+        : envelope.action
     if (!request) {
       finishCommand(config.journal, receipt, 'not-sent', 'guard-denied')
-      return refuse(envelope, 'unsupported', 'job delivery is unavailable')
+      return refuse(envelope, 'unsupported', 'missing command')
     }
     const { action, args } = request
     let lastRefusal: [ApiEnvelopeRefusalCode, string] | null = null
@@ -293,7 +328,10 @@ export function createApiCommandRunner(config: {
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
-        Math.min(MAX_EXECUTE_MS, envelope.expires_at - config.clock.wallNow()),
+        Math.min(
+          envelope.kind === 'job' ? 60_000 : MAX_EXECUTE_MS,
+          envelope.expires_at - config.clock.wallNow(),
+        ),
       ),
     )
     const signal = config.signal
@@ -321,7 +359,7 @@ export function createApiCommandRunner(config: {
       permitted = true
       return true
     }
-    try {
+    const executeDriver = async () => {
       await config.driver.prepare?.({ binding, signal })
       lastRefusal =
         authorityRefusal(envelope, sample()) ?? stateRefusal(action, binding)
@@ -342,7 +380,47 @@ export function createApiCommandRunner(config: {
             signal,
           })
       }
-    } catch {
+    }
+    try {
+      if (envelope.kind === 'job' && envelope.job) {
+        const mapping = readPrinterBinding(binding)
+        const target = jobTarget(binding)
+        if (!target || !config.jobFiles) throw new JobFileError('unsupported')
+        const authorize = () => {
+          lastRefusal =
+            config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
+              ? ['grant-revoked', 'issuer no longer trusted']
+              : (authorityRefusal(envelope, sample()) ??
+                safetyRefusal(envelope, binding) ??
+                stateRefusal(action, binding))
+          return (
+            !lastRefusal &&
+            !signal.aborted &&
+            !config.storageDegraded?.() &&
+            readPrinterBinding(binding) === mapping
+          )
+        }
+        if (!authorize()) throw new Error('unauthorized')
+        await fetchJobFile({
+          job: envelope.job,
+          target,
+          directory: config.jobFiles.directory,
+          signal,
+          authorize,
+          start: executeDriver,
+          ...(config.jobFiles.ca ? { ca: config.jobFiles.ca } : {}),
+        })
+      } else await executeDriver()
+    } catch (error) {
+      if (!attempted && error instanceof JobFileError)
+        lastRefusal = [
+          error.reason === 'checksum-mismatch'
+            ? 'checksum-mismatch'
+            : error.reason === 'unsupported'
+              ? 'unsupported'
+              : 'not-ready',
+          error.reason,
+        ]
       threw = true
     } finally {
       try {
@@ -384,7 +462,7 @@ export function createApiCommandRunner(config: {
     }
     if (!finishCommand(config.journal, receipt, 'applied', 'rpc-acknowledged'))
       return { kind: 'outcome-unknown' }
-    send(envelope, 'completed')
+    send(envelope, envelope.kind === 'job' ? 'started' : 'completed')
     return { kind: 'completed' }
   }
 }

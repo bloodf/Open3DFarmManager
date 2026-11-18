@@ -83,6 +83,13 @@ export interface IntegrationApprovalStore {
     decision: ApprovalDecision
     now: number
   }): Promise<DecideOutcome>
+  /** Terminally rejects an approved item when its envelope cannot be issued. */
+  rejectApproved(input: {
+    kind: ApprovalKind
+    id: string
+    now: number
+    reason: 'invalid' | 'refused'
+  }): Promise<void>
   /** Held items past their window become `expired`, each with an audit entry. */
   expireHeld(now: number, limit: number): Promise<number>
 }
@@ -219,8 +226,15 @@ export class IntegrationApprovalService {
       ttlMs: this.o.envelopeTtlMs ?? DEFAULT_JOB_ENVELOPE_TTL_MS,
       command: item.command,
     })
-    // The decision stands; the item stays queued without an envelope.
-    if (!issued.ok) return 'queued'
+    if (!issued.ok) {
+      await this.o.store.rejectApproved({
+        kind: item.kind,
+        id: item.id,
+        now: this.now(),
+        reason: issued.reason,
+      })
+      return 'rejected'
+    }
     let envelope = issued.record
     if (issued.created) {
       try {

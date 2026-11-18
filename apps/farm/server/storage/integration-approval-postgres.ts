@@ -253,6 +253,33 @@ export class PostgresIntegrationApprovals implements IntegrationApprovalStore {
     })
   }
 
+  async rejectApproved(input: {
+    kind: ApprovalKind
+    id: string
+    now: number
+    reason: 'invalid' | 'refused'
+  }): Promise<void> {
+    if (!validTime(input.now)) throw new Error('Invalid time')
+    await this.sql.begin(async (tx) => {
+      const rows = await tx<HeldRow[]>`
+        UPDATE ${tx(table(input.kind))} x
+        SET status = 'rejected', updated_at = GREATEST(${input.now}, x.updated_at)
+        WHERE x.id = ${input.id}::uuid AND x.status = 'submitted'
+        RETURNING x.id::text AS id, x.farm_id::text AS "farmId",
+          x.app_id::text AS "appId", x.printer_assignment_id::text AS "printerAssignmentId"`
+      if (rows[0])
+        await this.audit(
+          tx,
+          input.kind,
+          rows[0],
+          { kind: 'system', id: null },
+          'rejected',
+          `envelope-issue-${input.reason}`,
+          input.now,
+        )
+    })
+  }
+
   async expireHeld(now: number, limit: number): Promise<number> {
     if (!validTime(now)) throw new Error('Invalid time')
     const bound = Math.max(1, Math.min(Math.trunc(limit), 500))

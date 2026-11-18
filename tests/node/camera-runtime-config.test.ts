@@ -117,3 +117,42 @@ test('camera config rejects names, credentials, foreign assignments and unbounde
   ])
     assert.throws(() => parseCameraRuntimeConfig(changed, [assignment]))
 })
+
+test('vendor MJPEG cameras take a literal local address and port only', () => {
+  for (const kind of ['creality-mjpeg', 'anycubic-rinkhals'] as const) {
+    const config = parseCameraRuntimeConfig(
+      {
+        ...valid,
+        cameras: [
+          {
+            cameraId: 'cam-1',
+            assignmentId: assignment,
+            source: { kind, address: '127.0.0.1', port: 8080 },
+          },
+        ],
+      },
+      [assignment],
+    )
+    assert.deepEqual(config.cameras[0]?.source, {
+      kind,
+      address: '127.0.0.1',
+      port: 8080,
+      path: '/?action=stream',
+    })
+    for (const source of [
+      { kind, address: 'camera.local', port: 8080 },
+      { kind, address: '203.0.113.7', port: 8080 },
+      { kind, address: '127.0.0.1', port: 8080, path: '/other' },
+      { kind, address: '127.0.0.1', port: 8080, auth: 'user:pass' },
+    ])
+      assert.throws(() =>
+        parseCameraRuntimeConfig(
+          {
+            ...valid,
+            cameras: [{ cameraId: 'cam-1', assignmentId: assignment, source }],
+          },
+          [assignment],
+        ),
+      )
+  }
+})

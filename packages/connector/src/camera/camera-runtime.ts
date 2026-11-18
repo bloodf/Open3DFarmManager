@@ -64,9 +64,45 @@ export async function createCameraMediaFactory(input: {
         : [['camera-' + index, Object.freeze({ ...camera.source })]],
     ),
   )
+  // Vendor MJPEG cameras from the runtime file reuse the same local encoder.
+  const configured = config.cameras.flatMap((camera, index) =>
+    'kind' in camera.source &&
+    (camera.source.kind === 'creality-mjpeg' ||
+      camera.source.kind === 'anycubic-rinkhals')
+      ? [
+          {
+            handle: 'camera-' + index,
+            kind: camera.source.kind,
+            host: camera.source.address,
+            port: camera.source.port,
+          },
+        ]
+      : [],
+  )
+  const configuredCreality = new Map(
+    configured
+      .filter((camera) => camera.kind === 'creality-mjpeg')
+      .map(({ handle, host, port }) => {
+        selectCrealityCamera({ host, port })
+        return [handle, Object.freeze({ host, port })] as const
+      }),
+  )
+  const configuredAnycubic = new Map(
+    configured
+      .filter((camera) => camera.kind === 'anycubic-rinkhals')
+      .map(({ handle, host, port }) => {
+        const source = { kind: 'rinkhals', host, port } as const
+        selectAnycubicCamera(source)
+        return [handle, Object.freeze(source)] as const
+      }),
+  )
   const snapshots = new Map(
     config.cameras.flatMap((camera, index) => {
-      if (!('kind' in camera.source)) return []
+      if (
+        !('kind' in camera.source) ||
+        camera.source.kind !== 'moonraker-snapshot'
+      )
+        return []
       const { address, port, path } = camera.source
       const host = address.includes(':') ? '[' + address + ']' : address
       return [
@@ -177,8 +213,9 @@ export async function createCameraMediaFactory(input: {
               snapshot.reader.stream(jpegSignal),
           })
         }
-        const anycubicSource = anycubic.get(handle)
-        if (anycubicSource && anycubicFfmpeg) {
+        const anycubicSource =
+          anycubic.get(handle) ?? configuredAnycubic.get(handle)
+        if (anycubicSource && (anycubicFfmpeg ?? helper)) {
           if (
             !isCurrent() ||
             signal.aborted ||
@@ -188,7 +225,7 @@ export async function createCameraMediaFactory(input: {
             throw Error('Anycubic camera admission expired')
           return openAnycubicCameraSource({
             source: anycubicSource,
-            ffmpeg: anycubicFfmpeg,
+            ffmpeg: anycubicFfmpeg ?? helper,
             isCurrent,
             signal: AbortSignal.any([
               signal,
@@ -198,8 +235,9 @@ export async function createCameraMediaFactory(input: {
             ]),
           })
         }
-        const crealitySource = creality.get(handle)
-        if (crealitySource && crealityFfmpeg) {
+        const crealitySource =
+          creality.get(handle) ?? configuredCreality.get(handle)
+        if (crealitySource && (crealityFfmpeg ?? helper)) {
           if (
             !isCurrent() ||
             signal.aborted ||
@@ -213,7 +251,7 @@ export async function createCameraMediaFactory(input: {
               host: crealitySource.host,
               accessCode: 'unused',
             },
-            ffmpeg: crealityFfmpeg,
+            ffmpeg: crealityFfmpeg ?? helper,
             isCurrent,
             signal: AbortSignal.any([
               signal,

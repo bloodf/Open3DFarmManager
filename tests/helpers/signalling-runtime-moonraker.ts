@@ -152,6 +152,8 @@ export async function createRuntimeMoonrakerFixture() {
         assignment: Record<string, unknown>
         /** Pause between telemetry drains of an empty queue (100..5000). */
         telemetryIdleMs?: number
+        /** Opt-in camera section of the runtime file (vendor MJPEG sources). */
+        camera?: (assignmentId: string) => Record<string, unknown>
       }
     }) {
       if (running || disposal || input.assignmentRefs.length !== 1)
@@ -383,6 +385,9 @@ export async function createRuntimeMoonrakerFixture() {
           ],
           ...(camera
             ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
+            : {}),
+          ...(input.runtime?.camera
+            ? { camera: input.runtime.camera(ref.assignmentId) }
             : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',

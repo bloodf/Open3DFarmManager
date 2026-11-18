@@ -4,7 +4,9 @@
 // assignment) for the paired agent, and exposes scripted controls plus a
 // loopback discovery probe. Nothing here touches a physical printer.
 import { X509Certificate, createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +14,7 @@ import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.t
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
 import type { Printer } from '../../packages/connector/src/discovery/index.ts'
 import { probePrinterHost } from '../../packages/connector/src/discovery/probe.ts'
+import { startAnycubicCameraSim } from '../../packages/sim-tools/src/anycubic-camera-sim.ts'
 import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
@@ -54,6 +57,8 @@ export type VendorRuntime = Readonly<{
    * slot free for the inboxes of a simulator that reports every second.
    */
   telemetryIdleMs?: number
+  /** Opt-in camera section of the runtime file (vendor MJPEG source). */
+  camera?: (assignmentId: string) => Record<string, unknown>
 }>
 
 export type VendorDiscovery = Readonly<{
@@ -66,6 +71,16 @@ export type VendorDiscovery = Readonly<{
   >
 }>
 
+/** Loopback MJPEG camera the Connector reads (`/?action=stream`). */
+export type VendorCamera = Readonly<{
+  host: string
+  port: number
+  /** Absolute path of the encoder the Connector runs for this camera. */
+  helper: string
+  /** Stream requests the simulated camera served. */
+  requests(): number
+}>
+
 export type VendorSimulator = Readonly<{
   name: VendorName
   printerKey: string
@@ -74,6 +89,8 @@ export type VendorSimulator = Readonly<{
   controls: VendorControls
   /** Absent for vendors with no network discovery step (Bambu). */
   discovery: VendorDiscovery | undefined
+  /** Absent for vendors whose camera is not simulated. */
+  camera: VendorCamera | undefined
   runtime(scope: RuntimeScope): Promise<VendorRuntime>
   close(): Promise<void>
 }>
@@ -144,6 +161,65 @@ function closing(server: Server) {
     })
 }
 
+/** One real JPEG frame (320x240 test pattern) from the local ffmpeg. */
+function testFrame(ffmpeg: string): Buffer {
+  return execFileSync(
+    ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=320x240:rate=10',
+      '-frames:v',
+      '1',
+      '-f',
+      'image2pipe',
+      '-c:v',
+      'mjpeg',
+      'pipe:1',
+    ],
+    { maxBuffer: 4 * 1024 * 1024, timeout: 30_000 },
+  )
+}
+
+/** Starts the paced loopback camera and builds the Connector's camera section. */
+async function startCamera(
+  kind: 'creality-mjpeg' | 'anycubic-rinkhals',
+  undo: Closer[],
+) {
+  const found = execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
+  const ffmpeg = await realpath(found)
+  const sha256 = createHash('sha256')
+    .update(await readFile(ffmpeg))
+    .digest('hex')
+  const sim = await startAnycubicCameraSim({
+    jpeg: testFrame(ffmpeg),
+    frameIntervalMs: 100,
+  })
+  undo.push(() => sim.close())
+  const camera: VendorCamera = {
+    host: sim.host,
+    port: sim.port,
+    helper: ffmpeg,
+    requests: () => sim.requests,
+  }
+  const section = (assignmentId: string) => ({
+    helper: { path: ffmpeg, sha256 },
+    maxSessions: 1,
+    cameras: [
+      {
+        cameraId: 'journey-camera',
+        assignmentId,
+        source: { kind, address: sim.host, port: sim.port },
+      },
+    ],
+  })
+  return { camera, section }
+}
+
 function localAssignment(scope: RuntimeScope) {
   return {
     assignment_id: scope.assignmentId,
@@ -162,6 +238,9 @@ export async function startVendorSimulator(
   try {
     const { printerKey } = options
     let discovery: VendorDiscovery | undefined
+    let camera: VendorCamera | undefined
+    let cameraSection:
+      ((assignmentId: string) => Record<string, unknown>) | undefined
     let raw: unknown
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
@@ -252,7 +331,11 @@ export async function startVendorSimulator(
         port: infoPort,
         probe: () => probeCreality('127.0.0.1', { https: 1, http: infoPort }),
       }
+      const crealityCamera = await startCamera('creality-mjpeg', undo)
+      camera = crealityCamera.camera
+      cameraSection = crealityCamera.section
       runtime = async (scope) => ({
+        ...(cameraSection ? { camera: cameraSection } : {}),
         version: 4,
         collection: {
           version: 4,
@@ -306,11 +389,15 @@ export async function startVendorSimulator(
         port: infoPort,
         probe: () => probeAnycubic('127.0.0.1', infoPort),
       }
+      const anycubicCamera = await startCamera('anycubic-rinkhals', undo)
+      camera = anycubicCamera.camera
+      cameraSection = anycubicCamera.section
       runtime = async (scope) => {
         const passwordFile = join(directory, 'anycubic-password.json')
         await privateJson(passwordFile, password)
         return {
           version: 5,
+          ...(cameraSection ? { camera: cameraSection } : {}),
           // Uploads and both signalling inboxes share one credential proof
           // slot on the server; spaced uploads leave it free for commands.
           telemetryIdleMs: 5000,
@@ -461,6 +548,7 @@ export async function startVendorSimulator(
       raw,
       controls,
       discovery,
+      camera,
       runtime,
       close: () =>
         (closed ??= (async () => {

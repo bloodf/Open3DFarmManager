@@ -1,3 +1,4 @@
+import { readPrinterBinding } from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import { PAUSE_POLICY_HARD_MAXIMUMS } from '../../../farm-protocol/src/pause-capability.ts'
 import {
@@ -9,7 +10,12 @@ import {
   openTrustedKeyStore,
   type TrustedKeyAuthority,
 } from '../auth/trusted-key-store.ts'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { readBambuCredentials } from '../bambu/credentials.ts'
+import {
+  moonrakerAuthHeaders,
+  validateMoonrakerInput,
+} from '../config/moonraker.ts'
 import { join } from 'node:path'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -291,6 +297,63 @@ async function runAssignmentControl(
             journal,
             clock,
             driver: router,
+            jobFiles: {
+              directory: join(input.dataDirectory, 'job-file-staging'),
+              targetFor(printerKey) {
+                const mapping = readPrinterBinding(printerBinding)
+                if (!mapping || mapping.printer_key !== printerKey)
+                  return undefined
+                const collection = config.collection
+                if (collection.version === 3) {
+                  const bambu = collection.bambu.printers.find(
+                    (p) => p.printerKey === printerKey,
+                  )
+                  if (bambu)
+                    return {
+                      backend: 'bambu',
+                      host: bambu.host,
+                      serial: bambu.serial,
+                      accessCode: readBambuCredentials(bambu).password,
+                      trust: {
+                        ...(bambu.caFile
+                          ? { caPem: readFileSync(bambu.caFile, 'utf8') }
+                          : {}),
+                        ...(bambu.pinSha256
+                          ? { pinSha256: bambu.pinSha256 }
+                          : {}),
+                      },
+                    }
+                }
+                if ('printers' in collection) {
+                  const printer = collection.printers.find(
+                    (p) =>
+                      p.printerKey === printerKey &&
+                      p.origin === mapping.moonraker_origin,
+                  )
+                  if (printer) {
+                    const selected = validateMoonrakerInput({
+                      assignment: printer,
+                      allowedOrigins: collection.allowedOrigins,
+                      limits: collection.limits,
+                    })
+                    const apiKey = moonrakerAuthHeaders(
+                      selected.origin,
+                      selected.limits,
+                    )['X-Api-Key']
+                    return {
+                      backend: 'moonraker',
+                      origin: selected.origin,
+                      ...(apiKey ? { apiKey } : {}),
+                    }
+                  }
+                }
+                return createFileTargets({
+                  config,
+                  assignmentId,
+                  dataDirectory: input.dataDirectory,
+                }).fileTransfer.targetFor(printerKey)
+              },
+            },
             printer: (id) => (id === assignmentId ? printerBinding : undefined),
             observe() {
               const now = clock.monotonicNow()

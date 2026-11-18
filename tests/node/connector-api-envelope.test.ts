@@ -1,3 +1,4 @@
+import { once } from 'node:events'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -490,4 +491,105 @@ test('the authenticated inbox claim binds scope and its own offline lifetime', a
   )
   assert.equal(f.preparations(), 1)
   assert.equal(f.sent.length, 1)
+})
+
+test('signed jobs verify HTTPS files before upload and start once', async (t) => {
+  const { createServer: httpsServer } = await import('node:https')
+  const { createServer: httpServer } = await import('node:http')
+  const { readFile } = await import('node:fs/promises')
+  const { createHash } = await import('node:crypto')
+  const f = await fixture()
+  t.after(f.cleanup)
+  f.state.observation = { ready: true, printState: 'idle' }
+  f.state.controls.push('start_print')
+  const directory = mkdtempSync(join(tmpdir(), 'open3dfarm-api-job-'))
+  const cert = await readFile(
+    new URL('../fixtures/bambu-ftps/cert.pem', import.meta.url),
+  )
+  const key = await readFile(
+    new URL('../fixtures/bambu-ftps/key.pem', import.meta.url),
+  )
+  const data = Buffer.from('G28\n')
+  let content = data
+  let uploads = 0
+  let failUpload = false
+  let revokeOnUpload = false
+  const source = httpsServer({ cert, key }, (_req, res) => res.end(content))
+  const printer = httpServer((req, res) => {
+    uploads++
+    req.resume()
+    req.on('end', () => {
+      if (revokeOnUpload) f.state.grant = { ...f.state.grant, revoked: true }
+      res.statusCode = failUpload ? 500 : 200
+      res.end()
+    })
+  })
+  source.listen(0, '127.0.0.1')
+  printer.listen(0, '127.0.0.1')
+  await Promise.all([once(source, 'listening'), once(printer, 'listening')])
+  t.after(async () => {
+    source.closeAllConnections()
+    printer.closeAllConnections()
+    await Promise.all([
+      new Promise<void>((resolve) => source.close(() => resolve())),
+      new Promise<void>((resolve) => printer.close(() => resolve())),
+    ])
+    assert.deepEqual(readdirSync(directory), [])
+    rmdirSync(directory)
+  })
+  const sourceAddress = source.address()
+  const printerAddress = printer.address()
+  assert(sourceAddress && typeof sourceAddress !== 'string')
+  assert(printerAddress && typeof printerAddress !== 'string')
+  const runner = createApiCommandRunner({
+    ...f.runnerConfig,
+    jobFiles: {
+      directory,
+      ca: cert,
+      targetFor: () => ({
+        backend: 'moonraker',
+        origin: `http://127.0.0.1:${printerAddress.port}`,
+      }),
+    },
+  })
+  const job = {
+    file_url: `https://localhost:${sourceAddress.port}/file`,
+    sha256: createHash('sha256').update(data).digest('hex'),
+    size_bytes: data.length,
+    display_name: 'part.gcode',
+  }
+  const envelope = () =>
+    f.envelope(undefined, { kind: 'job', action: undefined, job })
+  content = Buffer.from('bad!')
+  assert.equal((await runner.run(await envelope())).kind, 'refused')
+  assert.equal(f.reports.at(-1)?.refusal_code, 'checksum-mismatch')
+  content = Buffer.from('too large')
+  assert.equal((await runner.run(await envelope())).kind, 'refused')
+  assert.equal(uploads, 0)
+  content = data
+  failUpload = true
+  assert.equal((await runner.run(await envelope())).kind, 'refused')
+  assert.equal(f.sent.length, 0)
+  failUpload = false
+  revokeOnUpload = true
+  assert.equal((await runner.run(await envelope())).kind, 'refused')
+  assert.equal(f.reports.at(-1)?.refusal_code, 'grant-revoked')
+  assert.equal(f.sent.length, 0)
+  f.state.grant = { ...f.state.grant, revoked: false }
+  revokeOnUpload = false
+  const wire = await envelope()
+  assert.deepEqual(await runner.run(wire), { kind: 'completed' })
+  assert.deepEqual(f.sent, [
+    { action: 'start_print', args: { file: 'part.gcode' } },
+  ])
+  assert.equal(uploads, 3)
+  assert.equal(f.reports.at(-1)?.outcome, 'started')
+  assert.deepEqual(await runner.run(wire), {
+    kind: 'dropped',
+    reason: 'replay',
+  })
+  f.state.observation = { ready: true, printState: 'printing' }
+  assert.equal((await runner.run(await envelope())).kind, 'refused')
+  assert.equal(f.reports.at(-1)?.refusal_code, 'printer-busy')
+  assert.equal(uploads, 3)
 })

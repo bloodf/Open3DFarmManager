@@ -25,7 +25,21 @@ test('verifies before upload, starts after upload, and removes staged files', as
   let uploads = 0
   let rejectUpload = false
   const events: string[] = []
-  const source = createHttpsServer({ cert, key }, (_req, res) => res.end(body))
+  let mode: 'normal' | 'redirect' | 'timeout' | 'chunked' = 'normal'
+  const source = createHttpsServer({ cert, key }, (_req, res) => {
+    if (mode === 'redirect') {
+      res.writeHead(302, { location: 'http://127.0.0.1:1/' })
+      res.end()
+      return
+    }
+    if (mode === 'timeout') return
+    if (mode === 'chunked') {
+      res.write(body)
+      res.end()
+      return
+    }
+    res.end(body)
+  })
   const printer = createHttpServer((req, res) => {
     uploads++
     req.resume()
@@ -83,6 +97,21 @@ test('verifies before upload, starts after upload, and removes staged files', as
       (error: unknown) =>
         error instanceof JobFileError && error.reason === 'unsupported',
     )
+    mode = 'chunked'
+    await assert.rejects(
+      fetchJobFile(input),
+      (error: unknown) =>
+        error instanceof JobFileError && error.reason === 'too-large',
+    )
+    mode = 'redirect'
+    await assert.rejects(
+      fetchJobFile(input),
+      (error: unknown) =>
+        error instanceof JobFileError && error.reason === 'download-failed',
+    )
+    mode = 'timeout'
+    await assert.rejects(fetchJobFile({ ...input, timeoutMs: 50 }))
+    mode = 'normal'
     body = data
     rejectUpload = true
     await assert.rejects(fetchJobFile(input))

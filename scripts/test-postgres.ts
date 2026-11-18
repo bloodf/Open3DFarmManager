@@ -29,8 +29,8 @@ export interface FixtureContext {
   port: number
   url: string
   systemId: string
-  image?: string
-  logPath?: string
+  image?: string | undefined
+  logPath?: string | undefined
 }
 
 export interface PgSuiteContract {

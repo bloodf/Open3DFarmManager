@@ -2,7 +2,7 @@ import { createServer } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 
 // Public disposable synthetic identity. Never use for a real printer.
-const cert = `-----BEGIN CERTIFICATE-----
+export const syntheticBambuCertificate = `-----BEGIN CERTIFICATE-----
 MIIDDzCCAfegAwIBAgIUIz5W9pVEWkuHCHkhRPa1b/Gp/BAwDQYJKoZIhvcNAQEL
 BQAwHzEdMBsGA1UEAwwUU1lOVEhFVElDLUJBTUJVLU9OTFkwHhcNMjYxMTE0MDgx
 NzI0WhcNMzYxMTExMDgxNzI0WjAfMR0wGwYDVQQDDBRTWU5USEVUSUMtQkFNQlUt
@@ -65,6 +65,7 @@ export function packet(header: number, body: Buffer) {
 }
 export async function startBambuSimulator({
   serial = 'SYNTHETIC',
+  host = '127.0.0.1',
   port = 0,
   initialState,
   initialTargetTemperature,
@@ -76,6 +77,7 @@ export async function startBambuSimulator({
   printDurationMs?: number
   totalLayers?: number
   serial?: string
+  host?: string
   port?: number
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
   initialTargetTemperature?: number
@@ -151,7 +153,7 @@ export async function startBambuSimulator({
   const sockets = new Set<TLSSocket>()
   const subscribed = new Set<TLSSocket>()
   const server = createServer(
-    { cert, key, handshakeTimeout: 3000 },
+    { cert: syntheticBambuCertificate, key, handshakeTimeout: 3000 },
     (socket) => {
       let buffer = Buffer.alloc(0)
       let connected = false
@@ -361,7 +363,7 @@ export async function startBambuSimulator({
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, host, () => {
       server.removeListener('error', reject)
       resolve()
     })
@@ -382,9 +384,9 @@ export async function startBambuSimulator({
   }
   let closing: Promise<void> | undefined
   return {
-    host: '127.0.0.1',
+    host,
     port: address.port,
-    syntheticTrust: cert,
+    syntheticTrust: syntheticBambuCertificate,
     reportTopic,
     requests,
     get extendedState() {

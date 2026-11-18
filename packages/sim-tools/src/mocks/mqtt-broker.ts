@@ -60,6 +60,11 @@ export interface MqttBrokerOptions {
         | ThrowawayTlsMaterial
       )
     | undefined
+  ca?: Buffer | Buffer[] | undefined
+  requestCert?: boolean | undefined
+  rejectUnauthorized?: boolean | undefined
+  validateClientCert?: ((socket: TLSSocket) => boolean) | undefined
+  onTlsClientError?: ((err: Error, socket: TLSSocket) => void) | undefined
   reuseSharedTls?: boolean | undefined
   scenario?: ScenarioStep[] | undefined
   auth?:
@@ -83,7 +88,12 @@ export interface MqttMockInstance {
   control: {
     faults: FaultController
     scenario: ScenarioController
-    publish: (topic: string, payload: unknown, qos?: 0 | 1) => void
+    publish: (
+      topic: string,
+      payload: unknown,
+      qos?: 0 | 1,
+      faultMethod?: string,
+    ) => boolean
     disconnectClients: () => Promise<void>
     subscriptions: Map<TLSSocket, Set<string>>
     sockets: Set<TLSSocket>
@@ -110,26 +120,31 @@ export async function startMqttBroker(
   let activeTlsMaterial: ThrowawayTlsMaterial | undefined
   let serverKey: Buffer
   let serverCert: Buffer
+  let tlsCa: Buffer | Buffer[] | undefined = options.ca
 
   if (options.tls) {
     if ('server' in options.tls) {
       activeTlsMaterial = options.tls
       serverKey = options.tls.server.key
       serverCert = options.tls.server.cert
+      tlsCa ??= options.tls.ca.cert
     } else {
       serverKey = options.tls.key
       serverCert = options.tls.cert
+      tlsCa ??= options.tls.ca
     }
   } else if (options.reuseSharedTls) {
     const shared = getSharedThrowawayTls()
     activeTlsMaterial = shared
     serverKey = shared.server.key
     serverCert = shared.server.cert
+    tlsCa ??= shared.ca.cert
   } else {
     ownedTlsMaterial = generateThrowawayTls()
     activeTlsMaterial = ownedTlsMaterial
     serverKey = ownedTlsMaterial.server.key
     serverCert = ownedTlsMaterial.server.cert
+    tlsCa ??= ownedTlsMaterial.ca.cert
   }
 
   const recordCall = (key: string) => {
@@ -202,23 +217,24 @@ export async function startMqttBroker(
     topic: string,
     payload: unknown,
     qos: 0 | 1 = 0,
-  ) {
+    faultMethod = 'REPORT',
+  ): boolean {
     const fault = faults.matchFault({
       topic,
       packetType: 3,
-      method: 'REPORT',
+      method: faultMethod,
     })
     if (fault) {
       if (fault.type === 'drop') {
         void disconnectClients()
-        return
+        return false
       }
       if (fault.type === 'refuse' || fault.type === 'stall') {
-        return
+        return false
       }
       if (fault.type === 'malformed') {
         emitToSubscribers(topic, fault.payload ?? '{malformed', qos)
-        return
+        return false
       }
       if (fault.type === 'delay') {
         const timer = setTimeout(() => {
@@ -226,10 +242,11 @@ export async function startMqttBroker(
           emitToSubscribers(topic, payload, qos)
         }, fault.delayMs)
         pendingTimers.add(timer)
-        return
+        return false
       }
     }
     emitToSubscribers(topic, payload, qos)
+    return true
   }
 
   const scenario = new ScenarioController({
@@ -245,9 +262,22 @@ export async function startMqttBroker(
     {
       key: serverKey,
       cert: serverCert,
+      ...(options.requestCert
+        ? {
+            requestCert: true,
+            rejectUnauthorized: options.rejectUnauthorized ?? true,
+            ...(tlsCa ? { ca: tlsCa } : {}),
+          }
+        : {}),
       handshakeTimeout: options.handshakeTimeout ?? 5000,
     },
     (socket) => {
+      if (options.validateClientCert && !options.validateClientCert(socket)) {
+        recordCall('TLS_CLIENT_AUTH_FAILED')
+        socket.destroy()
+        return
+      }
+
       sockets.add(socket)
       subscriptions.set(socket, new Set())
 
@@ -602,6 +632,14 @@ export async function startMqttBroker(
       })
     },
   )
+
+  server.on('tlsClientError', (err, tlsSocket) => {
+    recordCall('TLS_CLIENT_ERROR')
+    options.onTlsClientError?.(err, tlsSocket)
+    if (!tlsSocket.destroyed) {
+      tlsSocket.destroy()
+    }
+  })
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)

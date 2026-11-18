@@ -25,6 +25,7 @@ import {
   startMoonrakerSimulator,
   type MoonrakerSimulator,
 } from './moonraker-simulator.ts'
+import { startConfigurator, type Configurator } from './harness-configurator.ts'
 import { startJourneyDatabase, type JourneyDatabase } from './database.ts'
 import { AUDIENCE, startFarmApp, type FarmApp } from './farm-app.ts'
 import {
@@ -75,6 +76,12 @@ export type JourneyOptions = Readonly<{
    * page while the live connection stays up. Off by default.
    */
   history?: boolean
+  /**
+   * Also pairs and approves a second Connector in configuration mode (Creality
+   * and Anycubic only) whose "search printers" answers with the simulator's
+   * loopback discovery responder, so the Impressoras page can find the printer.
+   */
+  discovery?: boolean
   /**
    * Performs the printer set-up in the browser instead of the harness calling
    * the assignment API. Receives the signed-in owner page and must return once
@@ -127,6 +134,11 @@ export type JourneyHarness = Readonly<{
   vendor: VendorSimulator | undefined
   /** Loopback discovery/probe responder (Creality and Anycubic only). */
   discovery: VendorDiscovery | undefined
+  /** Connector the Impressoras page searches with (`discovery: true`). */
+  configurator:
+    Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
+  /** Loopback MJPEG camera (Creality and Anycubic only). */
+  camera: VendorSimulator['camera']
   /** The Moonraker simulator; throws for any other simulator. */
   printer: MoonrakerSimulator
   simulatorObservation(): ReturnType<
@@ -221,6 +233,7 @@ export async function startJourneyHarness(
   const printerKey = options.printerKey ?? `journey-${simulator}`
   const runId = randomUUID().slice(0, 8)
   const undo: Undo[] = []
+  let appOutput: (() => string) | undefined
   const savedEnv = Object.fromEntries(
     ENV_KEYS.map((key) => [key, process.env[key]]),
   )
@@ -264,6 +277,7 @@ export async function startJourneyHarness(
       history: options.history === true,
     })
     undo.push(() => app.close())
+    appOutput = app.log
     const { origin } = app
 
     // Native clients (Connector, machine calls) trust only this certificate.
@@ -502,6 +516,29 @@ export async function startJourneyHarness(
         : {}),
     })
 
+    let configurator: Configurator | undefined
+    if (options.discovery) {
+      const port = vendor?.discovery?.port
+      if (
+        port === undefined ||
+        (simulator !== 'creality' && simulator !== 'anycubic')
+      )
+        throw new Error(
+          'Page discovery needs the Creality or Anycubic simulator',
+        )
+      configurator = await startConfigurator({
+        origin,
+        audience: AUDIENCE,
+        farmId: database.farmId,
+        certificatePath: app.certificatePath,
+        ownerPage,
+        machinePost,
+        probes:
+          simulator === 'creality' ? { creality: port } : { anycubic: port },
+      })
+      const started = configurator
+      undo.push(() => started.close())
+    }
     const openFarm = async (page: Page = ownerPage) => {
       const response = await page.goto(origin + '/farm', {
         waitUntil: 'domcontentloaded',
@@ -582,6 +619,8 @@ export async function startJourneyHarness(
       controls,
       vendor,
       discovery: vendor?.discovery,
+      camera: vendor?.camera,
+      configurator,
       get printer(): MoonrakerSimulator {
         if (!printer)
           throw new Error(
@@ -596,6 +635,8 @@ export async function startJourneyHarness(
       close,
     })
   } catch (error) {
+    // What the app said while the start failed.
+    if (appOutput) console.error(appOutput())
     await close().catch(() => {})
     throw error
   }

@@ -231,8 +231,14 @@ export function readAgentRuntimeConfig(
       ? null
       : parseCameraRuntimeConfig(
           input.camera,
+          // Cameras attach to any local printer except KobraLink bridges.
           assignments
-            .filter((assignment) => 'moonraker_origin' in assignment)
+            .filter(
+              (assignment) =>
+                !(
+                  'backend' in assignment && assignment.backend === 'kobralink'
+                ),
+            )
             .map((assignment) => assignment.assignment_id),
         )
   // Strict: an invalid address fails startup before any task starts.

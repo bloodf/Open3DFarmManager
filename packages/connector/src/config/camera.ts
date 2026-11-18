@@ -45,6 +45,15 @@ const Source = z.strictObject({
     .max(1024)
     .regex(/^\/(?!\/)[^?#@\\\s]*$/),
 })
+// Vendor MJPEG cameras (`/?action=stream`): literal local address and port
+// only; the path is fixed by the vendor adapter and never configurable.
+const MjpegSource = (kind: 'creality-mjpeg' | 'anycubic-rinkhals') =>
+  z.strictObject({
+    kind: z.literal(kind),
+    address: z.string().refine(localAddress),
+    port: z.number().int().min(1).max(65535),
+    path: z.literal('/?action=stream').default('/?action=stream'),
+  })
 const Executable = z.strictObject({
   path: z.string().refine(isAbsolute),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -67,6 +76,8 @@ const CameraRuntime = z.strictObject({
               .max(2048)
               .regex(/^\/(?!\/)[^#@\\\s]*$/),
           }),
+          MjpegSource('creality-mjpeg'),
+          MjpegSource('anycubic-rinkhals'),
         ]),
       }),
     )

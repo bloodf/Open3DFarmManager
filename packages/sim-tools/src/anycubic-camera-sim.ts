@@ -9,6 +9,8 @@ export async function startAnycubicCameraSim(input: {
   flv?: Buffer
   token?: string
   frameCount?: number
+  /** Paces the MJPEG stream (one frame per interval, until the client leaves). */
+  frameIntervalMs?: number
   failFirst?: boolean
   malformed?: boolean
 }) {
@@ -39,6 +41,19 @@ export async function startAnycubicCameraSim(input: {
       res.writeHead(200, {
         'content-type': 'multipart/x-mixed-replace; boundary=frame',
       })
+      const interval = input.frameIntervalMs
+      if (interval !== undefined) {
+        const body = input.malformed ? Buffer.from('invalid') : input.jpeg
+        const send = () => {
+          res.write('--frame\r\nContent-Type: image/jpeg\r\n\r\n')
+          res.write(body)
+          res.write('\r\n')
+        }
+        send()
+        const timer = setInterval(send, interval)
+        res.on('close', () => clearInterval(timer))
+        return
+      }
       for (let i = 0; i < (input.frameCount ?? 24); i++) {
         res.write('--frame\r\nContent-Type: image/jpeg\r\n\r\n')
         res.write(input.malformed ? Buffer.from('invalid') : input.jpeg)

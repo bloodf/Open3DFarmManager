@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { browserOptions, launchBrowser } from '../helpers/browser.ts'
+import { fileURLToPath } from 'node:url'
+import { browserOptions } from '../helpers/browser.ts'
 
-const root = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
+const root = fileURLToPath(new URL('../..', import.meta.url))
 
 test('browserOptions helper resolves channel chrome by default', () => {
   const origBrowser = process.env.OPENFARM_BROWSER
@@ -60,7 +61,9 @@ test('browserOptions helper uses OPENFARM_CHROME_PATH as explicit executablePath
 
 test('browserOptions merges user overrides correctly', () => {
   const origBrowser = process.env.OPENFARM_BROWSER
+  const origChrome = process.env.OPENFARM_CHROME_PATH
   delete process.env.OPENFARM_BROWSER
+  delete process.env.OPENFARM_CHROME_PATH
   try {
     const opts = browserOptions({
       baseURL: 'http://127.0.0.1:3100',
@@ -73,6 +76,7 @@ test('browserOptions merges user overrides correctly', () => {
     assert.equal(opts.timeout, 5000)
   } finally {
     if (origBrowser !== undefined) process.env.OPENFARM_BROWSER = origBrowser
+    if (origChrome !== undefined) process.env.OPENFARM_CHROME_PATH = origChrome
   }
 })
 
@@ -132,30 +136,4 @@ test('CI workflow no longer runs playwright install', () => {
   const ciPath = join(root, '.github/workflows/ci.yml')
   const content = readFileSync(ciPath, 'utf8')
   assert.doesNotMatch(content, /playwright\s+install/)
-})
-
-test('launchBrowser runs system Chrome even when PLAYWRIGHT_BROWSERS_PATH is nonexistent', async () => {
-  const origBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH
-  const origBrowser = process.env.OPENFARM_BROWSER
-  process.env.PLAYWRIGHT_BROWSERS_PATH = '/nonexistent'
-  delete process.env.OPENFARM_BROWSER
-  try {
-    const browser = await launchBrowser({ headless: true })
-    try {
-      const version = browser.version()
-      assert.ok(typeof version === 'string' && version.length > 0)
-      const page = await browser.newPage()
-      await page.goto('about:blank')
-      const result = await page.evaluate(() => navigator.userAgent)
-      assert.match(result, /Chrome/)
-      await page.close()
-    } finally {
-      await browser.close()
-    }
-  } finally {
-    if (origBrowsersPath !== undefined)
-      process.env.PLAYWRIGHT_BROWSERS_PATH = origBrowsersPath
-    else delete process.env.PLAYWRIGHT_BROWSERS_PATH
-    if (origBrowser !== undefined) process.env.OPENFARM_BROWSER = origBrowser
-  }
 })

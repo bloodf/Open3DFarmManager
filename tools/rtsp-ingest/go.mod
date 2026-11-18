@@ -1,6 +1,6 @@
 module open3dfarm.local/rtsp-ingest
 
-go 1.27.1
+go 1.26.0
 
 require (
 	github.com/bluenviron/gortsplib/v5 v5.6.7

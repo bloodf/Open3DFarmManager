@@ -9,20 +9,41 @@ export * from './http-mock.ts'
 export * from './bambu-mock.ts'
 export * from './kobra-x-mock.ts'
 export * from './moonraker-mock.ts'
+export * from './spoolman-mock.ts'
 
-import { startHttpMock, type HttpMockOptions, type HttpMockInstance } from './http-mock.ts'
-import { startMqttBroker, type MqttBrokerOptions, type MqttMockInstance } from './mqtt-broker.ts'
-import { startBambuMock, type BambuMockOptions, type BambuMockInstance } from './bambu-mock.ts'
-import { startKobraXMock, type KobraXMockOptions, type KobraXMockInstance } from './kobra-x-mock.ts'
-import { startMoonrakerMock, type MoonrakerMockOptions, type MoonrakerMockInstance } from './moonraker-mock.ts'
+import {
+  startHttpMock,
+  type HttpMockOptions,
+  type HttpMockInstance,
+} from './http-mock.ts'
+import {
+  startMqttBroker,
+  type MqttBrokerOptions,
+  type MqttMockInstance,
+} from './mqtt-broker.ts'
+import {
+  startBambuMock,
+  type BambuMockOptions,
+  type BambuMockInstance,
+} from './bambu-mock.ts'
+import {
+  startKobraXMock,
+  type KobraXMockOptions,
+  type KobraXMockInstance,
+} from './kobra-x-mock.ts'
+import {
+  startMoonrakerMock,
+  type MoonrakerMockOptions,
+  type MoonrakerMockInstance,
+} from './moonraker-mock.ts'
+import {
+  startSpoolmanMock,
+  type SpoolmanMockOptions,
+  type SpoolmanMockInstance,
+} from './spoolman-mock.ts'
 
 export type MockKind =
-  | 'http'
-  | 'mqtt'
-  | 'bambu'
-  | 'kobra-x'
-  | 'anycubic'
-  | 'moonraker'
+  'http' | 'mqtt' | 'bambu' | 'kobra-x' | 'anycubic' | 'moonraker' | 'spoolman'
 
 export type MockOptionsMap = {
   http: HttpMockOptions
@@ -31,6 +52,7 @@ export type MockOptionsMap = {
   'kobra-x': KobraXMockOptions
   anycubic: KobraXMockOptions
   moonraker: MoonrakerMockOptions
+  spoolman: SpoolmanMockOptions
 }
 
 export type MockInstanceMap = {
@@ -40,6 +62,7 @@ export type MockInstanceMap = {
   'kobra-x': KobraXMockInstance
   anycubic: KobraXMockInstance
   moonraker: MoonrakerMockInstance
+  spoolman: SpoolmanMockInstance
 }
 
 export type AnyMockInstance =
@@ -48,6 +71,7 @@ export type AnyMockInstance =
   | BambuMockInstance
   | KobraXMockInstance
   | MoonrakerMockInstance
+  | SpoolmanMockInstance
 
 /**
  * Unified entry point to start an in-process mock.
@@ -60,16 +84,30 @@ export async function startMock<K extends MockKind>(
 ): Promise<MockInstanceMap[K]> {
   switch (kind) {
     case 'http':
-      return (await startHttpMock(options as HttpMockOptions)) as MockInstanceMap[K]
+      return (await startHttpMock(
+        options as HttpMockOptions,
+      )) as MockInstanceMap[K]
     case 'mqtt':
-      return (await startMqttBroker(options as MqttBrokerOptions)) as MockInstanceMap[K]
+      return (await startMqttBroker(
+        options as MqttBrokerOptions,
+      )) as MockInstanceMap[K]
     case 'bambu':
-      return (await startBambuMock(options as BambuMockOptions)) as MockInstanceMap[K]
+      return (await startBambuMock(
+        options as BambuMockOptions,
+      )) as MockInstanceMap[K]
     case 'kobra-x':
     case 'anycubic':
-      return (await startKobraXMock(options as KobraXMockOptions)) as MockInstanceMap[K]
+      return (await startKobraXMock(
+        options as KobraXMockOptions,
+      )) as MockInstanceMap[K]
     case 'moonraker':
-      return (await startMoonrakerMock(options as MoonrakerMockOptions)) as MockInstanceMap[K]
+      return (await startMoonrakerMock(
+        options as MoonrakerMockOptions,
+      )) as MockInstanceMap[K]
+    case 'spoolman':
+      return (await startSpoolmanMock(
+        options as SpoolmanMockOptions,
+      )) as MockInstanceMap[K]
     default:
       throw new Error(`Unsupported mock kind: ${String(kind)}`)
   }

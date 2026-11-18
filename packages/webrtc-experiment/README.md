@@ -6,10 +6,10 @@ A prova original deste pacote privado MIT comprova um RTCDataChannel real e crip
 
 A prova histórica em `interop.test.ts` conectou o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em processos Node e Bun reais com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
 
-O harness atual usa somente Node 24.22.3, conforme o runtime do workspace. Os manifests agora fixam `node-datachannel` 0.33.6; a atualização gerada do lock pnpm, a execução nativa e a aceitação por plataforma dessa versão permanecem pendentes. A evidência acima refere-se à versão 0.33.5. Consulte a [proveniência atual](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency).
+O harness atual usa somente Node 24.22.3, conforme o runtime do workspace. Os manifests agora fixam `node-datachannel` 0.33.6; a atualização gerada do lock npm, a execução nativa e a aceitação por plataforma dessa versão permanecem pendentes. A evidência acima refere-se à versão 0.33.5. Consulte a [proveniência atual](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency).
 
 ```sh
-pnpm --dir packages/webrtc-experiment run test:session
+npm run test:session -w @open3dfarmmanager/webrtc-experiment
 node --test packages/webrtc-experiment/interop.test.ts
 ```
 
@@ -22,8 +22,8 @@ O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPO
 Na raiz, com as dependências de desenvolvimento já instaladas pelo lockfile e o Chromium correspondente ao Playwright disponível:
 
 ```sh
-pnpm --dir packages/webrtc-experiment typecheck
-pnpm --dir packages/webrtc-experiment exec vitest run transport.test.ts --config vitest.config.ts
+npm run typecheck -w @open3dfarmmanager/webrtc-experiment
+npm exec -w @open3dfarmmanager/webrtc-experiment -- vitest run transport.test.ts --config vitest.config.ts
 ```
 
 O teste original usa o Playwright 1.64.1 do workspace e as APIs nativas WebRTC e Web Crypto. Não adiciona biblioteca de RTC, dependência de execução ou lockfile. Consulte [THIRD_PARTY.md](THIRD_PARTY.md) para licenças e avisos.

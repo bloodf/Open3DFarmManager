@@ -3,7 +3,7 @@ import { createRequire, registerHooks } from 'node:module'
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import {
   SESSION_COOKIE_ATTRIBUTES,
   SESSION_COOKIE_NAME,
@@ -12,9 +12,7 @@ import {
 // Recreate the exact Nuxt Nitro alias: its getCookie delegates to the H3 selected
 // by the installed Nitro server, while useSession remains Nuxt's portable adapter.
 const nuxtRequire = createRequire(
-  realpathSync(
-    new URL('../../apps/farm/node_modules/nuxt/package.json', import.meta.url),
-  ),
+  realpathSync(createRequire(import.meta.url).resolve('nuxt/package.json')),
 )
 const nitroRequire = createRequire(nuxtRequire.resolve('@nuxt/nitro-server'))
 const h3Url = pathToFileURL(nitroRequire.resolve('h3')).href

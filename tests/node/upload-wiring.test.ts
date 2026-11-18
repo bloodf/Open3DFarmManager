@@ -38,8 +38,7 @@ import type { PausePhaseFrame } from '../../packages/connector/src/webrtc/pause-
 import type { FileUploadTarget } from '../../packages/connector/src/runtime/file-upload.ts'
 import { fixture as ftpsFixture } from '../fixtures/bambu-ftps/server.ts'
 
-type Native =
-  typeof import('../../packages/connector/node_modules/node-datachannel')
+type Native = typeof import('node-datachannel')
 const native: Native = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('node-datachannel')

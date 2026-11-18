@@ -26,8 +26,9 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import postgres from 'postgres'
-import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
+import { assertSupportedNodeRuntime } from '../tests/helpers/node-version.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
 import { assertSignallingCatalog } from '../tests/helpers/signalling-https-catalog.ts'
 import {
@@ -239,8 +240,7 @@ function fixtureMode() {
   }
 }
 const mode = process.argv[2]
-if (process.versions.bun || !process.versions.node.startsWith('24.'))
-  throw new Error('Node 24 is required')
+assertSupportedNodeRuntime()
 if (mode === '--prepare-layer') {
   if (process.argv.length !== 4 || !process.argv[3])
     throw new Error('Provide a new private layer directory')
@@ -250,7 +250,7 @@ if (mode === '--prepare-layer') {
   const app = join(checkout, 'apps/farm')
   const output = join(layer, 'output')
   await symlink(
-    await realpath(join(app, 'node_modules')),
+    await realpath(join(checkout, 'node_modules')),
     join(layer, 'node_modules'),
     'dir',
   )

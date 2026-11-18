@@ -12,7 +12,7 @@ After approval, on a machine with a running Docker daemon:
 
 ```sh
 docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams up -d --build
-pnpm run sim:verify
+npm run sim:verify
 docker compose -f infra/sim/docker-compose.yml --profile klipper --profile spoolman --profile cams down
 ```
 
@@ -37,7 +37,7 @@ The optional `rtsp` profile runs a digest-pinned MediaMTX image (MIT) with its b
 
 ```sh
 docker compose -f infra/sim/docker-compose.yml --profile rtsp up -d
-pnpm run sim:verify:rtsp
+npm run sim:verify:rtsp
 docker compose -f infra/sim/docker-compose.yml --profile rtsp down
 ```
 

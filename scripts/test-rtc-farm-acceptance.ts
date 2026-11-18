@@ -328,7 +328,7 @@ try {
   assert.equal(
     await run(
       'prepare-app',
-      join(checkout, 'apps/farm/node_modules/.bin/nuxt'),
+      join(checkout, 'node_modules/.bin/nuxt'),
       ['prepare'],
       { cwd: join(checkout, 'apps/farm'), env: nodeEnv, timeoutMs: 300000 },
     ),

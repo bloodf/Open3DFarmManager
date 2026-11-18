@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
 
 if (process.env.FARM_VIEW_E2E !== 'true')
@@ -11,7 +12,10 @@ export default defineConfig({
   testDir: './tests/e2e',
   testMatch: 'printer-setup-forms.spec.ts',
   workers: 1,
-  use: { baseURL: `http://127.0.0.1:${port}` },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    ...browserOptions(),
+  },
   webServer: {
     command: 'node apps/farm/.output/server/index.mjs',
     url: `http://127.0.0.1:${port}/healthz`,

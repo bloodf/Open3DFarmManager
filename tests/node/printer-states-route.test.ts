@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { once } from 'node:events'
-import { registerHooks } from 'node:module'
+import { createRequire, registerHooks } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { test, after } from 'node:test'
 import type { Sql } from 'postgres'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import {
   SESSION_COOKIE_ATTRIBUTES,
   SESSION_COOKIE_NAME,
@@ -86,7 +87,7 @@ const hooks = registerHooks({
     ) {
       return {
         url: moduleUrl(
-          `export * from ${JSON.stringify(new URL('../../apps/farm/node_modules/nuxt/dist/server/index.js', import.meta.url).href)}
+          `export * from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve('nuxt/server')).href)}
            export const useRuntimeConfig = () => globalThis[Symbol.for('printer-states-route-test-config')]()`,
         ),
         shortCircuit: true,

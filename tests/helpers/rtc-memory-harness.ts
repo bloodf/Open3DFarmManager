@@ -14,10 +14,7 @@ import {
   type Role,
   until,
 } from './rtc-memory-wire.ts'
-import type {
-  DataChannel,
-  Track,
-} from '../../packages/connector/node_modules/node-datachannel'
+import type { DataChannel, Track } from 'node-datachannel'
 import { ReadonlyConnectorPeer } from '../../packages/connector/src/webrtc/readonly-peer.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import {

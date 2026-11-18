@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { isAbsolute } from 'node:path'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import {
   CameraFixture as RtspCameraFixture,
   cameraRuntimeSection as rtspRuntimeSection,

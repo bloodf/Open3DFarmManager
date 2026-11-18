@@ -85,12 +85,9 @@ async function moonrakerFixture() {
   process.env.WS_NO_BUFFER_UTIL = '1'
   process.env.WS_NO_UTF_8_VALIDATE = '1'
   // `ws` is a dependency of the Connector package, not of the test root.
-  const {
-    WebSocketServer,
-  }: typeof import('../../packages/connector/node_modules/@types/ws') =
-    createRequire(
-      new URL('../../packages/connector/package.json', import.meta.url),
-    )('ws')
+  const { WebSocketServer }: typeof import('ws') = createRequire(
+    new URL('../../packages/connector/package.json', import.meta.url),
+  )('ws')
   const server = createServer((_request, response) => {
     response.setHeader('content-type', 'application/json')
     response.end(

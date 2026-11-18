@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 
 const env = process.env
 if (env.AUTH_E2E_DISPOSABLE !== 'yes')
@@ -22,9 +23,9 @@ export default defineConfig({
   timeout: 90_000,
   use: {
     baseURL: origin,
-    browserName: 'chromium',
     // Disposable loopback certificate only.
     ignoreHTTPSErrors: true,
+    ...browserOptions(),
   },
   webServer: [
     {

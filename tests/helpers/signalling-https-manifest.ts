@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 
 export const Receipt = z.strictObject({
   head: z.string().regex(/^[a-f0-9]{40}$/),

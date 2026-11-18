@@ -40,8 +40,7 @@ import {
   FileListResponse,
 } from '../../packages/farm-protocol/src/file-list.ts'
 
-type Native =
-  typeof import('../../packages/connector/node_modules/node-datachannel')
+type Native = typeof import('node-datachannel')
 const native: Native = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('node-datachannel')

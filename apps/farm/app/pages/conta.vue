@@ -5,6 +5,7 @@ const pending = ref(false)
 const message = ref('')
 const error = ref(false)
 const summary = ref<HTMLElement | null>(null)
+const bambuCloudEnabled = ref(false)
 
 async function changePassword() {
   if (pending.value) return
@@ -85,6 +86,13 @@ async function changePassword() {
         {{ pending ? 'Alterando…' : 'Alterar senha' }}
       </button>
     </form>
+    <section
+      v-if="bambuCloudEnabled"
+      id="bambu-cloud-account"
+      aria-labelledby="bambu-cloud-heading"
+    >
+      <h2 id="bambu-cloud-heading">Conta Bambu Cloud</h2>
+    </section>
     <p><NuxtLink to="/sair">Sair</NuxtLink></p>
   </main>
 </template>

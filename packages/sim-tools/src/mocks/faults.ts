@@ -29,11 +29,7 @@ export interface StallFault {
 }
 
 export type FaultHook =
-  | DelayFault
-  | DropFault
-  | RefuseFault
-  | MalformedFault
-  | StallFault
+  DelayFault | DropFault | RefuseFault | MalformedFault | StallFault
 
 export interface FaultFilterContext {
   path?: string | undefined
@@ -99,7 +95,8 @@ export class FaultController {
           continue
         }
       }
-      if (rule.method && ctx.method) {
+      if (rule.method) {
+        if (!ctx.method) continue
         if (rule.method.toUpperCase() !== ctx.method.toUpperCase()) continue
       }
       if (rule.filter && !rule.filter(ctx)) {

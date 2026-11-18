@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import postgres, { type TransactionSql } from 'postgres'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import { PostgresCredentials } from '../../apps/farm/server/storage/postgres-credentials.ts'
 import {
   SESSION_COOKIE_NAME,

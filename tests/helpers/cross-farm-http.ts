@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { registerHooks } from 'node:module'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import {
   SESSION_COOKIE_ATTRIBUTES,
   SESSION_COOKIE_NAME,

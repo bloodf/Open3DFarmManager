@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { realpathSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { useSession } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { useSession } from 'nuxt/server'
 import {
   SESSION_COOKIE_NAME,
   SESSION_COOKIE_ATTRIBUTES,
@@ -23,9 +23,7 @@ import {
 
 // Resolve the dependencies ACTUALLY selected by the installed Nuxt Nitro builder.
 const nuxtRequire = createRequire(
-  realpathSync(
-    new URL('../../apps/farm/node_modules/nuxt/package.json', import.meta.url),
-  ),
+  realpathSync(createRequire(import.meta.url).resolve('nuxt/package.json')),
 )
 const builderRequire = createRequire(nuxtRequire.resolve('@nuxt/nitro-server'))
 const nitroRequire = createRequire(

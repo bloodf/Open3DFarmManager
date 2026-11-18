@@ -6,7 +6,8 @@ import { once } from 'node:events'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { chromium, type Browser, type Page } from '@playwright/test'
+import { type Browser, type Page } from '@playwright/test'
+import { launchBrowser } from '../../../tests/helpers/browser.ts'
 import {
   RtcSessionBinding,
   rtcDtlsFingerprint,
@@ -238,7 +239,7 @@ test(
     if (!address || typeof address === 'string') throw Error('No server port')
     let browser: Browser | undefined, child: FixtureProcess | undefined
     try {
-      browser = await chromium.launch({ headless: true })
+      browser = await launchBrowser()
       console.info(
         JSON.stringify({
           driver: process.version,

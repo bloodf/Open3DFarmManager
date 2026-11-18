@@ -112,7 +112,7 @@ export async function testRawUpgradeRejection(input: {
 }
 
 import { createRequire } from 'node:module'
-import type WebSocketType from '../../packages/connector/node_modules/@types/ws'
+import type WebSocketType from 'ws'
 const WebSocket: typeof WebSocketType = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('ws')
@@ -132,7 +132,8 @@ export function createFixtureSocket(
 
 import { generateKeyPairSync } from 'node:crypto'
 import { once } from 'node:events'
-import { chromium, type Page } from '@playwright/test'
+import { launchBrowser } from './browser.ts'
+import { type Page } from '@playwright/test'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { connectorSocket } from '../../packages/connector/src/cloud/authenticated-signalling-client.ts'
 import {
@@ -405,7 +406,7 @@ export async function runSignallingHttpsAcceptance(input: {
     await controlBounds(input.origin, input.ca)
   }
   console.error('[fixture-stage] chromium-launch')
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   const sockets: FixturePeer[] = []
   let identities: FixtureIdentityHandles | undefined
   try {

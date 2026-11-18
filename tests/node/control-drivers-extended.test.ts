@@ -713,7 +713,11 @@ const bambuCases: Array<{
     action: 'start_print',
     args: { file: 'cube.3mf' },
     command: 'project_file',
-    state: { file: 'file:///sdcard/cube.3mf' },
+    state: {
+      file: 'file:///sdcard/cube.3mf',
+      subtask_name: 'cube.3mf',
+      gcode_file: 'cube.3mf',
+    },
     initialState: 'IDLE',
   },
 ]
@@ -734,6 +738,9 @@ for (const c of bambuCases) {
         c.args,
       )
       assert.deepEqual(f.driver.controls(f.printerBinding), BAMBU_ALL)
+      // The simulator always reports baseline telemetry (temperatures, AMS);
+      // the command must change exactly the expected fields on top of it.
+      const baseline = f.bambu?.extendedState
       if (lifecycle) {
         assert.deepEqual(await f.dispatch(), {
           kind: 'applied',
@@ -746,7 +753,10 @@ for (const c of bambuCases) {
       assert.deepEqual(f.bambu?.requests, [
         { command: c.command, sequence_id: '1' },
       ])
-      assert.deepEqual(f.bambu?.extendedState, c.state ?? {})
+      assert.deepEqual(f.bambu?.extendedState, {
+        ...baseline,
+        ...c.state,
+      })
       if (c.action === 'start_print')
         assert.equal(f.bambu?.gcodeState, 'RUNNING')
     },

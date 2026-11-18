@@ -6,6 +6,16 @@ a farm under scopes an owner grants. The contract is
 unchanged, as JSON, at `GET /api/integrations/v1/openapi.json` (public, no
 authentication). Where this document and the spec disagree, the spec wins.
 
+## Rate limits
+
+Authenticated requests have separate per-app token buckets. The defaults are
+120 read requests and 30 write requests per minute. Override them with
+`NUXT_INTEGRATION_AUTH_READ_LIMIT` and
+`NUXT_INTEGRATION_AUTH_WRITE_LIMIT`; each value must be an integer from 1 to
+1,000,000. Reads are `GET` and `HEAD`; other methods use the write bucket.
+Authenticated responses report the consumed bucket in `RateLimit-Limit`,
+`RateLimit-Remaining` and `RateLimit-Reset`. A 429 also includes `Retry-After`.
+
 ## Versioning
 
 - The major version is part of the path: `/api/integrations/v1`. A new major

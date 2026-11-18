@@ -45,7 +45,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
       throw cause
     }
   }
-  /** Active owner or admin of the farm; the membership and account rows stay locked until commit. */
+  /** Active owner of the farm; the membership and account rows stay locked until commit. */
   private async manages(
     tx: TransactionSql,
     actorId: string,
@@ -53,7 +53,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
   ): Promise<boolean> {
     if (!uuid.test(farmId) || typeof actorId !== 'string') return false
     const rows =
-      await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${actorId} AND m.role IN ('owner', 'admin') AND m.revoked_at IS NULL AND NOT a.disabled FOR SHARE OF m, a`
+      await tx`SELECT 1 FROM farm.memberships m JOIN farm.session_accounts a ON a.id = m.account_id WHERE m.farm_id = ${farmId}::uuid AND m.account_id = ${actorId} AND m.role = 'owner' AND m.revoked_at IS NULL AND NOT a.disabled FOR SHARE OF m, a`
     return rows.length > 0
   }
   private async activeApp(

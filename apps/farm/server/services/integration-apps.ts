@@ -153,6 +153,18 @@ export class IntegrationAppsService {
   ) {
     return this.store.createApp(actorId, input, this.now())
   }
+  listApps(actorId: string, farmId: string) {
+    return this.store.listApps(actorId, farmId)
+  }
+  listGrants(actorId: string, appId: string) {
+    return this.store.listGrants(actorId, appId)
+  }
+  revokeApp(actorId: string, appId: string) {
+    return this.store.revokeApp(actorId, appId, this.now())
+  }
+  revokeGrant(actorId: string, grantId: string) {
+    return this.store.revokeGrant(actorId, grantId, this.now())
+  }
   /** The plaintext secret is returned once and never stored. */
   async issueCredential(
     actorId: string,

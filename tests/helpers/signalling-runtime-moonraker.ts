@@ -1,60 +1,22 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createServer } from 'node:http'
-import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
-import { readFile, readdir } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
 import {
+  startMoonrakerMock,
+  type MoonrakerMockInstance,
+} from '../../packages/sim-tools/src/mocks/index.ts'
+import {
   cameraFixtureFromEnv,
   cameraRuntimeSection,
 } from './signalling-snapshot-camera-fixture.ts'
 
-// The pause driver opens its own socket: one fixed state query shape and the
-// fixed pause request. Only accepted when the farm pause row opted in.
-const PauseRequest = z.union([
-  z.strictObject({
-    jsonrpc: z.literal('2.0'),
-    id: z.number().int().positive(),
-    method: z.literal('printer.objects.query'),
-    params: z.strictObject({
-      objects: z.strictObject({
-        webhooks: z.tuple([z.literal('state')]),
-        print_stats: z.tuple([z.literal('state')]),
-      }),
-    }),
-  }),
-  z.strictObject({
-    jsonrpc: z.literal('2.0'),
-    id: z.number().int().positive(),
-    method: z.literal('printer.print.pause'),
-  }),
-])
-const ListRequest = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int().positive(),
-  method: z.literal('printer.objects.list'),
-})
-const Request = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int().positive(),
-  method: z.enum(['printer.objects.subscribe', 'printer.objects.query']),
-  params: z.strictObject({
-    objects: z.strictObject({
-      webhooks: z.tuple([z.literal('state')]),
-      print_stats: z.tuple([z.literal('state')]),
-      virtual_sdcard: z.tuple([z.literal('progress')]),
-      // The complete-observation query also asks for temperatures (#74).
-      extruder: z.tuple([z.literal('temperature')]).optional(),
-      heater_bed: z.tuple([z.literal('temperature')]).optional(),
-    }),
-  }),
-})
+export { startMoonrakerMock }
 
 /** Explicit finite loopback fixture. Importing does not allocate resources. */
 export async function createRuntimeMoonrakerFixture() {
@@ -71,15 +33,13 @@ export async function createRuntimeMoonrakerFixture() {
   let running: Promise<void> | undefined,
     failure = false,
     settled = false
-  let requests = 0,
-    queued = 0,
-    progress = 0.25,
-    eventtime = 1
+  let simRequests = 0,
+    queued = 0
+  let mockInstance: MoonrakerMockInstance | undefined
   // Farm-page pause row: pause control is configured and a second socket allowed.
   const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
   const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
   if (farmPause && !pauseKey) throw Error('Farm pause issuer key required')
-  let pauses = 0
   // The Connector's pause inbox is admitted and waiting for a browser.
   let pauseInboxReady = false
   // How many times that inbox started listening (one per control session).
@@ -87,7 +47,6 @@ export async function createRuntimeMoonrakerFixture() {
   // Telemetry delivery attempts reported by the Connector.
   let telemetryDelivered = 0,
     telemetryRetained = 0
-  let printState: 'printing' | 'paused' = 'printing'
   let closeServer: (() => Promise<void>) | undefined
   let port = 0
   let listening = 0,
@@ -159,190 +118,37 @@ export async function createRuntimeMoonrakerFixture() {
       const ref = input.assignmentRefs[0]!
       if (ref.agentId !== input.claim.agent_id)
         throw Error('Runtime fixture agent')
-      const {
-        WebSocketServer,
-      }: typeof import('../../packages/connector/node_modules/@types/ws') =
-        createRequire(
-          new URL('../../packages/connector/package.json', import.meta.url),
-        )('ws')
-      const sockets = new WebSocketServer({
-        noServer: true,
-        maxPayload: 4096,
-        perMessageDeflate: false,
-      })
-      const server = createServer((request, response) => {
-        if (request.method !== 'GET' || request.url !== '/server/info') {
-          response.writeHead(404).end()
-          return
-        }
-        response.setHeader('content-type', 'application/json')
-        response.end(
-          JSON.stringify({
-            result: { klippy_connected: true, klippy_state: 'ready' },
-          }),
-        )
-      })
-      closeServer = async () => {
-        for (const socket of sockets.clients) socket.terminate()
-        await new Promise<void>((resolve, reject) =>
-          sockets.close((error) => (error ? reject(error) : resolve())),
-        )
-        server.closeAllConnections()
-        await new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        )
-      }
-      server.on('upgrade', (request, socket, head) => {
-        if (
-          request.url !== '/websocket' ||
-          sockets.clients.size >= (farmPause ? 2 : 1)
-        ) {
-          socket.destroy()
-          return
-        }
-        sockets.handleUpgrade(request, socket, head, (ws) =>
-          sockets.emit('connection', ws, request),
-        )
-      })
-      sockets.on('connection', (socket) => {
-        socket.on('error', () => {
+      const moonraker = await startMoonrakerMock({
+        initial: {
+          state: 'printing',
+          progress: 0.25,
+          extruder: 210,
+          bed: 60,
+        },
+        objects: [
+          'webhooks',
+          'print_stats',
+          'virtual_sdcard',
+          'extruder',
+          'heater_bed',
+        ],
+        maxWsConnections: farmPause ? 2 : 1,
+        maxRpcRequests: 64,
+        onClientError: () => {
           failure = true
-          socket.terminate()
-        })
-        socket.on('ping', () => socket.terminate())
-        socket.on('pong', () => socket.terminate())
-        socket.on('message', (data, binary) => {
-          try {
-            if (binary || ++requests > 64) throw Error('Fixture request cap')
-            const value = parseBoundedJson(data.toString(), {
-              maxBytes: 4096,
-              maxDepth: 5,
-              maxValues: 32,
-              maxStringChars: 128,
-            })
-            const pause = farmPause ? PauseRequest.safeParse(value) : undefined
-            if (pause?.success) {
-              const call = pause.data
-              if (call.method === 'printer.print.pause') {
-                // Exactly the synthetic printer's pause; never a physical printer.
-                pauses++
-                printState = 'paused'
-                socket.send(
-                  JSON.stringify({ jsonrpc: '2.0', id: call.id, result: 'ok' }),
-                )
-                eventtime++
-                for (const client of sockets.clients)
-                  if (client !== socket)
-                    client.send(
-                      JSON.stringify({
-                        jsonrpc: '2.0',
-                        method: 'notify_status_update',
-                        params: [
-                          { print_stats: { state: 'paused' } },
-                          eventtime,
-                        ],
-                      }),
-                    )
-              } else
-                socket.send(
-                  JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: call.id,
-                    result: {
-                      eventtime,
-                      status: {
-                        webhooks: { state: 'ready' },
-                        print_stats: { state: printState },
-                      },
-                    },
-                  }),
-                )
-              return
-            }
-            if (
-              (value as { method?: unknown } | null)?.method ===
-              'server.connection.identify'
-            ) {
-              socket.send(
-                JSON.stringify({
-                  jsonrpc: '2.0',
-                  id: (value as { id: number }).id,
-                  result: { connection_id: 1 },
-                }),
-              )
-              return
-            }
-            const list = ListRequest.safeParse(value)
-            if (list.success) {
-              socket.send(
-                JSON.stringify({
-                  jsonrpc: '2.0',
-                  id: list.data.id,
-                  result: {
-                    objects: [
-                      'webhooks',
-                      'print_stats',
-                      'virtual_sdcard',
-                      'extruder',
-                      'heater_bed',
-                    ],
-                  },
-                }),
-              )
-              return
-            }
-            const request = Request.parse(value)
-            socket.send(
-              JSON.stringify({
-                jsonrpc: '2.0',
-                id: request.id,
-                result: {
-                  eventtime,
-                  status: {
-                    webhooks: { state: 'ready' },
-                    print_stats: { state: printState },
-                    virtual_sdcard: { progress },
-                    ...(request.params.objects.extruder
-                      ? { extruder: { temperature: 210 } }
-                      : {}),
-                    ...(request.params.objects.heater_bed
-                      ? { heater_bed: { temperature: 60 } }
-                      : {}),
-                  },
-                },
-              }),
-            )
-          } catch {
-            failure = true
-            socket.terminate()
-          }
-        })
+        },
       })
+      mockInstance = moonraker
+      port = moonraker.ports.http
+      closeServer = () => moonraker.close()
       broadcast = () => {
         // Bounded synthetic sequence: initial, after first advance, after recovery.
         const next = ({ 0.25: 0.75, 0.75: 0.9 } as Record<number, number>)[
-          progress
+          moonraker.control.model().progress
         ]
         if (next === undefined) throw Error('Fixture transitions exhausted')
-        progress = next
-        eventtime++
-        for (const socket of sockets.clients)
-          socket.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              method: 'notify_status_update',
-              params: [{ virtual_sdcard: { progress } }, eventtime],
-            }),
-          )
+        moonraker.control.update({ progress: next })
       }
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject)
-        server.listen(0, '127.0.0.1', resolve)
-      })
-      const address = server.address()
-      if (!address || typeof address === 'string')
-        throw Error('Fixture listener missing')
-      port = address.port
       // Opt-in genuine simulator sources (rtc-farm-acceptance-sim-scenarios.ts).
       const sim = await (
         await import('./rtc-farm-acceptance-sim-scenarios.ts')
@@ -350,8 +156,8 @@ export async function createRuntimeMoonrakerFixture() {
       // The ready check above is the simulator's first request; the runtime
       // readiness wait expects requests > 0, which the synthetic server would
       // otherwise provide.
-      if (sim) requests++
-      const moon = sim?.moonraker ?? `http://127.0.0.1:${address.port}`
+      if (sim) simRequests++
+      const moon = sim?.moonraker ?? moonraker.origin
       const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),
         credentialPath = join(directory, 'credential.json')
@@ -596,7 +402,7 @@ export async function createRuntimeMoonrakerFixture() {
     observe() {
       return {
         kind: 'runtime-observation' as const,
-        requests,
+        requests: (mockInstance?.calls.all.length ?? 0) + simRequests,
         queued,
         failure,
         settled,
@@ -609,7 +415,7 @@ export async function createRuntimeMoonrakerFixture() {
         packagedSha256,
         packagedManifestSha256,
         packagedFiles,
-        pauses,
+        pauses: mockInstance?.calls()['printer.print.pause'] ?? 0,
         pauseInboxReady,
         pauseInboxes,
         telemetryDelivered,

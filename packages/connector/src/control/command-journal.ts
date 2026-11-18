@@ -6,6 +6,10 @@ import { z } from 'zod'
 import { SignedCommandV2 } from '../../../farm-protocol/src/command-v2.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
+import {
+  API_ENVELOPE_CLOCK_SKEW_MS,
+  ApiEnvelopeV1,
+} from '../../../farm-protocol/src/api-envelope.ts'
 
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
@@ -61,6 +65,27 @@ const ClaimInput = z.strictObject({
   printerKey,
   wireSha256: z.string().regex(/^[0-9a-f]{64}$/),
 })
+const ApiClaimInput = z.strictObject({
+  envelope: ApiEnvelopeV1,
+  printerKey,
+  wireSha256: z.string().regex(/^[0-9a-f]{64}$/),
+})
+/** One journal row, whichever signed path (browser v2 or API envelope) it came from. */
+type ClaimRow = {
+  cmd_id: string
+  key_id: string
+  nonce: string
+  farm_id: string
+  agent_id: string
+  assignment_id: string
+  account_id: string
+  transport_id: string
+  capability_id: string
+  action: string
+  /** Earliest local time the command may be claimed. */
+  not_before: number
+  expires_at: number
+}
 const OutcomeRow = z.strictObject({
   cmdId: BrowserDeviceUuid,
   assignmentId: BrowserDeviceUuid,
@@ -402,18 +427,67 @@ export function claimCommand(
   handle: CommandJournalHandle,
   input: { command: SignedCommandV2; printerKey: string; wireSha256: string },
 ): CommandClaimResult {
-  const state = stateOf(handle)
-  if (!state) return { ok: false, reason: 'storage-unavailable' }
   const parsed = ClaimInput.safeParse(input)
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
+  const command = parsed.data.command
+  return claimRow(
+    handle,
+    {
+      ...command,
+      not_before: command.issued_at,
+    },
+    parsed.data.printerKey,
+    parsed.data.wireSha256,
+  )
+}
+/**
+ * Claims a verified API envelope in the same table as browser commands, so it
+ * shares replay protection (`cmd_id` and `(key_id, nonce)`), the single active
+ * command per assignment and printer, the rate limit and the no-retry rule.
+ * The issuer kid is the key id, the app the account and the grant the capability.
+ */
+export function claimApiCommand(
+  handle: CommandJournalHandle,
+  input: { envelope: ApiEnvelopeV1; printerKey: string; wireSha256: string },
+): CommandClaimResult {
+  const parsed = ApiClaimInput.safeParse(input)
+  if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
+  const envelope = parsed.data.envelope
+  return claimRow(
+    handle,
+    {
+      cmd_id: envelope.cmd_id,
+      key_id: envelope.kid,
+      nonce: envelope.nonce,
+      farm_id: envelope.farm_id,
+      agent_id: envelope.agent_id,
+      assignment_id: envelope.assignment_id,
+      account_id: envelope.app_id,
+      transport_id: 'api-envelope',
+      capability_id: envelope.grant_id,
+      action: envelope.kind === 'job' ? 'start_print' : envelope.action!.action,
+      not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
+      expires_at: envelope.expires_at,
+    },
+    parsed.data.printerKey,
+    parsed.data.wireSha256,
+  )
+}
+function claimRow(
+  handle: CommandJournalHandle,
+  command: ClaimRow,
+  printerKey: string,
+  wireSha256: string,
+): CommandClaimResult {
+  const state = stateOf(handle)
+  if (!state) return { ok: false, reason: 'storage-unavailable' }
   try {
     const result = transaction(
       state,
       (): { ok: true } | Exclude<CommandClaimResult, { ok: true }> => {
         const now = clockStep(state)
         if (now === null) return { ok: false, reason: 'clock-regressed' }
-        const command = parsed.data.command
-        if (now < command.issued_at || now >= command.expires_at)
+        if (now < command.not_before || now >= command.expires_at)
           return { ok: false, reason: 'storage-unavailable' }
         state.database
           .prepare(
@@ -433,7 +507,7 @@ export function claimCommand(
             .prepare(
               "SELECT 1 FROM pause_commands WHERE status IN ('claimed','write-started','outcome-unknown') AND (assignment_id=? OR (farm_id=? AND printer_key=?)) LIMIT 1",
             )
-            .get(command.assignment_id, command.farm_id, parsed.data.printerKey)
+            .get(command.assignment_id, command.farm_id, printerKey)
         )
           return { ok: false, reason: 'assignment-busy' }
         const count = state.database
@@ -445,7 +519,7 @@ export function claimCommand(
           .prepare(
             'SELECT count(*) AS n FROM pause_commands WHERE farm_id=? AND printer_key=? AND claimed_at>?',
           )
-          .get(command.farm_id, parsed.data.printerKey, now - 60000)?.n
+          .get(command.farm_id, printerKey, now - 60000)?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
         if (recent >= 10) return { ok: false, reason: 'rate-limited' }
         state.database
@@ -462,8 +536,8 @@ export function claimCommand(
             command.account_id,
             command.transport_id,
             command.capability_id,
-            parsed.data.printerKey,
-            parsed.data.wireSha256,
+            printerKey,
+            wireSha256,
             state.writerId,
             now,
           )
@@ -482,7 +556,7 @@ export function claimCommand(
     const receipt = new ClaimHandle()
     receipts.set(receipt, {
       journal: state,
-      cmdId: parsed.data.command.cmd_id,
+      cmdId: command.cmd_id,
       markAttempted: false,
       marked: false,
       finishAttempted: false,

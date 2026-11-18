@@ -45,6 +45,19 @@ export default defineNuxtConfig({
       /** NUXT_INTEGRATION_AUTH_WRITE_LIMIT: per-app write requests per minute. */
       writeLimit: 30,
     },
+    integrationJobs: {
+      enabled: false,
+      /** A login that is a member of farm_integration_jobs, farm_integration_approvals and farm_integration_delivery. */
+      databaseUrl: '',
+      /** NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY: the API issuer's Ed25519 PKCS#8 key, base64url. Empty holds jobs only. */
+      envelopeSigningKey: '',
+      /** The key id the Connector's trusted-key set knows the issuer by. */
+      envelopeKid: '',
+      /** Largest file size a job may declare, in bytes. */
+      maxFileBytes: 17179869184,
+      /** How long an undelivered envelope stays valid, in milliseconds. */
+      envelopeTtlMs: 300000,
+    },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },

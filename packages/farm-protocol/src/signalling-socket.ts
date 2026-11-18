@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_API_ENVELOPE_WIRE_BYTES } from './api-envelope.ts'
 import { parseBoundedJson } from './json.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import { BrowserTransportProofChallenge } from './browser-transport-proof.ts'
@@ -10,6 +11,12 @@ const signallingChallenge = CredentialProofChallenge.refine(
 )
 const signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/)
 const base = { v: z.literal(1) }
+const envelopeWire = z.string().min(1).max(MAX_API_ENVELOPE_WIRE_BYTES)
+export const ApiInboxScope = z.enum([
+  'jobs:start',
+  'control:basic',
+  'control:extended',
+])
 const token = z.string().min(1).max(8192)
 const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 export const SignallingClientControl = z.discriminatedUnion('t', [
@@ -38,6 +45,11 @@ export const SignallingClientControl = z.discriminatedUnion('t', [
     signature,
   }),
   z.strictObject({ ...base, t: z.literal('connector.retry') }),
+  z.strictObject({
+    ...base,
+    t: z.literal('connector.api-result'),
+    wire: envelopeWire,
+  }),
 ])
 export type SignallingClientControl = z.infer<typeof SignallingClientControl>
 export const SignallingClientFrame = z.union([
@@ -89,6 +101,14 @@ export const SignallingServerControl = z
       ...base,
       t: z.literal('rtc.binding'),
       binding: RtcSessionBinding,
+    }),
+    // A fresh database claim authorizes exactly the attached signed envelope.
+    z.strictObject({
+      ...base,
+      t: z.literal('connector.api-command'),
+      wire: envelopeWire,
+      scope: ApiInboxScope,
+      confirmed_at: timestamp,
     }),
     // Current-authority confirmation for the Connector's offline tracker. Sent
     // only on the credential-authenticated Connector inbox, after the server

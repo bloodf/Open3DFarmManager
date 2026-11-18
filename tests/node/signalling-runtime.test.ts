@@ -910,3 +910,61 @@ test('a revocation from an app server whose wall clock runs ahead never blocks l
     second.close()
   }
 })
+
+test('API delivery and results use only the proved read-only Connector inbox', async () => {
+  const f = await fixture()
+  try {
+    const scope = { scope: 'control:basic', confirmedAt: Date.now() } as const
+    const reported = Promise.withResolvers<unknown[]>()
+    const pending: string[][] = []
+    f.runtime.bindApiDelivery({
+      async deliverPending(farmId, agentId) {
+        pending.push([farmId, agentId])
+        return []
+      },
+      async recordResult(...result) {
+        reported.resolve(result)
+        return 'recorded'
+      },
+    })
+    const send = (farm = f.farm) =>
+      f.runtime.sendToAgentInbox(farm, f.agent, 'signed-envelope', scope)
+
+    const pause = await f.inbox('pause')
+    assert.equal(send(), 'no-inbox')
+    const machine = await f.inbox()
+    assert.deepEqual(pending, [[f.farm, f.agent]])
+    assert.equal(send(randomUUID()), 'no-inbox')
+    assert.equal(send(), 'sent')
+    const command = {
+      v: 1,
+      t: 'connector.api-command',
+      wire: 'signed-envelope',
+      scope: scope.scope,
+      confirmed_at: scope.confirmedAt,
+    }
+    assert.deepEqual(machine.wires.at(-1), command)
+    assert.ok(!pause.wires.some((wire) => wire.t === command.t))
+    const rawData = Buffer.from(
+      JSON.stringify({
+        v: 1,
+        t: 'connector.api-result',
+        wire: 'result',
+      }),
+    )
+    machine.native.emit('message', rawData, false)
+    f.runtime.message(machine, { rawData })
+    assert.deepEqual(
+      await Promise.race([
+        reported.promise,
+        new Promise((resolve) => {
+          const timer = setTimeout(resolve, 2000, null)
+          timer.unref()
+        }),
+      ]),
+      [f.farm, f.agent, 'result'],
+    )
+  } finally {
+    f.close()
+  }
+})

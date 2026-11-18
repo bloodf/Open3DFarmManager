@@ -1,8 +1,21 @@
+import { readPrinterBinding } from '../control/printer-binding.ts'
+import { receiveApiCommand } from './api-command.ts'
+import { PAUSE_POLICY_HARD_MAXIMUMS } from '../../../farm-protocol/src/pause-capability.ts'
+import {
+  controlEffectMatches,
+  type ControlObservation,
+} from '../control/pause-dispatcher.ts'
+import type { ControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
   openTrustedKeyStore,
   type TrustedKeyAuthority,
 } from '../auth/trusted-key-store.ts'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { readBambuCredentials } from '../bambu/credentials.ts'
+import {
+  moonrakerAuthHeaders,
+  validateMoonrakerInput,
+} from '../config/moonraker.ts'
 import { join } from 'node:path'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -108,6 +121,13 @@ type PauseControlInput = {
    * `createOfflineAuthority()`. Stale authority rejects every command.
    */
   trustedKeys?: TrustedKeyAuthority
+  apiHandlers?: Map<
+    string,
+    (
+      frame: Parameters<typeof receiveApiCommand>[1],
+      inbox: Parameters<typeof receiveApiCommand>[2],
+    ) => void
+  >
   freshness: CachedAuthorityFreshness
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
@@ -218,6 +238,8 @@ async function runAssignmentControl(
     monotonicNow: () => performance.now(),
   })
   let relay: ReturnType<typeof createPauseCommandRelay>
+  const apiWork = new Set<Promise<unknown>>()
+  let observation: ControlObservation | null = null
   try {
     const router = createPauseDriverRouter({
       allowedOrigins: [
@@ -228,7 +250,11 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
-      observe: (binding, observation) => relay.observe(binding, observation),
+      observe(binding, next) {
+        const accepted = relay.observe(binding, next)
+        observation = accepted ? next : null
+        return accepted
+      },
     })
     input.onMacros?.((id) => {
       const binding = config.bindingFor(id)
@@ -259,6 +285,137 @@ async function runAssignmentControl(
         : {}),
       bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
     })
+    if (trustedKeys)
+      input.apiHandlers?.set(assignmentId, (frame, inbox) => {
+        if (input.signal.aborted || apiWork.size >= 8) return
+        let beforeWrite: ControlObservation | null = null
+        const work = receiveApiCommand(
+          {
+            farmId: credential.farm_id,
+            agentId: credential.agent_id,
+            keys: trustedKeys,
+            journal,
+            clock,
+            driver: router,
+            jobFiles: {
+              directory: join(input.dataDirectory, 'job-file-staging'),
+              targetFor(printerKey) {
+                const mapping = readPrinterBinding(printerBinding)
+                if (!mapping || mapping.printer_key !== printerKey)
+                  return undefined
+                const collection = config.collection
+                if (collection.version === 3) {
+                  const bambu = collection.bambu.printers.find(
+                    (p) => p.printerKey === printerKey,
+                  )
+                  if (bambu)
+                    return {
+                      backend: 'bambu',
+                      host: bambu.host,
+                      serial: bambu.serial,
+                      accessCode: readBambuCredentials(bambu).password,
+                      trust: {
+                        ...(bambu.caFile
+                          ? { caPem: readFileSync(bambu.caFile, 'utf8') }
+                          : {}),
+                        ...(bambu.pinSha256
+                          ? { pinSha256: bambu.pinSha256 }
+                          : {}),
+                      },
+                    }
+                }
+                if ('printers' in collection) {
+                  const printer = collection.printers.find(
+                    (p) =>
+                      p.printerKey === printerKey &&
+                      p.origin === mapping.moonraker_origin,
+                  )
+                  if (printer) {
+                    const selected = validateMoonrakerInput({
+                      assignment: printer,
+                      allowedOrigins: collection.allowedOrigins,
+                      limits: collection.limits,
+                    })
+                    const apiKey = moonrakerAuthHeaders(
+                      selected.origin,
+                      selected.limits,
+                    )['X-Api-Key']
+                    return {
+                      backend: 'moonraker',
+                      origin: selected.origin,
+                      ...(apiKey ? { apiKey } : {}),
+                    }
+                  }
+                }
+                return createFileTargets({
+                  config,
+                  assignmentId,
+                  dataDirectory: input.dataDirectory,
+                }).fileTransfer.targetFor(printerKey)
+              },
+            },
+            printer: (id) => (id === assignmentId ? printerBinding : undefined),
+            observe() {
+              const now = clock.monotonicNow()
+              const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
+              if (
+                !observation ||
+                observation.receivedMono > now ||
+                now - observation.readyObservedMono > maxAge ||
+                now - observation.printStateObservedMono > maxAge
+              )
+                return null
+              beforeWrite = observation
+              return observation
+            },
+            async confirmEffect(
+              { action, args },
+              { binding, sentMono, signal },
+            ) {
+              const before = beforeWrite
+              if (!before) return false
+              const after = await router.waitForPaused({
+                action: action as ControlAction,
+                args,
+                binding,
+                signal,
+                after: {
+                  connectionGeneration: before.connectionGeneration,
+                  sequence: before.sequence,
+                  sentMono,
+                },
+              })
+              const now = clock.monotonicNow()
+              const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
+              return (
+                !!after &&
+                after.ready &&
+                after.assignmentId === before.assignmentId &&
+                after.printerKey === before.printerKey &&
+                after.connectionGeneration === before.connectionGeneration &&
+                after.sequence > before.sequence &&
+                after.receivedMono <= now &&
+                after.receivedMono > sentMono &&
+                after.printStateObservedMono > sentMono &&
+                after.readyObservedMono <= after.receivedMono &&
+                after.printStateObservedMono <= after.receivedMono &&
+                now - after.readyObservedMono <= maxAge &&
+                now - after.printStateObservedMono <= maxAge &&
+                (after.effect === undefined ||
+                  now - after.effect.observedMono <= maxAge) &&
+                controlEffectMatches(action, args, after, sentMono)
+              )
+            },
+            ...(input.storageDegraded
+              ? { storageDegraded: input.storageDegraded }
+              : {}),
+          },
+          { ...frame },
+          { ...inbox, signal: AbortSignal.any([input.signal, inbox.signal]) },
+        ).catch(() => {})
+        apiWork.add(work)
+        void work.then(() => apiWork.delete(work))
+      })
   } catch (error) {
     // Nothing reached the journal yet: release it before failing.
     input.onMacros?.(() => undefined)
@@ -389,6 +546,7 @@ async function runAssignmentControl(
       },
     })
   } finally {
+    input.apiHandlers?.delete(assignmentId)
     input.onMacros?.(() => undefined)
     input.onControls?.(() => [])
     relay.close()
@@ -402,7 +560,7 @@ async function runAssignmentControl(
       PAUSE_CLOSE_STALL_MS,
     )
     try {
-      await relay.settled
+      await Promise.all([relay.settled, ...apiWork])
     } finally {
       clearTimeout(stall)
     }

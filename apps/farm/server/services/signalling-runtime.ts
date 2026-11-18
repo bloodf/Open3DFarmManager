@@ -1,3 +1,7 @@
+import type {
+  EnvelopeInbox,
+  IntegrationDeliveryService,
+} from './integration-delivery.ts'
 import type { IncomingMessage } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { createLogger } from '@open3dfarmmanager/shared'
@@ -196,6 +200,66 @@ export class SignallingRuntime {
   #authoritySeq = 0
   readonly #inboxes = new Map<string, Connection>()
   #closed = false
+  #apiDelivery?: Pick<
+    IntegrationDeliveryService,
+    'deliverPending' | 'recordResult'
+  >
+
+  /** The integration runtime owns the signer, database role, and delivery lifecycle. */
+  bindApiDelivery(
+    delivery: Pick<
+      IntegrationDeliveryService,
+      'deliverPending' | 'recordResult'
+    >,
+  ): void {
+    if (this.#closed || this.#apiDelivery)
+      throw Error('API delivery unavailable')
+    this.#apiDelivery = delivery
+    for (const connection of this.#inboxes.values()) {
+      const identity = this.#apiIdentity(connection)
+      if (identity) this.#deliverApiPending(identity)
+    }
+  }
+
+  #apiIdentity(connection: Connection) {
+    const state = connection.state
+    if (
+      connection.mode !== 'read-only' ||
+      connection.closed ||
+      this.#clock.monotonic() >= connection.inboxDeadline ||
+      (state.kind !== 'connector.ready' &&
+        state.kind !== 'connector.request' &&
+        state.kind !== 'connector.attach' &&
+        state.kind !== 'connector.context-proof' &&
+        state.kind !== 'connector.active')
+    )
+      return undefined
+    return state.identity.identity
+  }
+
+  #deliverApiPending(identity: Identity['identity']) {
+    void this.#apiDelivery
+      ?.deliverPending(identity.farm_id, identity.agent_id)
+      .catch(() => {})
+  }
+
+  sendToAgentInbox(
+    ...[farmId, agentId, wire, authority]: Parameters<
+      EnvelopeInbox['sendToAgentInbox']
+    >
+  ): 'sent' | 'no-inbox' {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    if (!connection || this.#apiIdentity(connection)?.farm_id !== farmId)
+      return 'no-inbox'
+    this.#send(connection, {
+      v: 1,
+      t: 'connector.api-command',
+      wire,
+      scope: authority.scope,
+      confirmed_at: authority.confirmedAt,
+    })
+    return 'sent'
+  }
   readonly #pauseConfig: PauseConfiguration | undefined
   #pauseOwner: PauseOwner | undefined
   constructor(input: {
@@ -528,6 +592,16 @@ export class SignallingRuntime {
     // The switch is explicit: an authenticated machine cannot act as a browser.
     const control = frame
     switch (control.t) {
+      case 'connector.api-result': {
+        const identity = this.#apiIdentity(connection)
+        if (!identity || !this.#apiDelivery) throw Error('API result denied')
+        await this.#apiDelivery.recordResult(
+          identity.farm_id,
+          identity.agent_id,
+          control.wire,
+        )
+        return
+      }
       case 'pause.begin':
       case 'browser.begin': {
         if (connection.state.kind !== 'browser.begin')
@@ -706,6 +780,8 @@ export class SignallingRuntime {
         })
         this.#confirmAuthority(connection, current)
         this.#revalidation(connection)
+        if (connection.mode === 'read-only')
+          this.#deliverApiPending(current.identity)
         break
       }
       case 'pause.connector-attach':

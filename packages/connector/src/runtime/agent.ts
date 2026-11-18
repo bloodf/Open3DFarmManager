@@ -1,3 +1,4 @@
+import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
 import type { Logger } from '../../../shared/src/log.ts'
 import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
@@ -314,6 +315,11 @@ async function runConnectorAgentOnce(
           },
         })
       : undefined
+    const apiHandlers: NonNullable<
+      Parameters<
+        typeof import('./pause-control.ts').runPauseControl
+      >[0]['apiHandlers']
+    > = new Map()
     if (config.signalling && lookupId && snapshots) {
       const { AuthenticatedConnectorSignallingClient } =
         await import('../cloud/authenticated-signalling-client.ts')
@@ -341,6 +347,7 @@ async function runConnectorAgentOnce(
           retryMaxMs: signalling.retryMaxMs,
           onReconnect: () => logger.info('reconnect'),
           createSession(onTerminal, onAdmitted) {
+            const inbox = new AbortController()
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
@@ -377,12 +384,26 @@ async function runConnectorAgentOnce(
                     }
                   }
                 },
+                onApiCommand(frame, report) {
+                  if (!offline || inbox.signal.aborted) return
+                  const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+                  const handler =
+                    apiHandlers.get(envelope.assignment_id) ??
+                    apiHandlers.values().next().value
+                  handler?.(frame, {
+                    report,
+                    signal: inbox.signal,
+                    freshness: offline.freshness,
+                  })
+                },
                 onAuthorityRevoked(serverSeq) {
+                  inbox.abort()
                   offline?.revoke(serverSeq)
                 },
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),
                 onTerminal(reason) {
+                  inbox.abort()
                   try {
                     diagnostic({
                       kind: 'readonly-terminal',
@@ -470,6 +491,7 @@ async function runConnectorAgentOnce(
           dataDirectory: input.dataDirectory,
           signal,
           freshness: offline.freshness,
+          apiHandlers,
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,

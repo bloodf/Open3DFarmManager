@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -267,9 +268,12 @@ fi
 `,
       )
       chmodSync(docker, 0o700)
-      // Supply a tiny dependency closure without requiring pnpm in offline tests.
+      // Supply a tiny dependency closure without requiring an install in offline tests.
+      const modules = join(directory, 'modules')
+      mkdirSync(join(modules, 'node-datachannel'), { recursive: true })
+      mkdirSync(join(modules, 'detect-libc'), { recursive: true })
       const realpath = join(directory, 'realpath')
-      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/ndc\\n" "$FIXTURE"\n')
+      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/modules\\n" "$FIXTURE"\n')
       chmodSync(realpath, 0o700)
       const result = spawnSync(
         'bash',

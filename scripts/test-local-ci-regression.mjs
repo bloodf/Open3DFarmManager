@@ -83,14 +83,14 @@ exec "$REGRESSION_REAL_NODE" "$@"
   )
 })
 
-test('workflow-only pnpm pin drift fails the selftest', (t) => {
+test('workflow-only Node pin drift fails the selftest', (t) => {
   const root = fixture(t)
   const path = join(root, '.github/workflows/ci.yml')
   writeFileSync(
     path,
     readFileSync(path, 'utf8').replaceAll(
-      /version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
-      "version: '99.0.0'",
+      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
+      "node-version: '99.0.0'",
     ),
   )
   const result = run(root)

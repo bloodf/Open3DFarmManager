@@ -178,9 +178,9 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
 
   const expectedVerify: Record<(typeof PROFILE_JOBS)[number], RegExp> = {
     spoolman:
-      /pnpm run sim:seed[\s\S]*node packages\/sim-tools\/src\/spoolman-cli\.ts/,
+      /npm run sim:seed[\s\S]*node packages\/sim-tools\/src\/spoolman-cli\.ts/,
     cams: /node packages\/sim-tools\/src\/camera-cli\.ts/,
-    rtsp: /pnpm run sim:verify:rtsp/,
+    rtsp: /npm run sim:verify:rtsp/,
   }
 
   for (const name of PROFILE_JOBS) {

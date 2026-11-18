@@ -394,7 +394,7 @@ try {
   await run(
     root,
     'prepare-app',
-    join(checkout, 'apps/farm/node_modules/.bin/nuxt'),
+    join(checkout, 'node_modules/.bin/nuxt'),
     ['prepare'],
     env,
     300000,

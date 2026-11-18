@@ -2,7 +2,7 @@
 // Disposable digest-pinned PostgreSQL 17, built farm server, real Connector CLI
 // process and a synthetic loopback Moonraker. Never contacts a physical printer,
 // never accepts a database URL or an existing container. Needs a built app:
-// pnpm --dir apps/farm build
+// npm run build -w @open3dfarmmanager/farm
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'

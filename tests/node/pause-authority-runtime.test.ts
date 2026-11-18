@@ -52,9 +52,7 @@ Object.defineProperty(globalThis, symbol, {
   },
 })
 const requireNuxt = createRequire(
-  realpathSync(
-    new URL('../../apps/farm/node_modules/nuxt/package.json', import.meta.url),
-  ),
+  realpathSync(createRequire(import.meta.url).resolve('nuxt/package.json')),
 )
 const nuxtUrl = pathToFileURL(requireNuxt.resolve('nuxt/server')).href
 const state = `globalThis[Symbol.for('open3dfarm-pause-runtime-test-only')]`

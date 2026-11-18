@@ -6,7 +6,7 @@ import { once } from 'node:events'
 import { browserBundle } from './browser-bundle.ts'
 import { launchBrowser, type Browser } from './browser.ts'
 import { type Page } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { BrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
   ControlSessionBinding,

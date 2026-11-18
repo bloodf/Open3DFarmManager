@@ -57,8 +57,7 @@ import { startAnycubicSimulator } from '../fixtures/anycubic-files.ts'
 import { writeFile } from 'node:fs/promises'
 import type { KobraLinkFetch } from '../../packages/connector/src/kobralink/client.ts'
 
-type Native =
-  typeof import('../../packages/connector/node_modules/node-datachannel')
+type Native = typeof import('node-datachannel')
 const native: Native = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('node-datachannel')

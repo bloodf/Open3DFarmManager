@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 import { createRequire } from 'node:module'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { RtcSessionBinding } from '../../packages/farm-protocol/src/rtc-session-binding.ts'
 import { ControlSessionBinding } from '../../packages/farm-protocol/src/control-session-binding.ts'
 import { RtcAssignmentRef } from '../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import { BrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 
-export const native: typeof import('../../packages/connector/node_modules/node-datachannel') =
-  createRequire(
-    new URL('../../packages/connector/package.json', import.meta.url),
-  )('node-datachannel')
+export const native: typeof import('node-datachannel') = createRequire(
+  new URL('../../packages/connector/package.json', import.meta.url),
+)('node-datachannel')
 export const Role = z.enum(['status', 'camera', 'control'])
 export type Role = z.infer<typeof Role>
 export const Command = z.discriminatedUnion('kind', [

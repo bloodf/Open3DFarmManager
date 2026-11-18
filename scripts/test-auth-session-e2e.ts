@@ -1,5 +1,5 @@
 // Explicit test-only runner for tests/e2e/auth-lockout-session.spec.ts. Never accepts a
-// database URL or an existing container. Needs a built app: pnpm --dir apps/farm build.
+// database URL or an existing container. Needs a built app: npm run build -w @open3dfarmmanager/farm.
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -89,8 +89,8 @@ try {
   )
   assert.equal(migrated, 0, 'Migrations failed')
   process.exitCode = await run(
-    'pnpm',
-    ['exec', 'playwright', 'test', '-c', 'playwright.auth-session.config.ts'],
+    'npx',
+    ['playwright', 'test', '-c', 'playwright.auth-session.config.ts'],
     {
       AUTH_E2E_DISPOSABLE: 'yes',
       AUTH_E2E_DB_PORT: String(dbPort),

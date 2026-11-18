@@ -8,7 +8,7 @@
  * u1 four-tool simulator and Spoolman started from infra/sim:
  *   RTC_FARM_TEST_SIM_MOONRAKER=http://127.0.0.1:<u1 port>
  *   RTC_FARM_TEST_SIM_SPOOLMAN=http://127.0.0.1:<spoolman port>
- * Start, seed (`pnpm run sim:seed`) and remove the simulators yourself.
+ * Start, seed (`npm run sim:seed`) and remove the simulators yourself.
  */
 import type { RtcFarmScenario } from './rtc-farm-acceptance-scenarios.ts'
 

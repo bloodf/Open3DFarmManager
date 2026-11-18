@@ -5,6 +5,7 @@ import type {
 // The Kobra helper has a closed registration DTO and must remain unchanged.
 // Reuse its public types; keep the same config-v1 proof flow for Moonraker.
 import { withoutMoonrakerKey } from './moonraker-onboarding.ts'
+import { withoutSpoolmanCredentials } from './spoolman-onboarding.ts'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../../packages/farm-protocol/src/json.ts'
 import { base64url } from '../../../../packages/farm-protocol/src/encoding.ts'
@@ -126,6 +127,15 @@ type SignallingClientLike = Pick<
   ConfigurationBrowserSignallingClient,
   'start' | 'sendMessage' | 'close' | 'dispose'
 >
+
+/** Outcomes keep the target for display; secrets never stay in browser state. */
+function redactTarget(target: ConfigurationTarget): ConfigurationTarget {
+  return target.backend === 'moonraker'
+    ? (withoutMoonrakerKey(target) as ConfigurationTarget)
+    : target.backend === 'spoolman'
+      ? (withoutSpoolmanCredentials(target) as ConfigurationTarget)
+      : target
+}
 
 function randomNonce(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)))
@@ -611,8 +621,7 @@ export async function openMoonrakerConfigurationBrowserSession(
       return {
         kind: 'prepared',
         operationId,
-        target:
-          target.backend === 'moonraker' ? withoutMoonrakerKey(target) : target,
+        target: redactTarget(target),
         targetSha256,
         expectedRevision,
         receipt,
@@ -624,10 +633,7 @@ export async function openMoonrakerConfigurationBrowserSession(
         return {
           kind: 'local-committed',
           operationId,
-          target:
-            target.backend === 'moonraker'
-              ? withoutMoonrakerKey(target)
-              : target,
+          target: redactTarget(target),
           targetSha256,
           expectedRevision,
           receipt,
@@ -712,6 +718,11 @@ export async function openMoonrakerConfigurationBrowserSession(
       preparedReceiptSha256: string
       expectedRevision: number
       signal: AbortSignal
+      /**
+       * Printer commits finish by registering inventory with the server. A farm
+       * setting (Spoolman) has no inventory to register and passes false.
+       */
+      completeInventory?: boolean
     }): Promise<ConfigurationSessionOutcome> {
       const frame: ConfigurationRequestFrame = {
         v: 1,
@@ -731,7 +742,7 @@ export async function openMoonrakerConfigurationBrowserSession(
         targetSha256: params.targetSha256,
         expectedRevision: params.expectedRevision,
         signal: params.signal,
-        completeInventoryOnLocalCommit: true,
+        completeInventoryOnLocalCommit: params.completeInventory !== false,
       })
     },
 

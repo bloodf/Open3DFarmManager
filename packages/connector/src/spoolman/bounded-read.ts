@@ -11,6 +11,8 @@ export function createBoundedSpoolmanReader(options: {
   context: SpoolmanInventoryContext
   timeoutMs: number
   fetch?: typeof fetch
+  /** Optional Authorization header value; never logged or returned. */
+  authorization?: string
 }) {
   const { origin, context, timeoutMs } = options
   const request = options.fetch ?? fetch
@@ -47,7 +49,12 @@ export function createBoundedSpoolmanReader(options: {
           redirect: 'error',
           credentials: 'omit',
           cache: 'no-store',
-          headers: { accept: 'application/json' },
+          headers: {
+            accept: 'application/json',
+            ...(options.authorization
+              ? { authorization: options.authorization }
+              : {}),
+          },
         })
         check()
         if (

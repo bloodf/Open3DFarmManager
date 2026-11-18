@@ -487,7 +487,10 @@ paths:
         Connectors upload a bounded display projection through authenticated
         telemetry (at most 8 spools, with no Spoolman credentials). The server
         returns the latest observation per Connector. Pagination uses a stable
-        farm and Connector keyset.
+        farm and Connector keyset. The Spoolman a Connector reads is set by the
+        farm owner or an administrator in the pt-BR Spoolman page, or in the
+        Connector's local configuration; its address and credentials are never
+        part of this API, and the credentials never leave the Connector.
       security:
         - clientCredentials: ['inventory:read']
       parameters:

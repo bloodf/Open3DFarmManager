@@ -74,6 +74,8 @@ export const ConfigurationErrorCode = z.enum([
   'moonraker-unavailable',
   'moonraker-not-ready',
   'moonraker-invalid-response',
+  'spoolman-unreachable',
+  'spoolman-unauthorized',
   'busy',
   'expired',
 ])

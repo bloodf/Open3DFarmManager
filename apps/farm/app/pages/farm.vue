@@ -37,6 +37,7 @@ import {
   localInterfaceOrigin,
   observationAge,
   printerStateLabel,
+  resolvedLocalInterfaceOrigin,
   type FarmRow,
 } from '../utils/farm-view.ts'
 import { livePauseAvailability, pauseStatusText } from '../utils/farm-pause.ts'
@@ -208,6 +209,12 @@ function connectionText(row: FarmRow) {
     case 'unavailable':
       return 'Conexão direta indisponível'
   }
+}
+function displayLocalOrigin(row: FarmRow) {
+  return resolvedLocalInterfaceOrigin(
+    row.localOrigin,
+    row.observation?.state.localWebUiOrigin,
+  )
 }
 // Reads the once-a-second tick for reactivity, but measures against a fresh
 // sample so a frame received after the last tick never shows a negative age.
@@ -888,13 +895,13 @@ function dateLabel(time: number) {
                       !isKobraXAssignment(row.assignment)
                     "
                   >
-                    <template v-if="row.localOrigin">
+                    <template v-if="displayLocalOrigin(row)">
                       <p class="opaque">
-                        Interface local confirmada nesta aba:
-                        {{ row.localOrigin }}
+                        Interface local da impressora:
+                        {{ displayLocalOrigin(row) }}
                       </p>
                       <a
-                        :href="row.localOrigin"
+                        :href="displayLocalOrigin(row) ?? undefined"
                         target="_blank"
                         rel="noopener noreferrer"
                         referrerpolicy="no-referrer"
@@ -911,7 +918,7 @@ function dateLabel(time: number) {
                       @click="setupLink(row.assignment.assignmentId)"
                     >
                       {{
-                        row.localOrigin
+                        displayLocalOrigin(row)
                           ? 'Alterar interface local'
                           : 'Configurar interface local'
                       }}

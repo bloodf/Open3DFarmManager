@@ -265,6 +265,13 @@ export function localInterfaceOrigin(input: string): string | null {
     return null
   }
 }
+
+export function resolvedLocalInterfaceOrigin(
+  manualOverride: string | null,
+  bindingOrigin: string | undefined,
+): string | null {
+  return manualOverride ?? bindingOrigin ?? null
+}
 export function observationAge(observation: FarmObservation, now: Clock) {
   const elapsed = now.mono - observation.received.mono
   const validElapsed = Number.isFinite(elapsed) && elapsed >= 0

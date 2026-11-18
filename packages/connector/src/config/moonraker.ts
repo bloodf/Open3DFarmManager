@@ -27,6 +27,22 @@ export function moonrakerSession(origin: string, limits: MoonrakerLimits) {
   return credentials.get(limits)?.session
 }
 
+/** Mainsail/Fluidd use the printer host's web origin, not Moonraker's API port. */
+export function moonrakerWebUiOrigin(input: string): string {
+  const url = new URL(input)
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  )
+    throw new Error('Invalid local Moonraker origin')
+  url.port = ''
+  return url.origin
+}
+
 export type MoonrakerLimits = Readonly<{
   maxMessageBytes: number
   connectTimeoutMs: number

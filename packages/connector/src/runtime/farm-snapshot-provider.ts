@@ -70,6 +70,7 @@ export function createFarmSnapshotSource(input: {
   controlsFor?: (
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
+  localWebUiOriginFor?: (assignmentId: string) => string | undefined
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -147,6 +148,8 @@ export function createFarmSnapshotSource(input: {
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
+      const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
+      if (localWebUiOrigin) printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
       for (const field of ['fans', 'light', 'materials'] as const) {

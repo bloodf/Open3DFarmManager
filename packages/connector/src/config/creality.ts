@@ -16,6 +16,14 @@ export const CrealityBinding = z.strictObject({
   /** Stock HTTP upload port (POST /upload/<name>); absent means 80. */
   httpPort: z.number().int().min(1).max(65535).optional(),
 })
+export function crealityWebUiOrigin(binding: {
+  host: string
+  httpPort?: number | undefined
+}): string {
+  const host = binding.host.includes(':') ? `[${binding.host}]` : binding.host
+  const port = binding.httpPort ?? 80
+  return `http://${host}${port === 80 ? '' : `:${port}`}`
+}
 const CrealityConfig = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })
   .extend({

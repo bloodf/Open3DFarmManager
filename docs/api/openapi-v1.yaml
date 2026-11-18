@@ -2035,7 +2035,7 @@ components:
           type: string
           description: |
             `held` awaits operator approval; `rejected` was refused by an
-            operator; `queued` was accepted and waits for the Connector to
+            operator or its approved envelope could not be issued; `queued` was accepted and waits for the Connector to
             confirm delivery; `expired` was never delivered before its expiry;
             `delivered` reached the Connector; `refused` was refused by the
             Connector (see `refusal`); `started`, `completed`, `cancelled` and

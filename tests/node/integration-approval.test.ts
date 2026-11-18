@@ -191,6 +191,20 @@ class World {
       (this.chain = this.chain.then(() =>
         this.decideNow(accountId, farmId, id, decision, now),
       )) as Promise<DecideOutcome>,
+    rejectApproved: async ({ id, now, reason }) => {
+      const job = this.jobs.find((row) => row.id === id)
+      if (job?.status !== 'submitted') return
+      job.status = 'rejected'
+      job.updatedAt = now
+      this.audit.push({
+        action: 'approval.decided',
+        actorKind: 'system',
+        actorId: null,
+        resourceId: id,
+        outcome: 'rejected',
+        decision: `envelope-issue-${reason}`,
+      })
+    },
     expireHeld: async (now) => {
       let count = 0
       for (const job of this.jobs)
@@ -540,6 +554,25 @@ test('approval is refused when the grant lost authority while held', async () =>
   })
   assert.equal(f.world.jobs[0]!.status, 'rejected')
   assert.equal(f.world.sent.length, 0)
+})
+
+test('failed envelope issue terminally rejects an approved item', async () => {
+  const f = await fixture()
+  const id = await held(f)
+  const service = f.approvals as unknown as {
+    o: { envelopes: { issue: () => Promise<{ ok: false; reason: 'refused' }> } }
+  }
+  service.o.envelopes.issue = async () => ({ ok: false, reason: 'refused' })
+  assert.deepEqual(await f.approvals.decide(operator, farm, id, 'approve'), {
+    ok: true,
+    result: { kind: 'job', id, decision: 'approve', status: 'rejected' },
+  })
+  assert.equal(f.world.jobs.find((job) => job.id === id)?.status, 'rejected')
+  assert.deepEqual(await f.approvals.decide(operator, farm, id, 'approve'), {
+    ok: false,
+    problem: 'conflict',
+  })
+  assert.equal(f.world.audit.at(-1)?.decision, 'envelope-issue-refused')
 })
 
 test('without an envelope signer approval is refused and the item stays held; rejection still works', async () => {

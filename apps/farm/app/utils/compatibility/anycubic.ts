@@ -30,6 +30,12 @@ export interface AnycubicCatalogProduct {
   readonly limitations: readonly string[]
 }
 
+/**
+ * Nenhum modelo deste grupo é aceito pelo driver Anycubic: o conector só
+ * habilita ações para o identificador de modelo `20024`
+ * (`packages/connector/src/anycubic/commands.ts`). Sem esse identificador não
+ * há rota de código para telemetria, arquivos ou comandos.
+ */
 const unknownCapabilities = {
   telemetry: 'unknown',
   files: 'unknown',
@@ -47,11 +53,11 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     model: 'Kobra 3 Max V2',
     releaseStatus: 'Data de lançamento desconhecida',
     releaseDate: null,
-    firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareStatus: 'não verificado',
     firmwareNotes: [
       {
-        firmware: 'Versão desconhecida',
-        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        firmware: 'não verificado',
+        note: 'O wiki do fabricante publica guias de atualização por modelo, mas não lista versões para a Kobra 3 Max V2; nenhuma versão foi qualificada em hardware e a fonte não comprova compatibilidade com o OpenFarm.',
         sources: [
           'https://us.anycubic3d.com/products/kobra-3-max-v2-combo-3d-printer',
         ],
@@ -65,6 +71,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     limitations: [
       'Modelo candidato; disponibilidade e integração não foram verificadas.',
       'Câmera e acessórios não comprovam integração.',
+      'O driver Anycubic do OpenFarm só aceita o identificador de modelo 20024; este modelo não é reconhecido.',
     ],
   },
   {
@@ -73,11 +80,11 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     model: 'Kobra 4',
     releaseStatus: 'Apresentada em feira; lançamento desconhecido',
     releaseDate: null,
-    firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareStatus: 'não verificado',
     firmwareNotes: [
       {
-        firmware: 'Versão desconhecida',
-        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        firmware: 'não verificado',
+        note: 'A apresentação cited pelo fabricante não informa versão de firmware nem canal de atualização para a Kobra 4; nenhuma versão foi qualificada em hardware.',
         sources: [
           'https://www.prnewswire.com/news-releases/anycubic-showcases-next-generation-3d-printing-lineup-at-rapidtct-2026-highlighting-multicolor-fdm-and-large-format-resin-innovation-302743844.html',
         ],
@@ -90,6 +97,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     ],
     limitations: [
       'Apresentação em feira não comprova disponibilidade nem integração.',
+      'O driver Anycubic do OpenFarm só aceita o identificador de modelo 20024; este modelo não é reconhecido.',
     ],
   },
   {
@@ -98,11 +106,12 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     model: 'Kobra X',
     releaseStatus: 'Apresentada na Formnext 2025',
     releaseDate: null,
-    firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareStatus:
+      'Versões publicadas pelo fabricante; não qualificadas em hardware',
     firmwareNotes: [
       {
-        firmware: 'Versão desconhecida',
-        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        firmware: 'V2.0.2.2',
+        note: 'O guia de atualização do fabricante publica o registro de versões do Kobra X, com V2.0.2.2 como entrada mais recente; a versão instalada e a compatibilidade com o OpenFarm não foram qualificadas em hardware.',
         sources: [
           'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
         ],
@@ -119,11 +128,13 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     },
     sources: [
       'https://www.prnewswire.com/apac/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620524.html',
+      'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
     ],
     limitations: [
       'A simulação não comprova suporte ao equipamento físico ou ao firmware.',
       'Arquivos e comandos estendidos, incluindo temperatura, ventilador, luz e velocidade, simulados pela ponte KobraLink; não comprovado em hardware.',
-      'Câmera não foi qualificada.',
+      'Câmera não foi qualificada: a ponte KobraLink do OpenFarm não expõe módulo de câmera.',
+      'Materiais permanecem desconhecidos: a ponte tem rotas AMS e ACE, mas elas não fazem parte do vocabulário de comandos assinados exercitado pelo OpenFarm.',
     ],
   },
   {
@@ -132,11 +143,11 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     model: 'Kobra S1 Max',
     releaseStatus: 'Apresentada na Formnext 2025',
     releaseDate: null,
-    firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareStatus: 'não verificado',
     firmwareNotes: [
       {
-        firmware: 'Versão desconhecida',
-        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        firmware: 'não verificado',
+        note: 'O wiki do fabricante publica um guia de atualização com verificação de versão no próprio painel, mas não fixa números de versão para a Kobra S1 Max; nenhuma versão foi qualificada em hardware.',
         sources: [
           'https://wiki.anycubic.com/en/fdm-3d-printer/kobra-s1-max-combo/firmware-updating-guide',
         ],
@@ -147,7 +158,10 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     sources: [
       'https://www.prnewswire.com/apac/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620524.html',
     ],
-    limitations: ['Data de lançamento e integração não foram comprovadas.'],
+    limitations: [
+      'Data de lançamento e integração não foram comprovadas.',
+      'O driver Anycubic do OpenFarm só aceita o identificador de modelo 20024; este modelo não é reconhecido.',
+    ],
   },
   {
     id: 'anycubic-kobra-3-v2',
@@ -155,11 +169,11 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     model: 'Kobra 3 V2',
     releaseStatus: 'Candidata; data de lançamento desconhecida',
     releaseDate: null,
-    firmwareStatus: 'Versão de firmware desconhecida',
+    firmwareStatus: 'não verificado',
     firmwareNotes: [
       {
-        firmware: 'Versão desconhecida',
-        note: 'Nenhuma versão foi qualificada em hardware; a fonte não comprova compatibilidade com o OpenFarm.',
+        firmware: 'não verificado',
+        note: 'O manual do fabricante disponível não fixa números de versão para a Kobra 3 V2; nenhuma versão foi qualificada em hardware e a fonte não comprova compatibilidade com o OpenFarm.',
         sources: [
           'https://wiki.anycubic.com/k3-v2/Anycubic%20Kobra%203%20V2%20combo%20User%20Manual-EN-V1.0.pdf',
         ],
@@ -171,6 +185,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     limitations: [
       'A quinta posição da matriz permanece incerta.',
       'A página do produto não comprova integração com o OpenFarm.',
+      'O driver Anycubic do OpenFarm só aceita o identificador de modelo 20024; este modelo não é reconhecido.',
     ],
   },
 ]

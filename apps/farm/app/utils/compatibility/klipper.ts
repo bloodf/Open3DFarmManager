@@ -3,11 +3,18 @@ import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic'
 export type { CatalogCapability }
 export type KlipperCatalogProduct = AnycubicCatalogProduct
 
+/**
+ * A família Klipper/Moonraker compartilha os mesmos caminhos de código no
+ * OpenFarm: `createFileTargets` não produz alvo de arquivos para a coleção
+ * Moonraker (`packages/connector/src/runtime/file-targets.ts`), então arquivos
+ * seguem desconhecidos; materiais dependem do espelho Spoolman configurado
+ * (`packages/connector/src/runtime/collect.ts`).
+ */
 const simulatedControl = {
   telemetry: 'simulated',
   files: 'unknown',
   camera: 'simulated',
-  materials: 'unknown',
+  materials: 'simulated',
   pause: 'simulated',
   resume: 'simulated',
   cancel: 'simulated',
@@ -48,7 +55,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     limitations: [
       ...commonLimitations,
       'Câmera depende das entradas de webcam configuradas no Moonraker; a leitura da lista de webcams é a única integração coberta.',
-      'Arquivos e materiais permanecem desconhecidos: não há integração comprovada de envio de arquivos nem de materiais pelo produto.',
+      'Arquivos permanecem desconhecidos: o OpenFarm lê e envia arquivos por Moonraker no código, mas nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker, então a operação não é alcançável pelo produto.',
+      'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
       'Configurações personalizadas, macros e plugins do usuário podem alterar o comportamento esperado.',
     ],
   },
@@ -81,6 +89,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       'Obter acesso root pode afetar garantia e estabilidade; este catálogo não recomenda nem automatiza o procedimento.',
       'A versão do Moonraker e a configuração variam conforme o método de instalação; nenhuma foi testada em K1 real.',
       'Câmera integrada não tem protocolo local verificado fora das entradas de webcam do Moonraker.',
+      'Arquivos permanecem desconhecidos: nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker.',
+      'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
     ],
   },
   {
@@ -111,6 +121,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       ...commonLimitations,
       'Kits e configurações variam por fornecedor e por montagem; um modelo único não representa todas as máquinas.',
       'Câmera, materiais e sistemas de troca dependem de acessórios opcionais não avaliados.',
+      'Arquivos permanecem desconhecidos: nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker.',
+      'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
     ],
   },
   {
@@ -141,6 +153,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       ...commonLimitations,
       'Nenhum teste em SV08 real foi executado; a classificação decorre da família Klipper/Moonraker.',
       'Câmera opcional e acessórios não foram avaliados.',
+      'Arquivos permanecem desconhecidos: nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker.',
+      'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
     ],
   },
   {
@@ -166,6 +180,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     limitations: [
       ...commonLimitations,
       'Nenhum teste em Trident real foi executado; acessórios e configuração variam por montagem.',
+      'Arquivos permanecem desconhecidos: nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker.',
+      'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
     ],
   },
 ]

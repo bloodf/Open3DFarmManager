@@ -46,7 +46,7 @@ export async function browserLogin(
   username: string,
   password: string,
 ) {
-  await page.goto(origin + '/entrar', { timeout: 45_000 })
+  await page.goto(origin + '/entrar', { timeout: 10000 })
   // Submitting before hydration posts the form natively (urlencoded) to the
   // JSON-only endpoint: 415, no session, and a later 401. Wait for the mounted
   // Vue app, as the other e2e specs do.

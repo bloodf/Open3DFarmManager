@@ -231,7 +231,15 @@ export function readAgentRuntimeConfig(
       ? null
       : parseCameraRuntimeConfig(
           input.camera,
-          assignments.map((assignment) => assignment.assignment_id),
+          // Cameras attach to any local printer except KobraLink bridges.
+          assignments
+            .filter(
+              (assignment) =>
+                !(
+                  'backend' in assignment && assignment.backend === 'kobralink'
+                ),
+            )
+            .map((assignment) => assignment.assignment_id),
         )
   // Strict: an invalid address fails startup before any task starts.
   const rtc = parseRtcRuntimeConfig(input.rtc)

@@ -167,12 +167,9 @@ export async function startJourneyDatabase(
       admin,
       viewer,
       async close() {
-        // A loaded host can take longer than one removal attempt.
-        for (let attempt = 0; attempt < 5; attempt++) {
-          remove()
-          if (docker(['ps', '-aq', '--filter', `label=${label}`]) === '') return
-        }
-        throw new Error('Journey PostgreSQL container remains')
+        remove()
+        if (docker(['ps', '-aq', '--filter', `label=${label}`]) !== '')
+          throw new Error('Journey PostgreSQL container remains')
       },
     })
   } catch (error) {

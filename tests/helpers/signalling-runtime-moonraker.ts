@@ -383,11 +383,12 @@ export async function createRuntimeMoonrakerFixture() {
               moonraker_origin: moon,
             },
           ],
+          ...(camera
+            ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
+            : {}),
           ...(input.runtime?.camera
             ? { camera: input.runtime.camera(ref.assignmentId) }
-            : camera
-              ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
-              : {}),
+            : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',
             audience: input.audience,

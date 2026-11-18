@@ -4,7 +4,8 @@ import type { ThrowawayTlsMaterial } from './tls.ts'
 import type { ScenarioStep } from './scenario.ts'
 import type { FaultController } from './faults.ts'
 
-export type KobraXPrintState = 'idle' | 'printing' | 'paused' | 'finished' | 'error'
+export type KobraXPrintState =
+  'idle' | 'printing' | 'paused' | 'finished' | 'error'
 
 export interface KobraXMockOptions {
   serial?: string | undefined
@@ -27,7 +28,11 @@ export interface KobraXMockInstance {
     setPrintProgress: (progress: number) => void
     finishPrint: () => void
     failPrint: () => void
-    getState: () => { state: KobraXPrintState; progress: number; extended: Record<string, unknown> }
+    getState: () => {
+      state: KobraXPrintState
+      progress: number
+      extended: Record<string, unknown>
+    }
   }
   calls: MqttMockInstance['calls']
   close: () => Promise<void>

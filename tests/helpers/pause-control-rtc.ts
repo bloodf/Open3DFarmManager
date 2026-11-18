@@ -4,7 +4,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { browserBundle } from './browser-bundle.ts'
-import { chromium, type Browser, type Page } from '@playwright/test'
+import { launchBrowser, type Browser } from './browser.ts'
+import { type Page } from '@playwright/test'
 import { z } from 'zod'
 import { BrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
@@ -329,7 +330,7 @@ export async function runPauseControlRtc(
     const address = server.address()
     if (!address || typeof address === 'string')
       throw Error('Missing fixture port')
-    browser = await chromium.launch({ headless: true, timeout: 5000 })
+    browser = await launchBrowser({ timeout: 5000 })
     page = await bounded(browser.newPage(), 3000, 'Browser page')
     page.setDefaultTimeout(9000)
     await page.goto('http://127.0.0.1:' + address.port, { timeout: 5000 })

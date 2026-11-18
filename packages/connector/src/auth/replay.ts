@@ -1,8 +1,33 @@
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite'
 import { mkdirSync, lstatSync, openSync, closeSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { SignedCommand } from '@open3dfarmmanager/farm-protocol'
 import type { ClaimResult, ReplayStore } from './verify.ts'
+
+const originalEmitWarning = process.emitWarning.bind(process)
+process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+  const message = typeof warning === 'string' ? warning : warning?.message
+  const type =
+    typeof args[0] === 'string'
+      ? args[0]
+      : typeof args[0] === 'object' && args[0] !== null && 'type' in args[0]
+        ? (args[0] as { type?: string }).type
+        : warning instanceof Error
+          ? warning.name
+          : undefined
+  if (
+    type === 'ExperimentalWarning' &&
+    typeof message === 'string' &&
+    message.includes('SQLite is an experimental feature')
+  ) {
+    return
+  }
+  return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args)
+}) as typeof process.emitWarning
+
+const { DatabaseSync } = process.getBuiltinModule(
+  'node:sqlite',
+) as typeof import('node:sqlite')
 
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
@@ -21,7 +46,7 @@ function privateEntry(path: string, directory: boolean) {
 }
 
 export class PersistentReplayStore implements ReplayStore {
-  private readonly database: DatabaseSync
+  private readonly database: DatabaseSyncType
   private readonly capacity: number
   constructor(directory: string, capacity = 10_000) {
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 100_000)

@@ -92,7 +92,9 @@ export function resetNetworkGuardStats(): void {
   stats.rejectedAttempts = 0
 }
 
-export async function withNetworkGuard<T>(action: () => Promise<T> | T): Promise<T> {
+export async function withNetworkGuard<T>(
+  action: () => Promise<T> | T,
+): Promise<T> {
   const wasInstalled = isInstalled
   if (!wasInstalled) installNetworkGuard()
   try {
@@ -102,7 +104,9 @@ export async function withNetworkGuard<T>(action: () => Promise<T> | T): Promise
   }
 }
 
-export function assertLoopbackAddress(addr: net.AddressInfo | string | null): void {
+export function assertLoopbackAddress(
+  addr: net.AddressInfo | string | null,
+): void {
   if (!addr) {
     throw new Error('Address is missing or null')
   }

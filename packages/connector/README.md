@@ -1,6 +1,6 @@
 # Open3DFarmManager Connector
 
-Local Phase 0 CLI for Node.js >=24.22.2 <25. No package has been published. Build from this checkout with the project's installed npm dependencies:
+Local Phase 0 CLI for Node.js >=22.18.0 <25. No package has been published. Build from this checkout with the project's installed npm dependencies:
 
 ```sh
 npm run build -w @open3dfarmmanager/connector

@@ -25,20 +25,21 @@ import { readFileSync } from 'node:fs';
 const root = process.argv[2];
 const read = path => readFileSync(`${root}/${path}`, 'utf8');
 const workflow = read('.github/workflows/ci.yml');
-const one = (pattern, text, label) => {
-  const pins = new Set([...text.matchAll(pattern)].map(match => match[1]));
-  if (pins.size !== 1) throw new Error(`Expected one exact ${label} pin`);
-  return [...pins][0];
-};
-const node = one(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow Node');
-if (read('.nvmrc').trim() !== node) {
+const dockerfile = read('apps/farm/Dockerfile');
+const nodePins = new Set([...workflow.matchAll(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm)].map(m => m[1]));
+const nvmrc = read('.nvmrc').trim();
+if (!nodePins.has(nvmrc)) {
   throw new Error('Workflow pins disagree with .nvmrc');
 }
-console.log(node);
+const baseMatch = /^FROM node:([0-9]+\.[0-9]+\.[0-9]+)-alpine/m.exec(dockerfile);
+if (!baseMatch || !nodePins.has(baseMatch[1])) {
+  throw new Error('Workflow pins disagree with Dockerfile base image');
+}
+console.log(nvmrc, baseMatch[1]);
 EOF
 )
-LOCAL_CI_PIN_NODE=$pins
-export LOCAL_CI_PIN_NODE
+read -r LOCAL_CI_PIN_NODE LOCAL_CI_PIN_IMAGE_NODE <<< "$pins"
+export LOCAL_CI_PIN_NODE LOCAL_CI_PIN_IMAGE_NODE
 cat > "$scratch/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMPDIR/calls"
@@ -57,7 +58,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} == "node:${LOCAL_CI_PIN_NODE}-alpine" ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} == "node:${LOCAL_CI_PIN_IMAGE_NODE}-alpine" ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;

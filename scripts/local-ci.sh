@@ -95,7 +95,9 @@ code_job() {
   if ! command -v npm >/dev/null || ! command -v node >/dev/null; then
     printf '%s\n' 'UNSUPPORTED: npm and Node are required.' >&2; return 2
   fi
-  [[ $(node --version) == v24.22.3 ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Node 24.22.3.' >&2; return 2; }
+  local node_ver
+  node_ver=$(node --version)
+  [[ $node_ver =~ ^v(22\.(1[89]|[2-9][0-9])\.[0-9]+|2[34]\.[0-9]+\.[0-9]+)$ ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Node >=22.18.0 <25.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
   npm ci --ignore-scripts
   npm run lint

@@ -137,6 +137,7 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
     actorId: string,
     credentialId: string,
     now: number,
+    expectedFarmId?: string,
   ): Promise<'ok' | StoreFailure> {
     if (!validTime(now) || !uuid.test(credentialId)) return 'invalid-input'
     return await this.run<'ok' | StoreFailure>(async (tx) => {
@@ -146,6 +147,8 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
       if (!row) return 'not-found'
       const farm =
         await tx`SELECT farm_id FROM farm.integration_apps WHERE id = ${row.app_id as string}::uuid`
+      if (expectedFarmId !== undefined && farm[0]?.farm_id !== expectedFarmId)
+        return 'not-found'
       if (!(await this.manages(tx, actorId, farm[0]?.farm_id as string)))
         return 'not-found'
       if (now < (row.created as number)) return 'invalid-input'

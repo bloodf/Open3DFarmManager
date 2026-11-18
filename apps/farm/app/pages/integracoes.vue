@@ -1,6 +1,12 @@
 <script setup lang="ts">
 type Farm = { farmId: string }
-type App = { id: string; name: string; sandbox: boolean; createdAt: number }
+type App = {
+  id: string
+  name: string
+  sandbox: boolean
+  createdAt: number
+  revokedAt: number | null
+}
 type Printer = { assignmentId: string; printerKey: string }
 type Grant = {
   id: string
@@ -22,6 +28,7 @@ const error = ref('')
 const status = ref('')
 const appName = ref('')
 const clientId = ref('')
+const credentialId = ref('')
 const newSecret = ref('')
 const grantDrafts = ref<
   Record<string, { scopes: string[]; printer: string; approval: boolean }>
@@ -104,7 +111,7 @@ async function registerApp() {
   try {
     const result = await $fetch<{
       app: App
-      credential: { clientId: string }
+      credential: { id: string; clientId: string }
       secret: string
     }>(`/api/farms/${farmId.value}/integrations/apps`, {
       method: 'POST',
@@ -113,6 +120,7 @@ async function registerApp() {
     })
     newSecret.value = result.secret
     clientId.value = result.credential.clientId
+    credentialId.value = result.credential.id
     appName.value = ''
     status.value =
       'Aplicativo cadastrado. Copie o segredo agora; ele não será exibido novamente.'
@@ -178,6 +186,58 @@ async function removeGrant(grant: Grant) {
   }
 }
 
+async function revokeApp(app: App) {
+  if (
+    pending.value ||
+    app.revokedAt ||
+    !window.confirm(
+      `Revogar o aplicativo ${app.name}? Todos os acessos e webhooks serão interrompidos.`,
+    )
+  )
+    return
+  pending.value = true
+  error.value = ''
+  status.value = ''
+  try {
+    await $fetch(`/api/farms/${farmId.value}/integrations/apps/${app.id}`, {
+      method: 'DELETE',
+      retry: 0,
+    })
+    status.value = `Aplicativo ${app.name} revogado.`
+    await load()
+  } catch {
+    error.value = 'Não foi possível revogar o aplicativo.'
+  } finally {
+    pending.value = false
+  }
+}
+
+async function revokeCredential() {
+  if (
+    pending.value ||
+    !credentialId.value ||
+    !window.confirm(
+      'Revogar esta credencial? Ela deixará de autenticar imediatamente.',
+    )
+  )
+    return
+  pending.value = true
+  error.value = ''
+  status.value = ''
+  try {
+    await $fetch(
+      `/api/farms/${farmId.value}/integrations/credentials/${credentialId.value}`,
+      { method: 'DELETE', retry: 0 },
+    )
+    status.value = 'Credencial revogada.'
+    dismissSecret()
+  } catch {
+    error.value = 'Não foi possível revogar a credencial.'
+  } finally {
+    pending.value = false
+  }
+}
+
 async function copySecret() {
   try {
     await navigator.clipboard.writeText(newSecret.value)
@@ -189,6 +249,7 @@ async function copySecret() {
 function dismissSecret() {
   newSecret.value = ''
   clientId.value = ''
+  credentialId.value = ''
 }
 function labelScope(scope: string) {
   return scopeOptions.find(([value]) => value === scope)?.[1] ?? scope
@@ -247,8 +308,16 @@ function grantDraft(appId: string) {
         </p>
         <article v-for="app in apps" :key="app.id" class="app-card">
           <h3>{{ app.name }}</h3>
+          <p v-if="app.revokedAt" role="status">Aplicativo revogado.</p>
           <p class="wrap">ID: {{ app.id }}</p>
-          <form @submit.prevent="addGrant(app)">
+          <button
+            type="button"
+            :disabled="pending || !!app.revokedAt"
+            @click="revokeApp(app)"
+          >
+            Revogar aplicativo
+          </button>
+          <form v-if="!app.revokedAt" @submit.prevent="addGrant(app)">
             <fieldset>
               <legend>Escopos para conceder</legend>
               <label
@@ -342,6 +411,9 @@ function grantDraft(appId: string) {
         @focus="($event.target as HTMLTextAreaElement).select()"
       />
       <button type="button" @click="copySecret">Copiar segredo</button>
+      <button type="button" :disabled="pending" @click="revokeCredential">
+        Revogar esta credencial
+      </button>
       <button type="button" @click="dismissSecret">
         Fechar e ocultar segredo
       </button>

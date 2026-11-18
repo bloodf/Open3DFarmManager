@@ -1249,22 +1249,6 @@ components:
       format: int64
       minimum: 0
       description: Milliseconds since the Unix epoch.
-    Ref:
-      type: string
-      minLength: 1
-      maxLength: 128
-      pattern: '^[A-Za-z0-9_.:-]+$'
-    Scope:
-      type: string
-      enum:
-        - printers:read
-        - files:read
-        - inventory:read
-        - jobs:read
-        - jobs:start
-        - control:basic
-        - control:extended
-        - events:subscribe
     ProblemCode:
       type: string
       description: |

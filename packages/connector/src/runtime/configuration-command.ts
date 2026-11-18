@@ -18,6 +18,7 @@ import {
   createConfigurationSignallingClient,
   type ConfigurationSocket,
 } from '../webrtc/configuration-signalling.ts'
+import type { DiscoveryScanner } from './configuration-discovery.ts'
 import { createRuntimeActivator } from './configuration-activation.ts'
 import {
   createConfigurationIssuerSource,
@@ -39,6 +40,8 @@ export interface ConfigurationCommandInput {
   issuerFetch?: IssuerFetch
   socket?: () => Promise<ConfigurationSocket>
   startRuntime?: (signal: AbortSignal, configPath: string) => Promise<void>
+  /** Network scan behind "search printers"; production scans the LAN. */
+  discovery?: DiscoveryScanner
   clock?: () => number
 }
 
@@ -183,6 +186,7 @@ export async function runConfigurationConnector(
     activator,
     serverOnline: signalling.online,
     credentialJti: () => credential()?.jti ?? null,
+    ...(input.discovery ? { discovery: input.discovery } : {}),
     clock,
     onDiagnostic: input.onDiagnostic,
   })

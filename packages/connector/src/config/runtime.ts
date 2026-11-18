@@ -231,9 +231,7 @@ export function readAgentRuntimeConfig(
       ? null
       : parseCameraRuntimeConfig(
           input.camera,
-          assignments
-            .filter((assignment) => 'moonraker_origin' in assignment)
-            .map((assignment) => assignment.assignment_id),
+          assignments.map((assignment) => assignment.assignment_id),
         )
   // Strict: an invalid address fails startup before any task starts.
   const rtc = parseRtcRuntimeConfig(input.rtc)

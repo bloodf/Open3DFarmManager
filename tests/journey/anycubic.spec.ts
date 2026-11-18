@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
+import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
 import {
   journeyEnabled,
   startJourneyHarness,
@@ -423,6 +424,7 @@ function suite(title: string) {
         simulator: 'anycubic',
         signedControl: true,
         history: true,
+        discovery: true,
       })
       // Fields are disabled between live sessions: fail fast and try again.
       harness.ownerPage.setDefaultTimeout(15_000)
@@ -434,29 +436,20 @@ function suite(title: string) {
       harness = undefined
     })
 
-    test('the printer is found by the Connector probe and listed as assigned', async () => {
+    test('the page finds the printer through discovery and lists it as assigned', async () => {
+      test.setTimeout(8 * 60_000)
       await step(async () => {
         const journey = started()
-        // Find: the Connector's own Anycubic probe against the loopback
-        // responder. The page cannot reach it: the Connector only probes
-        // operator-configured private (RFC 1918) networks, never loopback.
-        const discovery = journey.discovery
-        if (!discovery) throw new Error('Discovery responder missing')
-        expect(await discovery.probe()).toMatchObject({
-          vendor: 'anycubic',
-          host: '127.0.0.1',
-          port: discovery.port,
-          name: 'Anycubic Kobra 3',
+        // Find: "Procurar impressoras" on Impressoras, answered by the
+        // Connector's own Anycubic probe against the loopback responder; the
+        // selected result prefills the set-up form.
+        await discoverOnPage(journey, {
+          family: 'anycubic-lan',
+          label: 'Anycubic Kobra 3',
+          hostField: 'anycubic-host',
         })
         // Set up: the assignment is visible and active on the printers page.
         const page = journey.ownerPage
-        await page.goto(journey.origin + '/impressoras', {
-          waitUntil: 'domcontentloaded',
-        })
-        const farm = page.getByLabel('Farm', { exact: true })
-        await expect(farm).toBeVisible({ timeout: 30_000 })
-        if ((await farm.inputValue()) !== journey.farmId)
-          await farm.selectOption(journey.farmId)
         const assignments = page.locator(
           'section[aria-labelledby="assignment-heading"]',
         )
@@ -469,10 +462,6 @@ function suite(title: string) {
         await expect(
           assignments.getByText('Aprovado', { exact: true }),
         ).toBeVisible()
-        // The Anycubic (LAN) setup family is offered by the product.
-        await expect(
-          page.locator('#onboarding-family option[value="anycubic-lan"]'),
-        ).toHaveText('Anycubic (LAN)')
       })
     })
 
@@ -511,6 +500,15 @@ function suite(title: string) {
           'Definir ventilador',
           'Definir luz',
         ])
+        expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+      })
+    })
+
+    test('the farm page shows decoded camera frames from the printer', async () => {
+      test.setTimeout(5 * 60_000)
+      await step(async () => {
+        const journey = started()
+        await expectCameraFrames(journey)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })
       })
     })

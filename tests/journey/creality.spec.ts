@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
 import {
   journeyEnabled,
   startJourneyHarness,
@@ -222,6 +223,7 @@ if (journeyEnabled())
         browser,
         simulator: 'creality',
         signedControl: true,
+        discovery: true,
       })
     })
 
@@ -246,14 +248,16 @@ if (journeyEnabled())
         )
     })
 
-    test('the Connector probe finds the printer and the farm lists it', async () => {
+    test('the page finds the printer through discovery and the farm lists it', async () => {
+      test.setTimeout(8 * 60_000)
       const journey = started()
-      const discovery = journey.discovery
-      if (!discovery) throw new Error('Discovery responder missing')
-      expect(await discovery.probe()).toMatchObject({
-        vendor: 'creality',
-        host: '127.0.0.1',
-        model: 'Creality K1',
+      // Find: "Procurar impressoras" on Impressoras, answered by the
+      // Connector's own Creality probe against the loopback responder; the
+      // selected result prefills the set-up form.
+      await discoverOnPage(journey, {
+        family: 'creality-native',
+        label: 'Creality K1',
+        hostField: 'creality-host',
       })
       // Set up: the assignment is active on an approved Connector.
       const row = await journey.openFarm()
@@ -275,6 +279,13 @@ if (journeyEnabled())
       // A scripted progress step from the simulator reaches the page.
       journey.controls.setProgress(40)
       await journey.expectProgress(0.4)
+    })
+
+    test('the farm page shows decoded camera frames from the printer', async () => {
+      test.setTimeout(2 * 60_000)
+      const journey = started()
+      await expectCameraFrames(journey)
+      expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
 
     test('pause and resume are confirmed by the printer state', async () => {

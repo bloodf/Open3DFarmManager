@@ -31,7 +31,7 @@ export function browserBundle(
       ],
       {
         encoding: 'utf8',
-        timeout: 10000,
+        timeout: 60_000,
         killSignal: 'SIGKILL',
         maxBuffer: 1024 * 1024,
         ...(signal ? { signal } : {}),

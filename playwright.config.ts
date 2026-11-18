@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
 
 // Pick a free loopback port once and pass it to Playwright workers as well.
@@ -21,7 +22,10 @@ const port = e2ePort('E2E_PORT', 3100)
 
 export default defineConfig({
   testDir: './tests/e2e',
-  use: { baseURL: `http://127.0.0.1:${port}` },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    ...browserOptions(),
+  },
   webServer: {
     command: 'node apps/farm/.output/server/index.mjs',
     url: `http://127.0.0.1:${port}/healthz`,

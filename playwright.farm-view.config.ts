@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
 
 // Override the loopback port with FARM_VIEW_PORT when 3101 is taken.
@@ -12,7 +13,10 @@ export default defineConfig({
     'files-page.spec.ts',
   ],
   workers: 1,
-  use: { baseURL: `http://127.0.0.1:${port}` },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    ...browserOptions(),
+  },
   webServer: {
     command: 'node apps/farm/.output/server/index.mjs',
     url: `http://127.0.0.1:${port}/healthz`,

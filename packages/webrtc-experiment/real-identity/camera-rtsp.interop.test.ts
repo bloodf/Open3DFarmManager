@@ -10,7 +10,8 @@ import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { chromium, type Browser, type Page } from '@playwright/test'
+import { type Browser, type Page } from '@playwright/test'
+import { launchBrowser } from '../../../tests/helpers/browser.ts'
 import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
 import {
   RtcSessionBinding,
@@ -160,7 +161,7 @@ test(
       await once(server, 'listening')
       const address = server.address()
       assert.ok(address && typeof address === 'object')
-      browser = await chromium.launch({ headless: true, timeout: 10000 })
+      browser = await launchBrowser({ timeout: 10000 })
       const page = await browser.newPage()
       await page.goto('http://127.0.0.1:' + address.port, { timeout: 5000 })
       child = new FixtureProcess(process.execPath, './camera-rtsp-child.ts')

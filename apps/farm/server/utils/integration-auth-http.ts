@@ -6,6 +6,10 @@ import {
   type IntegrationPrincipal,
 } from './integration-auth.ts'
 import { IntegrationLimits } from './integration-auth-limits.ts'
+import {
+  takeIntegrationRequestLimit,
+  type IntegrationRateLimitConfig,
+} from './integration-rate-limit.ts'
 
 export const integrationBase = '/api/integrations/v1'
 const realm = 'realm="openfarm-integrations"'
@@ -301,6 +305,7 @@ export async function authorizeIntegrationRequest(
   path: string,
   runtime: () => IntegrationAuth,
   rateLimits = resourceLimits,
+  rateLimitConfig: IntegrationRateLimitConfig = {},
 ): Promise<
   | Response
   | { principal: IntegrationPrincipal; headers: Record<string, string> }
@@ -323,20 +328,16 @@ export async function authorizeIntegrationRequest(
     const principal = await auth.verify(token)
     if (!principal) return invalid()
     const method = request.method === 'HEAD' ? 'GET' : request.method
-    const isRead = method === 'GET'
-    const rate = rateLimits.take(
-      (isRead ? 'read:' : 'write:') + principal.appId,
-      isRead ? 120 : 30,
+    const rate = takeIntegrationRequestLimit(
+      rateLimits,
+      principal.appId,
+      method,
+      rateLimitConfig,
     )
-    headers = {
-      'ratelimit-limit': String(rate.limit),
-      'ratelimit-remaining': String(rate.remaining),
-      'ratelimit-reset': String(rate.reset),
-    }
+    headers = rate.headers
     if (!rate.allowed)
       return integrationProblem('rate-limited', {
         ...headers,
-        'retry-after': String(rate.retry),
       })
     const policy = integrationPolicy(path, method)
     if (!policy) {

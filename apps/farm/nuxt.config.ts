@@ -40,6 +40,10 @@ export default defineNuxtConfig({
       /** NUXT_INTEGRATION_AUTH_SIGNING_KEY is 32 random bytes encoded as base64url. */
       signingKey: '',
       tokenTtlSeconds: 300,
+      /** NUXT_INTEGRATION_AUTH_READ_LIMIT: per-app read requests per minute. */
+      readLimit: 120,
+      /** NUXT_INTEGRATION_AUTH_WRITE_LIMIT: per-app write requests per minute. */
+      writeLimit: 30,
     },
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },

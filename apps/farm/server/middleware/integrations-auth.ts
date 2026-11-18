@@ -1,4 +1,5 @@
 import { defineEventHandler } from 'nuxt/server'
+import { useRuntimeConfig } from 'nuxt/server'
 import {
   authorizeIntegrationRequest,
   integrationPath,
@@ -14,6 +15,11 @@ export default defineEventHandler(async (event) => {
     event.req,
     path,
     integrationAuthRuntime,
+    undefined,
+    {
+      read: useRuntimeConfig().integrationAuth.readLimit,
+      write: useRuntimeConfig().integrationAuth.writeLimit,
+    },
   )
   if (result instanceof Response) return result
   for (const [name, value] of Object.entries(result.headers))

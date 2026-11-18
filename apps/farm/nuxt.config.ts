@@ -33,6 +33,8 @@ export default defineNuxtConfig({
       oidcClientId: '',
       oidcClientSecret: '',
     },
+    /** NUXT_BAMBU_CLOUD=true enables Bambu cloud import. Off and offline by default. */
+    bambuCloud: false,
     integrationAuth: {
       enabled: false,
       /** Use a dedicated login in the farm_integration_apps role. */

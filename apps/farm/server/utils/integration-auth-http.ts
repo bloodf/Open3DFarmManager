@@ -31,9 +31,9 @@ export function oauthError(error: string, status = 400, headers?: HeadersInit) {
   )
 }
 
-class PayloadTooLarge extends Error {}
+export class PayloadTooLarge extends Error {}
 
-async function readText(request: Request, max: number) {
+export async function readText(request: Request, max: number) {
   const reader = request.body?.getReader()
   if (!reader) return ''
   const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -161,6 +161,8 @@ const problems = {
   'invalid-request': [400, 'Solicitação inválida.'],
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
+  'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'webhook-limit-reached': [409, 'Limite de assinaturas de webhook atingido.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
   unsupported: [422, 'Ação não suportada por esta impressora.'],
   'idempotency-key-reused': [

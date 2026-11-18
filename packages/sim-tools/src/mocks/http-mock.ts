@@ -25,7 +25,16 @@ export type HttpHandler = (
 ) => void | Promise<void>
 
 export interface HttpMockOptions {
+  port?: number | undefined
+  faults?: FaultController | undefined
   handler?: HttpHandler | undefined
+  onUpgrade?:
+    | ((
+        req: IncomingMessage,
+        socket: Socket,
+        head: Buffer,
+      ) => void | Promise<void>)
+    | undefined
   routes?:
     | Record<
         string,
@@ -60,7 +69,7 @@ export interface HttpMockInstance {
 export async function startHttpMock(
   options: HttpMockOptions = {},
 ): Promise<HttpMockInstance> {
-  const faults = new FaultController()
+  const faults = options.faults ?? new FaultController()
   const sockets = new Set<Socket>()
   const callRecords: HttpCallRecord[] = []
   const callCounts: Record<string, number> = {}
@@ -157,6 +166,55 @@ export async function startHttpMock(
     })
   })
 
+  if (options.onUpgrade) {
+    const onUpgrade = options.onUpgrade
+    server.on('upgrade', async (req, socket, head) => {
+      const netSocket = socket as Socket
+      sockets.add(netSocket)
+      netSocket.on('error', () => {})
+      netSocket.on('close', () => sockets.delete(netSocket))
+      const url = req.url ?? '/'
+      const path = url.split('?')[0]!
+      recordCall('UPGRADE')
+      recordCall(`UPGRADE ${path}`)
+
+      const fault = faults.matchFault({
+        path,
+        method: 'UPGRADE',
+        headers: req.headers,
+      })
+      if (fault) {
+        if (fault.type === 'drop') {
+          netSocket.destroy()
+          return
+        }
+        if (fault.type === 'refuse') {
+          const status = fault.statusCode ?? 401
+          const msg = fault.message ?? 'Unauthorized'
+          netSocket.write(
+            `HTTP/1.1 ${status} ${msg}\r\nConnection: close\r\n\r\n`,
+          )
+          netSocket.destroy()
+          return
+        }
+        if (fault.type === 'malformed') {
+          const bad = fault.payload ?? 'NOT_A_VALID_WS_UPGRADE\r\n\r\n'
+          netSocket.write(bad)
+          netSocket.destroy()
+          return
+        }
+        if (fault.type === 'delay') {
+          await new Promise((r) => setTimeout(r, fault.delayMs))
+        }
+        if (fault.type === 'stall') {
+          return
+        }
+      }
+
+      await onUpgrade(req, netSocket, head)
+    })
+  }
+
   server.on('connection', (socket) => {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
@@ -164,7 +222,7 @@ export async function startHttpMock(
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(options.port ?? 0, '127.0.0.1', () => {
       server.removeListener('error', reject)
       resolve()
     })

@@ -15,8 +15,14 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 
 - `GET /api/farms/{farmId}/integrations/apps` lists apps and active printer assignments.
 - `POST /api/farms/{farmId}/integrations/apps` registers an app and returns its client secret once.
+- `DELETE /api/farms/{farmId}/integrations/apps/{appId}` revokes an app and all of its credentials and grants.
+- `DELETE /api/farms/{farmId}/integrations/credentials/{credentialId}` revokes one app credential.
 - `GET` and `POST /api/farms/{farmId}/integrations/apps/{appId}/grants` list or grant scopes.
 - `DELETE /api/farms/{farmId}/integrations/grants/{grantId}` removes a grant.
+
+Revocations are audited and take effect on the next API request. Revoking an app
+also makes its webhook subscriptions ineligible for delivery, including events
+already waiting in the outbox.
 
 The OpenAPI document below describes the separate client-facing API. Sandbox apps can be granted sandbox farms only; they cannot be attached to a non-sandbox farm.
 

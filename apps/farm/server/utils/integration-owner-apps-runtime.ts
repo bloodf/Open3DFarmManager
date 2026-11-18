@@ -7,6 +7,8 @@ import {
 import { authenticatedSession } from '../services/authenticated-session.ts'
 import { IntegrationAppsService } from '../services/integration-apps.ts'
 import { PostgresIntegrationApps } from '../storage/integration-apps-postgres.ts'
+import { IntegrationAuditService } from '../services/integration-audit.ts'
+import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
 import { authRuntime } from './auth/runtime.ts'
 import type { OwnerAppsDeps } from '../services/integration-owner-apps-http.ts'
 
@@ -22,6 +24,7 @@ export async function ownerAppsRuntime(event: RequestEvent) {
   const store = new PostgresIntegrationApps(sql)
   const deps: OwnerAppsDeps = {
     apps: new IntegrationAppsService(store),
+    audit: new IntegrationAuditService(new PostgresIntegrationAudit(sql)),
     async isOwner(actorId, farmId) {
       const rows =
         await sql`SELECT 1 FROM farm.memberships WHERE account_id = ${actorId} AND farm_id = ${farmId}::uuid AND role = 'owner' AND revoked_at IS NULL`
@@ -43,6 +46,7 @@ export async function ownerAppsRuntime(event: RequestEvent) {
     farmId: getRouterParam(event, 'farmId') ?? '',
     appId: getRouterParam(event, 'appId') ?? '',
     grantId: getRouterParam(event, 'grantId') ?? '',
+    credentialId: getRouterParam(event, 'credentialId') ?? '',
     deps,
     close: () => sql.end({ timeout: 3 }),
   }

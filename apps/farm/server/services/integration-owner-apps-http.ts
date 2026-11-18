@@ -1,8 +1,10 @@
 import { createError } from 'nuxt/server'
 import type { IntegrationAppsService } from './integration-apps.ts'
+import type { IntegrationAuditService } from './integration-audit.ts'
 
 export interface OwnerAppsDeps {
   apps: IntegrationAppsService
+  audit?: IntegrationAuditService
   isOwner(actorId: string, farmId: string): Promise<boolean>
   listPrinters(
     actorId: string,
@@ -139,5 +141,74 @@ export async function revokeOwnerGrant(
   const result = await deps.apps.revokeGrant(actorId, grantId)
   if (result !== 'ok')
     throw createError({ status: 404, message: 'Acesso não encontrado.' })
+  await deps.audit?.record({
+    farmId,
+    appId: null,
+    printerAssignmentId: null,
+    actorKind: 'owner',
+    actorId,
+    action: 'credential.event',
+    resourceType: 'credential',
+    resourceId: grantId,
+    outcome: 'revoked',
+    details: { credentialEvent: 'grant-revoked' },
+  })
+  return { ok: true }
+}
+
+export async function revokeOwnerApp(
+  deps: OwnerAppsDeps,
+  actorId: string,
+  farmId: string,
+  appId: string,
+) {
+  await requireOwner(deps, actorId, farmId)
+  if (!idPattern.test(appId))
+    throw createError({ status: 404, message: 'Aplicativo não encontrado.' })
+  const apps = await deps.apps.listApps(actorId, farmId)
+  if (!apps?.some((app) => app.id === appId))
+    throw createError({ status: 404, message: 'Aplicativo não encontrado.' })
+  const result = await deps.apps.revokeApp(actorId, appId)
+  if (result !== 'ok')
+    throw createError({ status: 404, message: 'Aplicativo não encontrado.' })
+  await deps.audit?.record({
+    farmId,
+    appId,
+    printerAssignmentId: null,
+    actorKind: 'owner',
+    actorId,
+    action: 'credential.event',
+    resourceType: 'credential',
+    resourceId: appId,
+    outcome: 'revoked',
+    details: { credentialEvent: 'app-revoked' },
+  })
+  return { ok: true }
+}
+
+export async function revokeOwnerCredential(
+  deps: OwnerAppsDeps,
+  actorId: string,
+  farmId: string,
+  credentialId: string,
+) {
+  await requireOwner(deps, actorId, farmId)
+  if (!idPattern.test(credentialId))
+    throw createError({ status: 404, message: 'Credencial não encontrada.' })
+  const result = await deps.apps.revokeCredential(actorId, credentialId, farmId)
+  if (result !== 'ok')
+    throw createError({ status: 404, message: 'Credencial não encontrada.' })
+  await deps.audit?.record({
+    farmId,
+    appId: null,
+    printerAssignmentId: null,
+    actorKind: 'owner',
+    actorId,
+    action: 'credential.event',
+    resourceType: 'credential',
+    resourceId: credentialId,
+    outcome: 'revoked',
+    details: { credentialEvent: 'credential-revoked' },
+  })
   return { ok: true }
 }

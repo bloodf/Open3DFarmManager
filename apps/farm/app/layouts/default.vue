@@ -27,6 +27,8 @@ const links = computed(() => [
   ...(isOwner.value
     ? [
         { to: '/membros', label: 'Membros' },
+
+        { to: '/integracoes', label: 'Integrações' },
         { to: '/convites', label: 'Convidar pessoa' },
       ]
     : []),

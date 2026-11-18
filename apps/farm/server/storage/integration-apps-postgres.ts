@@ -9,6 +9,7 @@ import type {
   StoreFailure,
   StoredCredential,
 } from '../services/integration-apps.ts'
+import type { IntegrationPrinterRow } from '../utils/integration-auth.ts'
 import { validScopes } from '../services/integration-apps.ts'
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -260,6 +261,51 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
       WHERE id = ${printerId}::uuid AND revoked_at IS NULL
     `
     return rows[0]?.farmId ?? null
+  }
+
+  async readPrinters(input: {
+    farmIds: string[]
+    farmWideFarmIds: string[]
+    assignmentIds: string[]
+    farmId?: string
+    afterId?: string
+    snapshotAt: number
+    limit: number
+  }): Promise<IntegrationPrinterRow[]> {
+    if (!input.farmIds.length) return []
+    const rows = await this.sql<IntegrationPrinterRow[]>`
+      SELECT a.id, a.farm_id AS "farmId", a.printer_key AS "printerKey",
+        f.sandbox, s.state, s.observed_at::float8 AS "observedAt"
+      FROM farm.printer_assignments a
+      JOIN farm.farms f ON f.id = a.farm_id
+      LEFT JOIN farm.printer_latest_state s
+        ON s.farm_id = a.farm_id AND s.agent_id = a.agent_id
+        AND s.printer_key = a.printer_key
+      WHERE a.revoked_at IS NULL
+        AND a.farm_id = ANY(${this.sql.array(input.farmIds)}::uuid[])
+        AND (a.farm_id = ANY(${this.sql.array(input.farmWideFarmIds)}::uuid[])
+          OR a.id = ANY(${this.sql.array(input.assignmentIds)}::uuid[]))
+        AND (${input.farmId ?? null}::uuid IS NULL OR a.farm_id = ${input.farmId ?? null}::uuid)
+        AND a.created_at <= ${input.snapshotAt}
+        AND (${input.afterId ?? null}::uuid IS NULL OR a.id > ${input.afterId ?? null}::uuid)
+      ORDER BY a.id LIMIT ${input.limit}
+    `
+    return rows.map((row) => ({ ...row }))
+  }
+
+  async readPrinter(printerId: string): Promise<IntegrationPrinterRow | null> {
+    if (!uuid.test(printerId)) return null
+    const rows = await this.sql<IntegrationPrinterRow[]>`
+      SELECT a.id, a.farm_id AS "farmId", a.printer_key AS "printerKey",
+        f.sandbox, s.state, s.observed_at::float8 AS "observedAt"
+      FROM farm.printer_assignments a
+      JOIN farm.farms f ON f.id = a.farm_id
+      LEFT JOIN farm.printer_latest_state s
+        ON s.farm_id = a.farm_id AND s.agent_id = a.agent_id
+        AND s.printer_key = a.printer_key
+      WHERE a.id = ${printerId}::uuid AND a.revoked_at IS NULL
+    `
+    return rows[0] ? { ...rows[0] } : null
   }
 
   async effectiveGrants(appId: string): Promise<IntegrationGrant[]> {

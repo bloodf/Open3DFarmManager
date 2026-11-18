@@ -12,6 +12,25 @@ export type IntegrationAuthStore = Pick<
   'findActiveCredential' | 'effectiveGrants'
 > & {
   activePrinterFarm(printerId: string): Promise<string | null>
+  readPrinters?(input: {
+    farmIds: string[]
+    farmWideFarmIds: string[]
+    assignmentIds: string[]
+    farmId?: string
+    afterId?: string
+    snapshotAt: number
+    limit: number
+  }): Promise<IntegrationPrinterRow[]>
+  readPrinter?(printerId: string): Promise<IntegrationPrinterRow | null>
+}
+
+export interface IntegrationPrinterRow {
+  id: string
+  farmId: string
+  printerKey: string
+  sandbox: boolean
+  state: unknown
+  observedAt: number | null
 }
 
 export interface IntegrationPrincipal {

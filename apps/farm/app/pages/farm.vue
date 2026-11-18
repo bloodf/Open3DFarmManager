@@ -1200,6 +1200,9 @@ input[type='url'] {
   padding: 0;
   list-style: none;
 }
+.printers li {
+  min-width: 0;
+}
 .last-known-list {
   padding: 0;
   list-style: none;
@@ -1253,6 +1256,16 @@ progress {
   }
   .printers li {
     padding: 0.75rem;
+  }
+}
+@media (min-width: 48rem) {
+  .printers {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .printers li {
+    margin: 0;
   }
 }
 </style>

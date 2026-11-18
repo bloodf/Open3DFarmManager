@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs'
 import { join } from 'node:path'
@@ -10,6 +10,39 @@ import {
   API_ENVELOPE_CLOCK_SKEW_MS,
   ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
+
+const originalEmitWarning = process.emitWarning.bind(process)
+process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+  const message = typeof warning === 'string' ? warning : warning?.message
+  const type =
+    typeof args[0] === 'string'
+      ? args[0]
+      : typeof args[0] === 'object' && args[0] !== null && 'type' in args[0]
+        ? (args[0] as { type?: string }).type
+        : warning instanceof Error
+          ? warning.name
+          : undefined
+  if (
+    type === 'ExperimentalWarning' &&
+    typeof message === 'string' &&
+    message.includes('SQLite is an experimental feature')
+  ) {
+    return
+  }
+  return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args)
+}) as typeof process.emitWarning
+
+const { DatabaseSync } = process.getBuiltinModule(
+  'node:sqlite',
+) as typeof import('node:sqlite')
+if (
+  typeof (DatabaseSync.prototype as { enableDefensive?: unknown })
+    .enableDefensive !== 'function'
+) {
+  ;(
+    DatabaseSync.prototype as { enableDefensive?: (active: boolean) => void }
+  ).enableDefensive = () => {}
+}
 
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
@@ -141,7 +174,7 @@ export type CommandClaimResult =
         | 'storage-unavailable'
     }
 type State = {
-  database: DatabaseSync
+  database: DatabaseSyncType
   directory: string
   path: string
   clock: () => number

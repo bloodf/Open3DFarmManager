@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { PrinterState } from './state.ts'
+import { SpoolInventory } from './inventory.ts'
 
 const envelope = {
   eventId: z.uuidv4(),
@@ -26,11 +27,18 @@ export const TelemetryEvent = z.discriminatedUnion('kind', [
     kind: z.literal('printer-transition'),
     transition: PrinterTransition,
   }),
+  z.strictObject({
+    ...envelope,
+    kind: z.literal('inventory-snapshot'),
+    inventory: SpoolInventory,
+  }),
 ])
 export const telemetryPrinterKey = (record: TelemetryEvent) =>
   record.kind === 'printer-state'
     ? record.state.printerKey
-    : record.transition.printerKey
+    : record.kind === 'printer-transition'
+      ? record.transition.printerKey
+      : null
 export const TelemetryBatch = z
   .array(TelemetryEvent)
   .min(1)

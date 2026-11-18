@@ -96,9 +96,11 @@ async function admitOperation(
   >,
 ): Promise<boolean> {
   const existing = await tx.operation(request.operationId)
+  // A status request on a new operation id is the printer discovery request
+  // (it carries no preparation to pin); it records the operation like prepare.
   if (!existing)
     return (
-      request.action === 'prepare' &&
+      (request.action === 'prepare' || request.action === 'status') &&
       (await tx.createOperation({
         operation_id: request.operationId,
         account_id: a.account_id,

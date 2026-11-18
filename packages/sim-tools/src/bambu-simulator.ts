@@ -6,6 +6,12 @@ import {
 } from './mocks/mqtt-broker.ts'
 import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
 import type { ThrowawayTlsMaterial } from './mocks/tls.ts'
+import { startBambuFtpsSim } from './bambu-ftps-sim.ts'
+
+export {
+  syntheticBambuCertificate,
+  syntheticBambuTls,
+} from './bambu-synthetic-identity.ts'
 
 export { encodePacket as packet }
 
@@ -18,7 +24,11 @@ export interface BambuSimulatorOptions {
   printDurationMs?: number | undefined
   totalLayers?: number | undefined
   serial?: string | undefined
+  accessCode?: string | undefined
+  /** Listen address; loopback unless explicitly opted in (Docker sandbox). */
+  host?: string | undefined
   port?: number | undefined
+  ftpsPort?: number | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   initialTargetTemperature?: number | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
@@ -37,7 +47,10 @@ export interface BambuSimulatorOptions {
 
 export async function startBambuSimulator({
   serial = 'SYNTHETIC',
+  accessCode = 'secret',
+  host = '127.0.0.1',
   port = 0,
+  ftpsPort = 0,
   initialState,
   initialTargetTemperature,
   confirmCommands = true,
@@ -51,6 +64,8 @@ export async function startBambuSimulator({
 }: BambuSimulatorOptions = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
+  if (!accessCode || /[\r\n]/.test(accessCode))
+    throw new Error('Invalid synthetic access code')
   if (
     printDurationMs !== undefined &&
     (!Number.isFinite(printDurationMs) ||
@@ -60,17 +75,30 @@ export async function startBambuSimulator({
   )
     throw new Error('Invalid print configuration')
 
-  const uploads = new Set<string>()
+  const uploads = new Map<string, Buffer>()
   let timer: ReturnType<typeof setInterval> | undefined
   let elapsed = 0
   let lastTick = 0
   const reportTopic = `device/${serial}/report`
   const requestTopic = `device/${serial}/request`
   let gcodeState: string | undefined = initialState
-  const extended: Record<string, unknown> =
-    initialTargetTemperature === undefined
+  const extended: Record<string, unknown> = {
+    nozzle_temper: 210,
+    bed_temper: 60,
+    ams: {
+      ams: [
+        {
+          id: 0,
+          tray: [
+            { id: 0, tray_type: 'PLA', tray_color: 'FFFFFFFF', remain: 100 },
+          ],
+        },
+      ],
+    },
+    ...(initialTargetTemperature === undefined
       ? {}
-      : { nozzle_target_temper: initialTargetTemperature }
+      : { nozzle_target_temper: initialTargetTemperature }),
+  }
   const requests: { command: string; sequence_id: string }[] = []
 
   let brokerRef: MqttMockInstance | undefined
@@ -123,6 +151,7 @@ export async function startBambuSimulator({
   }
 
   const broker = await startMqttBroker({
+    host,
     port,
     handshakeTimeout: 3000,
     socketTimeout: 10000,
@@ -189,7 +218,10 @@ export async function startBambuSimulator({
         typeof request.url === 'string' &&
         request.url.startsWith('file:///sdcard/')
       ) {
-        if (printDurationMs !== undefined && !uploads.has(request.url))
+        if (
+          printDurationMs !== undefined &&
+          !uploads.has(sdcardFileName(request.url))
+        )
           throw new Error('File not uploaded')
       } else if (
         command === 'ams_change_filament' &&
@@ -240,6 +272,9 @@ export async function startBambuSimulator({
         extended.speed = request.param
       } else if (command === 'project_file') {
         extended.file = request.url
+        const fileName = sdcardFileName(request.url)
+        extended.subtask_name = fileName
+        extended.gcode_file = fileName
         gcodeState = 'RUNNING'
         elapsed = 0
         extended.mc_percent = 0
@@ -290,6 +325,29 @@ export async function startBambuSimulator({
       ? `${tls.cert.toString('utf8')}${tls.ca ? `\n${tls.ca.toString('utf8')}` : ''}`
       : ''
 
+  const ftpsIdentity = tlsMaterial
+    ? tlsMaterial.server
+    : tls && !('server' in tls)
+      ? tls
+      : tls?.server
+  if (!ftpsIdentity) throw new Error('Missing simulator TLS identity')
+  let ftps: Awaited<ReturnType<typeof startBambuFtpsSim>>
+  try {
+    ftps = await startBambuFtpsSim({
+      host,
+      port: ftpsPort,
+      accessCode,
+      key: ftpsIdentity.key,
+      cert: ftpsIdentity.cert,
+      uploads,
+    })
+  } catch (error) {
+    clearInterval(periodicReports)
+    scenario.stop()
+    await broker.close()
+    throw error
+  }
+
   function publishReport(value: unknown) {
     broker.control.publish(reportTopic, value)
   }
@@ -301,13 +359,15 @@ export async function startBambuSimulator({
   let closing: Promise<void> | undefined
 
   return {
-    host: '127.0.0.1',
+    host,
     port: broker.ports.default,
+    ftpsPort: ftps.port,
     origin: broker.origin,
     ports: broker.ports,
     syntheticTrust,
     reportTopic,
     requests,
+    uploads,
     calls: broker.calls,
     control: {
       faults: broker.control.faults,
@@ -329,7 +389,7 @@ export async function startBambuSimulator({
     uploadFile(name: string, data: Uint8Array) {
       if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
         throw new Error('Invalid upload')
-      uploads.add(`file:///sdcard/${name}`)
+      uploads.set(name, Buffer.from(data))
     },
     /** Journey control: a print in progress at a fixed percentage. */
     setPrintProgress(percent: number) {
@@ -362,8 +422,15 @@ export async function startBambuSimulator({
       stopTimer()
       clearInterval(periodicReports)
       scenario.stop()
-      closing ??= broker.close()
+      closing ??= (async () => {
+        await ftps.close()
+        await broker.close()
+      })()
       return closing
     },
   }
+}
+
+function sdcardFileName(url: string) {
+  return decodeURIComponent(url.slice('file:///sdcard/'.length))
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { join } from 'node:path'
 import { anycubicCatalog } from '../../apps/farm/app/utils/compatibility/anycubic'
 import { bambuCatalog } from '../../apps/farm/app/utils/compatibility/bambu'
 import { crealityCatalog } from '../../apps/farm/app/utils/compatibility/creality'
@@ -25,6 +28,7 @@ import { parseCollectorConfig as parseCrealityConfig } from '../../packages/conn
 import { parseCollectorConfig as parseAnycubicConfig } from '../../packages/connector/src/config/anycubic.ts'
 import { parseRtcRuntimeConfig } from '../../packages/connector/src/config/rtc.ts'
 import type { AgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
+import { provisionBambuPrinter } from '../../packages/connector/src/control/printer-binding.ts'
 
 /**
  * Cada status do catálogo precisa de uma prova: um caminho de código real do
@@ -55,7 +59,10 @@ const statusOf = (id: string, capability: string) =>
  * sections that the file-target path reads are populated; the rest keep the
  * same optional/null shape the Connector returns.
  */
-const runtimeConfigFor = (collection: Record<string, unknown>) =>
+const runtimeConfigFor = (
+  collection: Record<string, unknown>,
+  bindingFor: AgentRuntimeConfig['bindingFor'] = () => undefined,
+) =>
   ({
     camera: null,
     rtc: parseRtcRuntimeConfig(undefined),
@@ -85,7 +92,7 @@ const runtimeConfigFor = (collection: Record<string, unknown>) =>
     ],
     signalling: undefined,
     pause: null,
-    bindingFor: () => undefined,
+    bindingFor,
   }) satisfies AgentRuntimeConfig
 
 const bambuBinding = {
@@ -341,33 +348,73 @@ describe('sincronização do catálogo de compatibilidade', () => {
     expect(targets.fileTransfer.targetFor('k')).toBeUndefined()
   })
 
-  it('mantém arquivos Bambu simulados pelo caminho FTPS passivo', () => {
+  it('monta alvos Bambu FTPS com o binding e a credencial locais', async () => {
     // A listagem e o envio por FTPS passivo têm implementação e testes
     // próprios (`bambu/files.ts` e `bambu/ftps.ts`), então o status é
-    // `simulated`. A observação de que a coleção Bambu ainda não produz alvo
-    // de arquivos fica registrada como limitação, não como rebaixamento.
+    // `simulated`.
     for (const product of bambuCatalog) {
       expect(product.capabilities.files).toBe('simulated')
       expect(product.limitations.join(' ')).toMatch(/FTPS passivo/)
     }
-    const targets = createFileTargets({
-      config: runtimeConfigFor({
-        version: 3,
-        printers: [],
-        allowedOrigins: [],
-        bambu: { printers: [bambuBinding] },
-      }),
-      assignmentId: 'a',
-      dataDirectory: '/tmp',
+    const directory = await mkdtemp(join(tmpdir(), 'bambu-file-target-'))
+    const credentialFile = join(directory, 'credential.json')
+    await writeFile(credentialFile, JSON.stringify({ accessCode: 'secret' }), {
+      mode: 0o600,
     })
-    // A coleção Bambu não produz alvo: a limitação precisa dizer isso.
-    expect(targets.fileList.targetFor('k')).toBeUndefined()
-    expect(targets.fileTransfer.targetFor('k')).toBeUndefined()
-    expect(
-      bambuCatalog.every((product) =>
-        product.limitations.join(' ').includes('alvo de arquivos'),
-      ),
-    ).toBe(true)
+    try {
+      const localBinding = {
+        ...bambuBinding,
+        credentialFile,
+        ftpsPort: 1990,
+        pinSha256: 'a'.repeat(64),
+        caFile: undefined,
+      }
+      const handle = provisionBambuPrinter(
+        {
+          assignment_id: '11111111-1111-4111-8111-111111111111',
+          farm_id: '22222222-2222-4222-8222-222222222222',
+          agent_id: '33333333-3333-4333-8333-333333333333',
+          printer_key: 'k',
+        },
+        localBinding,
+      )
+      const targets = createFileTargets({
+        config: runtimeConfigFor(
+          {
+            version: 3,
+            printers: [],
+            allowedOrigins: [],
+            bambu: {
+              printers: [
+                {
+                  ...localBinding,
+                  allowedEndpoints: [{ host: '127.0.0.1', port: 8883 }],
+                },
+              ],
+            },
+          },
+          () => handle,
+        ),
+        assignmentId: 'a',
+        dataDirectory: directory,
+      })
+      expect(targets.fileTransfer.targetFor('k')).toMatchObject({
+        backend: 'bambu',
+        host: '127.0.0.1',
+        serial: 'SERIAL01',
+        port: 1990,
+        accessCode: 'secret',
+        trust: { pinSha256: 'a'.repeat(64) },
+      })
+      expect(targets.fileList.targetFor('k')).toMatchObject({
+        backend: 'bambu',
+        port: 1990,
+      })
+      expect(targets.fileTransfer.targetFor('foreign')).toBeUndefined()
+    } finally {
+      await unlink(credentialFile)
+      await rmdir(directory)
+    }
   })
 
   it('mantém arquivos Creality e Anycubic LAN simulados porque há alvo', () => {

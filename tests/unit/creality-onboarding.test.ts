@@ -151,7 +151,12 @@ async function apply(w: ReturnType<typeof world>, revision = 0) {
   return { prepare, prepared, commit, committed }
 }
 
-describe('Creality native onboarding', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Creality native onboarding', { timeout: 120_000 }, () => {
   it('accepts the provisional stock contract and keeps Moonraker separate', () => {
     expect(ConfigurationTarget.parse(target())).toEqual({
       v: 1,
@@ -367,7 +372,9 @@ describe('Creality native onboarding', () => {
     })
     const port = server.address().port
     const messages: unknown[] = []
-    let connectionCount = 0
+    // Set between the probes rather than counting connections: under load the
+    // aborted first probe may never connect at all.
+    let sendTelemetry = false
     server.on(
       'connection',
       (socket: {
@@ -375,10 +382,9 @@ describe('Creality native onboarding', () => {
         send: (data: string) => void
       }) => {
         socket.on('message', (data) => messages.push(data))
-        connectionCount += 1
         socket.send('invalid-json')
         socket.send(JSON.stringify({ model: 'K1' }))
-        if (connectionCount > 1)
+        if (sendTelemetry)
           socket.send(JSON.stringify({ state: 0, printProgress: 0 }))
       },
     )
@@ -389,11 +395,14 @@ describe('Creality native onboarding', () => {
         signal: AbortSignal.timeout(100),
       }),
     ).toBe(false)
+    sendTelemetry = true
     expect(
       await probeCreality({
         host: '127.0.0.1',
         port,
-        signal: AbortSignal.timeout(1000),
+        // Resolves as soon as telemetry arrives; the long bound only keeps a
+        // loaded host from aborting the handshake before then.
+        signal: AbortSignal.timeout(10_000),
       }),
     ).toBe(true)
     expect(messages).toEqual([])
@@ -405,7 +414,10 @@ describe('Creality native onboarding', () => {
   })
 })
 
-describe('Creality form', () => {
+// Loading vue/compiler-sfc and compiling the full impressoras.vue page is
+// inherently heavy (about 0.5 s idle, several seconds on a loaded host), so
+// this suite gets an explicit timeout instead of the 5 s default.
+describe('Creality form', { timeout: 30_000 }, () => {
   it('dispatches the validated host through the signed session and persists recovery state', async () => {
     const require = createRequire(resolve('apps/farm/package.json'))
     const { parse, compileScript } = require('vue/compiler-sfc')

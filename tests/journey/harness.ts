@@ -25,6 +25,7 @@ import {
   startMoonrakerSimulator,
   type MoonrakerSimulator,
 } from './moonraker-simulator.ts'
+import { startConfigurator, type Configurator } from './harness-configurator.ts'
 import { startJourneyDatabase, type JourneyDatabase } from './database.ts'
 import { AUDIENCE, startFarmApp, type FarmApp } from './farm-app.ts'
 import {
@@ -35,6 +36,7 @@ import {
   type VendorName,
   type VendorSimulator,
 } from './harness-vendors.ts'
+import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
 export type {
   VendorControls,
@@ -76,6 +78,12 @@ export type JourneyOptions = Readonly<{
    */
   history?: boolean
   /**
+   * Also pairs and approves a second Connector in configuration mode (Creality
+   * and Anycubic only) whose "search printers" answers with the simulator's
+   * loopback discovery responder, so the Impressoras page can find the printer.
+   */
+  discovery?: boolean
+  /**
    * Performs the printer set-up in the browser instead of the harness calling
    * the assignment API. Receives the signed-in owner page and must return once
    * the assignment for `printerKey` on `agentId` exists.
@@ -87,6 +95,8 @@ export type JourneyOptions = Readonly<{
     agentId: string
     printerKey: string
     vendor: VendorSimulator | undefined
+    configurator:
+      Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
   }): Promise<void>
 }>
 
@@ -127,6 +137,11 @@ export type JourneyHarness = Readonly<{
   vendor: VendorSimulator | undefined
   /** Loopback discovery/probe responder (Creality and Anycubic only). */
   discovery: VendorDiscovery | undefined
+  /** Connector the Impressoras page searches with (`discovery: true`). */
+  configurator:
+    Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
+  /** Loopback MJPEG camera (Creality and Anycubic only). */
+  camera: VendorSimulator['camera']
   /** The Moonraker simulator; throws for any other simulator. */
   printer: MoonrakerSimulator
   simulatorObservation(): ReturnType<
@@ -210,6 +225,22 @@ function machinePoster(origin: string, ca: Buffer) {
 /** Removes every resource a failed start already created. */
 type Undo = () => Promise<void>
 
+function journeyPrinterHost() {
+  const route = execFileSync('ip', ['route', 'get', '1.1.1.1'], {
+    encoding: 'utf8',
+  })
+  const host = /\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(route)?.[1]
+  if (!host) throw new Error('No private route address for the Bambu simulator')
+  const [first, second] = host.split('.').map(Number)
+  const privateAddress =
+    first === 10 ||
+    (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  if (!privateAddress)
+    throw new Error('The Bambu simulator needs a private route address')
+  return host
+}
+
 export async function startJourneyHarness(
   options: JourneyOptions,
 ): Promise<JourneyHarness> {
@@ -219,8 +250,11 @@ export async function startJourneyHarness(
   if (!Object.hasOwn(SIMULATORS, simulator))
     throw new Error(`Unknown simulator "${simulator}"`)
   const printerKey = options.printerKey ?? `journey-${simulator}`
+  const bambuHost =
+    simulator === 'bambu' && options.setup ? journeyPrinterHost() : undefined
   const runId = randomUUID().slice(0, 8)
   const undo: Undo[] = []
+  let appOutput: (() => string) | undefined
   const savedEnv = Object.fromEntries(
     ENV_KEYS.map((key) => [key, process.env[key]]),
   )
@@ -264,6 +298,7 @@ export async function startJourneyHarness(
       history: options.history === true,
     })
     undo.push(() => app.close())
+    appOutput = app.log
     const { origin } = app
 
     // Native clients (Connector, machine calls) trust only this certificate.
@@ -297,6 +332,7 @@ export async function startJourneyHarness(
       vendor = await startVendorSimulator(simulator as VendorName, {
         printerKey,
         ...(options.control === undefined ? {} : { control: options.control }),
+        ...(bambuHost ? { host: bambuHost } : {}),
       })
       const started = vendor
       undo.push(() => started.close())
@@ -442,6 +478,44 @@ export async function startJourneyHarness(
     if (claim.status !== 'approved' || claim.farm_id !== database.farmId)
       throw new Error('Connector pairing did not complete')
 
+    let configurator: Configurator | undefined
+    if (options.discovery || (options.setup && simulator === 'bambu')) {
+      let probes: {
+        creality?: number
+        anycubic?: number
+        bambuPort?: number
+      } = {}
+      if (options.discovery) {
+        const port = vendor?.discovery?.port
+        if (
+          port === undefined ||
+          (simulator !== 'creality' && simulator !== 'anycubic')
+        )
+          throw new Error(
+            'Page discovery needs the Creality or Anycubic simulator',
+          )
+        probes =
+          simulator === 'creality' ? { creality: port } : { anycubic: port }
+      } else if (simulator === 'bambu') {
+        const bambu = vendor?.raw as
+          Awaited<ReturnType<typeof startBambuSimulator>> | undefined
+        if (!bambu) throw new Error('Bambu simulator missing')
+        probes = { bambuPort: bambu.port }
+      }
+      configurator = await startConfigurator({
+        origin,
+        audience: AUDIENCE,
+        farmId: database.farmId,
+        certificatePath: app.certificatePath,
+        ownerPage,
+        machinePost,
+        probes,
+        ...(bambuHost ? { printerNetworks: [`${bambuHost}/32`] } : {}),
+      })
+      const started = configurator
+      undo.push(() => started.close())
+    }
+
     // Assign the printer, then read the assignment back.
     const path = `/api/farms/${database.farmId}/printers`
     let assignmentId: string
@@ -453,6 +527,7 @@ export async function startJourneyHarness(
         agentId: claim.agent_id,
         printerKey,
         vendor,
+        configurator,
       })
       const listed = (await ownerPage.evaluate(async (url) => {
         const response = await fetch(url, { cache: 'no-store' })
@@ -582,6 +657,8 @@ export async function startJourneyHarness(
       controls,
       vendor,
       discovery: vendor?.discovery,
+      camera: vendor?.camera,
+      configurator,
       get printer(): MoonrakerSimulator {
         if (!printer)
           throw new Error(
@@ -596,6 +673,8 @@ export async function startJourneyHarness(
       close,
     })
   } catch (error) {
+    // What the app said while the start failed.
+    if (appOutput) console.error(appOutput())
     await close().catch(() => {})
     throw error
   }

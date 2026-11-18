@@ -21,6 +21,7 @@ import { acquireQueueLock } from './queue-lock.ts'
 import {
   PrinterState,
   PrinterTransition,
+  SpoolInventory,
 } from '@open3dfarmmanager/farm-protocol'
 
 const MAX_BYTES = 50 * 1024 * 1024
@@ -42,6 +43,12 @@ export type TelemetryRecord =
       queuedAt: number
       kind: 'printer-transition'
       transition: PrinterTransition
+    }
+  | {
+      eventId: string
+      queuedAt: number
+      kind: 'inventory-snapshot'
+      inventory: SpoolInventory
     }
 export interface QueueLimits {
   maxBytes?: number
@@ -93,16 +100,19 @@ function parseRecord(value: unknown): TelemetryRecord {
     throw new Error('Invalid queue record')
   const record = value as Record<string, unknown>
   const transition = record.kind === 'printer-transition'
+  const inventory = record.kind === 'inventory-snapshot'
   if (
     Object.keys(record).sort().join(',') !==
       (transition
         ? 'eventId,kind,queuedAt,transition'
-        : 'eventId,kind,queuedAt,state') ||
+        : inventory
+          ? 'eventId,inventory,kind,queuedAt'
+          : 'eventId,kind,queuedAt,state') ||
     typeof record.eventId !== 'string' ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
       record.eventId,
     ) ||
-    (record.kind !== 'printer-state' && !transition) ||
+    (record.kind !== 'printer-state' && !transition && !inventory) ||
     typeof record.queuedAt !== 'number'
   )
     throw new Error('Invalid queue record')
@@ -113,6 +123,13 @@ function parseRecord(value: unknown): TelemetryRecord {
       queuedAt: record.queuedAt,
       kind: 'printer-transition',
       transition: PrinterTransition.parse(record.transition),
+    }
+  if (inventory)
+    return {
+      eventId: record.eventId,
+      queuedAt: record.queuedAt,
+      kind: 'inventory-snapshot',
+      inventory: SpoolInventory.parse(record.inventory),
     }
   return {
     eventId: record.eventId,
@@ -460,10 +477,23 @@ export class TelemetryQueue {
       now,
     )
   }
+  enqueueInventory(
+    inventory: SpoolInventory,
+    now: number,
+  ): { eventId: string; loss: QueueLoss } {
+    return this.append(
+      {
+        kind: 'inventory-snapshot',
+        inventory: SpoolInventory.parse(inventory),
+      },
+      now,
+    )
+  }
   private append(
     body:
       | { kind: 'printer-state'; state: PrinterState }
-      | { kind: 'printer-transition'; transition: PrinterTransition },
+      | { kind: 'printer-transition'; transition: PrinterTransition }
+      | { kind: 'inventory-snapshot'; inventory: SpoolInventory },
     now: number,
   ): { eventId: string; loss: QueueLoss } {
     // Degraded storage stops enqueueing: the record is counted, never stored.

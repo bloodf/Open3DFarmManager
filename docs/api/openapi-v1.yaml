@@ -628,6 +628,10 @@ paths:
       description: |
         One entry per Connector that reported a snapshot, for farms covered by
         a farm-wide `inventory:read` grant. Snapshots are read-only display evidence.
+        Deployments without a server-side inventory source return an empty page.
+        Connectors upload a bounded display projection through authenticated
+        telemetry (at most 8 spools, with no Spoolman credentials). The server
+        retains the newest observation per Connector by `observedAt`.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -1886,10 +1890,11 @@ components:
         total:
           type: integer
           minimum: 0
+          maximum: 10000
           description: Spools known to Spoolman; `spools` may be a bounded subset.
         spools:
           type: array
-          maxItems: 100
+          maxItems: 8
           items:
             $ref: '#/components/schemas/Spool'
     InventoryPage:
@@ -2035,7 +2040,7 @@ components:
           type: string
           description: |
             `held` awaits operator approval; `rejected` was refused by an
-            operator; `queued` was accepted and waits for the Connector to
+            operator or its approved envelope could not be issued; `queued` was accepted and waits for the Connector to
             confirm delivery; `expired` was never delivered before its expiry;
             `delivered` reached the Connector; `refused` was refused by the
             Connector (see `refusal`); `started`, `completed`, `cancelled` and

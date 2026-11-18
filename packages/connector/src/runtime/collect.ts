@@ -1,5 +1,6 @@
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { getSpoolmanMaterials } from './spoolman-materials.ts'
+import { inventoryAt, summarizeSpoolman } from './spool-inventory.ts'
 import {
   validateMoonrakerInput,
   moonrakerAuthHeaders,
@@ -181,6 +182,7 @@ export async function collectIntoQueue(input: {
   }
   const materialReads = new Set<Promise<void>>()
   let inventory: SpoolmanSnapshot | undefined
+  let lastInventoryObservedAt = -1
   try {
     if (queue.recoveredStaleLock) diagnostic({ kind: 'queue-lock-recovered' })
     if (queue.recoveryMutexLeft) diagnostic({ kind: 'queue-lock-mutex-left' })
@@ -191,6 +193,18 @@ export async function collectIntoQueue(input: {
         signal,
         onSnapshot(value) {
           inventory = value
+          const summary = summarizeSpoolman(value)
+          const projected = summary
+            ? inventoryAt(summary, 0, Date.now())
+            : undefined
+          if (projected && projected.observedAt > lastInventoryObservedAt) {
+            try {
+              queue.enqueueInventory(projected, Date.now())
+              lastInventoryObservedAt = projected.observedAt
+            } catch (error) {
+              fail(error)
+            }
+          }
           input.onInventory?.(value)
         },
       })

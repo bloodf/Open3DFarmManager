@@ -25,22 +25,25 @@ import { readFileSync } from 'node:fs';
 const root = process.argv[2];
 const read = path => readFileSync(`${root}/${path}`, 'utf8');
 const workflow = read('.github/workflows/ci.yml');
-const one = (pattern, text, label) => {
-  const matches = [...text.matchAll(pattern)];
-  if (matches.length !== 1) throw new Error(`Expected one exact ${label} pin`);
-  return matches[0][1];
-};
-const pnpm = one(/^          version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow pnpm');
-const node = one(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm, workflow, 'workflow Node');
+const dockerfile = read('apps/farm/Dockerfile');
+const pnpmPins = new Set([...workflow.matchAll(/^          version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm)].map(m => m[1]));
+if (pnpmPins.size !== 1) throw new Error('Expected one exact workflow pnpm pin');
+const pnpm = [...pnpmPins][0];
+const nodePins = new Set([...workflow.matchAll(/^          node-version: '([0-9]+\.[0-9]+\.[0-9]+)'$/gm)].map(m => m[1]));
+const nvmrc = read('.nvmrc').trim();
 const manager = JSON.parse(read('package.json')).packageManager;
-if (manager !== `pnpm@${pnpm}` || read('.nvmrc').trim() !== node) {
+if (manager !== `pnpm@${pnpm}` || !nodePins.has(nvmrc)) {
   throw new Error('Workflow pins disagree with packageManager or .nvmrc');
 }
-console.log(pnpm, node);
+const baseMatch = /^FROM node:([0-9]+\.[0-9]+\.[0-9]+)-alpine/m.exec(dockerfile);
+if (!baseMatch || !nodePins.has(baseMatch[1])) {
+  throw new Error('Workflow pins disagree with Dockerfile base image');
+}
+console.log(pnpm, nvmrc, baseMatch[1]);
 EOF
 )
-read -r LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE <<< "$pins"
-export LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE
+read -r LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE LOCAL_CI_PIN_IMAGE_NODE <<< "$pins"
+export LOCAL_CI_PIN_PNPM LOCAL_CI_PIN_NODE LOCAL_CI_PIN_IMAGE_NODE
 cat > "$scratch/bin/pnpm" <<'EOF'
 #!/usr/bin/env bash
 if [[ ${1:-} == --version ]]; then printf '%s\n' "$LOCAL_CI_PIN_PNPM"; exit 0; fi
@@ -60,7 +63,7 @@ if [[ $1 == info && ${2:-} == --format ]]; then
   if [[ ${LOCAL_CI_FAKE_SIM:-0} == 1 ]]; then printf '%s\n' x86_64; else printf '%s\n' aarch64; fi
   exit 0
 fi
-if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} == "node:${LOCAL_CI_PIN_NODE}-alpine" ]]; then
+if [[ -n ${LOCAL_CI_FAKE_BASE:-} && $1 == image && ${2:-} == inspect && ${*: -1} == "node:${LOCAL_CI_PIN_IMAGE_NODE}-alpine" ]]; then
   if [[ ${3:-} == --platform ]]; then
     case "$LOCAL_CI_FAKE_BASE" in
       index) printf '%s\n' linux/amd64 ;;

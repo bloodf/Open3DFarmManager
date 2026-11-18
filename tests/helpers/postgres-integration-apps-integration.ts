@@ -375,6 +375,40 @@ export async function testPostgresIntegrationApps(
     scopes: ['printers:read'],
   })
   assert.ok(typeof sandboxGrant === 'object')
+  const sandboxCredential = await service.issueCredential(owner, sandboxApp.id)
+  assert.ok(typeof sandboxCredential === 'object')
+  const sandboxToken = await auth.issue(
+    sandboxCredential.credential.clientId,
+    sandboxCredential.secret,
+    ['printers:read'],
+  )
+  assert.ok(typeof sandboxToken === 'object')
+  assert.ok(
+    !(
+      (await statusRequest(foreign, sandboxToken.access_token)) instanceof
+      Response
+    ),
+  )
+  const listed = await store.readPrinters({
+    farmIds: [sandboxFarm],
+    farmWideFarmIds: [sandboxFarm],
+    assignmentIds: [],
+    snapshotAt: Date.now(),
+    limit: 51,
+  })
+  assert.deepEqual(
+    listed.map((printer) => [printer.id, printer.sandbox]),
+    [[foreign, true]],
+  )
+  assert.equal(await store.activePrinterFarm(printerB), farm)
+  const realFarmDenied = await statusRequest(
+    printerB,
+    sandboxToken.access_token,
+  )
+  assert.ok(realFarmDenied instanceof Response)
+  assert.equal(realFarmDenied.status, 404)
+  assert.equal((await realFarmDenied.json()).code, 'not-found')
+
   await denied(
     admin`UPDATE farm.farms SET sandbox = false WHERE id = ${sandboxFarm}::uuid`,
     'a farm with sandbox apps cannot leave sandbox mode',

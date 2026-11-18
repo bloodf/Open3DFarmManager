@@ -282,9 +282,9 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
         ON s.farm_id = a.farm_id AND s.agent_id = a.agent_id
         AND s.printer_key = a.printer_key
       WHERE a.revoked_at IS NULL
-        AND a.farm_id = ANY(${this.sql.array(input.farmIds)}::uuid[])
-        AND (a.farm_id = ANY(${this.sql.array(input.farmWideFarmIds)}::uuid[])
-          OR a.id = ANY(${this.sql.array(input.assignmentIds)}::uuid[]))
+        AND a.farm_id = ANY(${input.farmIds}::uuid[])
+        AND (a.farm_id = ANY(${input.farmWideFarmIds}::uuid[])
+          OR a.id = ANY(${input.assignmentIds}::uuid[]))
         AND (${input.farmId ?? null}::uuid IS NULL OR a.farm_id = ${input.farmId ?? null}::uuid)
         AND a.created_at <= ${input.snapshotAt}
         AND (${input.afterId ?? null}::uuid IS NULL OR a.id > ${input.afterId ?? null}::uuid)

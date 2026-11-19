@@ -152,8 +152,7 @@ export function controlRoleAllowed(
   action?: ExtendedControlAction,
 ): boolean {
   if (action === 'service') return role === 'owner'
-  if (action === 'gcode') return role === 'admin'
-  if (action === 'power' || action === 'run_macro')
+  if (action === 'power' || action === 'run_macro' || action === 'gcode')
     return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }

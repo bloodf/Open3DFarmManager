@@ -14,7 +14,10 @@ import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
-import { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
+import {
+  ExtendedControlAction,
+  controlRoleAllowed,
+} from '../../packages/farm-protocol/src/control-actions.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 
 // Synthetic authority and in-memory bridge only; no physical printer.
@@ -142,8 +145,8 @@ async function authorityFixture(action: Action, args: Args) {
     printer_key: 'é"\\'.repeat(32),
     control_binding_sha256: bindingHash,
     admission_nonce: admissionNonce,
-    actions: ExtendedControlAction.options.filter(
-      (granted) => granted !== 'run_macro' && granted !== 'gcode',
+    actions: ExtendedControlAction.options.filter((granted) =>
+      controlRoleAllowed('operator', granted),
     ),
   }
   const challenge = {

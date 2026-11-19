@@ -413,7 +413,10 @@ test('camera region is named, unavailable without an authorized stream, silent a
   ).toBeDisabled()
   expect(await violations(page)).toEqual([])
   const handle = await video.elementHandle()
-  await page.getByRole('link', { name: 'Início', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: 'Navegação da farm' })
+    .getByRole('link', { name: 'Início', exact: true })
+    .click()
   await expect(page).not.toHaveURL(/\/farm$/)
   expect(
     await handle!.evaluate((node: HTMLVideoElement) => node.srcObject),

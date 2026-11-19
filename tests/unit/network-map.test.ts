@@ -107,6 +107,78 @@ describe('network entries', () => {
     )
   })
 
+  it('uses live linkHealth latency and state when provided without server link', async () => {
+    const data = fixture(2)
+    const serverNull: NetworkData = {
+      ...data,
+      printers: data.printers.map((p) => ({ ...p, link: null })),
+    }
+    const entries = buildEntries(serverNull, {
+      now,
+      agents: new Set([agent(1), agent(2)]),
+      printers: new Map([
+        [
+          printerOverlayKey(agent(1), 'printer-0'),
+          {
+            online: true,
+            at: now,
+            link: {
+              state: 'connected',
+              lastSuccessAt: now - 1000,
+              p50Ms: 250,
+              p95Ms: 265,
+            },
+          },
+        ],
+        [
+          printerOverlayKey(agent(2), 'printer-1'),
+          {
+            online: true,
+            at: now,
+            link: {
+              state: 'reconnecting',
+              lastSuccessAt: null,
+              p50Ms: 120,
+              p95Ms: 410,
+            },
+          },
+        ],
+      ]),
+    })
+    const byName = new Map(entries.map((e) => [e.name, e]))
+    expect(byName.get('Voron 1')).toMatchObject({
+      status: 'connected',
+      statusText: 'Conectado',
+      latencyMs: 250,
+      p95Ms: 265,
+      lastSeenAt: now - 1000,
+    })
+    expect(byName.get('Voron 2')).toMatchObject({
+      status: 'reconnecting',
+      statusText: 'Reconectando',
+      latencyMs: 120,
+      p95Ms: 410,
+      lastSeenAt: now,
+    })
+    const tableHtml = await renderFarmComponent(file, {
+      entries,
+      now,
+      live: true,
+      asOf: null,
+    })
+    expect(tableHtml).toContain('250 ms (p95 265 ms)')
+    expect(tableHtml).toContain('↻ Reconectando')
+    const mapHtml = await renderFarmComponent(file, {
+      entries,
+      now,
+      live: true,
+      asOf: null,
+      initialView: 'map',
+    })
+    expect(mapHtml).toContain('✓ Conectado · 250 ms · agora')
+    expect(mapHtml).toContain('↻ Reconectando · 120 ms')
+  })
+
   it('does not list adopted discoveries twice and ignores unknown Connectors', () => {
     const data = fixture(1)
     const entries = buildEntries(

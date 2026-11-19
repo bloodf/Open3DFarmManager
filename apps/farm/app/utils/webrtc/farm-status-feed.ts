@@ -329,6 +329,19 @@ export function createAuthenticatedFarmStatusFeed(
                     onUpdate(value) {
                       if (current() && session) webcamDetail.onUpdate(value)
                     },
+                    ...(webcamDetail.onGcodeHelp && {
+                      onGcodeHelp(commands) {
+                        if (current() && session)
+                          webcamDetail.onGcodeHelp?.(commands)
+                      },
+                    }),
+                    onGcodeResponse(frame) {
+                      if (current() && session)
+                        webcamDetail.onGcodeResponse?.(frame)
+                    },
+                    onDetail(frame) {
+                      if (current() && session) webcamDetail.onDetail?.(frame)
+                    },
                   },
                 }
               : {}),

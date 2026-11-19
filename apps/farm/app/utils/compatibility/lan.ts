@@ -1,10 +1,11 @@
+import { anycubicControlAreas } from './kobra-x.ts'
 import type { AnycubicCatalogProduct } from './anycubic.ts'
 import { unknownControlAreas } from './control-areas.ts'
 
 export const lanCatalog: readonly AnycubicCatalogProduct[] = [
   {
     id: 'anycubic-kobra-3-lan',
-    controlAreas: unknownControlAreas,
+    controlAreas: anycubicControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 (LAN, modelo 20024)',
     releaseStatus: 'Data de lançamento não verificada neste catálogo',
@@ -31,6 +32,8 @@ export const lanCatalog: readonly AnycubicCatalogProduct[] = [
       cancel: 'simulated',
     },
     sources: [
+      'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/protocols/anycubic-commands.md',
+      'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/protocols/anycubic-camera.md',
       'https://github.com/rvanderp3/kobra-connect/blob/main/docs/mqtt-commands.md',
       'https://wiki.anycubic.com/it/fdm-3d-printer/kobra-3-combo/firmware-upgrade-log',
     ],
@@ -39,7 +42,7 @@ export const lanCatalog: readonly AnycubicCatalogProduct[] = [
       'Arquivos: apenas início de arquivo existente; envio e listagem não são suportados.',
       'Temperatura, ventilador e luz foram simulados; comandos de filamento ACE não são suportados.',
       'Materiais: o protocolo LAN documentado não expõe comandos de filamento ACE, e o conector os recusa explicitamente.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      'Câmera disponível quando configurada para a atribuição.',
     ],
   },
   {

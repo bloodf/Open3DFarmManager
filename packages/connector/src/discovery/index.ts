@@ -19,6 +19,12 @@ const clean = (value: string | undefined) =>
     ? value
     : undefined
 
+/** Joining the mDNS group fails this way when the host has no LAN interface. */
+function isNoMulticastInterface(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'ENODEV' || code === 'ENETUNREACH' || code === 'EADDRNOTAVAIL'
+}
+
 export function parseBambu(packet: Buffer): Printer | undefined {
   if (packet.length > 8192 || packet.length === 0) return
   const lines = packet.toString('utf8').split(/\r?\n/)
@@ -252,7 +258,9 @@ export async function discoverPrinters(
               if (options.multicastInterface)
                 socket.setMulticastInterface(options.multicastInterface)
             } catch (error) {
-              reject(error)
+              // No multicast-capable interface (offline host): nobody can answer.
+              if (isNoMulticastInterface(error)) resolve()
+              else reject(error)
               return
             }
           }

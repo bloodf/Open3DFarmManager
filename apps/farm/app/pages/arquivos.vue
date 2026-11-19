@@ -277,301 +277,299 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <NuxtLayout>
-    <main id="conteudo">
-      <h1>Arquivos</h1>
-      <p>
-        Envie um arquivo ou escolha um arquivo da impressora para iniciar a
-        impressão pela conexão direta.
-      </p>
-      <div v-if="state.kind === 'loading'" aria-busy="true" class="loading">
-        <p role="status">Carregando farms…</p>
-        <Skeleton /><Skeleton /><Skeleton />
-      </div>
-      <div v-else-if="!ready" role="alert">
-        <ErrorState
-          title="Arquivos indisponíveis"
-          :description="
-            state.kind === 'sign-in-required'
-              ? 'Sua sessão não está ativa. Entre novamente para ver suas farms.'
-              : 'Não foi possível carregar suas farms. Tente novamente.'
-          "
+  <main id="conteudo">
+    <h1>Arquivos</h1>
+    <p>
+      Envie um arquivo ou escolha um arquivo da impressora para iniciar a
+      impressão pela conexão direta.
+    </p>
+    <div v-if="state.kind === 'loading'" aria-busy="true" class="loading">
+      <p role="status">Carregando farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <div v-else-if="!ready" role="alert">
+      <ErrorState
+        title="Arquivos indisponíveis"
+        :description="
+          state.kind === 'sign-in-required'
+            ? 'Sua sessão não está ativa. Entre novamente para ver suas farms.'
+            : 'Não foi possível carregar suas farms. Tente novamente.'
+        "
+      >
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar</NuxtLink>
+      </ErrorState>
+    </div>
+    <template v-else>
+      <label for="files-farm">Farm</label>
+      <select
+        id="files-farm"
+        :value="ready.scope?.farmId ?? ''"
+        :disabled="busy"
+        @change="chooseFarm"
+      >
+        <option value="">Selecione uma farm</option>
+        <option
+          v-for="farm in ready.farms"
+          :key="farm.farmId"
+          :value="farm.farmId"
         >
-          <Button @click="discover()">Tentar novamente</Button>
-          <NuxtLink to="/entrar">Entrar</NuxtLink>
-        </ErrorState>
-      </div>
-      <template v-else>
-        <label for="files-farm">Farm</label>
-        <select
-          id="files-farm"
-          :value="ready.scope?.farmId ?? ''"
-          :disabled="busy"
-          @change="chooseFarm"
-        >
-          <option value="">Selecione uma farm</option>
-          <option
-            v-for="farm in ready.farms"
-            :key="farm.farmId"
-            :value="farm.farmId"
-          >
-            {{ farm.farmId }}
-          </option>
-        </select>
-        <EmptyState
-          v-if="!ready.farms.length"
-          title="Nenhuma farm nesta página"
-          description="Esta conta ainda não tem uma farm aqui. Crie uma farm ou volte à primeira página."
-        >
-          <NuxtLink to="/farm">Ir para farms</NuxtLink>
-        </EmptyState>
-        <button
-          v-if="ready.farmAfter"
-          type="button"
-          :disabled="busy"
-          @click="discover()"
-        >
-          Primeira página de farms
-        </button>
-        <button
-          v-if="ready.nextFarm"
-          type="button"
-          :disabled="busy"
-          @click="discover(ready.nextFarm)"
-        >
-          Próximas farms
-        </button>
-        <template v-if="ready.scope">
-          <template v-if="ready.keys.kind === 'available'">
-            <label for="files-key">Dispositivo aprovado deste navegador</label>
-            <select
-              id="files-key"
-              :value="ready.keys.selected"
-              :disabled="busy"
-              @change="chooseKey"
-            >
-              <option value="">Selecione um dispositivo</option>
-              <option
-                v-for="key in ready.keys.choices"
-                :key="key.keyId"
-                :value="key.keyId"
-              >
-                {{ key.keyId }}
-              </option>
-            </select>
-          </template>
-          <p v-else role="status">
-            É necessário um dispositivo aprovado deste navegador.
-            <NuxtLink to="/dispositivos">Gerenciar dispositivos</NuxtLink>
-          </p>
-          <label for="files-printer">Impressora</label>
+          {{ farm.farmId }}
+        </option>
+      </select>
+      <EmptyState
+        v-if="!ready.farms.length"
+        title="Nenhuma farm nesta página"
+        description="Esta conta ainda não tem uma farm aqui. Crie uma farm ou volte à primeira página."
+      >
+        <NuxtLink to="/farm">Ir para farms</NuxtLink>
+      </EmptyState>
+      <button
+        v-if="ready.farmAfter"
+        type="button"
+        :disabled="busy"
+        @click="discover()"
+      >
+        Primeira página de farms
+      </button>
+      <button
+        v-if="ready.nextFarm"
+        type="button"
+        :disabled="busy"
+        @click="discover(ready.nextFarm)"
+      >
+        Próximas farms
+      </button>
+      <template v-if="ready.scope">
+        <template v-if="ready.keys.kind === 'available'">
+          <label for="files-key">Dispositivo aprovado deste navegador</label>
           <select
-            id="files-printer"
-            v-model="printer"
-            :disabled="busy || ready.inventory === 'loading'"
+            id="files-key"
+            :value="ready.keys.selected"
+            :disabled="busy"
+            @change="chooseKey"
           >
-            <option value="">Selecione uma impressora</option>
+            <option value="">Selecione um dispositivo</option>
             <option
-              v-for="item in ready.rows"
-              :key="item.assignment.assignmentId"
-              :value="item.assignment.assignmentId"
+              v-for="key in ready.keys.choices"
+              :key="key.keyId"
+              :value="key.keyId"
             >
-              {{ item.assignment.printerKey }}
+              {{ key.keyId }}
             </option>
           </select>
-          <p v-if="row">
-            Impressora selecionada: {{ row.assignment.printerKey }}
-          </p>
-          <div
-            v-if="ready.inventory === 'loading'"
-            aria-busy="true"
-            class="loading"
-          >
-            <p role="status">Carregando impressoras…</p>
-            <Skeleton /><Skeleton />
-          </div>
-          <EmptyState
-            v-else-if="!ready.rows.length"
-            title="Nenhuma impressora nesta página"
-            description="Adicione uma impressora a esta farm para enviar arquivos."
-          >
-            <NuxtLink to="/impressoras">Ir para impressoras</NuxtLink>
-          </EmptyState>
-          <button
-            v-if="ready.printerAfter"
-            type="button"
-            :disabled="busy"
-            @click="selectFarm(ready.scope.farmId)"
-          >
-            Primeira página de impressoras
-          </button>
-          <button
-            v-if="ready.nextPrinter"
-            type="button"
-            :disabled="busy"
-            @click="selectFarm(ready.scope.farmId, ready.nextPrinter)"
-          >
-            Próximas impressoras
-          </button>
-          <p v-if="!availability.available" id="files-unavailable">
-            {{ availability.reason }} O modo degradado permite somente leitura.
-          </p>
-          <section aria-labelledby="upload-title" :aria-busy="busy">
-            <h2 id="upload-title">Enviar arquivo</h2>
-            <form @submit.prevent="send">
-              <label for="files-upload"
-                >Arquivo .gcode ou .3mf (até 512 MiB)</label
-              >
-              <input
-                id="files-upload"
-                type="file"
-                accept=".gcode,.3mf"
-                :disabled="busy || !availability.available"
-                @change="chooseFile"
-              />
-              <button
-                type="submit"
-                :disabled="
-                  busy ||
-                  !availability.available ||
-                  !upload ||
-                  !!validateUpload(upload)
-                "
-              >
-                Enviar arquivo
-              </button>
-            </form>
-            <progress
-              v-if="operation.kind === 'uploading'"
-              :value="operation.sent"
-              :max="operation.total"
-              aria-label="Progresso do envio"
-            />
-          </section>
-          <section aria-labelledby="list-title">
-            <h2 id="list-title">Arquivos da impressora</h2>
-            <button
-              type="button"
-              :disabled="busy || !availability.available"
-              @click="list"
-            >
-              Consultar arquivos
-            </button>
-            <EmptyState
-              v-if="!files.length"
-              title="Nenhum arquivo listado"
-              description="Consulte os arquivos da impressora ou envie um arquivo."
-            />
-            <ul
-              v-if="files.some((file) => file.thumbnail)"
-              aria-label="Miniaturas dos arquivos"
-            >
-              <li
-                v-for="file in files.filter((item) => item.thumbnail)"
-                :key="file.name"
-              >
-                <img
-                  :src="`data:image/png;base64,${file.thumbnail}`"
-                  alt=""
-                  width="96"
-                  height="96"
-                  style="object-fit: contain"
-                />
-                {{ file.name }}
-              </li>
-            </ul>
-            <form
-              v-if="manualEntry && !files.length"
-              @submit.prevent="startStored"
-            >
-              <p>
-                Listagem não suportada pela biblioteca desta impressora. Informe
-                o nome exato de um arquivo .gcode já armazenado na impressora.
-              </p>
-              <label for="files-stored">Arquivo armazenado na impressora</label>
-              <input
-                id="files-stored"
-                v-model="manualName"
-                type="text"
-                maxlength="255"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="busy"
-              />
-              <p v-if="manualName.trim() && !printableFile(manualName.trim())">
-                Nome inválido para o comando de impressão.
-              </p>
-              <label class="confirmation"
-                ><input
-                  v-model="confirmed"
-                  type="checkbox"
-                  :disabled="
-                    busy ||
-                    !availability.available ||
-                    !printableFile(manualName.trim())
-                  "
-                />Conferi o arquivo {{ manualName.trim() || 'informado' }} e a
-                impressora {{ row?.assignment.printerKey }}. Quero iniciar esta
-                impressão.</label
-              >
-              <button
-                type="submit"
-                :disabled="
-                  busy ||
-                  !availability.available ||
-                  !printableFile(manualName.trim()) ||
-                  !confirmed
-                "
-              >
-                Iniciar impressão
-              </button>
-            </form>
-            <form v-if="files.length" @submit.prevent="start">
-              <label for="files-existing">Arquivo para imprimir</label>
-              <select id="files-existing" v-model="selected" :disabled="busy">
-                <option value="">Selecione um arquivo</option>
-                <option
-                  v-for="file in files"
-                  :key="file.name"
-                  :value="file.name"
-                  :disabled="!printableFile(file.name)"
-                >
-                  {{ file.name }} ({{ file.size.toLocaleString('pt-BR') }}
-                  bytes)
-                </option>
-              </select>
-              <p>Subpastas não são aceitas pelo comando de impressão atual.</p>
-              <label class="confirmation"
-                ><input
-                  v-model="confirmed"
-                  type="checkbox"
-                  :disabled="busy || !selected || !availability.available"
-                />Conferi o arquivo {{ selected || 'selecionado' }} e a
-                impressora {{ row?.assignment.printerKey }}. Quero iniciar esta
-                impressão.</label
-              >
-              <button
-                type="submit"
-                :disabled="
-                  busy || !availability.available || !selected || !confirmed
-                "
-              >
-                Iniciar impressão
-              </button>
-            </form>
-          </section>
         </template>
+        <p v-else role="status">
+          É necessário um dispositivo aprovado deste navegador.
+          <NuxtLink to="/dispositivos">Gerenciar dispositivos</NuxtLink>
+        </p>
+        <label for="files-printer">Impressora</label>
+        <select
+          id="files-printer"
+          v-model="printer"
+          :disabled="busy || ready.inventory === 'loading'"
+        >
+          <option value="">Selecione uma impressora</option>
+          <option
+            v-for="item in ready.rows"
+            :key="item.assignment.assignmentId"
+            :value="item.assignment.assignmentId"
+          >
+            {{ item.assignment.printerKey }}
+          </option>
+        </select>
+        <p v-if="row">
+          Impressora selecionada: {{ row.assignment.printerKey }}
+        </p>
+        <div
+          v-if="ready.inventory === 'loading'"
+          aria-busy="true"
+          class="loading"
+        >
+          <p role="status">Carregando impressoras…</p>
+          <Skeleton /><Skeleton />
+        </div>
+        <EmptyState
+          v-else-if="!ready.rows.length"
+          title="Nenhuma impressora nesta página"
+          description="Adicione uma impressora a esta farm para enviar arquivos."
+        >
+          <NuxtLink to="/impressoras">Ir para impressoras</NuxtLink>
+        </EmptyState>
+        <button
+          v-if="ready.printerAfter"
+          type="button"
+          :disabled="busy"
+          @click="selectFarm(ready.scope.farmId)"
+        >
+          Primeira página de impressoras
+        </button>
+        <button
+          v-if="ready.nextPrinter"
+          type="button"
+          :disabled="busy"
+          @click="selectFarm(ready.scope.farmId, ready.nextPrinter)"
+        >
+          Próximas impressoras
+        </button>
+        <p v-if="!availability.available" id="files-unavailable">
+          {{ availability.reason }} O modo degradado permite somente leitura.
+        </p>
+        <section aria-labelledby="upload-title" :aria-busy="busy">
+          <h2 id="upload-title">Enviar arquivo</h2>
+          <form @submit.prevent="send">
+            <label for="files-upload"
+              >Arquivo .gcode ou .3mf (até 512 MiB)</label
+            >
+            <input
+              id="files-upload"
+              type="file"
+              accept=".gcode,.3mf"
+              :disabled="busy || !availability.available"
+              @change="chooseFile"
+            />
+            <button
+              type="submit"
+              :disabled="
+                busy ||
+                !availability.available ||
+                !upload ||
+                !!validateUpload(upload)
+              "
+            >
+              Enviar arquivo
+            </button>
+          </form>
+          <progress
+            v-if="operation.kind === 'uploading'"
+            :value="operation.sent"
+            :max="operation.total"
+            aria-label="Progresso do envio"
+          />
+        </section>
+        <section aria-labelledby="list-title">
+          <h2 id="list-title">Arquivos da impressora</h2>
+          <button
+            type="button"
+            :disabled="busy || !availability.available"
+            @click="list"
+          >
+            Consultar arquivos
+          </button>
+          <EmptyState
+            v-if="!files.length"
+            title="Nenhum arquivo listado"
+            description="Consulte os arquivos da impressora ou envie um arquivo."
+          />
+          <ul
+            v-if="files.some((file) => file.thumbnail)"
+            aria-label="Miniaturas dos arquivos"
+          >
+            <li
+              v-for="file in files.filter((item) => item.thumbnail)"
+              :key="file.name"
+            >
+              <img
+                :src="`data:image/png;base64,${file.thumbnail}`"
+                alt=""
+                width="96"
+                height="96"
+                style="object-fit: contain"
+              />
+              {{ file.name }}
+            </li>
+          </ul>
+          <form
+            v-if="manualEntry && !files.length"
+            @submit.prevent="startStored"
+          >
+            <p>
+              Listagem não suportada pela biblioteca desta impressora. Informe o
+              nome exato de um arquivo .gcode já armazenado na impressora.
+            </p>
+            <label for="files-stored">Arquivo armazenado na impressora</label>
+            <input
+              id="files-stored"
+              v-model="manualName"
+              type="text"
+              maxlength="255"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="busy"
+            />
+            <p v-if="manualName.trim() && !printableFile(manualName.trim())">
+              Nome inválido para o comando de impressão.
+            </p>
+            <label class="confirmation"
+              ><input
+                v-model="confirmed"
+                type="checkbox"
+                :disabled="
+                  busy ||
+                  !availability.available ||
+                  !printableFile(manualName.trim())
+                "
+              />Conferi o arquivo {{ manualName.trim() || 'informado' }} e a
+              impressora {{ row?.assignment.printerKey }}. Quero iniciar esta
+              impressão.</label
+            >
+            <button
+              type="submit"
+              :disabled="
+                busy ||
+                !availability.available ||
+                !printableFile(manualName.trim()) ||
+                !confirmed
+              "
+            >
+              Iniciar impressão
+            </button>
+          </form>
+          <form v-if="files.length" @submit.prevent="start">
+            <label for="files-existing">Arquivo para imprimir</label>
+            <select id="files-existing" v-model="selected" :disabled="busy">
+              <option value="">Selecione um arquivo</option>
+              <option
+                v-for="file in files"
+                :key="file.name"
+                :value="file.name"
+                :disabled="!printableFile(file.name)"
+              >
+                {{ file.name }} ({{ file.size.toLocaleString('pt-BR') }}
+                bytes)
+              </option>
+            </select>
+            <p>Subpastas não são aceitas pelo comando de impressão atual.</p>
+            <label class="confirmation"
+              ><input
+                v-model="confirmed"
+                type="checkbox"
+                :disabled="busy || !selected || !availability.available"
+              />Conferi o arquivo {{ selected || 'selecionado' }} e a impressora
+              {{ row?.assignment.printerKey }}. Quero iniciar esta
+              impressão.</label
+            >
+            <button
+              type="submit"
+              :disabled="
+                busy || !availability.available || !selected || !confirmed
+              "
+            >
+              Iniciar impressão
+            </button>
+          </form>
+        </section>
       </template>
-      <p role="status" aria-live="polite">{{ message }}</p>
-      <button
-        v-if="busy && operation.kind !== 'starting'"
-        type="button"
-        @click="session.cancel()"
-      >
-        Cancelar operação
-      </button>
-    </main>
-  </NuxtLayout>
+    </template>
+    <p role="status" aria-live="polite">{{ message }}</p>
+    <button
+      v-if="busy && operation.kind !== 'starting'"
+      type="button"
+      @click="session.cancel()"
+    >
+      Cancelar operação
+    </button>
+  </main>
 </template>
 
 <style scoped>

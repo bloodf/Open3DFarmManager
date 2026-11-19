@@ -1,3 +1,4 @@
+import { readPowerDevices } from './control-power.ts'
 import { readSystemServices } from './control-system-services.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
@@ -75,6 +76,8 @@ export function createMoonrakerDetailStream(input: {
     let id = 0
     let timer: ReturnType<typeof setTimeout> | undefined
     let selected = new Set<string>()
+    let powerDevices: Awaited<ReturnType<typeof readPowerDevices>> | undefined
+    let powerRead = 0
     let system: Awaited<ReturnType<typeof readSystemServices>> = {}
     let webcams: Awaited<ReturnType<typeof listDetailWebcams>> | undefined
     let ready = false
@@ -139,11 +142,33 @@ export function createMoonrakerDetailStream(input: {
       })
     }
 
+    let metadataFile = ''
+    let metadata: Fields = {}
     function publish() {
       timer = undefined
       if (signal.aborted || !ready) return
       lastUpdate = performance.now()
-      const normalized = normalizeDetail(status)
+      const print = status.get('print_stats')
+      const file = string(print?.filename, 512)
+      if (file !== metadataFile) {
+        metadataFile = file
+        metadata = {}
+        if (file)
+          void request('server.files.metadata', { filename: file })
+            .then((result) => {
+              if (!ready || metadataFile !== file) return
+              const value = fields(result)
+              metadata = {
+                estimated_time: value.estimated_time,
+                filament_total: value.filament_total,
+              }
+              schedulePublish()
+            })
+            .catch(() => {})
+      }
+      const enriched = new Map(status)
+      if (print) enriched.set('print_stats', { ...print, ...metadata })
+      const normalized = normalizeDetail(enriched)
       const frame = PrinterDetailUpdate.safeParse({
         v: 1,
         t: 'detail.update',
@@ -152,10 +177,12 @@ export function createMoonrakerDetailStream(input: {
         capabilities: [
           ...normalized.capabilities,
           ...(Object.keys(system).length ? ['system'] : []),
+          ...(powerDevices?.length ? ['power'] : []),
           ...(webcams ? ['webcams'] : []),
         ],
         detail: {
           ...system,
+          ...(powerDevices && { powerDevices }),
           ...normalized.detail,
           ...(webcams && { webcams }),
         },
@@ -169,6 +196,14 @@ export function createMoonrakerDetailStream(input: {
       if (timer) return
       const wait = DETAIL_MIN_INTERVAL_MS - (performance.now() - lastUpdate)
       timer = setTimeout(publish, Math.max(0, Math.ceil(wait)))
+    }
+
+    async function refreshPower() {
+      const current = ++powerRead
+      const devices = await readPowerDevices(request).catch(() => undefined)
+      if (!ready || current !== powerRead || signal.aborted) return
+      powerDevices = devices
+      schedulePublish()
     }
 
     function merge(delta: unknown, eventtime: unknown) {
@@ -214,6 +249,9 @@ export function createMoonrakerDetailStream(input: {
       switch (frame.method) {
         case 'notify_status_update':
           if (merge(data, eventtime)) schedulePublish()
+          break
+        case 'notify_power_changed':
+          void refreshPower()
           break
         case 'notify_gcode_response':
           if (typeof data === 'string') forwardConsole(data)
@@ -263,6 +301,7 @@ export function createMoonrakerDetailStream(input: {
           system = value
           schedulePublish()
         })
+        void refreshPower()
         void listDetailWebcams(request)
           .then((catalogue) => {
             if (socket.readyState !== socket.OPEN || signal.aborted) return

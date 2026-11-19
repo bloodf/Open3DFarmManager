@@ -12,8 +12,10 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import { POWER_MARKER, readPowerDevices } from './control-power.ts'
 import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
+import { timelapseMarkers } from './control-timelapse.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
@@ -143,13 +145,35 @@ export function detectMoonrakerMacroParams(
   )
 }
 
+const PowerComponent = z.object({
+  components: z.array(z.string()).max(512),
+})
+
+/** True only when a `server.info` reply lists the power component. */
+const powerListed = (result: unknown) => {
+  const info = PowerComponent.safeParse(result)
+  return info.success && info.data.components.includes('power')
+}
+
 /**
- * One read-only server.info: a marker for each Moonraker component the
- * Connector drives (the job queue). A failure rejects; the caller advertises
- * nothing for those components rather than guessing.
+ * Read the Moonraker components, then the power device catalogue only when
+ * `server.info` lists the power component. Advertise each capability only
+ * when its probe succeeds.
  */
-export function detectMoonrakerComponents(
+export async function detectMoonrakerComponents(
   input: DetectInput,
 ): Promise<readonly string[]> {
-  return readOnlyOnce(input, { method: 'server.info' }, queueMarkers)
+  const info = await readOnlyOnce(
+    input,
+    { method: 'server.info' },
+    (result) => ({
+      markers: [...queueMarkers(result), ...timelapseMarkers(result)],
+      power: powerListed(result),
+    }),
+  ).catch(() => ({ markers: [], power: false }))
+  if (!info.power) return info.markers
+  const devices = await readPowerDevices((method) =>
+    readOnlyOnce(input, { method }, (result) => result),
+  ).catch(() => [])
+  return [...info.markers, ...(devices.length ? [POWER_MARKER] : [])]
 }

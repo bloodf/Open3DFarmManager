@@ -4,6 +4,10 @@ import { z } from 'zod'
 export const ControlAction = z.enum(['pause', 'resume', 'cancel'])
 export type ControlAction = z.infer<typeof ControlAction>
 /** Every action a signed 'printer-control' command may carry. */
+export const PowerArguments = z.strictObject({
+  device: z.string().min(1).max(128),
+  on: z.boolean(),
+})
 export const ExtendedControlAction = z.enum([
   ...ControlAction.options,
   'emergency_stop',
@@ -16,6 +20,8 @@ export const ExtendedControlAction = z.enum([
   'start_library_print',
   'firmware_restart',
   'service',
+  'power',
+  'timelapse',
   'run_macro',
   'load_filament',
   'unload_filament',
@@ -24,9 +30,11 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'exclude_object',
   'set_led',
   'set_pin',
   'queue_op',
+  'gcode',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -80,6 +88,14 @@ export const LibraryPrintArgs = z.strictObject({
   ams_mapping: AmsMapping.optional(),
 })
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
+/** Console line: one line of printable ASCII, at most 256 bytes. */
+export const GCODE_LINE_MAX_BYTES = 256
+export const GcodeLine = z
+  .string()
+  .min(1)
+  .max(GCODE_LINE_MAX_BYTES)
+  .refine((line) => !/[^\x20-\x7e]/.test(line))
+  .refine((line) => line.trim().length > 0)
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 export const MACRO_PARAM_MAX_KEYS = 16
 export const MACRO_PARAM_MAX_VALUE_CHARS = 64
@@ -117,18 +133,35 @@ export const ServiceArguments = z.strictObject({
 })
 export type ServiceOperation = z.infer<typeof ServiceArguments>['op']
 
+/** Timelapse video: a plain file name in the timelapse root, no path. */
+export const TimelapseFileName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && v !== '.' && v !== '..')
+/** Render the captured frames, or delete one rendered video. */
+export const TimelapseArguments = z.discriminatedUnion('op', [
+  z.strictObject({ op: z.literal('render') }),
+  z.strictObject({ op: z.literal('delete'), file: TimelapseFileName }),
+])
+export type TimelapseArguments = z.infer<typeof TimelapseArguments>
+
 export function controlRoleAllowed(
   role: string,
   action?: ExtendedControlAction,
 ): boolean {
   if (action === 'service') return role === 'owner'
-  if (action === 'run_macro') return role === 'owner' || role === 'admin'
+  if (action === 'gcode') return role === 'admin'
+  if (action === 'power' || action === 'run_macro')
+    return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
 export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (action === 'exclude_object')
+    return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
   if (action === 'service') return state === 'idle' || state === 'cancelled'
   if (action === 'firmware_restart')
@@ -178,6 +211,12 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+export const ExcludeObjectArguments = z.strictObject({
+  name: z
+    .string()
+    .max(128)
+    .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/),
+})
 /** Most files or jobs one queue operation may name. */
 export const QUEUE_OP_MAX_ITEMS = 32
 /** Queue file: a gcodes-relative path, no traversal, no control characters. */
@@ -219,12 +258,22 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
 ])
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('power'), args: PowerArguments }),
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
+  z.strictObject({ action: z.literal('timelapse'), args: TimelapseArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
+  z.strictObject({
+    action: z.literal('exclude_object'),
+    args: ExcludeObjectArguments,
+  }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
     args: z.strictObject({ name: MacroName, params: MacroParams.optional() }),
+  }),
+  z.strictObject({
+    action: z.literal('gcode'),
+    args: z.strictObject({ line: GcodeLine }),
   }),
   z.strictObject({
     action: z.literal('load_filament'),

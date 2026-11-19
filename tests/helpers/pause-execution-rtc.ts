@@ -444,7 +444,7 @@ async function connectorChild(
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        NODE_OPTIONS: '',
+        NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
         ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,
         NODE_TLS_REJECT_UNAUTHORIZED: '1',

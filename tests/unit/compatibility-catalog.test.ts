@@ -63,18 +63,58 @@ describe('áreas de controle do catálogo', () => {
     },
   )
 
-  it('mantém desconhecidas as famílias que não são Klipper até o E22', () => {
-    for (const products of [
-      anycubicCatalog,
-      bambuCatalog,
-      crealityCatalog,
-      lanCatalog,
-    ])
-      for (const product of products)
+  it('mantém desconhecidas as famílias que ainda não têm o E22', () => {
+    for (const products of [anycubicCatalog, lanCatalog])
+      for (const product of products) {
+        if (
+          product.id === 'anycubic-kobra-x' ||
+          product.id === 'anycubic-kobra-3-lan'
+        )
+          continue
         for (const key of controlAreaKeys)
           expect(product.controlAreas[key], `${product.id}.${key}`).toBe(
             'unknown',
           )
+      }
+  })
+
+  it('documenta as áreas da Kobra X e da Anycubic LAN do #444', () => {
+    const kobraX = anycubicCatalog.find(
+      (product) => product.id === 'anycubic-kobra-x',
+    )!
+    const kobra3Lan = lanCatalog.find(
+      (product) => product.id === 'anycubic-kobra-3-lan',
+    )!
+    for (const key of [
+      'temperatures',
+      'fans',
+      'leds',
+      'printStatus',
+      'fileManager',
+    ] as const) {
+      expect(kobraX.controlAreas[key]).toBe('documented')
+      expect(kobra3Lan.controlAreas[key]).toBe('documented')
+    }
+    expect(kobraX.controlAreas.webcams).toBe('unsupported')
+    expect(kobra3Lan.controlAreas.webcams).toBe('documented')
+    for (const key of [
+      'motion',
+      'extrusion',
+      'macros',
+      'console',
+      'excludeObject',
+      'jobQueue',
+      'bedMesh',
+      'config',
+      'services',
+      'history',
+      'timelapse',
+      'power',
+      'updates',
+    ] as const) {
+      expect(kobraX.controlAreas[key]).toBe('unsupported')
+      expect(kobra3Lan.controlAreas[key]).toBe('unsupported')
+    }
   })
 
   it('não aceita simulado sem referência a teste em simulador existente', () => {

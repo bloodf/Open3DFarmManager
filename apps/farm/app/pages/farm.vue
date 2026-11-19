@@ -94,6 +94,15 @@ const errorText = computed(() =>
   state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
 )
 const route = useRoute()
+watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
+  if (
+    typeof farmId === 'string' &&
+    farms?.some((farm) => farm.farmId === farmId) &&
+    ready.value?.scope?.farmId !== farmId
+  )
+    void selectFarm(farmId)
+})
+
 const router = useRouter()
 const wallQuery = computed({
   get: () => readFarmWallQuery(route.query),

@@ -104,6 +104,8 @@ export interface MoonrakerMockOptions {
   macros?: readonly string[] | undefined
   webcams?: readonly MoonrakerWebcamEntry[] | undefined
   files?: readonly MoonrakerFileEntry[] | undefined
+  /** Rendered videos in the `timelapse` file root. */
+  timelapseFiles?: readonly MoonrakerFileEntry[] | undefined
   auth?: MoonrakerAuthConfig | undefined
   firmware?:
     | {
@@ -668,14 +670,33 @@ export async function startMoonrakerMock(
   }
   let lastFrame = 0
   const configFiles = new Map<string, StoredMoonrakerFile>()
+  const timelapseFiles = new Map<string, StoredMoonrakerFile>()
+  for (const entry of options.timelapseFiles ?? []) {
+    const content = Buffer.from(entry.content ?? '; mock timelapse\n')
+    timelapseFiles.set(entry.path, {
+      path: entry.path,
+      size: entry.size ?? content.length,
+      modified: entry.modified ?? Math.floor(Date.now() / 1000),
+      content,
+      thumbnails: new Map(),
+    })
+  }
   const directories = new Set<string>(['gcodes', 'config'])
   const fileRoot = (root: string) =>
-    root === 'config' ? configFiles : filesMap
+    root === 'config'
+      ? configFiles
+      : root === 'timelapse'
+        ? timelapseFiles
+        : filesMap
   const fileLocation = (value: unknown) => {
     const path = typeof value === 'string' ? safeFilePath(value) : null
     const slash = path?.indexOf('/') ?? -1
     const root = path?.slice(0, slash)
-    if (!path || slash < 0 || (root !== 'gcodes' && root !== 'config')) {
+    if (
+      !path ||
+      slash < 0 ||
+      (root !== 'gcodes' && root !== 'config' && root !== 'timelapse')
+    ) {
       throw new Error('Invalid file path')
     }
     return { root, path: path.slice(slash + 1) }
@@ -1546,6 +1567,7 @@ export async function startMoonrakerMock(
         'file_manager',
         'history',
         'job_queue',
+        'power',
         'spoolman',
         'update_manager',
         'webcam',
@@ -1557,7 +1579,8 @@ export async function startMoonrakerMock(
   }
 
   function fileListResult(root = 'gcodes') {
-    if (root !== 'gcodes' && root !== 'config') return []
+    if (root !== 'gcodes' && root !== 'config' && root !== 'timelapse')
+      return []
     return [...fileRoot(root).values()].map((f) => ({
       path: f.path,
       size: f.size,

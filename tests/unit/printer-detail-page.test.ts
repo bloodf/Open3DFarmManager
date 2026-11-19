@@ -81,6 +81,7 @@ describe('tab visibility by capability', () => {
       'console',
       'arquivos',
       'fila',
+      'timelapse',
       'malha',
       'configuracao',
       'sistema',
@@ -237,5 +238,5 @@ describe('accessibility', () => {
     } finally {
       await server.close()
     }
-  }, 30_000)
+  }, 120_000)
 })

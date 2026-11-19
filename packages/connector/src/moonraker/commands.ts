@@ -1,11 +1,14 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { buildConsoleScript } from './control-console.ts'
 import { buildMacroScript } from './control-macros.ts'
 import {
   buildMotionScript,
   isMotionAction,
   motionSupported,
 } from './control-motion.ts'
+import { POWER_MARKER, powerCommand } from './control-power.ts'
 import { serviceCommand } from './control-system-services.ts'
+import { parseTimelapseOp, timelapseSupported } from './control-timelapse.ts'
 import { parseExtrude } from './control-extrusion.ts'
 import {
   ledNames,
@@ -102,6 +105,8 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('exclude_object') && objects.includes('print_stats'))
+    supported.push('exclude_object')
   // Named LEDs and output pins need the object list; an unknown list never widens support.
   if (ledNames(objects).length) supported.push('set_led')
   if (pinNames(objects).length) supported.push('set_pin')
@@ -112,7 +117,10 @@ export function supportedMoonrakerActions(
   if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
     supported.push('unload_filament')
   // The queue is a Moonraker component; detection marks it next to the objects.
+  if (objects.includes(POWER_MARKER)) supported.push('power')
   if (queueSupported(objects)) supported.push('queue_op')
+  // Timelapse is a plugin component; detection marks it next to the objects.
+  if (timelapseSupported(objects)) supported.push('timelapse')
   // Motion actions are advertised only when the printer lists a toolhead.
   if (motionSupported(objects))
     supported.push('jog', 'motors_off', 'z_babystep', 'set_factor')
@@ -171,9 +179,17 @@ export function buildMoonrakerCommand(
     }
   }
 
+  if (action === 'power') return powerCommand(args, objects)
   if (action === 'queue_op') {
     if (!queueSupported(objects)) throw new Error('Queue unavailable')
     return parseQueueOp(args).call
+  }
+  if (action === 'gcode') {
+    keys(['line'])
+    return {
+      method: 'printer.gcode.script',
+      params: { script: buildConsoleScript(args) },
+    }
   }
 
   if (action === 'extrude') {
@@ -197,6 +213,11 @@ export function buildMoonrakerCommand(
       throw new Error('Service control unavailable')
     return serviceCommand(args)
   }
+  if (action === 'timelapse') {
+    if (!timelapseSupported(objects)) throw new Error('Timelapse unavailable')
+    return parseTimelapseOp(args).call
+  }
+
   if (action === 'pause') {
     keys([])
     return { method: 'printer.print.pause' }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
@@ -15,6 +16,7 @@ import { useFarmView } from '../../composables/useFarmView.ts'
 import type {
   ExtendedControlAction,
   QueueOpArguments,
+  TimelapseArguments,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
@@ -31,15 +33,39 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
+const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const initialPrinterKey = String(route.params.printerKey ?? '')
 const webcams = shallowRef<
   Parameters<WebcamDetailOptions['onUpdate']>[0] | null
 >(null)
-const systemFrame =
+const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const vendorFrame = computed(() =>
+  detailFrame.value?.vendor ? detailFrame.value : undefined,
+)
+const printFile = ref('')
+const systemFrame = computed(() =>
+  detailFrame.value?.capabilities.includes('system')
+    ? detailFrame.value
+    : undefined,
+)
+const consoleCommands = shallowRef<readonly string[]>([])
+const consoleResponses = shallowRef<
+  readonly { seq: number; lines: readonly string[] }[]
+>([])
+let consoleSequence = 0
 const view = useFarmView({
+  onGcodeHelp(commands) {
+    consoleCommands.value = commands
+  },
+  onGcodeResponse(frame) {
+    consoleResponses.value = [
+      ...consoleResponses.value.slice(-999),
+      { seq: consoleSequence++, lines: frame.lines },
+    ]
+  },
   onDetail(frame) {
-    if (frame.capabilities.includes('system')) systemFrame.value = frame
+    detailFrame.value = frame
   },
   printerKey: initialPrinterKey,
   onUpdate(value) {
@@ -47,6 +73,8 @@ const view = useFarmView({
   },
   onClose() {
     webcams.value = null
+    detailFrame.value = undefined
+    consoleCommands.value = []
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -77,7 +105,6 @@ const {
   closePause,
 } = useFarmControls(view, dialog)
 
-const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const row = computed(
   () =>
     ready.value?.rows.find(
@@ -109,9 +136,12 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
       ? (['system'] as const)
       : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('power') ? (['power'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
+    ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
+    ...(controls?.includes('gcode') ? (['console'] as const) : []),
   ]
   return found.length ? found : undefined
 })
@@ -150,6 +180,7 @@ function availability(action: ExtendedControlAction) {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const excludeAvailability = computed(() => availability('exclude_object'))
 const extrudeAvailability = computed(() => availability('extrude'))
 const extrusion = computed(() => {
   const advertised = state.value?.controls?.includes('extrude') ?? false
@@ -168,7 +199,7 @@ const extrusion = computed(() => {
 const outputs = computed(() => {
   const controls = state.value?.controls ?? []
   const advertised = {
-    fan: controls.includes('set_fan'),
+    fan: !vendorFrame.value && controls.includes('set_fan'),
     led: controls.includes('set_led'),
     pin: controls.includes('set_pin'),
   }
@@ -193,7 +224,25 @@ const outputs = computed(() => {
         : undefined,
   }
 })
+const powerAvailability = computed(() => availability('power'))
 const serviceAvailability = computed(() => availability('service'))
+const timelapseAvailability = computed(() => availability('timelapse'))
+const timelapse = computed(() => {
+  const advertised = state.value?.controls?.includes('timelapse') ?? false
+  return {
+    advertised,
+    canCommand: timelapseAvailability.value.available && !commandInFlight.value,
+    reason: timelapseAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? timelapseAvailability.value.reason
+        : undefined,
+    // Play and download wait for the file-transfer channel of the session.
+    canTransfer: false,
+    transferReason:
+      'Reproduzir e baixar exigem o canal de transferência de arquivos, ainda não aberto nesta sessão.',
+  }
+})
 const queueAvailability = computed(() => availability('queue_op'))
 const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
@@ -230,6 +279,20 @@ const motionAvailability = computed(() =>
     }),
   ),
 )
+
+const gcodeAvailability = computed(() => availability('gcode'))
+const gcodeConsole = computed(() => ({
+  advertised: state.value?.controls?.includes('gcode') ?? false,
+  canCommand: gcodeAvailability.value.available && !commandInFlight.value,
+  reason: gcodeAvailability.value.available
+    ? 'Um comando já está em andamento.'
+    : gcodeAvailability.value.reason,
+  printerKey: printerKey.value,
+  commands: consoleCommands.value,
+  responses: consoleResponses.value,
+  printing:
+    state.value?.state === 'printing' || state.value?.state === 'paused',
+}))
 
 const macroAvailability = computed(() => availability('run_macro'))
 const macros = computed(() => {
@@ -299,6 +362,12 @@ function setPin(name: string, value: number, event: Event) {
 function queueOp(args: QueueOpArguments, event: Event) {
   if (row.value) void openControl(row.value, 'queue_op', event, args)
 }
+function timelapseOp(args: TimelapseArguments, event: Event) {
+  if (row.value) void openControl(row.value, 'timelapse', event, args)
+}
+function sendGcode(line: string, event: Event) {
+  if (row.value) void openControl(row.value, 'gcode', event, { line })
+}
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
 }
@@ -364,6 +433,7 @@ onMounted(() => heading.value?.focus())
           : 'sem conexão direta'
       "
       :live="live"
+      :supported-only="vendorFrame?.vendor === 'creality'"
       :last-known-text="lastKnownText"
       :capabilities="capabilities"
       :heaters="heaters"
@@ -389,20 +459,58 @@ onMounted(() => heading.value?.focus())
         (speed, flow, event) =>
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
+      :print-status="
+        detailFrame?.printerKey === printerKey ? detailFrame : undefined
+      "
+      :exclude-available="
+        live &&
+        !!state?.controls?.includes('exclude_object') &&
+        excludeAvailability.available &&
+        !commandInFlight
+      "
+      :exclude-reason="
+        !state?.controls?.includes('exclude_object')
+          ? undefined
+          : excludeAvailability.available
+            ? 'Aguarde a conexão ou o comando em andamento.'
+            : excludeAvailability.reason
+      "
+      @exclude-object="
+        (name, event) => control('exclude_object', event, { name })
+      "
       :extrusion="extrusion"
       :queue="queue"
+      :timelapse="timelapse"
       :macros="macros"
+      :gcode-console="gcodeConsole"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @queue-op="queueOp"
+      @timelapse-op="timelapseOp"
       @run-macro="runMacro"
+      @send-gcode="sendGcode"
       @set-fan="setFan"
       @set-led="setLed"
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
       <template #sistema>
+        <PowerPanel
+          v-if="state?.controls?.includes('power')"
+          :devices="
+            live && detailFrame?.printerKey === printerKey
+              ? detailFrame.detail.powerDevices
+              : undefined
+          "
+          :can-command="live && powerAvailability.available && !commandInFlight"
+          :reason="
+            commandInFlight
+              ? 'Um comando já está em andamento.'
+              : powerAvailability.reason
+          "
+          @toggle="(args, event) => control('power', event, args)"
+        />
         <SystemServicesPanel
           :firmware="systemFrame?.detail.firmware"
           :host="systemFrame?.detail.host"
@@ -419,6 +527,106 @@ onMounted(() => heading.value?.focus())
         />
       </template>
     </PrinterDetailDashboard>
+    <section
+      v-if="row && live && vendorFrame"
+      aria-label="Detalhes da impressora"
+    >
+      <h2>Impressão</h2>
+      <p v-if="vendorFrame.detail.print?.file">
+        {{ vendorFrame.detail.print.file }}
+      </p>
+      <p v-if="vendorFrame.detail.print?.progress !== undefined">
+        Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
+      </p>
+      <button
+        v-if="
+          vendorFrame.vendor === 'creality' && state?.controls?.includes('home')
+        "
+        type="button"
+        :disabled="!availability('home').available || commandInFlight"
+        @click="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
+      >
+        Referenciar todos os eixos
+      </button>
+      <form
+        v-if="state?.controls?.includes('start_print')"
+        @submit.prevent="
+          (event) => control('start_print', event, { file: printFile })
+        "
+      >
+        <label for="detail-print-file">Nome do arquivo na impressora</label>
+        <input
+          id="detail-print-file"
+          v-model.trim="printFile"
+          required
+          maxlength="255"
+        />
+        <button
+          type="submit"
+          :disabled="!availability('start_print').available || commandInFlight"
+        >
+          Iniciar impressão
+        </button>
+      </form>
+      <template v-if="vendorFrame.detail.fans?.length">
+        <h2>Ventoinhas</h2>
+        <div v-for="fan in vendorFrame.detail.fans" :key="fan.name">
+          <p>
+            {{
+              fan.name === 'part'
+                ? 'Peça'
+                : fan.name === 'aux'
+                  ? 'Auxiliar'
+                  : 'Câmara'
+            }}: {{ Math.round(fan.speed * 100) }}%
+          </p>
+          <button
+            v-if="state?.controls?.includes('set_fan')"
+            type="button"
+            :disabled="!availability('set_fan').available || commandInFlight"
+            @click="(event) => setFan(fan.name, fan.speed > 0 ? 0 : 100, event)"
+          >
+            {{
+              fan.speed > 0 ? 'Desligar ventoinha' : 'Ligar ventoinha a 100%'
+            }}
+          </button>
+        </div>
+      </template>
+      <template v-if="vendorFrame.detail.lights?.length">
+        <h2>Iluminação</h2>
+        <p>
+          {{ vendorFrame.detail.lights[0]?.white ? 'Ligada' : 'Desligada' }}
+        </p>
+        <button
+          v-if="state?.controls?.includes('set_light')"
+          type="button"
+          :disabled="!availability('set_light').available || commandInFlight"
+          @click="
+            (event) =>
+              control('set_light', event, {
+                on: !vendorFrame?.detail.lights?.[0]?.white,
+              })
+          "
+        >
+          {{
+            vendorFrame.detail.lights[0]?.white ? 'Desligar luz' : 'Ligar luz'
+          }}
+        </button>
+      </template>
+      <template v-if="vendorFrame.detail.materials?.length">
+        <h2>Slots ACE</h2>
+        <ul>
+          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
+            {{ slot.slot
+            }}<template v-if="slot.materialType">
+              · {{ slot.materialType }}</template
+            >
+            <template v-if="slot.active"> · Em uso</template>
+          </li>
+        </ul>
+      </template>
+    </section>
+
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"
@@ -437,8 +645,13 @@ onMounted(() => heading.value?.focus())
           {{ extendedLabel(pauseTarget.action) }} — {{ pauseTarget.printerKey }}
         </h2>
         <p id="pause-dialog-description">
-          Confirme o comando para esta impressora. Ele será enviado diretamente
-          ao Connector e não será repetido automaticamente.
+          <template v-if="pauseTarget.action === 'power'">
+            Confirme se deseja {{ pauseTarget.args.on ? 'ligar' : 'desligar' }}
+            {{ pauseTarget.args.device }} nesta impressora.
+          </template>
+          <template v-else>Confirme o comando para esta impressora.</template>
+          Ele será enviado diretamente ao Connector e não será repetido
+          automaticamente.
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
         <div class="actions">

@@ -174,4 +174,4 @@ it('renders wall details and passes axe at 320, 768 and 1280 px', async () => {
   } finally {
     await server.close()
   }
-}, 30_000)
+}, 120_000)

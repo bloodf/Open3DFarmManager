@@ -144,7 +144,7 @@ async function authorityFixture(action: Action, args: Args) {
     issued_at: now,
     expires_at: now + 30000,
     account_id: command.account_id,
-    role: 'admin' as const,
+    role: 'owner' as const,
     farm_id: binding.farm_id,
     agent_id: binding.agent_id,
     key_id: binding.key_id,

@@ -7,6 +7,95 @@ const error = ref(false)
 const summary = ref<HTMLElement | null>(null)
 const bambuCloudEnabled = ref(false)
 
+type IdentitiesResponse = {
+  google?: {
+    available?: boolean
+    linked?: boolean
+    canUnlink?: boolean
+  }
+}
+
+const googleAvailable = ref(false)
+const googleLinked = ref(false)
+const googleCanUnlink = ref(false)
+const googleBusy = ref(false)
+const googleMessage = ref('')
+const googleError = ref(false)
+const googleSummary = ref<HTMLElement | null>(null)
+
+async function loadIdentities() {
+  try {
+    const response = await $fetch<IdentitiesResponse>('/api/auth/identities', {
+      retry: 0,
+      timeout: 10_000,
+    })
+    const google = response.google ?? {}
+    googleAvailable.value = google.available === true
+    googleLinked.value = google.linked === true
+    googleCanUnlink.value = google.canUnlink === true
+  } catch {
+    googleAvailable.value = false
+    googleLinked.value = false
+    googleCanUnlink.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadIdentities()
+  if (window.location.hash === '#google=vinculado') {
+    googleMessage.value = 'Conta Google vinculada.'
+    history.replaceState(null, '', window.location.pathname)
+    await nextTick()
+    googleSummary.value?.focus()
+  } else if (window.location.hash === '#erro=google-vinculo') {
+    googleMessage.value = 'Não foi possível vincular o Google. Tente novamente.'
+    googleError.value = true
+    history.replaceState(null, '', window.location.pathname)
+    await nextTick()
+    googleSummary.value?.focus()
+  }
+})
+
+function startGoogleLink() {
+  if (googleBusy.value || !googleAvailable.value || googleLinked.value) return
+  googleBusy.value = true
+  window.location.assign('/api/auth/google/link/start')
+}
+
+async function unlinkGoogle() {
+  if (googleBusy.value || !googleLinked.value || !googleCanUnlink.value) return
+  googleBusy.value = true
+  googleMessage.value = ''
+  googleError.value = false
+  try {
+    await $fetch('/api/auth/identities/google', {
+      method: 'DELETE',
+      retry: 0,
+      timeout: 15_000,
+    })
+    googleLinked.value = false
+    googleCanUnlink.value = false
+    googleMessage.value = 'Conta Google desvinculada.'
+    await loadIdentities()
+  } catch (cause: unknown) {
+    const status =
+      cause && typeof cause === 'object' && 'statusCode' in cause
+        ? cause.statusCode
+        : undefined
+    googleMessage.value =
+      status === 409
+        ? 'Mantenha outra forma de entrada antes de desvincular o Google.'
+        : status === 404
+          ? 'Nenhuma conta Google vinculada.'
+          : 'Não foi possível desvincular o Google agora.'
+    googleError.value = true
+  } finally {
+    googleBusy.value = false
+    await nextTick()
+    googleSummary.value?.focus()
+  }
+}
+
 async function changePassword() {
   if (pending.value) return
   pending.value = true
@@ -23,6 +112,7 @@ async function changePassword() {
       timeout: 15_000,
     })
     message.value = 'Senha alterada. As outras sessões foram encerradas.'
+    await loadIdentities()
   } catch (cause: unknown) {
     const status =
       cause && typeof cause === 'object' && 'statusCode' in cause
@@ -51,6 +141,46 @@ async function changePassword() {
   <main id="conteudo">
     <small>Open3DFarmManager</small>
     <h1>Conta</h1>
+    <section aria-labelledby="google-heading">
+      <h2 id="google-heading">Conta Google</h2>
+      <p v-if="!googleAvailable && !googleLinked" class="help">
+        O vínculo com o Google fica indisponível enquanto o provedor não estiver
+        ativo nesta instalação.
+      </p>
+      <p v-else-if="googleLinked" class="help">
+        Uma conta Google está vinculada.
+      </p>
+      <p v-else class="help">Nenhuma conta Google vinculada.</p>
+      <p
+        ref="googleSummary"
+        :role="googleError ? 'alert' : 'status'"
+        tabindex="-1"
+      >
+        {{ googleMessage }}
+      </p>
+      <button
+        v-if="googleAvailable && !googleLinked"
+        type="button"
+        class="google-button"
+        :disabled="googleBusy"
+        :aria-busy="googleBusy"
+        @click="startGoogleLink"
+      >
+        {{ googleBusy ? 'Abrindo o Google…' : 'Vincular conta Google' }}
+      </button>
+      <button
+        v-if="googleLinked && googleCanUnlink"
+        type="button"
+        :disabled="googleBusy"
+        :aria-busy="googleBusy"
+        @click="unlinkGoogle"
+      >
+        {{ googleBusy ? 'Desvinculando…' : 'Desvincular Google' }}
+      </button>
+      <p v-if="googleLinked && !googleCanUnlink" class="help">
+        Defina uma senha ou vincule outro provedor antes de remover o Google.
+      </p>
+    </section>
     <h2>Alterar senha</h2>
     <form
       method="post"
@@ -121,5 +251,11 @@ button:focus-visible,
 input:focus-visible {
   outline: 3px solid currentColor;
   outline-offset: 3px;
+}
+.help {
+  max-width: 36rem;
+}
+.google-button {
+  margin-top: 0.75rem;
 }
 </style>

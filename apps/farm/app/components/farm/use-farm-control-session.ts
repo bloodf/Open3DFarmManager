@@ -11,21 +11,21 @@ import {
 import type {
   ControlAction,
   ExtendedControlAction,
-} from '../../../../packages/farm-protocol/src/control-actions.ts'
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   controlStatusText,
   liveControlActionAvailability,
-} from '../utils/farm-control.ts'
-import { livePauseAvailability } from '../utils/farm-pause.ts'
-import { macroArgs } from '../utils/farm-macros.ts'
-import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
+} from '../../utils/farm-control.ts'
+import { livePauseAvailability } from '../../utils/farm-pause.ts'
+import { macroArgs } from '../../utils/farm-macros.ts'
+import type { FarmKeyState, FarmRow } from '../../utils/farm-view.ts'
 import {
   openFarmPauseControl,
   PAUSE_CAPABILITY_MARGIN_MS,
   type FarmPauseControl,
   type FarmPauseControlState,
-} from '../utils/webrtc/farm-pause-control.ts'
-import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
+} from '../../utils/webrtc/farm-pause-control.ts'
+import { createFarmStatusKeyResolver } from '../../utils/webrtc/farm-status-key-resolver.ts'
 
 type ReadyLike = {
   accountId: string

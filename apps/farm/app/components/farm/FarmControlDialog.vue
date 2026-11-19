@@ -21,35 +21,26 @@ defineProps<{
   pauseState: FarmPauseControlState
   pauseRemaining: number
   pauseStatus: string
+  confirmControl: () => void
+  closePause: () => void
+  cancelPause: (event: Event) => void
 }>()
 
-const emit = defineEmits<{
-  confirm: []
-  close: []
-  cancel: [event: Event]
-}>()
-
+// Same element refs the farm page and the controls fixture bind to.
 const pauseDialog = defineModel<HTMLDialogElement | null>('pauseDialog', {
   default: null,
 })
 const pauseCancel = defineModel<HTMLButtonElement | null>('pauseCancel', {
   default: null,
 })
-
-function bindDialog(el: unknown) {
-  pauseDialog.value = el instanceof HTMLDialogElement ? el : null
-}
-function bindCancel(el: unknown) {
-  pauseCancel.value = el instanceof HTMLButtonElement ? el : null
-}
 </script>
 
 <template>
   <dialog
-    :ref="bindDialog"
+    ref="pauseDialog"
     aria-labelledby="pause-dialog-title"
     aria-describedby="pause-dialog-description"
-    @cancel="emit('cancel', $event)"
+    @cancel="cancelPause"
   >
     <template v-if="pauseTarget">
       <h2 id="pause-dialog-title">
@@ -77,7 +68,7 @@ function bindCancel(el: unknown) {
         <button
           type="button"
           :disabled="pauseState.kind !== 'ready' || pauseRemaining <= 0"
-          @click="emit('confirm')"
+          @click="confirmControl"
         >
           {{
             ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
@@ -88,10 +79,10 @@ function bindCancel(el: unknown) {
           }}
         </button>
         <button
-          :ref="bindCancel"
+          ref="pauseCancel"
           type="button"
           :disabled="pauseState.kind === 'sending'"
-          @click="emit('close')"
+          @click="closePause"
         >
           {{
             pauseState.kind === 'settled' || pauseState.kind === 'failed'

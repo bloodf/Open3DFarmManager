@@ -7,7 +7,7 @@ import FarmOfflineSection from '../components/farm/FarmOfflineSection.vue'
 import FarmPrinterInventory from '../components/farm/FarmPrinterInventory.vue'
 import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import SpoolInventory from '../components/SpoolInventory.vue'
-import { useFarmControlSession } from '../composables/useFarmControlSession.ts'
+import { useFarmControlSession } from '../components/farm/use-farm-control-session.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
@@ -308,9 +308,9 @@ const {
       :pause-state="pauseState"
       :pause-remaining="pauseRemaining"
       :pause-status="pauseStatus"
-      @confirm="confirmControl"
-      @close="closePause"
-      @cancel="cancelPause"
+      :confirm-control="confirmControl"
+      :close-pause="closePause"
+      :cancel-pause="cancelPause"
     />
   </main>
 </template>

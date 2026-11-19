@@ -10,6 +10,10 @@ import {
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
 import { validateMoonrakerInput } from '../config/moonraker.ts'
 import {
+  readDetailHistory,
+  readDetailTotals,
+} from '../moonraker/control-history.ts'
+import {
   createMoonrakerDetailStream,
   MoonrakerRpcError,
   count,
@@ -21,7 +25,6 @@ import {
 } from '../moonraker/detail-stream.ts'
 
 const MAX_ITEMS = 256
-const HISTORY_PAGE = 64
 const MAX_QUERIES_PER_SESSION = 4
 const METHOD_NOT_FOUND = -32601
 
@@ -171,25 +174,9 @@ async function query(
     case 'config-read':
       return { path: frame.path, text: await readConfig(frame.path, signal) }
     case 'history':
-      return (await historyJobs(request, signal))
-        .map((job) => ({
-          id: string(job.job_id),
-          file: path(job.filename),
-          state: string(job.status),
-          startedAtMs: ms(job.start_time),
-          durationSeconds: count(job.total_duration),
-        }))
-        .filter((job) => job.id && job.file && job.state)
-    case 'totals': {
-      const totals = fields(
-        fields(await request('server.history.totals')).job_totals,
-      )
-      return {
-        jobs: count(totals.total_jobs),
-        printSeconds: count(totals.total_print_time),
-        filamentMm: count(totals.total_filament_used),
-      }
-    }
+      return readDetailHistory(request, signal)
+    case 'totals':
+      return readDetailTotals(request)
     case 'job-queue': {
       const queue = fields(await request('server.job_queue.status'))
       return {
@@ -241,28 +228,6 @@ async function query(
     case 'temperature-store':
       return temperatureStore(await request('server.temperature_store'))
   }
-}
-
-/** Page `server.history.list` until the cap, the end, or an abort. */
-async function historyJobs(
-  request: MoonrakerDetailStream['request'],
-  signal: AbortSignal,
-) {
-  const jobs: Record<string, unknown>[] = []
-  while (jobs.length < MAX_ITEMS) {
-    signal.throwIfAborted()
-    const page = fields(
-      await request('server.history.list', {
-        start: jobs.length,
-        limit: HISTORY_PAGE,
-        order: 'desc',
-      }),
-    )
-    const batch = list(page.jobs).slice(0, HISTORY_PAGE).map(fields)
-    jobs.push(...batch)
-    if (batch.length < HISTORY_PAGE || jobs.length >= Number(page.count)) break
-  }
-  return jobs.slice(0, MAX_ITEMS)
 }
 
 /**

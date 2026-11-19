@@ -8,6 +8,9 @@ import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
+import HistoryPanel from './HistoryPanel.vue'
+import type { JobHistoryItem } from '../../utils/job-history-view.ts'
+import type { PrinterHistoryJob, PrinterHistoryTotals } from './history-view.ts'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import {
   DEFAULT_UNSUPPORTED_REASON,
@@ -58,6 +61,17 @@ const props = defineProps<{
     reason?: string
   }
   canEmergencyStop: boolean
+  /** Per-printer history: the panel shows with the catalog reason when not advertised. */
+  jobHistory?: {
+    advertised: boolean
+    disabledReason?: string
+    jobs: readonly PrinterHistoryJob[]
+    totals: PrinterHistoryTotals | null
+    openfarmJobs: readonly JobHistoryItem[]
+    pending?: boolean
+    error?: string
+    replayHref?: (librarySha256: string) => string | undefined
+  }
   /** Motion controls; the panel shows only when the printer advertises motion. */
   motionAvailability?: MotionAvailabilityMap
   position?: readonly number[]
@@ -239,7 +253,11 @@ const heaterReason = computed(
         :key="tab.id"
         #[tab.id]
       >
-        <p>Sem dados de {{ tab.label }} neste momento.</p>
+        <HistoryPanel
+          v-if="tab.id === 'historico' && jobHistory"
+          v-bind="jobHistory"
+        />
+        <p v-else>Sem dados de {{ tab.label }} neste momento.</p>
       </template>
     </Tabs>
     <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">

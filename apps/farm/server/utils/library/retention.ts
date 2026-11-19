@@ -95,7 +95,12 @@ export interface RetentionResult {
 
 type Facts = (
   tx: Sql,
-  scope: { farmId: string; sha256: string },
+  scope: {
+    farmId: string
+    sha256: string
+    location: BlobFacts['location']
+    agentId: string | null
+  },
 ) => Promise<BlobFacts[]>
 
 const FACT_COLUMNS = (
@@ -107,14 +112,14 @@ const FACT_COLUMNS = (
   max(v.deleted_at)::float8 AS "newestDeletedAt"
   FROM farm.library_blobs b
   LEFT JOIN farm.library_settings s ON s.farm_id = b.farm_id
-  LEFT JOIN farm.library_versions v ON v.farm_id = b.farm_id AND v.sha256 = b.sha256`
+  LEFT JOIN farm.library_versions v ON v.farm_id = b.farm_id AND v.sha256 = b.sha256 AND v.storage_location = b.storage_location AND v.location_agent_id = b.location_agent_id`
 const FACT_GROUP = (tx: Sql) =>
   tx`GROUP BY b.farm_id, b.sha256, b.size_bytes, b.storage_location, b.agent_id, b.created_at, s.retention_days`
 
 const factsOf: Facts = (tx, scope) =>
   tx<
     BlobFacts[]
-  >`${FACT_COLUMNS(tx)} WHERE b.farm_id=${scope.farmId}::uuid AND b.sha256=${scope.sha256} AND b.purged_at IS NULL ${FACT_GROUP(tx)}`
+  >`${FACT_COLUMNS(tx)} WHERE b.farm_id=${scope.farmId}::uuid AND b.sha256=${scope.sha256} AND b.storage_location=${scope.location} AND b.agent_id IS NOT DISTINCT FROM ${scope.agentId}::uuid AND b.purged_at IS NULL ${FACT_GROUP(tx)}`
 
 /** Same rule as isPurgeable, so each batch holds only blobs that can go (no starvation by live ones). */
 function purgeCandidates(
@@ -179,7 +184,7 @@ async function purgeOne(
     const [fresh] = await factsOf(tx as unknown as Sql, facts)
     if (!fresh || !isPurgeable(fresh, now, graceMs)) return false
     const marked =
-      await tx`UPDATE farm.library_blobs SET purged_at=${now} WHERE farm_id=${fresh.farmId}::uuid AND sha256=${fresh.sha256} AND purged_at IS NULL RETURNING 1`
+      await tx`UPDATE farm.library_blobs SET purged_at=${now} WHERE farm_id=${fresh.farmId}::uuid AND sha256=${fresh.sha256} AND storage_location=${fresh.location} AND agent_id IS NOT DISTINCT FROM ${fresh.agentId}::uuid AND purged_at IS NULL RETURNING 1`
     if (!marked[0]) return false
     await removeStoredFile(tx as unknown as Sql, deps, fresh)
     return true

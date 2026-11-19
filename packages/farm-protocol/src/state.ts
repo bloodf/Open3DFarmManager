@@ -60,6 +60,19 @@ export const PrinterState = z
       })
       .optional(),
     printerKey: z.string().min(1).max(128),
+    linkHealth: z
+      .strictObject({
+        state: z.enum(['connected', 'reconnecting', 'offline']),
+        lastSuccessAt: z.number().int().nonnegative().nullable(),
+        p50Ms: z.number().finite().nonnegative().nullable(),
+        p95Ms: z.number().finite().nonnegative().nullable(),
+        reconnects: z.number().int().nonnegative(),
+        lastErrorCode: z
+          .string()
+          .regex(/^[a-zA-Z0-9_.-]{1,64}$/)
+          .nullable(),
+      })
+      .optional(),
     localWebUiOrigin: LocalWebUiOrigin.optional(),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     statusReason: z.enum(['client-certificate-missing']).optional(),

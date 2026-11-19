@@ -1,3 +1,4 @@
+import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { getSpoolmanMaterials } from './spoolman-materials.ts'
 import { parseMoonrakerActiveSpoolId } from '../moonraker/active-spool.ts'
@@ -93,6 +94,7 @@ export async function collectLocalTelemetry(input: {
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
+  linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
   /** Import Moonraker's finished-job history on connect and after reconnects. */
   importMoonrakerHistory?: boolean
@@ -259,7 +261,9 @@ export async function collectIntoQueue(input: {
             },
           })
         : undefined
+      const linkHealth = input.linkHealthFor?.(assignment.printerKey)
       const subscription = createMoonrakerSubscription({
+        ...(linkHealth ? { linkHealth } : {}),
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,

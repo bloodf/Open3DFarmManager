@@ -12,7 +12,7 @@ import {
   controlSourceState,
   type ExtendedControlAction as Action,
 } from '../../packages/farm-protocol/src/control-actions.ts'
-import { PrinterDetailUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
 import {
   claimCommand,
   closeCommandJournal,
@@ -407,7 +407,7 @@ describe('bed mesh read path', () => {
       profiles: ['default', 'cold'],
     })
     expect(
-      PrinterDetailUpdate.safeParse({
+      PrinterDetailStreamUpdate.safeParse({
         v: 1,
         t: 'detail.update',
         printerKey: 'printer-mesh',

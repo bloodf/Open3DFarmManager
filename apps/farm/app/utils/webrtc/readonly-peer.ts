@@ -1,8 +1,8 @@
 import {
   assemblePrinterDetailFrames,
   decodePrinterDetailFrame,
-  type PrinterDetailUpdate,
-  type PrinterDetailGcodeResponse,
+  type PrinterDetailStreamUpdate,
+  type PrinterDetailStreamGcodeResponse,
 } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import type { z } from 'zod'
 import {
@@ -645,12 +645,12 @@ export class ReadonlyBrowserPeer {
 
 export type WebcamDetailOptions = {
   onGcodeHelp?: (commands: readonly string[]) => void
-  onGcodeResponse?: (frame: z.infer<typeof PrinterDetailGcodeResponse>) => void
-  onDetail?: (frame: z.infer<typeof PrinterDetailUpdate>) => void
+  onGcodeResponse?: (frame: z.infer<typeof PrinterDetailStreamGcodeResponse>) => void
+  onDetail?: (frame: z.infer<typeof PrinterDetailStreamUpdate>) => void
   printerKey: string
   onUpdate: (
     value: NonNullable<
-      z.infer<typeof PrinterDetailUpdate>['detail']['webcams']
+      z.infer<typeof PrinterDetailStreamUpdate>['detail']['webcams']
     > | null,
   ) => void
 }

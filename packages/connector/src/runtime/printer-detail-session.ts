@@ -8,8 +8,8 @@ import {
   createPrinterDetailSubscriptions,
   decodePrinterDetailFrame,
   encodePrinterDetailFrames,
-  PrinterDetailQueryResponse,
-  type PrinterDetailQueryRequest,
+  PrinterDetailStreamQueryResponse,
+  type PrinterDetailStreamQueryRequest,
 } from '../../../farm-protocol/src/printer-detail.ts'
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
 import { validateMoonrakerInput } from '../config/moonraker.ts'
@@ -223,7 +223,7 @@ export function createPrinterDetailSession(
   }
 }
 
-type Query = z.infer<typeof PrinterDetailQueryRequest>
+type Query = z.infer<typeof PrinterDetailStreamQueryRequest>
 
 async function answer(
   frame: Query,
@@ -234,17 +234,17 @@ async function answer(
   const base = { ...rest, t: 'query.response' as const }
   if (source.query) {
     const reply = await source.query(frame.kind, signal)
-    return PrinterDetailQueryResponse.parse({ ...base, ...reply })
+    return PrinterDetailStreamQueryResponse.parse({ ...base, ...reply })
   }
   try {
     if (!source.request || !source.readConfig)
-      return PrinterDetailQueryResponse.parse({ ...base, error: 'unsupported' })
+      return PrinterDetailStreamQueryResponse.parse({ ...base, error: 'unsupported' })
     const data = await query(
       frame,
       { request: source.request, readConfig: source.readConfig },
       signal,
     )
-    return PrinterDetailQueryResponse.parse({ ...base, data })
+    return PrinterDetailStreamQueryResponse.parse({ ...base, data })
   } catch (error) {
     const reason =
       error instanceof RangeError
@@ -252,7 +252,7 @@ async function answer(
         : error instanceof MoonrakerRpcError && error.code === METHOD_NOT_FOUND
           ? 'unsupported'
           : 'unavailable'
-    return PrinterDetailQueryResponse.parse({ ...base, error: reason })
+    return PrinterDetailStreamQueryResponse.parse({ ...base, error: reason })
   }
 }
 

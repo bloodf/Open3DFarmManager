@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import type { z } from 'zod'
 import {
-  PrinterDetailUpdate,
-  type PrinterDetailQueryKind as QueryKindSchema,
+  PrinterDetailStreamUpdate,
+  type PrinterDetailStreamQueryKind as QueryKindSchema,
 } from '../../../farm-protocol/src/printer-detail.ts'
 import { ControlArguments } from '../../../farm-protocol/src/control-actions.ts'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
@@ -137,7 +137,7 @@ export function createBambuDetailState(printerKey: string) {
             ? undefined
             : SPEED_LEVEL_FACTOR[level]
       const light = observed.light?.chamber
-      const parsed = PrinterDetailUpdate.safeParse({
+      const parsed = PrinterDetailStreamUpdate.safeParse({
         v: 1,
         t: 'detail.update',
         printerKey,

@@ -13,7 +13,7 @@ import {
   controlRoleAllowed,
   controlSourceState,
 } from '../../packages/farm-protocol/src/control-actions.ts'
-import { PrinterDetailQueryResponse } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamQueryResponse } from '../../packages/farm-protocol/src/printer-detail.ts'
 import {
   closeCommandJournal,
   openCommandJournal,
@@ -269,7 +269,7 @@ describe('autocomplete source', () => {
     expect(parseGcodeHelp(null)).toEqual([])
     expect(parseGcodeHelp([1])).toEqual([])
     expect(
-      PrinterDetailQueryResponse.safeParse({
+      PrinterDetailStreamQueryResponse.safeParse({
         v: 1,
         t: 'query.response',
         printerKey: 'printer-a',

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/index.ts'
 import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
 import { createMoonrakerDetailStream } from '../../packages/connector/src/moonraker/detail-stream.ts'
-import { PrinterDetailUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
 
 const startMock = startMoonrakerMock
 type Webcam = NonNullable<
@@ -57,14 +57,14 @@ it('lists both cameras with their orientation over the detail socket without exp
       let timeout: ReturnType<typeof setTimeout> | undefined
       try {
         const frame = await new Promise<
-          ReturnType<typeof PrinterDetailUpdate.parse>
+          ReturnType<typeof PrinterDetailStreamUpdate.parse>
         >((resolve, reject) => {
           timeout = setTimeout(
             () => reject(Error('Webcam catalogue timed out')),
             2000,
           )
           stop = detail.subscribe((value) => {
-            const parsed = PrinterDetailUpdate.parse(value)
+            const parsed = PrinterDetailStreamUpdate.parse(value)
             if (parsed.capabilities.includes('webcams')) resolve(parsed)
           })
         })

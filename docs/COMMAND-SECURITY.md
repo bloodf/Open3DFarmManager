@@ -166,3 +166,18 @@ Rate limits apply per action class and per printer. Bounds marked proposed are c
 3. Numeric caps are the proposed values in the table above.
 4. Owner does not inherit G-code console access. #390 grants it to the admin role only, and this rule keeps that literal reading. An implementing issue may propose changing it.
 5. Config write is limited to the printer configuration directory, and service restart to the Klipper and Moonraker units. These allow-lists are proposed.
+
+## Library print action (E17.1, #373)
+
+`start_library_print` starts a print from a stored library version. The rule is documented in [PRINT-LIBRARY.md](PRINT-LIBRARY.md) and nothing in it is implemented on this branch. The action is a signed command with the same envelope, canonical-JSON, signature, freshness and replay checks as pause, resume, cancel and emergency stop. Its arguments are the library version ID, the version's SHA-256, and the list of acknowledged `warn` compatibility results.
+
+| Action                | Role                                                                                | Allowed printer states                                                   | Bounds                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start_library_print` | `operator` or `admin` (proposed); `owner` may act through `admin`; `viewer` refused | Idle only: refused while printing, paused, or in an error or fault state | Version must be live; digest must match the version; `block` compatibility results refused; 10 commands per minute per printer, shared with other starts (proposed) |
+
+Connector enforcement, in addition to checks 1 to 10 above:
+
+- The argument digest must equal the digest of the version the Connector serves for that library. A mismatch is refused with `checksum-mismatch`.
+- Compatibility `block` results are evaluated locally and cannot be overridden by the command.
+- For an API-originated start the envelope must carry the owner-granted `jobs:start` scope. A browser-originated start uses the authenticated local session and the role above.
+- Start is never retried automatically. An uncertain result is recorded as uncertain and reported.

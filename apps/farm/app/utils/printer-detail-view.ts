@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 import type { z } from 'zod'
-import type { PrinterDetailCapability } from '../../../../packages/farm-protocol/src/printer-detail.ts'
+import type { PrinterDetailStreamCapability } from '../../../../packages/farm-protocol/src/printer-detail.ts'
 
-export type DetailCapability = z.infer<typeof PrinterDetailCapability>
+export type DetailCapability = z.infer<typeof PrinterDetailStreamCapability>
 export type DetailTabId =
   | 'painel'
   | 'console'

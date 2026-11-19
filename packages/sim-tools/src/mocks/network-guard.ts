@@ -5,20 +5,51 @@ import dgram from 'node:dgram'
 export interface NetworkGuardStats {
   listenAttempts: number
   rejectedAttempts: number
+  multicastSendAttempts: number
+  multicastRejected: number
 }
 
 const stats: NetworkGuardStats = {
   listenAttempts: 0,
   rejectedAttempts: 0,
+  multicastSendAttempts: 0,
+  multicastRejected: 0,
 }
 
 let isInstalled = false
 const originalListen = net.Server.prototype.listen
 const originalDgramBind = dgram.Socket.prototype.bind
+const originalDgramSend = dgram.Socket.prototype.send
+const originalAddMembership = dgram.Socket.prototype.addMembership
 
 function isLoopback(host?: string | null): boolean {
   if (!host) return false
   return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+}
+
+/** IPv4 multicast (224.0.0.0/4), including mDNS and SSDP groups. */
+export function isMulticastAddress(address?: string | null): boolean {
+  if (!address) return false
+  const trimmed = address.trim()
+  if (trimmed === '224.0.0.251' || trimmed === '239.255.255.250') return true
+  const match = /^(\d{1,3})\./.exec(trimmed)
+  if (!match) return false
+  const first = Number(match[1])
+  return first >= 224 && first <= 239
+}
+
+function sendDestination(args: unknown[]): string | undefined {
+  // dgram.send(msg, port, address, cb) | send(msg, offset, length, port, address, cb)
+  // | send(msg, port, address) | send(msg, { port, address }, cb)
+  for (let i = 1; i < args.length; i++) {
+    const value = args[i]
+    if (typeof value === 'string') return value
+    if (value && typeof value === 'object' && 'address' in value) {
+      const address = (value as { address?: unknown }).address
+      if (typeof address === 'string') return address
+    }
+  }
+  return undefined
 }
 
 export function installNetworkGuard(): void {
@@ -74,6 +105,36 @@ export function installNetworkGuard(): void {
 
     return originalDgramBind.apply(this, args as any)
   }
+
+  dgram.Socket.prototype.send = function (this: dgram.Socket, ...args: any[]) {
+    const destination = sendDestination(args)
+    if (isMulticastAddress(destination)) {
+      stats.multicastSendAttempts++
+      stats.multicastRejected++
+      const err = new Error(
+        `Network guard violation: multicast UDP send rejected (address: ${destination})`,
+      )
+      const maybeCb = args[args.length - 1]
+      if (typeof maybeCb === 'function') {
+        queueMicrotask(() => maybeCb(err))
+        return 0
+      }
+      throw err
+    }
+    return originalDgramSend.apply(this, args as any)
+  }
+
+  dgram.Socket.prototype.addMembership = function (
+    this: dgram.Socket,
+    multicastAddress: string,
+    multicastInterface?: string,
+  ) {
+    stats.multicastSendAttempts++
+    stats.multicastRejected++
+    throw new Error(
+      `Network guard violation: multicast membership rejected (address: ${multicastAddress}${multicastInterface ? `, iface: ${multicastInterface}` : ''})`,
+    )
+  }
 }
 
 export function uninstallNetworkGuard(): void {
@@ -81,6 +142,8 @@ export function uninstallNetworkGuard(): void {
   isInstalled = false
   net.Server.prototype.listen = originalListen
   dgram.Socket.prototype.bind = originalDgramBind
+  dgram.Socket.prototype.send = originalDgramSend
+  dgram.Socket.prototype.addMembership = originalAddMembership
 }
 
 export function getNetworkGuardStats(): Readonly<NetworkGuardStats> {
@@ -90,6 +153,8 @@ export function getNetworkGuardStats(): Readonly<NetworkGuardStats> {
 export function resetNetworkGuardStats(): void {
   stats.listenAttempts = 0
   stats.rejectedAttempts = 0
+  stats.multicastSendAttempts = 0
+  stats.multicastRejected = 0
 }
 
 export async function withNetworkGuard<T>(

@@ -5,10 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
-import { startAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
-import { startCrealityDiscoverySimulator } from '../../packages/sim-tools/src/creality-discovery-sim.ts'
-import { startDiscoveryResponder } from '../../packages/sim-tools/src/mocks/discovery/index.ts'
-import { startKobraXMock } from '../../packages/sim-tools/src/mocks/kobra-x-mock.ts'
+import { startDiscoveryMocks } from '../../packages/sim-tools/src/mocks/discovery.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import { withNetworkGuard } from '../../packages/sim-tools/src/mocks/network-guard.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
@@ -346,12 +343,18 @@ test('discovers E16 loopback mocks on port 0, marks adopted bindings, and persis
     try {
       const moonraker = await own(startMoonrakerMock())
       const moonrakerPort = Number(new URL(moonraker.origin).port)
-      const responder = await own(startDiscoveryResponder(moonrakerPort))
-      const creality = await own(startCrealityDiscoverySimulator({ port: 0 }))
-      const anycubic = await own(startAnycubicDiscoverySimulator({ port: 0 }))
-      const kobra = await own(startKobraXMock({ ssdp: true, camera: false }))
-      if (kobra.ssdpPort === undefined)
-        throw new Error('Missing Kobra X SSDP port')
+      const mocks = await own(
+        startDiscoveryMocks({
+          moonraker: { name: 'mock-printer', port: moonrakerPort },
+          bambu: {
+            serial: 'synthetic-bambu',
+            model: 'BL-P001',
+            name: 'Mock Bambu',
+          },
+          kobraX: { deviceName: 'Anycubic Kobra X (Synthetic)' },
+        }),
+      )
+      const anycubicPort = mocks.ports.anycubicHttp
 
       const queueDir = join(dir, 'telemetry')
       const queue = new TelemetryQueue(queueDir, 1000)
@@ -383,25 +386,15 @@ test('discovers E16 loopback mocks on port 0, marks adopted bindings, and persis
         scan: () => {
           let bambuSocket: dgram.Socket | undefined
           return discoverPrinters({
+            ...mocks.discoveryOptions,
             timeout: 250,
-            bindAddress: loopback,
-            mdnsPort: 0,
             bambuPorts: [0],
-            queryPort: responder.port,
-            queryAddress: loopback,
-            crealityPorts: { http: creality.port, https: creality.port },
-            anycubicPort: anycubic.port,
-            kobraX: {
-              target: loopback,
-              ssdpPort: kobra.ssdpPort!,
-              httpPort: kobra.httpPort,
-            },
             createSocket: () => {
               const socket = dgram.createSocket('udp4')
               if (!bambuSocket) {
                 bambuSocket = socket
                 socket.once('listening', () =>
-                  responder.notifyBambu(socket.address().port),
+                  mocks.announceBambu(socket.address().port),
                 )
               }
               return socket
@@ -454,7 +447,7 @@ test('discovers E16 loopback mocks on port 0, marks adopted bindings, and persis
           {
             vendor: 'anycubic',
             host: loopback,
-            port: anycubic.port,
+            port: anycubicPort,
             serial: 'simulator',
             model: 'K3',
             name: 'Anycubic Kobra 3',

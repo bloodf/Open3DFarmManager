@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { z } from 'zod'
-import type { PrinterDetailUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
+import type { PrinterDetailStreamUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import CameraDisplay from '../CameraDisplay.vue'
 
 type Webcam = NonNullable<
-  z.infer<typeof PrinterDetailUpdate>['detail']['webcams']
+  z.infer<typeof PrinterDetailStreamUpdate>['detail']['webcams']
 >[number]
 const props = defineProps<{
   webcams: readonly Webcam[]

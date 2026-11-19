@@ -1,413 +1,227 @@
-// SPDX-License-Identifier: MIT
-import { PrinterState } from './state.ts'
 import { z } from 'zod'
-import { parseBoundedJson } from './json.ts'
-import { RtcAssignmentRef } from './rtc-assignment-set.ts'
-import { MAX_RTC_PROOF_WIRE_BYTES } from './rtc-session-binding.ts'
 
-const string = (max: number) =>
-  z
-    .string()
-    .max(max)
-    .refine((value) => !/[\uD800-\uDFFF]/u.test(value))
-const name = string(128).refine((value) => value.length > 0)
-const path = string(512).refine((value) => value.length > 0)
-const message = string(2048)
-const number = z.number().finite()
-const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-const fraction = number.min(0).max(1)
-const xyz = z.tuple([number, number, number])
-const axis = z.enum(['x', 'y', 'z'])
-const base = { v: z.literal(1), printerKey: RtcAssignmentRef.shape.printerKey }
-const named = <T extends z.ZodRawShape>(shape: T) =>
-  z.array(z.strictObject({ ...shape, name })).max(64)
+/** Detail snapshots are intentionally chunk-sized for the existing RTC data channel. */
+export const MAX_PRINTER_DETAIL_FRAME_BYTES = 64 * 1024
+export const MAX_PRINTER_DETAIL_LIST = 256
+export const MAX_PRINTER_DETAIL_TEXT = 4096
 
-const meshRows = z
-  .array(z.array(number).min(1).max(64))
-  .min(1)
-  .max(64)
-  .refine((rows) => rows.every((row) => row.length === rows[0]?.length))
+const id = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
+const text = z.string().max(MAX_PRINTER_DETAIL_TEXT)
+const finite = z.number().finite()
+const nullableText = text.nullable()
+const base = { v: z.literal(1), printer_key: id }
 
-export const PrinterDetailCapability = z.enum([
-  'motion',
-  'heaters',
-  'fans',
-  'lights',
-  'outputs',
-  'speed',
-  'flow',
-  'offsets',
-  'files',
-  'job',
-  'exclude-object',
-  'bed-mesh',
-  'job-queue',
-  'power',
-  'timelapse',
-  'updates',
-  'system',
-  'console',
-  'webcams',
-  'materials',
-])
-const capabilities = z
-  .array(PrinterDetailCapability)
-  .max(20)
-  .refine((items) => new Set(items).size === items.length)
-
-export const PrinterDetailSubscribe = z.strictObject({
-  ...base,
-  t: z.literal('detail.subscribe'),
+const vector3 = z.strictObject({ x: finite, y: finite, z: finite })
+const heater = z.strictObject({
+  name: id,
+  temperature: finite,
+  target: finite,
+  power: finite,
 })
-export const PrinterDetailUnsubscribe = z.strictObject({
-  ...base,
-  t: z.literal('detail.unsubscribe'),
+const namedValue = z.strictObject({ name: id, value: finite })
+const namedState = z.strictObject({
+  name: id,
+  value: z.union([text, finite, z.boolean()]),
 })
-export const PrinterDetailUpdate = z.strictObject({
-  ...base,
-  t: z.literal('detail.update'),
-  seq: count,
-  vendor: z.enum(['anycubic', 'kobra-x', 'creality']).optional(),
-  capabilities,
-  detail: z
-    .strictObject({
-      toolhead: z.strictObject({
-        position: z.tuple([number, number, number, number]),
-        homedAxes: z
-          .array(axis)
-          .max(3)
-          .refine((axes) => new Set(axes).size === axes.length),
-      }),
-      heaters: named({
-        temperature: number,
-        target: number.optional(),
-        power: fraction.optional(),
-      }),
-      fans: named({ speed: fraction, rpm: count.optional() }),
-      lights: named({
-        red: fraction,
-        green: fraction,
-        blue: fraction,
-        white: fraction.optional(),
-      }),
-      outputs: named({ value: number }),
-      webcams: named({
-        uid: name.nullable(),
-        enabled: z.boolean(),
-        rotation: z.union([
-          z.literal(0),
-          z.literal(90),
-          z.literal(180),
-          z.literal(270),
-        ]),
-        flipHorizontal: z.boolean(),
-        flipVertical: z.boolean(),
-      }),
-      speedFactor: number.nonnegative(),
-      flowFactor: number.nonnegative(),
-      offsets: xyz,
-      print: z.strictObject({
-        file: path.optional(),
-        state: name,
-        message,
-        filamentUsedMm: number.nonnegative().optional(),
-        estimatedSeconds: number.positive().optional(),
-        filamentTotalMm: number.positive().optional(),
-        elapsedSeconds: number.nonnegative().optional(),
-        progress: fraction.optional(),
-        currentLayer: count.optional(),
-        totalLayers: count.optional(),
-      }),
-      materials: PrinterState.shape.materials,
-      virtualFile: z.strictObject({
-        active: z.boolean(),
-        progress: fraction,
-        position: count,
-        size: count,
-      }),
-      display: z.strictObject({ message, progress: fraction }),
-      objects: z.strictObject({
-        names: z.array(name).max(256),
-        polygons: z
+const boundedStrings = z.array(text).max(MAX_PRINTER_DETAIL_LIST)
+const objectJson = z.record(
+  text,
+  z.union([text, finite, z.boolean(), z.null()]),
+)
+
+export const PrinterDetailUpdate = z
+  .strictObject({
+    ...base,
+    t: z.literal('detail.update'),
+    seq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    toolhead: z
+      .strictObject({ position: vector3, homed_axes: boundedStrings })
+      .optional(),
+    heaters: z.array(heater).max(64),
+    fans: z.array(namedValue).max(64),
+    leds: z.array(namedState).max(64),
+    output_pins: z.array(namedState).max(64),
+    speed_factor: finite,
+    flow_factor: finite,
+    gcode_offsets: vector3,
+    print_stats: z
+      .strictObject({
+        state: id,
+        filename: text,
+        total_duration: finite,
+        print_duration: finite,
+        filament_used: finite,
+      })
+      .nullable(),
+    virtual_sdcard: z
+      .strictObject({ progress: finite, is_active: z.boolean() })
+      .nullable(),
+    display_status: z
+      .strictObject({
+        message: nullableText,
+        progress: finite,
+        layers: z.strictObject({
+          current: finite.nullable(),
+          total: finite.nullable(),
+        }),
+      })
+      .nullable(),
+    exclude_object: z
+      .strictObject({
+        objects: z
           .array(
-            z.strictObject({
-              name,
-              points: z
-                .array(z.tuple([number, number]))
-                .min(3)
-                .max(64),
-            }),
+            z.strictObject({ name: text, polygon: z.array(vector3).max(4096) }),
           )
-          .max(64)
-          .optional(),
-        excluded: z.array(name).max(256),
-        current: name.nullable(),
-      }),
-      bedMesh: z.strictObject({
-        profile: name.nullable(),
-        min: z.tuple([number, number]),
-        max: z.tuple([number, number]),
-        // The interpolated matrix Klipper compensates with.
-        rows: z.union([meshRows, z.tuple([])]),
-        // The points actually probed; absent when the printer reports none.
-        probed: meshRows.optional(),
-        // Saved profile names.
-        profiles: z.array(name).max(64).optional(),
-      }),
-      idle: z.strictObject({
-        state: name,
-        printingSeconds: number.nonnegative(),
-      }),
-      firmware: z.strictObject({ state: name, message }),
-      powerDevices: named({
-        status: z.enum(['on', 'off', 'unknown']),
-        locked: z.boolean(),
-      }),
-      updates: named({ installed: string(128), available: string(128) }),
-      host: z.strictObject({
-        temperatureC: number.optional(),
-        cpuLoad: number.nonnegative().optional(),
-        memoryBytes: count.optional(),
-        cpuSeconds: number.nonnegative().optional(),
-        uptimeSeconds: number.nonnegative().optional(),
-      }),
-    })
-    .partial(),
+          .max(MAX_PRINTER_DETAIL_LIST),
+        excluded_objects: boundedStrings,
+      })
+      .nullable(),
+    bed_mesh: z
+      .strictObject({
+        profile_name: nullableText,
+        mesh_min: vector3.nullable(),
+        mesh_max: vector3.nullable(),
+        x_count: z.number().int().nonnegative().max(1024),
+        y_count: z.number().int().nonnegative().max(1024),
+        points: z.array(z.array(finite).max(1024)).max(1024),
+      })
+      .nullable(),
+    idle_timeout: z
+      .strictObject({ state: id, time_remaining: finite })
+      .nullable(),
+    klippy: z.strictObject({ state: id, message: nullableText }),
+    host_stats: z.record(text, z.union([finite, text, z.boolean(), z.null()])),
+  })
+  .superRefine((value, ctx) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength
+    if (bytes > MAX_PRINTER_DETAIL_FRAME_BYTES)
+      ctx.addIssue({
+        code: 'custom',
+        message: 'detail update must be chunked to RTC frame limit',
+      })
+  })
+export type PrinterDetailUpdate = z.infer<typeof PrinterDetailUpdate>
+
+export const PrinterDetailCapability = z.strictObject({
+  ...base,
+  t: z.literal('detail.capability'),
+  areas: z
+    .array(
+      z.enum([
+        'toolhead',
+        'heaters',
+        'fans',
+        'lights',
+        'pins',
+        'job',
+        'objects',
+        'bed_mesh',
+        'idle_timeout',
+        'host',
+        'files',
+        'history',
+        'config',
+        'queue',
+        'power',
+        'timelapse',
+        'updates',
+        'temperature_store',
+      ]),
+    )
+    .max(32),
 })
+
 export const PrinterDetailGcodeResponse = z.strictObject({
   ...base,
   t: z.literal('detail.gcode_response'),
-  seq: count,
-  lines: z.array(message).min(1).max(64),
+  lines: z.array(text).min(1).max(128),
 })
-
-const queryResults = {
-  files: z
-    .array(z.strictObject({ path, bytes: count, modifiedAtMs: count }))
-    .max(256),
-  history: z
-    .array(
-      z.strictObject({
-        id: name,
-        file: path,
-        state: name,
-        startedAtMs: count,
-        durationSeconds: number.nonnegative(),
-      }),
-    )
-    .max(256),
-  totals: z.strictObject({
-    jobs: count,
-    printSeconds: number.nonnegative(),
-    filamentMm: number.nonnegative(),
-    longestJobSeconds: number.nonnegative().optional(),
-  }),
-  'config-files': z.array(path).max(256),
-  'config-read': z.strictObject({ path, text: string(65_536) }),
-  'job-queue': z.strictObject({
-    state: name,
-    jobs: z.array(z.strictObject({ id: name, file: path })).max(256),
-  }),
-  'gcode-help': z.array(name).max(512),
-  'power-devices': named({ on: z.boolean() }),
-  timelapse: z.strictObject({
-    enabled: z.boolean(),
-    rendering: z.boolean(),
-    files: z.array(path).max(256),
-  }),
-  'update-status': named({ installed: name, available: name.optional() }),
-  'temperature-store': named({
-    samples: z
-      .array(
-        z.strictObject({
-          atMs: count,
-          temperature: number,
-          target: number.optional(),
-          power: fraction.optional(),
-        }),
-      )
-      .max(256),
-  }),
-}
-export const PrinterDetailQueryKind = z.enum(
-  Object.keys(queryResults) as (keyof typeof queryResults)[],
-)
-const query = { ...base, requestId: name }
-
-export const PrinterDetailQueryRequest = z.union([
-  z.strictObject({
-    ...query,
-    t: z.literal('query.request'),
-    kind: z.literal('config-read'),
-    path,
-  }),
-  z.strictObject({
-    ...query,
-    t: z.literal('query.request'),
-    kind: PrinterDetailQueryKind.exclude(['config-read']),
-  }),
-])
-export const PrinterDetailQueryResponse = z.union([
-  ...Object.entries(queryResults).map(([kind, data]) =>
-    z.strictObject({
-      ...query,
-      t: z.literal('query.response'),
-      kind: z.literal(kind),
-      data,
-    }),
-  ),
-  z.strictObject({
-    ...query,
-    t: z.literal('query.response'),
-    kind: PrinterDetailQueryKind,
-    error: z.enum(['unsupported', 'unavailable', 'not-found', 'too-large']),
-  }),
+export const PrinterDetailSubscription = z.discriminatedUnion('t', [
+  z.strictObject({ ...base, t: z.literal('detail.subscribe') }),
+  z.strictObject({ ...base, t: z.literal('detail.unsubscribe') }),
 ])
 
-const payload = z.union([
-  PrinterDetailUpdate,
-  PrinterDetailGcodeResponse,
-  PrinterDetailQueryResponse,
+export const PrinterDetailQueryKind = z.enum([
+  'files',
+  'history',
+  'totals',
+  'config_files',
+  'config_read',
+  'job_queue',
+  'power_devices',
+  'timelapse',
+  'update_status',
+  'temperature_store',
 ])
-const maxPayloadBytes = 1_048_576
-const chunkChars = 1024
-const maxChunks = Math.ceil(maxPayloadBytes / (chunkChars - 1))
-export const MAX_PRINTER_DETAIL_WIRE_BYTES = MAX_RTC_PROOF_WIRE_BYTES
-const chunk = z
-  .strictObject({
+export const PrinterDetailQueryRequest = z.strictObject({
+  ...base,
+  t: z.literal('detail.query'),
+  request_id: id,
+  kind: PrinterDetailQueryKind,
+  offset: z.number().int().min(0).max(10000).default(0),
+  limit: z.number().int().min(1).max(100),
+  path: text.optional(),
+})
+const queryItem = z.record(text, z.union([text, finite, z.boolean(), z.null()]))
+export const PrinterDetailQueryResponse = z.discriminatedUnion('ok', [
+  z.strictObject({
     ...base,
-    t: z.literal('detail.chunk'),
-    transferId: name,
-    index: count,
-    total: count.min(2).max(maxChunks),
-    text: string(chunkChars).refine((value) => value.length > 0),
-  })
-  .refine(
-    ({ index, total, text }) =>
-      index < total && (index === total - 1 || text.length >= chunkChars - 1),
-  )
-export const PrinterDetailFrame = z.union([
-  PrinterDetailSubscribe,
-  PrinterDetailUnsubscribe,
-  PrinterDetailQueryRequest,
-  payload,
-  chunk,
+    t: z.literal('detail.query_result'),
+    request_id: id,
+    kind: PrinterDetailQueryKind,
+    ok: z.literal(true),
+    items: z.array(queryItem).max(100),
+    next_offset: z.number().int().min(0).max(10000).nullable(),
+  }),
+  z.strictObject({
+    ...base,
+    t: z.literal('detail.query_result'),
+    request_id: id,
+    kind: PrinterDetailQueryKind,
+    ok: z.literal(false),
+    reason: z.enum(['unsupported', 'offline', 'busy', 'not_found', 'invalid']),
+  }),
 ])
-const byteLength = (wire: string) => new TextEncoder().encode(wire).byteLength
 
-export function decodePrinterDetailFrame(wire: string) {
-  return PrinterDetailFrame.parse(
-    parseBoundedJson(wire, {
-      maxBytes: MAX_PRINTER_DETAIL_WIRE_BYTES,
-    }),
-  )
-}
+export const PrinterDetailFrame = z
+  .union([
+    PrinterDetailSubscription,
+    PrinterDetailUpdate,
+    PrinterDetailCapability,
+    PrinterDetailGcodeResponse,
+    PrinterDetailQueryRequest,
+    PrinterDetailQueryResponse,
+  ])
+  .superRefine((value, ctx) => {
+    if (
+      new TextEncoder().encode(JSON.stringify(value)).byteLength >
+      MAX_PRINTER_DETAIL_FRAME_BYTES
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'printer detail frame exceeds RTC limit; split into chunks',
+      })
+    }
+  })
+export type PrinterDetailFrame = z.infer<typeof PrinterDetailFrame>
 
-/** A transfer ID is unique among in-flight messages on the authenticated session. */
-export function encodePrinterDetailFrames(
-  input: unknown,
-  transferId: string,
-): string[] {
-  const frame = PrinterDetailFrame.parse(input)
-  const wire = JSON.stringify(frame)
-  if (byteLength(wire) <= MAX_PRINTER_DETAIL_WIRE_BYTES) return [wire]
-  const { printerKey } = payload.parse(frame)
-  if (byteLength(wire) > maxPayloadBytes)
-    throw new RangeError('Printer detail payload too large')
-  const parts: string[] = []
-  for (let start = 0; start < wire.length;) {
-    let end = start + chunkChars
-    // Keep surrogate pairs together so each chunk is valid Unicode on its own.
-    const next = wire.charCodeAt(end)
-    if (next >= 0xdc00 && next <= 0xdfff) end--
-    parts.push(wire.slice(start, end))
-    start = end
+/** Session-local ownership guard. A page leaving must unsubscribe its printer key. */
+export class PrinterDetailSubscriptions {
+  readonly #printers = new Set<string>()
+  subscribe(printerKey: string): boolean {
+    const key = id.parse(printerKey)
+    if (this.#printers.has(key)) return false
+    this.#printers.add(key)
+    return true
   }
-  return parts.map((text, index) =>
-    JSON.stringify(
-      chunk.parse({
-        v: 1,
-        t: 'detail.chunk',
-        printerKey,
-        transferId,
-        index,
-        total: parts.length,
-        text,
-      }),
-    ),
-  )
-}
-
-/** Invoke with one ordered transfer from one session. */
-export function assemblePrinterDetailFrames(wires: readonly string[]) {
-  if (wires.length < 2 || wires.length > maxChunks) {
-    throw new RangeError('Invalid printer detail transfer length')
+  unsubscribe(printerKey: string): boolean {
+    return this.#printers.delete(id.parse(printerKey))
   }
-  const parts = wires.map((wire) => chunk.parse(decodePrinterDetailFrame(wire)))
-  const first = parts[0]!
-  if (
-    parts.some(
-      (part, index) =>
-        part.index !== index ||
-        part.total !== parts.length ||
-        part.transferId !== first.transferId ||
-        part.printerKey !== first.printerKey,
-    )
-  )
-    throw new Error('Invalid printer detail chunk sequence')
-  const frame = payload.parse(
-    parseBoundedJson(parts.map((part) => part.text).join(''), {
-      maxBytes: maxPayloadBytes,
-      maxValues: 100_000,
-      maxStringChars: 65_536,
-    }),
-  )
-  if (frame.printerKey !== first.printerKey)
-    throw new Error('Printer detail transfer identity mismatch')
-  return frame
-}
-
-/** Create one registry per admitted read-only session, using its assignment set. */
-export function createPrinterDetailSubscriptions(
-  isAssigned: (printerKey: string) => boolean,
-  start: (printerKey: string) => () => void,
-) {
-  const active = new Map<string, () => void>()
-  let closed = false
-  return {
-    receive(input: unknown) {
-      const frame = z
-        .union([PrinterDetailSubscribe, PrinterDetailUnsubscribe])
-        .parse(input)
-      const { printerKey } = frame
-      if (closed) return false
-      if (frame.t === 'detail.unsubscribe') {
-        const stop = active.get(printerKey)
-        active.delete(printerKey)
-        stop?.()
-        return true
-      }
-      if (!isAssigned(printerKey)) return false
-      if (!active.has(printerKey)) active.set(printerKey, start(printerKey))
-      return true
-    },
-    close() {
-      closed = true
-      const stops = [...active.values()]
-      active.clear()
-      const errors: unknown[] = []
-      for (const stop of stops) {
-        try {
-          stop()
-        } catch (error) {
-          errors.push(error)
-        }
-      }
-      if (errors.length)
-        throw new AggregateError(
-          errors,
-          'Printer detail subscription cleanup failed',
-        )
-    },
+  has(printerKey: string): boolean {
+    return this.#printers.has(id.parse(printerKey))
   }
 }
+
+// Chunked, camelCase detail stream used by the Connector detail session and the
+// farm printer detail page (assignment-scoped subscriptions, typed query data).
+export * from './printer-detail-stream.ts'

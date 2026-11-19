@@ -1,5 +1,5 @@
 import { createMoonrakerDetailStream } from '../../packages/connector/src/moonraker/detail-stream.ts'
-import { PrinterDetailUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -99,14 +99,14 @@ it('reads cached system data through the existing loopback detail stream with Kl
     stop?.()
     await mock.close()
   })
-  const frame = await new Promise<ReturnType<typeof PrinterDetailUpdate.parse>>(
+  const frame = await new Promise<ReturnType<typeof PrinterDetailStreamUpdate.parse>>(
     (resolve, reject) => {
       timeout = setTimeout(
         () => reject(new Error('System detail timed out')),
         2500,
       )
       stop = detail.subscribe((value) => {
-        const parsed = PrinterDetailUpdate.parse(value)
+        const parsed = PrinterDetailStreamUpdate.parse(value)
         if (parsed.capabilities.includes('system')) resolve(parsed)
       })
     },

@@ -10,12 +10,12 @@
   --printer-error: #a02534;
   --printer-offline: #535765;
   --printer-stale: #694784;
-  --printer-idle-icon: "○";
-  --printer-printing-icon: "▶";
-  --printer-paused-icon: "Ⅱ";
-  --printer-error-icon: "!";
-  --printer-offline-icon: "×";
-  --printer-stale-icon: "◷";
+  --printer-idle-icon: '○';
+  --printer-printing-icon: '▶';
+  --printer-paused-icon: 'Ⅱ';
+  --printer-error-icon: '!';
+  --printer-offline-icon: '×';
+  --printer-stale-icon: '◷';
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;

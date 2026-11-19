@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type TLSSocket } from 'node:tls'
 import { createHash, X509Certificate } from 'node:crypto'
@@ -18,8 +18,18 @@ import {
   readBambuH264,
   openBambuCameraSource,
 } from '../../packages/connector/src/bambu/camera-media.ts'
+import type { HelperExecutable } from '../../tools/rtsp-ingest/supervisor/process.ts'
+import {
+  createFakeEncoder,
+  ffmpegFixtures,
+  ffmpegQualificationSkip,
+  qualificationEncoder,
+} from '../helpers/camera-encoder.ts'
 
 const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9])
+// Offline stand-in for FFmpeg; it exits non-zero if the access code reaches argv.
+const encoder = createFakeEncoder(['synthetic'])
+after(() => encoder.dispose())
 function record(payload = jpeg) {
   const header = Buffer.alloc(16)
   header.writeUInt32LE(payload.length)
@@ -137,152 +147,143 @@ test('Annex B AUD parser preserves complete access units across chunk boundaries
   assert.ok(result[1]!.timestampUs > result[0]!.timestampUs)
 })
 
+async function assertTlsLoopback(media: {
+  ffmpeg: HelperExecutable
+  jpeg: Buffer
+}) {
+  const dir = mkdtempSync(join(tmpdir(), 'bambu-camera-'))
+  const sockets = new Set<TLSSocket>()
+  let server: ReturnType<typeof createServer> | undefined
+  try {
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        join(dir, 'key'),
+        '-out',
+        join(dir, 'cert'),
+        '-days',
+        '1',
+        '-subj',
+        '/CN=localhost',
+      ],
+      { stdio: 'ignore' },
+    )
+    const cert = readFileSync(join(dir, 'cert'))
+    const pinSha256 = createHash('sha256')
+      .update(new X509Certificate(cert).raw)
+      .digest('hex')
+    let authentications = 0
+    let peerJpeg = jpeg
+    let encoding = false
+    server = createServer(
+      { key: readFileSync(join(dir, 'key')), cert },
+      (socket) => {
+        sockets.add(socket)
+        socket.on('close', () => sockets.delete(socket))
+        socket.on('error', () => {})
+        let auth = Buffer.alloc(0)
+        socket.on('data', (part) => {
+          auth = Buffer.concat([auth, part])
+          if (auth.length < 80) return
+          assert.deepEqual(auth, bambuCameraAuth('synthetic'))
+          authentications++
+          if (authentications === 1) socket.end(record().subarray(0, 18))
+          else {
+            socket.write(record(peerJpeg).subarray(0, 5))
+            socket.write(record(peerJpeg).subarray(5))
+            if (encoding)
+              for (let i = 0; i < 24; i++) socket.write(record(peerJpeg))
+          }
+        })
+      },
+    )
+    server.on('tlsClientError', () => {})
+    await new Promise<void>((resolve) =>
+      server!.listen(0, '127.0.0.1', resolve),
+    )
+    const address = server.address()
+    assert.ok(address && typeof address !== 'string')
+    const controller = new AbortController()
+    const frames = streamBambuJpegs({
+      host: '127.0.0.1',
+      port: address.port,
+      accessCode: 'synthetic',
+      pinSha256,
+      signal: controller.signal,
+      reconnectDelayMs: 1,
+    })
+    assert.deepEqual((await frames.next()).value, jpeg)
+    assert.equal(authentications, 2)
+    controller.abort()
+    await frames.return(undefined)
+    await assert.rejects(
+      collect(
+        streamBambuJpegs({
+          host: '127.0.0.1',
+          port: address.port,
+          accessCode: 'synthetic',
+          pinSha256: '0'.repeat(64),
+          signal: new AbortController().signal,
+          maxReconnects: 0,
+        }),
+      ),
+      /unavailable/,
+    )
+    assert.equal(authentications, 2, 'bad pin must not send credentials')
+    peerJpeg = media.jpeg
+    encoding = true
+    const mediaAbort = new AbortController()
+    const encoded = await openBambuCameraSource({
+      source: {
+        model: 'P1S',
+        host: '127.0.0.1',
+        accessCode: 'synthetic',
+        pinSha256,
+      },
+      ffmpeg: media.ffmpeg,
+      signal: mediaAbort.signal,
+      jpegStream: async function* (options) {
+        yield* streamBambuJpegs({ ...options, port: address.port })
+      },
+    })
+    const iterator = encoded[Symbol.asyncIterator]()
+    try {
+      const first = await iterator.next()
+      assert.equal(first.done, false)
+      assert.ok(first.value?.keyframe)
+      assert.ok(first.value.data.length > 20)
+      const next = await iterator.next()
+      assert.ok(next.value && next.value.timestampUs > first.value.timestampUs)
+    } finally {
+      mediaAbort.abort()
+      await iterator.return?.()
+    }
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    if (server)
+      await new Promise<void>((resolve) => server!.close(() => resolve()))
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 test(
   'TLS loopback authenticates after pin verification, reconnects and aborts',
   { timeout: 15000 },
-  async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'bambu-camera-'))
-    const sockets = new Set<TLSSocket>()
-    let server: ReturnType<typeof createServer> | undefined
-    try {
-      execFileSync(
-        'openssl',
-        [
-          'req',
-          '-x509',
-          '-newkey',
-          'rsa:2048',
-          '-nodes',
-          '-keyout',
-          join(dir, 'key'),
-          '-out',
-          join(dir, 'cert'),
-          '-days',
-          '1',
-          '-subj',
-          '/CN=localhost',
-        ],
-        { stdio: 'ignore' },
-      )
-      const cert = readFileSync(join(dir, 'cert'))
-      const pinSha256 = createHash('sha256')
-        .update(new X509Certificate(cert).raw)
-        .digest('hex')
-      let authentications = 0
-      let peerJpeg = jpeg
-      server = createServer(
-        { key: readFileSync(join(dir, 'key')), cert },
-        (socket) => {
-          sockets.add(socket)
-          socket.on('close', () => sockets.delete(socket))
-          socket.on('error', () => {})
-          let auth = Buffer.alloc(0)
-          socket.on('data', (part) => {
-            auth = Buffer.concat([auth, part])
-            if (auth.length < 80) return
-            assert.deepEqual(auth, bambuCameraAuth('synthetic'))
-            authentications++
-            if (authentications === 1) socket.end(record().subarray(0, 18))
-            else {
-              socket.write(record(peerJpeg).subarray(0, 5))
-              socket.write(record(peerJpeg).subarray(5))
-              if (peerJpeg !== jpeg)
-                for (let i = 0; i < 24; i++) socket.write(record(peerJpeg))
-            }
-          })
-        },
-      )
-      server.on('tlsClientError', () => {})
-      await new Promise<void>((resolve) =>
-        server!.listen(0, '127.0.0.1', resolve),
-      )
-      const address = server.address()
-      assert.ok(address && typeof address !== 'string')
-      const controller = new AbortController()
-      const frames = streamBambuJpegs({
-        host: '127.0.0.1',
-        port: address.port,
-        accessCode: 'synthetic',
-        pinSha256,
-        signal: controller.signal,
-        reconnectDelayMs: 1,
-      })
-      assert.deepEqual((await frames.next()).value, jpeg)
-      assert.equal(authentications, 2)
-      controller.abort()
-      await frames.return(undefined)
-      await assert.rejects(
-        collect(
-          streamBambuJpegs({
-            host: '127.0.0.1',
-            port: address.port,
-            accessCode: 'synthetic',
-            pinSha256: '0'.repeat(64),
-            signal: new AbortController().signal,
-            maxReconnects: 0,
-          }),
-        ),
-        /unavailable/,
-      )
-      assert.equal(authentications, 2, 'bad pin must not send credentials')
-      const encoder = execFileSync('which', ['ffmpeg'], {
-        encoding: 'utf8',
-      }).trim()
-      peerJpeg = execFileSync(encoder, [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=blue:s=32x32',
-        '-frames:v',
-        '1',
-        '-f',
-        'image2pipe',
-        '-vcodec',
-        'mjpeg',
-        'pipe:1',
-      ])
-      const mediaAbort = new AbortController()
-      const media = await openBambuCameraSource({
-        source: {
-          model: 'P1S',
-          host: '127.0.0.1',
-          accessCode: 'synthetic',
-          pinSha256,
-        },
-        ffmpeg: {
-          path: encoder,
-          sha256: createHash('sha256')
-            .update(readFileSync(encoder))
-            .digest('hex'),
-        },
-        signal: mediaAbort.signal,
-        jpegStream: async function* (options) {
-          yield* streamBambuJpegs({ ...options, port: address.port })
-        },
-      })
-      const iterator = media[Symbol.asyncIterator]()
-      try {
-        const first = await iterator.next()
-        assert.equal(first.done, false)
-        assert.ok(first.value?.keyframe)
-        assert.ok(first.value.data.length > 20)
-        const next = await iterator.next()
-        assert.ok(
-          next.value && next.value.timestampUs > first.value.timestampUs,
-        )
-      } finally {
-        mediaAbort.abort()
-        await iterator.return?.()
-      }
-    } finally {
-      for (const socket of sockets) socket.destroy()
-      if (server)
-        await new Promise<void>((resolve) => server!.close(() => resolve()))
-      rmSync(dir, { recursive: true, force: true })
-    }
+  () => assertTlsLoopback({ ffmpeg: encoder.ffmpeg, jpeg }),
+)
+
+test(
+  'qualification: TLS loopback feeds real FFmpeg H264 encoder',
+  { timeout: 15000, skip: ffmpegQualificationSkip },
+  () => {
+    const ffmpeg = qualificationEncoder()
+    return assertTlsLoopback({ ffmpeg, jpeg: ffmpegFixtures(ffmpeg.path).jpeg })
   },
 )
 

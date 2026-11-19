@@ -5,6 +5,8 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./print-file": "./src/print-file/index.ts",
+    "./print-file/node": "./src/print-file/node.ts"
   }
 }

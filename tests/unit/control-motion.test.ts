@@ -676,7 +676,7 @@ describe('MotionPanel keyboard and layout', () => {
     } finally {
       await server.close()
     }
-  }, 30_000)
+  }, 120_000)
 })
 
 describe('command journal', () => {

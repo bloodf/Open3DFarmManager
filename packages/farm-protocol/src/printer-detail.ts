@@ -130,6 +130,10 @@ export const PrinterDetailUpdate = z.strictObject({
         printingSeconds: number.nonnegative(),
       }),
       firmware: z.strictObject({ state: name, message }),
+      powerDevices: named({
+        status: z.enum(['on', 'off', 'unknown']),
+        locked: z.boolean(),
+      }),
       updates: named({ installed: string(128), available: string(128) }),
       host: z.strictObject({
         temperatureC: number.optional(),

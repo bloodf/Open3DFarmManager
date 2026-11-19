@@ -4,6 +4,7 @@ import {
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
+import { executePower } from './control-power.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import {
   parseQueueOp,
@@ -621,6 +622,20 @@ export function openFixedMoonrakerPause(input: {
         return executeMotion(action, args, request)
       }
       if (action === 'extrude') return extrude(args, request)
+      if (action === 'power') {
+        extended = true
+        return executePower(
+          args,
+          input.objects ?? [],
+          request,
+          requestRead,
+          send,
+          async () => {
+            stop()
+            await closed
+          },
+        )
+      }
       if (action === 'queue_op') return queueOp(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
         return output(action, args, request)

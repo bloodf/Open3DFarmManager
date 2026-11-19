@@ -5,6 +5,7 @@ import {
   isMotionAction,
   motionSupported,
 } from './control-motion.ts'
+import { POWER_MARKER, powerCommand } from './control-power.ts'
 import { serviceCommand } from './control-system-services.ts'
 import { parseExtrude } from './control-extrusion.ts'
 import {
@@ -112,6 +113,7 @@ export function supportedMoonrakerActions(
   if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
     supported.push('unload_filament')
   // The queue is a Moonraker component; detection marks it next to the objects.
+  if (objects.includes(POWER_MARKER)) supported.push('power')
   if (queueSupported(objects)) supported.push('queue_op')
   // Motion actions are advertised only when the printer lists a toolhead.
   if (motionSupported(objects))
@@ -171,6 +173,7 @@ export function buildMoonrakerCommand(
     }
   }
 
+  if (action === 'power') return powerCommand(args, objects)
   if (action === 'queue_op') {
     if (!queueSupported(objects)) throw new Error('Queue unavailable')
     return parseQueueOp(args).call

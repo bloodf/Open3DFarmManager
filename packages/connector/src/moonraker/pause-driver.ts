@@ -41,6 +41,14 @@ import {
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
+  ConsoleRefusal,
+  consoleQueryWire,
+  consoleSupported,
+  parseConsoleState,
+  refuseConsole,
+  takeConsoleRate,
+} from './control-console.ts'
+import {
   MotionRefusal,
   isMotionAction,
   motionNeedsState,
@@ -141,6 +149,8 @@ export function openFixedMoonrakerPause(input: {
    * it and refused without it; lifecycle actions never need it.
    */
   objects?: readonly string[] | undefined
+  /** Local admin switch of the G-code console; off unless provisioned. */
+  gcodeConsole?: boolean | undefined
 }) {
   const candidateMapping = readPrinterBinding(input.binding)
   if (
@@ -712,6 +722,40 @@ export function openFixedMoonrakerPause(input: {
     extended = true
     return send(wire, requested, 5000)
   }
+  /**
+   * G-code console: switch, support, state and rate refusals all precede the
+   * single write; a refusal closes the attempt having sent nothing.
+   */
+  async function executeConsole(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (!input.gcodeConsole) throw new ConsoleRefusal('disabled')
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !consoleSupported(input.objects)
+      )
+        throw new ConsoleRefusal('unsupported')
+      refuseConsole(
+        args,
+        parseConsoleState(
+          await request(11, consoleQueryWire(11), lifetimeDeadline),
+        ),
+      )
+      const wire = extendedWire('gcode', args)
+      if (wire === undefined) throw new ConsoleRefusal('invalid')
+      takeConsoleRate(binding, input.clock.monotonicNow())
+      extended = true
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ConsoleRefusal ? error : failure()
+    }
+  }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
   const driver: PauseDriver = Object.freeze({
@@ -727,6 +771,7 @@ export function openFixedMoonrakerPause(input: {
         return executeMotion(action, args, request)
       }
       if (action === 'exclude_object') return excludeObject(args, request)
+      if (action === 'gcode') return executeConsole(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'power') {
         extended = true

@@ -143,7 +143,7 @@ async function authorityFixture(action: Action, args: Args) {
     control_binding_sha256: bindingHash,
     admission_nonce: admissionNonce,
     actions: ExtendedControlAction.options.filter(
-      (granted) => granted !== 'run_macro',
+      (granted) => granted !== 'run_macro' && granted !== 'gcode',
     ),
   }
   const challenge = {

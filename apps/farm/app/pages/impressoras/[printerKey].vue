@@ -44,7 +44,21 @@ const systemFrame = computed(() =>
     ? detailFrame.value
     : undefined,
 )
+const consoleCommands = shallowRef<readonly string[]>([])
+const consoleResponses = shallowRef<
+  readonly { seq: number; lines: readonly string[] }[]
+>([])
+let consoleSequence = 0
 const view = useFarmView({
+  onGcodeHelp(commands) {
+    consoleCommands.value = commands
+  },
+  onGcodeResponse(frame) {
+    consoleResponses.value = [
+      ...consoleResponses.value.slice(-999),
+      { seq: consoleSequence++, lines: frame.lines },
+    ]
+  },
   onDetail(frame) {
     detailFrame.value = frame
   },
@@ -55,6 +69,7 @@ const view = useFarmView({
   onClose() {
     webcams.value = null
     detailFrame.value = undefined
+    consoleCommands.value = []
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -121,6 +136,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
     ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
+    ...(controls?.includes('gcode') ? (['console'] as const) : []),
   ]
   return found.length ? found : undefined
 })
@@ -259,6 +275,20 @@ const motionAvailability = computed(() =>
   ),
 )
 
+const gcodeAvailability = computed(() => availability('gcode'))
+const gcodeConsole = computed(() => ({
+  advertised: state.value?.controls?.includes('gcode') ?? false,
+  canCommand: gcodeAvailability.value.available && !commandInFlight.value,
+  reason: gcodeAvailability.value.available
+    ? 'Um comando já está em andamento.'
+    : gcodeAvailability.value.reason,
+  printerKey: printerKey.value,
+  commands: consoleCommands.value,
+  responses: consoleResponses.value,
+  printing:
+    state.value?.state === 'printing' || state.value?.state === 'paused',
+}))
+
 const macroAvailability = computed(() => availability('run_macro'))
 const macros = computed(() => {
   const advertised = state.value?.controls?.includes('run_macro') ?? false
@@ -329,6 +359,9 @@ function queueOp(args: QueueOpArguments, event: Event) {
 }
 function timelapseOp(args: TimelapseArguments, event: Event) {
   if (row.value) void openControl(row.value, 'timelapse', event, args)
+}
+function sendGcode(line: string, event: Event) {
+  if (row.value) void openControl(row.value, 'gcode', event, { line })
 }
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
@@ -417,12 +450,14 @@ onMounted(() => heading.value?.focus())
       :queue="queue"
       :timelapse="timelapse"
       :macros="macros"
+      :gcode-console="gcodeConsole"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @queue-op="queueOp"
       @timelapse-op="timelapseOp"
       @run-macro="runMacro"
+      @send-gcode="sendGcode"
       @set-fan="setFan"
       @set-led="setLed"
       @set-pin="setPin"

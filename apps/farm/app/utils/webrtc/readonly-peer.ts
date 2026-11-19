@@ -2,6 +2,7 @@ import {
   assemblePrinterDetailFrames,
   decodePrinterDetailFrame,
   type PrinterDetailUpdate,
+  type PrinterDetailGcodeResponse,
 } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import type { z } from 'zod'
 import {
@@ -235,6 +236,7 @@ export class ReadonlyBrowserPeer {
         !this.#application
       ) {
         this.#application = channel
+        let requestedGcodeHelp = false
         let detailChunks: string[] = []
         channel.onmessage = ({ data }) => {
           if (this.#terminal) return
@@ -271,6 +273,32 @@ export class ReadonlyBrowserPeer {
               if (frame.t === 'detail.update') {
                 detail.onUpdate(frame.detail.webcams ?? null)
                 detail.onDetail?.(frame)
+                if (detail.onGcodeHelp && !requestedGcodeHelp) {
+                  requestedGcodeHelp = true
+                  channel.send(
+                    JSON.stringify({
+                      v: 1,
+                      t: 'query.request',
+                      printerKey: detail.printerKey,
+                      requestId: 'console-help',
+                      kind: 'gcode-help',
+                    }),
+                  )
+                }
+              } else if (frame.t === 'detail.gcode_response') {
+                detail.onGcodeResponse?.(frame)
+              } else if (
+                frame.t === 'query.response' &&
+                frame.kind === 'gcode-help' &&
+                frame.requestId === 'console-help' &&
+                'data' in frame &&
+                Array.isArray(frame.data)
+              ) {
+                detail.onGcodeHelp?.(
+                  frame.data.filter(
+                    (name): name is string => typeof name === 'string',
+                  ),
+                )
               }
               return
             } catch {
@@ -616,6 +644,8 @@ export class ReadonlyBrowserPeer {
 }
 
 export type WebcamDetailOptions = {
+  onGcodeHelp?: (commands: readonly string[]) => void
+  onGcodeResponse?: (frame: z.infer<typeof PrinterDetailGcodeResponse>) => void
   onDetail?: (frame: z.infer<typeof PrinterDetailUpdate>) => void
   printerKey: string
   onUpdate: (

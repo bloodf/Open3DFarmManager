@@ -2,6 +2,7 @@ import { anycubicPrinterDetail } from '../anycubic/printer-detail.ts'
 import { kobraXPrinterDetail } from '../kobra-x/printer-detail.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { randomUUID } from 'node:crypto'
+import { parseGcodeHelp } from '../moonraker/control-console.ts'
 import type { z } from 'zod'
 import {
   createPrinterDetailSubscriptions,
@@ -302,6 +303,8 @@ async function query(
           .filter((job) => job.id && job.file),
       }
     }
+    case 'gcode-help':
+      return parseGcodeHelp(await request('printer.gcode.help'))
     case 'power-devices':
       return list(fields(await request('machine.device_power.devices')).devices)
         .slice(0, 64)

@@ -1,28 +1,36 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import FarmMaterials from '../FarmMaterials.vue'
 import FarmEnvironment from '../FarmEnvironment.vue'
 import CameraDisplay from '../CameraDisplay.vue'
 import ActiveSpoolAssign from './ActiveSpoolAssign.vue'
 import FarmLocalInterface from './FarmLocalInterface.vue'
+import PrinterAlerts from './PrinterAlerts.vue'
 import {
   formatPrinterStateLabel,
   observationAge,
   type FarmRow,
 } from '../../utils/farm-view.ts'
+import { deriveRowAlerts, type FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobOutcome } from '../../utils/farm-job-outcome.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
 import {
   KOBRA_X_DEVICE_CAPABILITIES,
   isKobraXAssignment,
 } from '../../utils/kobralink-onboarding.ts'
-const { liveNow } = defineProps<{
+const props = defineProps<{
   row: FarmRow & {
     draft?: { value: string; confirmed: boolean; error: string }
   }
   farmId: string
   cameraFor: (id: string) => MediaStream | null
   liveNow: () => { wall: number; mono: number }
+  alerts?: readonly FarmAlert[]
 }>()
+const liveNow = props.liveNow
+const cardAlerts = computed(
+  () => props.alerts ?? deriveRowAlerts(props.row, props.liveNow()),
+)
 const emit = defineEmits<{ setup: []; save: []; cancel: [] }>()
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
@@ -91,6 +99,11 @@ function dateLabel(time: number) {
       <h3 :id="`printer-${row.assignment.assignmentId}`" class="opaque">
         {{ row.assignment.printerKey }}
       </h3>
+      <PrinterAlerts
+        v-if="cardAlerts.length"
+        :chips="cardAlerts"
+        label="Alertas da impressora"
+      />
       <a :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}`"
         >Abrir detalhes da impressora
         <span class="opaque">{{ row.assignment.printerKey }}</span></a

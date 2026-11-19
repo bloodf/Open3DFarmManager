@@ -18,6 +18,7 @@ export const ExtendedControlAction = z.enum([
   'run_macro',
   'load_filament',
   'unload_filament',
+  'extrude',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -70,6 +71,8 @@ export function controlSourceState(
   if (action === 'emergency_stop') return true
   if (action === 'firmware_restart')
     return state === 'error' || state === 'idle'
+  // Extrusion moves filament: only a stopped printer may do it.
+  if (action === 'extrude') return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
   return action === 'resume'
@@ -88,7 +91,19 @@ export function controlTargetState(
       : 'cancelled'
 }
 
+/** Tool index, signed length (negative retracts) and feed rate in mm/min. */
+export const ExtrudeArguments = z.strictObject({
+  tool: z.number().int().min(0).max(15),
+  length_mm: z
+    .number()
+    .finite()
+    .min(-50)
+    .max(100)
+    .refine((value) => value !== 0),
+  feed: z.number().finite().min(1).max(6000),
+})
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
     args: z.strictObject({ name: MacroName }),

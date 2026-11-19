@@ -19,7 +19,9 @@ import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
+import { deriveAlerts } from '../utils/farm-alerts.ts'
 import {
   farmConnectionNotice,
   resolvedLocalInterfaceOrigin,
@@ -148,6 +150,7 @@ const counts = computed(() => summarizeFarmRows(renderedRows.value, now.value))
 const connectionNotice = computed(() =>
   farmConnectionNotice(ready.value?.rows ?? []),
 )
+const alertsSummary = computed(() => deriveAlerts(ready.value, now.value))
 function setupLink(id: string) {
   drafts.value[id] = { value: '', confirmed: false, error: '' }
 }
@@ -260,6 +263,7 @@ function cancelPause(event: Event) {
             ready.rows.some((row) => row.connection === 'authenticated')
           "
         />
+        <PrinterAlerts :alerts="alertsSummary" />
         <section
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"
@@ -338,6 +342,10 @@ function cancelPause(event: Event) {
                     :farm-id="ready.scope.farmId"
                     :camera-for="cameraFor"
                     :live-now="liveNow"
+                    :alerts="
+                      alertsSummary.byAssignment[row.assignment.assignmentId] ??
+                      []
+                    "
                     @setup="setupLink(row.assignment.assignmentId)"
                     @save="saveLink(row.assignment.assignmentId)"
                     @cancel="delete drafts[row.assignment.assignmentId]"

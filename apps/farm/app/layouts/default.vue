@@ -45,6 +45,7 @@ const links = computed(() => [
   { to: '/farm', label: 'Minha farm' },
   { to: '/impressoras', label: 'Impressoras' },
   { to: '/arquivos', label: 'Arquivos' },
+  { to: '/biblioteca', label: 'Biblioteca' },
   { to: '/historico', label: 'Histórico' },
   { to: '/connectors', label: 'Connectors' },
   ...(canApproveConnectors.value

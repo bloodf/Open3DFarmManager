@@ -37,7 +37,7 @@ export default defineNitroPlugin((nitro) => {
       const blobs = directory ? await createBlobStore(directory) : undefined
       const result = await runLibraryRetention({ sql, blobs }, config)
       if (Object.values(result).some(Boolean))
-        logger.info('library-retention', result)
+        logger.info('library-retention', { ...result })
     } catch (error) {
       logger.error('library-retention-failed', { error })
     } finally {

@@ -1623,7 +1623,12 @@ components:
     FilamentUsage:
       type: object
       additionalProperties: false
+      required: [tool]
       properties:
+        tool:
+          type: string
+          minLength: 1
+          maxLength: 32
         grams:
           type: number
           minimum: 0
@@ -1665,7 +1670,11 @@ components:
           type: number
           minimum: 0
         filamentUsage:
-          $ref: '#/components/schemas/FilamentUsage'
+          type: array
+          description: Per-tool usage recorded at job end, when known.
+          maxItems: 17
+          items:
+            $ref: '#/components/schemas/FilamentUsage'
         endedAt:
           $ref: '#/components/schemas/TimestampMs'
     JobHistoryPage:

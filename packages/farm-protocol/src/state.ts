@@ -1,6 +1,13 @@
 import { z } from 'zod'
 import { ExtendedControlAction, MacroName } from './control-actions.ts'
 
+export const FilamentUsage = z.strictObject({
+  tool: z.string().min(1).max(32),
+  millimetres: z.number().finite().nonnegative().optional(),
+  grams: z.number().finite().nonnegative().optional(),
+})
+export type FilamentUsage = z.infer<typeof FilamentUsage>
+
 const LocalWebUiOrigin = z
   .string()
   .max(512)
@@ -68,6 +75,8 @@ export const PrinterState = z
             .optional(),
           remainingPercent: z.number().min(0).max(100).optional(),
           active: z.boolean().optional(),
+          filamentDiameterMm: z.number().finite().positive().optional(),
+          filamentDensityGramsPerCm3: z.number().finite().positive().optional(),
         }),
       )
       .max(17)
@@ -96,6 +105,8 @@ export const PrinterState = z
         filename: z.string().max(255).optional(),
         printDuration: z.number().finite().nonnegative().optional(),
         totalDuration: z.number().finite().nonnegative().optional(),
+        filamentUsedMillimetres: z.number().finite().nonnegative().optional(),
+        filamentUsage: z.array(FilamentUsage).max(17).optional(),
         endedAt: z.number().int().nonnegative(),
       })
       .optional(),

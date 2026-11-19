@@ -1,4 +1,7 @@
-import type { TelemetryEvent } from '@open3dfarmmanager/farm-protocol'
+import type {
+  FilamentUsage,
+  TelemetryEvent,
+} from '@open3dfarmmanager/farm-protocol'
 
 export const jobHistoryCursor = /^\d{1,16}-\d{1,18}$/
 export interface JobRecord {
@@ -7,6 +10,7 @@ export interface JobRecord {
   filename?: string
   printDurationSeconds?: number
   totalDurationSeconds?: number
+  filamentUsage?: FilamentUsage[]
   endedAt: number
 }
 export type JobHistoryFailure = {
@@ -48,6 +52,18 @@ export function jobsFromEvents(events: readonly TelemetryEvent[]): JobRecord[] {
       ...(last.totalDuration !== undefined
         ? { totalDurationSeconds: last.totalDuration }
         : {}),
+      ...(last.filamentUsage?.length
+        ? { filamentUsage: last.filamentUsage }
+        : last.filamentUsedMillimetres !== undefined
+          ? {
+              filamentUsage: [
+                {
+                  tool: 'unknown',
+                  millimetres: last.filamentUsedMillimetres,
+                },
+              ],
+            }
+          : {}),
       endedAt: last.endedAt,
     })
   }

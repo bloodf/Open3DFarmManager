@@ -44,3 +44,27 @@ retention and purge rules apply. Show each version's storage mode and, for
 Connector storage, its Connector identity. Replay always retrieves the exact
 selected version by hash, verifies it, and runs compatibility checks before
 starting. A blocked version cannot be replayed.
+
+## Quota and retention
+
+The default quota is 20 GiB per farm; `OPENFARM_LIBRARY_QUOTA_BYTES` changes the
+default for farms with no stored setting. An upload that does not fit is refused
+before any file is accepted, with an accessible pt-BR message. Server mode counts
+the unpurged files on the server disk. Connector mode checks the quota the
+Connector host reports for its own library directory (`farm.library_connector_storage`);
+the Connector enforces it too. The owner sees used and available space for the
+active mode.
+
+The retention job (`libraryRetention`, off by default, login in
+`farm_library_retention` from migration 0057) runs beside the telemetry prune:
+
+- when the owner sets "keep newest N versions", older live versions of an item are
+  soft-deleted;
+- a stored file is purged once every version using it has been soft-deleted for
+  the retention window (30 days by default) and none is live; files no version
+  references are removed after a one-hour grace;
+- the file is removed on the server disk, or on the Connector host in Connector
+  mode (the server records the purge only after the Connector confirms it);
+  without the disk or a Connector transport the purge is deferred;
+- version rows are kept: a purged version shows "arquivo removido" instead of
+  being replayed, and uploading the same bytes again restores the file.

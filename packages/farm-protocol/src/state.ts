@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { ExtendedControlAction, MacroName } from './control-actions.ts'
+import {
+  ExtendedControlAction,
+  MACRO_PARAM_MAX_KEYS,
+  MacroName,
+  MacroParamName,
+  MacroParamValue,
+} from './control-actions.ts'
 
 export const FilamentUsage = z.strictObject({
   tool: z.string().min(1).max(32),
@@ -52,6 +58,21 @@ export const PrinterState = z
   .strictObject({
     machine: MachineProfile.optional(),
     macros: z.array(MacroName).max(50).optional(),
+    /** Parameters each macro reads (`params.X`), with a literal default if any. */
+    macroParams: z
+      .record(
+        MacroName,
+        z
+          .array(
+            z.strictObject({
+              name: MacroParamName,
+              default: MacroParamValue.optional(),
+            }),
+          )
+          .max(MACRO_PARAM_MAX_KEYS),
+      )
+      .refine((value) => Object.keys(value).length <= 50)
+      .optional(),
     controls: z
       .array(ExtendedControlAction)
       .max(ExtendedControlAction.options.length)

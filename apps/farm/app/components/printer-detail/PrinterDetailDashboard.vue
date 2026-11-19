@@ -4,8 +4,10 @@ import Button from '../ui/Button.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
+import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
+import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import type { QueueOpArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
@@ -41,6 +43,22 @@ const props = defineProps<{
     canCommand: boolean
     reason?: string
   }
+  /** Macro control: shown with its reason when not advertised. */
+  macros?: {
+    advertised: boolean
+    list: readonly {
+      name: string
+      params: readonly { name: string; default?: string }[]
+    }[]
+    canCommand: boolean
+    reason?: string
+  }
+  /** Named fans, LEDs and pins: shown with the reason when not advertised. */
+  outputs?: {
+    advertised: { fan: boolean; led: boolean; pin: boolean }
+    canCommand: boolean
+    reason?: string
+  }
   /** Job queue control and the queue the detail session reported. */
   queue?: {
     advertised: boolean
@@ -66,6 +84,20 @@ const emit = defineEmits<{
     feed: number,
     event: Event,
   ): void
+  (
+    e: 'run-macro',
+    name: string,
+    params: Record<string, string> | undefined,
+    event: Event,
+  ): void
+  (e: 'set-fan', fan: string, percent: number, event: Event): void
+  (
+    e: 'set-led',
+    name: string,
+    channels: { r: number; g: number; b: number; w?: number },
+    event: Event,
+  ): void
+  (e: 'set-pin', name: string, value: number, event: Event): void
   (e: 'queue-op', args: QueueOpArguments, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
@@ -188,6 +220,29 @@ const heaterReason = computed(
             (tool, lengthMm, feed, event) =>
               emit('extrude', tool, lengthMm, feed, event)
           "
+        />
+        <MacrosPanel
+          v-if="macros"
+          :advertised="macros.advertised"
+          :macros="macros.list"
+          :can-command="macros.canCommand"
+          :disabled-reason="macros.reason"
+          @run-macro="
+            (name, params, event) => emit('run-macro', name, params, event)
+          "
+        />
+        <OutputsPanel
+          v-if="outputs"
+          :advertised="outputs.advertised"
+          :can-command="outputs.canCommand"
+          :disabled-reason="outputs.reason"
+          @set-fan="
+            (fan, percent, event) => emit('set-fan', fan, percent, event)
+          "
+          @set-led="
+            (name, channels, event) => emit('set-led', name, channels, event)
+          "
+          @set-pin="(name, value, event) => emit('set-pin', name, value, event)"
         />
       </template>
       <template

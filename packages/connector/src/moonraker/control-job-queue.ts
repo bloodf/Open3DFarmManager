@@ -123,6 +123,14 @@ export function parseQueueStatus(result: unknown): QueueStatus {
   })
 }
 
+/**
+ * Moonraker answers the queue methods with the new queue status (or "ok");
+ * a reply that is neither is not an acknowledgement.
+ */
+export function queueReplyAccepted(result: unknown): boolean {
+  return Status.safeParse(result).success
+}
+
 /** Operations whose result depends on what the queue holds right now. */
 export const queueNeedsStatus = (op: QueueOpArguments) => op.op !== 'pause'
 

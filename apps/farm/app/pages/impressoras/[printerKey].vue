@@ -136,6 +136,34 @@ const extrusion = computed(() => {
         : undefined,
   }
 })
+const outputs = computed(() => {
+  const controls = state.value?.controls ?? []
+  const advertised = {
+    fan: controls.includes('set_fan'),
+    led: controls.includes('set_led'),
+    pin: controls.includes('set_pin'),
+  }
+  // The panel is one form set: it is on only when every advertised action is.
+  const blocked = (
+    [
+      ['set_fan', advertised.fan],
+      ['set_led', advertised.led],
+      ['set_pin', advertised.pin],
+    ] as const
+  )
+    .filter(([, offered]) => offered)
+    .map(([action]) => availability(action))
+    .find((item) => !item.available)
+  return {
+    advertised,
+    canCommand: !blocked && !commandInFlight.value,
+    reason: blocked
+      ? blocked.reason
+      : commandInFlight.value
+        ? 'Um comando já está em andamento.'
+        : undefined,
+  }
+})
 const queueAvailability = computed(() => availability('queue_op'))
 const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
@@ -173,11 +201,40 @@ const motionAvailability = computed(() =>
   ),
 )
 
+const macroAvailability = computed(() => availability('run_macro'))
+const macros = computed(() => {
+  const advertised = state.value?.controls?.includes('run_macro') ?? false
+  const params = state.value?.macroParams ?? {}
+  return {
+    advertised,
+    list: (state.value?.macros ?? [])
+      .filter((name) => !name.startsWith('_'))
+      .map((name) => ({ name, params: params[name] ?? [] })),
+    canCommand: macroAvailability.value.available && !commandInFlight.value,
+    reason: !advertised
+      ? undefined
+      : macroAvailability.value.available
+        ? 'Um comando já está em andamento.'
+        : macroAvailability.value.reason,
+  }
+})
+
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
     void openControl(row.value, 'set_temperature', event, {
       heater,
       target_c: targetC,
+    })
+}
+function runMacro(
+  name: string,
+  params: Record<string, string> | undefined,
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'run_macro', event, {
+      name,
+      ...(params ? { params } : {}),
     })
 }
 function control(
@@ -194,6 +251,20 @@ function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
       length_mm: lengthMm,
       feed,
     })
+}
+function setFan(fan: string, percent: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_fan', event, { fan, percent })
+}
+function setLed(
+  name: string,
+  channels: { r: number; g: number; b: number; w?: number },
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'set_led', event, { name, ...channels })
+}
+function setPin(name: string, value: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_pin', event, { name, value })
 }
 function queueOp(args: QueueOpArguments, event: Event) {
   if (row.value) void openControl(row.value, 'queue_op', event, args)
@@ -263,9 +334,15 @@ onMounted(() => heading.value?.focus())
       "
       :extrusion="extrusion"
       :queue="queue"
+      :macros="macros"
+      :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @queue-op="queueOp"
+      @run-macro="runMacro"
+      @set-fan="setFan"
+      @set-led="setLed"
+      @set-pin="setPin"
       @emergency-stop="emergencyStop"
     />
     <dialog

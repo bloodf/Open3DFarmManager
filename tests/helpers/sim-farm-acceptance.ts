@@ -464,7 +464,9 @@ export async function runSimFarmAcceptance(input: {
     assert.equal(totals!.n, totals!.d, 'each event stored exactly once')
     const [inventory] =
       await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
-    assert.equal(inventory!.n, 1, 'one seeded inventory snapshot stored')
+    // The Spoolman provider refreshes on its own timer, so a slow run stores
+    // more than one snapshot; the exact accounting below covers every one.
+    assert.ok(inventory!.n >= 1, 'seeded inventory snapshot stored')
     // The collector summary counts printer records; delivery also carries Spoolman.
     const queued = Number(summary.queued) + inventory!.n
     assert.equal(totals!.n, queued, 'every queued record stored')

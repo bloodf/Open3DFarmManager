@@ -33,7 +33,12 @@ export async function startConfigurator(input: {
   ownerPage: Page
   machinePost(path: string, body: unknown): Promise<unknown>
   /** Loopback discovery responder ports (info endpoints) per vendor. */
-  probes: Readonly<{ creality?: number; anycubic?: number; bambuPort?: number }>
+  probes: Readonly<{
+    creality?: number
+    anycubic?: number
+    bambuPort?: number
+    kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
+  }>
   /** Private host route allowed for the loopback Bambu simulator. */
   printerNetworks?: readonly string[]
 }): Promise<Configurator> {

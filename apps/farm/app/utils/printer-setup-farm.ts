@@ -1,4 +1,5 @@
 import { nextTick } from 'vue'
+import { DEFAULT_KOBRA_X_SETUP_MODE } from './kobra-x-setup-mode.ts'
 import type {
   KobraEpoch,
   Printer,
@@ -91,7 +92,7 @@ export function createFarmData(
       kobraKeyId.value = ''
       kobraKeyState.value = { kind: 'idle' }
       kobraIp.value = ''
-      kobraSetupMode.value = 'unselected'
+      kobraSetupMode.value = DEFAULT_KOBRA_X_SETUP_MODE
       kobraLabel.value = ''
       kobraExpectedDeviceId.value = ''
     }

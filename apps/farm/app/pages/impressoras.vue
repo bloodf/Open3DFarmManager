@@ -168,6 +168,7 @@ async function prepareKobraX() {
   }
   const validated = validateKobraXTargetInput({
     ipv4: kobraIp.value,
+    mode: gate.ok ? gate.mode : 'native',
     displayLabel: kobraLabel.value,
     expectedDeviceId: kobraExpectedDeviceId.value,
     ...(certOption.clientCertificate

@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { KOBRA_X_BRIDGE_REQUIRED_MESSAGE } from '../../utils/kobra-x-setup-mode.ts'
+import { DEFAULT_KOBRA_X_SETUP_MODE } from '../../utils/kobra-x-setup-mode.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
 import { usePrinterSetupActions } from '../../utils/printer-setup-actions.ts'
 import AnycubicFields from './AnycubicFields.vue'
@@ -20,15 +19,9 @@ const {
 } = usePrinterSetup()
 const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
 
-const bridgeRequired = computed(
-  () =>
-    onboardingFamily.value === 'anycubic-kobra-x' &&
-    kobraSetupMode.value !== 'kobralink-bridge',
-)
-
-// A new setup must name its transport again after any family change.
+// A new setup starts on the native default again after any family change.
 function onFamilyChanged() {
-  kobraSetupMode.value = 'unselected'
+  kobraSetupMode.value = DEFAULT_KOBRA_X_SETUP_MODE
   closeKobraSession()
 }
 </script>
@@ -89,10 +82,7 @@ function onFamilyChanged() {
       <div class="kobra-actions">
         <button
           type="submit"
-          :disabled="
-            kobraBusy || kobraBootstrap.kind !== 'ready' || bridgeRequired
-          "
-          :aria-describedby="bridgeRequired ? 'kobra-submit-help' : undefined"
+          :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'"
         >
           {{
             kobraBusy && kobraStage === 'preparing'
@@ -109,9 +99,6 @@ function onFamilyChanged() {
           }}
         </button>
       </div>
-      <p v-if="bridgeRequired" id="kobra-submit-help">
-        {{ KOBRA_X_BRIDGE_REQUIRED_MESSAGE }}
-      </p>
     </fieldset>
   </form>
 </template>

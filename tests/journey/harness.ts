@@ -25,6 +25,10 @@ import {
   startMoonrakerSimulator,
   type MoonrakerSimulator,
 } from './moonraker-simulator.ts'
+import {
+  startKobraXMock,
+  type KobraXMockInstance,
+} from '../../packages/sim-tools/src/mocks/index.ts'
 import { startConfigurator, type Configurator } from './harness-configurator.ts'
 import { startJourneyDatabase, type JourneyDatabase } from './database.ts'
 import { AUDIENCE, startFarmApp, type FarmApp } from './farm-app.ts'
@@ -84,6 +88,15 @@ export type JourneyOptions = Readonly<{
    */
   discovery?: boolean
   /**
+   * Starts the loopback Kobra X mock and the configuration-mode Connector with
+   * the native connection confirmation pointed at it, so the Impressoras page
+   * can set up a Kobra X natively. The page-created assignment is the journey's
+   * own; the harness's default printer is unaffected. Private route
+   * 10.0.0.0/24 stands in for the LAN; the Connector's probe reaches the mock
+   * on 127.0.0.1 only.
+   */
+  kobraX?: boolean
+  /**
    * Performs the printer set-up in the browser instead of the harness calling
    * the assignment API. Receives the signed-in owner page and must return once
    * the assignment for `printerKey` on `agentId` exists.
@@ -142,6 +155,8 @@ export type JourneyHarness = Readonly<{
     Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
   /** Loopback MJPEG camera (Creality and Anycubic only). */
   camera: VendorSimulator['camera']
+  /** The Kobra X mock behind the native setup (`kobraX: true`). */
+  kobraX: Readonly<{ mock: KobraXMockInstance; lanAddress: string }> | undefined
   /** The Moonraker simulator; throws for any other simulator. */
   printer: MoonrakerSimulator
   simulatorObservation(): ReturnType<
@@ -221,6 +236,9 @@ function machinePoster(origin: string, ca: Buffer) {
       request.end(payload)
     })
 }
+
+/** Private address the Kobra X setup form is given; the probe maps it to the mock. */
+const KOBRA_X_LAN_ADDRESS = '10.0.0.5'
 
 /** Removes every resource a failed start already created. */
 type Undo = () => Promise<void>
@@ -479,12 +497,30 @@ export async function startJourneyHarness(
       throw new Error('Connector pairing did not complete')
 
     let configurator: Configurator | undefined
-    if (options.discovery || (options.setup && simulator === 'bambu')) {
+    let kobraX: JourneyHarness['kobraX']
+    if (options.kobraX) {
+      const mock = await startKobraXMock({ reportIntervalMs: 0 })
+      undo.push(() => mock.close())
+      kobraX = Object.freeze({ mock, lanAddress: KOBRA_X_LAN_ADDRESS })
+    }
+    if (
+      options.discovery ||
+      options.kobraX ||
+      (options.setup && simulator === 'bambu')
+    ) {
       let probes: {
         creality?: number
         anycubic?: number
         bambuPort?: number
+        kobraX?: { httpPort: number; mqttPort: number }
       } = {}
+      if (kobraX)
+        probes = {
+          kobraX: {
+            httpPort: kobraX.mock.httpPort,
+            mqttPort: kobraX.mock.mqttPort,
+          },
+        }
       if (options.discovery) {
         const port = vendor?.discovery?.port
         if (
@@ -511,6 +547,7 @@ export async function startJourneyHarness(
         machinePost,
         probes,
         ...(bambuHost ? { printerNetworks: [`${bambuHost}/32`] } : {}),
+        ...(kobraX ? { printerNetworks: [`${KOBRA_X_LAN_ADDRESS}/32`] } : {}),
       })
       const started = configurator
       undo.push(() => started.close())
@@ -658,6 +695,7 @@ export async function startJourneyHarness(
       vendor,
       discovery: vendor?.discovery,
       camera: vendor?.camera,
+      kobraX,
       configurator,
       get printer(): MoonrakerSimulator {
         if (!printer)

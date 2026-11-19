@@ -14,6 +14,8 @@ export function discoveryLabel(printer: Printer): string {
       return 'Creality'
     case 'anycubic':
       return 'Anycubic'
+    case 'kobra-x':
+      return 'Anycubic Kobra X'
     default: {
       const _exhaustive: never = printer.vendor
       return _exhaustive
@@ -46,6 +48,12 @@ export function discoveryPrefill(printer: Printer) {
       return {
         family: 'anycubic-lan' as const,
         host: printer.host,
+        label: printer.name ?? '',
+      }
+    case 'kobra-x':
+      return {
+        family: 'anycubic-kobra-x' as const,
+        ip: printer.host,
         label: printer.name ?? '',
       }
     default: {

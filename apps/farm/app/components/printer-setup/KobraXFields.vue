@@ -7,8 +7,8 @@ import {
 import {
   KOBRA_X_BRIDGE_CHOICE_HELP,
   KOBRA_X_BRIDGE_CHOICE_LABEL,
+  KOBRA_X_NATIVE_CHOICE_HELP,
   KOBRA_X_NATIVE_CHOICE_LABEL,
-  KOBRA_X_NATIVE_UNAVAILABLE_REASON,
 } from '../../utils/kobra-x-setup-mode.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
 
@@ -89,8 +89,22 @@ async function onPassphraseInput() {
 </script>
 
 <template>
-  <fieldset aria-describedby="kobra-mode-bridge-help kobra-mode-native-help">
+  <fieldset aria-describedby="kobra-mode-native-help kobra-mode-bridge-help">
     <legend>Conexão da Kobra X</legend>
+    <div class="kobra-mode-option">
+      <input
+        id="kobra-mode-native"
+        v-model="kobraSetupMode"
+        type="radio"
+        name="kobra-setup-mode"
+        value="native"
+        aria-describedby="kobra-mode-native-help"
+      />
+      <div>
+        <label for="kobra-mode-native">{{ KOBRA_X_NATIVE_CHOICE_LABEL }}</label>
+        <p id="kobra-mode-native-help">{{ KOBRA_X_NATIVE_CHOICE_HELP }}</p>
+      </div>
+    </div>
     <div class="kobra-mode-option">
       <input
         id="kobra-mode-bridge"
@@ -103,24 +117,6 @@ async function onPassphraseInput() {
       <div>
         <label for="kobra-mode-bridge">{{ KOBRA_X_BRIDGE_CHOICE_LABEL }}</label>
         <p id="kobra-mode-bridge-help">{{ KOBRA_X_BRIDGE_CHOICE_HELP }}</p>
-      </div>
-    </div>
-    <div class="kobra-mode-option">
-      <input
-        id="kobra-mode-native"
-        type="radio"
-        name="kobra-setup-mode"
-        value="native"
-        disabled
-        aria-describedby="kobra-mode-native-help"
-      />
-      <div>
-        <label for="kobra-mode-native"
-          >{{ KOBRA_X_NATIVE_CHOICE_LABEL }} (indisponível)</label
-        >
-        <p id="kobra-mode-native-help">
-          {{ KOBRA_X_NATIVE_UNAVAILABLE_REASON }}
-        </p>
       </div>
     </div>
   </fieldset>

@@ -2,9 +2,10 @@ import dgram from 'node:dgram'
 import { probeAnycubic } from './anycubic.ts'
 import { crealityQuery, isCrealityResponse, probeCreality } from './creality.ts'
 import { isIPv4 } from 'node:net'
+import { discoverKobraX } from '../kobra-x/discovery.ts'
 
 export type Printer = {
-  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic'
+  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic' | 'kobra-x'
   host: string
   port?: number
   serial?: string
@@ -195,6 +196,11 @@ type Options = {
   queryPort?: number
   anycubicPort?: number
   crealityPorts?: { https: number; http: number }
+  /**
+   * Kobra X SSDP discovery. Enabled by default on the real network; a test
+   * that injects `queryAddress` must opt in with loopback endpoints.
+   */
+  kobraX?: false | { target?: string; ssdpPort?: number; httpPort?: number }
   createSocket?: () => dgram.Socket
 }
 export async function discoverPrinters(
@@ -284,12 +290,34 @@ export async function discoverPrinters(
         ),
       )
     ).filter((printer): printer is Printer => printer !== undefined)
+    // Only the confirmed sender address and a clean display name leave this
+    // step: the printer's /info token never reaches a discovery result.
+    const kobraX: Printer[] =
+      options.kobraX === false ||
+      (options.kobraX === undefined && options.queryAddress)
+        ? []
+        : (
+            await discoverKobraX({
+              timeoutMs: Math.min(timeout, 2500),
+              ...(options.kobraX ?? {}),
+            }).catch(() => [])
+          ).map((found) => {
+            const name = clean(found.name)
+            return {
+              vendor: 'kobra-x' as const,
+              host: found.address,
+              port: 18910,
+              model: 'Anycubic Kobra X',
+              ...(name && { name }),
+            }
+          })
     const unique = new Map<string, Printer>()
     for (const printer of [
       ...printers,
       ...moonrakerPrinters(records),
       ...creality,
       ...anycubic,
+      ...kobraX,
     ])
       unique.set(
         `${printer.vendor}:${printer.serial ?? printer.host}:${printer.port ?? ''}`,

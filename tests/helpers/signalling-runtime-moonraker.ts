@@ -96,6 +96,8 @@ export async function createRuntimeMoonrakerFixture() {
   }
   return {
     identity,
+    /** Identity directory, for a configuration-mode run of the same agent. */
+    dataDirectory: data,
     async start(input: {
       origin: string
       audience: string

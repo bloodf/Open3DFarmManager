@@ -42,5 +42,33 @@ export async function launchBrowser(options?: LaunchOptions): Promise<Browser> {
   return chromium.launch(launchOpts)
 }
 
+/**
+ * Runs `use` against a browser whose process is force-killed afterwards.
+ *
+ * Chrome's graceful shutdown can stall on a loaded host until its own
+ * teardown watchdog and then Playwright's 30 s kill deadline fire, so a test
+ * that only needs the browser while it runs would spend most of its budget
+ * closing it. Killing the launched server skips that wait and still removes
+ * the process group and its temporary profile.
+ */
+export async function withBrowser<T>(
+  options: LaunchOptions,
+  use: (browser: Browser) => Promise<T>,
+): Promise<T> {
+  const launchOpts: LaunchOptions = { ...browserOptions(options) }
+  delete (launchOpts as { browserName?: unknown }).browserName
+  const server = await chromium.launchServer(launchOpts)
+  try {
+    const browser = await chromium.connect(server.wsEndpoint())
+    try {
+      return await use(browser)
+    } finally {
+      await browser.close()
+    }
+  } finally {
+    await server.kill()
+  }
+}
+
 export const launchChromium = launchBrowser
 export type { Browser, LaunchOptions }

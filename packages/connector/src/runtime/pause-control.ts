@@ -491,7 +491,7 @@ async function runAssignmentControl(
       credentialExpiresAt: credential.expires_at,
       retryMinMs: RETRY_MIN_MS,
       retryMaxMs: RETRY_MAX_MS,
-      createSession(onTerminal, onAdmitted) {
+      createSession(onTerminal, onAdmitted, onServed) {
         const peerSignal = new AbortController()
         let transportId: string | undefined
         let ended = false
@@ -530,16 +530,24 @@ async function runAssignmentControl(
             },
             onPhase(frame) {
               if (!transportId) return
+              // A session is single-use: once the relay admits its verified
+              // browser peer, it has served and its end is not a failure.
+              const served = (
+                result: Awaited<ReturnType<typeof relay.admitPeer>>,
+              ) => {
+                if (result.ok) onServed()
+                admitted(result)
+              }
               if (frame.t === 'control.capability')
                 void relay
                   .admitPeer({ transportId, capabilityWire: frame.wire })
-                  .then(admitted, () =>
+                  .then(served, () =>
                     diagnostic({ kind: 'pause-denied', reason: 'error' }),
                   )
               else if (frame.t === 'control.admission-proof')
                 void relay
                   .admitPeer({ transportId, admissionProofWire: frame.wire })
-                  .then(admitted, () =>
+                  .then(served, () =>
                     diagnostic({ kind: 'pause-denied', reason: 'error' }),
                   )
             },

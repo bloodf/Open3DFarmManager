@@ -35,6 +35,24 @@ export type ConfigurationStableAssignment = z.infer<
   typeof ConfigurationStableAssignment
 >
 
+/**
+ * Printer key of a configured assignment. The prefix names the backend that
+ * owns it, so the farm never shows one printer family as another.
+ */
+export const ConfigurationPrinterKey = z
+  .string()
+  .regex(/^(?:kobra-x|moonraker|bambu)-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)
+
+const PRINTER_KEY_PREFIXES = ['moonraker-', 'bambu-'] as const
+
+function printerKeyPrefix(bridgeInstanceId: string) {
+  return (
+    PRINTER_KEY_PREFIXES.find((prefix) =>
+      bridgeInstanceId.startsWith(prefix),
+    ) ?? 'kobra-x-'
+  )
+}
+
 /** Identity is not authority. Callers must reject existing conflicting bindings. */
 export async function deriveConfigurationAssignmentIdentity(input: unknown) {
   const stable = ConfigurationStableAssignment.parse(input)
@@ -58,10 +76,7 @@ export async function deriveConfigurationAssignmentIdentity(input: unknown) {
   )
   return {
     assignment_id,
-    printer_key:
-      (stable.bridge_instance_id.startsWith('moonraker-')
-        ? 'moonraker-'
-        : 'kobra-x-') + digest,
+    printer_key: printerKeyPrefix(stable.bridge_instance_id) + digest,
   }
 }
 
@@ -95,9 +110,7 @@ const fields = {
   committed_receipt_sha256: configurationDigest,
   committed_revision: z.number().int().min(1).max(2_147_483_646),
   assignment_id: BrowserDeviceUuid,
-  printer_key: z
-    .string()
-    .regex(/^(?:kobra-x|moonraker)-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+  printer_key: ConfigurationPrinterKey,
   nonce: configurationDigest,
   issued_at: configurationTime,
   expires_at: configurationTime,

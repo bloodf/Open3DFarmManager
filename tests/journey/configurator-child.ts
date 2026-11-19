@@ -68,8 +68,9 @@ async function main() {
         ),
       ]
     },
-    // The setup form's private LAN address is mapped to the loopback mock here
-    // and nowhere else: the production probe never overrides the address.
+    // The setup form's private LAN address is mapped to the loopback mock or
+    // simulator here and nowhere else: the production probe never overrides
+    // the address.
     ...(probes.kobraX === undefined
       ? {}
       : {
@@ -85,7 +86,11 @@ async function main() {
       ? {}
       : {
           bambuProbe: (input) =>
-            probeBambuLan({ ...input, port: probes.bambuPort! }),
+            probeBambuLan({
+              ...input,
+              host: '127.0.0.1',
+              port: probes.bambuPort!,
+            }),
         }),
   })
 }

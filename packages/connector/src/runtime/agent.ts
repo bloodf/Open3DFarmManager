@@ -1,3 +1,4 @@
+import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { createPrinterDetailSources } from './printer-detail-session.ts'
 import {
@@ -268,6 +269,7 @@ async function runConnectorAgentOnce(
     endpoint: config.telemetry.endpoint,
     credential,
     dataDirectory: input.dataDirectory,
+    library: config.library,
   }).catch((error: unknown) => {
     logger.warn('library-print-unavailable', { error })
     return undefined
@@ -306,8 +308,8 @@ async function runConnectorAgentOnce(
         createPrinterLinkHealth(printerKey),
       ]),
     )
-    startLinkHealthHeartbeat(
-      () => ({
+    const readHeartbeat = () =>
+      ({
         connector: {
           version: connectorVersionMetadata.connectorVersion,
           uptimeMs: Math.floor(performance.now() - startedAt),
@@ -321,7 +323,30 @@ async function runConnectorAgentOnce(
                 : 'lan',
         },
         printers: Array.from(links.values(), (link) => link.read()),
-      }),
+      }) satisfies import('../../../farm-protocol/src/telemetry.ts').HeartbeatHealth
+    const enqueueHeartbeat = (health: ReturnType<typeof readHeartbeat>) => {
+      const printers = health.printers.slice(0, 100)
+      while (
+        Buffer.byteLength(JSON.stringify({ ...health, printers })) >
+        MAX_HEARTBEAT_HEALTH_BYTES
+      )
+        printers.pop()
+      const { loss } = queue.enqueueHeartbeat(
+        { ...health, printers },
+        clock.now(),
+      )
+      if (loss.expired || loss.capacity) logger.warn('queue-loss', { ...loss })
+    }
+    startLinkHealthHeartbeat(
+      () => {
+        const health = readHeartbeat()
+        try {
+          enqueueHeartbeat(health)
+        } catch (error) {
+          fail(error)
+        }
+        return health
+      },
       (frames) => {
         for (const frame of frames)
           logger.info('link-health-heartbeat', JSON.parse(frame))
@@ -801,6 +826,18 @@ async function runConnectorAgentOnce(
         },
       }).catch(fail),
     )
+    // Connector library storage (#446): answers the server's relay operations
+    // on this host's store. A failure here never stops telemetry.
+    if (library)
+      tasks.push(
+        library
+          .serveRelay(signal, (event) =>
+            logger.warn(event.kind, { reason: event.reason }),
+          )
+          .catch((error: unknown) =>
+            logger.warn('library-relay-stopped', { error }),
+          ),
+      )
     tasks.push(drainLoop().catch(fail))
     await Promise.all(tasks)
   } catch (error) {

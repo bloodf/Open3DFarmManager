@@ -25,6 +25,11 @@ import {
   type PrinterProfile,
   type StorageMode,
 } from '../utils/library-view.ts'
+import {
+  libraryReplayPrinters,
+  sendWithoutSession,
+  type LibraryReplayAssignment,
+} from '../utils/library-replay.ts'
 
 type Settings = {
   storageMode: StorageMode
@@ -41,6 +46,10 @@ const usedBytes = ref<number>()
 const canManage = ref(false)
 const connectors = ref<{ agentId: string }[]>([])
 const profiles = ref<PrinterProfile[]>([])
+const assignments = ref<LibraryReplayAssignment[]>([])
+const replayPrinters = computed(() =>
+  libraryReplayPrinters(assignments.value, profiles.value),
+)
 const view = ref<'grid' | 'list'>('grid')
 const filters = ref<LibraryFilters>({ ...emptyFilters })
 const compatPrinter = ref('')
@@ -141,13 +150,17 @@ async function start() {
     }
     await loadSettings()
     // Side lists are optional: the page works without them.
-    const [inventory, printers] = await Promise.allSettled([
+    const [inventory, printers, farmPrinters] = await Promise.allSettled([
       $fetch<{ connectors: { agentId: string; status: string }[] }>(
         `/api/farms/${farmId.value}/connectors`,
         { retry: 0, timeout: 15_000 },
       ),
       $fetch<{ profiles: PrinterProfile[] }>(
         `/api/farms/${farmId.value}/printer-profiles`,
+        { query: { limit: 50 }, retry: 0, timeout: 15_000 },
+      ),
+      $fetch<{ printers: LibraryReplayAssignment[] }>(
+        `/api/farms/${farmId.value}/printers`,
         { query: { limit: 50 }, retry: 0, timeout: 15_000 },
       ),
     ])
@@ -157,6 +170,8 @@ async function start() {
       )
     if (printers.status === 'fulfilled')
       profiles.value = printers.value.profiles
+    if (farmPrinters.status === 'fulfilled')
+      assignments.value = farmPrinters.value.printers
     await search()
   } catch {
     error.value =
@@ -436,6 +451,8 @@ onBeforeUnmount(() => controller?.abort())
         :can-upload="true"
         :mode="settings.storageMode"
         :connectors="connectors"
+        :replay-printers="replayPrinters"
+        :replay-send="sendWithoutSession"
         @changed="refreshAll"
       />
     </template>

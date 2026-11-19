@@ -71,6 +71,10 @@ export function printerAssignmentBoundary(
 }
 export async function readPrinterAssignmentBody(
   request: Request,
+  limits: { maxBytes: number; maxValues: number; maxDepth?: number } = {
+    maxBytes: 4096,
+    maxValues: 8,
+  },
 ): Promise<unknown> {
   const reader = request.body?.getReader()
   if (!reader) throw invalid()
@@ -90,13 +94,13 @@ export async function readPrinterAssignmentBody(
       const chunk = await Promise.race([reader.read(), timeout])
       if (chunk.done) break
       bytes += chunk.value.byteLength
-      if (bytes > 4096)
+      if (bytes > limits.maxBytes)
         throw createError({ status: 413, message: 'Solicitação muito grande.' })
       chunks.push(chunk.value)
     }
     return parseBoundedJson(
       new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
-      { maxBytes: 4096, maxDepth: 2, maxValues: 8, maxStringChars: 1024 },
+      { maxDepth: 2, ...limits, maxStringChars: 1024 },
     )
   } catch (error) {
     if (error instanceof Error && 'status' in error) throw error

@@ -1,4 +1,5 @@
 import { createMoonrakerConfigEditor } from '../moonraker/control-config-editor.ts'
+import { createHash } from 'node:crypto'
 import { moonrakerAuthHeaders } from '../config/moonraker.ts'
 import {
   FileListRequest,
@@ -6,6 +7,8 @@ import {
   PrinterFile,
   MAX_FILE_LIST_WIRE_BYTES,
   MAX_PRINTER_DOWNLOAD_BYTES,
+  MAX_TIMELAPSE_BYTES,
+  TIMELAPSE_CHUNK_BYTES,
 } from '../../../farm-protocol/src/file-list.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
 import { awaitAdmittedHandle } from '../files/admission-grace.ts'
@@ -19,6 +22,7 @@ import type {
   PrinterBinding,
 } from '../kobralink/client.ts'
 import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
+import { createBambuSdCard } from '../bambu/printer-detail.ts'
 
 export type FileListTarget =
   | { backend: 'creality' }
@@ -57,6 +61,8 @@ export function createFileList(
         >
       }
     | undefined
+  let timelapseSnapshot:
+    { name: string; bytes: Buffer; sha256: string } | undefined
   let closed = false
   let busy = false
   let work: Promise<void> = Promise.resolve()
@@ -85,12 +91,15 @@ export function createFileList(
           (request.config
             ? cap.actions.includes('config_write') &&
               (cap.role === 'owner' || cap.role === 'admin')
-            : cap.actions.includes(
-                request.directory === undefined &&
-                  request.download === undefined
-                  ? 'start_print'
-                  : 'file_op',
-              ))
+            : request.timelapse
+              ? cap.actions.includes('timelapse') ||
+                cap.actions.includes('file_op')
+              : cap.actions.includes(
+                  request.directory === undefined &&
+                    request.download === undefined
+                    ? 'start_print'
+                    : 'file_op',
+                ))
         )
       }
       const send = (result: object) => {
@@ -134,6 +143,36 @@ export function createFileList(
           }
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
+          if (request.timelapse && request.download) {
+            const offset = request.offset ?? 0
+            if (offset === 0 || timelapseSnapshot?.name !== request.download) {
+              if (offset !== 0) throw Error('unsupported')
+              const bytes = await Promise.race([
+                readTimelapse(target, request.download, controller.signal),
+                deadline,
+              ])
+              timelapseSnapshot = {
+                name: request.download,
+                bytes,
+                sha256: createHash('sha256').update(bytes).digest('hex'),
+              }
+            }
+            const { bytes, sha256 } = timelapseSnapshot
+            if (offset > bytes.length) throw Error('unsupported')
+            send(
+              authorized()
+                ? {
+                    ok: true,
+                    files: [],
+                    download: bytes
+                      .subarray(offset, offset + TIMELAPSE_CHUNK_BYTES)
+                      .toString('base64'),
+                    transfer: { size: bytes.length, sha256 },
+                  }
+                : { ok: false, reason: 'unauthorized' },
+            )
+            return
+          }
           if (request.config) {
             if (target.backend !== 'moonraker' || !target.thumbnailSource)
               throw Error('unsupported')
@@ -278,6 +317,51 @@ export function createFileList(
     async settled() {
       await work
     },
+  }
+}
+
+/** Reads one rendered timelapse whole; every chunk is then served from memory. */
+async function readTimelapse(
+  target: FileListTarget,
+  name: string,
+  signal: AbortSignal,
+): Promise<Buffer> {
+  if (target.backend === 'bambu') {
+    const data = await createBambuSdCard(target).download(
+      'timelapse',
+      name.replace(/^timelapse\//, ''),
+      signal,
+    )
+    if (data.length > MAX_TIMELAPSE_BYTES) throw Error('File too large')
+    return data
+  }
+  if (target.backend !== 'moonraker' || !target.thumbnailSource)
+    throw Error('unsupported')
+  const response = await createThumbnailDownload({
+    ...target.thumbnailSource,
+    signal,
+  })(`timelapse/${name}`)
+  const reader = response.body?.getReader()
+  if (!reader) throw Error('File unavailable')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    if (
+      !response.ok ||
+      Number(response.headers.get('content-length')) > MAX_TIMELAPSE_BYTES
+    )
+      throw Error('File unavailable')
+    for (;;) {
+      const part = await reader.read()
+      if (part.done) break
+      size += part.value.byteLength
+      if (size > MAX_TIMELAPSE_BYTES) throw Error('File too large')
+      chunks.push(part.value)
+    }
+    return Buffer.concat(chunks)
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 

@@ -1,3 +1,4 @@
+import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import type {
   ControlResultCode,
   ExtendedControlAction,
@@ -222,7 +223,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
       printerKey: string,
       directory?: string,
       download?: string,
-      config?: { config: true; configPath?: string; offset?: number },
+      config?: FileListExtra,
     ) {
       if (
         state.kind !== 'ready' ||

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   BrowserDeviceUuid,
@@ -425,7 +426,7 @@ export class PauseBrowserSignallingClient {
     printerKey: string,
     directory?: string,
     download?: string,
-    config?: { config: true; configPath?: string; offset?: number },
+    config?: FileListExtra,
   ) {
     if (
       !this.#channel.current() ||

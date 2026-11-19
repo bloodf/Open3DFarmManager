@@ -15,6 +15,9 @@ import {
 } from '../../utils/library-view.ts'
 import LibraryMetadata from './LibraryMetadata.vue'
 import LibraryUpload from './LibraryUpload.vue'
+import ReplayDialog from './ReplayDialog.vue'
+import type { LibraryPrintArgs } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type { ReplayPrinter, ReplayResult } from '../../utils/replay-view.ts'
 
 const props = defineProps<{
   farmId: string
@@ -23,6 +26,12 @@ const props = defineProps<{
   canUpload: boolean
   mode: StorageMode
   connectors: readonly { agentId: string }[]
+  /** Replay needs a live session: without both props the button is not shown. */
+  replayPrinters?: readonly ReplayPrinter[]
+  replaySend?: (
+    printerKey: string,
+    args: LibraryPrintArgs,
+  ) => Promise<ReplayResult>
 }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
 const open = defineModel<boolean>({ required: true })
@@ -34,6 +43,14 @@ const status = ref('')
 const selectedVersion = ref('')
 const plate = ref('1')
 const pendingDelete = ref('')
+const replaying = ref(false)
+const replayVersion = ref<LibraryVersion>()
+const canReplay = (v: LibraryVersion) =>
+  !!props.replaySend && !!props.replayPrinters && v.deletedAt === null
+function replay(v: LibraryVersion) {
+  replayVersion.value = v
+  replaying.value = true
+}
 
 const current = computed(
   () =>
@@ -148,6 +165,15 @@ async function uploaded() {
       <LibraryMetadata :metadata="current.metadata" />
       <DataTable caption="Histórico de versões" :columns="columns" :rows="rows">
         <template #actions="{ row }">
+          <Button
+            v-if="
+              versions.find((v) => v.id === row.id) &&
+              canReplay(versions.find((v) => v.id === row.id)!)
+            "
+            :aria-label="`Imprimir de novo a versão ${row.cells.number}`"
+            @click="replay(versions.find((v) => v.id === row.id)!)"
+            >Imprimir de novo</Button
+          >
           <template
             v-if="
               canManage &&
@@ -179,6 +205,22 @@ async function uploaded() {
       <p v-else>Seu papel nesta farm não permite enviar arquivos.</p>
     </template>
   </Dialog>
+  <ReplayDialog
+    v-if="replayVersion && replayPrinters && replaySend"
+    v-model="replaying"
+    :source="{
+      sha256: replayVersion.sha256,
+      name: replayVersion.originalName,
+      kind: replayVersion.kind,
+      plateCount: replayVersion.plateCount,
+      metadata: replayVersion.metadata,
+      storageLocation: replayVersion.storageLocation,
+      agentId: replayVersion.agentId,
+      purged: replayVersion.purgedAt !== null,
+    }"
+    :printers="replayPrinters"
+    :send="replaySend"
+  />
 </template>
 
 <style scoped>

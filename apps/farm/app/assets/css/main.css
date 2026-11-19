@@ -77,3 +77,29 @@ small {
   font-size: var(--font-size-sm);
   margin: var(--space-1) 0 0;
 }
+/*
+ * Legacy aliases used by Phase 3b components. They resolve to the design
+ * tokens in tokens.css, so hex colours stay in one file.
+ */
+:root {
+  --surface: var(--color-surface);
+  --surface-raised: var(--color-surface-raised);
+  --text: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --accent: var(--color-accent);
+  --printer-idle: var(--state-idle-color);
+  --printer-printing: var(--state-printing-color);
+  --printer-paused: var(--state-paused-color);
+  --printer-error: var(--state-error-color);
+  --printer-offline: var(--state-offline-color);
+  --printer-stale: var(--state-stale-color);
+  --printer-warning: var(--state-paused-color);
+  --space-12: var(--space-6);
+  --type-small: var(--font-size-sm);
+  --type-body: var(--font-size-base);
+  --type-heading: clamp(var(--font-size-xl), 4vw, var(--font-size-2xl));
+  --elevation-raised: var(--elevation-2);
+  --focus-ring: var(--focus-ring-width) solid var(--color-focus-ring);
+  --focus-offset: var(--focus-ring-offset);
+  --focus-offset-compact: 3px;
+}

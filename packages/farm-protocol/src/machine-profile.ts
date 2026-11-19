@@ -16,6 +16,8 @@ export const MACHINE_PROFILE_MAX_TOOLS = 8
  */
 export const MachineProfile = z
   .strictObject({
+    /** Model name the printer itself reports, where identity carries none. */
+    model: z.string().trim().min(1).max(64).optional(),
     toolCount: z
       .number()
       .int()

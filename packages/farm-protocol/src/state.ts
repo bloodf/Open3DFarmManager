@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { ExtendedControlAction, MacroName } from './control-actions.ts'
+import {
+  ExtendedControlAction,
+  MACRO_PARAM_MAX_KEYS,
+  MacroName,
+  MacroParamName,
+  MacroParamValue,
+} from './control-actions.ts'
 import { MachineProfile } from './machine-profile.ts'
 
 export const FilamentUsage = z.strictObject({
@@ -31,6 +37,21 @@ export { firmwareUpdateAvailable } from './firmware.ts'
 export const PrinterState = z
   .strictObject({
     macros: z.array(MacroName).max(50).optional(),
+    /** Parameters each macro reads (`params.X`), with a literal default if any. */
+    macroParams: z
+      .record(
+        MacroName,
+        z
+          .array(
+            z.strictObject({
+              name: MacroParamName,
+              default: MacroParamValue.optional(),
+            }),
+          )
+          .max(MACRO_PARAM_MAX_KEYS),
+      )
+      .refine((value) => Object.keys(value).length <= 50)
+      .optional(),
     controls: z
       .array(ExtendedControlAction)
       .max(ExtendedControlAction.options.length)
@@ -63,6 +84,19 @@ export const PrinterState = z
       })
       .optional(),
     printerKey: z.string().min(1).max(128),
+    linkHealth: z
+      .strictObject({
+        state: z.enum(['connected', 'reconnecting', 'offline']),
+        lastSuccessAt: z.number().int().nonnegative().nullable(),
+        p50Ms: z.number().finite().nonnegative().nullable(),
+        p95Ms: z.number().finite().nonnegative().nullable(),
+        reconnects: z.number().int().nonnegative(),
+        lastErrorCode: z
+          .string()
+          .regex(/^[a-zA-Z0-9_.-]{1,64}$/)
+          .nullable(),
+      })
+      .optional(),
     localWebUiOrigin: LocalWebUiOrigin.optional(),
     state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
     statusReason: z.enum(['client-certificate-missing']).optional(),
@@ -110,6 +144,12 @@ export const PrinterState = z
         totalDuration: z.number().finite().nonnegative().optional(),
         filamentUsedMillimetres: z.number().finite().nonnegative().optional(),
         filamentUsage: z.array(FilamentUsage).max(17).optional(),
+        /** Library version that was printed; absent for jobs started outside the library. */
+        sha256: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+        plate: z.number().int().min(1).max(1000).optional(),
         endedAt: z.number().int().nonnegative(),
       })
       .optional(),

@@ -21,6 +21,10 @@ export interface PrinterStateListInput {
 interface RawRow {
   assignmentId: string
   printerKey: string
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   state: unknown
 }
 
@@ -78,7 +82,7 @@ export class PostgresPrinterStateReader {
           return { ok: false as const, reason: 'forbidden' as const }
         const rows = await tx<
           RawRow[]
-        >`SELECT a.id AS "assignmentId", a.printer_key AS "printerKey", s.state
+        >`SELECT a.id AS "assignmentId", a.printer_key AS "printerKey", a.display_name AS "displayName", a.group_name AS "groupName", a.location AS "location", a.sort_order AS "sortOrder", s.state
           FROM farm.printer_assignments a
           JOIN farm.printer_latest_state s
             ON s.farm_id = a.farm_id AND s.agent_id = a.agent_id AND s.printer_key = a.printer_key
@@ -96,12 +100,11 @@ export class PostgresPrinterStateReader {
           return { ok: false as const, reason: 'unauthorized' as const }
         await tx`UPDATE farm.account_sessions SET last_seen_at=${current.touchAt} WHERE id=${input.sessionRecordId}`
         const states: PrinterStateRow[] = []
-        for (const row of rows) {
-          const stored = parseStoredPrinterState(row.state)
+        for (const { state, ...assignment } of rows) {
+          const stored = parseStoredPrinterState(state)
           if (!stored) continue
           states.push({
-            assignmentId: row.assignmentId,
-            printerKey: row.printerKey,
+            ...assignment,
             state: stored.state,
             progress: stored.progress,
             toolTemperatureCelsius: stored.toolTemperatureCelsius,

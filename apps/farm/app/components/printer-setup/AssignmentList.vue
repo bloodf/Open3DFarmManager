@@ -3,6 +3,10 @@ import {
   KOBRA_X_DEVICE_CAPABILITIES,
   isKobraXAssignment,
 } from '../../utils/kobralink-onboarding.ts'
+import AssignmentGrouping from '../printers/AssignmentGrouping.vue'
+import EmptyState from '../ui/EmptyState.vue'
+import Skeleton from '../ui/Skeleton.vue'
+import MachineProfile from '../machine-profile/MachineProfile.vue'
 import PrinterIdentity from '../printer-identity/PrinterIdentity.vue'
 import {
   liveConnectionLabel,
@@ -29,7 +33,22 @@ const stateText = (id: string) => livePrinterStateText(setup, id)
 <template>
   <section v-if="farmId" aria-labelledby="assignment-heading">
     <h2 id="assignment-heading">Atribuições</h2>
-    <p v-if="!pending && !printers.length">Nenhuma atribuição nesta página.</p>
+    <div v-if="pending && !printers.length" class="loading" aria-busy="true">
+      <p role="status">Carregando as atribuições…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <EmptyState
+      :level="3"
+      v-else-if="!printers.length"
+      title="Nenhuma atribuição nesta página."
+      :description="
+        canManage
+          ? 'Descubra uma impressora ou registre uma atribuição nesta página.'
+          : 'Peça a um proprietário ou administrador para atribuir uma impressora.'
+      "
+    >
+      <NuxtLink to="/connectors">Ver Connectors</NuxtLink>
+    </EmptyState>
     <ul>
       <li v-for="printer in printers" :key="printer.assignmentId">
         <PrinterIdentity
@@ -127,6 +146,18 @@ const stateText = (id: string) => livePrinterStateText(setup, id)
             </div>
           </dl>
         </div>
+        <AssignmentGrouping
+          :key="farmId + ':' + printer.assignmentId"
+          :printer="printer"
+        />
+        <MachineProfile
+          v-if="printer.status === 'active'"
+          :key="'profile:' + farmId + ':' + printer.assignmentId"
+          :farm-id="farmId"
+          :assignment-id="printer.assignmentId"
+          :label="printer.displayName || printer.printerKey"
+          :can-manage="canManage"
+        />
         <button
           v-if="canManage && printer.status === 'active'"
           type="button"

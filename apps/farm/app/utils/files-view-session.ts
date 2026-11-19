@@ -67,9 +67,11 @@ export function createFilesSession(input: {
     }
   }
   return {
-    list(printerKey: string) {
+    list(printerKey: string, directory?: string) {
       return run(async (session, signal, publish) => {
-        const result = await session.listFiles(printerKey)
+        const result = await (directory === undefined
+          ? session.listFiles(printerKey)
+          : session.listFiles(printerKey, directory))
         signal.throwIfAborted()
         if (!result.ok) {
           if (result.reason === 'unsupported') {
@@ -97,6 +99,25 @@ export function createFilesSession(input: {
             ? 'Arquivos atualizados.'
             : 'Nenhum arquivo nesta impressora.',
         })
+      })
+    },
+    download(
+      printerKey: string,
+      path: string,
+      receive: (file: File) => Promise<string | void> | string | void,
+    ) {
+      return run(async (session, signal, publish) => {
+        const result = await session.listFiles(printerKey, undefined, path)
+        signal.throwIfAborted()
+        if (!result.ok || result.download === undefined)
+          throw Error('File unavailable')
+        const bytes = Uint8Array.from(atob(result.download), (char) =>
+          char.charCodeAt(0),
+        )
+        const message = await receive(
+          new File([bytes], path.split('/').at(-1)!),
+        )
+        publish({ kind: 'done', message: message ?? 'Arquivo recebido.' })
       })
     },
     upload(printerKey: string, file: File) {

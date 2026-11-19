@@ -1,12 +1,30 @@
 import { z } from 'zod'
+import { PrinterGcodePath } from './control-actions.ts'
 
 export const MAX_FILE_LIST_WIRE_BYTES = 256 * 1024
+export const MAX_PRINTER_DOWNLOAD_BYTES = 128 * 1024
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
-export const FileListRequest = z.strictObject({
-  type: z.literal('files.list'),
-  request_id: id,
-  printer_key: id,
-})
+export const FileListRequest = z
+  .strictObject({
+    type: z.literal('files.list'),
+    request_id: id,
+    printer_key: id,
+    directory: z.union([z.literal(''), PrinterGcodePath]).optional(),
+    download: PrinterGcodePath.optional(),
+  })
+  .refine(
+    ({ directory, download }) =>
+      directory === undefined || download === undefined,
+  )
+const DownloadBytes = z
+  .base64()
+  .max(Math.ceil(MAX_PRINTER_DOWNLOAD_BYTES / 3) * 4)
+  .refine(
+    (data) =>
+      (data.length * 3) / 4 -
+        (data.endsWith('==') ? 2 : Number(data.endsWith('='))) <=
+      MAX_PRINTER_DOWNLOAD_BYTES,
+  )
 export const PrinterFile = z.strictObject({
   name: z
     .string()
@@ -18,6 +36,7 @@ export const PrinterFile = z.strictObject({
         !name.startsWith('/') &&
         !name.split('/').some((part) => part === '..' || part === '.' || !part),
     ),
+  directory: z.literal(true).optional(),
   printRef: z
     .string()
     .regex(/^kobralink-library:[A-Za-z0-9_-]{1,128}$/)
@@ -45,6 +64,7 @@ export const FileListResponse = z.discriminatedUnion('ok', [
     request_id: id,
     printer_key: id,
     ok: z.literal(true),
+    download: DownloadBytes.optional(),
     files: z
       .array(PrinterFile)
       .max(200)

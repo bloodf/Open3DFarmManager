@@ -223,7 +223,8 @@ export async function connectKobraX(options: {
     if (!type || suffix !== 'report' || extra !== undefined) return
     try {
       const message = JSON.parse(payload.toString())
-      if (Object.hasOwn(queries, type)) state.report(type, message)
+      if (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
+        state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
       facts.report(report)

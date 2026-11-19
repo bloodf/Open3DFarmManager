@@ -1,3 +1,10 @@
+import { kobraXControlAreas, kobraXDetailSource } from './kobra-x.ts'
+import { unknownControlAreas } from './control-areas.ts'
+import type {
+  ControlAreaCapabilities,
+  ControlAreaEvidenceMap,
+} from './control-areas.ts'
+
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'
 
@@ -26,6 +33,8 @@ export interface AnycubicCatalogProduct {
       CatalogCapability
     >
   >
+  readonly controlAreas: ControlAreaCapabilities
+  readonly controlAreaEvidence?: ControlAreaEvidenceMap
   readonly sources: readonly string[]
   readonly limitations: readonly string[]
 }
@@ -49,6 +58,7 @@ const unknownCapabilities = {
 export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   {
     id: 'anycubic-kobra-3-max-v2',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 Max V2',
     releaseStatus: 'Data de lançamento desconhecida',
@@ -76,6 +86,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-4',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 4',
     releaseStatus: 'Apresentada em feira; lançamento desconhecido',
@@ -102,6 +113,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-x',
+    controlAreas: kobraXControlAreas,
     brand: 'Anycubic',
     model: 'Kobra X',
     releaseStatus: 'Apresentada na Formnext 2025',
@@ -117,7 +129,8 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
         ],
       },
     ],
-    connection: 'Ponte local KobraLink testada somente em simulação',
+    connection:
+      'Protocolo LAN nativo documentado; integração direta somente para leitura',
     capabilities: {
       ...unknownCapabilities,
       telemetry: 'simulated',
@@ -127,18 +140,18 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
       cancel: 'simulated',
     },
     sources: [
+      kobraXDetailSource,
       'https://www.prnewswire.com/apac/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620524.html',
       'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
     ],
     limitations: [
-      'A simulação não comprova suporte ao equipamento físico ou ao firmware.',
-      'Arquivos e comandos estendidos, incluindo temperatura, ventilador, luz e velocidade, simulados pela ponte KobraLink; não comprovado em hardware.',
-      'Câmera não foi qualificada: a ponte KobraLink do OpenFarm não expõe módulo de câmera.',
-      'Materiais permanecem desconhecidos: a ponte tem rotas AMS e ACE, mas elas não fazem parte do vocabulário de comandos assinados exercitado pelo OpenFarm.',
+      'O adaptador nativo tem testes simulados; não comprovado em hardware. O agente ainda não encaminha comandos assinados para a atribuição nativa.',
+      'Os slots ACE aparecem quando a impressora os informa. A câmera nativa ainda não está ligada à sessão de mídia.',
     ],
   },
   {
     id: 'anycubic-kobra-s1-max',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra S1 Max',
     releaseStatus: 'Apresentada na Formnext 2025',
@@ -165,6 +178,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-3-v2',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 V2',
     releaseStatus: 'Candidata; data de lançamento desconhecida',

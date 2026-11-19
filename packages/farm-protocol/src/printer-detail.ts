@@ -221,3 +221,7 @@ export class PrinterDetailSubscriptions {
     return this.#printers.has(id.parse(printerKey))
   }
 }
+
+// Chunked, camelCase detail stream used by the Connector detail session and the
+// farm printer detail page (assignment-scoped subscriptions, typed query data).
+export * from './printer-detail-stream.ts'

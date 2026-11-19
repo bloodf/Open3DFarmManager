@@ -25,6 +25,16 @@ export async function membersPageBundle() {
   const compile = (text: string, filename: string) => {
     const { descriptor, errors } = sfc.parse(text, { filename })
     if (errors.length) throw errors[0]
+    if (!descriptor.script && !descriptor.scriptSetup) {
+      // Template-only components (Skeleton).
+      const template = sfc.compileTemplate({
+        filename,
+        id: filename,
+        source: descriptor.template?.content ?? '',
+      })
+      if (template.errors.length) throw template.errors[0]
+      return `${template.code}\nexport default { render }`
+    }
     return sfc.compileScript(descriptor, { id: filename, inlineTemplate: true })
       .content
   }

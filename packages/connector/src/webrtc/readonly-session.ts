@@ -158,6 +158,7 @@ export function validatedStatusMessage(
 }
 export type GenuineStatusOptions = Readonly<{
   assignmentRefs: readonly AssignmentRef[]
+  detailSourceFor?: import('../runtime/printer-detail-session.ts').PrinterDetailSourceFor
   onStatus?: (message: ReadonlyStatusMessage) => void
 }>
 

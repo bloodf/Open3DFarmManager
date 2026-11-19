@@ -1,23 +1,46 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
-import FarmBrowserDevice from '../components/farm/FarmBrowserDevice.vue'
-import FarmControlDialog from '../components/farm/FarmControlDialog.vue'
-import FarmOfflineSection from '../components/farm/FarmOfflineSection.vue'
-import FarmPrinterInventory from '../components/farm/FarmPrinterInventory.vue'
-import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
+import {
+  filterFarmRows,
+  groupFarmRows,
+  readFarmWallQuery,
+  summarizeFarmRows,
+  writeFarmWallQuery,
+} from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
-import { useFarmControlSession } from '../components/farm/use-farm-control-session.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
+import LastKnownStates from '../components/farm/LastKnownStates.vue'
+import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
+import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
+import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
+import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
+import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
+import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
+import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
+import { useFarmControls } from '../components/farm/useFarmControls.ts'
+import { deriveAlerts } from '../utils/farm-alerts.ts'
 import {
-  filterFarmRows,
-  type FarmFilter,
-  type FarmSort,
-} from '../utils/farm-filters.ts'
-import { farmConnectionNotice, type FarmRow } from '../utils/farm-view.ts'
-
+  farmConnectionNotice,
+  resolvedLocalInterfaceOrigin,
+  type FarmRow,
+} from '../utils/farm-view.ts'
+import type { ControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import {
+  actionButtonConfirmationLabel,
+  actionDialogDescription,
+  actionDialogTitle,
+} from '../utils/farm-control.ts'
+import { extendedLabel } from '../utils/farm-control-extended.ts'
+import { farmViewErrorText } from '../utils/farm-view-error.ts'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
+const view = useFarmView()
 const {
   state,
   ready,
@@ -27,8 +50,10 @@ const {
   selectKey,
   confirmOrigin,
   cameraFor,
-} = useFarmView()
+} = view
 
+// A live feed owns the printers it reports. While none is authenticated, the
+// stored last known states are read so the page is not empty.
 const liveFeedConnected = computed(() =>
   (ready.value?.rows ?? []).some((row) => row.connection === 'authenticated'),
 )
@@ -36,13 +61,14 @@ const lastKnown = useLastKnownStates({
   farmId: () => ready.value?.scope?.farmId,
   live: () => liveFeedConnected.value,
 })
+// The live rows win: a printer the feed reports never gains a second card
+// from the stored snapshot.
 const offlineStates = computed(() =>
   offlineCards(ready.value?.rows ?? [], lastKnown.states.value),
 )
 const offlineVisible = computed(
   () => !liveFeedConnected.value && offlineStates.value.length > 0,
 )
-
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -64,83 +90,70 @@ watch(
   },
 )
 onMounted(() => heading.value?.focus())
-
-const errorText = computed(() => {
-  if (state.value.kind !== 'error') return ''
-  switch (state.value.reason) {
-    case 'forbidden':
-      return 'Esta farm não está disponível para sua conta.'
-    case 'rate-limit':
-      return 'Aguarde antes de tentar novamente.'
-    case 'account-changed':
-      return 'A conta mudou. Entre novamente para confirmar seus dados.'
-    case 'invalid-response':
-      return 'Não foi possível confirmar os dados recebidos. Tente novamente.'
-    case 'unavailable':
-      return 'Não foi possível confirmar seus dados. Tente novamente.'
-    default: {
-      const _exhaustive: never = state.value.reason
-      return _exhaustive
-    }
-  }
-})
-
-const keyText = computed(() => {
-  const keys = ready.value?.keys
-  if (!keys || keys.kind === 'available') return ''
-  if (keys.kind === 'loading')
-    return 'Consultando os dispositivos deste navegador…'
-  switch (keys.reason) {
-    case 'storage':
-      return 'Não foi possível acessar as chaves salvas neste navegador.'
-    case 'registry':
-      return 'Não foi possível confirmar a aprovação dos dispositivos.'
-    case 'incomplete':
-      return 'A consulta dos dispositivos ficou incompleta. Nenhum dispositivo foi selecionado.'
-    case 'pending':
-      return 'O dispositivo deste navegador aguarda aprovação.'
-    case 'revoked':
-      return 'O dispositivo deste navegador foi revogado.'
-    case 'missing':
-      return 'Nenhuma chave local corresponde a um dispositivo aprovado desta conta e farm.'
-    default: {
-      const _exhaustive: never = keys.reason
-      return _exhaustive
-    }
-  }
-})
-
-const query = ref('')
-const filter = ref<FarmFilter>('all')
-const sort = ref<FarmSort>('original')
-function resetFilters() {
-  query.value = ''
-  filter.value = 'all'
-  sort.value = 'original'
-}
-const renderedRows = computed(() =>
-  filterFarmRows(
-    ready.value?.rows ?? [],
-    query.value,
-    filter.value,
-    sort.value,
-    now.value,
-  ).map((row) => ({
-    ...row,
-    draft: drafts.value[row.assignment.assignmentId],
-  })),
+const errorText = computed(() =>
+  state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
 )
+const route = useRoute()
+watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
+  if (
+    typeof farmId === 'string' &&
+    farms?.some((farm) => farm.farmId === farmId) &&
+    ready.value?.scope?.farmId !== farmId
+  )
+    void selectFarm(farmId)
+})
+
+const router = useRouter()
+const wallQuery = computed({
+  get: () => readFarmWallQuery(route.query),
+  set: (value) => {
+    void router.replace({
+      query: {
+        ...router.currentRoute.value.query,
+        ...writeFarmWallQuery(value),
+      },
+      hash: route.hash,
+    })
+  },
+})
+const rows = computed(() => ready.value?.rows ?? [])
+const facets = computed(() => {
+  const fields = [
+    { key: 'group', field: 'groupName', label: 'Grupo' },
+    { key: 'location', field: 'location', label: 'Local' },
+    { key: 'connector', field: 'agentId', label: 'Connector' },
+  ] as const
+  return fields.map(({ key, field, label }) => {
+    const options = new Set(
+      rows.value
+        .map((row) => row.assignment[field])
+        .filter((value): value is string => !!value),
+    )
+    if (wallQuery.value[key]) options.add(wallQuery.value[key])
+    return {
+      key,
+      label,
+      options: [...options].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    }
+  })
+})
+const renderedRows = computed(() => {
+  const filters = wallQuery.value
+  return filterFarmRows(
+    rows.value,
+    filters.query,
+    filters.filter,
+    filters.sort,
+    now.value,
+    filters,
+  ).map((row) => ({ ...row, draft: drafts.value[row.assignment.assignmentId] }))
+})
+const counts = computed(() => summarizeFarmRows(renderedRows.value, now.value))
+// role="status" announces only live <-> unavailable; per-row text shows transient steps.
 const connectionNotice = computed(() =>
   farmConnectionNotice(ready.value?.rows ?? []),
 )
-
-function chooseFarm(event: Event) {
-  if (event.target instanceof HTMLSelectElement)
-    void selectFarm(event.target.value)
-}
-function chooseKey(event: Event) {
-  if (event.target instanceof HTMLSelectElement) selectKey(event.target.value)
-}
+const alertsSummary = computed(() => deriveAlerts(ready.value, now.value))
 function setupLink(id: string) {
   drafts.value[id] = { value: '', confirmed: false, error: '' }
 }
@@ -154,55 +167,50 @@ function saveLink(id: string) {
   }
   delete drafts.value[id]
 }
-function cancelLink(id: string) {
-  delete drafts.value[id]
-}
-function connectionText(row: FarmRow) {
-  switch (row.connection) {
-    case 'authenticated':
-      return row.observation
-        ? 'Conexão direta autenticada'
-        : 'Conexão direta autenticada; aguardando estado.'
-    case 'connecting':
-      return 'Estabelecendo conexão direta…'
-    case 'verifying':
-      return 'Verificando conexão direta…'
-    case 'closed':
-      return row.observation
-        ? 'Conexão direta indisponível. Exibindo a última observação.'
-        : 'Conexão direta indisponível'
-    case 'unavailable':
-      return 'Conexão direta indisponível'
-    default: {
-      const _exhaustive: never = row.connection
-      return _exhaustive
-    }
-  }
-}
+// Reads the once-a-second tick for reactivity, but measures against a fresh
+// sample so a frame received after the last tick never shows a negative age.
 function liveNow() {
   void now.value
   return { wall: Date.now(), mono: performance.now() }
 }
-
+function displayLocalOrigin(row: FarmRow) {
+  return resolvedLocalInterfaceOrigin(
+    row.localOrigin,
+    row.observation?.state.localWebUiOrigin,
+  )
+}
+const pauseDialog = ref<HTMLDialogElement | null>(null)
+const pauseCancel = ref<HTMLButtonElement | null>(null)
+const dialog = {
+  value: {
+    show() {
+      pauseDialog.value?.showModal()
+      pauseCancel.value?.focus()
+    },
+    close() {
+      pauseDialog.value?.close()
+    },
+  },
+}
 const {
   pauseEnabled,
-  pauseDialog,
-  pauseCancel,
+  availability,
   pauseTarget,
   pauseState,
   lastControlResults,
   pauseRemaining,
   pauseStatus,
-  commandInFlight,
-  availability,
   openControl,
-  openPause,
   confirmControl,
   closePause,
-  cancelPause,
-} = useFarmControlSession({ ready, now })
+  commandInFlight,
+} = useFarmControls(view, dialog)
+function cancelPause(event: Event) {
+  // Esc closes the dialog, but never interrupts a command in flight.
+  event.preventDefault()
+  closePause()
+}
 </script>
-
 <template>
   <main id="conteudo">
     <small>Open3DFarmManager</small>
@@ -219,9 +227,10 @@ const {
       Os controles desta página são somente leitura, exceto a pausa, que exige
       confirmação e uma conexão direta segura.
     </p>
-    <p v-if="state.kind === 'loading'" role="status" aria-busy="true">
-      Carregando suas farms…
-    </p>
+    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
@@ -229,31 +238,29 @@ const {
       <p>Entre na sua conta para consultar suas farms.</p>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
     </section>
-    <section v-else-if="state.kind === 'error'" aria-label="Falha na consulta">
+    <ErrorState
+      v-else-if="state.kind === 'error'"
+      title="Não foi possível carregar suas farms"
+    >
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorText }}</p>
       <div class="actions">
-        <button type="button" @click="discover()">Tentar novamente</button
-        ><NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
       </div>
-    </section>
+    </ErrorState>
     <template v-else-if="ready">
       <p class="opaque">Conta atual: {{ ready.accountId }}</p>
       <FarmScopeSelector
-        :farms="ready.farms"
-        :farm-id="ready.scope?.farmId ?? ''"
-        :farm-after="ready.farmAfter"
-        :next-farm="ready.nextFarm"
-        @change="chooseFarm"
-        @first-page="discover()"
-        @next-page="discover($event)"
+        :ready="ready"
+        @select="selectFarm"
+        @discover="discover"
       />
       <template v-if="ready.scope">
         <ApprovalPanel :farm-id="ready.scope.farmId" />
-        <FarmBrowserDevice
-          :connection-notice="connectionNotice"
+        <FarmDeviceSelector
           :keys="ready.keys"
-          :key-text="keyText"
-          @change-key="chooseKey"
+          :connection-notice="connectionNotice"
+          @select="selectKey"
         />
         <SpoolInventory
           :items="ready.spools"
@@ -263,56 +270,208 @@ const {
             ready.rows.some((row) => row.connection === 'authenticated')
           "
         />
-        <FarmPrinterInventory
-          v-model:query="query"
-          v-model:filter="filter"
-          v-model:sort="sort"
-          :farm-id="ready.scope.farmId"
-          :inventory="ready.inventory"
-          :printer-after="ready.printerAfter"
-          :next-printer="ready.nextPrinter"
-          :rows="ready.rows"
-          :rendered-rows="renderedRows"
-          :keys="ready.keys"
-          :control-enabled="pauseEnabled"
-          :command-in-flight="commandInFlight"
-          :now="now"
-          :last-control-results="lastControlResults"
-          :connection-text="connectionText"
-          :pause-availability="availability"
-          :camera-for="cameraFor"
-          :live-now="liveNow"
-          @refresh="selectFarm(ready.scope.farmId, ready.printerAfter)"
-          @first-page="selectFarm(ready.scope.farmId)"
-          @next-page="selectFarm(ready.scope.farmId, $event)"
-          @reset-filters="resetFilters"
-          @action="
-            (row, action, args, event) => openControl(row, action, event, args)
-          "
-          @pause="(row, event) => openPause(row, event)"
-          @setup-origin="setupLink"
-          @save-origin="saveLink"
-          @cancel-origin="cancelLink"
-        />
-        <FarmOfflineSection
+        <PrinterAlerts :alerts="alertsSummary" />
+        <section
+          aria-labelledby="printers-heading"
+          :aria-busy="ready.inventory === 'loading'"
+        >
+          <h2 id="printers-heading">Impressoras atribuídas</h2>
+          <p>
+            O cadastro informa atribuições e aprovações. O estado da impressora
+            depende da conexão direta.
+          </p>
+          <div
+            v-if="ready.inventory === 'loading'"
+            class="loading"
+            aria-busy="true"
+          >
+            <p role="status">Carregando o cadastro de impressoras…</p>
+            <Skeleton /><Skeleton /><Skeleton />
+          </div>
+          <template v-else>
+            <div class="actions">
+              <button
+                type="button"
+                @click="selectFarm(ready.scope.farmId, ready.printerAfter)"
+              >
+                Atualizar cadastro
+              </button>
+              <button
+                v-if="ready.printerAfter"
+                type="button"
+                @click="selectFarm(ready.scope.farmId)"
+              >
+                Primeira página de atribuições
+              </button>
+              <button
+                v-if="ready.nextPrinter"
+                type="button"
+                @click="selectFarm(ready.scope.farmId, ready.nextPrinter)"
+              >
+                Próximas atribuições
+              </button>
+            </div>
+            <p v-if="ready.printerAfter">
+              Exibindo outra página de atribuições.
+            </p>
+            <EmptyState
+              v-if="!ready.rows.length"
+              :title="
+                ready.printerAfter || ready.nextPrinter
+                  ? 'Nenhuma atribuição nesta página.'
+                  : 'Nenhuma impressora atribuída a esta farm.'
+              "
+              description="Atribua uma impressora a um Connector para acompanhar o estado dela aqui."
+            >
+              <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
+            </EmptyState>
+            <PrinterWallFilters
+              v-model="wallQuery"
+              :facets="facets"
+              :counts="counts"
+              :total="ready.rows.length"
+              :visible="renderedRows.length"
+            />
+            <PrinterWallTable
+              v-slot="{ rows: wallRows }"
+              :rows="renderedRows"
+              :live-now="liveNow"
+            >
+              <template
+                v-for="group in groupFarmRows(wallRows, wallQuery.groupBy)"
+                :key="group.key ?? ''"
+              >
+                <h3 v-if="wallQuery.groupBy">
+                  {{
+                    group.key ??
+                    (wallQuery.groupBy === 'groupName'
+                      ? 'Sem grupo'
+                      : 'Sem local')
+                  }}
+                </h3>
+                <ul class="printers">
+                  <FarmPrinterCard
+                    v-for="row in group.rows"
+                    :key="row.assignment.assignmentId"
+                    :row="row"
+                    :farm-id="ready.scope.farmId"
+                    :camera-for="cameraFor"
+                    :live-now="liveNow"
+                    :alerts="
+                      alertsSummary.byAssignment[row.assignment.assignmentId] ??
+                      []
+                    "
+                    @setup="setupLink(row.assignment.assignmentId)"
+                    @save="saveLink(row.assignment.assignmentId)"
+                    @cancel="delete drafts[row.assignment.assignmentId]"
+                  >
+                    <template #local-link>
+                      <a
+                        :href="displayLocalOrigin(row) ?? undefined"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        referrerpolicy="no-referrer"
+                        :aria-describedby="`local-help-${row.assignment.assignmentId}`"
+                        >Abrir interface local de
+                        <span class="opaque">{{
+                          row.assignment.printerKey
+                        }}</span></a
+                      >
+                    </template>
+                    <FarmCardControls
+                      :row="row"
+                      :keys="ready.keys"
+                      :control-enabled="pauseEnabled"
+                      :command-in-flight="commandInFlight"
+                      :live-now="liveNow"
+                      :last-result="
+                        lastControlResults[row.assignment.assignmentId]
+                      "
+                      :availability="availability"
+                      :open-control="openControl"
+                    />
+                  </FarmPrinterCard>
+                </ul>
+              </template>
+            </PrinterWallTable>
+          </template>
+        </section>
+        <section
           v-if="offlineVisible"
-          :states="offlineStates"
-          :now-wall-ms="now.wall"
-        />
+          aria-labelledby="last-known-heading"
+          aria-describedby="last-known-description"
+        >
+          <h2 id="last-known-heading">Última observação conhecida</h2>
+          <StaleNotice
+            id="last-known-description"
+            description="Sem conexão direta, estes são os últimos estados que o servidor observou. As informações são somente leitura e podem estar desatualizadas."
+          />
+          <ul class="last-known-list">
+            <li v-for="state in offlineStates" :key="state.assignmentId">
+              <LastKnownStates :state="state" :now-wall-ms="now.wall" />
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
-    <FarmControlDialog
-      v-model:pause-dialog="pauseDialog"
-      v-model:pause-cancel="pauseCancel"
-      :pause-target="pauseTarget"
-      :pause-state="pauseState"
-      :pause-remaining="pauseRemaining"
-      :pause-status="pauseStatus"
-      :confirm-control="confirmControl"
-      :close-pause="closePause"
-      :cancel-pause="cancelPause"
-    />
+    <dialog
+      ref="pauseDialog"
+      aria-labelledby="pause-dialog-title"
+      aria-describedby="pause-dialog-description"
+      @cancel="cancelPause"
+    >
+      <template v-if="pauseTarget">
+        <h2 id="pause-dialog-title">
+          {{
+            ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+              ? actionDialogTitle(
+                  pauseTarget.action as ControlAction,
+                  pauseTarget.printerKey,
+                )
+              : `${extendedLabel(pauseTarget.action)}${pauseTarget.action === 'run_macro' ? ` ${pauseTarget.args.name}` : ''} — ${pauseTarget.printerKey}`
+          }}
+        </h2>
+        <p id="pause-dialog-description">
+          {{
+            ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+              ? actionDialogDescription(
+                  pauseTarget.action as ControlAction,
+                  pauseTarget.printerKey,
+                )
+              : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
+          }}
+        </p>
+        <p role="status" aria-live="polite">{{ pauseStatus }}</p>
+        <div class="actions">
+          <button
+            type="button"
+            :disabled="pauseState.kind !== 'ready' || pauseRemaining <= 0"
+            @click="confirmControl"
+          >
+            {{
+              ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
+                ? actionButtonConfirmationLabel(
+                    pauseTarget.action as ControlAction,
+                  )
+                : 'Confirmar comando'
+            }}
+          </button>
+          <button
+            ref="pauseCancel"
+            type="button"
+            :disabled="pauseState.kind === 'sending'"
+            @click="closePause"
+          >
+            {{
+              pauseState.kind === 'settled' || pauseState.kind === 'failed'
+                ? 'Fechar'
+                : 'Cancelar'
+            }}
+          </button>
+        </div>
+      </template>
+    </dialog>
   </main>
 </template>
 
-<style src="../components/farm/farm-page.css"></style>
+<style scoped src="../components/farm/farm-view.css"></style>

@@ -4,6 +4,10 @@ import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 export interface PrinterStateRow {
   assignmentId: string
   printerKey: string
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   state: PrinterState['state']
   progress: number | undefined
   toolTemperatureCelsius: number | undefined
@@ -15,6 +19,10 @@ export interface PrinterStateRow {
 export interface PrinterStateProjection {
   assignmentId: string
   printerKey: string
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   state: PrinterState['state']
   progress: number | undefined
   temperatures: {
@@ -37,7 +45,12 @@ export type PrinterStatesFailure = {
 export function projectPrinterState(
   row: PrinterStateRow,
 ): PrinterStateProjection {
+  const { displayName, groupName, location, sortOrder } = row
   return {
+    ...(displayName !== undefined && { displayName }),
+    ...(groupName !== undefined && { groupName }),
+    ...(location !== undefined && { location }),
+    ...(sortOrder !== undefined && { sortOrder }),
     assignmentId: row.assignmentId,
     printerKey: row.printerKey,
     state: row.state,

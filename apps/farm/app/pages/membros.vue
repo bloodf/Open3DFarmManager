@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
 import InvitesList from '../components/members/InvitesList.vue'
 import MembersConfirmDialog from '../components/members/MembersConfirmDialog.vue'
 import MembersList from '../components/members/MembersList.vue'
@@ -24,6 +29,8 @@ const invites = ref<FarmInvite[]>([])
 const loading = ref(true)
 const pending = ref(false)
 const errorMessage = ref('')
+const loadFailed = ref(false)
+const stale = ref(false)
 const statusMessage = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 const confirmTarget = ref<ConfirmTarget | null>(null)
@@ -55,6 +62,8 @@ async function refresh() {
   }
   loading.value = true
   errorMessage.value = ''
+  loadFailed.value = false
+  stale.value = false
   statusMessage.value = pendingStatus('load')
   try {
     await loadDirectory(farmId.value)
@@ -62,6 +71,7 @@ async function refresh() {
   } catch (error: unknown) {
     members.value = []
     invites.value = []
+    loadFailed.value = true
     const status =
       error && typeof error === 'object' && 'statusCode' in error
         ? error.statusCode
@@ -77,7 +87,10 @@ async function refresh() {
   }
 }
 
-onMounted(async () => {
+async function start() {
+  loading.value = true
+  errorMessage.value = ''
+  loadFailed.value = false
   try {
     const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
       query: { limit: 50 },
@@ -87,12 +100,10 @@ onMounted(async () => {
     farms.value = page.farms
     farmId.value = page.farms[0]?.farmId ?? ''
     if (farmId.value) await refresh()
-    else {
-      loading.value = false
-      errorMessage.value = 'Nenhuma farm disponível para gerenciar.'
-    }
+    else loading.value = false
   } catch (error: unknown) {
     loading.value = false
+    loadFailed.value = true
     const status =
       error && typeof error === 'object' && 'statusCode' in error
         ? error.statusCode
@@ -103,6 +114,9 @@ onMounted(async () => {
     await nextTick()
     errorSummary.value?.focus()
   }
+}
+onMounted(async () => {
+  await start()
 })
 
 watch(farmId, () => {
@@ -174,7 +188,12 @@ async function runConfirmed() {
     confirmTarget.value = null
     confirmChecked.value = false
     confirmStatus.value = ''
-    await loadDirectory(farmId.value)
+    try {
+      await loadDirectory(farmId.value)
+      stale.value = false
+    } catch {
+      stale.value = true
+    }
   } catch (error: unknown) {
     const status =
       error && typeof error === 'object' && 'statusCode' in error
@@ -215,11 +234,36 @@ function onRevoke(invite: FarmInvite) {
     <p>
       <NuxtLink to="/convites">Criar novo convite</NuxtLink>
     </p>
-    <p v-if="errorMessage" ref="errorSummary" role="alert" tabindex="-1">
-      {{ errorMessage }}
-    </p>
-    <p role="status" aria-live="polite">{{ statusMessage }}</p>
-    <div v-if="!loading" :aria-busy="pending">
+    <div v-if="errorMessage" ref="errorSummary" role="alert" tabindex="-1">
+      <ErrorState
+        v-if="loadFailed"
+        title="Membros indisponíveis"
+        :description="errorMessage"
+      >
+        <Button @click="farmId ? refresh() : start()">Tentar novamente</Button>
+      </ErrorState>
+      <p v-else>{{ errorMessage }}</p>
+    </div>
+    <p role="status" aria-live="polite">{{ loading ? '' : statusMessage }}</p>
+    <div v-if="loading" aria-busy="true">
+      <p role="status">{{ pendingStatus('load') }}</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <EmptyState
+      v-else-if="!loadFailed && !farms.length"
+      title="Nenhuma farm disponível"
+      description="Sua conta ainda não tem uma farm para gerenciar. Crie ou peça acesso a uma farm e volte a esta página."
+    >
+      <NuxtLink to="/farm">Abrir a página da farm</NuxtLink>
+    </EmptyState>
+    <div v-else-if="farms.length" :aria-busy="pending">
+      <StaleNotice
+        v-if="stale"
+        title="Lista desatualizada"
+        description="A alteração foi salva, mas não foi possível atualizar a lista. Os dados abaixo podem estar antigos."
+      >
+        <Button :disabled="pending" @click="refresh()">Atualizar lista</Button>
+      </StaleNotice>
       <label for="members-farm">Farm</label>
       <select
         id="members-farm"
@@ -230,17 +274,19 @@ function onRevoke(invite: FarmInvite) {
           {{ farm.farmId }}
         </option>
       </select>
-      <MembersList
-        :members="members"
-        :pending="pending"
-        @change-role="onChangeRole"
-        @remove="onRemove"
-      />
-      <InvitesList
-        :invites="visibleInvites"
-        :pending="pending"
-        @revoke="onRevoke"
-      />
+      <template v-if="!loadFailed">
+        <MembersList
+          :members="members"
+          :pending="pending"
+          @change-role="onChangeRole"
+          @remove="onRemove"
+        />
+        <InvitesList
+          :invites="visibleInvites"
+          :pending="pending"
+          @revoke="onRevoke"
+        />
+      </template>
     </div>
     <MembersConfirmDialog
       v-model:confirmed="confirmChecked"

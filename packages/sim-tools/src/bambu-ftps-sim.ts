@@ -11,11 +11,21 @@ export interface BambuFtpsSimOptions {
   key: Buffer | string
   cert: Buffer | string
   uploads: Map<string, Buffer>
+  timelapse?: Map<string, Buffer>
 }
 
 /** Implicit-TLS FTPS endpoint emulating the Bambu SD-card file service. */
 export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   const { host, accessCode, key, cert, uploads } = options
+  const timelapse = options.timelapse ?? new Map<string, Buffer>()
+  /** `/timelapse/x` or `/x`: the folder map and the bare name, or nothing. */
+  const target = (path: string) => {
+    const inFolder = path.startsWith('/timelapse/')
+    const name = path.replace(/^\/(?:timelapse\/)?/, '')
+    return /^[A-Za-z0-9_][A-Za-z0-9_. -]{0,254}$/.test(name)
+      ? { files: inFolder ? timelapse : uploads, name }
+      : undefined
+  }
   const sockets = new Set<TLSSocket>()
   const passiveServers = new Set<TlsServer>()
 
@@ -70,10 +80,10 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
             : '530 invalid credentials\r\n',
         )
       else if (line === 'PASV') openPassive()
-      else if (line === 'MLSD') {
+      else if (line === 'MLSD' || line === 'MLSD /timelapse') {
         control.write('150 Opening protected data connection\r\n')
         withDataSocket((socket) => {
-          const listing = [...uploads]
+          const listing = [...(line === 'MLSD' ? uploads : timelapse)]
             .map(
               ([name, data]) =>
                 `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`,
@@ -100,6 +110,25 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
             dataServer?.close()
           })
         })
+      } else if (line.startsWith('DELE ')) {
+        const found = target(line.slice(5))
+        if (found?.files.delete(found.name))
+          control.write('250 File deleted\r\n')
+        else control.write('550 No such file\r\n')
+      } else if (line.startsWith('RETR ')) {
+        const found = target(line.slice(5))
+        const data = found?.files.get(found.name)
+        if (!data) {
+          control.write('550 No such file\r\n')
+          return
+        }
+        control.write('150 Opening protected data connection\r\n')
+        withDataSocket((socket) =>
+          socket.end(data, () => {
+            control.write('226 Transfer complete\r\n')
+            dataServer?.close()
+          }),
+        )
       } else if (line === 'QUIT') {
         control.write('221 goodbye\r\n')
         control.end()

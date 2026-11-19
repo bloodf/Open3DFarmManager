@@ -1,3 +1,4 @@
+import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { readMoonrakerMachineProfile } from '../machine-profile/moonraker.ts'
 import { fetchMoonrakerConfigfile } from '../machine-profile/moonraker-fetch.ts'
@@ -39,6 +40,7 @@ import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
+import type { LibraryJobLinks } from './library-job-links.ts'
 
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
@@ -97,6 +99,7 @@ export async function collectLocalTelemetry(input: {
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
+  linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
   /** Import Moonraker's finished-job history on connect and after reconnects. */
   importMoonrakerHistory?: boolean
@@ -122,6 +125,8 @@ export async function collectIntoQueue(input: {
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
+  /** Links a finished job to the library version that was started on this printer (#385). */
+  libraryLinks?: Pick<LibraryJobLinks, 'attach'>
   queue: TelemetryQueue
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
@@ -191,12 +196,14 @@ export async function collectIntoQueue(input: {
           totals.queued++
           loss(transition.loss, 'retention')
         }
-        const queued = machineGate.apply(event.printer)
+        const printer =
+          input.libraryLinks?.attach(event.printer) ?? event.printer
+        const queued = machineGate.apply(printer)
         let receipt
         try {
           receipt = queue.enqueue(queued, now)
         } catch (error) {
-          machineGate.forget(event.printer.printerKey)
+          machineGate.forget(printer.printerKey)
           throw error
         }
         totals.queued++
@@ -275,7 +282,9 @@ export async function collectIntoQueue(input: {
             },
           })
         : undefined
+      const linkHealth = input.linkHealthFor?.(assignment.printerKey)
       const subscription = createMoonrakerSubscription({
+        ...(linkHealth ? { linkHealth } : {}),
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,

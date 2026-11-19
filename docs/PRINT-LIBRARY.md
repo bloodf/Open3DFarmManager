@@ -103,3 +103,98 @@ A start is sent once. An uncertain outcome is reported as `outcome-unknown` and 
 ## Tests
 
 Tests for these rules use only in-process mocks from `packages/sim-tools/src/mocks` (the E16 harness, [#351](https://github.com/bloodf/Open3DFarmManager/issues/351)): the HTTP mock for the Connector fetch, the network guard and fault injection for interrupted writes and checksum mismatches. Servers bind to `127.0.0.1` on port `0`. No Docker, no network, and no physical printer is used. Printer state is supplied by the Moonraker or Kobra-X mock.
+
+## Farm manager decisions
+
+These decisions apply where the rules above leave a choice open. Where they differ, they describe the farm manager as built.
+
+- **Default mode**: a farm with no stored setting uses `connector` mode.
+- **One setting per farm**: each farm has one storage mode, read and changed only by an `owner` or `admin` of that farm (`GET`/`PUT /settings` below).
+- **A switch applies to future uploads**: changing the mode never copies or deletes files by itself. Existing versions keep their recorded location until a migration moves them (see "Migration over the Connector session"). The UI and API report where each version actually is, including the Connector identity for Connector copies.
+
+### Connector host store
+
+The host store (`packages/connector/src/runtime/library-store.ts`) keeps files at
+`<directory>/<sha256>`, writes through a temp file and rename, keeps one copy per
+hash, applies the quota and retention rules of server mode (oldest unpinned
+versions are evicted; the removal is reported) and reports quota and usage with
+the `library.storage.report` frame. File listings carry metadata, thumbnail and
+hash only (`packages/farm-protocol/src/library-storage.ts`). Errors for a full
+disk, a missing file and a hash mismatch are distinct and shown in pt-BR.
+
+`packages/connector/src/library/store.ts` (`ConnectorLibraryStore`) is the
+published in-memory store contract with the same content-addressed, quota and
+hash-verification rules; the host store above adds the persistent index, the
+streaming upload path and the protocol reports that Connector mode needs.
+
+### Print file metadata
+
+G-code metadata is read by `packages/shared/src/print-file/gcode-meta.ts`
+(`readGcodeMetadata`, first and last 256 KiB only, `schema.ts` shape). The
+library stores a flat shape (`print-file/metadata.ts`); `fromGcodeMetadata`
+maps the parser result onto it for uploads, 3MF plate G-code and replay
+compatibility checks.
+
+### Migration over the Connector session
+
+Switching mode alone never copies or deletes files. A migration, in either
+direction, runs on the Connector over the existing session
+(`packages/connector/src/runtime/library-migration.ts`): one transfer per hash,
+bytes verified against SHA-256 before they are stored or sent, and a per-version
+result (`moved`, `already-there` or `stays` with a reason: purged, disk full,
+quota, hash mismatch, not found, unconfirmed transfer, refused). A version that
+stays keeps its recorded location, and a transfer that ends without
+confirmation is never retried automatically (the source copy is kept). Show each
+version's storage mode and, for Connector storage, its Connector identity.
+Replay always retrieves the exact
+selected version by hash, verifies it, and runs compatibility checks before
+starting. A blocked version cannot be replayed.
+
+### Session API
+
+Routes live under `/api/farms/{farmId}/library`. Viewers read; operators and
+above upload; owners and admins delete and change settings. A farm the caller
+does not belong to answers 404 on reads and 403 on writes.
+
+- `POST /` uploads a raw `application/octet-stream` body (`.gcode` or `.3mf`,
+  at most 512 MiB) with `name`, optional `title`, `itemId` (adds a version),
+  repeated `tag`, `notes` and, in Connector mode, `agentId`. Server mode stores
+  the file under `OPENFARM_LIBRARY_DIR`; Connector mode relays it to the
+  Connector and keeps no bytes on the server.
+- `GET /` lists items newest first. Filters `title`, `tag`, `printerModel`,
+  `nozzle`, `material` and `slicer` combine; `limit` (max 100) and `cursor`
+  page without skipping or repeating items when new ones arrive.
+- `GET /versions/{id}`, `GET /versions/{id}/thumbnail` (immutable cache
+  headers, `ETag` is the file hash), `DELETE /versions/{id}` (soft delete),
+  `GET /items/{id}/versions`.
+- `GET`/`PUT /settings` read and change `storageMode`, `quotaBytes` and
+  `retentionDays`. Both answers include `locations`: how many files and bytes
+  stay on the server and on each Connector. Nothing is migrated.
+
+Connector mode needs a relay between the server and the Connector; until one is
+wired the upload answers 503 while list, search and get keep working from
+server metadata.
+
+### Quota and retention job
+
+The default quota is 20 GiB per farm; `OPENFARM_LIBRARY_QUOTA_BYTES` changes the
+default for farms with no stored setting. An upload that does not fit is refused
+before any file is accepted, with an accessible pt-BR message. Server mode counts
+the unpurged files on the server disk. Connector mode checks the quota the
+Connector host reports for its own library directory (`farm.library_connector_storage`);
+the Connector enforces it too. The owner sees used and available space for the
+active mode.
+
+The retention job (`libraryRetention`, off by default, login in
+`farm_library_retention` from migration 0057) runs beside the telemetry prune:
+
+- when the owner sets "keep newest N versions", older live versions of an item are
+  soft-deleted;
+- a stored file is purged once every version using it has been soft-deleted for
+  the retention window (30 days by default) and none is live; files no version
+  references are removed after a one-hour grace;
+- the file is removed on the server disk, or on the Connector host in Connector
+  mode (the server records the purge only after the Connector confirms it);
+  without the disk or a Connector transport the purge is deferred;
+- version rows are kept: a purged version shows "arquivo removido" instead of
+  being replayed, and uploading the same bytes again restores the file.

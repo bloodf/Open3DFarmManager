@@ -1,3 +1,4 @@
+import type { WebcamDetailOptions } from './readonly-peer.ts'
 import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
@@ -90,6 +91,7 @@ type PeerOptions = {
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
+  webcamDetail?: WebcamDetailOptions
   cameraMedia?: BrowserCameraHooks
 }
 type CameraFactory = (
@@ -108,6 +110,7 @@ export class AuthenticatedBrowserSignallingClient {
     genuineStatus?: GenuineStatusOptions
     onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
     onTerminal?: (reason: string) => void
+    webcamDetail?: WebcamDetailOptions
     cameraMedia?: CameraFactory
   }>
   #peer: Peer | undefined
@@ -132,6 +135,7 @@ export class AuthenticatedBrowserSignallingClient {
       onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
       onTerminal?: (reason: string) => void
       /** Opt-in camera media per peer; violations close this session. */
+      webcamDetail?: WebcamDetailOptions
       cameraMedia?: CameraFactory
     } = {},
   ) {
@@ -243,6 +247,9 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
+        ...(this.#options.webcamDetail
+          ? { webcamDetail: this.#options.webcamDetail }
+          : {}),
         ...(this.#options.cameraMedia
           ? {
               cameraMedia: this.#options.cameraMedia((reason) =>

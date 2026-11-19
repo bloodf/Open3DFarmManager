@@ -5,6 +5,10 @@ import {
   connectorUpgradeDoc,
 } from '../utils/connector-version.ts'
 import { useConnectorVersions } from '../utils/connector-version-feed.ts'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 const versionFeed = useConnectorVersions()
 const versionReady = versionFeed.ready
 
@@ -197,8 +201,16 @@ onBeforeRouteLeave(() => {
       Consulte os registros de pareamento das farms às quais sua conta tem
       acesso. Este inventário não indica se o Connector está conectado agora.
     </p>
-    <p ref="errorSummary" role="alert" tabindex="-1">{{ error }}</p>
-    <p v-if="error"><NuxtLink to="/entrar">Entrar na conta</NuxtLink></p>
+    <div ref="errorSummary" role="alert" tabindex="-1">
+      <ErrorState
+        v-if="error"
+        title="Inventário indisponível"
+        :description="error"
+      >
+        <Button @click="load('farms')">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
+      </ErrorState>
+    </div>
     <section aria-labelledby="farms-heading" :aria-busy="pending">
       <h2 id="farms-heading">Suas farms</h2>
       <label for="farm">Selecione uma farm</label>
@@ -232,15 +244,17 @@ onBeforeRouteLeave(() => {
       >
         Próxima página de farms
       </button>
-      <p role="status">
-        {{
-          pending
-            ? 'Consultando inventário…'
-            : !error && !farms.length
-              ? 'Nenhuma farm disponível para esta conta.'
-              : ''
-        }}
-      </p>
+      <div v-if="pending" aria-busy="true">
+        <p role="status">Carregando o inventário…</p>
+        <Skeleton /><Skeleton /><Skeleton />
+      </div>
+      <EmptyState
+        v-else-if="!error && !farms.length"
+        title="Nenhuma farm disponível"
+        description="Sua conta ainda não tem acesso a uma farm. Peça um convite a uma proprietária ou a um proprietário e consulte de novo."
+      >
+        <Button @click="load('farms')">Consultar novamente</Button>
+      </EmptyState>
       <template v-if="farmId && !pending">
         <h2>Connectors registrados</h2>
         <p>
@@ -278,7 +292,13 @@ onBeforeRouteLeave(() => {
         >
           Consultar versões das próximas impressoras
         </button>
-        <p v-if="!connectors.length">Nenhum Connector registrado nesta farm.</p>
+        <EmptyState
+          v-if="!connectors.length"
+          title="Nenhum Connector registrado"
+          description="Esta farm ainda não tem registros de pareamento. Inicie o pareamento no Connector e aprove-o para que ele apareça aqui."
+        >
+          <NuxtLink to="/parear">Aprovar um novo Connector</NuxtLink>
+        </EmptyState>
         <ul v-else>
           <li v-for="connector in connectors" :key="connector.agentId">
             <dl>

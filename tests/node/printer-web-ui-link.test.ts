@@ -137,33 +137,9 @@ test('farm page renders the derived link as a safe external anchor', async () =>
     new URL('../../apps/farm/app/pages/farm.vue', import.meta.url),
     'utf8',
   )
-  assert.match(
-    page,
-    /FarmPrinterInventory/,
-    'farm page mounts the printer inventory that owns local-origin links',
-  )
-  const cardControls = await readFile(
-    new URL(
-      '../../apps/farm/app/components/farm/FarmPrinterCardControls.vue',
-      import.meta.url,
-    ),
-    'utf8',
-  )
-  assert.match(
-    cardControls,
-    /FarmLocalOrigin/,
-    'printer card controls mount the local-origin component',
-  )
-  const localOrigin = await readFile(
-    new URL(
-      '../../apps/farm/app/components/farm/FarmLocalOrigin.vue',
-      import.meta.url,
-    ),
-    'utf8',
-  )
   const anchor =
     /<a\s+:href="displayLocalOrigin\(row\) \?\? undefined"[^>]*>/.exec(
-      localOrigin,
+      page,
     )?.[0]
   assert.ok(anchor, 'link is bound to the derived origin')
   assert.match(anchor, /target="_blank"/)

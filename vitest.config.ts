@@ -21,8 +21,9 @@ const rawImports: Plugin = {
 }
 
 export default defineConfig({
-  // Tests run before Nuxt generates apps/farm/.nuxt/tsconfig.*.json.
-  tsconfig: resolve(import.meta.dirname, 'tsconfig.json'),
+  // Tests run before Nuxt generates apps/farm/.nuxt/tsconfig.*.json, and
+  // unit tests load server modules that need the root project references.
+  tsconfig: './tsconfig.json',
   plugins: [rawImports],
   test: {
     include: ['tests/unit/**/*.test.ts'],

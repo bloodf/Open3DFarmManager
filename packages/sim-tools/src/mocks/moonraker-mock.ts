@@ -166,6 +166,12 @@ export interface MoonrakerMockOptions {
   bedMeshProfiles?: readonly MoonrakerBedMeshProfileSeed[] | undefined
   activeMesh?: string | null | undefined
   timelapse?: false | MoonrakerTimelapseOptions | undefined
+  /** Rendered videos seeded into the `timelapse` file root. */
+  timelapseFiles?: readonly MoonrakerFileEntry[] | undefined
+  /** Components server.info lists; defaults to the mock's own list. */
+  components?: readonly string[] | undefined
+  /** Axes homed at start, such as `xyz` or `` for none. Defaults to `xyz`. */
+  homedAxes?: string | undefined
   gcodeHelp?: Record<string, string> | undefined
   temperatureStoreLength?: number | undefined
   auth?: MoonrakerAuthConfig | undefined
@@ -615,6 +621,9 @@ export async function startMoonrakerMock(
   }
 
   const directories = new Set<string>()
+  // Stats for directories made via `server.files.post_directory`; others keep
+  // the default live mtime and 4096-byte size in listings.
+  const directoryStats = new Map<string, { modified: number; size: number }>()
   for (const dir of options.directories ?? []) {
     const root = dir.root ?? 'gcodes'
     const safe = safeFilePath(dir.path)
@@ -726,7 +735,8 @@ export async function startMoonrakerMock(
       : options.activeMesh
 
   let toolheadPosition: [number, number, number, number] = [0, 0, 0, 0]
-  let homedAxes = 'xyz'
+  let homedAxes = options.homedAxes ?? 'xyz'
+  let absoluteMoves = true
   const axisMinimum: [number, number, number] = [0, 0, 0]
   const axisMaximum: [number, number, number] = [220, 220, 250]
   let probeZ = 0
@@ -785,6 +795,42 @@ export async function startMoonrakerMock(
       storeFileEntry(entry, 'timelapse', filesMap)
     }
   }
+  for (const entry of options.timelapseFiles ?? []) {
+    storeFileEntry(entry, 'timelapse', filesMap)
+  }
+  // The Connector's timelapse control speaks the `server.timelapse.*`
+  // methods; they share the plugin state above.
+  function serverTimelapse(
+    method: string,
+    params: Record<string, unknown>,
+  ): { result: unknown } | null {
+    switch (method) {
+      case 'server.timelapse.get_settings':
+        return { result: { ...timelapseSettings } }
+      case 'server.timelapse.post_settings':
+        Object.assign(timelapseSettings, params)
+        return { result: { ...timelapseSettings } }
+      case 'server.timelapse.lastframe':
+        return { result: { frame: timelapseFramecount } }
+      case 'server.timelapse.takeframe':
+        timelapseFramecount += 1
+        return { result: { frame: timelapseFramecount } }
+      case 'server.timelapse.render':
+        return { result: { status: 'success', frames: timelapseFramecount } }
+      case 'server.timelapse.saveframes':
+        return { result: { frames: timelapseFramecount } }
+      default:
+        return null
+    }
+  }
+  const serverTimelapseHttp: Record<string, string> = {
+    'GET /server/timelapse/settings': 'server.timelapse.get_settings',
+    'POST /server/timelapse/settings': 'server.timelapse.post_settings',
+    'GET /server/timelapse/lastframe': 'server.timelapse.lastframe',
+    'POST /server/timelapse/takeframe': 'server.timelapse.takeframe',
+    'POST /server/timelapse/render': 'server.timelapse.render',
+    'POST /server/timelapse/saveframes': 'server.timelapse.saveframes',
+  }
 
   const gcodeHelp: Record<string, string> = {
     G28: 'Home axes',
@@ -792,6 +838,14 @@ export async function startMoonrakerMock(
     M140: 'Set bed temperature',
     EXCLUDE_OBJECT: 'Exclude an object by name',
     BED_MESH_PROFILE: 'Load or save a bed mesh profile',
+    G1: 'Move to a position',
+    PROBE: 'Probe Z',
+    BED_MESH_CALIBRATE: 'Calibrate bed mesh',
+    SET_LED: 'Set LED color',
+    SET_PIN: 'Set output pin',
+    SET_HEATER_TEMPERATURE: 'Set heater target',
+    SET_FAN_SPEED: 'Set fan speed',
+    M118: 'Emit a console message',
     ...(options.gcodeHelp ?? {}),
   }
 
@@ -1052,9 +1106,39 @@ export async function startMoonrakerMock(
     return all
   }
 
+  /** Rolls each heater's temperature window forward by one sample. */
+  function sampleTemperatures(current: Record<string, object>) {
+    for (const [name, series] of Object.entries(temperatureStore)) {
+      const status = current[name] as
+        { temperature?: unknown; target?: unknown; power?: unknown } | undefined
+      if (typeof status?.temperature !== 'number') continue
+      const roll = (values: number[], value: number) => [
+        ...values.slice(1),
+        value,
+      ]
+      temperatureStore[name] = {
+        ...series,
+        temperatures: roll(series.temperatures, status.temperature),
+        ...(series.targets && {
+          targets: roll(
+            series.targets,
+            typeof status.target === 'number' ? status.target : 0,
+          ),
+        }),
+        ...(series.powers && {
+          powers: roll(
+            series.powers,
+            typeof status.power === 'number' ? status.power : 0,
+          ),
+        }),
+      }
+    }
+  }
+
   function broadcastStatus() {
     eventtime++
     const current = statusOf(model)
+    sampleTemperatures(current)
     for (const client of wsClients) {
       if (!client.hasSubscribed) continue
       const delta = pickStatus(current, client.subscribedObjects)
@@ -1091,6 +1175,7 @@ export async function startMoonrakerMock(
   }
 
   function updateModel(patch: Partial<MoonrakerModel>) {
+    recordPrintTransition(patch)
     const nextExtruders = {
       ...model.extruders,
       ...(patch.extruders ?? {}),
@@ -1311,6 +1396,39 @@ export async function startMoonrakerMock(
         continue
       }
 
+      if (upper === 'G90' || upper === 'G91') {
+        absoluteMoves = upper === 'G90'
+        continue
+      }
+
+      const moveMatch = /^G[01](?:\s|$)/.exec(upper)
+      if (moveMatch) {
+        const next: [number, number, number, number] = [...toolheadPosition]
+        for (const match of upper
+          .slice(2)
+          .matchAll(/([XYZE])\s*(-?\d+(?:\.\d+)?)/g)) {
+          const axis = 'XYZE'.indexOf(match[1]!)
+          next[axis] =
+            Number(match[2]) + (absoluteMoves ? 0 : toolheadPosition[axis]!)
+        }
+        const outOfRange = next
+          .slice(0, 3)
+          .some(
+            (value, axis) =>
+              value < axisMinimum[axis]! || value > axisMaximum[axis]!,
+          )
+        if (outOfRange) responses.push('!! Move out of range')
+        else toolheadPosition = next
+        statusDirty = true
+        continue
+      }
+
+      if (upper === 'M84' || upper === 'M18') {
+        homedAxes = ''
+        statusDirty = true
+        continue
+      }
+
       if (upper === 'G28' || upper.startsWith('G28 ')) {
         const axes = upper.slice(3).replace(/\s+/g, '')
         if (!axes) homedAxes = 'xyz'
@@ -1325,6 +1443,31 @@ export async function startMoonrakerMock(
         if (homedAxes.includes('y')) toolheadPosition[1] = axisMinimum[1]
         if (homedAxes.includes('z')) toolheadPosition[2] = axisMinimum[2]
         responses.push('// Homed ' + (homedAxes || 'xyz'))
+        statusDirty = true
+        continue
+      }
+
+      const defineMatch =
+        /^EXCLUDE_OBJECT_(DEFINE|START|END)(?:\s+NAME=([A-Za-z0-9_-]+))?/i.exec(
+          line,
+        )
+      if (defineMatch) {
+        const kind = defineMatch[1]!.toUpperCase()
+        const name = defineMatch[2]
+        if (kind === 'DEFINE' && name) {
+          if (!excludeObjects.some((o) => o.name === name)) {
+            excludeObjects.push({
+              name,
+              center: [0, 0],
+              polygon: [],
+              excluded: false,
+            })
+          }
+        } else if (kind === 'START') {
+          currentExcludeObject = name ?? null
+        } else if (kind === 'END') {
+          currentExcludeObject = null
+        }
         statusDirty = true
         continue
       }
@@ -1440,7 +1583,7 @@ export async function startMoonrakerMock(
       moonraker_version: 'v0.9.3-mock',
       api_version: [1, 5, 0],
       api_version_string: '1.5.0',
-      components: [
+      components: options.components ?? [
         'file_manager',
         'history',
         'job_queue',
@@ -1551,6 +1694,39 @@ export async function startMoonrakerMock(
     }
   }
 
+  // A print that ends is recorded in history, as Moonraker does. End times
+  // strictly increase so newest-first ordering stays stable.
+  let printStartedAt = Date.now() / 1000
+  let lastHistoryEnd = 0
+  function recordPrintTransition(patch: Partial<MoonrakerModel>) {
+    const active = model.state === 'printing' || model.state === 'paused'
+    if (patch.state === 'printing' && !active) {
+      printStartedAt = Date.now() / 1000
+      return
+    }
+    if (
+      !active ||
+      (patch.state !== 'complete' &&
+        patch.state !== 'cancelled' &&
+        patch.state !== 'error')
+    )
+      return
+    const end = Math.max(Date.now() / 1000, lastHistoryEnd + 0.001)
+    lastHistoryEnd = end
+    historyJobs.push({
+      job_id: (historyJobs.length + 1).toString(16).padStart(6, '0'),
+      filename: patch.filename ?? model.filename,
+      status: patch.state === 'complete' ? 'completed' : patch.state,
+      start_time: printStartedAt,
+      end_time: end,
+      print_duration: patch.printDuration ?? model.printDuration,
+      total_duration: patch.totalDuration ?? model.totalDuration,
+      filament_used: 0,
+      exists: true,
+      metadata: {},
+    })
+  }
+
   function historyListResult(params: Record<string, unknown> = {}) {
     const limit =
       typeof params.limit === 'number' && params.limit > 0
@@ -1576,7 +1752,8 @@ export async function startMoonrakerMock(
         return order === 'asc' ? ae - be : be - ae
       })
     const page = filtered.slice(start, start + limit)
-    return { count: page.length, jobs: page }
+    // Moonraker reports the total matching jobs, not the page size.
+    return { count: filtered.length, jobs: page }
   }
 
   function historyTotalsResult() {
@@ -1664,6 +1841,37 @@ export async function startMoonrakerMock(
     return out
   }
 
+  /** Single-device power API (`machine.device_power.{get,post}_device`). */
+  function devicePowerRpc(
+    method: string,
+    params: Record<string, unknown>,
+  ): { result: unknown } | { error: string } | null {
+    if (
+      method !== 'machine.device_power.get_device' &&
+      method !== 'machine.device_power.post_device'
+    )
+      return null
+    const name = typeof params.device === 'string' ? params.device : ''
+    const device = powerDevices.get(name)
+    if (!device) return { error: `Unknown device ${name}` }
+    if (method === 'machine.device_power.get_device')
+      return { result: { device: name, status: device.status } }
+    const action = params.action
+    const next =
+      action === 'toggle'
+        ? device.status === 'on'
+          ? 'off'
+          : 'on'
+        : action === 'on' || action === 'off'
+          ? action
+          : null
+    if (!next) return { error: `Invalid power action ${String(action)}` }
+    const result = setPowerDevices([name], next)
+    if (typeof result.error === 'string' && !(name in result))
+      return { error: result.error }
+    return { result: { device: name, status: device.status } }
+  }
+
   function getDirectoryResult(rawPath: string) {
     const parsed = splitRootPath(rawPath || 'gcodes')
     if (!parsed) return null
@@ -1681,6 +1889,7 @@ export async function startMoonrakerMock(
       .map((p) => ({
         modified: Math.floor(Date.now() / 1000),
         size: 4096,
+        ...directoryStats.get(fileKey(root, p)),
         permissions: 'rw',
         dirname: dirPath ? p.slice(prefix.length) : p,
       }))
@@ -1839,6 +2048,80 @@ export async function startMoonrakerMock(
         },
         source_item: { root: source.root, path: source.path },
         action: 'move_dir' as const,
+      }
+    }
+    return { error: 'Not found' as const }
+  }
+
+  // `server.files.post_directory` creates the directory like createDirectory
+  // but records deterministic zero stats, so listings stay stable in tests.
+  function postDirectory(rawPath: string) {
+    const result = createDirectory(rawPath)
+    if ('error' in result) return result
+    const { root, path } = result.item
+    directoryStats.set(fileKey(root, path), { modified: 0, size: 0 })
+    return {
+      ...result,
+      item: { ...result.item, modified: 0, size: 0 },
+    }
+  }
+
+  // Mirrors Moonraker's `server.files.copy`: duplicates a file or a
+  // directory tree within one root and acknowledges with create_file/create_dir.
+  function copyFileOrDir(sourceRaw: string, destRaw: string) {
+    const source = splitRootPath(sourceRaw)
+    const dest = splitRootPath(destRaw)
+    if (!source?.path || !dest?.path) return { error: 'Invalid path' as const }
+    if (source.root !== dest.root)
+      return { error: 'Cross-root copy refused' as const }
+    const modified = Math.floor(Date.now() / 1000)
+    const file = filesMap.get(fileKey(source.root, source.path))
+    if (file) {
+      const copied = { ...file, path: dest.path, modified }
+      filesMap.set(fileKey(dest.root, dest.path), copied)
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified,
+          size: copied.size,
+          permissions: 'rw',
+        },
+        action: 'create_file' as const,
+      }
+    }
+    if (directories.has(fileKey(source.root, source.path))) {
+      const sourcePrefix = `${source.path}/`
+      const nestedDirs = [...directories]
+        .filter((key) => key.startsWith(`${source.root}:`))
+        .map((key) => key.slice(source.root.length + 1))
+        .filter((rel) => rel.startsWith(sourcePrefix))
+      const nestedFiles = [...filesMap.values()].filter(
+        (f) => f.root === source.root && f.path.startsWith(sourcePrefix),
+      )
+      directories.add(fileKey(dest.root, dest.path))
+      for (const rel of nestedDirs) {
+        directories.add(
+          fileKey(dest.root, dest.path + rel.slice(source.path.length)),
+        )
+      }
+      for (const nested of nestedFiles) {
+        const nextPath = dest.path + nested.path.slice(source.path.length)
+        filesMap.set(fileKey(dest.root, nextPath), {
+          ...nested,
+          path: nextPath,
+          modified,
+        })
+      }
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified,
+          size: 4096,
+          permissions: 'rw',
+        },
+        action: 'create_dir' as const,
       }
     }
     return { error: 'Not found' as const }
@@ -2410,6 +2693,28 @@ export async function startMoonrakerMock(
       return
     }
 
+    if (path === '/machine/device_power/device') {
+      const devicePower = devicePowerRpc(
+        method === 'GET'
+          ? 'machine.device_power.get_device'
+          : method === 'POST'
+            ? 'machine.device_power.post_device'
+            : '',
+        {
+          ...(readBodyJson(body) ?? {}),
+          ...Object.fromEntries(url.searchParams.entries()),
+        },
+      )
+      if (devicePower) {
+        if ('error' in devicePower)
+          sendJson(res, 400, {
+            error: { code: 400, message: devicePower.error },
+          })
+        else sendJson(res, 200, devicePower)
+        return
+      }
+    }
+
     if (path === '/machine/device_power/devices' && method === 'GET') {
       sendJson(res, 200, { result: powerDevicesResult() })
       return
@@ -2470,6 +2775,18 @@ export async function startMoonrakerMock(
     }
 
     if (timelapseEnabled) {
+      const aliased = serverTimelapseHttp[`${method} ${path}`]
+      if (aliased) {
+        const params: Record<string, unknown> = {
+          ...(readBodyJson(body) ?? {}),
+          ...Object.fromEntries(url.searchParams.entries()),
+        }
+        const handled = serverTimelapse(aliased, params)
+        if (handled) {
+          sendJson(res, 200, handled)
+          return
+        }
+      }
       if (path === '/machine/timelapse/settings') {
         if (method === 'GET') {
           sendJson(res, 200, { result: { ...timelapseSettings } })
@@ -2938,6 +3255,23 @@ export async function startMoonrakerMock(
         return
       }
 
+      // Moonraker's documented JSON-RPC name for creating a directory; used by
+      // the Connector file manager.
+      if (method === 'server.files.post_directory') {
+        const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
+        if (typeof dirPath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = postDirectory(dirPath)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
       if (method === 'server.files.create_directory') {
         const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
         if (typeof dirPath !== 'string') {
@@ -2994,6 +3328,25 @@ export async function startMoonrakerMock(
           return
         }
         const result = moveFileOrDir(params.source, params.dest)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.copy') {
+        const params = reqObj.params as
+          { source?: unknown; dest?: unknown } | undefined
+        if (
+          typeof params?.source !== 'string' ||
+          typeof params?.dest !== 'string'
+        ) {
+          replyError(-32602, 'Invalid source or dest')
+          return
+        }
+        const result = copyFileOrDir(params.source, params.dest)
         if ('error' in result) {
           replyError(-32602, result.error)
           return
@@ -3098,6 +3451,16 @@ export async function startMoonrakerMock(
         return
       }
 
+      const devicePower = devicePowerRpc(
+        method,
+        (reqObj.params as Record<string, unknown> | undefined) ?? {},
+      )
+      if (devicePower) {
+        if ('error' in devicePower) replyError(-32602, devicePower.error)
+        else reply(devicePower.result)
+        return
+      }
+
       if (
         method === 'machine.device_power.on' ||
         method === 'machine.device_power.off' ||
@@ -3154,6 +3517,14 @@ export async function startMoonrakerMock(
       }
 
       if (timelapseEnabled) {
+        const handled = serverTimelapse(
+          method,
+          (reqObj.params as Record<string, unknown> | undefined) ?? {},
+        )
+        if (handled) {
+          reply(handled.result)
+          return
+        }
         if (method === 'machine.timelapse.settings') {
           const params =
             (reqObj.params as Record<string, unknown> | undefined) ?? {}

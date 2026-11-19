@@ -33,6 +33,12 @@ const Runtime = z.strictObject({
   collection: z.unknown(),
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
+  discovery: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      intervalMs: z.number().int().min(1).max(2147483647).default(600_000),
+    })
+    .prefault({}),
   telemetry: z
     .strictObject({
       endpoint: z.string().min(1).max(2048),
@@ -248,6 +254,7 @@ export function readAgentRuntimeConfig(
     rtc,
     collection,
     telemetry: input.telemetry,
+    discovery: input.discovery,
     renewal: input.renewal,
     assignments,
     signalling: input.signalling,

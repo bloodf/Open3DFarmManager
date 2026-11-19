@@ -1,43 +1,57 @@
 <script setup lang="ts">
-defineProps<{
-  farms: readonly { farmId: string }[]
-  farmId: string
-  farmAfter: string | null
-  nextFarm: string | null
-}>()
-
+import { type FarmViewState } from '../../utils/farm-view.ts'
+defineProps<{ ready: Extract<FarmViewState, { kind: 'ready' }> }>()
 const emit = defineEmits<{
-  change: [event: Event]
-  firstPage: []
-  nextPage: [after: string]
+  select: [farmId: string]
+  discover: [after?: string]
 }>()
+function chooseFarm(event: Event) {
+  if (event.target instanceof HTMLSelectElement)
+    emit('select', event.target.value)
+}
 </script>
 
 <template>
   <section aria-labelledby="farm-scope-heading">
     <h2 id="farm-scope-heading">Escolha da farm</h2>
     <label for="farm-scope">Farm atual</label>
-    <select id="farm-scope" :value="farmId" @change="emit('change', $event)">
+    <select
+      id="farm-scope"
+      :value="ready.scope?.farmId ?? ''"
+      @change="chooseFarm"
+    >
       <option value="">Selecione uma farm</option>
-      <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
+      <option
+        v-for="farm in ready.farms"
+        :key="farm.farmId"
+        :value="farm.farmId"
+      >
         {{ farm.farmId }}
       </option>
     </select>
-    <p v-if="farmId" class="opaque">Farm atual: {{ farmId }}</p>
-    <p v-if="!farms.length">
+    <p v-if="ready.scope" class="opaque">
+      Farm atual: {{ ready.scope.farmId }}
+    </p>
+    <p v-if="!ready.farms.length">
       {{
-        farmAfter || nextFarm
+        ready.farmAfter || ready.nextFarm
           ? 'Nenhuma farm nesta página.'
           : 'Sua conta ainda não tem acesso a uma farm.'
       }}
     </p>
     <div class="actions">
-      <button v-if="farmAfter" type="button" @click="emit('firstPage')">
+      <button v-if="ready.farmAfter" type="button" @click="emit('discover')">
         Primeira página de farms
       </button>
-      <button v-if="nextFarm" type="button" @click="emit('nextPage', nextFarm)">
+      <button
+        v-if="ready.nextFarm"
+        type="button"
+        @click="emit('discover', ready.nextFarm)"
+      >
         Próximas farms
       </button>
     </div>
   </section>
 </template>
+
+<style scoped src="./farm-view.css"></style>

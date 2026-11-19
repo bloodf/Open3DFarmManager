@@ -10,7 +10,10 @@ import { parseInventoryPage } from './connector-inventory.ts'
 import { authRuntime, type AuthRuntime } from '../utils/auth/runtime.ts'
 import { checkMutationOrigin } from '../utils/auth/boundary.ts'
 import { inventoryUuid } from '../storage/postgres-connector-inventory.ts'
-import { validPrinterOwnershipKey } from '../storage/postgres-printer-ownership.ts'
+import {
+  validPrinterOwnershipKey,
+  type PostgresPrinterOwnership,
+} from '../storage/postgres-printer-ownership.ts'
 import {
   printerAssignmentsRuntime,
   type PrinterAssignmentsRuntime,
@@ -25,12 +28,26 @@ const revokeBody = z.strictObject({
   agentId: z.string().regex(inventoryUuid),
   printerKey: key,
 })
+const groupingText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .refine((value) => !/[\p{Cc}\p{Cs}]/u.test(value))
+  .nullable()
+const groupingBody = z.strictObject({
+  ...revokeBody.shape,
+  displayName: groupingText,
+  groupName: groupingText,
+  location: groupingText,
+  sortOrder: z.number().int().min(0).max(9999).nullable(),
+})
 const invalid = () =>
   createError({ status: 400, message: 'Solicitação inválida.' })
 export function printerAssignmentBoundary(
   request: Request,
   origin: string,
-  operation: 'list' | 'register' | 'revoke',
+  operation: 'list' | 'register' | 'revoke' | 'edit',
 ) {
   if (operation === 'list') {
     if (request.method !== 'GET') throw invalid()
@@ -54,6 +71,10 @@ export function printerAssignmentBoundary(
 }
 export async function readPrinterAssignmentBody(
   request: Request,
+  limits: { maxBytes: number; maxValues: number; maxDepth?: number } = {
+    maxBytes: 4096,
+    maxValues: 8,
+  },
 ): Promise<unknown> {
   const reader = request.body?.getReader()
   if (!reader) throw invalid()
@@ -73,13 +94,13 @@ export async function readPrinterAssignmentBody(
       const chunk = await Promise.race([reader.read(), timeout])
       if (chunk.done) break
       bytes += chunk.value.byteLength
-      if (bytes > 4096)
+      if (bytes > limits.maxBytes)
         throw createError({ status: 413, message: 'Solicitação muito grande.' })
       chunks.push(chunk.value)
     }
     return parseBoundedJson(
       new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
-      { maxBytes: 4096, maxDepth: 2, maxValues: 8, maxStringChars: 1024 },
+      { maxDepth: 2, ...limits, maxStringChars: 1024 },
     )
   } catch (error) {
     if (error instanceof Error && 'status' in error) throw error
@@ -121,15 +142,20 @@ function failure(reason: string): never {
 }
 export async function printerAssignments(
   event: Pick<RequestEvent, 'req' | 'res'>,
-  operation: 'list' | 'register' | 'revoke',
+  operation: 'list' | 'register' | 'revoke' | 'edit',
   target: { farmId: string; assignmentId?: string },
-  dependencies?: { auth: AuthRuntime; runtime: PrinterAssignmentsRuntime },
+  dependencies?: {
+    auth: AuthRuntime
+    runtime: PrinterAssignmentsRuntime & {
+      ownership: Partial<Pick<PostgresPrinterOwnership, 'editGrouping'>>
+    }
+  },
 ) {
   authResponse(event)
   event.res.headers.set('Referrer-Policy', 'no-referrer')
   if (
     !inventoryUuid.test(target.farmId) ||
-    (operation === 'revoke' &&
+    ((operation === 'revoke' || operation === 'edit') &&
       (!target.assignmentId || !inventoryUuid.test(target.assignmentId)))
   )
     throw invalid()
@@ -179,6 +205,28 @@ export async function printerAssignments(
       printerKey: parsed.data.printerKey,
     })
     if (!result.ok) return failure(result.reason)
+    return { assignmentId: result.assignmentId, status: result.status }
+  }
+  if (operation === 'edit') {
+    const parsed = groupingBody.safeParse(body)
+    if (!parsed.success || !target.assignmentId) throw invalid()
+    if (!runtime.ownership.editGrouping) return failure('storage-unavailable')
+    const { agentId, printerKey, ...grouping } = parsed.data
+    const result = await runtime.ownership.editGrouping({
+      ...authority,
+      agentId,
+      printerKey,
+      grouping,
+      expectedAssignmentId: target.assignmentId,
+    })
+    if (!result.ok) {
+      if (result.reason === 'conflict')
+        throw createError({
+          status: 409,
+          message: 'Já existe uma impressora com este nome na farm.',
+        })
+      return failure(result.reason)
+    }
     return { assignmentId: result.assignmentId, status: result.status }
   }
   const parsed = revokeBody.safeParse(body)

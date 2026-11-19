@@ -3,6 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
+import { decodeAnycubicReport } from '../../packages/connector/src/anycubic/report.ts'
+import { decodeCrealityStatus } from '../../packages/connector/src/creality/index.ts'
+import { reportedModelProfile } from '../../packages/connector/src/runtime/machine-profile.ts'
 import { parseBambuMachineProfile } from '../../packages/connector/src/machine-profile/bambu.ts'
 import {
   createBambuRuntimeSubscription,
@@ -234,4 +237,34 @@ describe('Bambu machine profile', () => {
       queue.close()
     }
   }, 20_000)
+})
+
+describe('reported model profiles', () => {
+  it('uses only the reported Creality model, even with temperatures present', () => {
+    const report = decodeCrealityStatus(
+      '{"state":0,"model":"K1","nozzleTemp":22,"nozzleTemp2":220,"bedTemp2":55}',
+    )
+    expect(reportedModelProfile(report?.model)).toEqual({ model: 'K1' })
+    expect(
+      reportedModelProfile(decodeCrealityStatus('{"state":0}')?.model),
+    ).toBeUndefined()
+  })
+
+  it('has no profile fields in Anycubic live temperature telemetry', () => {
+    const report = decodeAnycubicReport(
+      Buffer.from(
+        '{"state":"idle","curr_nozzle_temp":22,"curr_hotbed_temp":23}',
+      ),
+    )
+    expect(report).toMatchObject({
+      toolTemperatureCelsius: 22,
+      bedTemperatureCelsius: 23,
+    })
+    expect(report).not.toHaveProperty('machine')
+  })
+
+  it('uses the Kobra X model identifier without a model lookup', () => {
+    expect(reportedModelProfile('20030')).toEqual({ model: '20030' })
+    expect(reportedModelProfile(undefined)).toBeUndefined()
+  })
 })

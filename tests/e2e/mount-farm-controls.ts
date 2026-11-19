@@ -7,17 +7,14 @@ const app = resolve(import.meta.dirname, '../../apps/farm')
 const components = join(app, 'app/components')
 const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 
-// Compile the production components and the farm confirmation dialog component.
+// Compile the production components and the farm page's actual confirmation dialog.
 export async function farmControlsBundle() {
-  const dialogSource = readFileSync(
-    join(app, 'app/components/farm/FarmControlDialog.vue'),
-    'utf8',
-  )
-  const start = dialogSource.indexOf('  <dialog\n    ref="pauseDialog"')
-  const end = dialogSource.indexOf('  </dialog>', start) + '  </dialog>'.length
+  const page = readFileSync(join(app, 'app/pages/farm.vue'), 'utf8')
+  const start = page.indexOf('    <dialog\n      ref="pauseDialog"')
+  const end = page.indexOf('    </dialog>', start) + '    </dialog>'.length
   if (start < 0 || end < start)
     throw new Error('Farm confirmation dialog not found')
-  const dialog = dialogSource.slice(start, end)
+  const dialog = page.slice(start, end)
   const entry = `<script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import PrinterControls from './PrinterControls.vue'

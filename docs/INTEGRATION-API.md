@@ -171,3 +171,8 @@ unrecognized. Follow cursors, token lifetime and rate limit headers rather
 than assuming fixed values. Deprecation notices and the minimum notice periods
 are defined by the OpenAPI contract and release notes. Security fixes may
 change behavior within v1 when needed to protect owners or printers.
+
+## Out of scope
+
+E7 does not provide the print-library storage, retention or replay contract;
+see [PRINT-LIBRARY.md](PRINT-LIBRARY.md).

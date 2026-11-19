@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 import SpoolmanForm from '../components/spoolman/SpoolmanForm.vue'
 import SpoolmanResults, {
   type SpoolmanSavedSetting,
@@ -32,6 +36,9 @@ const results = ref<SpoolmanConnectorResult[]>([])
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
+// Fixed pt-BR copy for the failed page load, shown as ErrorState with retry.
+const loadError = ref('')
+const noFarm = ref(false)
 const status = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 const origin = ref('')
@@ -76,7 +83,11 @@ async function refresh() {
     keyState.value = await loadSpoolmanBrowserKey(farmId.value, signal)
 }
 
-onMounted(async () => {
+async function load() {
+  loading.value = true
+  loadError.value = ''
+  error.value = ''
+  noFarm.value = false
   try {
     const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
       query: { limit: 50 },
@@ -85,14 +96,25 @@ onMounted(async () => {
     })
     farms.value = page.farms
     farmId.value = page.farms[0]?.farmId ?? ''
-    if (!farmId.value) await fail('Nenhuma farm disponível.')
+    if (!farmId.value) noFarm.value = true
     else await refresh()
-  } catch {
-    await fail('Entre na sua conta para configurar o Spoolman.')
+  } catch (cause) {
+    const code =
+      cause && typeof cause === 'object' && 'statusCode' in cause
+        ? cause.statusCode
+        : undefined
+    loadError.value =
+      code === 401
+        ? 'Entre na sua conta para configurar o Spoolman.'
+        : 'Não foi possível carregar o Spoolman. Tente novamente.'
+    await nextTick()
+    errorSummary.value?.focus()
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(load)
 onBeforeUnmount(() => {
   controller?.abort()
   clearSecrets()
@@ -154,18 +176,35 @@ async function submit() {
       Configure um Spoolman para toda a farm. O endereço é enviado aos
       Connectors aprovados; as credenciais ficam somente neles.
     </p>
-    <p v-if="loading" role="status">Carregando…</p>
+    <div v-if="loading" aria-busy="true" class="loading">
+      <p role="status">Carregando o Spoolman…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <div
-      v-if="error"
+      v-if="error || loadError"
       ref="errorSummary"
       role="alert"
       tabindex="-1"
       class="spoolman-error"
     >
-      {{ error }}
+      <ErrorState
+        v-if="loadError"
+        title="Spoolman indisponível"
+        :description="loadError"
+      >
+        <Button @click="load()">Tentar novamente</Button>
+      </ErrorState>
+      <template v-else>{{ error }}</template>
     </div>
+    <EmptyState
+      v-if="noFarm"
+      title="Nenhuma farm disponível"
+      description="Esta conta ainda não tem uma farm para configurar o Spoolman. Crie uma farm ou peça acesso."
+    >
+      <NuxtLink to="/farm">Ir para farms</NuxtLink>
+    </EmptyState>
     <p v-if="status" role="status">{{ status }}</p>
-    <template v-if="!loading && farmId">
+    <template v-if="!loading && farmId && !loadError">
       <p v-if="!canManage" role="status">
         Apenas proprietários e administradores configuram o Spoolman. Você pode
         consultar a situação abaixo.
@@ -180,7 +219,18 @@ async function submit() {
         :connector-count="approved.length"
         @submit="submit"
       />
-      <SpoolmanResults :settings="settings" :results="results" />
+      <SpoolmanResults
+        :settings="settings"
+        :results="results"
+        :can-manage="canManage"
+      />
     </template>
   </main>
 </template>
+
+<style scoped>
+.loading {
+  display: grid;
+  gap: var(--space-3, 0.75rem);
+}
+</style>

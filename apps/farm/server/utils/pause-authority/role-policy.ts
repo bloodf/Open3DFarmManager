@@ -12,6 +12,7 @@ export function actionsForControlRole(
     (action) =>
       ![
         'run_macro',
+        'config_write',
         'service',
         'power',
         'timelapse',

@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 14
+const SCHEMA_VERSION = 15
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -257,9 +257,13 @@ const fileOpActionSchema = gcodeActionSchema.replace(
   "'set_factor'",
   "'set_factor','file_op'",
 )
-const actionSchema = fileOpActionSchema.replace(
+const bedMeshActionSchema = fileOpActionSchema.replace(
   "'file_op'",
   "'file_op','bed_mesh'",
+)
+const actionSchema = bedMeshActionSchema.replace(
+  "'bed_mesh'",
+  "'bed_mesh','config_write'",
 )
 /**
  * Journals from the power, timelapse and console units were rebuilt from the
@@ -299,6 +303,7 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   11: [powerTimelapseActionSchema, withBedMesh(powerTimelapseActionSchema)],
   12: [gcodeActionSchema],
   13: [fileOpActionSchema],
+  14: [bedMeshActionSchema],
 }
 const schema = [
   actionSchema,
@@ -445,9 +450,23 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, SCHEMA_VERSION].includes(
-        Number(initialVersion),
-      ) ||
+      (![
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        SCHEMA_VERSION,
+      ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')

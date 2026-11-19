@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { FileReceiver } from '../files/file-transfer.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
@@ -97,7 +98,23 @@ export async function uploadFile(input: {
 }
 const terminal = z.strictObject({ type: z.enum(['complete', 'abort']) })
 
-/** One stop-and-wait transfer per control peer. No remote destination or credential is accepted. */
+// One verified payload per admitted transport, cleared on dispatch or peer close.
+const stagedConfigs = new Map<
+  string,
+  { path: string; sha256: string; bytes: Buffer }
+>()
+export function consumeStagedConfig(
+  transport: string,
+  path: string,
+  sha256: string,
+) {
+  const staged = stagedConfigs.get(transport)
+  if (staged?.path !== path || staged.sha256 !== sha256) return undefined
+  stagedConfigs.delete(transport)
+  return staged.bytes
+}
+
+/** One stop-and-wait transfer per control peer. */
 export function createFileUpload(
   input: FileUploadOptions & {
     admittedHandle(): PauseCapabilityHandle | undefined
@@ -109,6 +126,7 @@ export function createFileUpload(
   let transfer: Awaited<ReturnType<FileReceiver['offer']>> | undefined
   let offer: ReturnType<typeof parseOffer> | undefined
   let handle: PauseCapabilityHandle | undefined
+  let stagedTransport: string | undefined
   let used = false
   let busy = false
   let work: Promise<void> = Promise.resolve()
@@ -120,7 +138,10 @@ export function createFileUpload(
       !!cap &&
       current === handle &&
       cap.printer_key === offer?.printer_key &&
-      cap.actions.includes('start_print')
+      (offer?.config
+        ? cap.actions.includes('config_write') &&
+          (cap.role === 'owner' || cap.role === 'admin')
+        : cap.actions.includes('start_print'))
     )
   }
   function send(value: object) {
@@ -149,7 +170,12 @@ export function createFileUpload(
         }
         const target = input.targetFor(offer.printer_key)
         if (!target) throw Error('offline')
-        if (!supportsFileUpload(target, offer.name)) throw Error('unsupported')
+        if (
+          offer.config
+            ? target.backend !== 'moonraker'
+            : !supportsFileUpload(target, offer.name)
+        )
+          throw Error('unsupported')
         transfer = await receiver.offer(offer)
         if (closed || !authorized()) throw Error('unauthorized')
         send({ type: 'accept' })
@@ -178,6 +204,18 @@ export function createFileUpload(
         if (closed || !authorized()) throw Error('unauthorized')
         const target = input.targetFor(staged.offer.printer_key)
         if (!target) throw Error('offline')
+        if (staged.offer.config) {
+          const bytes = await readFile(filePath, { signal: controller.signal })
+          const cap = handle?.current
+          if (!cap || closed || !authorized()) throw Error('unauthorized')
+          stagedTransport = cap.transport_id
+          stagedConfigs.set(stagedTransport, {
+            path: staged.offer.name,
+            sha256: staged.offer.sha256,
+            bytes,
+          })
+          return
+        }
         forwarding = true
         library = target.backend === 'kobralink'
         await uploadFile({
@@ -233,6 +271,7 @@ export function createFileUpload(
     },
     async close() {
       closed = true
+      if (stagedTransport) stagedConfigs.delete(stagedTransport)
       controller.abort()
       await transfer?.abort()
       transfer = undefined

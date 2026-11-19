@@ -1,3 +1,5 @@
+import { createMoonrakerConfigEditor } from '../moonraker/control-config-editor.ts'
+import { moonrakerAuthHeaders } from '../config/moonraker.ts'
 import {
   FileListRequest,
   FileListResponse,
@@ -47,6 +49,14 @@ export function createFileList(
     send(wire: string): void
   },
 ) {
+  let configSnapshot:
+    | {
+        path: string
+        value: Awaited<
+          ReturnType<ReturnType<typeof createMoonrakerConfigEditor>['read']>
+        >
+      }
+    | undefined
   let closed = false
   let busy = false
   let work: Promise<void> = Promise.resolve()
@@ -72,11 +82,15 @@ export function createFileList(
           !!handle &&
           current === handle &&
           cap?.printer_key === request.printer_key &&
-          cap.actions.includes(
-            request.directory === undefined && request.download === undefined
-              ? 'start_print'
-              : 'file_op',
-          )
+          (request.config
+            ? cap.actions.includes('config_write') &&
+              (cap.role === 'owner' || cap.role === 'admin')
+            : cap.actions.includes(
+                request.directory === undefined &&
+                  request.download === undefined
+                  ? 'start_print'
+                  : 'file_op',
+              ))
         )
       }
       const send = (result: object) => {
@@ -120,6 +134,62 @@ export function createFileList(
           }
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
+          if (request.config) {
+            if (target.backend !== 'moonraker' || !target.thumbnailSource)
+              throw Error('unsupported')
+            const { origin, limits } = target.thumbnailSource
+            const editor = createMoonrakerConfigEditor(
+              origin,
+              moonrakerAuthHeaders(origin, limits)['X-Api-Key'],
+            )
+            const signal = AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(10000),
+            ])
+            if (!request.configPath) {
+              const names = await editor.list(signal)
+              send(
+                authorized()
+                  ? {
+                      ok: true,
+                      files: names
+                        .slice(0, 200)
+                        .map((name) => ({ name, size: 0, modified: 0 })),
+                    }
+                  : { ok: false, reason: 'unauthorized' },
+              )
+              return
+            }
+            const offset = request.offset ?? 0
+            if (offset === 0)
+              configSnapshot = {
+                path: request.configPath,
+                value: await editor.read(request.configPath, signal),
+              }
+            if (
+              configSnapshot?.path !== request.configPath ||
+              offset > configSnapshot.value.bytes.length
+            )
+              throw Error('unsupported')
+            const { bytes, sha256, backups } = configSnapshot.value
+            send(
+              authorized()
+                ? {
+                    ok: true,
+                    files: [],
+                    download: Buffer.from(
+                      bytes.subarray(offset, offset + 16384),
+                    ).toString('base64'),
+                    config: {
+                      sha256,
+                      size: bytes.length,
+                      backups: backups.slice(0, 10),
+                    },
+                  }
+                : { ok: false, reason: 'unauthorized' },
+            )
+            return
+          }
           if (request.download) {
             if (target.backend !== 'moonraker' || !target.thumbnailSource)
               throw Error('unsupported')

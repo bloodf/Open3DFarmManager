@@ -261,6 +261,20 @@ const actionSchema = fileOpActionSchema.replace(
   "'file_op'",
   "'file_op','bed_mesh'",
 )
+/**
+ * Journals from the power, timelapse and console units were rebuilt from the
+ * merged schema, so their historical shapes also carry `bed_mesh` (and, for
+ * the v9/v10 power and exclude_object journals, `gcode`) without `file_op`.
+ * Each variant is an exact, enumerated schema; unknown shapes stay refused.
+ */
+const withBedMesh = (sql: string) =>
+  sql.replace("'set_factor'", "'set_factor','bed_mesh'")
+const withGcodeBedMesh = (sql: string) =>
+  withBedMesh(sql.replace("'set_pin'", "'set_pin','gcode'"))
+const servicePowerActionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','power'",
+)
 const previousActionSchemas: Record<number, readonly string[]> = {
   2: [legacyActionSchema],
   3: [previousActionSchema],
@@ -271,11 +285,18 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   8: [queuedFileActionSchema, serviceActionSchema],
   9: [
     fileServiceActionSchema,
-    serviceActionSchema.replace("'service'", "'service','power'"),
+    servicePowerActionSchema,
     excludeActionSchema,
+    withGcodeBedMesh(servicePowerActionSchema),
+    withGcodeBedMesh(excludeActionSchema),
   ],
-  10: [powerActionSchema, timelapseActionSchema],
-  11: [powerTimelapseActionSchema],
+  10: [
+    powerActionSchema,
+    timelapseActionSchema,
+    withGcodeBedMesh(powerActionSchema),
+    withGcodeBedMesh(timelapseActionSchema),
+  ],
+  11: [powerTimelapseActionSchema, withBedMesh(powerTimelapseActionSchema)],
   12: [gcodeActionSchema],
   13: [fileOpActionSchema],
 }

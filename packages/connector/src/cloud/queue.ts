@@ -570,6 +570,15 @@ export class TelemetryQueue {
     const bounded = this.bound(this.records, now)
     if (bounded.loss.expired || bounded.loss.capacity)
       this.replace(bounded.records)
+    const latestHeartbeat = this.records.findLastIndex(
+      (record) => record.kind === 'heartbeat',
+    )
+    if (latestHeartbeat >= 0) {
+      const retained = this.records.filter(
+        (record, index) => record.kind !== 'heartbeat' || index === latestHeartbeat,
+      )
+      if (retained.length !== this.records.length) this.replace(retained)
+    }
     const records: TelemetryRecord[] = []
     let size = 2 // JSON array brackets, with commas between entries.
     for (const record of this.records.slice(0, maxRecords)) {

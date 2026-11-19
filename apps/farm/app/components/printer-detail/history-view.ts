@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT
+import {
+  formatDateTime,
+  formatDuration,
+  formatNumber,
+} from '../../utils/ui-format.ts'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 
 /** One `server.history.list` job as the detail `history` query returns it. */
@@ -55,12 +60,6 @@ const openfarmOutcome = {
   failed: 'Falhou',
 } as const
 
-const dateFormat = new Intl.DateTimeFormat('pt-BR', {
-  dateStyle: 'short',
-  timeStyle: 'medium',
-  timeZone: 'America/Sao_Paulo',
-})
-
 /** pt-BR outcome for a Moonraker history status; anything else failed. */
 export function moonrakerOutcomeLabel(state: string): string {
   return outcomeLabels[state] ?? 'Falhou'
@@ -70,16 +69,15 @@ export function durationText(seconds: number | undefined): string {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0)
     return 'Não informada'
   const total = Math.round(seconds)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  if (hours) return `${hours} h ${minutes} min`
-  return minutes ? `${minutes} min` : `${total} s`
+  return total < 60
+    ? `${formatNumber(total)} s`
+    : (formatDuration(total) ?? 'Não informada')
 }
 
 export function filamentText(millimetres: number | undefined): string {
   return millimetres === undefined || !Number.isFinite(millimetres)
     ? 'Não informado'
-    : `${(millimetres / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} m`
+    : `${formatNumber(millimetres / 1000, { maximumFractionDigits: 1 })} m`
 }
 
 /** The wire carries start and total duration, so the end is derived. */
@@ -116,7 +114,7 @@ export function mergeHistory(
       filename: job.file,
       outcome: moonrakerOutcomeLabel(job.state),
       endedAtMs: end,
-      ended: dateFormat.format(new Date(end)),
+      ended: formatDateTime(end) ?? 'Não informada',
       duration: durationText(job.durationSeconds),
       source: best ? 'both' : 'moonraker',
       sourceLabel: sourceLabels[best ? 'both' : 'moonraker'],
@@ -130,7 +128,7 @@ export function mergeHistory(
       filename: job.filename ?? 'Arquivo desconhecido',
       outcome: openfarmOutcome[job.outcome],
       endedAtMs: job.endedAt,
-      ended: dateFormat.format(new Date(job.endedAt)),
+      ended: formatDateTime(job.endedAt) ?? 'Não informada',
       duration: durationText(
         job.printDurationSeconds ?? job.totalDurationSeconds,
       ),

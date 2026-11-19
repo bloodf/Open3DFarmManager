@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import Sparkline from '../ui/charts/Sparkline.vue'
 import { computed, reactive } from 'vue'
 import Button from '../ui/Button.vue'
 import LineChart from '../ui/charts/LineChart.vue'
 import {
   clampTarget,
+  fieldText,
   commandHeaterName,
   heaterLabel,
   powerText,
@@ -45,7 +47,7 @@ function submit(heater: HeaterReading, event: Event) {
     notes[heater.name] = 'Informe uma temperatura válida em °C.'
     return
   }
-  const clamped = String(target) !== (drafts[heater.name] ?? '').trim()
+  const clamped = String(target) !== fieldText(drafts[heater.name])
   drafts[heater.name] = String(target)
   notes[heater.name] = clamped
     ? `Valor ajustado ao limite de ${temperatureText(heater.maxTemp)}.`
@@ -74,6 +76,10 @@ function submit(heater: HeaterReading, event: Event) {
           <dt>Potência</dt>
           <dd>{{ powerText(heater.power) }}</dd>
         </dl>
+        <Sparkline
+          :label="`Tendência de temperatura de ${heater.label}`"
+          :points="heater.points"
+        />
         <LineChart
           :label="`Temperatura de ${heater.label} nos últimos 10 minutos`"
           :series="[

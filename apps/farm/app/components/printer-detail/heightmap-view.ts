@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { formatNumber } from '../../utils/ui-format.ts'
 /**
  * Pure helpers of the bed mesh panel: statistics, colour scale, the 3D
  * projection drawn on a canvas (no library), the accessible table model and
@@ -36,7 +37,7 @@ export type MeshStats = Readonly<{
 export const DEFAULT_MESH_REASON = 'Comando indisponível.'
 
 const number = (value: number, digits = 3) =>
-  value.toLocaleString('pt-BR', {
+  formatNumber(value, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })

@@ -7,6 +7,8 @@ import {
   controlSourceState,
 } from '../../packages/farm-protocol/src/control-actions.ts'
 import { buildMoonrakerCommand } from '../../packages/connector/src/moonraker/commands.ts'
+import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
+import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
 import { readSystemServices } from '../../packages/connector/src/moonraker/control-system-services.ts'
 
 const objects = ['print_stats', 'webhooks']
@@ -125,4 +127,59 @@ it('reads cached system data through the existing loopback detail stream with Kl
       .filter(({ method }) => method.startsWith('machine.update.'))
       .map(({ method, params }) => ({ method, params })),
   ).toEqual([{ method: 'machine.update.status', params: { refresh: false } }])
+})
+
+it('reports a restart as unconfirmed when Klippy drops the read-back, instead of failing it', async (t) => {
+  // Klippy stays "not ready" for the whole test, as right after a restart.
+  const mock = await startMoonrakerMock({
+    initial: { state: 'standby' },
+    restartDelayMs: 60_000,
+  })
+  const owner = new AbortController()
+  const origin = mock.origin
+  const binding = createPrinterBindingRegistry({
+    allowedOrigins: [origin],
+  }).provision({
+    assignment_id: crypto.randomUUID(),
+    farm_id: crypto.randomUUID(),
+    agent_id: crypto.randomUUID(),
+    printer_key: 'sv06',
+    moonraker_origin: origin,
+  })
+  const fixed = openFixedMoonrakerPause({
+    binding,
+    allowedOrigins: [origin],
+    connectionGeneration: 1,
+    publish: () => {},
+    signal: owner.signal,
+    clock: { monotonicNow: () => performance.now() },
+    limits: {
+      maxMessageBytes: 65536,
+      connectTimeoutMs: 1000,
+      requestTimeoutMs: 1000,
+      staleAfterMs: 2000,
+      reconnectMinMs: 100,
+      reconnectMaxMs: 100,
+    },
+    objects: ['print_stats', 'webhooks'],
+  })
+  t.onTestFinished(async () => {
+    await fixed.close()
+    await mock.close()
+  })
+  await fixed.prepare()
+  await fixed.driver.execute!(
+    'service',
+    { op: 'klipper_restart' },
+    { binding, beforeSend: () => true, signal: owner.signal },
+  )
+  expect(mock.calls()['printer.restart']).toBe(1)
+  await expect(
+    fixed.driver.waitForPaused({
+      action: 'service' as never,
+      binding,
+      after: { connectionGeneration: 1, sequence: 1, sentMono: 0 },
+      signal: owner.signal,
+    }),
+  ).resolves.toBeNull()
 })

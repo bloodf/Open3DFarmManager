@@ -9,6 +9,8 @@ import { z } from 'zod'
  * and the bytes of a read travel in the result body.
  */
 export const LIBRARY_RELAY_POLL_PATH = '/api/connector/library/relay/poll'
+/** The Connector reports its library storage (`library.storage.report`) here, with the same credential headers. */
+export const LIBRARY_RELAY_STORAGE_PATH = '/api/connector/library/relay/storage'
 export const libraryRelayBodyPath = (opId: string) =>
   `/api/connector/library/relay/${opId}/body`
 export const libraryRelayResultPath = (opId: string) =>

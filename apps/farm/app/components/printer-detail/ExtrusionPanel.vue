@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
+import { fieldText } from '../../utils/printer-detail-view.ts'
 
 /** Same bounds the signed `extrude` command accepts. */
 const MAX_EXTRUDE_MM = 100
@@ -42,11 +43,11 @@ function submit(direction: 1 | -1, event: Event) {
   const max = direction === 1 ? MAX_EXTRUDE_MM : MAX_RETRACT_MM
   const mm = Number(length.value)
   const rate = Number(feed.value)
-  if (length.value.trim() === '' || !(mm >= 0.1 && mm <= max)) {
+  if (fieldText(length.value) === '' || !(mm >= 0.1 && mm <= max)) {
     note.value = `Informe um comprimento entre 0,1 e ${max} mm.`
     return
   }
-  if (feed.value.trim() === '' || !(rate >= 1 && rate <= MAX_FEED)) {
+  if (fieldText(feed.value) === '' || !(rate >= 1 && rate <= MAX_FEED)) {
     note.value = `Informe uma velocidade entre 1 e ${MAX_FEED} mm/min.`
     return
   }

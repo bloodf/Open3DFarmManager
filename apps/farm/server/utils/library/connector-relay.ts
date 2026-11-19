@@ -17,6 +17,7 @@ import {
   type ConnectorEnrollmentReader,
   type ConnectorIdentity,
 } from './connector-download.ts'
+import { LibraryStorageReport } from '../../../../../packages/farm-protocol/src/library-storage.ts'
 import { BlobStoreError } from './blob-store.ts'
 import type { ConnectorLibraryPort } from './retention.ts'
 import type { ConnectorLibraryRelay } from './routes.ts'
@@ -43,7 +44,14 @@ export interface ConnectorRelayOptions {
   /** Longest silence while a claimed operation runs. */
   runMs?: number
   pollMs?: number
+  /** Stores what a Connector reports about its own library (quota and usage). */
+  recordStorage?(
+    identity: ConnectorIdentity,
+    report: { quotaBytes: number; usedBytes: number },
+  ): Promise<boolean>
 }
+
+const MAX_STORAGE_REPORT_BYTES = 4096
 
 type Outcome =
   | {
@@ -128,9 +136,11 @@ export class ConnectorLibraryRelayHub
   private readonly runMs: number
   private readonly pollMs: number
   private readonly authenticate: ConnectorRelayOptions['authenticate']
+  private readonly recordStorage: ConnectorRelayOptions['recordStorage']
 
   constructor(options: ConnectorRelayOptions) {
     this.authenticate = options.authenticate
+    this.recordStorage = options.recordStorage
     this.claimMs = options.claimMs ?? DEFAULT_CLAIM_MS
     this.runMs = options.runMs ?? DEFAULT_RUN_MS
     this.pollMs = options.pollMs ?? LIBRARY_RELAY_POLL_MS
@@ -471,6 +481,41 @@ export class ConnectorLibraryRelayHub
     if (value.type !== op.spec.type) return { status: 400 }
     op.succeed({ kind: 'json', value, streamed: op.streamed })
     return { status: 204 }
+  }
+
+  /** The Connector tells the farm how much of its library quota is used. */
+  async storage(
+    headers: Headers,
+    body: ReadableStream<Uint8Array> | null,
+  ): Promise<{ status: 204 | 400 | 403 | 413 | 503 }> {
+    let identity: ConnectorIdentity | null
+    try {
+      identity = await this.authenticate(headers)
+    } catch {
+      return { status: 503 }
+    }
+    if (!identity) return { status: 403 }
+    const raw = await readCapped(body, MAX_STORAGE_REPORT_BYTES)
+    if (!raw) return { status: 413 }
+    let parsed: ReturnType<typeof LibraryStorageReport.safeParse>
+    try {
+      parsed = LibraryStorageReport.safeParse(
+        JSON.parse(Buffer.from(raw).toString('utf8')),
+      )
+    } catch {
+      return { status: 400 }
+    }
+    if (!parsed.success) return { status: 400 }
+    if (!this.recordStorage) return { status: 503 }
+    try {
+      const stored = await this.recordStorage(identity, {
+        quotaBytes: parsed.data.quota_bytes,
+        usedBytes: parsed.data.used_bytes,
+      })
+      return { status: stored ? 204 : 403 }
+    } catch {
+      return { status: 503 }
+    }
   }
 
   /** Fails every operation in flight (shutdown). */

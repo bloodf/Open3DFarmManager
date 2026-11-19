@@ -32,6 +32,7 @@ import {
 import {
   startJourneyHarness,
   type JourneyHarness,
+  type JourneyOptions,
   type SimulatorName,
   type VendorName,
   type VendorSimulator,
@@ -152,6 +153,10 @@ export type BootOptions = Readonly<{
   discoveredMoonraker?: Readonly<{ name?: string }>
   /** Opt the Bambu mock into local commands. */
   control?: boolean
+  /** Forwarded to the harness: the admin's G-code console switch (Moonraker). */
+  consoleEnabled?: boolean
+  /** Forwarded to the harness: the first (live) Moonraker mock's seed. */
+  moonraker?: JourneyOptions['moonraker']
 }>
 
 export type FarmManager = Readonly<{
@@ -404,6 +409,12 @@ async function bootFarm(
     simulator: HARNESS_SIMULATOR[first.family],
     printerKey: keys[0]!,
     ...(options.control === undefined ? {} : { control: options.control }),
+    ...(options.consoleEnabled === undefined
+      ? {}
+      : { consoleEnabled: options.consoleEnabled }),
+    ...(options.moonraker === undefined
+      ? {}
+      : { moonraker: options.moonraker }),
     ...(options.history === undefined ? {} : { history: options.history }),
     ...(options.signedControl === undefined
       ? {}
@@ -782,33 +793,11 @@ async function bootFarm(
       has: page.getByRole('heading', { name: printerKey, exact: true }),
     })
 
-  const operatorAccount = async () => {
-    // The harness has owner, admin and viewer accounts. The operator is the
-    // viewer account promoted through the members API, as an owner would.
-    const members = (await harness.ownerPage.evaluate(
-      async (farmId) =>
-        (
-          await fetch(`/api/farms/${farmId}/members`, { cache: 'no-store' })
-        ).json(),
-      harness.farmId,
-    )) as { members: { accountId: string; username: string | null }[] }
-    const viewer = members.members.find(
-      (member) => member.username === harness.accounts.viewer,
-    )
-    if (!viewer) throw new Error('Viewer account not listed')
-    await pagePost(
-      harness.ownerPage,
-      `/api/farms/${harness.farmId}/members/${viewer.accountId}/role`,
-      { role: 'operator' },
-    )
-    return harness.accounts.viewer
-  }
-
   const signInAs = async (role: FarmRole): Promise<Page> => {
     if (role === 'owner') return harness.newOwnerPage()
     if (role === 'admin' || role === 'viewer') return harness.signInAs(role)
-    // Operator: promote the viewer account, then sign in with it.
-    const username = await operatorAccount()
+    // Operator: the harness database seeds one operator member.
+    const username = harness.accounts.operator
     const context = await browser.newContext({ ignoreHTTPSErrors: true })
     await guard.install(context)
     onClose(() => context.close())
@@ -877,8 +866,19 @@ type Fixtures = {
   bootFarm(options: BootOptions): Promise<FarmManager>
 }
 
+/**
+ * The disposable PostgreSQL refuses to start on macOS without a valid locale
+ * ("postmaster became multithreaded during startup"). A shell with no LANG or
+ * LC_ALL, such as a CI runner or a gate, would fail every boot.
+ */
+function ensureLocale() {
+  if (process.env.LC_ALL || /UTF-8$/i.test(process.env.LANG ?? '')) return
+  process.env.LC_ALL = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'
+}
+
 export const test = base.extend<Fixtures>({
   bootFarm: async ({ browser }, use, testInfo) => {
+    ensureLocale()
     const guard = createNetworkGuard()
     const closers: (() => Promise<void>)[] = []
     let booted: FarmManager | undefined

@@ -240,3 +240,19 @@ describe('accessibility', () => {
     }
   }, 120_000)
 })
+
+describe('configuration editor placement', () => {
+  it('fills the Configuração tab, not the Painel tab', async () => {
+    const read = (path: string) =>
+      readFile(new URL(path, import.meta.url), 'utf8')
+    const page = await read(
+      '../../apps/farm/app/pages/impressoras/[printerKey].vue',
+    )
+    const dashboard = await read(
+      '../../apps/farm/app/components/printer-detail/PrinterDetailDashboard.vue',
+    )
+    expect(page).toMatch(/<template #configuracao>\s*<ConfigEditorPanel/)
+    expect(page).not.toContain('#config-editor')
+    expect(dashboard).not.toContain('config-editor')
+  })
+})

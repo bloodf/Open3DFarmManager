@@ -224,6 +224,16 @@ export function getPrinterActionButtons(
 export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
   'bambu-authorization-required':
     'A impressora Bambu recusou o comando porque o controle de autorização do firmware está ativo. No painel da impressora, ative o modo Somente LAN (LAN Only) e o Modo Desenvolvedor (Developer Mode) e tente novamente.',
+  'cache-full':
+    'O cache do Connector está cheio. Libere espaço no cache do Connector e reenvie o arquivo a partir da biblioteca.',
+  'checksum-mismatch':
+    'O arquivo recebido não confere com o original. Reenvie o arquivo para a biblioteca e tente imprimir novamente.',
+  'download-failed':
+    'O Connector não conseguiu baixar o arquivo. Verifique a rede e o Connector e reenvie o arquivo a partir da biblioteca.',
+  incompatible:
+    'O arquivo não é compatível com esta impressora. Escolha uma impressora ou um arquivo compatível.',
+  'local-file-missing':
+    'O arquivo não está mais no Connector. Reenvie o arquivo a partir da biblioteca.',
 }
 
 export function resultCodeHint(

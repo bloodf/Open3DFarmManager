@@ -119,7 +119,7 @@ async function connectorChild(
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        NODE_OPTIONS: '',
+        NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
         // Keeps the runtime fixture directory inside the caller's private work root.
         ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,

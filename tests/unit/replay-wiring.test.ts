@@ -295,3 +295,81 @@ describe('Biblioteca', () => {
     }
   })
 })
+
+describe('Histórico with two farms', () => {
+  const FARM_B = '00000000-0000-4000-8000-0000000000b1'
+  const twoFarms = (): Routes => {
+    const farmB = (path: string) => `GET /api/farms/${FARM_B}${path}`
+    const farmA = (path: string) => `GET /api/farms/${FARM}${path}`
+    return {
+      ...routes(),
+      'GET /api/farms': reply({
+        farms: [{ farmId: FARM }, { farmId: FARM_B }],
+        nextAfter: null,
+      }),
+      [farmA('/library/replay-source')]: reply({ version }, 404),
+      [farmB('/library/replay-source')]: reply({ version }),
+      [farmB('/printers')]: reply({
+        printers: [assignment('prusa', 'Prusa da farm B')],
+        nextAfter: null,
+      }),
+      [farmB('/printer-profiles')]: reply({
+        profiles: [profile('prusa', 'Voron 2.4')],
+      }),
+      [farmA('/printers')]: reply({
+        printers: [assignment('voron', 'Voron da farm A')],
+        nextAfter: null,
+      }),
+    }
+  }
+  const live = {
+    infoByFarm: {
+      [FARM]: {
+        voron: {
+          connectorOnline: true,
+          live: true,
+          state: 'idle',
+          materials: [],
+        },
+      },
+      [FARM_B]: {
+        prusa: {
+          connectorOnline: true,
+          live: true,
+          state: 'idle',
+          materials: [],
+        },
+      },
+    },
+  }
+
+  it('replays a version of farm B to a compatible printer of farm B and never offers one of farm A', async () => {
+    const opened = await harness.open('historico', twoFarms(), {
+      init: `window.__replayLive = { result: { outcome: 'applied' }, sent: [], info: {}, infoByFarm: ${JSON.stringify(live.infoByFarm)} }`,
+    })
+    try {
+      const { page } = opened
+      await page.getByLabel('Farm', { exact: true }).selectOption(FARM_B, {
+        timeout: WAIT,
+      })
+      await page
+        .getByRole('button', { name: /Imprimir de novo/ })
+        .click({ timeout: WAIT })
+      const dialog = page.getByRole('dialog')
+      const prusa = dialog.getByRole('radio', { name: /Prusa da farm B/ })
+      await prusa.waitFor({ timeout: WAIT })
+      await pw(prusa).toBeEnabled()
+      expect(
+        await dialog.getByRole('radio', { name: /Voron da farm A/ }).count(),
+      ).toBe(0)
+      await dialog.getByRole('checkbox', { name: /mesa está limpa/i }).check()
+      await dialog.getByRole('button', { name: /^Imprimir/ }).click()
+      await pw(dialog).toContainText('Impressão iniciada')
+      expect(await sent(page)).toEqual([
+        { printerKey: 'prusa', args: { sha256: SHA }, farmId: FARM_B },
+      ])
+    } finally {
+      await opened.close()
+    }
+  })
+})

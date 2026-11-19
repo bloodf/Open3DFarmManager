@@ -424,9 +424,12 @@ for (const action of ['load_filament', 'unload_filament'] as const) {
     assert.deepEqual(f.bambu?.requests, [
       { command: 'ams_change_filament', sequence_id: '1' },
     ])
+    assert.deepEqual(f.bambu?.extendedState.ams, {
+      tray_now: action === 'load_filament' ? '15' : '255',
+    })
     assert.deepEqual(f.bambu?.extendedState, {
       ...baseline,
-      ams: { tray_now: action === 'load_filament' ? '15' : '255' },
+      ams: f.bambu?.extendedState.ams,
     })
   })
 }

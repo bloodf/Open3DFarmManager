@@ -26,6 +26,8 @@ export interface BambuSimulatorOptions {
   ftpsPort?: number | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   initialTargetTemperature?: number | undefined
+  /** Reported as `nozzle_diameter`; absent unless given. */
+  nozzleDiameter?: string | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
   confirmCommands?: boolean | undefined
   credentials?:
@@ -48,6 +50,7 @@ export async function startBambuSimulator({
   ftpsPort = 0,
   initialState,
   initialTargetTemperature,
+  nozzleDiameter,
   confirmCommands = true,
   versionModules,
   printDurationMs,
@@ -93,6 +96,9 @@ export async function startBambuSimulator({
     ...(initialTargetTemperature === undefined
       ? {}
       : { nozzle_target_temper: initialTargetTemperature }),
+    ...(nozzleDiameter === undefined
+      ? {}
+      : { nozzle_diameter: nozzleDiameter }),
   }
   const requests: { command: string; sequence_id: string }[] = []
 

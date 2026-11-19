@@ -91,6 +91,10 @@ function dateLabel(time: number) {
       <h3 :id="`printer-${row.assignment.assignmentId}`" class="opaque">
         {{ row.assignment.printerKey }}
       </h3>
+      <a :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}`"
+        >Abrir detalhes da impressora
+        <span class="opaque">{{ row.assignment.printerKey }}</span></a
+      >
       <p>
         {{
           row.assignment.status === 'active'

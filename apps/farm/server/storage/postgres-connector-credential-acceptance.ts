@@ -1,3 +1,4 @@
+import { recordNetworkTelemetry } from './postgres-farm-network.ts'
 import {
   latestStateTableExists,
   recordLatestStates,
@@ -674,6 +675,11 @@ export class PostgresConnectorCredentialAcceptance {
                     { farmId: request.farmId, agentId: request.agentId },
                     sorted,
                   )
+                await recordNetworkTelemetry(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  sorted,
+                )
                 for (const event of operation.inventorySnapshots) {
                   await save`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
                     VALUES (${request.farmId}::uuid, ${request.agentId}::uuid, ${event.inventory.observedAt}, ${save.json(event.inventory)}::jsonb)

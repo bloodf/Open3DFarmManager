@@ -23,6 +23,41 @@ export const DiscoveryResults = z
   .max(MAX_DISCOVERY_RESULTS)
 export type DiscoveryResults = z.infer<typeof DiscoveryResults>
 
+export const MAX_HEARTBEAT_HEALTH_BYTES = 32 * 1024
+
+const counter = z.number().int().nonnegative()
+const measurement = z.number().nonnegative().nullable()
+export const HeartbeatHealth = z
+  .strictObject({
+    connector: z.strictObject({
+      version: z.string().min(1).max(64),
+      uptimeMs: counter,
+      queueBacklog: counter,
+      storage: z.enum(['healthy', 'degraded']),
+      rtcScope: z.enum(['loopback', 'lan', 'disabled']),
+    }),
+    printers: z
+      .array(
+        z.strictObject({
+          printerKey: PrinterState.shape.printerKey,
+          state: z.enum(['connected', 'reconnecting', 'offline']),
+          lastSuccessAt: counter.nullable(),
+          p50Ms: measurement,
+          p95Ms: measurement,
+          reconnects: counter,
+          lastErrorCode: z.string().max(64).nullable(),
+        }),
+      )
+      .max(100),
+  })
+  .refine(
+    (health) =>
+      new TextEncoder().encode(JSON.stringify(health)).byteLength <=
+      MAX_HEARTBEAT_HEALTH_BYTES,
+    'Heartbeat health too large',
+  )
+export type HeartbeatHealth = z.infer<typeof HeartbeatHealth>
+
 const envelope = {
   eventId: z.uuidv4(),
   queuedAt: z.number().int().nonnegative(),
@@ -47,6 +82,11 @@ export const TelemetryEvent = z.discriminatedUnion('kind', [
     ...envelope,
     kind: z.literal('printer-transition'),
     transition: PrinterTransition,
+  }),
+  z.strictObject({
+    ...envelope,
+    kind: z.literal('heartbeat'),
+    health: HeartbeatHealth,
   }),
   z.strictObject({
     ...envelope,

@@ -575,7 +575,8 @@ export class TelemetryQueue {
     )
     if (latestHeartbeat >= 0) {
       const retained = this.records.filter(
-        (record, index) => record.kind !== 'heartbeat' || index === latestHeartbeat,
+        (record, index) =>
+          record.kind !== 'heartbeat' || index === latestHeartbeat,
       )
       if (retained.length !== this.records.length) this.replace(retained)
     }

@@ -32,6 +32,12 @@ export interface BambuSimulatorOptions {
   nozzleDiameter?: string | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
   confirmCommands?: boolean | undefined
+  /**
+   * Interval of the repeated status report (default 100 ms). State changes and
+   * command replies are always reported at once; this only sets how often an
+   * unchanged state is repeated.
+   */
+  reportIntervalMs?: number | undefined
   credentials?:
     { username?: string | undefined; password?: string | undefined } | undefined
   tls?:
@@ -55,6 +61,7 @@ export async function startBambuSimulator({
   initialLayer,
   nozzleDiameter,
   confirmCommands = true,
+  reportIntervalMs = 100,
   versionModules,
   printDurationMs,
   totalLayers = 100,
@@ -75,6 +82,12 @@ export async function startBambuSimulator({
       totalLayers < 1)
   )
     throw new Error('Invalid print configuration')
+  if (
+    !Number.isInteger(reportIntervalMs) ||
+    reportIntervalMs < 5 ||
+    reportIntervalMs > 60_000
+  )
+    throw new Error('Invalid report interval')
 
   if (
     initialLayer !== undefined &&
@@ -343,7 +356,7 @@ export async function startBambuSimulator({
 
   const periodicReports = setInterval(() => {
     if (gcodeState && hasSubscribers()) emitCurrentReport()
-  }, 100)
+  }, reportIntervalMs)
 
   const tlsMaterial = broker.control.tlsMaterial
   const syntheticTrust = tlsMaterial

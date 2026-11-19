@@ -78,6 +78,12 @@ Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse
 
 Para entender a configuração, comece pelos contratos de [sessão](docs/SESSION-PERSISTENCE-CONTRACT.md), [pareamento](docs/PAIRING-CONTRACTS.md) e [autorização da farm](docs/FARM-AUTHORIZATION-CHECKPOINT.md). Mantenha credenciais e configuração privada fora do Git.
 
+### Execute no desktop offline
+
+Para Linux x64, prepare Node.js 22.18 ou superior (o projeto fixa Node 24.22.2 ou superior na série 24), npm, Google Chrome e PostgreSQL local antes de desconectar. Go 1.26 ou superior é opcional. Instale as dependências com `npm ci --ignore-scripts`; sem rede, use o cache preparado conforme o [guia do desktop](docs/DESKTOP.md). Docker é opcional e não é usado na verificação desktop.
+
+Execute `npm run desktop:check` para iniciar mocks e um banco PostgreSQL isolado, verificar o servidor compilado e abrir `/farm` no Chrome durante o teste. O teste encerra esses recursos ao terminar; não fornece uma demonstração interativa persistente. Para iniciar a interface de desenvolvimento, use `npm run dev` e abra http://127.0.0.1:3000/farm no Chrome. A página exige configuração e autenticação próprias; esse comando não cria uma farm simulada.
+
 ### Verificação local
 
 ```sh

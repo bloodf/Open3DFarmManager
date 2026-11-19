@@ -62,8 +62,9 @@ export function fromGcodeMetadata(meta: GcodeMetadata): PrintFileMetadata {
       ...(tool.grams !== undefined && { filamentGrams: tool.grams }),
     }
   }
-  const filamentProfile = meta.tools.find((t) => t.filamentProfile)
-    ?.filamentProfile
+  const filamentProfile = meta.tools.find(
+    (t) => t.filamentProfile,
+  )?.filamentProfile
   return {
     ...(meta.slicer && { slicer: librarySlicerName(meta.slicer.name) }),
     ...(meta.slicer?.version && { slicerVersion: meta.slicer.version }),

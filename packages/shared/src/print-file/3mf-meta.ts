@@ -3,10 +3,7 @@ import {
   GCODE_TAIL_BYTES,
   type GcodeByteSource,
 } from './gcode-meta.ts'
-import {
-  readLibraryGcodeMetadata,
-  type PrintFileMetadata,
-} from './metadata.ts'
+import { readLibraryGcodeMetadata, type PrintFileMetadata } from './metadata.ts'
 import {
   bufferSource,
   ZipArchive,

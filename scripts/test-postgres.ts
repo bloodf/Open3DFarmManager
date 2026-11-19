@@ -270,6 +270,15 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
   },
 }
 
+/**
+ * Vitest files the runner also runs after the suites. They drive the real
+ * handlers over in-process fakes, so they take no fixture of their own; naming
+ * them here keeps them in `npm run test:postgres` and in its summary.
+ */
+export const PG_VITEST_FILES: readonly string[] = [
+  'tests/unit/api-v1-contract.test.ts',
+]
+
 /** Round trip on a fresh fixture, before every suite. */
 export const MIGRATION_ROUND_TRIP = 'migration-round-trip'
 export const MIGRATION_PREFIX_ROUND_TRIP = 'migration-prefix-round-trip'
@@ -448,7 +457,9 @@ async function main(): Promise<number> {
     .map((name) => name.trim())
     .filter(Boolean)
   if (only) {
-    const unknown = only.filter((name) => !suites.includes(name))
+    const unknown = only.filter(
+      (name) => !suites.includes(name) && !PG_VITEST_FILES.includes(name),
+    )
     if (unknown.length)
       throw new Error(
         `Unknown POSTGRES_TEST_SUITES entries: ${unknown.join(', ')}`,
@@ -460,9 +471,14 @@ async function main(): Promise<number> {
       (!only || only.includes(suite)) &&
       (onlyFlag === undefined || suite.includes(onlyFlag)),
   )
-  if (onlyFlag !== undefined && !runnable.length)
+  const vitestFiles = PG_VITEST_FILES.filter(
+    (file) =>
+      (!only || only.includes(file)) &&
+      (onlyFlag === undefined || file.includes(onlyFlag)),
+  )
+  if (onlyFlag !== undefined && !runnable.length && !vitestFiles.length)
     throw new Error(`No suite matches --only ${onlyFlag}`)
-  const order = planJobs(runnable)
+  const order = [...planJobs(runnable), ...vitestFiles]
 
   const id = randomUUID()
   const evidenceDir = join(homedir(), '.local/state/o3dfm/postgres-runner', id)
@@ -505,6 +521,7 @@ async function main(): Promise<number> {
       const handle = await startFixture(name, 'none')
       return handle
     }
+    if (PG_VITEST_FILES.includes(name)) return { env }
     const contract = PG_SUITE_CONTRACTS[name]
     if (!contract) throw new Error(`Missing contract for ${name}`)
     if (contract.selfContained) {
@@ -611,9 +628,19 @@ async function main(): Promise<number> {
     if (!job.env) throw new Error(`No environment for ${name}`)
     const logPath = join(evidenceDir, name.replace(/[^\w.-]+/g, '_') + '.log')
     await new Promise<void>((resolve, reject) => {
+      const isVitest = PG_VITEST_FILES.includes(name)
       const child = execFile(
         process.execPath,
-        [join(new URL(scriptsDir).pathname, name)],
+        isVitest
+          ? [
+              join(
+                new URL(repoRoot).pathname,
+                'node_modules/vitest/vitest.mjs',
+              ),
+              'run',
+              name,
+            ]
+          : [join(new URL(scriptsDir).pathname, name)],
         {
           env: job.env,
           cwd: new URL(repoRoot).pathname,
@@ -629,7 +656,9 @@ async function main(): Promise<number> {
             const lines = output.trimEnd().split('\n')
             const tail =
               lines.find((line) =>
-                /^(?:AssertionError|Error|TypeError|SyntaxError)\b/.test(line),
+                /^(?:AssertionError|Error|TypeError|SyntaxError| FAIL)\b/.test(
+                  line,
+                ),
               ) ?? lines.slice(-4).join('\n')
             reject(
               new Error(
@@ -651,7 +680,7 @@ async function main(): Promise<number> {
   }
 
   console.log(
-    `[test-postgres] ${order.length} jobs (${runnable.length} suites + 2 migration checks)` +
+    `[test-postgres] ${order.length} jobs (${runnable.length} suites + ${vitestFiles.length} vitest files + 2 migration checks)` +
       (skipped.length
         ? `; skipped without Docker image: ${skipped.join(', ')}`
         : ''),

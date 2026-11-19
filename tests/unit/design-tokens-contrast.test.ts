@@ -14,20 +14,26 @@ const foregrounds = [
 ]
 const surfaces = ['surface', 'surface-raised']
 
+function channel(hex: string, index: number) {
+  const srgb = Number.parseInt(hex.slice(index, index + 2), 16) / 255
+  return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+}
+
 function luminance(hex: string) {
-  const channels = [0, 2, 4].map((index) => {
-    const srgb = Number.parseInt(hex.slice(index, index + 2), 16) / 255
-    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+  return (
+    0.2126 * channel(hex, 0) +
+    0.7152 * channel(hex, 2) +
+    0.0722 * channel(hex, 4)
+  )
 }
 
 function colour(block: string, name: string) {
   const match = block.match(
     new RegExp(`--${name}:\\s*#([0-9a-f]{6})\\s*;`, 'i'),
   )
-  if (!match) throw new Error(`Missing six-digit colour token --${name}`)
-  return luminance(match[1])
+  const hex = match?.[1]
+  if (!hex) throw new Error(`Missing six-digit colour token --${name}`)
+  return luminance(hex)
 }
 
 const light = css.match(/^:root\s*\{([^}]+)\}/)?.[1] ?? ''

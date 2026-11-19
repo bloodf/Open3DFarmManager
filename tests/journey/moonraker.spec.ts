@@ -38,7 +38,8 @@ if (journeyEnabled())
       const page = journey.ownerPage
       try {
         await journey.expectLiveTelemetry()
-        const row = await journey.openFarm()
+        // expectLiveTelemetry opened /farm; keep its live connection.
+        const row = journey.farmRow()
         await expect(row).toContainText('Conexão direta autenticada')
         await expect(row.getByRole('progressbar')).toHaveAttribute(
           'value',

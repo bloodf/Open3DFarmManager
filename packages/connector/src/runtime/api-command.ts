@@ -8,6 +8,7 @@ import {
   type ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
 import { controlSourceState } from '../../../farm-protocol/src/control-actions.ts'
+import { macroParamsAllowed } from '../moonraker/control-macros.ts'
 import type { SignallingServerFrame } from '../../../farm-protocol/src/signalling-socket.ts'
 import {
   createOfflineAuthority,
@@ -46,7 +47,7 @@ export type ApiPrinterObservation = Readonly<{
 }>
 export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
-  'execute' | 'controls' | 'macros'
+  'execute' | 'controls' | 'macros' | 'macroParams'
 > &
   Partial<Pick<PreparedPauseDriver, 'prepare' | 'closeAttempt'>>
 export type ApiCommandResult =
@@ -202,7 +203,13 @@ export function createApiCommandRunner(config: {
       (action === 'run_macro' &&
         !config.driver
           .macros?.(binding)
-          ?.includes(typeof args.name === 'string' ? args.name : ''))
+          ?.includes(typeof args.name === 'string' ? args.name : '')) ||
+      (action === 'run_macro' &&
+        !macroParamsAllowed(
+          config.driver.macroParams?.(binding),
+          String(args.name),
+          args.params,
+        ))
     )
       return ['unsupported', 'action not supported by this printer']
     return null

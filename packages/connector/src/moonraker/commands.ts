@@ -1,4 +1,5 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { buildMacroScript } from './control-macros.ts'
 import { parseExtrude } from './control-extrusion.ts'
 /**
  * Moonraker extended command builder and capability inspection.
@@ -111,7 +112,7 @@ export function buildMoonrakerCommand(
   }
 
   if (['run_macro', 'load_filament', 'unload_filament'].includes(action)) {
-    keys(action === 'run_macro' ? ['name'] : [])
+    keys(action === 'run_macro' ? ['name', 'params'] : [])
     const name =
       action === 'run_macro'
         ? args.name
@@ -125,7 +126,16 @@ export function buildMoonrakerCommand(
         !advertisedMoonrakerMacros(objects)?.includes(name))
     )
       throw new Error('Macro unavailable')
-    return { method: 'printer.gcode.script', params: { script: name } }
+    let script: string
+    try {
+      script = buildMacroScript(
+        name,
+        action === 'run_macro' ? args.params : undefined,
+      )
+    } catch {
+      throw new Error('Invalid macro parameters')
+    }
+    return { method: 'printer.gcode.script', params: { script } }
   }
 
   if (action === 'extrude') {

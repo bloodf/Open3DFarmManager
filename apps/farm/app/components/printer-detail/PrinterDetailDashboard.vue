@@ -4,6 +4,7 @@ import Button from '../ui/Button.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
+import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import {
   DEFAULT_UNSUPPORTED_REASON,
@@ -37,6 +38,16 @@ const props = defineProps<{
     canCommand: boolean
     reason?: string
   }
+  /** Macro control: shown with its reason when not advertised. */
+  macros?: {
+    advertised: boolean
+    list: readonly {
+      name: string
+      params: readonly { name: string; default?: string }[]
+    }[]
+    canCommand: boolean
+    reason?: string
+  }
   canEmergencyStop: boolean
 }>()
 const emit = defineEmits<{
@@ -46,6 +57,12 @@ const emit = defineEmits<{
     tool: number,
     lengthMm: number,
     feed: number,
+    event: Event,
+  ): void
+  (
+    e: 'run-macro',
+    name: string,
+    params: Record<string, string> | undefined,
     event: Event,
   ): void
   (e: 'emergency-stop', event: Event): void
@@ -120,6 +137,16 @@ const heaterReason = computed(
           @extrude="
             (tool, lengthMm, feed, event) =>
               emit('extrude', tool, lengthMm, feed, event)
+          "
+        />
+        <MacrosPanel
+          v-if="macros"
+          :advertised="macros.advertised"
+          :macros="macros.list"
+          :can-command="macros.canCommand"
+          :disabled-reason="macros.reason"
+          @run-macro="
+            (name, params, event) => emit('run-macro', name, params, event)
           "
         />
       </template>

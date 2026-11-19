@@ -137,9 +137,19 @@ async function world(
   const journal = openCommandJournal({ directory, clock: Date.now })
   cleanup.push(() => closeCommandJournal(journal))
   // Query 1 is the prepare read, 2 the extrusion probe, 3 the result audit.
+  let configReads = 0
   const remote = await pauseFixture({
     objects: printer.objects ?? OBJECTS,
-    query: (index, socket, id) => {
+    query: (rawIndex, socket, id) => {
+      // Detection also reads the macro config when any macro is advertised.
+      const asked = remote.requests.at(-1)?.params as
+        { objects?: Record<string, unknown> } | undefined
+      if (asked?.objects && 'configfile' in asked.objects) {
+        configReads++
+        reply(socket, id, { eventtime: rawIndex, status: {} })
+        return true
+      }
+      const index = rawIndex - configReads
       if (index === 2)
         reply(
           socket,

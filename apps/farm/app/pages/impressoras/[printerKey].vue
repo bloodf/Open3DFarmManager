@@ -96,7 +96,7 @@ watch(
 )
 
 function availability(
-  action: 'set_temperature' | 'emergency_stop' | 'extrude',
+  action: 'set_temperature' | 'emergency_stop' | 'extrude' | 'run_macro',
 ) {
   void now.value
   const current = ready.value
@@ -127,11 +127,40 @@ const extrusion = computed(() => {
   }
 })
 
+const macroAvailability = computed(() => availability('run_macro'))
+const macros = computed(() => {
+  const advertised = state.value?.controls?.includes('run_macro') ?? false
+  const params = state.value?.macroParams ?? {}
+  return {
+    advertised,
+    list: (state.value?.macros ?? [])
+      .filter((name) => !name.startsWith('_'))
+      .map((name) => ({ name, params: params[name] ?? [] })),
+    canCommand: macroAvailability.value.available && !commandInFlight.value,
+    reason: !advertised
+      ? undefined
+      : macroAvailability.value.available
+        ? 'Um comando já está em andamento.'
+        : macroAvailability.value.reason,
+  }
+})
+
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
     void openControl(row.value, 'set_temperature', event, {
       heater,
       target_c: targetC,
+    })
+}
+function runMacro(
+  name: string,
+  params: Record<string, string> | undefined,
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'run_macro', event, {
+      name,
+      ...(params ? { params } : {}),
     })
 }
 function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
@@ -192,8 +221,10 @@ onMounted(() => heading.value?.focus())
       "
       :can-emergency-stop="stopAvailability.available && !commandInFlight"
       :extrusion="extrusion"
+      :macros="macros"
       @set-temperature="setTemperature"
       @extrude="extrude"
+      @run-macro="runMacro"
       @emergency-stop="emergencyStop"
     />
     <dialog

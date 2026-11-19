@@ -1,3 +1,4 @@
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
 import { moonrakerFilamentUsage } from './job-filament-usage.ts'
@@ -69,6 +70,7 @@ export function createFarmSnapshotSource(input: {
   linkHealthFor?: (printerKey: string) => PrinterState['linkHealth']
   nowMono?: () => number
   macrosFor?: (assignmentId: string) => readonly string[] | undefined
+  macroParamsFor?: (assignmentId: string) => MacroParamMap | undefined
   controlsFor?: (
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
@@ -139,12 +141,16 @@ export function createFarmSnapshotSource(input: {
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
       const macros = input.macrosFor?.(ref.assignmentId)
+      const macroParams = macros?.length
+        ? input.macroParamsFor?.(ref.assignmentId)
+        : undefined
       const controls = input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {
         controls: _untrustedControls,
         macros: _untrustedMacros,
+        macroParams: _untrustedMacroParams,
         firmware: _untrustedFirmware,
         lastJob: _observedLastJob,
         linkHealth: _observedLinkHealth,
@@ -181,6 +187,9 @@ export function createFarmSnapshotSource(input: {
           ...printer,
           ...advertisedControls,
           ...(macros !== undefined ? { macros: [...macros] } : {}),
+          ...(macroParams && Object.keys(macroParams).length
+            ? { macroParams }
+            : {}),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),

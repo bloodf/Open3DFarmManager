@@ -86,6 +86,12 @@ export interface BlobStore {
   ): Promise<PutResult>
   has(sha256: string): Promise<boolean>
   read(sha256: string, range?: BlobRange | null): Promise<BlobRead>
+  /**
+   * Drops a file this caller just created and no version references (rejected
+   * upload). Never call it for content that may be referenced; purge after the
+   * retention window is #378.
+   */
+  remove(sha256: string): Promise<void>
   /** Removes temp files older than `olderThanMs` (leftovers of a crash before the rename). */
   sweepTemp(olderThanMs: number, now?: number): Promise<number>
 }
@@ -184,6 +190,11 @@ export async function createBlobStore(
           range ? { start: range.start, end: range.end } : {},
         ),
       }
+    },
+
+    async remove(sha256) {
+      const path = pathFor(sha256)
+      if (await regularFile(path)) await unlink(path)
     },
 
     async sweepTemp(olderThanMs, now = Date.now()) {

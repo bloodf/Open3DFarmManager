@@ -23,7 +23,10 @@ import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
-import { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
+import {
+  ExtendedControlAction,
+  controlRoleAllowed,
+} from '../../packages/farm-protocol/src/control-actions.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import type { ControlLimits } from '../../packages/connector/src/runtime/control-limits.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
@@ -182,9 +185,10 @@ async function authorityFixture(action: Action, args: Args) {
     admission_nonce: admissionNonce,
     actions: [...ExtendedControlAction.options],
   }
-  // An operator is never granted run_macro: only owners and admins are.
-  capability.actions = capability.actions.filter(
-    (granted) => granted !== 'run_macro',
+  // An operator is never granted run_macro or service: owners (and admins
+  // for macros) only. Keep the operator role and grant what it is allowed.
+  capability.actions = capability.actions.filter((granted) =>
+    controlRoleAllowed(capability.role, granted),
   )
   const challenge = {
     v: 1 as const,

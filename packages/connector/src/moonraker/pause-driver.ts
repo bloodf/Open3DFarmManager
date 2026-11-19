@@ -1,5 +1,6 @@
 import {
   controlTargetState,
+  ExcludeObjectArguments,
   controlSourceState,
   type ControlAction,
   type ExtendedControlAction,
@@ -10,6 +11,11 @@ import {
   prepareFileOperation,
   requireStoppedPrinter,
 } from './control-file-manager.ts'
+import {
+  ExcludeObjectRefusal,
+  excludeObjectProbe,
+  excludeObjectWire,
+} from './control-print-status.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import {
   parseQueueOp,
@@ -28,6 +34,15 @@ import {
   parseExtrude,
 } from './control-extrusion.ts'
 import { OutputRefused } from './control-outputs.ts'
+import {
+  parseTimelapseOp,
+  parseTimelapseStatus,
+  refuseTimelapseOp,
+  TimelapseRefused,
+  timelapseReplyAccepted,
+  timelapseStatusWire,
+  timelapseSupported,
+} from './control-timelapse.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
@@ -77,6 +92,9 @@ const SideNotification = z.strictObject({
 const Snapshot = z.strictObject({
   eventtime: z.number().finite().nonnegative(),
   status: z.strictObject({
+    exclude_object: z
+      .object({ excluded_objects: z.array(z.string()) })
+      .optional(),
     webhooks: z.strictObject({
       state: z.enum(['ready', 'startup', 'shutdown', 'error']),
     }),
@@ -365,23 +383,27 @@ export function openFixedMoonrakerPause(input: {
     index: number,
     deadline: number,
     withFilename = false,
+    excludedName?: string,
   ): Promise<ControlObservation> {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
-      const wire = withFilename
-        ? JSON.stringify({
-            jsonrpc: '2.0',
-            id,
-            method: 'printer.objects.query',
-            params: {
-              objects: {
-                webhooks: ['state'],
-                print_stats: ['state', 'filename'],
-              },
-            },
-          })
-        : QUERIES[index]
+      const wire =
+        excludedName !== undefined
+          ? excludeObjectProbe(id)
+          : withFilename
+            ? JSON.stringify({
+                jsonrpc: '2.0',
+                id,
+                method: 'printer.objects.query',
+                params: {
+                  objects: {
+                    webhooks: ['state'],
+                    print_stats: ['state', 'filename'],
+                  },
+                },
+              })
+            : QUERIES[index]
       if (!wire) throw failure()
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
@@ -411,6 +433,16 @@ export function openFixedMoonrakerPause(input: {
               effect: {
                 kind: 'file' as const,
                 filename: snapshot.status.print_stats.filename,
+                observedMono: started,
+              },
+            }
+          : {}),
+        ...(excludedName &&
+        snapshot.status.exclude_object?.excluded_objects.includes(excludedName)
+          ? {
+              effect: {
+                kind: 'excluded-object' as const,
+                name: excludedName,
                 observedMono: started,
               },
             }
@@ -613,6 +645,42 @@ export function openFixedMoonrakerPause(input: {
     }
   }
   /**
+   * Timelapse render or delete: refusals are decided from one read before the
+   * single send; a refusal writes nothing and an uncertain send never repeats.
+   */
+  async function timelapse(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !timelapseSupported(input.objects)
+      )
+        throw new TimelapseRefused('unsupported-action')
+      const { op } = parseTimelapseOp(args)
+      const wire = extendedWire('timelapse', args)
+      if (wire === undefined) throw new TimelapseRefused('invalid-command')
+      refuseTimelapseOp(
+        op,
+        parseTimelapseStatus(
+          op,
+          await requestRead(11, timelapseStatusWire(11, op)),
+        ),
+      )
+      extended = 'timelapse'
+      return await send(wire, requested, 5000, (result) =>
+        timelapseReplyAccepted(op, result),
+      )
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof TimelapseRefused ? error : failure()
+    }
+  }
+  /**
    * Named fans, LEDs and pins: the name is checked against the object list
    * before the single write; a refusal sends nothing and is never retried.
    */
@@ -634,6 +702,45 @@ export function openFixedMoonrakerPause(input: {
     }
     extended = action
     return send(extendedWire(action, args), request, 5000)
+  }
+  let excludedName: string | undefined
+  async function excludeObject(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    let wire: string
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !input.objects?.includes('exclude_object') ||
+        !input.objects.includes('print_stats')
+      )
+        throw new ExcludeObjectRefusal(
+          'Object exclusion unavailable',
+          'unsupported-action',
+        )
+      const parsed = ExcludeObjectArguments.safeParse(args)
+      if (!parsed.success)
+        throw new ExcludeObjectRefusal(
+          'Invalid print object name',
+          'invalid-command',
+        )
+      wire = excludeObjectWire(
+        parsed.data,
+        await requestRead(11, excludeObjectProbe(11)),
+      )
+      excludedName = parsed.data.name
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ExcludeObjectRefusal
+        ? error
+        : new ExcludeObjectRefusal('Print object state unavailable')
+    }
+    extended = 'exclude_object'
+    return send(wire, requested, 5000)
   }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
@@ -671,8 +778,10 @@ export function openFixedMoonrakerPause(input: {
           ),
         )
       }
+      if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'queue_op') return queueOp(args, request)
+      if (action === 'timelapse') return timelapse(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
         return output(action, args, request)
       extended = action
@@ -709,6 +818,7 @@ export function openFixedMoonrakerPause(input: {
             1,
             operationDeadline,
             extended === 'start_print',
+            excludedName,
           )
           detachCommand()
           return observation

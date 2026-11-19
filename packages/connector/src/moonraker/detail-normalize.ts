@@ -137,6 +137,15 @@ function normalizeFixed(
           : {}),
         state: string(value.state) || 'unknown',
         message: string(value.message, 2048),
+        ...(typeof value.filament_used === 'number'
+          ? { filamentUsedMm: Math.max(0, number(value.filament_used)) }
+          : {}),
+        ...(number(value.estimated_time) > 0
+          ? { estimatedSeconds: value.estimated_time }
+          : {}),
+        ...(number(value.filament_total) > 0
+          ? { filamentTotalMm: value.filament_total }
+          : {}),
         elapsedSeconds: Math.max(0, number(value.print_duration)),
         ...(typeof info.current_layer === 'number'
           ? { currentLayer: count(info.current_layer) }
@@ -164,6 +173,29 @@ function normalizeFixed(
     case 'exclude_object':
       capabilities.add('exclude-object')
       detail.objects = {
+        polygons: list(value.objects)
+          .slice(0, 64)
+          .flatMap((item) => {
+            const object = fields(item)
+            const name = string(object.name)
+            const polygon = list(object.polygon)
+            if (!name || polygon.length < 3 || polygon.length > 64) return []
+            const points = polygon.map(list)
+            if (
+              !points.every(
+                (point) =>
+                  point.length === 2 &&
+                  point.every(
+                    (coordinate) =>
+                      typeof coordinate === 'number' &&
+                      Number.isFinite(coordinate) &&
+                      Math.abs(coordinate) <= 100_000,
+                  ),
+              )
+            )
+              return []
+            return [{ name, points }]
+          }),
         names: list(value.objects)
           .map((item) => string(fields(item).name))
           .filter(Boolean)

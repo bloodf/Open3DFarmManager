@@ -59,8 +59,69 @@ const bambuCapabilities = {
   cancel: 'simulated',
 } satisfies BambuCatalogProduct['capabilities']
 
+const detailTest = 'tests/unit/bambu-detail.test.ts'
+const extendedTest = 'tests/unit/bambu-control-extended.test.ts'
+const cameraTest = 'tests/node/bambu-camera.test.ts'
+const cameraName = 'models select local TLS JPEG or authenticated RTSPS 322'
+
+/**
+ * Áreas do painel (E18) comprovadas apenas pelo simulador Bambu do E16 em
+ * loopback, sem impressora física. Cada `simulated` aponta para o teste que o
+ * exercita; a câmera só vale para os modelos que o seletor aceita.
+ */
+export const bambuControlAreaEvidence = {
+  temperatures: { file: detailTest, test: 'reports temperatures' },
+  fans: { file: detailTest, test: 'reports fans' },
+  leds: { file: detailTest, test: 'reports the chamber light' },
+  printStatus: { file: detailTest, test: 'reports print status with layers' },
+  motion: { file: extendedTest, test: 'jogs and homes through gcode_line' },
+  extrusion: { file: extendedTest, test: 'extrudes through gcode_line' },
+  console: { file: extendedTest, test: 'console lines follow the E18.1 rules' },
+  fileManager: {
+    file: detailTest,
+    test: 'lists, downloads and deletes SD card files over FTPS',
+  },
+  timelapse: { file: detailTest, test: 'lists timelapse files over FTPS' },
+} as const satisfies ControlAreaEvidenceMap
+const cameraEvidence = {
+  webcams: { file: cameraTest, test: cameraName },
+} as const satisfies ControlAreaEvidenceMap
+
+/**
+ * Sem comando ou relato documentado no protocolo LAN da Bambu para estas
+ * áreas; ficam indisponíveis. Fonte: docs/protocols/bambu-detail.md.
+ */
+const unsupportedAreas = [
+  'config',
+  'bedMesh',
+  'services',
+  'power',
+  'jobQueue',
+  'updates',
+  'macros',
+  'excludeObject',
+  'history',
+] as const
+const withAreas = (
+  evidence: ControlAreaEvidenceMap,
+): BambuCatalogProduct['controlAreas'] => ({
+  ...unknownControlAreas,
+  ...Object.fromEntries(Object.keys(evidence).map((k) => [k, 'simulated'])),
+  ...Object.fromEntries(unsupportedAreas.map((k) => [k, 'unsupported'])),
+})
+const baseControlAreas = withAreas(bambuControlAreaEvidence)
+const cameraControlAreas = withAreas({
+  ...bambuControlAreaEvidence,
+  ...cameraEvidence,
+})
+const unsupportedLimitation =
+  'Não suportado no painel Bambu: editor de configuração, malha da mesa, serviços, energia, fila de impressão, atualizações além das versões de firmware, macros, exclusão de objetos e histórico. O protocolo LAN documentado não os expõe; fonte em docs/protocols/bambu-detail.md.'
+const detailLimitation =
+  'Painel de detalhe: temperaturas, ventoinhas, luz da câmara, referenciar, mover, extrudar e console via gcode_line, níveis de velocidade, bandejas AMS, estado da impressão com camadas, arquivos do cartão SD e timelapse por FTPS foram exercitados somente no simulador em loopback; não comprovado em hardware. A posição do cabeçote não é informada pelo protocolo.'
+
 const common = {
-  controlAreas: unknownControlAreas,
+  controlAreas: baseControlAreas,
+  controlAreaEvidence: bambuControlAreaEvidence,
   brand: 'Bambu Lab',
   releaseStatus: 'Anunciada; disponibilidade regional não verificada',
   firmwareStatus: 'não verificado',
@@ -77,6 +138,8 @@ const common = {
     'Integração e requisitos de conexão não verificados para este modelo',
   capabilities: bambuCapabilities,
   limitations: [
+    detailLimitation,
+    unsupportedLimitation,
     'A data indica a publicação do anúncio, não a disponibilidade em cada região.',
     'Recursos comerciais não comprovam acesso por terceiros ou compatibilidade com o OpenFarm.',
     'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',
@@ -93,7 +156,6 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     id: 'bambu-a2l',
-    controlAreas: unknownControlAreas,
     model: 'A2L',
     releaseDate: '2026-06-01',
     sources: [
@@ -107,7 +169,6 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     id: 'bambu-x2d',
-    controlAreas: unknownControlAreas,
     model: 'X2D',
     releaseDate: '2026-04-14',
     sources: [
@@ -121,8 +182,9 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
+    controlAreas: cameraControlAreas,
+    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-h2c',
-    controlAreas: unknownControlAreas,
     model: 'H2C',
     releaseDate: '2025-11-14',
     sources: [
@@ -136,8 +198,9 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
+    controlAreas: cameraControlAreas,
+    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-p2s',
-    controlAreas: unknownControlAreas,
     model: 'P2S',
     releaseDate: '2025-10-14',
     sources: [
@@ -151,8 +214,9 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
+    controlAreas: cameraControlAreas,
+    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-h2s',
-    controlAreas: unknownControlAreas,
     model: 'H2S',
     releaseDate: '2025-08-26',
     sources: [

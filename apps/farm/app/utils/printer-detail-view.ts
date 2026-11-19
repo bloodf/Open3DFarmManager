@@ -8,6 +8,7 @@ export type DetailTabId =
   | 'console'
   | 'arquivos'
   | 'fila'
+  | 'timelapse'
   | 'malha'
   | 'configuracao'
   | 'sistema'
@@ -25,6 +26,7 @@ export const DETAIL_TABS: readonly DetailTab[] = [
   { id: 'console', label: 'Console', needs: ['console'] },
   { id: 'arquivos', label: 'Arquivos', needs: ['files'] },
   { id: 'fila', label: 'Fila', needs: ['job-queue'] },
+  { id: 'timelapse', label: 'Timelapse', needs: ['timelapse'] },
   { id: 'malha', label: 'Malha', needs: ['bed-mesh'] },
   // Configuration files are read through the file capability.
   { id: 'configuracao', label: 'Configuração', needs: ['files'] },

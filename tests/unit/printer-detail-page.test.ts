@@ -81,6 +81,7 @@ describe('tab visibility by capability', () => {
       'console',
       'arquivos',
       'fila',
+      'timelapse',
       'malha',
       'configuracao',
       'sistema',

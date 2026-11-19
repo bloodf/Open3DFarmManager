@@ -1,4 +1,5 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { buildMacroScript } from './control-macros.ts'
 import {
   buildMotionScript,
   isMotionAction,
@@ -9,6 +10,14 @@ import {
   PrinterGcodePath,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { parseExtrude } from './control-extrusion.ts'
+import {
+  ledNames,
+  ledScript,
+  namedFanScript,
+  OutputRefused,
+  pinNames,
+  pinScript,
+} from './control-outputs.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -95,6 +104,9 @@ export function supportedMoonrakerActions(
 
   if (objects.includes('virtual_sdcard'))
     supported.push('file_op', 'start_print')
+  // Named LEDs and output pins need the object list; an unknown list never widens support.
+  if (ledNames(objects).length) supported.push('set_led')
+  if (pinNames(objects).length) supported.push('set_pin')
   if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))
@@ -125,7 +137,7 @@ export function buildMoonrakerCommand(
   }
 
   if (['run_macro', 'load_filament', 'unload_filament'].includes(action)) {
-    keys(action === 'run_macro' ? ['name'] : [])
+    keys(action === 'run_macro' ? ['name', 'params'] : [])
     const name =
       action === 'run_macro'
         ? args.name
@@ -139,7 +151,16 @@ export function buildMoonrakerCommand(
         !advertisedMoonrakerMacros(objects)?.includes(name))
     )
       throw new Error('Macro unavailable')
-    return { method: 'printer.gcode.script', params: { script: name } }
+    let script: string
+    try {
+      script = buildMacroScript(
+        name,
+        action === 'run_macro' ? args.params : undefined,
+      )
+    } catch {
+      throw new Error('Invalid macro parameters')
+    }
+    return { method: 'printer.gcode.script', params: { script } }
   }
 
   if (isMotionAction(action)) {
@@ -164,6 +185,15 @@ export function buildMoonrakerCommand(
     return {
       method: 'printer.print.start',
       params: { filename: PrinterGcodePath.parse(parsed.args.file) },
+    }
+  }
+
+  if (action === 'set_led' || action === 'set_pin') {
+    return {
+      method: 'printer.gcode.script',
+      params: {
+        script: (action === 'set_led' ? ledScript : pinScript)(args, objects),
+      },
     }
   }
 
@@ -381,9 +411,8 @@ export function buildMoonrakerCommand(
         `fan_generic ${fanType}_fan`,
       ]
       const found = objects.find((obj) => candidates.includes(obj))
-      if (objects.length > 0 && !found) {
-        throw new Error(`Fan '${fanType}' not found in printer objects`)
-      }
+      if (objects.length > 0 && !found)
+        throw new OutputRefused('unsupported-action')
       const fanName = found ? found.slice('fan_generic '.length) : fanType
       if (!SAFE_IDENTIFIER.test(fanName)) throw new Error('Unsafe fan name')
       return {
@@ -395,18 +424,13 @@ export function buildMoonrakerCommand(
     }
 
     if (typeof fanType === 'string' && SAFE_IDENTIFIER.test(fanType)) {
-      const match = objects.find((obj) => obj === `fan_generic ${fanType}`)
-      if (match) {
-        return {
-          method: 'printer.gcode.script',
-          params: {
-            script: `SET_FAN_SPEED FAN=${fanType} SPEED=${formatFanSpeed(speed255)}`,
-          },
-        }
+      return {
+        method: 'printer.gcode.script',
+        params: { script: namedFanScript(fanType, speed255, objects) },
       }
     }
 
-    throw new Error(`Invalid or unconfigured fan '${String(fanType)}'`)
+    throw new OutputRefused('invalid-command')
   }
 
   if (action === 'set_light') {

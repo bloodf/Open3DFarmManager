@@ -13,6 +13,7 @@ import {
   string,
   type Fields,
 } from './detail-normalize.ts'
+import { listDetailWebcams } from './control-webcams.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
 export { count, fields, fraction, list, string } from './detail-normalize.ts'
@@ -73,6 +74,7 @@ export function createMoonrakerDetailStream(input: {
     let id = 0
     let timer: ReturnType<typeof setTimeout> | undefined
     let selected = new Set<string>()
+    let webcams: Awaited<ReturnType<typeof listDetailWebcams>> | undefined
     let ready = false
     let everReady = false
     let lastEvent = -Infinity
@@ -139,12 +141,17 @@ export function createMoonrakerDetailStream(input: {
       timer = undefined
       if (signal.aborted || !ready) return
       lastUpdate = performance.now()
+      const normalized = normalizeDetail(status)
       const frame = PrinterDetailUpdate.safeParse({
         v: 1,
         t: 'detail.update',
         printerKey: input.printerKey,
         seq: seq++,
-        ...normalizeDetail(status),
+        ...normalized,
+        ...(webcams && {
+          capabilities: [...normalized.capabilities, 'webcams'],
+          detail: { ...normalized.detail, webcams },
+        }),
       })
       if (!frame.success) return
       latest = frame.data
@@ -233,6 +240,13 @@ export function createMoonrakerDetailStream(input: {
         rpc = request
         ready = everReady = true
         publish()
+        void listDetailWebcams(request)
+          .then((catalogue) => {
+            if (socket.readyState !== socket.OPEN || signal.aborted) return
+            webcams = catalogue
+            schedulePublish()
+          })
+          .catch(() => {})
       })().catch(abort)
     })
     await closed

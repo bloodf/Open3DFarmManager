@@ -118,6 +118,7 @@ export function projectNetwork(rows: NetworkRows) {
     ]),
   )
   return {
+    canManage: addresses,
     connectors: rows.connectors.map((row) => ({
       agentId: row.agentId,
       fingerprint: row.fingerprint,

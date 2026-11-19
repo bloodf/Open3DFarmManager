@@ -24,6 +24,8 @@ export const ExtendedControlAction = z.enum([
   'set_factor',
   'extrude',
   'file_op',
+  'set_led',
+  'set_pin',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -44,6 +46,22 @@ export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
 export function controlsForBackend(backend: string): readonly ControlAction[] {
   return backend === 'moonraker' ? MOONRAKER_CONTROLS : []
 }
+/** Klipper object name (the part after the section type); never free text. */
+export const OutputName = z.string().regex(/^[A-Za-z0-9_]{1,64}$/)
+const Channel = z.number().int().min(0).max(255)
+/** LED channels are 0-255; `w` is left out for RGB-only strips. */
+export const SetLedArguments = z.strictObject({
+  name: OutputName,
+  r: Channel,
+  g: Channel,
+  b: Channel,
+  w: Channel.optional(),
+})
+/** PWM duty or digital level, 0 to 1 (Klipper's default `scale`). */
+export const SetPinArguments = z.strictObject({
+  name: OutputName,
+  value: z.number().finite().min(0).max(1),
+})
 /** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
 export const LIBRARY_PRINT_API_SCOPE = 'jobs:write'
 /** One Bambu AMS slot per filament of the plate; -1 leaves a filament unmapped. */
@@ -62,6 +80,37 @@ export const LibraryPrintArgs = z.strictObject({
 })
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+export const MACRO_PARAM_MAX_KEYS = 16
+export const MACRO_PARAM_MAX_VALUE_CHARS = 64
+/** Klipper macro parameter name: a safe identifier. */
+export const MacroParamName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,31}$/)
+/**
+ * One G-code token: no whitespace, control characters, `;` (command
+ * separator) or `#`/`*` (comment and checksum), so a value never splits a
+ * script line or smuggles a second command.
+ */
+export const MacroParamValue = z
+  .string()
+  .min(1)
+  .max(MACRO_PARAM_MAX_VALUE_CHARS)
+  .regex(/^[^\s\x00-\x1f\x7f;#*]+$/)
+/** Bounded `KEY=value` parameters of one macro run. */
+export const MacroParams = z.custom<Record<string, string>>((value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  const keys = Object.keys(value)
+  return (
+    keys.length <= MACRO_PARAM_MAX_KEYS &&
+    keys.every(
+      (key) =>
+        MacroParamName.safeParse(key).success &&
+        MacroParamValue.safeParse((value as Record<string, unknown>)[key])
+          .success,
+    )
+  )
+})
 export function controlRoleAllowed(
   role: string,
   action?: ExtendedControlAction,
@@ -150,7 +199,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
-    args: z.strictObject({ name: MacroName }),
+    args: z.strictObject({ name: MacroName, params: MacroParams.optional() }),
   }),
   z.strictObject({
     action: z.literal('load_filament'),
@@ -198,9 +247,19 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('set_fan'),
     args: z.strictObject({
-      fan: z.enum(['part', 'aux', 'chamber']),
+      // 'part' is the default fan; any other value is a fan_generic or
+      // controller_fan name the Connector checks against the object list.
+      fan: OutputName,
       percent: z.number().int().min(0).max(100),
     }),
+  }),
+  z.strictObject({
+    action: z.literal('set_led'),
+    args: SetLedArguments,
+  }),
+  z.strictObject({
+    action: z.literal('set_pin'),
+    args: SetPinArguments,
   }),
   z.strictObject({
     action: z.literal('home'),

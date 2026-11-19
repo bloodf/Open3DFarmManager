@@ -233,3 +233,52 @@ test('admin page may contain foreign accounts but only own key is selectable', a
     }),
   )
 })
+
+test('a recent approved registry verdict is reused; everything else is rechecked', async () => {
+  const f = await fixture()
+  let clock = 1_000,
+    registry = 0,
+    accounts = 0,
+    metadata = 0,
+    status: 'approved' | 'pending' = 'pending'
+  const resolve = createFarmStatusKeyResolver({
+    ...f.opts,
+    now: () => clock,
+    readMetadata: async () => {
+      metadata++
+      return f.metadata
+    },
+    readAccount: async () => {
+      accounts++
+      return { accountId: f.scope.accountId }
+    },
+    readRegistryPage: async () => {
+      registry++
+      return { ...f.page, devices: [{ ...f.device, status }] }
+    },
+  })
+  const input = {
+    scope: f.scope,
+    browserKeyId: f.keyId,
+    signal: f.signal.signal,
+  }
+  // A refused verdict is never reused.
+  await assert.rejects(resolve(input))
+  status = 'approved'
+  await resolve(input)
+  assert.equal(registry, 2)
+  // The rate-limited registry is read once per minute, never more.
+  clock += 59_000
+  const reused = await resolve(input)
+  assert.equal(reused.localKey.thumbprint, f.device.thumbprint)
+  assert.equal(registry, 2)
+  // Account, metadata and the local key are still checked every time.
+  assert.equal(accounts, 5)
+  assert.equal(metadata, 5)
+  clock += 1_000
+  await resolve(input)
+  assert.equal(registry, 3)
+  // Another key never borrows the verdict.
+  await assert.rejects(resolve({ ...input, browserKeyId: randomUUID() }))
+  assert.equal(registry, 4)
+})

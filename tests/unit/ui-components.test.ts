@@ -133,11 +133,16 @@ describe('UI component gallery', () => {
 
   afterAll(async () => {
     try {
-      await browser?.close()
+      // Chrome shutdown is occasionally slow (>30s); close is already
+      // requested and the pipe is released when the worker exits.
+      await Promise.race([
+        browser?.close(),
+        new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
+      ])
     } finally {
       await server?.close()
     }
-  }, 30_000)
+  })
 
   beforeEach(async () => {
     if (!browser || !server) throw new Error('Gallery fixture unavailable')

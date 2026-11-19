@@ -44,6 +44,7 @@ const farmRoutes = (extra: Routes = {}): Routes => ({
     nextAfter: null,
   }),
   [`GET /api/farms/${FARM}/printer-states`]: reply({ states: [] }),
+  [`GET /api/farms/${FARM}/status-summary`]: summaryOf([]),
   ...extra,
 })
 
@@ -55,6 +56,20 @@ const storedState = (ageMs: number) => ({
   temperatures: { toolCelsius: 205, bedCelsius: 60 },
   observedAt: Date.now() - ageMs,
 })
+
+/** The status-summary answer for printers shaped like `storedState`. */
+function summaryOf(printers: ReturnType<typeof storedState>[]) {
+  const counts: Record<string, number> = {}
+  for (const printer of printers)
+    counts[printer.state] = (counts[printer.state] ?? 0) + 1
+  return reply({
+    generatedAt: Date.now(),
+    total: printers.length,
+    counts,
+    truncated: false,
+    printers: printers.map((printer) => ({ ...printer, dataAgeMs: 0 })),
+  })
+}
 
 type Opened = Awaited<ReturnType<PageHarness['open']>>
 
@@ -280,9 +295,7 @@ export const register: RegisterStates = (harness) => {
   describe('painel page states', () => {
     const painelRoutes = (extra: Routes = {}): Routes => ({
       'GET /api/farms': farmsPage(FARM),
-      [`GET /api/farms/${FARM}/printer-states`]: reply({
-        states: [storedState(1000)],
-      }),
+      [`GET /api/farms/${FARM}/status-summary`]: summaryOf([storedState(1000)]),
       ...extra,
     })
 
@@ -313,7 +326,7 @@ export const register: RegisterStates = (harness) => {
           harness(),
           'painel',
           painelRoutes({
-            [`GET /api/farms/${FARM}/printer-states`]: reply({ states: [] }),
+            [`GET /api/farms/${FARM}/status-summary`]: summaryOf([]),
           }),
           {},
           async ({ page }) => {
@@ -418,7 +431,7 @@ export const register: RegisterStates = (harness) => {
             // The next poll fails: the old states stay, flagged as stale.
             setRoutes(
               painelRoutes({
-                [`GET /api/farms/${FARM}/printer-states`]: failing(500),
+                [`GET /api/farms/${FARM}/status-summary`]: failing(500),
               }),
             )
             await page.clock.runFor(5_500)

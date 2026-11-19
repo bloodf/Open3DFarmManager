@@ -308,13 +308,13 @@ test('mural de status com 24 impressoras mistas, alertas, filtros, tabela, paine
       .innerText()
     expect(descendingFirst).not.toBe(initialFirst)
 
-    // Abre detalhes da impressora pela tabela e retorna para cartões
-    await errorRow.getByRole('link').click()
-    await expect(
-      page.getByRole('heading', { name: 'Detalhes da impressora' }),
-    ).toBeVisible()
-    await expect(farm.printerCard(errorPrinter.printerKey)).toBeVisible()
+    // Cada linha da tabela abre a página de detalhes da impressora
+    await expect(errorRow.getByRole('link')).toHaveAttribute(
+      'href',
+      `/impressoras/${encodeURIComponent(errorPrinter.printerKey)}`,
+    )
     await page.getByRole('button', { name: 'Cartões' }).click()
+    await expect(farm.printerCard(errorPrinter.printerKey)).toBeVisible()
     await expect(table).toHaveCount(0)
 
     // 6) Página /farm em viewport mobile de 390 px (cartões e tabela sem estouro horizontal)

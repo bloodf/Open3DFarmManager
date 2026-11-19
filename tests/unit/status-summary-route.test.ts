@@ -125,6 +125,27 @@ describe('status summary route', () => {
     ])
   })
 
+  test('carries progress and temperatures, absent when not reported', async () => {
+    const get = await serve(
+      reader([
+        row(1, {
+          state: 'printing',
+          progress: 0,
+          toolTemperatureCelsius: 0,
+          bedTemperatureCelsius: 60.5,
+        }),
+        row(2),
+      ]),
+    )
+    const body = (await (await get(farmId)).json()) as StatusSummary
+    expect(body.printers[0]).toMatchObject({
+      progress: 0,
+      temperatures: { toolCelsius: 0, bedCelsius: 60.5 },
+    })
+    expect(body.printers[1]).not.toHaveProperty('progress')
+    expect(body.printers[1]?.temperatures).toEqual({})
+  })
+
   test('unchanged data answers 304 even when the age moved', async () => {
     const get = await serve(reader([row(1)]))
     const etag = (await get(farmId)).headers.get('etag')!

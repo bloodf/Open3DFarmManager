@@ -1,5 +1,5 @@
 name: Simulator
-on: [workflow_dispatch]
+on: [pull_request, workflow_dispatch]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
@@ -17,6 +17,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: node --test tests/node/e16-358.test.mjs
   klipper:
+    if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
     runs-on: ubuntu-latest
@@ -35,6 +36,7 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down
   spoolman:
+    if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
     strategy:
@@ -72,6 +74,7 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile spoolman down
   cams:
+    if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
     strategy:
@@ -108,6 +111,7 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile cams down
   rtsp:
+    if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
     strategy:

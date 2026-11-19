@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { X509Certificate } from 'node:crypto'
+import { createCipheriv, createHash, X509Certificate } from 'node:crypto'
 import test from 'node:test'
 import { createSocket } from 'node:dgram'
 import { createServer } from 'node:http'
@@ -9,7 +9,11 @@ import {
   connectKobraX,
   discoverKobraX,
 } from '../../packages/connector/src/kobra-x/index.ts'
-import { readKobraXInfo } from '../../packages/connector/src/kobra-x/discovery.ts'
+import {
+  kobraXCtrlQuery,
+  readKobraXInfo,
+  recoverKobraXCredentials,
+} from '../../packages/connector/src/kobra-x/discovery.ts'
 import { createKobraXStatus } from '../../packages/connector/src/kobra-x/status.ts'
 import {
   generateWrongKobraXClientCert,
@@ -20,25 +24,6 @@ import {
 } from '../../packages/sim-tools/src/mocks/index.ts'
 
 const address = '127.0.0.1'
-// Synthetic E16.18 envelope. The hardware signing and derivation rules are
-// intentionally absent until the clean-room spec documents them.
-const recovery = {
-  query: () => ({
-    ts: String(Date.now()),
-    nonce: 'mock-364',
-    sign: '0'.repeat(32),
-    did: 'fixture',
-  }),
-  encrypted(token, response) {
-    assert.equal(response.code, 200)
-    return {
-      key: Buffer.from(token.slice(16)),
-      iv: Buffer.from(response.data.token),
-      ciphertext: Buffer.from(response.data.info, 'base64'),
-    }
-  },
-}
-
 async function until(check) {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (check()) return
@@ -78,7 +63,6 @@ test(
       printerKey: 'fixture',
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
-      recovery,
       reconnectMs: 100,
     }
     await assert.rejects(
@@ -100,21 +84,25 @@ test(
       connectKobraX({ ...options, clientIdentity, pinSha256: '0'.repeat(64) }),
       /fingerprint mismatch/,
     )
+    const invalidCtrl = await withInfoServer(t, (req, res) => {
+      if (req.url === '/info') {
+        res.writeHead(200).end(JSON.stringify(goodInfo))
+        return
+      }
+      res.writeHead(200).end(
+        JSON.stringify({
+          code: 200,
+          data: { token: 'a'.repeat(16), info: 'AA==' },
+        }),
+      )
+    })
     await assert.rejects(
-      connectKobraX({
-        ...options,
-        clientIdentity,
-        recovery: {
-          ...recovery,
-          encrypted(token, response) {
-            return {
-              ...recovery.encrypted(token, response),
-              ciphertext: Buffer.alloc(1),
-            }
-          },
-        },
-      }),
+      connectKobraX({ ...options, clientIdentity, httpPort: invalidCtrl.port }),
       /Kobra X credential recovery failed/,
+    )
+    assert.deepEqual(
+      invalidCtrl.paths.map((path) => path.split('?')[0]),
+      ['/info', '/ctrl'],
     )
     adapter = await connectKobraX({ ...options, clientIdentity })
     await until(() => adapter.snapshot().materials?.length === 4)
@@ -512,7 +500,6 @@ test(
       printerKey: 'fixture',
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
-      recovery,
       reconnectMs: 100,
     }
     const calls = () => mock.calls()
@@ -575,3 +562,97 @@ test(
     )
   },
 )
+
+test('native /ctrl matches the owner vectors and rejects invalid responses', async (t) => {
+  installNetworkGuard()
+  t.after(uninstallNetworkGuard)
+  const token = 'abcdefghijklmnopqrstuvwxyz012345'
+  const iv = 'fedcba9876543210'
+  const ciphertext =
+    'MVKiXl3ql2/w4yj4fxCdaHwbtBLzgliMf3qIt1xiq2lolTgXVSm9OEh0ARykh/VrVUYJJBS4ppKEwweZlT3kdD57+5kos/UXv1gKXdzKMcUosUfyPmRJKctigF/mSO090xxCV+wccHrFoUY5o75h+WuLvOj2hwktsQQndzbtqOcwgu8dn+IWxJWThQi0bsDVJZ8WYVG3CLEC2HLZHs36Mw=='
+  assert.equal(
+    kobraXCtrlQuery(token, '1700000000000', 'AbC123').toString(),
+    'ts=1700000000000&nonce=AbC123&sign=aea435b5fbd0d0731ac51b4510e8c163&did=random',
+  )
+  const credentials = {
+    username: 'user_demo',
+    password: 'pass_demo',
+    deviceId: '0123456789abcdef0123456789abcdef',
+    modeId: '20030',
+  }
+  const valid = { code: 200, data: { token: iv, info: ciphertext } }
+  let status = 200
+  let response = valid
+  let observed
+  const { port } = await withInfoServer(t, (req, res) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => {
+      observed = {
+        method: req.method,
+        url: req.url,
+        body: Buffer.concat(chunks),
+        connection: req.headers.connection,
+      }
+      res.writeHead(status).end(JSON.stringify(response))
+    })
+  })
+  const info = { address, token, name: 'fixture' }
+  const started = Date.now()
+  assert.deepEqual(await recoverKobraXCredentials(info, port), credentials)
+  const url = new URL(observed.url, 'http://127.0.0.1')
+  const { ts, nonce, sign, did } = Object.fromEntries(url.searchParams)
+  assert.equal(url.pathname, '/ctrl')
+  assert.equal(observed.method, 'POST')
+  assert.equal(observed.connection, 'close')
+  assert.equal(observed.body.length, 0)
+  assert.match(ts, /^\d{13}$/)
+  assert.ok(Number(ts) >= started && Number(ts) <= Date.now())
+  assert.match(nonce, /^[A-Za-z0-9]{6}$/)
+  assert.equal(did, 'random')
+  assert.equal(
+    sign,
+    createHash('md5')
+      .update('1d64dce239c4437b7736041db089e1b9' + ts + nonce)
+      .digest('hex'),
+  )
+
+  function encrypt(payload) {
+    const cipher = createCipheriv('aes-128-cbc', 'qrstuvwxyz012345', iv)
+    return Buffer.concat([cipher.update(payload), cipher.final()]).toString(
+      'base64',
+    )
+  }
+  function envelope(payload) {
+    return { code: 200, data: { token: iv, info: encrypt(payload) } }
+  }
+  response = envelope(JSON.stringify({ ...credentials, modeId: undefined }))
+  assert.deepEqual(await recoverKobraXCredentials(info, port), credentials)
+
+  const badPadding = Buffer.from(ciphertext, 'base64')
+  badPadding[badPadding.length - 17] ^= 0xff
+  for (const invalid of [
+    { ...valid, code: 403 },
+    { ...valid, data: { ...valid.data, token: 'é'.repeat(16) } },
+    { ...valid, data: { ...valid.data, info: ciphertext + '!' } },
+    { ...valid, data: { ...valid.data, info: 'AA==' } },
+    { ...valid, data: { ...valid.data, info: badPadding.toString('base64') } },
+    envelope(Buffer.from([0xff])),
+    envelope('invalid JSON'),
+    envelope(JSON.stringify({ ...credentials, error: 'refused' })),
+    envelope(JSON.stringify({ ...credentials, password: '' })),
+    envelope(JSON.stringify({ ...credentials, deviceId: '+/#' })),
+  ]) {
+    response = invalid
+    await assert.rejects(
+      recoverKobraXCredentials(info, port),
+      /^Error: Kobra X credential recovery failed$/,
+    )
+  }
+  response = valid
+  status = 403
+  await assert.rejects(
+    recoverKobraXCredentials(info, port),
+    /credential recovery failed/,
+  )
+})

@@ -1,11 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { connect, createSecureContext } from 'node:tls'
 import { MqttClient } from 'mqtt'
-import {
-  readKobraXInfo,
-  recoverKobraXCredentials,
-  type KobraXRecoveryProtocol,
-} from './discovery.ts'
+import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
 import { createKobraXFacts } from './facts.ts'
 import { createKobraXRequests, parseKobraXReport } from './requests.ts'
@@ -21,7 +17,6 @@ export async function connectKobraX(options: {
   address: string
   printerKey: string
   clientIdentity?: { cert: Buffer | string; key: Buffer | string }
-  recovery: KobraXRecoveryProtocol
   pinSha256?: string
   httpPort?: number
   mqttPort?: number
@@ -51,7 +46,7 @@ export async function connectKobraX(options: {
     throw new Error('Invalid Kobra X certificate fingerprint')
   const info = await readKobraXInfo(address, options.httpPort)
   const { modeId, deviceId, username, password } =
-    await recoverKobraXCredentials(info, options.recovery, options.httpPort)
+    await recoverKobraXCredentials(info, options.httpPort)
   const state = createKobraXStatus(options.printerKey, address)
   const facts = createKobraXFacts()
   const usage = createKobraXUsage({
@@ -105,6 +100,7 @@ export async function connectKobraX(options: {
       username,
       password,
       clean: true,
+      keepalive: 60,
       connectTimeout: 3000,
       reconnectPeriod: options.reconnectMs ?? 1000,
       resubscribe: false,

@@ -1,6 +1,6 @@
 import { createSocket } from 'node:dgram'
 import { isIPv4 } from 'node:net'
-import { createDecipheriv } from 'node:crypto'
+import { createDecipheriv, createHash, randomInt } from 'node:crypto'
 
 export function isLocalAddress(address: string) {
   return (
@@ -27,13 +27,14 @@ async function request(
     throw new Error('Kobra X requires a local IPv4 address')
   const response = await fetch(new URL(path, `http://${address}:${port}`), {
     method,
+    headers: method === 'POST' ? { Connection: 'close' } : {},
     redirect: 'error',
     signal: AbortSignal.timeout(2500),
   })
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Empty Kobra X response')
   try {
-    if (!response.ok) throw new Error('Kobra X HTTP request failed')
+    if (response.status !== 200) throw new Error('Kobra X HTTP request failed')
     const chunks = []
     let size = 0
     for (;;) {
@@ -54,7 +55,7 @@ export async function readKobraXInfo(address: string, port = 18910) {
     info.ctrlType !== 'lan' ||
     info.modelId !== '20030' ||
     typeof info.token !== 'string' ||
-    info.token.length !== 32
+    !/^[\x20-\x7e]{32}$/.test(info.token)
   ) {
     throw new Error('Kobra X LAN identity could not be confirmed')
   }
@@ -125,37 +126,63 @@ export async function discoverKobraX(
   )
 }
 
-// The clean-room spec requires verified signing and key/IV derivation before
-// enabling recovery on hardware. The simulator supplies its own protocol.
-export interface KobraXRecoveryProtocol {
-  query(token: string): { ts: string; nonce: string; sign: string; did: string }
-  encrypted(
-    token: string,
-    response: Record<string, unknown>,
-  ): { key: Buffer; iv: Buffer; ciphertext: Buffer }
+export function kobraXCtrlQuery(token: string, ts: string, nonce: string) {
+  const md5 = (value: string) =>
+    createHash('md5').update(value, 'ascii').digest('hex')
+  return new URLSearchParams({
+    ts,
+    nonce,
+    sign: md5(md5(token.slice(0, 16)) + ts + nonce),
+    did: 'random',
+  })
 }
 
 export async function recoverKobraXCredentials(
   info: Awaited<ReturnType<typeof readKobraXInfo>>,
-  protocol: KobraXRecoveryProtocol,
   port = 18910,
 ) {
   try {
-    const query = new URLSearchParams(protocol.query(info.token))
-    const response = await request(info.address, port, `/ctrl?${query}`, 'POST')
-    const { key, iv, ciphertext } = protocol.encrypted(info.token, response)
-    const decipher = createDecipheriv('aes-128-cbc', key, iv)
-    const { username, password, modeId, deviceId } = record(
-      JSON.parse(
-        Buffer.concat([
-          decipher.update(ciphertext),
-          decipher.final(),
-        ]).toString(),
-      ),
-    )
+    if (!/^[\x20-\x7e]{32}$/.test(info.token)) throw new Error()
+    const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    const nonce = Array.from({ length: 6 }, () =>
+      alphabet.charAt(randomInt(alphabet.length)),
+    ).join('')
+    const query = kobraXCtrlQuery(info.token, String(Date.now()), nonce)
+    const response = await request(info.address, port, '/ctrl?' + query, 'POST')
+    const { token: iv, info: encoded } = record(response.data)
     if (
+      response.code !== 200 ||
+      typeof iv !== 'string' ||
+      !/^[\x20-\x7e]{16}$/.test(iv) ||
+      typeof encoded !== 'string'
+    )
+      throw new Error()
+
+    const ciphertext = Buffer.from(encoded, 'base64')
+    if (
+      !ciphertext.length ||
+      ciphertext.length % 16 ||
+      ciphertext.toString('base64') !== encoded
+    )
+      throw new Error()
+
+    const decipher = createDecipheriv('aes-128-cbc', info.token.slice(16), iv)
+    const plaintext = new TextDecoder('utf-8', { fatal: true }).decode(
+      Buffer.concat([decipher.update(ciphertext), decipher.final()]),
+    )
+    const {
+      username,
+      password,
+      modeId = '20030',
+      deviceId,
+      error,
+    } = record(JSON.parse(plaintext))
+    if (
+      (error !== undefined && error !== '') ||
       typeof username !== 'string' ||
-      !username ||
+      !username.trim() ||
+      username.includes('\0') ||
       typeof password !== 'string' ||
       !password ||
       typeof modeId !== 'string' ||

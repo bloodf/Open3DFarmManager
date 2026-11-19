@@ -9,6 +9,7 @@ import {
   moonrakerPrinters,
   parseBambu,
 } from '../../packages/connector/src/discovery/index.ts'
+import { main } from '../../scripts/discover-printers.ts'
 
 const fixture = Buffer.from(
   'NOTIFY * HTTP/1.1\r\nLocation: http://192.168.1.42:2021/\r\nUSN: uuid:ABC123\r\nDevModel.bambu.com: BL-P001\r\nDevName.bambu.com: Oficina\r\nDevConnect.bambu.com: lan\r\nDevBind.bambu.com: free\r\n\r\n',
@@ -101,22 +102,33 @@ test('discovers both protocols over loopback', async () => {
     responder.close()
   }
 })
-test('CLI help and JSON', () => {
+test('CLI help and JSON', async (t) => {
   assert.match(
     execFileSync(process.execPath, ['scripts/discover-printers.ts', '--help'], {
       encoding: 'utf8',
     }),
     /--timeout/,
   )
-  assert.ok(
-    Array.isArray(
-      JSON.parse(
-        execFileSync(
-          process.execPath,
-          ['scripts/discover-printers.ts', '--timeout', '30'],
-          { encoding: 'utf8' },
-        ),
-      ),
-    ),
+  // Real discovery binds 0.0.0.0 and sends LAN multicast; inject an in-process
+  // mock so the JSON path is exercised without leaving the process.
+  const requested: unknown[] = []
+  const written: string[] = []
+  t.mock.method(process.stdout, 'write', (chunk: string) => {
+    written.push(chunk)
+    return true
+  })
+  const status = await main(['--timeout', '30'], async (options) => {
+    requested.push(options)
+    return [{ vendor: 'moonraker', host: '127.0.0.1', port: 7125 }]
+  })
+  t.mock.restoreAll()
+  assert.equal(status, 0)
+  assert.deepEqual(requested, [{ timeout: 30 }])
+  assert.ok(Array.isArray(JSON.parse(written.join(''))))
+  assert.equal(
+    await main(['--timeout', 'abc'], () => {
+      throw Error('discovery must not run for rejected arguments')
+    }),
+    2,
   )
 })

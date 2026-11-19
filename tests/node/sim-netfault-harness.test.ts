@@ -18,6 +18,7 @@ import {
   assertFarmReadOnly,
   assertFarmStatusFlowing,
 } from '../helpers/sim-netfault-observation.ts'
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const harness = join(root, 'infra/sim/netfault')
@@ -62,6 +63,13 @@ for (const profile of profiles) {
 test('Compose parses offline and installed Docker validates every profile', (t) => {
   for (const profile of profiles)
     assert.ok(compose.services.connector.profiles.includes(profile))
+  // The Docker CLI is a real external tool; only an explicit opt-in may run it.
+  if (!isDockerSim()) {
+    t.diagnostic(
+      'OPENFARM_SIM is not docker; offline profile parsing passed; CLI validation not requested',
+    )
+    return
+  }
   const available = spawnSync('docker', ['--version'], { encoding: 'utf8' })
   if (
     available.error &&

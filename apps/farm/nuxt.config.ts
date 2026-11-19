@@ -77,6 +77,13 @@ export default defineNuxtConfig({
       jobHistoryRetentionDays: 365,
       batchSize: 500,
     },
+    /** A login that is a member of farm_library_retention (migration 0057). */
+    libraryRetention: {
+      enabled: false,
+      databaseUrl: '',
+      intervalMs: 3600000,
+      batchSize: 100,
+    },
     pauseAuthority: {
       enabled: false,
       databaseUrl: '',

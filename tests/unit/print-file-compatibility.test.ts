@@ -31,6 +31,27 @@ const profile: CompatibilityProfile = {
 }
 const materials: LoadedMaterial[] = [{ type: 'pla', colour: '#AABBCC' }]
 
+type MetadataOverride = {
+  [K in keyof CompatibilityMetadata]?: CompatibilityMetadata[K] | undefined
+}
+type Row = [
+  name: string,
+  meta: MetadataOverride,
+  printer: Partial<CompatibilityProfile>,
+  level: 'ok' | 'warn' | 'block',
+  reasons: string[],
+]
+
+/** An explicit `undefined` override removes the key from the base metadata. */
+function withMetadata(overrides: MetadataOverride): CompatibilityMetadata {
+  const result: CompatibilityMetadata = { ...metadata }
+  for (const key of Object.keys(overrides) as (keyof MetadataOverride)[]) {
+    if (overrides[key] === undefined) delete result[key]
+    else Object.assign(result, { [key]: overrides[key] })
+  }
+  return result
+}
+
 describe('checkCompatibility', () => {
   beforeEach(installNetworkGuard)
   afterEach(uninstallNetworkGuard)
@@ -40,7 +61,7 @@ describe('checkCompatibility', () => {
     expect(connectorCheck).toBe(checkCompatibility)
   })
 
-  it.each([
+  it.each<Row>([
     ['matching printer and exact bed fit', {}, {}, 'ok', []],
     ['listed model', { printerModel: 'Modelo B' }, {}, 'ok', []],
     ['unlisted model', { printerModel: 'Modelo C' }, {}, 'block', ['block']],
@@ -106,13 +127,9 @@ describe('checkCompatibility', () => {
       'block',
       ['block', 'warn', 'info'],
     ],
-  ] as const)('%s', (_name, meta, printer, level, reasons) => {
+  ])('%s', (_name, meta, printer, level, reasons) => {
     const result = checkCompatibility(
-      {
-        ...metadata,
-        ...meta,
-        tools: 'tools' in meta ? meta.tools && [...meta.tools] : metadata.tools,
-      },
+      withMetadata(meta),
       { ...profile, ...printer },
       materials,
     )

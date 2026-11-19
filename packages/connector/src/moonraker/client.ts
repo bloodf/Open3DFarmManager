@@ -141,6 +141,7 @@ export function openMoonrakerClient(input: {
   onStatus: (params: unknown) => void
   /** Opt-in display evidence; default telemetry transport remains unchanged. */
   onComplete?: (observation: MoonrakerCompleteObservation) => void
+  onRequestSuccess?: (startedAtMonoMs: number, receivedAtMonoMs: number) => void
   onInvalidated?: () => void
 }): {
   snapshot: Promise<unknown>
@@ -420,6 +421,7 @@ export function openMoonrakerClient(input: {
         pending = undefined
         lastRequestStarted = started
         clearTimeout(queryTimeout)
+        input.onRequestSuccess?.(started, received)
         input.onComplete?.(
           Object.freeze({
             result: reply.data.result,

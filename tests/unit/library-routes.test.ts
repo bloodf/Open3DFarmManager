@@ -86,6 +86,7 @@ class FakeLibrary {
         storageMode: 'connector',
         quotaBytes: 21_474_836_480,
         retentionDays: 30,
+        keepVersions: null,
       }
     )
   }
@@ -131,6 +132,9 @@ class FakeLibrary {
       ...(input.retentionDays !== undefined
         ? { retentionDays: input.retentionDays }
         : {}),
+      ...(input.keepVersions !== undefined
+        ? { keepVersions: input.keepVersions }
+        : {}),
     }
     this.settings.set(input.farmId, next)
     return {
@@ -139,6 +143,20 @@ class FakeLibrary {
       locations: this.locations(input.farmId),
     }
   }
+  getUsage: LibraryStore['getUsage'] = async (input) =>
+    this.role(input)
+      ? {
+          ok: true,
+          usage: {
+            mode: this.modeOf(input.farmId).storageMode,
+            usedBytes: 7,
+            quotaBytes: 100,
+            availableBytes: 93,
+            connectors: [],
+            unreported: false,
+          },
+        }
+      : { ok: false, reason: 'forbidden' }
   uploadContext: LibraryStore['uploadContext'] = async (input) => {
     this.calls.push('uploadContext')
     const role = this.role(input)
@@ -152,7 +170,9 @@ class FakeLibrary {
     }
     return { ok: true, settings }
   }
-  addVersion: LibraryStore['addVersion'] = async (input) => {
+  addVersion = async (
+    input: Parameters<LibraryStore['addVersion']>[0],
+  ): Promise<Awaited<ReturnType<LibraryStore['addVersion']>>> => {
     this.calls.push('addVersion')
     const role = this.role(input)
     if (!role) return { ok: false, reason: 'forbidden' }
@@ -170,7 +190,11 @@ class FakeLibrary {
         .filter(([k, b]) => k.startsWith(farm) && b.location === 'server')
         .reduce((sum, [, b]) => sum + b.size, 0)
       if (v.location === 'server' && used + v.sizeBytes > settings.quotaBytes)
-        return { ok: false, reason: 'quota-exceeded' }
+        return {
+          ok: false,
+          reason: 'quota-exceeded',
+          message: 'Cota da biblioteca excedida no servidor.',
+        }
       this.blobs.set(key, {
         size: v.sizeBytes,
         location: v.location,
@@ -210,6 +234,7 @@ class FakeLibrary {
       uploadedBy: input.sessionRecordId,
       createdAt: this.tick,
       deletedAt: null,
+      purgedAt: null,
     }
     this.versions.push(version)
     return {
@@ -523,8 +548,11 @@ async function handle(request: Request, rt: LibraryRuntime) {
       headers,
     })
   } catch (error) {
-    const { status = 500 } = error as { status?: number }
-    return new Response(JSON.stringify({ status }), { status })
+    const { status = 500, message } = error as {
+      status?: number
+      message?: string
+    }
+    return new Response(JSON.stringify({ status, message }), { status })
   }
 }
 
@@ -612,7 +640,8 @@ describe('storage mode setting', () => {
     ] as const) {
       const response = await call('GET', '/settings', { as: who })
       expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({
+      const body = await response.json()
+      expect(body).toMatchObject({
         settings: {
           storageMode: 'connector',
           quotaBytes: 21_474_836_480,
@@ -620,6 +649,8 @@ describe('storage mode setting', () => {
         },
         canManage,
       })
+      // Used and available space is shown to the people who manage the farm.
+      expect(body.usage?.availableBytes).toBe(canManage ? 93 : undefined)
     }
   })
 
@@ -646,6 +677,15 @@ describe('storage mode setting', () => {
     expect(store.settings.get(farmA)?.storageMode).toBe('server')
   })
 
+  test('keeps the newest N versions setting and clears it with null', async () => {
+    const set = await call('PUT', '/settings', { body: { keepVersions: 5 } })
+    expect((await set.json()).settings.keepVersions).toBe(5)
+    const cleared = await call('PUT', '/settings', {
+      body: { keepVersions: null },
+    })
+    expect((await cleared.json()).settings.keepVersions).toBeNull()
+  })
+
   test('rejects unknown, invalid and unbounded input', async () => {
     for (const body of [
       { storageMode: 'cloud' },
@@ -653,6 +693,7 @@ describe('storage mode setting', () => {
       { quotaBytes: -1 },
       { retentionDays: 0 },
       { retentionDays: 4000 },
+      { keepVersions: 0 },
     ])
       expect((await call('PUT', '/settings', { body })).status).toBe(400)
     expect(
@@ -851,6 +892,9 @@ describe('upload in server mode', () => {
     await call('PUT', '/settings', { body: { quotaBytes: 10 } })
     const quota = await put(gcode('q'), 'q.gcode')
     expect(quota.status).toBe(507)
+    expect((await quota.json()).message).toBe(
+      'Cota da biblioteca excedida no servidor.',
+    )
     await call('PUT', '/settings', { body: { quotaBytes: 1_000_000 } })
     store.beforeAdd = () =>
       store.settings.set(farmA, {

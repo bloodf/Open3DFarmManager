@@ -135,6 +135,12 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** Local configuration only. This does not register or authorize a 0015 assignment. */
+export type MoonrakerLinkHealth = {
+  success(startedAtMonoMs: number, receivedAtMonoMs: number): void
+  failure(code: string): void
+  reconnect(): void
+}
+
 export function createMoonrakerSubscription(input: {
   assignment: MoonrakerAssignment
   allowedOrigins: readonly string[]
@@ -143,6 +149,7 @@ export function createMoonrakerSubscription(input: {
   machineProfile?: boolean
   /** Request job fields and report the last job this subscription watched end. */
   jobFields?: boolean
+  linkHealth?: MoonrakerLinkHealth
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -193,6 +200,7 @@ export function createMoonrakerSubscription(input: {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
     while (!signal.aborted) {
+      if (epoch > 0) input.linkHealth?.reconnect()
       if (++epoch > Number.MAX_SAFE_INTEGER) throw Error('Epoch exhausted')
       const currentEpoch = epoch
       let machine: PrinterState['machine']
@@ -318,6 +326,9 @@ export function createMoonrakerSubscription(input: {
         client = openMoonrakerClient({
           origin,
           limits,
+          ...(input.linkHealth
+            ? { onRequestSuccess: input.linkHealth.success }
+            : {}),
           signal,
           ...(input.machineProfile ? { machineProfile: true } : {}),
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
@@ -471,22 +482,20 @@ export function createMoonrakerSubscription(input: {
         }
         backoff = limits.reconnectMinMs
         const reason = await client.closed
-        if (!signal.aborted)
-          emit({
-            kind: 'unavailable',
-            printerKey,
-            reason: stale ? 'stale' : reason,
-          })
+        if (!signal.aborted) {
+          const code = stale ? 'stale' : reason
+          input.linkHealth?.failure(code)
+          emit({ kind: 'unavailable', printerKey, reason: code })
+        }
       } catch (error) {
-        if (!signal.aborted)
-          emit({
-            kind: 'unavailable',
-            printerKey,
-            reason:
-              error instanceof MoonrakerClientError
-                ? error.reason
-                : 'invalid-response',
-          })
+        if (!signal.aborted) {
+          const reason =
+            error instanceof MoonrakerClientError
+              ? error.reason
+              : 'invalid-response'
+          input.linkHealth?.failure(reason)
+          emit({ kind: 'unavailable', printerKey, reason })
+        }
       } finally {
         try {
           invalidate()

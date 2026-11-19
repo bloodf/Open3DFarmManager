@@ -1,4 +1,4 @@
-// Synthetic PostgreSQL only. Caller owns the database, migrations (through 0056) and teardown.
+// Synthetic PostgreSQL only. Caller owns the database, migrations (through 0057) and teardown.
 // Library store + blob store: dedupe, per-farm storage mode, crash safety, quota, roles.
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
@@ -123,6 +123,7 @@ try {
     storageMode: 'connector',
     quotaBytes: 21_474_836_480,
     retentionDays: 30,
+    keepVersions: null,
   })
   assert.equal(defaults.canManage, false)
   for (const who of ['viewer', 'operator'] as const)
@@ -413,13 +414,12 @@ try {
     )[0]?.n,
   )
   const big = await blobs.put(bytes('x'.repeat(30 - used)))
-  assert.deepEqual(
-    await library.addVersion({
-      ...auth('operator'),
-      version: server(big.sha256, big.size, { title: 'big' }),
-    }),
-    { ok: false, reason: 'quota-exceeded' },
-  )
+  const refused = await library.addVersion({
+    ...auth('operator'),
+    version: server(big.sha256, big.size, { title: 'big' }),
+  })
+  assert.ok(!refused.ok && refused.reason === 'quota-exceeded')
+  assert.match(refused.message ?? '', /Cota da biblioteca excedida/)
   assert.equal(await blobRows(big.sha256), 0)
   assert.equal(
     Number(

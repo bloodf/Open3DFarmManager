@@ -30,6 +30,7 @@ const MAX_PAGE = 100
 export type LibraryStore = Pick<
   PostgresLibrary,
   | 'getSettings'
+  | 'getUsage'
   | 'setSettings'
   | 'uploadContext'
   | 'addVersion'
@@ -102,6 +103,7 @@ const invalid = (message = 'Solicitação inválida.') =>
 function failure(
   reason: LibraryFailure['reason'] | 'conflict',
   mutation: boolean,
+  message?: string,
 ): never {
   switch (reason) {
     case 'invalid-input':
@@ -138,7 +140,7 @@ function failure(
     case 'quota-exceeded':
       throw createError({
         status: 507,
-        message: 'A cota da biblioteca desta farm foi atingida.',
+        message: message ?? 'A cota da biblioteca desta farm foi atingida.',
       })
     case 'storage-unavailable':
       throw createError({
@@ -152,6 +154,7 @@ const settingsBody = z.strictObject({
   storageMode: z.enum(['server', 'connector']).optional(),
   quotaBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   retentionDays: z.number().int().min(1).max(3650).optional(),
+  keepVersions: z.number().int().min(1).max(1000).nullable().optional(),
 })
 
 const text = (max: number) =>
@@ -306,7 +309,9 @@ async function upload(
       stored = await blobs.put(body, { maxBytes: LIBRARY_MAX_UPLOAD_BYTES })
       source = blobSource(blobs, stored.sha256, stored.size)
       const sha256 = stored.sha256
-      discard = () => blobs.remove(sha256)
+      discard = async () => {
+        await blobs.remove(sha256)
+      }
     } else {
       const relay = runtime.relay
       const agentId = q.agentId
@@ -363,7 +368,12 @@ async function upload(
         ...(q.notes ? { notes: q.notes } : {}),
       },
     })
-    if (!added.ok) return failure(added.reason, true)
+    if (!added.ok)
+      return failure(
+        added.reason,
+        true,
+        'message' in added ? added.message : undefined,
+      )
     // The bytes are referenced unless a Connector already held them and this server copy is surplus.
     keep = !added.orphanedServerCopy
     event.res.status = 201
@@ -436,9 +446,14 @@ export async function libraryRoutes(
   if (operation === 'settings') {
     const result = await runtime.store.getSettings(authority)
     if (!result.ok) return failure(result.reason, false)
+    // Used and available space for the active mode, for the people who manage it.
+    const usage = result.canManage
+      ? await runtime.store.getUsage(authority)
+      : undefined
     return {
       settings: result.settings,
       locations: result.locations,
+      ...(usage?.ok ? { usage: usage.usage } : {}),
       canManage: result.canManage,
     }
   }

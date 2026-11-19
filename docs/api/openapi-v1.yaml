@@ -1671,6 +1671,7 @@ components:
           minimum: 0
         filamentUsage:
           type: array
+          description: Per-tool usage recorded at job end, when known.
           maxItems: 17
           items:
             $ref: '#/components/schemas/FilamentUsage'

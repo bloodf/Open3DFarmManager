@@ -162,11 +162,13 @@ export async function listIntegrationJobs(
       filename: string | null
       printDurationSeconds: number | null
       totalDurationSeconds: number | null
+      filamentUsage:
+        import('@open3dfarmmanager/farm-protocol').FilamentUsage[] | null
       endedAt: number
     }[]
   >`SELECT h.id::text AS id, h.farm_id::text AS "farmId", p.id::text AS "printerId", h.outcome,
       h.filename, h.print_duration_seconds AS "printDurationSeconds",
-      h.total_duration_seconds AS "totalDurationSeconds", h.ended_at::float8 AS "endedAt"
+      h.total_duration_seconds AS "totalDurationSeconds", h.filament_usage AS "filamentUsage", h.ended_at::float8 AS "endedAt"
       FROM farm.job_history h
       JOIN farm.printer_assignments p ON p.farm_id = h.farm_id AND p.agent_id = h.agent_id
         AND p.printer_key = h.printer_key AND p.revoked_at IS NULL
@@ -189,6 +191,7 @@ export async function listIntegrationJobs(
     ...(row.totalDurationSeconds !== null
       ? { totalDurationSeconds: Number(row.totalDurationSeconds) }
       : {}),
+    ...(row.filamentUsage?.length ? { filamentUsage: row.filamentUsage } : {}),
     endedAt: Number(row.endedAt),
   }))
   const last = data.at(-1)

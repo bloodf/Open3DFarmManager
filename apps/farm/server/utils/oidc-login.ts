@@ -239,3 +239,33 @@ export async function decideOidcAccount(
     role: linked.role,
   }
 }
+
+export interface GoogleDirectory {
+  signInGoogle(input: {
+    issuer: string
+    subject: string
+    email: string
+    username?: string | undefined
+    inviteDigest?: string | undefined
+  }): Promise<{ accountId: string; created: boolean } | null>
+}
+
+/** Only pass identities returned by finishGoogleAuthorization to this function. */
+export async function decideGoogleAccount(
+  identity: OidcIdentity & { readonly email: string },
+  pending: { username?: string | undefined; inviteDigest?: string | undefined },
+  directory: GoogleDirectory,
+): Promise<
+  | { ok: true; accountId: string; created: boolean }
+  | { ok: false; code: 'unlinked' }
+> {
+  if (pending.username !== undefined && !usernamePattern.test(pending.username))
+    return { ok: false, code: 'unlinked' }
+  if (
+    pending.inviteDigest !== undefined &&
+    !digestPattern.test(pending.inviteDigest)
+  )
+    return { ok: false, code: 'unlinked' }
+  const result = await directory.signInGoogle({ ...identity, ...pending })
+  return result ? { ok: true, ...result } : { ok: false, code: 'unlinked' }
+}

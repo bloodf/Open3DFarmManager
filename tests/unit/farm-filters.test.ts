@@ -73,29 +73,28 @@ describe('farm filters', () => {
 
 describe('printer wall', () => {
   const defaults = readFarmWallQuery({})
-  const fixtures = [
-    row('Zulu', 'error'),
-    row('Alfa', 'error'),
-    row('Beta', 'error'),
-    row('Delta', 'error'),
-    row('Gama', 'error', true),
-    row('Épsilon', null),
-  ]
-  Object.assign(fixtures[0].assignment, {
+  const zulu = row('Zulu', 'error')
+  const alfa = row('Alfa', 'error')
+  const beta = row('Beta', 'error')
+  const delta = row('Delta', 'error')
+  const gama = row('Gama', 'error', true)
+  const epsilon = row('Épsilon', null)
+  const fixtures = [zulu, alfa, beta, delta, gama, epsilon]
+  Object.assign(zulu.assignment, {
     groupName: 'Ação & B',
     location: 'Sul/1',
   })
-  Object.assign(fixtures[1].assignment, { groupName: 'B', location: 'Sul/1' })
-  Object.assign(fixtures[2].assignment, {
+  Object.assign(alfa.assignment, { groupName: 'B', location: 'Sul/1' })
+  Object.assign(beta.assignment, {
     groupName: 'Ação & B',
     location: 'Norte',
   })
-  Object.assign(fixtures[3].assignment, {
+  Object.assign(delta.assignment, {
     groupName: 'Ação & B',
     location: 'Sul/1',
     agentId: 'other',
   })
-  Object.assign(fixtures[4].assignment, {
+  Object.assign(gama.assignment, {
     groupName: 'Ação & B',
     location: 'Sul/1',
   })
@@ -156,6 +155,60 @@ describe('printer wall', () => {
     },
   )
 
+  it('round trips every state filter, sort, groupBy and search term through the URL', () => {
+    const filters = [
+      'all',
+      'idle',
+      'printing',
+      'paused',
+      'error',
+      'offline',
+      'unknown',
+      'stale',
+      'connected',
+      'disconnected',
+    ] as const
+    const sorts = ['original', 'name-asc', 'name-desc'] as const
+    const groupBys = ['', 'groupName', 'location'] as const
+    for (const filter of filters) {
+      for (const sort of sorts) {
+        for (const groupBy of groupBys) {
+          const state = {
+            query: 'Mesa & 1',
+            filter,
+            sort,
+            group: 'Ação & B',
+            location: 'Sul/1',
+            connector: 'connector',
+            alerts: 'yes' as const,
+            groupBy,
+          }
+          const params = new URLSearchParams()
+          for (const [key, value] of Object.entries(
+            writeFarmWallQuery(state),
+          )) {
+            if (value !== undefined) params.set(key, value)
+          }
+          expect(
+            readFarmWallQuery(
+              Object.fromEntries(new URLSearchParams(params.toString())),
+            ),
+          ).toEqual(state)
+        }
+      }
+    }
+    expect(writeFarmWallQuery(defaults)).toEqual({
+      q: undefined,
+      filter: undefined,
+      sort: undefined,
+      group: undefined,
+      location: undefined,
+      connector: undefined,
+      alerts: undefined,
+      groupBy: undefined,
+    })
+  })
+
   it('combines existing search, filter and sort with the selected facets', () => {
     const state = readFarmWallQuery({
       q: 'connector',
@@ -175,7 +228,7 @@ describe('printer wall', () => {
         now,
         state,
       ),
-    ).toEqual([fixtures[0], fixtures[2]])
+    ).toEqual([zulu, beta])
     expect(
       readFarmWallQuery({
         q: ['a', 'b'],
@@ -185,26 +238,59 @@ describe('printer wall', () => {
         alerts: null,
       }),
     ).toEqual(defaults)
+
+    const disconnected: FarmRow = {
+      ...row('Ômega', 'printing'),
+      connection: 'closed',
+    }
+    Object.assign(disconnected.assignment, {
+      displayName: 'Bancada Especial',
+      groupName: 'Ação & B',
+      location: 'Sul/1',
+    })
+    const pool = [...fixtures, disconnected]
+    expect(
+      filterFarmRows(pool, 'especial', 'disconnected', 'original', now, {
+        group: 'Ação & B',
+        location: 'Sul/1',
+        connector: 'connector',
+        alerts: 'no',
+      }).map((item) => item.assignment.printerKey),
+    ).toEqual(['Ômega'])
+    expect(
+      filterFarmRows(pool, '', 'connected', 'name-asc', now, {
+        group: 'Ação & B',
+        location: '',
+        connector: '',
+        alerts: 'no',
+      }).map((item) => item.assignment.printerKey),
+    ).toEqual(['Gama'])
   })
 
   it('groups by group or location and keeps missing metadata together', () => {
     expect(groupFarmRows(fixtures, 'groupName')).toEqual([
       {
         key: 'Ação & B',
-        rows: [fixtures[0], fixtures[2], fixtures[3], fixtures[4]],
+        rows: [zulu, beta, delta, gama],
       },
-      { key: 'B', rows: [fixtures[1]] },
-      { key: null, rows: [fixtures[5]] },
+      { key: 'B', rows: [alfa] },
+      { key: null, rows: [epsilon] },
     ])
     expect(groupFarmRows(fixtures, 'location')).toEqual([
       {
         key: 'Sul/1',
-        rows: [fixtures[0], fixtures[1], fixtures[3], fixtures[4]],
+        rows: [zulu, alfa, delta, gama],
       },
-      { key: 'Norte', rows: [fixtures[2]] },
-      { key: null, rows: [fixtures[5]] },
+      { key: 'Norte', rows: [beta] },
+      { key: null, rows: [epsilon] },
     ])
     expect(groupFarmRows(fixtures, '')).toEqual([{ key: null, rows: fixtures }])
+    expect(groupFarmRows([], 'groupName')).toEqual([])
+    const blankGroup = row('Vazio', 'idle')
+    Object.assign(blankGroup.assignment, { groupName: '' })
+    expect(groupFarmRows([epsilon, blankGroup], 'groupName')).toEqual([
+      { key: null, rows: [epsilon, blankGroup] },
+    ])
   })
 
   it('counts every state without counting past errors as current', () => {
@@ -233,12 +319,12 @@ describe('printer wall', () => {
 
   it('accepts inventories with grouping metadata and legacy assignments', () => {
     const assignment = {
-      ...fixtures[0].assignment,
+      ...zulu.assignment,
       assignmentId: '00000000-0000-4000-8000-000000000001',
       agentId: '00000000-0000-4000-8000-000000000002',
     }
     const legacy = {
-      ...fixtures[5].assignment,
+      ...epsilon.assignment,
       assignmentId: '00000000-0000-4000-8000-000000000003',
       agentId: assignment.agentId,
     }

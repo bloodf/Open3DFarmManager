@@ -23,6 +23,7 @@ export const ExtendedControlAction = z.enum([
   'power',
   'timelapse',
   'run_macro',
+  'config_write',
   'load_filament',
   'unload_filament',
   'jog',
@@ -182,6 +183,7 @@ export function controlRoleAllowed(
     action === 'bed_mesh' ||
     action === 'power' ||
     action === 'run_macro' ||
+    action === 'config_write' ||
     action === 'gcode'
   )
     return role === 'owner' || role === 'admin'
@@ -194,6 +196,8 @@ export function controlSourceState(
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
+  if (action === 'config_write')
+    return state === 'idle' || state === 'cancelled'
   if (action === 'service') return state === 'idle' || state === 'cancelled'
   if (action === 'firmware_restart')
     return state === 'error' || state === 'idle'
@@ -313,8 +317,31 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
   z.strictObject({ op: z.enum(['start', 'pause']) }),
 ])
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
+export const ConfigFileName = z
+  .string()
+  .regex(/^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,190}\.cfg$/)
+const ConfigDigest = z.string().regex(/^[a-f0-9]{64}$/)
+const configWriteBase = {
+  path: ConfigFileName,
+  base_sha256: ConfigDigest,
+  restart: z.boolean().optional(),
+}
+export const ConfigWriteArguments = z.union([
+  z.strictObject({ ...configWriteBase, sha256: ConfigDigest }),
+  z
+    .strictObject({ ...configWriteBase, backup: z.string().max(224) })
+    .refine(
+      ({ path, backup }) =>
+        backup.startsWith(`${path}.openfarm-`) &&
+        /^\d{13}\.bak$/.test(backup.slice(path.length + '.openfarm-'.length)),
+    ),
+])
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
+  z.strictObject({
+    action: z.literal('config_write'),
+    args: ConfigWriteArguments,
+  }),
   z.strictObject({ action: z.literal('power'), args: PowerArguments }),
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
   z.strictObject({ action: z.literal('timelapse'), args: TimelapseArguments }),

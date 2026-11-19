@@ -241,6 +241,9 @@ const livePrinters = computed(
                 {
                   online: row.observation.state.state !== 'offline',
                   at: row.observation.received.wall,
+                  ...(row.observation.state.linkHealth
+                    ? { link: row.observation.state.linkHealth }
+                    : {}),
                 },
               ] as const,
             ]

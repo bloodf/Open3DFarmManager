@@ -1,3 +1,9 @@
+import { moonrakerAuthHeaders } from '../config/moonraker.ts'
+import {
+  ConfigWriteRefused,
+  createMoonrakerConfigEditor,
+} from './control-config-editor.ts'
+import { consumeStagedConfig } from '../runtime/file-upload.ts'
 import {
   BedMeshRefused,
   bedMeshQueryWire,
@@ -6,6 +12,7 @@ import {
   refuseBedMesh,
 } from './control-bed-mesh.ts'
 import {
+  ConfigWriteArguments,
   controlTargetState,
   ExcludeObjectArguments,
   controlSourceState,
@@ -149,6 +156,11 @@ const QUERIES = [1, 3, 4, 5, 6, 7, 8, 9, 10].map(queryWire)
 /** One locally bound connection/attempt. This supplies no capability or RTC authority.
  * API contract pin: Moonraker 71f9e677b81afcc6b99dd5002f595025c38edc7b (v0.9.3).
  */
+const editors = new WeakMap<
+  PrinterBinding,
+  ReturnType<typeof createMoonrakerConfigEditor>
+>()
+
 export function openFixedMoonrakerPause(input: {
   binding: PrinterBinding
   allowedOrigins: readonly string[]
@@ -826,11 +838,74 @@ export function openFixedMoonrakerPause(input: {
   }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
+  async function configWrite(
+    args: Record<string, unknown>,
+    request: Parameters<NonNullable<PauseDriver['execute']>>[2],
+  ) {
+    const parsed = ConfigWriteArguments.safeParse(args)
+    const { stillAuthorized } = request
+    if (
+      !parsed.success ||
+      !request.transportId ||
+      !stillAuthorized ||
+      request.binding !== binding ||
+      !prepared ||
+      attempted ||
+      !input.objects?.includes('configfile') ||
+      !input.objects.includes('print_stats')
+    )
+      throw Object.assign(Error('Invalid config command'), {
+        refusal: 'invalid-command',
+      })
+    let editor = editors.get(binding)
+    if (!editor) {
+      editor = createMoonrakerConfigEditor(
+        selected.origin,
+        moonrakerAuthHeaders(selected.origin, selected.limits)['X-Api-Key'],
+      )
+      editors.set(binding, editor)
+    }
+    current()
+    attempted = true
+    const config = parsed.data
+    const options = {
+      ...config,
+      signal: AbortSignal.any([request.signal, ownerSignal]),
+      authorize() {
+        current()
+        return stillAuthorized()
+      },
+      beforeWrite: request.beforeSend,
+    }
+    try {
+      if ('backup' in config)
+        await editor.restore({ ...options, backup: config.backup })
+      else {
+        const content = consumeStagedConfig(
+          request.transportId,
+          config.path,
+          config.sha256,
+        )
+        if (!content) throw new ConfigWriteRefused('invalid')
+        await editor.write({ ...options, sha256: config.sha256, content })
+      }
+      current()
+      now()
+      return { acknowledged: true }
+    } catch (error) {
+      if (error instanceof ConfigWriteRefused)
+        throw Object.assign(error, {
+          refusal: error.reason === 'state' ? 'state' : 'invalid-command',
+        })
+      throw error
+    }
+  }
+
   const driver: PauseDriver = Object.freeze({
     execute(
       action: ExtendedControlAction,
       args: Record<string, unknown>,
-      request: Parameters<PauseDriver['pauseOnce']>[0],
+      request: Parameters<NonNullable<PauseDriver['execute']>>[2],
     ) {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
@@ -860,6 +935,7 @@ export function openFixedMoonrakerPause(input: {
           ),
         )
       }
+      if (action === 'config_write') return configWrite(args, request)
       if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'bed_mesh') return bedMesh(args, request)
       if (action === 'gcode') return executeConsole(args, request)

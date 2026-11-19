@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
@@ -192,6 +193,146 @@ function availability(action: ExtendedControlAction) {
       )
     : { available: false as const, reason: 'Impressora não carregada.' }
 }
+const configAdvertised = computed(
+  () => state.value?.controls?.includes('config_write') === true,
+)
+const configReason = computed(() => {
+  if (!ready.value?.canManage)
+    return 'Apenas proprietários e administradores podem editar a configuração.'
+  const status = availability('config_write')
+  if (!status.available) return status.reason
+  if (commandInFlight.value) return 'Um comando já está em andamento.'
+})
+
+async function withConfigSession<T>(
+  signal: AbortSignal,
+  operation: (
+    session: Awaited<ReturnType<typeof connectFiles>>,
+    key: string,
+  ) => Promise<T>,
+) {
+  const current = row.value
+  if (!current || !configAdvertised.value || configReason.value)
+    throw Error(configReason.value || 'Editor de configuração indisponível.')
+  let session: Awaited<ReturnType<typeof connectFiles>> | undefined
+  const close = () => session?.close()
+  signal.addEventListener('abort', close, { once: true })
+  try {
+    session = await connectFiles(current, signal)
+    signal.throwIfAborted()
+    return await operation(session, current.assignment.printerKey)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Configuração:'))
+      throw error
+    throw Error('Não foi possível concluir a operação de configuração.')
+  } finally {
+    signal.removeEventListener('abort', close)
+    session?.close()
+    await session?.dispose()
+  }
+}
+
+function listConfig(signal: AbortSignal) {
+  return withConfigSession(signal, async (session, key) => {
+    const result = await session.listFiles(key, undefined, undefined, {
+      config: true,
+    })
+    if (!result.ok) throw Error('Lista indisponível')
+    return result.files.map(({ name }) => name)
+  })
+}
+
+async function configHash(bytes: Uint8Array<ArrayBuffer>) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+}
+
+function readConfig(path: string, signal: AbortSignal) {
+  return withConfigSession(signal, async (session, key) => {
+    let bytes: Uint8Array<ArrayBuffer> | undefined
+    let sha256 = ''
+    let backups: string[] = []
+    let offset = 0
+    do {
+      signal.throwIfAborted()
+      const result = await session.listFiles(key, undefined, undefined, {
+        config: true,
+        configPath: path,
+        offset,
+      })
+      if (!result.ok || !result.config || result.download === undefined)
+        throw Error('Arquivo indisponível')
+      if (!bytes) {
+        bytes = new Uint8Array(result.config.size)
+        sha256 = result.config.sha256
+        backups = result.config.backups
+      }
+      const chunk = atob(result.download)
+      if (
+        result.config.sha256 !== sha256 ||
+        (chunk.length === 0 && offset < bytes.length)
+      )
+        throw Error('Arquivo incompleto')
+      bytes.set(
+        Uint8Array.from(chunk, (char) => char.charCodeAt(0)),
+        offset,
+      )
+      offset += chunk.length
+    } while (offset < bytes.length)
+    if ((await configHash(bytes)) !== sha256) throw Error('Arquivo alterado')
+    return {
+      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        bytes,
+      ),
+      sha256,
+      backups,
+    }
+  })
+}
+
+function saveConfig(
+  path: string,
+  base_sha256: string,
+  change: { text: string; restart: boolean } | { backup: string },
+  signal: AbortSignal,
+) {
+  return withConfigSession(signal, async (session, key) => {
+    let args: Record<string, unknown> = { path, base_sha256 }
+    if ('backup' in change) args = { ...args, backup: change.backup }
+    else {
+      const bytes = new TextEncoder().encode(change.text)
+      if (bytes.length > 1024 * 1024)
+        throw Error('Configuração: limite de 1 MiB excedido.')
+      const sha256 = await configHash(bytes)
+      const result = await session.sendFile(
+        {
+          type: 'offer',
+          config: true,
+          transfer_id: crypto.randomUUID(),
+          printer_key: key,
+          name: path,
+          size: bytes.length,
+          sha256,
+        },
+        new Blob([bytes]),
+        signal,
+      )
+      if (!result.ok) throw Error('Transferência recusada')
+      args = { ...args, sha256, restart: change.restart }
+    }
+    signal.throwIfAborted()
+    const result = await session.issueControlCommand('config_write', args)
+    if (result !== 'applied')
+      throw Error(
+        result === 'outcome-unknown'
+          ? 'Configuração: resultado incerto. Abra o arquivo e confira antes de tentar novamente.'
+          : 'Configuração: gravação recusada. Confira o estado da impressora e abra o arquivo novamente.',
+      )
+  })
+}
+
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
 const excludeAvailability = computed(() => availability('exclude_object'))
@@ -533,6 +674,16 @@ onMounted(() => heading.value?.focus())
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
+      <template #config-editor>
+        <ConfigEditorPanel
+          v-if="configAdvertised"
+          :key="row.assignment.assignmentId"
+          :reason="configReason"
+          :list="listConfig"
+          :read="readConfig"
+          :save="saveConfig"
+        />
+      </template>
       <template #arquivos>
         <FileManagerPanel
           :key="row.assignment.assignmentId"

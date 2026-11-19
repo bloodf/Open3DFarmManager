@@ -1,4 +1,7 @@
-import { recordLatestStates } from './postgres-printer-latest-state.ts'
+import {
+  latestStateTableExists,
+  recordLatestStates,
+} from './postgres-printer-latest-state.ts'
 import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
@@ -662,11 +665,15 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
-                await recordLatestStates(
-                  save,
-                  { farmId: request.farmId, agentId: request.agentId },
-                  sorted,
+                if (
+                  sorted.some((event) => event.kind === 'printer-state') &&
+                  (await latestStateTableExists(save))
                 )
+                  await recordLatestStates(
+                    save,
+                    { farmId: request.farmId, agentId: request.agentId },
+                    sorted,
+                  )
                 for (const event of operation.inventorySnapshots) {
                   await save`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
                     VALUES (${request.farmId}::uuid, ${request.agentId}::uuid, ${event.inventory.observedAt}, ${save.json(event.inventory)}::jsonb)

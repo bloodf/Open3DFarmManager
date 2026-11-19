@@ -3,6 +3,7 @@ import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycub
 import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
 import {
   journeyEnabled,
+  reportedProgress,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
@@ -478,7 +479,7 @@ function suite(title: string) {
         const progress = (fraction: string) =>
           expect(async () => {
             await live(page)
-            await expect(row.getByRole('progressbar')).toHaveAttribute(
+            await expect(reportedProgress(row)).toHaveAttribute(
               'value',
               fraction,
               { timeout: 10_000 },

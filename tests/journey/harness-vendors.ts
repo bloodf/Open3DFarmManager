@@ -6,7 +6,6 @@
 import { X509Certificate, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { readFile, realpath } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,6 +18,7 @@ import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-si
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { createJourneyCameraEncoder } from './camera-encoder.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
 export type VendorName = 'bambu' | 'creality' | 'anycubic' | 'kobralink'
@@ -196,18 +196,22 @@ function testFrame(ffmpeg: string): Buffer {
   )
 }
 
-/** Starts the paced loopback camera and builds the Connector's camera section. */
+/**
+ * Starts the paced loopback camera and builds the Connector's camera section.
+ * The encoder is the pinned offline stand-in unless the real FFmpeg
+ * qualification is requested (see ./camera-encoder.ts).
+ */
 async function startCamera(
   kind: 'creality-mjpeg' | 'anycubic-rinkhals',
   undo: Closer[],
 ) {
-  const found = execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
-  const ffmpeg = await realpath(found)
-  const sha256 = createHash('sha256')
-    .update(await readFile(ffmpeg))
-    .digest('hex')
+  const encoder = await createJourneyCameraEncoder()
+  undo.push(() => encoder.dispose())
+  const { path: ffmpeg, sha256 } = encoder
   const sim = await startAnycubicCameraSim({
-    jpeg: testFrame(ffmpeg),
+    // The qualification keeps the 320x240 frame from the real encoder; the
+    // stand-in ignores pixels and reads the pre-encoded frame.
+    jpeg: encoder.kind === 'ffmpeg' ? testFrame(ffmpeg) : encoder.frame,
     frameIntervalMs: 100,
   })
   undo.push(() => sim.close())

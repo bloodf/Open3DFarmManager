@@ -1,4 +1,15 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+// The shell's first tab stop is its skip link; following it by keyboard moves
+// focus to the page content, as a keyboard-only user would.
+async function skipToContent(page: Page) {
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: 'Pular para o conteúdo' }),
+  ).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#conteudo-shell')).toBeFocused()
+}
 
 test('home keyboard navigation exposes account routes and unavailable read-only state', async ({
   page,
@@ -8,32 +19,26 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
     const root = document.querySelector('#__nuxt')
     return root !== null && '__vue_app__' in root
   })
-  await page.keyboard.press('Tab')
-  await expect(page.getByRole('link', { name: 'Minha farm' })).toBeFocused()
-  await page.keyboard.press('Tab')
+  const main = page.getByRole('main')
   await expect(
-    page.getByRole('link', { name: 'Consultar Connectors' }),
+    page.getByRole('heading', {
+      level: 1,
+      name: 'Sua farm de impressão, em um só lugar.',
+    }),
   ).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('link', { name: 'Aprovar Connector' }),
-  ).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('link', { name: 'Dispositivos do navegador' }),
-  ).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('link', { name: 'Entrar', exact: true }),
-  ).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('link', { name: 'Convidar pessoa' }),
-  ).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(
-    page.getByRole('link', { name: 'Sair da conta', exact: true }),
-  ).toBeFocused()
+  const quick = main.getByRole('navigation', { name: 'Acessos rápidos' })
+  for (const name of [
+    'Minha farm',
+    'Consultar Connectors',
+    'Aprovar Connector',
+    'Dispositivos do navegador',
+    'Entrar',
+    'Convidar pessoa',
+    'Sair da conta',
+  ]) {
+    await page.keyboard.press('Tab')
+    await expect(quick.getByRole('link', { name, exact: true })).toBeFocused()
+  }
 
   await expect(
     page.getByRole('heading', { name: 'Recursos ainda indisponíveis' }),
@@ -44,7 +49,8 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   await expect(page.getByRole('main')).toContainText(
     'Sem conexão, o modo degradado será somente leitura; comandos não estarão disponíveis.',
   )
-  await expect(page.getByRole('button')).toHaveCount(0)
+  // The page content offers no commands; the shell's own controls are not part of it.
+  await expect(main.getByRole('button')).toHaveCount(0)
 })
 
 test('login is keyboard operable, labels help, and failed submission focuses an announced error', async ({
@@ -70,6 +76,13 @@ test('login is keyboard operable, labels help, and failed submission focuses an 
     'letras minúsculas',
   )
 
+  await skipToContent(page)
+  await page.keyboard.press('Tab')
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Localização' })
+      .getByRole('link', { name: 'Início' }),
+  ).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(username).toBeFocused()
   await page.keyboard.press('Tab')
@@ -108,11 +121,17 @@ test('successful login by keyboard returns home and focuses its heading', async 
     const root = document.querySelector('#__nuxt')
     return root !== null && '__vue_app__' in root
   })
+  await skipToContent(page)
   await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('textbox', { name: 'Usuário' })).toBeFocused()
   await page.keyboard.type('fixture_user')
   await page.keyboard.press('Tab')
   await page.keyboard.type('synthetic-password')
   await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('button', { name: 'Entrar', exact: true }),
+  ).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL('/')
   await expect(
@@ -153,6 +172,7 @@ test('logout failure focuses an announced error and success returns home', async
   })
   await expect(submit).toBeVisible()
   expect(requests).toBe(0)
+  await skipToContent(page)
   await page.keyboard.press('Tab')
   await expect(submit).toBeFocused()
   await page.keyboard.press('Enter')
@@ -162,7 +182,8 @@ test('logout failure focuses an announced error and success returns home', async
   await expect(page.locator('body')).not.toContainText(
     'private synthetic detail',
   )
-  await expect(page).toHaveURL(/\/sair$/)
+  // Still on the logout page; the skip link only adds its in-page fragment.
+  await expect(page).toHaveURL(/\/sair(#conteudo-shell)?$/)
 
   outcome = 'success'
   await submit.click()

@@ -198,7 +198,7 @@ test('Moonraker snapshot advertises every detected driver action and round-trips
   )
   assert.deepEqual(
     remote.requests.map((request) => request.method),
-    ['printer.objects.list'],
+    ['printer.objects.list', 'server.info'],
   )
 })
 

@@ -1,7 +1,9 @@
-import { parseGcodeMetadata } from '../../../../../packages/shared/src/print-file/gcode-meta.ts'
 import { readThreeMf } from '../../../../../packages/shared/src/print-file/3mf-meta.ts'
 import type { ThreeMfProject } from '../../../../../packages/shared/src/print-file/3mf-meta.ts'
-import { PrintFileMetadata } from '../../../../../packages/shared/src/print-file/metadata.ts'
+import {
+  PrintFileMetadata,
+  readLibraryGcodeMetadata,
+} from '../../../../../packages/shared/src/print-file/metadata.ts'
 import type { BlobStore } from './blob-store.ts'
 
 /** Random-access reads over a stored file; shared shape of the E17.2 and E17.3 parsers. */
@@ -86,7 +88,7 @@ export async function ingest(
 ): Promise<IngestResult> {
   let raw: PrintFileMetadata
   let plateCount = 1
-  if (kind === 'gcode') raw = await parseGcodeMetadata(source)
+  if (kind === 'gcode') raw = await readLibraryGcodeMetadata(source)
   else {
     const result = await readThreeMf(source)
     if (!result.ok) return { ok: false, reason: result.reason }

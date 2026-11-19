@@ -7,8 +7,10 @@ import {
   type LoadedMaterial,
 } from '../../../shared/src/print-file/compatibility.ts'
 import { readThreeMf } from '../../../shared/src/print-file/3mf-meta.ts'
-import { parseGcodeMetadata } from '../../../shared/src/print-file/gcode-meta.ts'
-import type { PrintFileMetadata } from '../../../shared/src/print-file/metadata.ts'
+import {
+  readLibraryGcodeMetadata,
+  type PrintFileMetadata,
+} from '../../../shared/src/print-file/metadata.ts'
 import type { ZipSource } from '../../../shared/src/print-file/zip.ts'
 import type { LibraryPrintArgs } from '../../../farm-protocol/src/control-actions.ts'
 import type { LibraryStore } from './library-store.ts'
@@ -107,7 +109,7 @@ async function readMetadata(
     if (kind === 'gcode')
       return {
         ok: true,
-        meta: { ...(await parseGcodeMetadata(source)), format: 'gcode' },
+        meta: { ...(await readLibraryGcodeMetadata(source)), format: 'gcode' },
       }
     const result = await readThreeMf(source)
     if (!result.ok) return { ok: false, reasons: [result.reason] }

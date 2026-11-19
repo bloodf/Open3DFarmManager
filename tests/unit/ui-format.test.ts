@@ -1,11 +1,16 @@
+import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import {
+
+// Node 22 loads this standalone module without generated Nuxt tsconfigs.
+const {
   formatDateTime,
   formatDuration,
   formatPercentage,
   formatTemperature,
   formatWeight,
-} from '../../apps/farm/app/utils/ui-format'
+} = createRequire(import.meta.url)(
+  '../../apps/farm/app/utils/ui-format.ts',
+) as typeof import('../../apps/farm/app/utils/ui-format')
 
 describe('pt-BR UI formatting', () => {
   it('formats dates in São Paulo even across midnight UTC', () => {

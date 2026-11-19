@@ -23,6 +23,7 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'exclude_object',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -72,6 +73,8 @@ export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (action === 'exclude_object')
+    return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
   if (action === 'firmware_restart')
     return state === 'error' || state === 'idle'
@@ -120,7 +123,17 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+export const ExcludeObjectArguments = z.strictObject({
+  name: z
+    .string()
+    .max(128)
+    .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/),
+})
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('exclude_object'),
+    args: ExcludeObjectArguments,
+  }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

@@ -21,7 +21,10 @@ import {
   SignallingClientChannel,
   type SocketPort,
 } from '../../../../../packages/connector/src/webrtc/signalling-client-channel.ts'
-import { ReadonlyBrowserPeer } from './readonly-peer.ts'
+import {
+  ReadonlyBrowserPeer,
+  type DetailSubscription,
+} from './readonly-peer.ts'
 import type { BrowserCameraHooks } from './camera-media.ts'
 
 const protocol = 'open3dfarm.signalling.v1'
@@ -81,6 +84,7 @@ type Peer = Partial<Pick<ReadonlyBrowserPeer, 'diagnostics'>> & {
   close(reason?: string): void
 }
 type PeerOptions = {
+  detail?: DetailSubscription
   privateKey: CryptoKey
   expectedAgentId: string
   admittedBinding: Promise<unknown>
@@ -105,6 +109,7 @@ export class AuthenticatedBrowserSignallingClient {
   #thumbprint: string | undefined
   #admission: VerifiedRtcAdmission | undefined
   #options: Readonly<{
+    detail?: DetailSubscription
     genuineStatus?: GenuineStatusOptions
     onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
     onTerminal?: (reason: string) => void
@@ -128,6 +133,7 @@ export class AuthenticatedBrowserSignallingClient {
     scope: Scope,
     options: {
       peerFactory?: (options: PeerOptions) => Peer
+      detail?: DetailSubscription
       genuineStatus?: GenuineStatusOptions
       onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
       onTerminal?: (reason: string) => void
@@ -243,6 +249,7 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
+        ...(this.#options.detail ? { detail: this.#options.detail } : {}),
         ...(this.#options.cameraMedia
           ? {
               cameraMedia: this.#options.cameraMedia((reason) =>

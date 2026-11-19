@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -201,14 +201,19 @@ const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
-const actionSchema = macroActionSchema.replace(
+const motionActionSchema = macroActionSchema.replace(
   "'unload_filament'",
   "'unload_filament','extrude','jog','motors_off','z_babystep','set_factor'",
+)
+const actionSchema = motionActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','exclude_object'",
 )
 const previousActionSchemas: Record<number, string> = {
   2: legacyActionSchema,
   3: previousActionSchema,
   4: macroActionSchema,
+  5: motionActionSchema,
 }
 const schema = [
   actionSchema,
@@ -355,7 +360,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, 3, 4, 5, SCHEMA_VERSION].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -560,9 +565,18 @@ function claimRow(
         if (count >= state.capacity) return { ok: false, reason: 'capacity' }
         const recent = state.database
           .prepare(
-            'SELECT count(*) AS n FROM pause_commands WHERE farm_id=? AND printer_key=? AND claimed_at>?',
+            `SELECT count(*) AS n FROM pause_commands
+             JOIN control_command_actions USING (cmd_id)
+             WHERE farm_id=? AND printer_key=?
+               AND (action='exclude_object')=?
+               AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
-          .get(command.farm_id, printerKey, now - 60000)?.n
+          .get(
+            command.farm_id,
+            printerKey,
+            Number(command.action === 'exclude_object'),
+            now - 60000,
+          )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
         if (recent >= 10) return { ok: false, reason: 'rate-limited' }
         state.database

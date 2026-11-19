@@ -24,7 +24,10 @@ type ResolvedKey = {
   audience: string
 }
 type Client = { start(): Promise<void>; close(): void }
+import type { DetailSubscription } from './readonly-peer.ts'
+
 type ClientInput = {
+  detail?: DetailSubscription
   scope: {
     farmId: string
     agentId: string
@@ -49,6 +52,10 @@ export type FarmCameraEvent = Readonly<{
   stream: MediaStream | null
 }>
 type Options = {
+  detailPrinterKey?: () => string
+  onDetail?: (
+    frame: Parameters<DetailSubscription['onUpdate']>[0] | null,
+  ) => void
   resolveKey: (input: {
     scope: FarmScope
     browserKeyId: string
@@ -85,6 +92,9 @@ export function createAuthenticatedFarmStatusFeed(
           }),
         ),
       )
+      const detailKey = refs.find(
+        ({ printerKey }) => printerKey === options.detailPrinterKey?.(),
+      )?.printerKey
       const agentId = input.agentId,
         keyId = input.browserKeyId
       const signal = input.signal,
@@ -132,6 +142,7 @@ export function createAuthenticatedFarmStatusFeed(
         signal.removeEventListener('abort', aborted)
         if (active.get(slot) === retire) active.delete(slot)
         controller.abort()
+        if (detailKey) options.onDetail?.(null)
         try {
           client?.close()
         } catch {}
@@ -268,6 +279,7 @@ export function createAuthenticatedFarmStatusFeed(
                   assignmentRefs: value.assignmentRefs,
                   onStatus: value.onStatus,
                 },
+                ...(value.detail ? { detail: value.detail } : {}),
                 onVerifiedAdmission: value.onVerifiedAdmission,
                 onTerminal: value.onTerminal,
                 ...(value.cameraMedia
@@ -306,6 +318,23 @@ export function createAuthenticatedFarmStatusFeed(
               privateKey: resolved.privateKey,
             },
             assignmentRefs: refs,
+            ...(detailKey
+              ? {
+                  detail: {
+                    printerKey: detailKey,
+                    onUpdate(
+                      frame: Parameters<DetailSubscription['onUpdate']>[0],
+                    ) {
+                      if (
+                        current() &&
+                        session &&
+                        frame.printerKey === detailKey
+                      )
+                        options.onDetail?.(frame)
+                    },
+                  },
+                }
+              : {}),
             ...(cameraMedia ? { cameraMedia } : {}),
             onVerifiedAdmission(value) {
               if (session) return close('rejected')

@@ -20,7 +20,9 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
-const view = useFarmView()
+definePageMeta({ key: (route) => route.path })
+const printerKey = computed(() => String(route.params.printerKey ?? ''))
+const view = useFarmView(() => printerKey.value)
 const { ready, now } = view
 const heading = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
@@ -48,7 +50,6 @@ const {
   closePause,
 } = useFarmControls(view, dialog)
 
-const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const row = computed(
   () =>
     ready.value?.rows.find(
@@ -117,6 +118,7 @@ function availability(action: ExtendedControlAction) {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const excludeAvailability = computed(() => availability('exclude_object'))
 const extrudeAvailability = computed(() => availability('extrude'))
 const extrusion = computed(() => {
   const advertised = state.value?.controls?.includes('extrude') ?? false
@@ -240,6 +242,27 @@ onMounted(() => heading.value?.focus())
       @set-factor="
         (speed, flow, event) =>
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
+      "
+      :print-status="
+        view.detail.value?.printerKey === printerKey
+          ? view.detail.value
+          : undefined
+      "
+      :exclude-available="
+        live &&
+        !!state?.controls?.includes('exclude_object') &&
+        excludeAvailability.available &&
+        !commandInFlight
+      "
+      :exclude-reason="
+        !state?.controls?.includes('exclude_object')
+          ? undefined
+          : excludeAvailability.available
+            ? 'Aguarde a conexão ou o comando em andamento.'
+            : excludeAvailability.reason
+      "
+      @exclude-object="
+        (name, event) => control('exclude_object', event, { name })
       "
       :extrusion="extrusion"
       @set-temperature="setTemperature"

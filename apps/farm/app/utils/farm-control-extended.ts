@@ -28,6 +28,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   motors_off: 'Desligar motores',
   z_babystep: 'Ajuste fino do Z',
   set_factor: 'Definir velocidade e fluxo',
+  exclude_object: 'Excluir objeto',
   extrude: 'Extrudar filamento',
 }
 export function extendedLabel(action: ExtendedControlAction): string {

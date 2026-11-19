@@ -5,6 +5,8 @@ import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
+import PrintStatusPanel from './PrintStatusPanel.vue'
+import type { DetailSubscription } from '../../utils/webrtc/readonly-peer.ts'
 import MotionPanel from './MotionPanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import {
@@ -46,6 +48,9 @@ const props = defineProps<{
   homedAxes?: readonly string[]
   speedPct?: number
   flowPct?: number
+  printStatus?: Parameters<DetailSubscription['onUpdate']>[0] | undefined
+  excludeAvailable?: boolean
+  excludeReason?: string | undefined
 }>()
 const emit = defineEmits<{
   (e: 'set-temperature', heater: string, targetC: number, event: Event): void
@@ -56,6 +61,7 @@ const emit = defineEmits<{
     feed: number,
     event: Event,
   ): void
+  (e: 'exclude-object', name: string, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -128,6 +134,14 @@ const heaterReason = computed(
       :tabs="tabs.available"
     >
       <template #painel>
+        <PrintStatusPanel
+          v-if="printStatus?.capabilities.includes('job')"
+          :frame="printStatus"
+          :can-exclude="!!excludeAvailable"
+          :exclude-reason="excludeReason"
+          :object-reason="reasons?.['exclude-object']"
+          @exclude="(name, event) => emit('exclude-object', name, event)"
+        />
         <HeaterPanel
           v-if="hasHeaters"
           :heaters="heaters"

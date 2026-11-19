@@ -89,6 +89,8 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('exclude_object') && objects.includes('print_stats'))
+    supported.push('exclude_object')
   if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))

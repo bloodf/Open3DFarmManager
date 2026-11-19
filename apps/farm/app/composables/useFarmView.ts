@@ -10,7 +10,12 @@ import { listDeviceKeys } from '../utils/device-key.ts'
 import { createAuthenticatedFarmStatusFeed } from '../utils/webrtc/farm-status-feed.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-export function useFarmView() {
+import type { DetailSubscription } from '../utils/webrtc/readonly-peer.ts'
+
+export function useFarmView(detailPrinterKey?: () => string) {
+  const detail = shallowRef<
+    Parameters<DetailSubscription['onUpdate']>[0] | null
+  >(null)
   // Per component instance, client-only. Never serialize private scope into a Nuxt payload.
   const state = shallowRef<FarmViewState>({ kind: 'loading' })
   const now = shallowRef({ wall: 0, mono: 0 })
@@ -52,6 +57,14 @@ export function useFarmView() {
   const hide = () => view.invalidate()
   onMounted(() => {
     feed = createAuthenticatedFarmStatusFeed({
+      ...(detailPrinterKey
+        ? {
+            detailPrinterKey,
+            onDetail: (frame) => {
+              detail.value = frame
+            },
+          }
+        : {}),
       onCamera({ assignmentId, stream }) {
         const next = new Map(cameras.value)
         if (stream) next.set(assignmentId, stream)
@@ -99,6 +112,7 @@ export function useFarmView() {
   })
   return {
     state,
+    detail,
     now,
     ready: computed(() => (state.value.kind === 'ready' ? state.value : null)),
     cameraFor: (assignmentId: string) =>

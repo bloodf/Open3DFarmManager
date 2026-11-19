@@ -866,8 +866,19 @@ type Fixtures = {
   bootFarm(options: BootOptions): Promise<FarmManager>
 }
 
+/**
+ * The disposable PostgreSQL refuses to start on macOS without a valid locale
+ * ("postmaster became multithreaded during startup"). A shell with no LANG or
+ * LC_ALL, such as a CI runner or a gate, would fail every boot.
+ */
+function ensureLocale() {
+  if (process.env.LC_ALL || /UTF-8$/i.test(process.env.LANG ?? '')) return
+  process.env.LC_ALL = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'
+}
+
 export const test = base.extend<Fixtures>({
   bootFarm: async ({ browser }, use, testInfo) => {
+    ensureLocale()
     const guard = createNetworkGuard()
     const closers: (() => Promise<void>)[] = []
     let booted: FarmManager | undefined

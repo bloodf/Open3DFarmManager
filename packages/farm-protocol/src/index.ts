@@ -19,3 +19,4 @@ export {
 export * from './configuration-signalling.ts'
 
 export * from './control-actions.ts'
+export * from './printer-detail.ts'

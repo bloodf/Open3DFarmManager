@@ -552,7 +552,9 @@ onMounted(() => heading.value?.focus())
           :reason="
             commandInFlight
               ? 'Um comando já está em andamento.'
-              : powerAvailability.reason
+              : powerAvailability.available
+                ? undefined
+                : powerAvailability.reason
           "
           @toggle="(args, event) => control('power', event, args)"
         />
@@ -566,7 +568,9 @@ onMounted(() => heading.value?.focus())
           :reason="
             commandInFlight
               ? 'Um comando já está em andamento.'
-              : serviceAvailability.reason
+              : serviceAvailability.available
+                ? undefined
+                : serviceAvailability.reason
           "
           @restart="(op, event) => control('service', event, { op })"
         />

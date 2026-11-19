@@ -8,7 +8,8 @@ import ExtrusionPanel from './ExtrusionPanel.vue'
 import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import PrintStatusPanel from './PrintStatusPanel.vue'
-import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
+import type { z } from 'zod'
+import type { PrinterDetailStreamUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import BedMeshPanel from './BedMeshPanel.vue'
@@ -124,7 +125,7 @@ const props = defineProps<{
   homedAxes?: readonly string[]
   speedPct?: number
   flowPct?: number
-  printStatus?: Parameters<WebcamDetailOptions['onUpdate']>[1] | undefined
+  printStatus?: z.infer<typeof PrinterDetailStreamUpdate> | undefined
   excludeAvailable?: boolean
   excludeReason?: string | undefined
 }>()

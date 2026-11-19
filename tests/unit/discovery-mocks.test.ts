@@ -85,7 +85,7 @@ test('discovers five printer vendors using guarded loopback sockets', async () =
       }
 
       try {
-        const moonraker = await own(startMoonrakerMock({ port: 0 }))
+        const moonraker = await own(startMoonrakerMock())
         const moonrakerPort = Number(new URL(moonraker.origin).port)
         const responder = await own(startDiscoveryResponder(moonrakerPort))
         const creality = await own(startCrealityDiscoverySimulator({ port: 0 }))

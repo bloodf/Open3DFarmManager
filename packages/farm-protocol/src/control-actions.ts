@@ -196,6 +196,9 @@ export function controlSourceState(
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
+  // A library start uploads a file first: never onto a printer that is busy.
+  if (action === 'start_library_print')
+    return !['printing', 'paused', 'unknown', 'error'].includes(state)
   if (action === 'config_write')
     return state === 'idle' || state === 'cancelled'
   if (action === 'service') return state === 'idle' || state === 'cancelled'

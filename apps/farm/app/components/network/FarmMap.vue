@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import AdoptDiscoveredPrinter from './AdoptDiscoveredPrinter.vue'
 import type { DiscoveredPrinter } from '../../utils/printer-setup-state.ts'
 import DataTable from '../ui/DataTable.vue'
+import EmptyState from '../ui/EmptyState.vue'
 import {
   defaultView,
   filterEntries,
@@ -161,7 +162,14 @@ const statuses = Object.keys(statusInfo) as NetworkStatus[]
       Mostrando {{ shownCount }} de {{ entries.length }} itens.
     </p>
 
-    <p v-if="!connectors.length">Nenhum Connector nesta farm.</p>
+    <EmptyState
+      :level="3"
+      v-if="!connectors.length"
+      title="Nenhum Connector nesta farm."
+      description="Pareie um Connector para ver a rede e as impressoras."
+    >
+      <NuxtLink to="/parear">Parear um Connector</NuxtLink>
+    </EmptyState>
     <div
       v-else-if="view === 'map'"
       class="map-scroll"

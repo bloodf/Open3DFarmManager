@@ -233,8 +233,7 @@ export function uploadFile(
       }
       if (xhr.status === 201)
         resolve(body as { version: LibraryVersion; deduplicated: boolean })
-      else
-        reject(new Error(body?.message ?? 'Não foi possível enviar o arquivo.'))
+      else reject(new Error('Não foi possível enviar o arquivo.'))
     }
     xhr.send(input.file)
   })

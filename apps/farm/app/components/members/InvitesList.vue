@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EmptyState from '../ui/EmptyState.vue'
 import {
   formatInviteExpiry,
   roleLabel,
@@ -18,9 +19,14 @@ const emit = defineEmits<{
 <template>
   <section aria-labelledby="invites-heading">
     <h2 id="invites-heading">Convites pendentes</h2>
-    <p v-if="invites.length === 0" role="status">
-      Nenhum convite pendente nesta farm.
-    </p>
+    <EmptyState
+      :level="3"
+      v-if="invites.length === 0"
+      title="Nenhum convite pendente"
+      description="Todos os convites foram usados, expiraram ou foram revogados. Gere um novo link para convidar mais pessoas."
+    >
+      <NuxtLink to="/convites">Gerar novo convite</NuxtLink>
+    </EmptyState>
     <ul v-else class="invite-list">
       <li v-for="invite in invites" :key="invite.id">
         <div class="identity">

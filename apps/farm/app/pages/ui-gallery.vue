@@ -12,6 +12,7 @@ import IconButton from '../components/ui/IconButton.vue'
 import Meter from '../components/ui/Meter.vue'
 import ProgressBar from '../components/ui/ProgressBar.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import Tabs from '../components/ui/Tabs.vue'
 import Toast from '../components/ui/Toast.vue'
@@ -62,7 +63,14 @@ const rows = [
           />
         </template>
         <template #materials>
-          <EmptyState title="Nenhum material cadastrado" />
+          <EmptyState
+            title="Nenhum material cadastrado"
+            description="Cadastre um material para acompanhar o estoque de filamento."
+          >
+            <Button @click="message = 'Cadastro de material iniciado.'">
+              Cadastrar material
+            </Button>
+          </EmptyState>
         </template>
       </Tabs>
     </Card>
@@ -80,8 +88,21 @@ const rows = [
     </Card>
     <Card>
       <h2>Carregando histórico</h2>
-      <Skeleton />
+      <div aria-busy="true">
+        <p role="status">Carregando histórico…</p>
+        <Skeleton />
+        <Skeleton />
+      </div>
     </Card>
+    <StaleNotice
+      title="Histórico desatualizado"
+      description="Não foi possível atualizar. Mostrando os últimos dados carregados."
+    >
+      <Button @click="message = 'Atualizando o histórico.'">
+        <Icon name="refresh" />
+        Atualizar
+      </Button>
+    </StaleNotice>
     <ErrorState
       title="Histórico indisponível"
       description="Tente carregar o histórico novamente."

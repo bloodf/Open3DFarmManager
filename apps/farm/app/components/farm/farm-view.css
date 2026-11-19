@@ -125,3 +125,7 @@ progress {
     margin: 0;
   }
 }
+.loading {
+  display: grid;
+  gap: 0.5rem;
+}

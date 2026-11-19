@@ -5,6 +5,10 @@ import {
   type LastKnownState,
 } from '../../composables/useLastKnownStates-core.ts'
 import { formatPrinterStateLabel } from '../../utils/farm-view.ts'
+import EmptyState from '../ui/EmptyState.vue'
+import ErrorState from '../ui/ErrorState.vue'
+import Skeleton from '../ui/Skeleton.vue'
+import StaleNotice from '../ui/StaleNotice.vue'
 import {
   KIOSK_STALE_SECONDS,
   clampKioskPage,
@@ -20,10 +24,14 @@ const props = withDefaults(
     fetchedAt: number | null
     /** The last poll failed; the states shown are the previous ones. */
     failed?: boolean
+    /** The account has no farm to show. */
+    noFarm?: boolean
+    /** Fixed pt-BR reason for a failure, when one is known. */
+    problem?: string
     page?: number
     perPage?: number
   }>(),
-  { failed: false, page: 0, perPage: 12 },
+  { failed: false, noFarm: false, problem: '', page: 0, perPage: 12 },
 )
 
 const icons = {
@@ -78,13 +86,43 @@ function temperature(value: number | undefined) {
   <section class="kiosk" aria-label="Painel das impressoras">
     <header class="kiosk__head">
       <h1>Painel das impressoras</h1>
-      <p v-if="fetchedAt === null">Aguardando dados…</p>
-      <p v-else :class="{ kiosk__warn: fetchStale }">{{ headLabel }}</p>
+      <StaleNotice
+        v-if="fetchedAt !== null && fetchStale"
+        class="kiosk__warn"
+        :role="null"
+        :title="headLabel"
+      />
+      <p v-else-if="fetchedAt !== null">{{ headLabel }}</p>
       <p v-if="total > 1">Página {{ current + 1 }} de {{ total }}</p>
     </header>
-    <p v-if="!states.length && fetchedAt !== null" class="kiosk__empty">
-      Nenhuma impressora com estado registrado.
-    </p>
+    <div
+      v-if="fetchedAt === null && !failed && !noFarm"
+      class="kiosk__loading"
+      aria-busy="true"
+    >
+      <p role="status">Carregando o painel. Aguardando dados…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <EmptyState
+      v-else-if="noFarm"
+      title="Nenhuma farm disponível"
+      description="Esta conta ainda não tem acesso a uma farm. Entre com outra conta para ver o painel."
+    />
+    <!-- Read-only wall for a TV: no control, so the retry is automatic. -->
+    <ErrorState
+      v-else-if="fetchedAt === null"
+      title="Painel indisponível"
+      :description="
+        problem ||
+        'Não foi possível carregar os estados das impressoras. Uma nova tentativa será feita automaticamente.'
+      "
+    />
+    <EmptyState
+      v-else-if="!states.length"
+      class="kiosk__empty"
+      title="Nenhuma impressora com estado registrado"
+      description="Atribua uma impressora a um Connector na página Impressoras para vê-la neste painel."
+    />
     <ul class="kiosk__grid">
       <li v-for="card in cards" :key="card.state.assignmentId">
         <article
@@ -138,6 +176,24 @@ function temperature(value: number | undefined) {
 .kiosk__warn {
   color: #ffb454;
   font-weight: 700;
+}
+.kiosk__head .kiosk__warn.stale {
+  background: transparent;
+  border-color: #ffb454;
+}
+.kiosk__loading {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+section.kiosk .ui-card {
+  background: transparent;
+  box-shadow: none;
+  border: 2px solid currentColor;
+  margin-top: 0.75rem;
+}
+section.kiosk .ui-card h2 {
+  color: inherit;
 }
 .kiosk__grid {
   flex: 1;

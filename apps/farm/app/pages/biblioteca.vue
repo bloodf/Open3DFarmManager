@@ -6,6 +6,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Field from '../components/ui/Field.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
 import LibraryDetail from '../components/library/LibraryDetail.vue'
 import LibraryMetadata from '../components/library/LibraryMetadata.vue'
 import LibraryStorage from '../components/library/LibraryStorage.vue'
@@ -46,6 +47,8 @@ const compatPrinter = ref('')
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
+const modeError = ref('')
+const noFarm = ref(false)
 const status = ref('')
 const detailOpen = ref(false)
 const detailItem = ref<LibraryItem | null>(null)
@@ -94,11 +97,10 @@ async function search(more = false) {
     })
     items.value = more ? [...items.value, ...page.items] : page.items
     nextCursor.value = page.nextCursor
-  } catch (cause) {
+  } catch {
     if (signal.aborted) return
-    error.value =
-      (cause as { data?: { message?: string } }).data?.message ??
-      'Não foi possível carregar a biblioteca. Tente novamente.'
+    // Fixed copy only: server messages never reach the user.
+    error.value = 'Não foi possível carregar a biblioteca. Tente novamente.'
   } finally {
     loading.value = false
     loadingMore.value = false
@@ -124,6 +126,7 @@ async function loadSettings() {
 async function start() {
   loading.value = true
   error.value = ''
+  noFarm.value = false
   try {
     const page = await $fetch<{ farms: { farmId: string }[] }>('/api/farms', {
       query: { limit: 1 },
@@ -132,7 +135,7 @@ async function start() {
     })
     farmId.value = page.farms[0]?.farmId ?? ''
     if (!farmId.value) {
-      error.value = 'Nenhuma farm disponível para esta conta.'
+      noFarm.value = true
       loading.value = false
       return
     }
@@ -164,6 +167,7 @@ async function start() {
 
 async function changeMode(storageMode: StorageMode) {
   status.value = ''
+  modeError.value = ''
   try {
     await $fetch(`/api/farms/${farmId.value}/library/settings`, {
       method: 'PUT',
@@ -174,10 +178,8 @@ async function changeMode(storageMode: StorageMode) {
     await loadSettings()
     status.value =
       'Modo de armazenamento alterado. Vale para os próximos envios.'
-  } catch (cause) {
-    error.value =
-      (cause as { data?: { message?: string } }).data?.message ??
-      'Não foi possível alterar o modo de armazenamento.'
+  } catch {
+    modeError.value = 'Não foi possível alterar o modo de armazenamento.'
   }
 }
 
@@ -207,13 +209,20 @@ onBeforeUnmount(() => controller?.abort())
     </p>
     <p v-if="status" role="status">{{ status }}</p>
 
-    <ErrorState
-      v-if="error && !items.length && !loading"
-      title="Biblioteca indisponível"
-      :description="error"
+    <p v-if="modeError" role="alert" class="error">{{ modeError }}</p>
+
+    <EmptyState
+      v-if="noFarm"
+      title="Nenhuma farm disponível"
+      description="Esta conta ainda não tem uma farm. Crie uma farm ou peça acesso para usar a biblioteca."
     >
-      <Button @click="farmId ? search() : start()">Tentar novamente</Button>
-    </ErrorState>
+      <NuxtLink to="/farm">Ir para farms</NuxtLink>
+    </EmptyState>
+    <div v-else-if="error && !items.length && !loading" role="alert">
+      <ErrorState title="Biblioteca indisponível" :description="error">
+        <Button @click="farmId ? search() : start()">Tentar novamente</Button>
+      </ErrorState>
+    </div>
 
     <template v-if="farmId">
       <form
@@ -317,7 +326,14 @@ onBeforeUnmount(() => controller?.abort())
           >{{ visible.length }} item(ns) na lista.</template
         >
       </p>
-      <p v-if="error && items.length" role="alert" class="error">{{ error }}</p>
+      <StaleNotice
+        v-if="error && items.length && !loading"
+        role="alert"
+        title="Lista desatualizada"
+        description="Não foi possível atualizar a biblioteca. Mostrando a última lista carregada, que pode não refletir os filtros atuais."
+      >
+        <Button @click="search()">Tentar novamente</Button>
+      </StaleNotice>
 
       <div v-if="loading" aria-busy="true" class="loading">
         <p role="status">Carregando a biblioteca…</p>

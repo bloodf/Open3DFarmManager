@@ -6,6 +6,11 @@ import SystemServicesPanel from '../../components/printer-detail/SystemServicesP
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
+import Button from '../../components/ui/Button.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import ErrorState from '../../components/ui/ErrorState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import { farmViewErrorText } from '../../utils/farm-view-error.ts'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
 import type {
@@ -73,7 +78,7 @@ const view = useFarmView({
   },
 })
 definePageMeta({ key: (route) => route.path })
-const { ready, now } = view
+const { state: viewState, ready, now, discover } = view
 const heading = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
@@ -380,15 +385,42 @@ onMounted(() => heading.value?.focus())
       <NuxtLink to="/farm">Minha farm</NuxtLink>
       <NuxtLink to="/impressoras">Impressoras</NuxtLink>
     </nav>
-    <p v-if="!ready" ref="heading" role="status" tabindex="-1">
-      Carregando a impressora…
-    </p>
+    <div
+      v-if="viewState.kind === 'loading' || ready?.inventory === 'loading'"
+      class="loading"
+      aria-busy="true"
+    >
+      <p ref="heading" role="status" tabindex="-1">Carregando a impressora…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <section
+      v-else-if="viewState.kind === 'sign-in-required'"
+      aria-label="Acesso à farm"
+    >
+      <h1 ref="heading" tabindex="-1">Entre para ver a impressora</h1>
+      <p>Entre na sua conta para consultar esta impressora.</p>
+      <NuxtLink to="/entrar">Entrar</NuxtLink>
+    </section>
+    <ErrorState
+      v-else-if="viewState.kind === 'error'"
+      title="Não foi possível carregar a impressora"
+    >
+      <p ref="heading" role="alert" tabindex="-1">
+        {{ farmViewErrorText(viewState.reason) }}
+      </p>
+      <div class="actions">
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+      </div>
+    </ErrorState>
     <template v-else-if="!row">
       <h1 ref="heading" tabindex="-1">Impressora não encontrada</h1>
-      <p>
-        Nenhuma impressora com este identificador está atribuída à farm
-        selecionada.
-      </p>
+      <EmptyState
+        title="Nenhuma impressora com este identificador"
+        description="Nenhuma impressora com este identificador está atribuída à farm selecionada."
+      >
+        <NuxtLink to="/impressoras">Ver impressoras da farm</NuxtLink>
+      </EmptyState>
     </template>
     <PrinterDetailDashboard
       v-else

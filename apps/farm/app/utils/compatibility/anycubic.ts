@@ -1,8 +1,8 @@
-import { unknownControlAreas } from './control-areas'
+import { unknownControlAreas } from './control-areas.ts'
 import type {
   ControlAreaCapabilities,
   ControlAreaEvidenceMap,
-} from './control-areas'
+} from './control-areas.ts'
 
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'

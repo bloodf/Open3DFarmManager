@@ -1,5 +1,5 @@
-import type { AnycubicCatalogProduct } from './anycubic'
-import { unknownControlAreas } from './control-areas'
+import type { AnycubicCatalogProduct } from './anycubic.ts'
+import { unknownControlAreas } from './control-areas.ts'
 
 export const lanCatalog: readonly AnycubicCatalogProduct[] = [
   {

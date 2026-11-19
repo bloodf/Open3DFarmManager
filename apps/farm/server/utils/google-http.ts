@@ -6,6 +6,7 @@ import {
 } from 'nuxt/server'
 import {
   authResponse,
+  authenticatedSession,
   establishSession,
   limit,
 } from '../services/authenticated-session.ts'
@@ -17,7 +18,9 @@ import type { OidcSettings } from './oidc-config.ts'
 import {
   beginGoogleAuthorization,
   completeGoogleSignIn,
+  finishGoogleAuthorization,
 } from './oidc-google.ts'
+import { decideGoogleAccountLink } from './identity-google.ts'
 import {
   GOOGLE_PROVIDER_PRESET,
   googleRedirectUri,
@@ -76,6 +79,21 @@ export async function googleStatus(event: AuthEvent) {
 }
 
 export async function googleStartGet(event: AuthEvent): Promise<void> {
+  await googleStart(event, {})
+}
+
+/** Link Google to the signed-in account. */
+export async function googleLinkStartGet(event: AuthEvent): Promise<void> {
+  authResponse(event)
+  const runtime = authRuntime()
+  const auth = await authenticatedSession(event, runtime)
+  await googleStart(event, { linkAccountId: auth.accountId })
+}
+
+async function googleStart(
+  event: AuthEvent,
+  extra: { linkAccountId?: string },
+): Promise<void> {
   const runtime = authRuntime()
   const settings = await googleSettings(runtime)
   if (!settings)
@@ -97,6 +115,7 @@ export async function googleStartGet(event: AuthEvent): Promise<void> {
     nonce: begun.nonce,
     verifier: begun.codeVerifier,
     expiresAt: Date.now() + TRANSACTION_MS,
+    ...(extra.linkAccountId ? { linkAccountId: extra.linkAccountId } : {}),
   })
   redirect(event, begun.url.href)
 }
@@ -120,11 +139,14 @@ export async function googleCallback(event: AuthEvent): Promise<void> {
   const nonce = typeof data.nonce === 'string' ? data.nonce : ''
   const codeVerifier = typeof data.verifier === 'string' ? data.verifier : ''
   const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : 0
+  const linkAccountId =
+    typeof data.linkAccountId === 'string' ? data.linkAccountId : undefined
   await cookie.clear()
   if (!state || !nonce || !codeVerifier || expiresAt < Date.now()) {
     redirect(event, fail)
     return
   }
+  const linkFail = runtime.origin + '/conta#erro=google-vinculo'
   try {
     await limit(
       runtime,
@@ -134,9 +156,29 @@ export async function googleCallback(event: AuthEvent): Promise<void> {
     )
     const config = await oidcConfiguration(settings)
     const incoming = new URL(event.req.url, settings.redirectUri)
+    const callback = oidcCallbackUrl(settings.redirectUri, incoming)
+    if (linkAccountId) {
+      if (!runtime.oidc || !runtime.identities) throw unavailable()
+      const identity = await finishGoogleAuthorization(config, callback, {
+        state,
+        nonce,
+        codeVerifier,
+      })
+      const decision = await decideGoogleAccountLink(identity, linkAccountId, {
+        findLink: (issuer, subject) => runtime.oidc!.findLink(issuer, subject),
+        link: (accountId, issuer, subject) =>
+          runtime.identities!.link(accountId, issuer, subject),
+      })
+      if (!decision.ok) {
+        redirect(event, linkFail)
+        return
+      }
+      redirect(event, runtime.origin + '/conta#google=vinculado')
+      return
+    }
     const decision = await completeGoogleSignIn(
       config,
-      oidcCallbackUrl(settings.redirectUri, incoming),
+      callback,
       { state, nonce, codeVerifier },
       {},
       runtime,

@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import { PostgresRegistration } from '../../apps/farm/server/storage/postgres-registration.ts'
 import { PostgresOidc } from '../../apps/farm/server/storage/postgres-oidc.ts'
+import { PostgresIdentities } from '../../apps/farm/server/storage/postgres-identities.ts'
 import { PostgresSignInRules } from '../../apps/farm/server/storage/sign-in-rules.ts'
+import { GOOGLE_PROVIDER_PRESET } from '../../apps/farm/server/utils/google-provider-preset.ts'
 
 const hash = 'synthetic-registration-password-hash-00000'
 const digest = (c: string) => c.repeat(64)
@@ -285,6 +287,40 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     await store.createInvite(ownerRow.id, farm, 'viewer', digest('7'), 60_000),
     null,
   )
+
+  const identities = new PostgresIdentities(runtime)
+  const googleIssuer = GOOGLE_PROVIDER_PRESET.issuer
+  const oidcIssuer = 'https://oidc.example.test'
+  assert.ok(joined?.accountId)
+  const linkedAccount = joined.accountId
+  assert.equal(
+    await identities.link(linkedAccount, googleIssuer, 'google-subject-dup'),
+    'issuer-linked',
+  )
+  assert.equal(
+    await identities.link(linkedAccount, oidcIssuer, 'other-subject'),
+    'linked',
+  )
+  assert.equal(
+    await identities.link('missing-account', googleIssuer, 'nobody'),
+    'unavailable',
+  )
+  assert.equal(await identities.unlink(linkedAccount, googleIssuer), 'unlinked')
+  assert.equal(await identities.unlink(linkedAccount, oidcIssuer), 'unlinked')
+  assert.equal(await identities.unlink(linkedAccount, oidcIssuer), 'not-linked')
+  const googleOnly = randomUUID()
+  await admin`INSERT INTO farm.session_accounts (id) VALUES (${googleOnly})`
+  await admin`INSERT INTO farm.oidc_identities (issuer, subject, account_id) VALUES (${googleIssuer}, ${'only-google-' + suffix}, ${googleOnly})`
+  assert.equal(await identities.unlink(googleOnly, googleIssuer), 'last-method')
+  const passwordOnly = randomUUID()
+  await admin`INSERT INTO farm.session_accounts (id) VALUES (${passwordOnly})`
+  await admin`INSERT INTO farm.password_credentials (account_id, username, password_hash) VALUES (${passwordOnly}, ${'pw_' + suffix}, ${hash})`
+  assert.equal(
+    await identities.link(passwordOnly, googleIssuer, 'pw-google-' + suffix),
+    'linked',
+  )
+  assert.equal(await identities.unlink(passwordOnly, googleIssuer), 'unlinked')
+
   return [
     'bootstrap single winner and closed afterwards',
     'invite creation owner-only, no owner role, bounded ttl',
@@ -292,5 +328,6 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     'username conflict keeps invite and leaves no orphan',
     'expired and unknown invites rejected, consumed invites immutable',
     'revoked or disabled owner cannot invite and their invites are dead',
+    'members link and unlink Google only with another sign-in method',
   ]
 }

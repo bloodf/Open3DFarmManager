@@ -207,5 +207,6 @@ try {
 }
 if (!requestedRoot && !failure && !cleanupFailure)
   await rm(workRoot, { recursive: true })
+if (failure || cleanupFailure) process.exitCode = 1
 if (failure) throw failure
 if (cleanupFailure) throw cleanupFailure

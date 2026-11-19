@@ -396,7 +396,7 @@ export async function runSimFarmAcceptance(input: {
     // 6. Telemetry from both genuine printers is ingested into PostgreSQL.
     const perPrinter = async () =>
       (await admin`SELECT COALESCE(payload#>>'{state,printerKey}', payload#>>'{transition,printerKey}') AS printer, count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid GROUP BY 1`) as unknown as {
-        printer: string
+        printer: string | null
         n: number
       }[]
     await until(
@@ -423,6 +423,7 @@ export async function runSimFarmAcceptance(input: {
       )[0]!.n as number
     await until(
       async () =>
+        delivered() >= PRINTERS.length + 1 &&
         delivered() >= connector.count('queued') &&
         (await stored()) === delivered(),
       30000,
@@ -444,9 +445,14 @@ export async function runSimFarmAcceptance(input: {
         d: number
       }[]
     assert.equal(totals!.n, totals!.d, 'each event stored exactly once')
-    assert.equal(totals!.n, summary.queued, 'every queued record stored')
-    assert.equal(agentSummary.delivered, summary.queued, 'every record acked')
-    const rows = await perPrinter()
+    const [inventory] =
+      await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+    assert.equal(inventory!.n, 1, 'one seeded inventory snapshot stored')
+    // The collector summary counts printer records; delivery also carries Spoolman.
+    const queued = Number(summary.queued) + inventory!.n
+    assert.equal(totals!.n, queued, 'every queued record stored')
+    assert.equal(agentSummary.delivered, queued, 'every record acked')
+    const rows = (await perPrinter()).filter((row) => row.printer !== null)
     // Idle simulators: exactly one baseline state record per printer.
     assert.deepEqual(
       Object.fromEntries(rows.map((row) => [row.printer, row.n])),
@@ -467,7 +473,7 @@ export async function runSimFarmAcceptance(input: {
       discovered,
       snapshotBytes,
       exactlyOnce: {
-        queued: summary.queued,
+        queued,
         delivered: agentSummary.delivered,
         stored: totals!.n,
         distinct: totals!.d,

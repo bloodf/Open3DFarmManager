@@ -92,10 +92,13 @@ export class MemorySignInProviderStore implements SignInProviderStore {
   private readonly admins = new Set<string>()
   private readonly roles = new Map<string, string>()
 
-  constructor(
-    private readonly master: string,
-    private readonly issuer = 'https://accounts.google.com',
-  ) {}
+  private readonly master: string
+  private readonly issuer: string
+
+  constructor(master: string, issuer = 'https://accounts.google.com') {
+    this.master = master
+    this.issuer = issuer
+  }
 
   /** Test helper: grant or refuse installation-admin access. */
   setActor(actorId: string, role: string | null): void {
@@ -175,10 +178,13 @@ export class MemorySignInProviderStore implements SignInProviderStore {
 }
 
 export class PostgresSignInProviderStore implements SignInProviderStore {
-  constructor(
-    private readonly sql: Sql,
-    private readonly master: string,
-  ) {}
+  private readonly sql: Sql
+  private readonly master: string
+
+  constructor(sql: Sql, master: string) {
+    this.sql = sql
+    this.master = master
+  }
 
   private async actorIsAdmin(tx: Sql, actorId: string): Promise<boolean> {
     const rows = await tx`SELECT m.role FROM farm.memberships m

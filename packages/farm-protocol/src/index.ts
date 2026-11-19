@@ -14,6 +14,8 @@ export * from './sign.ts'
 export {
   TelemetryEvent,
   DiscoveryResults,
+  HeartbeatHealth,
+  MAX_HEARTBEAT_HEALTH_BYTES,
   TelemetryBatch,
   PrinterTransition,
   telemetryPrinterKey,

@@ -1,5 +1,8 @@
 import type { Sql, TransactionSql } from 'postgres'
-import type { TelemetryEvent } from '@open3dfarmmanager/farm-protocol'
+import {
+  MAX_HEARTBEAT_HEALTH_BYTES,
+  type TelemetryEvent,
+} from '@open3dfarmmanager/farm-protocol'
 import {
   evaluateSession,
   type AccountSessionState,
@@ -23,8 +26,6 @@ export interface FarmNetworkReader {
     input: FarmNetworkInput,
   ): Promise<({ ok: true } & NetworkRows) | FarmNetworkFailure>
 }
-
-const MAX_HEALTH_BYTES = 32 * 1024
 
 /**
  * The newest discovery report in a batch replaces the Connector's stored set;
@@ -52,12 +53,26 @@ export async function recordHeartbeat(
   observedAt: number,
   health: { connector: unknown; printers: readonly unknown[] },
 ): Promise<void> {
-  if (Buffer.byteLength(JSON.stringify(health)) > MAX_HEALTH_BYTES)
+  if (Buffer.byteLength(JSON.stringify(health)) > MAX_HEARTBEAT_HEALTH_BYTES)
     throw new Error('Heartbeat health too large')
   await tx`INSERT INTO farm.connector_heartbeats (farm_id, agent_id, last_seen_at, health)
     VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${observedAt}, ${tx.json(health as never)}::jsonb)
     ON CONFLICT (farm_id, agent_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, health = EXCLUDED.health
     WHERE farm.connector_heartbeats.last_seen_at < EXCLUDED.last_seen_at`
+}
+
+/** Updates the network view in the same transaction as accepted telemetry. */
+export async function recordNetworkTelemetry(
+  tx: TransactionSql,
+  scope: { farmId: string; agentId: string },
+  events: readonly TelemetryEvent[],
+): Promise<void> {
+  const heartbeat = events
+    .filter((event) => event.kind === 'heartbeat')
+    .sort((a, b) => b.queuedAt - a.queuedAt)[0]
+  if (heartbeat)
+    await recordHeartbeat(tx, scope, heartbeat.queuedAt, heartbeat.health)
+  await recordDiscoveries(tx, scope, events)
 }
 
 /**

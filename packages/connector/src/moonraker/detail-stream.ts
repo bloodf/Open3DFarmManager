@@ -1,3 +1,4 @@
+import { readSystemServices } from './control-system-services.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   moonrakerAuthHeaders,
@@ -74,6 +75,7 @@ export function createMoonrakerDetailStream(input: {
     let id = 0
     let timer: ReturnType<typeof setTimeout> | undefined
     let selected = new Set<string>()
+    let system: Awaited<ReturnType<typeof readSystemServices>> = {}
     let webcams: Awaited<ReturnType<typeof listDetailWebcams>> | undefined
     let ready = false
     let everReady = false
@@ -169,11 +171,16 @@ export function createMoonrakerDetailStream(input: {
         t: 'detail.update',
         printerKey: input.printerKey,
         seq: seq++,
-        ...normalized,
-        ...(webcams && {
-          capabilities: [...normalized.capabilities, 'webcams'],
-          detail: { ...normalized.detail, webcams },
-        }),
+        capabilities: [
+          ...normalized.capabilities,
+          ...(Object.keys(system).length ? ['system'] : []),
+          ...(webcams ? ['webcams'] : []),
+        ],
+        detail: {
+          ...system,
+          ...normalized.detail,
+          ...(webcams && { webcams }),
+        },
       })
       if (!frame.success) return
       latest = frame.data
@@ -233,6 +240,9 @@ export function createMoonrakerDetailStream(input: {
         case 'notify_gcode_response':
           if (typeof data === 'string') forwardConsole(data)
           break
+        case 'notify_klippy_ready':
+          if (!rpc) abort()
+          break
         case 'notify_klippy_disconnected':
         case 'notify_klippy_shutdown':
           abort()
@@ -248,20 +258,33 @@ export function createMoonrakerDetailStream(input: {
           type: 'agent',
           url: 'https://open3dfarmmanager.local',
         })
-        const objects = fields(await request('printer.objects.list')).objects
-        selected = new Set(selectDetailObjects(objects))
-        const initial = fields(
-          await request('printer.objects.subscribe', {
-            objects: Object.fromEntries(
-              [...selected].map((name) => [name, null]),
-            ),
-          }),
-        )
+        const systemRead = readSystemServices(request)
+        try {
+          const objects = fields(await request('printer.objects.list')).objects
+          selected = new Set(selectDetailObjects(objects))
+          const initial = fields(
+            await request('printer.objects.subscribe', {
+              objects: Object.fromEntries(
+                [...selected].map((name) => [name, null]),
+              ),
+            }),
+          )
+          if (signal.aborted || socket.readyState !== socket.OPEN) return
+          merge(initial.status, initial.eventtime)
+          rpc = request
+        } catch (error) {
+          // Moonraker can still serve system data while Klippy is disconnected.
+          system = await systemRead
+          if (!Object.keys(system).length) throw error
+        }
         if (signal.aborted || socket.readyState !== socket.OPEN) return
-        merge(initial.status, initial.eventtime)
-        rpc = request
         ready = everReady = true
         publish()
+        void systemRead.then((value) => {
+          if (!ready || signal.aborted) return
+          system = value
+          schedulePublish()
+        })
         void listDetailWebcams(request)
           .then((catalogue) => {
             if (socket.readyState !== socket.OPEN || signal.aborted) return

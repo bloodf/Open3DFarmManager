@@ -268,8 +268,10 @@ export class ReadonlyBrowserPeer {
                 detailChunks = []
                 frame = assemblePrinterDetailFrames(chunks)
               }
-              if (frame.t === 'detail.update')
-                detail.onUpdate(frame.detail.webcams ?? null, frame)
+              if (frame.t === 'detail.update') {
+                detail.onUpdate(frame.detail.webcams ?? null)
+                detail.onDetail?.(frame)
+              }
               return
             } catch {
               detailChunks = []
@@ -614,11 +616,11 @@ export class ReadonlyBrowserPeer {
 }
 
 export type WebcamDetailOptions = {
+  onDetail?: (frame: z.infer<typeof PrinterDetailUpdate>) => void
   printerKey: string
   onUpdate: (
     value: NonNullable<
       z.infer<typeof PrinterDetailUpdate>['detail']['webcams']
     > | null,
-    frame: z.infer<typeof PrinterDetailUpdate>,
   ) => void
 }

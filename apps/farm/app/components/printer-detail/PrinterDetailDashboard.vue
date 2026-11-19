@@ -11,6 +11,9 @@ import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
+import HistoryPanel from './HistoryPanel.vue'
+import type { JobHistoryItem } from '../../utils/job-history-view.ts'
+import type { PrinterHistoryJob, PrinterHistoryTotals } from './history-view.ts'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import type { QueueOpArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import {
@@ -70,6 +73,17 @@ const props = defineProps<{
     reason?: string
   }
   canEmergencyStop: boolean
+  /** Per-printer history: the panel shows with the catalog reason when not advertised. */
+  jobHistory?: {
+    advertised: boolean
+    disabledReason?: string
+    jobs: readonly PrinterHistoryJob[]
+    totals: PrinterHistoryTotals | null
+    openfarmJobs: readonly JobHistoryItem[]
+    pending?: boolean
+    error?: string
+    replayHref?: (librarySha256: string) => string | undefined
+  }
   /** Motion controls; the panel shows only when the printer advertises motion. */
   motionAvailability?: MotionAvailabilityMap
   position?: readonly number[]
@@ -176,6 +190,7 @@ const heaterReason = computed(
       label="Seções da impressora"
       :tabs="tabs.available"
     >
+      <template #sistema><slot name="sistema" /></template>
       <template #painel>
         <PrintStatusPanel
           v-if="printStatus?.capabilities.includes('job')"
@@ -260,7 +275,9 @@ const heaterReason = computed(
         />
       </template>
       <template
-        v-for="tab in tabs.available.filter(({ id }) => id !== 'painel')"
+        v-for="tab in tabs.available.filter(
+          ({ id }) => id !== 'painel' && id !== 'sistema',
+        )"
         :key="tab.id"
         #[tab.id]
       >
@@ -272,6 +289,10 @@ const heaterReason = computed(
           :can-command="queue.canCommand"
           :disabled-reason="queue.reason"
           @queue-op="(args, event) => emit('queue-op', args, event)"
+        />
+        <HistoryPanel
+          v-else-if="tab.id === 'historico' && jobHistory"
+          v-bind="jobHistory"
         />
         <p v-else>Sem dados de {{ tab.label }} neste momento.</p>
       </template>

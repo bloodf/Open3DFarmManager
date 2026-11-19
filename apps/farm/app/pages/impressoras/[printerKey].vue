@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
@@ -30,18 +31,24 @@ const initialPrinterKey = String(route.params.printerKey ?? '')
 const webcams = shallowRef<
   Parameters<WebcamDetailOptions['onUpdate']>[0] | null
 >(null)
-const printStatus = shallowRef<
-  Parameters<WebcamDetailOptions['onUpdate']>[1] | null
->(null)
+const detailFrame =
+  shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const systemFrame = computed(() =>
+  detailFrame.value?.capabilities.includes('system')
+    ? detailFrame.value
+    : undefined,
+)
 const view = useFarmView({
+  onDetail(frame) {
+    detailFrame.value = frame
+  },
   printerKey: initialPrinterKey,
-  onUpdate(value, frame) {
-    printStatus.value = frame
+  onUpdate(value) {
     webcams.value = value
   },
   onClose() {
     webcams.value = null
-    printStatus.value = null
+    detailFrame.value = undefined
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -99,6 +106,9 @@ const heaters = computed(() =>
 const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
   const found: DetailCapability[] = [
+    ...(systemFrame.value?.capabilities.includes('system')
+      ? (['system'] as const)
+      : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
@@ -185,6 +195,7 @@ const outputs = computed(() => {
         : undefined,
   }
 })
+const serviceAvailability = computed(() => availability('service'))
 const queueAvailability = computed(() => availability('queue_op'))
 const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
@@ -354,7 +365,7 @@ onMounted(() => heading.value?.focus())
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
       :print-status="
-        printStatus?.printerKey === printerKey ? printStatus : undefined
+        detailFrame?.printerKey === printerKey ? detailFrame : undefined
       "
       :exclude-available="
         live &&
@@ -384,7 +395,24 @@ onMounted(() => heading.value?.focus())
       @set-led="setLed"
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
-    />
+    >
+      <template #sistema>
+        <SystemServicesPanel
+          :firmware="systemFrame?.detail.firmware"
+          :host="systemFrame?.detail.host"
+          :updates="systemFrame?.detail.updates"
+          :can-command="
+            live && serviceAvailability.available && !commandInFlight
+          "
+          :reason="
+            commandInFlight
+              ? 'Um comando já está em andamento.'
+              : serviceAvailability.reason
+          "
+          @restart="(op, event) => control('service', event, { op })"
+        />
+      </template>
+    </PrinterDetailDashboard>
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"

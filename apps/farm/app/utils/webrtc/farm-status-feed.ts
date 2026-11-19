@@ -326,9 +326,11 @@ export function createAuthenticatedFarmStatusFeed(
               ? {
                   webcamDetail: {
                     printerKey: webcamDetail.printerKey,
-                    onUpdate(value, frame) {
-                      if (current() && session)
-                        webcamDetail.onUpdate(value, frame)
+                    onUpdate(value) {
+                      if (current() && session) webcamDetail.onUpdate(value)
+                    },
+                    onDetail(frame) {
+                      if (current() && session) webcamDetail.onDetail?.(frame)
                     },
                   },
                 }

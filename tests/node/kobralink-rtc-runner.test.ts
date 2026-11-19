@@ -10,6 +10,7 @@ import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
   uniqueMatch,
+  type CapturedBody,
 } from '../helpers/kobralink-rtc/cdp-body.ts'
 import { instrumentPage } from '../helpers/kobralink-rtc/observe.ts'
 
@@ -440,11 +441,10 @@ async function observeSessionBodies(
   // can differ by more than the capture's 0.05 ms matching tolerance, even
   // for the same request. This test covers body completeness: claim from
   // the capture session's own events, without changing matching tolerance.
-  const sessionFactory = t.mock.method(
-    context,
-    'newCDPSession',
-    async () => session,
-  )
+  // Only the capture's event session is shared; its durable body store
+  // stays a separate session.
+  const sessionFactory = t.mock.method(context, 'newCDPSession')
+  sessionFactory.mock.mockImplementationOnce(async () => session)
   const network = await captureBodies(page, origin)
   sessionFactory.mock.restore()
   const starts = new Map<
@@ -525,20 +525,36 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
       void page
         .evaluate(async (u) => (await fetch(u)).status, origin + path)
         .catch(() => 0)
-    await new Promise((resolve) => setTimeout(resolve, 2500))
-    const read = async (path: string) => (await takes.get(path))!.read()
-    const done = await read('/api/complete')
+    // A loaded host announces responses and their bytes late: read each
+    // capture only once the network event it depends on was observed.
+    const read = async (
+      path: string,
+      observed: (capture: CapturedBody) => boolean,
+    ) => {
+      const deadline = Date.now() + 60_000
+      for (;;) {
+        const take = takes.get(path)
+        const capture = take && (await take).read()
+        if (capture && observed(capture)) return capture
+        assert.ok(Date.now() < deadline, `${path} was never observed`)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+    await read('/api/complete', () => true)
+    await (await takes.get('/api/complete'))!.finished
+    const done = await read('/api/complete', () => true)
     assert.equal(done.body, '{"denied":"complete"}')
-    const encoded = await read('/api/encoded')
+    const arrived = (capture: CapturedBody) => capture.facts.receivedBytes > 0
+    const encoded = await read('/api/encoded', arrived)
     assert.equal(encoded.facts.encoded, true)
     assert.equal(encoded.facts.finished, false)
     assert.equal(encoded.body, null)
-    const short = await read('/api/short')
+    const short = await read('/api/short', arrived)
     assert.equal(short.body, null)
     assert.equal(short.facts.declaredLength, 100)
     assert.ok(short.facts.receivedBytes > 0)
     assert.ok(short.facts.receivedBytes < 100)
-    const overflow = await read('/api/overflow')
+    const overflow = await read('/api/overflow', (c) => c.facts.finished)
     assert.equal(overflow.body, null)
     assert.equal(overflow.facts.truncated, true)
     // The same request is never claimed a second time.

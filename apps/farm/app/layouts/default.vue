@@ -47,6 +47,7 @@ const links = computed(() => [
   { to: '/arquivos', label: 'Arquivos' },
   { to: '/historico', label: 'Histórico' },
   { to: '/connectors', label: 'Connectors' },
+  { to: '/rede', label: 'Rede' },
   ...(canApproveConnectors.value
     ? [{ to: '/spoolman', label: 'Spoolman' }]
     : []),

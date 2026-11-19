@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
@@ -29,7 +30,12 @@ const initialPrinterKey = String(route.params.printerKey ?? '')
 const webcams = shallowRef<
   Parameters<WebcamDetailOptions['onUpdate']>[0] | null
 >(null)
+const systemFrame =
+  shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
 const view = useFarmView({
+  onDetail(frame) {
+    if (frame.capabilities.includes('system')) systemFrame.value = frame
+  },
   printerKey: initialPrinterKey,
   onUpdate(value) {
     webcams.value = value
@@ -94,6 +100,9 @@ const heaters = computed(() =>
 const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
   const found: DetailCapability[] = [
+    ...(systemFrame.value?.capabilities.includes('system')
+      ? (['system'] as const)
+      : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
@@ -179,6 +188,7 @@ const outputs = computed(() => {
         : undefined,
   }
 })
+const serviceAvailability = computed(() => availability('service'))
 const queueAvailability = computed(() => availability('queue_op'))
 const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
@@ -359,7 +369,24 @@ onMounted(() => heading.value?.focus())
       @set-led="setLed"
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
-    />
+    >
+      <template #sistema>
+        <SystemServicesPanel
+          :firmware="systemFrame?.detail.firmware"
+          :host="systemFrame?.detail.host"
+          :updates="systemFrame?.detail.updates"
+          :can-command="
+            live && serviceAvailability.available && !commandInFlight
+          "
+          :reason="
+            commandInFlight
+              ? 'Um comando já está em andamento.'
+              : serviceAvailability.reason
+          "
+          @restart="(op, event) => control('service', event, { op })"
+        />
+      </template>
+    </PrinterDetailDashboard>
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"

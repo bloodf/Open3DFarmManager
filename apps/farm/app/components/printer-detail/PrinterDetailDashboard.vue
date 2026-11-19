@@ -170,6 +170,7 @@ const heaterReason = computed(
       label="Seções da impressora"
       :tabs="tabs.available"
     >
+      <template #sistema><slot name="sistema" /></template>
       <template #painel>
         <HeaterPanel
           v-if="hasHeaters"
@@ -246,7 +247,9 @@ const heaterReason = computed(
         />
       </template>
       <template
-        v-for="tab in tabs.available.filter(({ id }) => id !== 'painel')"
+        v-for="tab in tabs.available.filter(
+          ({ id }) => id !== 'painel' && id !== 'sistema',
+        )"
         :key="tab.id"
         #[tab.id]
       >

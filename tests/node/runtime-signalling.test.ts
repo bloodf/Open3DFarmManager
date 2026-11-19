@@ -282,3 +282,42 @@ test('an admitted session resets reconnect backoff to the minimum; unadmitted se
   assert.ok(Math.max(...admitted) < 120, String(admitted))
   assert.ok(unadmitted[3]! >= 150, String(unadmitted))
 })
+
+test('a single-use session that served its peer resets backoff; one that never served still backs off', async () => {
+  async function gaps(serve: 'before' | 'after' | 'never') {
+    const controller = new AbortController()
+    const starts: number[] = []
+    const running = runSignallingLifecycle({
+      credentialExpiresAt: Date.now() + 1_000_000,
+      retryMinMs: 20,
+      retryMaxMs: 400,
+      signal: controller.signal,
+      createSession(terminal, admitted, served) {
+        starts.push(performance.now())
+        setImmediate(() => {
+          // Admitted but far short of 30 s of uptime, like a control session.
+          admitted()
+          if (serve === 'before') served()
+          terminal()
+          // Serving after terminal never resets backoff.
+          if (serve === 'after') served()
+        })
+        return {
+          start: async () => {},
+          close() {},
+          dispose: async () => {},
+        }
+      },
+    })
+    while (starts.length < 5) await new Promise((r) => setTimeout(r, 5))
+    controller.abort()
+    await running
+    return starts.slice(1).map((value, index) => value - starts[index]!)
+  }
+  const served = await gaps('before')
+  const late = await gaps('after')
+  const never = await gaps('never')
+  assert.ok(Math.max(...served) < 120, String(served))
+  assert.ok(late[3]! >= 150, String(late))
+  assert.ok(never[3]! >= 150, String(never))
+})

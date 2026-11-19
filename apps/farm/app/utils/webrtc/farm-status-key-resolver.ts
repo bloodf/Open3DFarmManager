@@ -43,7 +43,16 @@ type Options = {
     accountId: string
     farmId: string
   }) => Promise<LocalDeviceKey[]>
+  /** Monotonic clock in milliseconds; tests inject it. */
+  now?: () => number
 }
+/**
+ * The device registry is rate limited per session (60 reads per 15 minutes),
+ * and every live view reopen and control session resolves a key. An approved
+ * verdict is reused this long; refusals are never reused, and account,
+ * metadata and the local key are rechecked on every resolution.
+ */
+export const REGISTRY_REUSE_MS = 60_000
 async function boundedRead(path: string, signal: AbortSignal) {
   const response = await fetch(path, {
     signal,
@@ -85,6 +94,8 @@ export function createFarmStatusKeyResolver(options: Options) {
     options.readAccount ?? ((signal) => boundedRead('/api/auth/me', signal))
   const readRegistry = options.readRegistryPage ?? readBrowserDeviceScope
   const listKeys = options.listKeys ?? listDeviceKeys
+  const now = options.now ?? (() => performance.now())
+  let approved: { id: string; thumbprint: string; at: number } | undefined
   return async (input: Input) => {
     const scope = Object.freeze({ ...input.scope }),
       keyId = input.browserKeyId,
@@ -116,43 +127,57 @@ export function createFarmStatusKeyResolver(options: Options) {
     )
     check()
     if (account.accountId !== scope.accountId) throw Error('Unavailable')
-    const seen = new Set<string>(),
-      cursors = new Set<string>()
-    let after: string | undefined,
-      selected:
-        | z.infer<typeof BrowserDeviceHttpListResponse>['devices'][number]
-        | undefined,
-      complete = false
-    for (let i = 0; i < 32; i++) {
-      const page = BrowserDeviceHttpListResponse.parse(
-        await readRegistry(scope.farmId, signal, after),
-      )
-      check()
-      if (page.currentAccountId !== scope.accountId || page.devices.length > 20)
+    // The registry narrows local key selection; it never grants admission.
+    const id = JSON.stringify([scope.accountId, scope.farmId, keyId])
+    const reusable =
+      approved?.id === id && now() - approved.at < REGISTRY_REUSE_MS
+        ? approved.thumbprint
+        : undefined
+    const thumbprint = reusable ?? (await readApproved())
+    if (reusable === undefined) approved = { id, thumbprint, at: now() }
+    async function readApproved(): Promise<string> {
+      const seen = new Set<string>(),
+        cursors = new Set<string>()
+      let after: string | undefined,
+        selected:
+          | z.infer<typeof BrowserDeviceHttpListResponse>['devices'][number]
+          | undefined,
+        complete = false
+      for (let i = 0; i < 32; i++) {
+        const page = BrowserDeviceHttpListResponse.parse(
+          await readRegistry(scope.farmId, signal, after),
+        )
+        check()
+        if (
+          page.currentAccountId !== scope.accountId ||
+          page.devices.length > 20
+        )
+          throw Error('Unavailable')
+        for (const device of page.devices) {
+          if (seen.has(device.keyId)) throw Error('Unavailable')
+          seen.add(device.keyId)
+          if (device.keyId === keyId && device.accountId === scope.accountId)
+            selected = device
+        }
+        if (page.nextAfter === null) {
+          complete = true
+          break
+        }
+        if (cursors.has(page.nextAfter)) throw Error('Unavailable')
+        cursors.add(page.nextAfter)
+        after = page.nextAfter
+      }
+      if (!complete || !selected || selected.status !== 'approved')
         throw Error('Unavailable')
-      for (const device of page.devices) {
-        if (seen.has(device.keyId)) throw Error('Unavailable')
-        seen.add(device.keyId)
-        if (device.keyId === keyId && device.accountId === scope.accountId)
-          selected = device
-      }
-      if (page.nextAfter === null) {
-        complete = true
-        break
-      }
-      if (cursors.has(page.nextAfter)) throw Error('Unavailable')
-      cursors.add(page.nextAfter)
-      after = page.nextAfter
+      return selected.thumbprint
     }
-    if (!complete || !selected || selected.status !== 'approved')
-      throw Error('Unavailable')
     const keys = await listKeys({
       accountId: scope.accountId,
       farmId: scope.farmId,
     })
     check()
     if (keys.length > 32) throw Error('Unavailable')
-    const matches = keys.filter((key) => key.thumbprint === selected.thumbprint)
+    const matches = keys.filter((key) => key.thumbprint === thumbprint)
     const item = matches[0]
     if (matches.length !== 1 || !item) throw Error('Unavailable')
     const record = {

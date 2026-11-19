@@ -113,6 +113,11 @@ export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
     'Loopback KobraLink bridge stand-in (tests/journey/harness-kobralink-bridge.ts), synthetic Kobra X, printing at 25 %',
 }
 
+/**
+ * LAN access code the Bambu simulator accepts. It must satisfy the production
+ * form rule (6 to 32 letters and digits) so browser set-up can submit it.
+ */
+export const BAMBU_ACCESS_CODE = 'journeyaccess'
 const MODEL_ID = '20024'
 
 type Closer = () => Promise<void>
@@ -257,9 +262,14 @@ export async function startVendorSimulator(
         : 'JOURNEYBAMBU'
       const sim = await startBambuSimulator({
         serial,
-        accessCode: 'journeyaccess',
+        accessCode: BAMBU_ACCESS_CODE,
         ...(options.host === undefined ? {} : { host: options.host }),
         initialState: 'RUNNING',
+        // Matches the 25 % the simulator reports for the running print.
+        initialLayer: 25,
+        // A running print reports its nozzle target; filament changes use it.
+        initialTargetTemperature: 210,
+        totalLayers: 100,
         printDurationMs: 15_000,
         ...(options.ftpsPort === undefined
           ? {}
@@ -274,7 +284,7 @@ export async function startVendorSimulator(
       }
       runtime = async (scope) => {
         const credentialFile = join(directory, 'bambu-credential.json')
-        await privateJson(credentialFile, { accessCode: 'journeyaccess' })
+        await privateJson(credentialFile, { accessCode: BAMBU_ACCESS_CODE })
         return {
           version: 3,
           collection: {
@@ -290,6 +300,8 @@ export async function startVendorSimulator(
                   port: sim.port,
                   ftpsPort: sim.ftpsPort,
                   control: options.control === true,
+                  // Locally provisioned model: opts into extended actions.
+                  model: 'X1C',
                   credentialFile,
                   pinSha256: pinOf(sim.syntheticTrust),
                   allowedEndpoints: [{ host: sim.host, port: sim.port }],

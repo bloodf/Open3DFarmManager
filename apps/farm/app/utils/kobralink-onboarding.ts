@@ -32,6 +32,7 @@ import {
   type ConfigurationResponseFrame,
 } from '../../../../packages/farm-protocol/src/configuration-frames.ts'
 import {
+  ConfigurationPrinterKey,
   deriveConfigurationAssignmentIdentity,
   decodeConfigurationInventoryAck,
   verifyConfigurationInventoryAck,
@@ -165,7 +166,8 @@ export type ConfigurationIssuerMetadataDto = z.infer<
 
 export const ConfigurationRegistrationResponseDto = z.strictObject({
   assignmentId: BrowserDeviceUuid,
-  printerKey: z.string().regex(KOBRA_X_KEY_RE),
+  // Kobra X and Bambu Lab (LAN) commits share this flow.
+  printerKey: ConfigurationPrinterKey,
   receiptSha256: configurationDigest,
   status: z.literal('active'),
   replayed: z.boolean(),

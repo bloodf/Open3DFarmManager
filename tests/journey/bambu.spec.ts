@@ -1,10 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import {
+  BAMBU_LAN_ADDRESS,
   journeyEnabled,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
+import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -12,6 +14,13 @@ const GCODE = Buffer.from('; jornada Bambu\nG28\nG1 X10 Y10 F3000\n')
 const UNKNOWN =
   'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 const NOT_SENT = /Nenhum comando foi enviado\./
+// The page reports a file operation it could not finish (failed session, or
+// cancelled because the live view blinked) with one of these.
+const FILES_UNDONE = [
+  'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
+  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.',
+]
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 if (journeyEnabled())
   test.describe('journey: Bambu Lab', () => {
@@ -128,7 +137,8 @@ if (journeyEnabled())
         page,
         async () => {
           await fill(block)
-          await expect(control).toBeEnabled()
+          // Same allowance as the lifecycle buttons after the last session.
+          await expect(control).toBeEnabled({ timeout: 20_000 })
           await control.click()
         },
         'Confirmar comando',
@@ -136,7 +146,11 @@ if (journeyEnabled())
       )
     }
 
-    async function filamentCommand(page: Page, label: string) {
+    async function filamentCommand(
+      page: Page,
+      label: string,
+      fill: (section: Locator) => Promise<void> = async () => {},
+    ) {
       const section = row(page).getByRole('region', {
         name: 'Macros e filamento de ' + started().printerKey,
       })
@@ -144,12 +158,48 @@ if (journeyEnabled())
       await command(
         page,
         async () => {
-          await expect(button).toBeEnabled()
+          await fill(section)
+          await expect(button).toBeEnabled({ timeout: 20_000 })
           await button.click()
         },
         'Confirmar comando',
         UNKNOWN,
       )
+    }
+
+    /**
+     * Settles one file operation the test just asked for. When the page
+     * reports it undone (a failed session, or one it cancelled because the
+     * live view blinked), the operator checks the printer and asks again; the
+     * journey asks again only while the printer shows nothing arrived.
+     * Starting a print is never repeated and never passes through here.
+     */
+    async function repeatUndone(
+      page: Page,
+      label: string,
+      result: string,
+      untouched: () => boolean,
+    ) {
+      const status = page.getByRole('status').last()
+      const undone = new RegExp(`^(${FILES_UNDONE.map(escape).join('|')})$`)
+      const settled = new RegExp(
+        `^(${[result, ...FILES_UNDONE].map(escape).join('|')})$`,
+      )
+      for (let attempt = 1; ; attempt++) {
+        await expect(status).toHaveText(settled, { timeout: 60_000 })
+        const text = (await status.textContent()) ?? ''
+        if (!undone.test(text)) return
+        expect(
+          untouched(),
+          `${label} reached the printer without a confirmation: ${text}`,
+        ).toBe(true)
+        expect(attempt, text).toBeLessThan(5)
+        await controlInbox()
+        await expect(page.locator('#files-upload')).toBeEnabled({
+          timeout: 45_000,
+        })
+        await page.getByRole('button', { name: label, exact: true }).click()
+      }
     }
 
     async function historyEntry(page: Page, outcome: string) {
@@ -189,11 +239,9 @@ if (journeyEnabled())
         control: true,
         signedControl: true,
         history: true,
-        setup: async ({ page, origin, farmId, configurator, vendor }) => {
+        setup: async ({ page, origin, farmId, configurator }) => {
           if (!configurator)
             throw new Error('Bambu browser set-up needs its config Connector')
-          const host = (vendor?.raw as BambuSim | undefined)?.host
-          if (!host) throw new Error('Bambu simulator host missing')
           await page.goto(origin + '/impressoras', {
             waitUntil: 'domcontentloaded',
           })
@@ -214,9 +262,9 @@ if (journeyEnabled())
             await expect(ready).toBeVisible({ timeout: 10_000 })
           }).toPass({ timeout: 150_000 })
           await page.locator('#onboarding-family').selectOption('bambu-lan')
-          await page.locator('#bambu-ip').fill(host)
+          await page.locator('#bambu-ip').fill(BAMBU_LAN_ADDRESS)
           await page.locator('#bambu-serial').fill('JOURNEYBAMBU')
-          await page.locator('#bambu-access-code').fill('journeyaccess')
+          await page.locator('#bambu-access-code').fill(BAMBU_ACCESS_CODE)
           await page.locator('#bambu-control').check()
           await page
             .getByRole('button', { name: 'Preparar Bambu Lab (LAN)' })
@@ -228,6 +276,7 @@ if (journeyEnabled())
           await page
             .getByRole('button', { name: 'Confirmar e ativar impressora' })
             .click()
+          // The assignment exists only once the Connector signed the commit.
           await expect(
             page.getByText(
               'Impressora adicionada e confirmada com recibo assinado pelo Connector.',
@@ -244,7 +293,9 @@ if (journeyEnabled())
     })
 
     test('completa a jornada Bambu no navegador com resultados confirmados ou desconhecidos', async () => {
-      test.setTimeout(5 * 60_000)
+      // Thirteen Connector sessions, each opened only after the previous one
+      // closed (about 30 s apart), plus a timed print and its history entry.
+      test.setTimeout(15 * 60_000)
       const journey = started()
       const page = journey.ownerPage
       await journey.expectLiveTelemetry()
@@ -291,7 +342,10 @@ if (journeyEnabled())
       await extendedCommand(page, 'Definir velocidade', async (block) => {
         await block.getByLabel('Velocidade').selectOption('sport')
       })
-      await filamentCommand(page, 'Carregar filamento')
+      // Bambu loads into a named AMS tray (AMS 1, tray 1 is tray 0).
+      await filamentCommand(page, 'Carregar filamento', async (section) => {
+        await section.getByLabel('Bandeja AMS').selectOption('0')
+      })
       await filamentCommand(page, 'Descarregar filamento')
 
       for (const name of [
@@ -325,6 +379,13 @@ if (journeyEnabled())
       await expect(input).toBeEnabled({ timeout: 30_000 })
       await controlInbox()
       await page.getByRole('button', { name: 'Consultar arquivos' }).click()
+      // Listing is read-only, so an undone listing is always safe to repeat.
+      await repeatUndone(
+        page,
+        'Consultar arquivos',
+        'Nenhum arquivo nesta impressora.',
+        () => true,
+      )
       const fileOption = page.locator('#files-existing option', {
         hasText: FILE,
       })
@@ -335,7 +396,16 @@ if (journeyEnabled())
         mimeType: 'text/plain',
         buffer: GCODE,
       })
+      // The listing session has ended; upload in the next one.
+      await controlInbox()
       await page.getByRole('button', { name: 'Enviar arquivo' }).click()
+      // Asked again only while the printer has not stored the file.
+      await repeatUndone(
+        page,
+        'Enviar arquivo',
+        'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
+        () => !simulator().uploads.has(FILE),
+      )
       const status = page.getByRole('status').last()
       await expect(status).toHaveText(
         'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
@@ -345,7 +415,16 @@ if (journeyEnabled())
 
       await controlInbox()
       await page.getByRole('button', { name: 'Consultar arquivos' }).click()
+      await repeatUndone(
+        page,
+        'Consultar arquivos',
+        'Arquivos atualizados.',
+        () => true,
+      )
       await expect(fileOption).toHaveCount(1, { timeout: 45_000 })
+      // The listing session has ended; start in the next one. The page clears
+      // its confirmation whenever the live view blips, so confirm last.
+      await controlInbox()
       await page.locator('#files-existing').selectOption(FILE)
       await page.getByRole('checkbox').check()
       await page.getByRole('button', { name: 'Iniciar impressão' }).click()

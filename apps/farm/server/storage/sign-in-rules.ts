@@ -39,7 +39,10 @@ export function parseSignInRules(value: unknown): SignInRules | null {
 }
 
 export class PostgresSignInRules {
-  constructor(private readonly sql: Sql) {}
+  private readonly sql: Sql
+  constructor(sql: Sql) {
+    this.sql = sql
+  }
 
   async access(
     actorId: string,

@@ -15,6 +15,7 @@ import {
   encodeConfigurationInventoryAck,
   decodeConfigurationInventoryAck,
   ConfigurationInventoryExpectation,
+  ConfigurationPrinterKey,
 } from '../../packages/farm-protocol/src/configuration-inventory.ts'
 
 const uuid = '00000000-0000-4000-8000-000000000001'
@@ -69,6 +70,29 @@ async function fixture() {
     ack: await signConfigurationInventoryAck(claims, keys.privateKey),
   }
 }
+it('derives the printer key prefix from the configured backend bridge', async () => {
+  const keyFor = async (bridge_instance_id: string) =>
+    (
+      await deriveConfigurationAssignmentIdentity({
+        ...stable,
+        bridge_instance_id,
+      })
+    ).printer_key
+  const cases = [
+    ['moonraker-bridge', 'moonraker-'],
+    ['bambu-bridge', 'bambu-'],
+    ['kobra-x-bridge', 'kobra-x-'],
+  ] as const
+  for (const [bridge, prefix] of cases) {
+    const key = await keyFor(bridge)
+    expect(key.startsWith(prefix)).toBe(true)
+    expect(ConfigurationPrinterKey.safeParse(key).success).toBe(true)
+    expect(PauseCapabilityV1.shape.printer_key.safeParse(key).success).toBe(
+      true,
+    )
+  }
+  expect(ConfigurationPrinterKey.safeParse('journey-bambu').success).toBe(false)
+})
 it('derives stable domain-scoped identity accepted by existing validators', async () => {
   const id = await deriveConfigurationAssignmentIdentity(stable)
   expect(await deriveConfigurationAssignmentIdentity({ ...stable })).toEqual(id)

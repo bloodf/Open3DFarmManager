@@ -1,4 +1,5 @@
 import type { Sql, TransactionSql } from 'postgres'
+import type { FilamentUsage } from '@open3dfarmmanager/farm-protocol'
 import {
   evaluateSession,
   type AccountSessionState,
@@ -23,6 +24,7 @@ interface RawRow {
   filename: string | null
   printDurationSeconds: number | null
   totalDurationSeconds: number | null
+  filamentUsage: FilamentUsage[] | null
   endedAt: number
 }
 
@@ -38,8 +40,8 @@ export async function recordJobs(
   jobs: readonly JobRecord[],
 ): Promise<void> {
   for (const job of jobs)
-    await tx`INSERT INTO farm.job_history (farm_id, agent_id, printer_key, outcome, filename, print_duration_seconds, total_duration_seconds, ended_at)
-      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${job.printerKey}, ${job.outcome}, ${job.filename ?? null}, ${job.printDurationSeconds ?? null}, ${job.totalDurationSeconds ?? null}, ${job.endedAt})
+    await tx`INSERT INTO farm.job_history (farm_id, agent_id, printer_key, outcome, filename, print_duration_seconds, total_duration_seconds, filament_usage, ended_at)
+      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${job.printerKey}, ${job.outcome}, ${job.filename ?? null}, ${job.printDurationSeconds ?? null}, ${job.totalDurationSeconds ?? null}, ${job.filamentUsage ? JSON.stringify(job.filamentUsage) : null}::jsonb, ${job.endedAt})
       ON CONFLICT DO NOTHING`
 }
 
@@ -109,7 +111,7 @@ export class PostgresJobHistory {
           return { ok: false as const, reason: 'forbidden' as const }
         const rows = await tx<
           RawRow[]
-        >`SELECT id::text AS id, printer_key AS "printerKey", outcome, filename, print_duration_seconds AS "printDurationSeconds", total_duration_seconds AS "totalDurationSeconds", ended_at::float8 AS "endedAt"
+        >`SELECT id::text AS id, printer_key AS "printerKey", outcome, filename, print_duration_seconds AS "printDurationSeconds", total_duration_seconds AS "totalDurationSeconds", filament_usage AS "filamentUsage", ended_at::float8 AS "endedAt"
           FROM farm.job_history
           WHERE farm_id = ${input.farmId}::uuid
             AND (${input.printerKey}::text IS NULL OR printer_key = ${input.printerKey})
@@ -138,6 +140,9 @@ export class PostgresJobHistory {
             : {}),
           ...(row.totalDurationSeconds !== null
             ? { totalDurationSeconds: row.totalDurationSeconds }
+            : {}),
+          ...(row.filamentUsage?.length
+            ? { filamentUsage: row.filamentUsage }
             : {}),
         }))
         const last = jobs.at(-1)

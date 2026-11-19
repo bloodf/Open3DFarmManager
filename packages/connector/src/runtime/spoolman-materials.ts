@@ -13,6 +13,12 @@ export function mapSpoolmanMaterial(spool: Spool, slot = 'external') {
     slot,
     active: true,
     ...(material ? { materialType: material } : {}),
+    ...(spool.filament.diameter === null
+      ? {}
+      : { filamentDiameterMm: spool.filament.diameter }),
+    ...(spool.filament.density === null
+      ? {}
+      : { filamentDensityGramsPerCm3: spool.filament.density }),
     ...(color ? { colorHex: color.length === 6 ? `${color}FF` : color } : {}),
     ...(remaining !== null && initial !== null && initial > 0
       ? {

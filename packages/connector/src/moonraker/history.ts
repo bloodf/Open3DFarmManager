@@ -126,6 +126,9 @@ export function historyJobState(
       ...(job.totalDuration === undefined
         ? {}
         : { totalDuration: job.totalDuration }),
+      ...(job.filamentUsedMm === undefined
+        ? {}
+        : { filamentUsedMillimetres: job.filamentUsedMm }),
       endedAt: job.endedAt,
     },
     observedAt: job.endedAt,

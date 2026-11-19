@@ -3,6 +3,7 @@ import { decodeBambuVersion } from './version.ts'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import type { FilamentUsage } from '@open3dfarmmanager/farm-protocol'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
 import { readBambuCredentials } from './credentials.ts'
 import { decodeBambuReport } from './report.ts'
@@ -61,6 +62,7 @@ export function createBambuRuntimeSubscription(input: {
   let times: Partial<Record<keyof Fields, number>> = {}
   let connected = false
   let activeJob = false
+  let filamentUsage: FilamentUsage[] | undefined
   const clear = () => {
     firmwareObservation = undefined
     version = undefined
@@ -68,6 +70,7 @@ export function createBambuRuntimeSubscription(input: {
     fields = {}
     times = {}
     activeJob = false
+    filamentUsage = undefined
     clearTimeout(timer)
   }
   const unavailable = (
@@ -191,7 +194,8 @@ export function createBambuRuntimeSubscription(input: {
             unavailable('invalid-response')
             return
           }
-          const { kind: _, ...decoded } = result
+          const { kind: _, filamentUsage: usage, ...decoded } = result
+          if (usage?.length) filamentUsage = usage
           const observed: Partial<Fields> = decoded
           // Unknown explicit states must not retain a previously recognized state.
           const raw: unknown = JSON.parse(payload.toString('utf8'))
@@ -212,9 +216,10 @@ export function createBambuRuntimeSubscription(input: {
           delete times.lastJob
           const print = (raw as { print?: { gcode_state?: unknown } })?.print
           const state = print?.gcode_state
-          if (state === 'RUNNING' || state === 'PREPARE' || state === 'PAUSE')
+          if (state === 'RUNNING' || state === 'PREPARE' || state === 'PAUSE') {
+            if (!activeJob) filamentUsage = usage
             activeJob = true
-          else if (
+          } else if (
             activeJob &&
             (state === 'FINISH' || state === 'FAILED' || state === 'IDLE')
           ) {
@@ -225,6 +230,7 @@ export function createBambuRuntimeSubscription(input: {
                   : state === 'FAILED'
                     ? 'failed'
                     : 'cancelled',
+              ...(filamentUsage?.length ? { filamentUsage } : {}),
               endedAt: Date.now(),
             }
             activeJob = false

@@ -1,5 +1,6 @@
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
+import { moonrakerFilamentUsage } from './job-filament-usage.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -377,11 +378,24 @@ export function createFarmSnapshotSource(input: {
       lastJobs.delete(value.printerKey)
       rearmed.add(value.printerKey)
     }
-    const finished =
+    const observedFinished =
       parsedPrinter.data.lastJob ??
       (!fieldStamped && !connectionOnly && value.status
         ? moonrakerLastJob(value.status, parsedPrinter.data.observedAt)
         : undefined)
+    const finished =
+      observedFinished?.filamentUsedMillimetres !== undefined &&
+      observedFinished.filamentUsage === undefined
+        ? {
+            ...observedFinished,
+            filamentUsage: [
+              moonrakerFilamentUsage(
+                observedFinished.filamentUsedMillimetres,
+                value.materialsObservation?.materials,
+              ),
+            ],
+          }
+        : observedFinished
     if (finished && !active) {
       const known = lastJobs.get(value.printerKey)
       // The same terminal state is re-observed every poll; keep its first endedAt.

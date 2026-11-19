@@ -1567,6 +1567,7 @@ export async function startMoonrakerMock(
         'file_manager',
         'history',
         'job_queue',
+        'power',
         'spoolman',
         'update_manager',
         'webcam',

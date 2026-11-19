@@ -37,10 +37,11 @@ export function powerCommand(args: unknown, objects: readonly string[]) {
 }
 
 export class PowerRefused extends Error {
-  constructor(
-    readonly refusal: 'state' | 'unsupported-action' | 'invalid-command',
-  ) {
+  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
+
+  constructor(refusal: 'state' | 'unsupported-action' | 'invalid-command') {
     super(`Power operation refused: ${refusal}`)
+    this.refusal = refusal
   }
 }
 

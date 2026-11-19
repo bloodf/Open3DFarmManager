@@ -16,11 +16,12 @@ type ConfigStorage = {
 }
 
 export class ConfigWriteRefused extends Error {
-  constructor(
-    readonly reason:
-      'invalid' | 'state' | 'base-mismatch' | 'busy' | 'unauthorized',
-  ) {
+  readonly reason:
+    'invalid' | 'state' | 'base-mismatch' | 'busy' | 'unauthorized'
+
+  constructor(reason: ConfigWriteRefused['reason']) {
     super(reason)
+    this.reason = reason
   }
 }
 

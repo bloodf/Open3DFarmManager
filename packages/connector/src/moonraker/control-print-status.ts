@@ -2,12 +2,14 @@ import { ExcludeObjectArguments } from '../../../farm-protocol/src/control-actio
 import { fields, list } from './detail-normalize.ts'
 
 export class ExcludeObjectRefusal extends Error {
+  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
+
   constructor(
     message: string,
-    readonly refusal:
-      'state' | 'unsupported-action' | 'invalid-command' = 'state',
+    refusal: 'state' | 'unsupported-action' | 'invalid-command' = 'state',
   ) {
     super(message)
+    this.refusal = refusal
   }
 }
 

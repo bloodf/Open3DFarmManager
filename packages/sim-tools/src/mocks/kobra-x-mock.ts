@@ -1249,6 +1249,9 @@ export async function startKobraXMock(
             if (typeof settings.fan_speed_pct === 'number') {
               fanSpeedPct = settings.fan_speed_pct
             }
+            if (typeof settings.print_speed_mode === 'number') {
+              printSpeedMode = settings.print_speed_mode
+            }
             if (typeof settings.target_nozzle_temp === 'number') {
               tempState.target_nozzle_temp = settings.target_nozzle_temp
             }

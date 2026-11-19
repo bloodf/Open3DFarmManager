@@ -43,7 +43,7 @@ function state(
   return PrinterState.parse({ printerKey, observedAt: 1000, ...over })
 }
 const printing = () => state({ state: 'printing', progress: 0.4 })
-const finished = (lastJob: Record<string, unknown>) =>
+const finished = (lastJob: NonNullable<PrinterState['lastJob']>) =>
   state({ state: 'idle', progress: 1, lastJob })
 const event = (printer: PrinterState): TelemetryEvent => ({
   eventId: crypto.randomUUID(),
@@ -146,7 +146,7 @@ describe('library start then completion (E16 Moonraker mock)', () => {
 
 describe('unlinked jobs stay unchanged', () => {
   const plain = {
-    outcome: 'completed',
+    outcome: 'completed' as const,
     filename: 'benchy.gcode',
     printDuration: 90,
     endedAt: 7000,

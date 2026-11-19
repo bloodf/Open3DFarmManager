@@ -4,7 +4,7 @@ import { build } from 'esbuild'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { expect, test } from 'vitest'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
-import { launchBrowser } from '../helpers/browser.ts'
+import { withBrowser } from '../helpers/browser.ts'
 import { FarmAssignmentPage } from '../../apps/farm/app/utils/farm-view.ts'
 
 const ids = [
@@ -88,59 +88,70 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
     },
   })
   try {
-    const browser = await launchBrowser({
-      args: ['--disable-background-networking'],
-    })
-    try {
-      const context = await browser.newContext()
-      await context.route('**/*', (route) =>
-        new URL(route.request().url()).origin === server.origin
-          ? route.continue()
-          : route.abort(),
-      )
-      const page = await context.newPage()
-      await page.goto(server.origin)
-      const toggle = page.getByRole('button', { name: 'Tabela' })
-      await toggle.focus()
-      await page.keyboard.press('Enter')
-      await page.reload()
-      const table = page.getByRole('table')
-      await table.waitFor()
-      const links = table.getByRole('link')
-      expect(await links.allTextContents()).toEqual(['Máquina 2', 'Máquina 10'])
-      const progress = table.getByRole('button', { name: 'Progresso' })
-      await progress.focus()
-      await page.keyboard.press('Space')
-      expect(await links.allTextContents()).toEqual(['Máquina 10', 'Máquina 2'])
-      await page.keyboard.press('Enter')
-      expect(await links.allTextContents()).toEqual(['Máquina 2', 'Máquina 10'])
-      expect(
-        await table
-          .getByRole('columnheader', { name: 'Progresso' })
-          .getAttribute('aria-sort'),
-      ).toBe('descending')
-      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-      await links.first().focus()
-      await page.keyboard.press('Enter')
-      const heading = page.getByRole('heading', {
-        name: 'Detalhes da impressora',
-      })
-      await heading.waitFor()
-      expect(
-        await heading.evaluate((element) => element === document.activeElement),
-      ).toBe(true)
-      expect(await page.getByRole('listitem').allTextContents()).toEqual([
-        'Máquina 2',
-      ])
-      await page.goBack()
-      await table.waitFor()
-      await page.getByRole('button', { name: 'Cartões' }).click()
-      await page.reload()
-      await page.getByRole('list').waitFor()
-      expect(await table.count()).toBe(0)
-    } finally {
-      await browser.close()
-    }
+    await withBrowser(
+      { args: ['--disable-background-networking'] },
+      async (browser) => {
+        const context = await browser.newContext()
+        await context.route('**/*', (route) =>
+          new URL(route.request().url()).origin === server.origin
+            ? route.continue()
+            : route.abort(),
+        )
+        const page = await context.newPage()
+        await page.goto(server.origin)
+        const toggle = page.getByRole('button', { name: 'Tabela' })
+        await toggle.focus()
+        await page.keyboard.press('Enter')
+        await page.reload()
+        const table = page.getByRole('table')
+        await table.waitFor()
+        const links = table.getByRole('link')
+        expect(await links.allTextContents()).toEqual([
+          'Máquina 2',
+          'Máquina 10',
+        ])
+        const progress = table.getByRole('button', { name: 'Progresso' })
+        await progress.focus()
+        await page.keyboard.press('Space')
+        expect(await links.allTextContents()).toEqual([
+          'Máquina 10',
+          'Máquina 2',
+        ])
+        await page.keyboard.press('Enter')
+        expect(await links.allTextContents()).toEqual([
+          'Máquina 2',
+          'Máquina 10',
+        ])
+        expect(
+          await table
+            .getByRole('columnheader', { name: 'Progresso' })
+            .getAttribute('aria-sort'),
+        ).toBe('descending')
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual(
+          [],
+        )
+        await links.first().focus()
+        await page.keyboard.press('Enter')
+        const heading = page.getByRole('heading', {
+          name: 'Detalhes da impressora',
+        })
+        await heading.waitFor()
+        expect(
+          await heading.evaluate(
+            (element) => element === document.activeElement,
+          ),
+        ).toBe(true)
+        expect(await page.getByRole('listitem').allTextContents()).toEqual([
+          'Máquina 2',
+        ])
+        await page.goBack()
+        await table.waitFor()
+        await page.getByRole('button', { name: 'Cartões' }).click()
+        await page.reload()
+        await page.getByRole('list').waitFor()
+        expect(await table.count()).toBe(0)
+      },
+    )
   } finally {
     await server.close()
   }

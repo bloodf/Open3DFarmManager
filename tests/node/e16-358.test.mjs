@@ -57,3 +57,11 @@ test('canonical temp paths do not mask startup log redaction and cleanup', () =>
     /pass 1/,
   )
 })
+
+test('KobraLink integration exercises the loopback protocol suite by default', () => {
+  assert.match(node('scripts/test-kobralink-integration.mjs'), /pass 7/)
+})
+
+test('rtc-farm all-mode summary defers container-only rows outside docker mode', () => {
+  assert.match(node('--test', 'tests/node/rtc-farm-all-mode.test.ts'), /fail 0/)
+})

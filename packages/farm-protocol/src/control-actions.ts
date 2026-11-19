@@ -15,6 +15,7 @@ export const ExtendedControlAction = z.enum([
   'start_print',
   'start_library_print',
   'firmware_restart',
+  'service',
   'run_macro',
   'load_filament',
   'unload_filament',
@@ -111,10 +112,16 @@ export const MacroParams = z.custom<Record<string, string>>((value) => {
     )
   )
 })
+export const ServiceArguments = z.strictObject({
+  op: z.enum(['klipper_restart', 'firmware_restart', 'moonraker_restart']),
+})
+export type ServiceOperation = z.infer<typeof ServiceArguments>['op']
+
 export function controlRoleAllowed(
   role: string,
   action?: ExtendedControlAction,
 ): boolean {
+  if (action === 'service') return role === 'owner'
   if (action === 'run_macro') return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
@@ -123,6 +130,7 @@ export function controlSourceState(
   state: string,
 ): boolean {
   if (action === 'emergency_stop') return true
+  if (action === 'service') return state === 'idle' || state === 'cancelled'
   if (action === 'firmware_restart')
     return state === 'error' || state === 'idle'
   // Jogging and releasing the motors never run during a job.
@@ -211,6 +219,7 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
 ])
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({

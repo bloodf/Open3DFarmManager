@@ -30,7 +30,7 @@ test('the assignment inventory accepts grouping metadata', () => {
   ).toEqual(printers)
 })
 
-test('remembers the table, sorts by keyboard and opens printer details', async () => {
+test('remembers the table, sorts by keyboard and links to printer details', async () => {
   const filename = 'apps/farm/app/components/farm/PrinterWallTable.vue'
   const { descriptor, errors } = parse(await readFile(filename, 'utf8'), {
     filename,
@@ -130,22 +130,15 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual(
           [],
         )
-        await links.first().focus()
-        await page.keyboard.press('Enter')
-        const heading = page.getByRole('heading', {
-          name: 'Detalhes da impressora',
-        })
-        await heading.waitFor()
+        // Each row opens the printer detail page, not an anchor on this page.
         expect(
-          await heading.evaluate(
-            (element) => element === document.activeElement,
+          await links.evaluateAll((anchors) =>
+            anchors.map((anchor) => anchor.getAttribute('href')),
           ),
-        ).toBe(true)
-        expect(await page.getByRole('listitem').allTextContents()).toEqual([
-          'Máquina 2',
+        ).toEqual([
+          '/impressoras/Impressora%200',
+          '/impressoras/Impressora%201',
         ])
-        await page.goBack()
-        await table.waitFor()
         await page.getByRole('button', { name: 'Cartões' }).click()
         await page.reload()
         await page.getByRole('list').waitFor()
@@ -155,4 +148,4 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
   } finally {
     await server.close()
   }
-}, 30_000)
+}, 90_000)

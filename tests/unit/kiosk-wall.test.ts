@@ -133,7 +133,8 @@ it('polls every 5 s and requests the screen wake lock', async () => {
   )
   expect(page).toContain("wakeLock?.request('screen')")
   expect(page).toContain('setInterval(poll, KIOSK_POLL_MS)')
-  expect(page).toContain('/printer-states')
+  expect(page).toContain('statusSummaryPath(farmId)')
+  expect(page).not.toContain('/printer-states')
   expect(page).toContain('background: #0b0d10')
 })
 

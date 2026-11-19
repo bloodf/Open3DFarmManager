@@ -1,11 +1,12 @@
 <script setup lang="ts" generic="Row extends FarmRow">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   formatPrinterStateLabel,
   observationAge,
   type FarmRow,
 } from '../../utils/farm-view.ts'
 import { formatJobTime } from '../../utils/farm-job-view.ts'
+import { printerDetailHref } from '../../utils/farm-wall-card.ts'
 
 const props = defineProps<{
   rows: readonly Row[]
@@ -14,23 +15,7 @@ const props = defineProps<{
 
 const storageKey = 'openfarm:printer-wall-view'
 const mode = ref('cards')
-const detailId = ref('')
-const detail = computed(() =>
-  props.rows.find((row) => row.assignment.assignmentId === detailId.value),
-)
 defineSlots<{ default(props: { rows: readonly Row[] }): unknown }>()
-const detailHeading = ref<HTMLElement | null>(null)
-const tableToggle = ref<HTMLButtonElement | null>(null)
-
-function syncDetail() {
-  const previous = detailId.value
-  const hash = window.location.hash
-  detailId.value = hash.startsWith('#impressora-')
-    ? hash.slice('#impressora-'.length)
-    : ''
-  if (detailId.value) void nextTick(() => detailHeading.value?.focus())
-  else if (previous) void nextTick(() => tableToggle.value?.focus())
-}
 
 onMounted(() => {
   try {
@@ -38,19 +23,10 @@ onMounted(() => {
   } catch {
     // The toggle still works when browser storage is blocked.
   }
-  syncDetail()
-  window.addEventListener('hashchange', syncDetail)
 })
-onUnmounted(() => window.removeEventListener('hashchange', syncDetail))
 
 function selectMode(value: 'cards' | 'table') {
   mode.value = value
-  if (detailId.value) {
-    const url = new URL(window.location.href)
-    url.hash = ''
-    window.history.replaceState(window.history.state, '', url)
-    syncDetail()
-  }
   try {
     localStorage.setItem(storageKey, value)
   } catch {
@@ -110,7 +86,11 @@ const sortedRows = computed(() => {
         alerts.length ? alerts.join(', ') : 'Nenhum',
         age?.seconds,
       ]
-      return { id: row.assignment.assignmentId, cells }
+      return {
+        id: row.assignment.assignmentId,
+        printerKey: row.assignment.printerKey,
+        cells,
+      }
     })
     .sort((a, b) => {
       const left = a.cells[index]
@@ -145,27 +125,20 @@ function display(value: string | number | null | undefined, index: number) {
   <div role="group" aria-label="Visualização das impressoras" class="actions">
     <button
       type="button"
-      :aria-pressed="!detail && mode === 'cards'"
+      :aria-pressed="mode === 'cards'"
       @click="selectMode('cards')"
     >
       Cartões
     </button>
     <button
-      ref="tableToggle"
       type="button"
-      :aria-pressed="!detail && mode === 'table'"
+      :aria-pressed="mode === 'table'"
       @click="selectMode('table')"
     >
       Tabela
     </button>
   </div>
-  <section v-if="detail" aria-labelledby="printer-wall-detail">
-    <h3 id="printer-wall-detail" ref="detailHeading" tabindex="-1">
-      Detalhes da impressora
-    </h3>
-    <slot :rows="[detail]" />
-  </section>
-  <slot v-else-if="mode === 'cards'" :rows="rows" />
+  <slot v-if="mode === 'cards'" :rows="rows" />
   <div
     v-else
     class="wall-scroll"
@@ -203,7 +176,7 @@ function display(value: string | number | null | undefined, index: number) {
       <tbody>
         <tr v-for="row in sortedRows" :key="row.id">
           <th scope="row">
-            <a :href="`#impressora-${row.id}`">{{ row.cells[0] }}</a>
+            <a :href="printerDetailHref(row.printerKey)">{{ row.cells[0] }}</a>
           </th>
           <td v-for="index in columns.length - 1" :key="index">
             {{ display(row.cells[index], index) }}

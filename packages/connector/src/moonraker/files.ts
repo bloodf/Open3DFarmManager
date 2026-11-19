@@ -210,7 +210,10 @@ export function createThumbnailDownload(input: {
   signal: AbortSignal
 }): (path: string) => Promise<Response> {
   return async (path) => {
-    if (!path.startsWith('gcodes/') || !safeRelative(path))
+    if (
+      !(path.startsWith('gcodes/') || path.startsWith('timelapse/')) ||
+      !safeRelative(path)
+    )
       throw Error('Invalid thumbnail path')
     const origin = new URL(input.origin)
     if (

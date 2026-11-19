@@ -159,5 +159,22 @@ Failures on this candidate:
   state `42501`) from `/api/auth/google`; migration `0076_sign_in_providers`
   grants the table only to `farm_account_registration`.
 
+  Diagnosis from the retained logs and a focused local rerun
+  (`harness-smoke.spec.ts`, local PostgreSQL 17, system Chrome): two separate
+  defects.
+  - The journey wired `NUXT_AUTH_DATABASE_URL` to a `farm_password_auth`
+    login, but the auth connection role must be `farm_account_registration`
+    (see [Account creation](ACCOUNT-CREATION.md)). The sign-in page swallows
+    the failed `/api/auth/google` call, so sign-in still worked and the 42501
+    was not what stopped telemetry. The journey now uses a
+    `farm_account_registration` login (no superuser, `BYPASSRLS` or new
+    grants), checks its grants at fixture start and requires
+    `/api/auth/google` to answer `enabled: false` before a journey starts.
+  - Every failure stops at the same assertion: the reported-progress bar was
+    "not found". Commit `54f0b9cf` replaced the card's `<progress value>` and
+    its "Progresso informado da impressão: N%" label with `ProgressRing`
+    (`aria-label` without the colon, `aria-valuenow` in points). The journey
+    locators now match that contract and assert the same fractions.
+
 Issue #367 stays open until every step passes on one candidate. The
 `test-sim-farm`, `app-smoke` and RTSP steps ran offline with no blocked attempt.

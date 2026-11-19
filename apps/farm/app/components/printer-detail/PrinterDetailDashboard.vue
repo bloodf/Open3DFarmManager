@@ -33,6 +33,7 @@ import {
   DEFAULT_UNSUPPORTED_REASON,
   detailTabs,
   type DetailCapability,
+  type VendorPanelCatalog,
   type DetailTabId,
   type HeaterHistory,
   type HeaterReading,
@@ -49,6 +50,7 @@ const props = defineProps<{
   /** Age of the last known data, shown while not live. */
   lastKnownText?: string
   supportedOnly?: boolean
+  vendorCatalog?: VendorPanelCatalog
   capabilities?: readonly DetailCapability[]
   /** Catalog reasons per capability the printer does not advertise. */
   reasons?: Readonly<Partial<Record<DetailCapability, string>>>
@@ -178,7 +180,9 @@ const emit = defineEmits<{
 }>()
 
 const selected = ref<DetailTabId>('painel')
-const tabs = computed(() => detailTabs(props.capabilities, props.reasons))
+const tabs = computed(() =>
+  detailTabs(props.capabilities, props.reasons, props.vendorCatalog),
+)
 const hasHeaters = computed(() => props.capabilities?.includes('heaters'))
 const hasMotion = computed(() => props.capabilities?.includes('motion'))
 const hasFactors = computed(
@@ -384,11 +388,9 @@ const heaterReason = computed(
         >
       </template>
     </Tabs>
-    <section
-      v-if="!supportedOnly && tabs.unavailable.length"
-      aria-labelledby="unavailable-title"
-    >
+    <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">
       <h2 id="unavailable-title">Recursos indisponíveis</h2>
+      <p v-if="vendorCatalog">{{ vendorCatalog.hardwareNote }}</p>
       <ul>
         <li v-for="tab in tabs.unavailable" :key="tab.id">
           <strong>{{ tab.label }}:</strong> {{ tab.reason }}

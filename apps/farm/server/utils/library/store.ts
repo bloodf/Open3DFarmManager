@@ -142,9 +142,11 @@ const ITEM_COLUMNS = (tx: Sql) =>
 /** `lite` drops the thumbnail payload (up to 256 KiB per version) from lists. */
 const VERSION_COLUMNS = (tx: Sql, lite = false) =>
   tx`${lite ? tx`v.metadata - 'thumbnail' AS metadata` : tx`v.metadata`}, jsonb_exists(v.metadata, 'thumbnail') AS "hasThumbnail", v.id, v.item_id AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes",
-     v.storage_location AS "storageLocation", b.agent_id AS "agentId", v.original_name AS "originalName", v.kind,
+     v.storage_location AS "storageLocation", COALESCE(v.agent_id, b.agent_id) AS "agentId", v.original_name AS "originalName", v.kind,
      v.plate_count AS "plateCount", v.notes, v.uploaded_by AS "uploadedBy",
      v.created_at::float8 AS "createdAt", v.deleted_at::float8 AS "deletedAt", b.purged_at::float8 AS "purgedAt"`
+const VERSION_BLOB_JOIN = (tx: Sql) =>
+  tx`b.farm_id=v.farm_id AND b.sha256=v.sha256 AND b.storage_location=v.storage_location AND b.location_agent_id=v.location_agent_id`
 
 /**
  * Library metadata. Server mode keeps the file in the blob store; Connector mode
@@ -397,33 +399,49 @@ export class PostgresLibrary {
           if (!item) return { ok: false as const, reason: 'not-found' as const }
         }
 
-        // One blob per (farm, sha256): a repeat adds a version reference only.
-        const existing = (
-          await tx<
-            {
-              storageLocation: StorageMode
-              sizeBytes: number
-              purgedAt: number | null
-            }[]
-          >`SELECT storage_location AS "storageLocation", size_bytes::float8 AS "sizeBytes", purged_at::float8 AS "purgedAt" FROM farm.library_blobs WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}`
-        )[0]
-        if (existing && existing.sizeBytes !== v.sizeBytes)
+        // Blobs are deduplicated per (farm, sha256, storage_location, agent_id).
+        const existingBlobs = await tx<
+          {
+            storageLocation: StorageMode
+            agentId: string | null
+            sizeBytes: number
+            purgedAt: number | null
+          }[]
+        >`SELECT storage_location AS "storageLocation", agent_id AS "agentId", size_bytes::float8 AS "sizeBytes", purged_at::float8 AS "purgedAt"
+          FROM farm.library_blobs
+          WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}
+          ORDER BY created_at ASC, storage_location ASC, agent_id ASC`
+        if (existingBlobs.some((b) => b.sizeBytes !== v.sizeBytes))
           return { ok: false as const, reason: 'invalid-input' as const }
-        // Retention removed the file but kept the row: the same bytes uploaded again restore it in place.
-        const restoring = existing?.purgedAt != null
-        // ponytail: a purged file can only come back where its row says; after a mode switch the user re-uploads under the old mode.
-        if (restoring && existing!.storageLocation !== v.location)
-          return { ok: false as const, reason: 'mode-mismatch' as const }
-        if (!existing || restoring) {
+
+        const atTarget = existingBlobs.find(
+          (b) =>
+            b.storageLocation === v.location &&
+            b.agentId === (v.agentId ?? null),
+        )
+        // Server uploads reuse an existing live Connector copy so no duplicate server copy is kept.
+        const reusableConnector =
+          v.location === 'server' && !atTarget
+            ? existingBlobs.find(
+                (b) => b.storageLocation === 'connector' && b.purgedAt == null,
+              )
+            : undefined
+        const matched = atTarget ?? reusableConnector
+        // Retention removed the file at this location, but kept the row: the same bytes uploaded again restore it in place.
+        const restoring = matched?.purgedAt != null
+        const targetLocation = matched?.storageLocation ?? v.location
+        const targetAgentId = matched ? matched.agentId : (v.agentId ?? null)
+
+        if (!matched || restoring) {
           const basis = await quotaBasis(
             tx,
             farm,
-            v.location,
-            v.agentId,
+            targetLocation,
+            targetAgentId ?? undefined,
             settings.quotaBytes,
           )
           const decision = basis
-            ? checkQuota(v.location, basis, v.sizeBytes)
+            ? checkQuota(targetLocation, basis, v.sizeBytes)
             : { ok: true as const }
           if (!decision.ok)
             return {
@@ -432,10 +450,12 @@ export class PostgresLibrary {
               message: decision.message,
             }
           if (restoring)
-            await tx`UPDATE farm.library_blobs SET purged_at=NULL WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}`
+            await tx`UPDATE farm.library_blobs SET purged_at=NULL
+              WHERE farm_id=${farm}::uuid AND sha256=${v.sha256} AND storage_location=${targetLocation}
+                AND ${targetLocation === 'connector' ? tx`agent_id=${targetAgentId!}::uuid` : tx`agent_id IS NULL`}`
           else
             await tx`INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
-          VALUES (${farm}::uuid, ${v.sha256}, ${v.sizeBytes}, ${v.location}, ${v.agentId ?? null}, ${now})`
+              VALUES (${farm}::uuid, ${v.sha256}, ${v.sizeBytes}, ${targetLocation}, ${targetAgentId}, ${now})`
         }
         // Refusals above return before this point, so a rejected upload creates no item.
         item ??= (
@@ -447,7 +467,6 @@ export class PostgresLibrary {
         )[0]
         if (!item)
           return { ok: false as const, reason: 'storage-unavailable' as const }
-        const location = existing?.storageLocation ?? v.location
         const next = (
           await tx<
             { n: number }[]
@@ -456,12 +475,12 @@ export class PostgresLibrary {
         if (!next)
           return { ok: false as const, reason: 'storage-unavailable' as const }
         const id = randomUUID()
-        await tx`INSERT INTO farm.library_versions (id, farm_id, item_id, version_number, sha256, size_bytes, storage_location, original_name, kind, plate_count, metadata, notes, uploaded_by, created_at)
-        VALUES (${id}::uuid, ${farm}::uuid, ${item.id}::uuid, ${next}, ${v.sha256}, ${v.sizeBytes}, ${location}, ${v.originalName}, ${v.kind}, ${v.plateCount}, ${tx.json(metadata.data as never)}, ${v.notes ?? ''}, ${accountId}, ${now})`
+        await tx`INSERT INTO farm.library_versions (id, farm_id, item_id, version_number, sha256, size_bytes, storage_location, agent_id, original_name, kind, plate_count, metadata, notes, uploaded_by, created_at)
+        VALUES (${id}::uuid, ${farm}::uuid, ${item.id}::uuid, ${next}, ${v.sha256}, ${v.sizeBytes}, ${targetLocation}, ${targetAgentId}, ${v.originalName}, ${v.kind}, ${v.plateCount}, ${tx.json(metadata.data as never)}, ${v.notes ?? ''}, ${accountId}, ${now})`
         const stored = (
           await tx<
             LibraryVersion[]
-          >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256 WHERE v.id=${id}::uuid`
+          >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v JOIN farm.library_blobs b ON ${VERSION_BLOB_JOIN(tx)} WHERE v.id=${id}::uuid`
         )[0]
         if (!stored)
           return { ok: false as const, reason: 'storage-unavailable' as const }
@@ -469,11 +488,11 @@ export class PostgresLibrary {
           ok: true as const,
           item,
           version: stored,
-          deduplicated: existing !== undefined && !restoring,
+          deduplicated: matched !== undefined && !restoring,
           orphanedServerCopy:
             !restoring &&
-            existing?.storageLocation === 'connector' &&
-            v.location === 'server',
+            v.location === 'server' &&
+            targetLocation === 'connector',
         }
       },
     )
@@ -514,7 +533,7 @@ export class PostgresLibrary {
       >`SELECT i.id, i.title, i.tags, i.archived, i.created_at::float8 AS "createdAt", to_jsonb(lv) AS latest
         FROM farm.library_items i
         JOIN LATERAL (SELECT ${VERSION_COLUMNS(tx, true)} FROM farm.library_versions v
-          JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256
+          JOIN farm.library_blobs b ON ${VERSION_BLOB_JOIN(tx)}
           WHERE v.farm_id=i.farm_id AND v.item_id=i.id AND v.deleted_at IS NULL
           ORDER BY v.version_number DESC LIMIT 1) lv ON true
         WHERE i.farm_id=${farm}::uuid
@@ -564,7 +583,7 @@ export class PostgresLibrary {
         await tx<
           LibraryVersion[]
         >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v
-          JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256
+          JOIN farm.library_blobs b ON ${VERSION_BLOB_JOIN(tx)}
           WHERE v.farm_id=${input.farmId}::uuid AND v.id=${input.versionId}::uuid AND v.deleted_at IS NULL`
       )[0]
       if (!version) return { ok: false as const, reason: 'not-found' as const }
@@ -591,7 +610,7 @@ export class PostgresLibrary {
         versions: await tx<
           LibraryVersion[]
         >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v
-        JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256
+        JOIN farm.library_blobs b ON ${VERSION_BLOB_JOIN(tx)}
         WHERE v.farm_id=${input.farmId}::uuid AND v.item_id=${input.itemId}::uuid AND (${input.includeDeleted === true} OR v.deleted_at IS NULL)
         ORDER BY v.version_number DESC LIMIT 500`,
       }),

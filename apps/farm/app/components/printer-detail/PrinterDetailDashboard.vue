@@ -11,6 +11,12 @@ import PrintStatusPanel from './PrintStatusPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
+import BedMeshPanel from './BedMeshPanel.vue'
+import type {
+  BedMeshData,
+  MeshAvailabilityMap,
+  MeshOp,
+} from './heightmap-view.ts'
 import MotionPanel from './MotionPanel.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import TimelapsePanel from './TimelapsePanel.vue'
@@ -32,6 +38,7 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const props = defineProps<{
+  bedMesh?: { mesh?: BedMeshData; availability: MeshAvailabilityMap }
   name: string
   stateLabel: string
   stateTone: 'idle' | 'printing' | 'paused' | 'error' | 'offline'
@@ -122,6 +129,7 @@ const props = defineProps<{
   excludeReason?: string | undefined
 }>()
 const emit = defineEmits<{
+  (e: 'bed-mesh', args: { op: MeshOp; profile?: string }, event: Event): void
   (e: 'set-temperature', heater: string, targetC: number, event: Event): void
   (
     e: 'extrude',
@@ -330,8 +338,14 @@ const heaterReason = computed(
         :key="tab.id"
         #[tab.id]
       >
+        <BedMeshPanel
+          v-if="tab.id === 'malha'"
+          :mesh="bedMesh?.mesh"
+          :availability="bedMesh?.availability ?? {}"
+          @bed-mesh="(args, event) => emit('bed-mesh', args, event)"
+        />
         <JobQueuePanel
-          v-if="tab.id === 'fila' && queue"
+          v-else-if="tab.id === 'fila' && queue"
           :advertised="queue.advertised"
           :state="queue.state"
           :jobs="queue.jobs"

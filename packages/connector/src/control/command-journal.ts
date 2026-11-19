@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 13
+const SCHEMA_VERSION = 14
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -253,9 +253,13 @@ const gcodeActionSchema = powerTimelapseActionSchema.replace(
   "'set_pin'",
   "'set_pin','gcode'",
 )
-const actionSchema = gcodeActionSchema.replace(
+const fileOpActionSchema = gcodeActionSchema.replace(
   "'set_factor'",
   "'set_factor','file_op'",
+)
+const actionSchema = fileOpActionSchema.replace(
+  "'file_op'",
+  "'file_op','bed_mesh'",
 )
 const previousActionSchemas: Record<number, readonly string[]> = {
   2: [legacyActionSchema],
@@ -273,6 +277,7 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   10: [powerActionSchema, timelapseActionSchema],
   11: [powerTimelapseActionSchema],
   12: [gcodeActionSchema],
+  13: [fileOpActionSchema],
 }
 const schema = [
   actionSchema,
@@ -419,7 +424,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, SCHEMA_VERSION].includes(
+      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, SCHEMA_VERSION].includes(
         Number(initialVersion),
       ) ||
         initialApplication !== APPLICATION_ID)
@@ -640,6 +645,16 @@ function claimRow(
           )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
         if (recent >= 10) return { ok: false, reason: 'rate-limited' }
+        // Bed mesh is its own class: one accepted dispatch per printer a minute.
+        if (command.action === 'bed_mesh') {
+          const meshes = state.database
+            .prepare(
+              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action='bed_mesh' AND p.claimed_at>?",
+            )
+            .get(command.farm_id, printerKey, now - 60000)?.n
+          if (typeof meshes !== 'number') throw new Error('Invalid mesh count')
+          if (meshes >= 1) return { ok: false, reason: 'rate-limited' }
+        }
         state.database
           .prepare(
             "INSERT INTO pause_commands(cmd_id,key_id,nonce,farm_id,agent_id,assignment_id,account_id,transport_id,capability_id,printer_key,wire_sha256,writer_id,claimed_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed')",

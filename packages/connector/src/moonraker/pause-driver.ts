@@ -1,4 +1,11 @@
 import {
+  BedMeshRefused,
+  bedMeshQueryWire,
+  bedMeshSupported,
+  parseBedMeshState,
+  refuseBedMesh,
+} from './control-bed-mesh.ts'
+import {
   controlTargetState,
   ExcludeObjectArguments,
   controlSourceState,
@@ -754,6 +761,36 @@ export function openFixedMoonrakerPause(input: {
     return send(wire, requested, 5000)
   }
   /**
+   * Bed mesh: refusals are decided from one read of the print, homing and
+   * profile state before the single send; a refusal writes nothing.
+   */
+  async function bedMesh(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (requested.binding !== binding || !prepared || attempted)
+        throw new BedMeshRefused('state')
+      if (!bedMeshSupported(input.objects))
+        throw new BedMeshRefused('unsupported-action')
+      // Same builder as the send; it also rejects malformed arguments.
+      const wire = extendedWire('bed_mesh', args)
+      if (wire === undefined) throw new BedMeshRefused('invalid-command')
+      refuseBedMesh(
+        args,
+        parseBedMeshState(
+          await request(11, bedMeshQueryWire(11), lifetimeDeadline),
+        ),
+      )
+      extended = 'bed_mesh'
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof BedMeshRefused ? error : failure()
+    }
+  }
+  /**
    * G-code console: switch, support, state and rate refusals all precede the
    * single write; a refusal closes the attempt having sent nothing.
    */
@@ -824,6 +861,7 @@ export function openFixedMoonrakerPause(input: {
         )
       }
       if (action === 'exclude_object') return excludeObject(args, request)
+      if (action === 'bed_mesh') return bedMesh(args, request)
       if (action === 'gcode') return executeConsole(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'power') {

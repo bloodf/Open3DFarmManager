@@ -214,18 +214,30 @@ function normalizeFixed(
         .map((row) => list(row).slice(0, 64).map(number))
       const min = list(value.mesh_min).slice(0, 2).map(number)
       const max = list(value.mesh_max).slice(0, 2).map(number)
+      const probed = list(value.probed_matrix)
+        .slice(0, 64)
+        .map((row) => list(row).slice(0, 64).map(number))
+      const profiles = Object.keys(fields(value.profiles))
+        .map((key) => string(key))
+        .filter(Boolean)
+        .slice(0, 64)
       const width = rows[0]?.length
       if (
         min.length === 2 &&
         max.length === 2 &&
-        width &&
-        rows.every((row) => row.length === width)
+        (rows.length === 0 ||
+          (width && rows.every((row) => row.length === width)))
       )
         detail.bedMesh = {
           profile: string(value.profile_name) || null,
           min,
           max,
           rows,
+          ...(probed[0]?.length &&
+          probed.every((row) => row.length === probed[0]?.length)
+            ? { probed }
+            : {}),
+          ...(profiles.length ? { profiles } : {}),
         }
       break
     }

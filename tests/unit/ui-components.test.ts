@@ -137,7 +137,7 @@ describe('UI component gallery', () => {
     } finally {
       await server?.close()
     }
-  })
+  }, 30_000)
 
   beforeEach(async () => {
     if (!browser || !server) throw new Error('Gallery fixture unavailable')

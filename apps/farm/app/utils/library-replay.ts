@@ -1,8 +1,13 @@
-// Replay from the library page. The page has no live, signed session with any
-// Connector, so every printer is listed (for the compatibility comparison) but
-// cannot be picked, and the send never reaches a Connector.
-import type { PrinterProfile } from './library-view.ts'
-import type { ReplayPrinter, ReplayResult } from './replay-view.ts'
+// Replay from the library and history pages. Printers always list (for the
+// compatibility comparison); only those with a live, signed session can be
+// picked, so nothing is sent without one.
+import type { LibraryVersion, PrinterProfile } from './library-view.ts'
+import type { LiveReplayInfo } from './replay-live.ts'
+import type {
+  ReplayPrinter,
+  ReplayResult,
+  ReplaySource,
+} from './replay-view.ts'
 
 /** One farm printer assignment, as `/api/farms/:farmId/printers` lists it. */
 export type LibraryReplayAssignment = Readonly<{
@@ -18,6 +23,8 @@ export type LibraryReplayAssignment = Readonly<{
 export function libraryReplayPrinters(
   assignments: readonly LibraryReplayAssignment[],
   profiles: readonly PrinterProfile[],
+  /** Live session data; without it no printer can be picked. */
+  liveFor?: (printerKey: string) => LiveReplayInfo | undefined,
 ): ReplayPrinter[] {
   return assignments
     .filter(
@@ -36,11 +43,26 @@ export function libraryReplayPrinters(
         connectorOnline: true,
         live: false,
         materials: [],
+        ...liveFor?.(row.printerKey),
       }
     })
 }
 
-/** The library page cannot sign a command: nothing is sent. */
+/** Without a live signed session nothing is sent. */
 export async function sendWithoutSession(): Promise<ReplayResult> {
   return { outcome: 'not-sent' }
+}
+
+/** The replay dialog's view of a stored library version. */
+export function libraryReplaySource(version: LibraryVersion): ReplaySource {
+  return {
+    sha256: version.sha256,
+    name: version.originalName,
+    kind: version.kind,
+    plateCount: version.plateCount,
+    metadata: version.metadata,
+    storageLocation: version.storageLocation,
+    agentId: version.agentId,
+    purged: version.purgedAt !== null,
+  }
 }

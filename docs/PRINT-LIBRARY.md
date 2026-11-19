@@ -203,7 +203,10 @@ default for farms with no stored setting. An upload that does not fit is refused
 before any file is accepted, with an accessible pt-BR message. Server mode counts
 the unpurged files on the server disk. Connector mode checks the quota the
 Connector host reports for its own library directory (`farm.library_connector_storage`);
-the Connector enforces it too. The owner sees used and available space for the
+the Connector enforces it too. The Connector posts its `library.storage.report`
+(quota and used bytes) to `POST /api/connector/library/relay/storage` with the
+same credential headers as the relay: when it starts, every five minutes and after
+each operation that can change usage. The owner sees used and available space for the
 active mode.
 
 The retention job (`libraryRetention`, off by default, login in

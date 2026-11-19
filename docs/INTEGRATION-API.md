@@ -53,7 +53,9 @@ latest observed projection. Its `state` can be `unknown`, and optional readings
 may be absent: do not infer readiness from missing data. `GET /inventory`
 requires `inventory:read` and returns the Spoolman snapshot, including its
 `stale` and `observedAt` fields. A snapshot may be stale and its spools list may
-be a bounded subset of `total`.
+be a bounded subset of `total`. The Connector's Spoolman setup, active spool
+sources, usage calculation and read-only behaviour are described in
+[SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
 Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action

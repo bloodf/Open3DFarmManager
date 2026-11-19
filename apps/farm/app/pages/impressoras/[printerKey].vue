@@ -368,6 +368,7 @@ onMounted(() => heading.value?.focus())
           : 'sem conexão direta'
       "
       :live="live"
+      :supported-only="vendorFrame?.vendor === 'creality'"
       :last-known-text="lastKnownText"
       :capabilities="capabilities"
       :heaters="heaters"
@@ -470,6 +471,16 @@ onMounted(() => heading.value?.focus())
       <p v-if="vendorFrame.detail.print?.progress !== undefined">
         Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
       </p>
+      <button
+        v-if="
+          vendorFrame.vendor === 'creality' && state?.controls?.includes('home')
+        "
+        type="button"
+        :disabled="!availability('home').available || commandInFlight"
+        @click="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
+      >
+        Referenciar todos os eixos
+      </button>
       <form
         v-if="state?.controls?.includes('start_print')"
         @submit.prevent="

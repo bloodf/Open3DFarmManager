@@ -31,6 +31,7 @@ import {
   createBambuDetailStream,
   type BambuDetailStream,
 } from '../bambu/printer-detail.ts'
+import { createCrealityDetailStream } from '../creality/printer-detail.ts'
 
 const MAX_ITEMS = 256
 const MAX_QUERIES_PER_SESSION = 4
@@ -44,7 +45,7 @@ type PrinterDetailSource = Pick<MoonrakerDetailStream, 'subscribe'> &
   Partial<Pick<MoonrakerDetailStream, 'request' | 'readConfig'>> &
   Partial<Pick<BambuDetailStream, 'query'>>
 
-/** Moonraker and Bambu streams connect on subscription. Anycubic frames reuse collection. */
+/** Moonraker, Bambu and Creality streams connect on subscription. Anycubic frames reuse collection. */
 export function createPrinterDetailSources(config: AgentRuntimeConfig) {
   const sources = new Map<string, PrinterDetailSource>()
   const { printers, limits, allowedOrigins } = config.collection
@@ -71,6 +72,25 @@ export function createPrinterDetailSources(config: AgentRuntimeConfig) {
     if (selected.origin === assignment.moonraker_origin)
       sources.set(selected.printerKey, createMoonrakerDetailStream(selected))
   }
+  if (config.collection.version === 4)
+    for (const assignment of config.assignments) {
+      // Klipper-rooted K-series printers keep the Moonraker stream above.
+      if (sources.has(assignment.printer_key)) continue
+      const binding = config.collection.creality.printers.find(
+        (item) => item.printerKey === assignment.printer_key,
+      )
+      if (!binding) continue
+      const camera = config.camera?.cameras.find(
+        (item) =>
+          item.assignmentId === assignment.assignment_id &&
+          'kind' in item.source &&
+          item.source.kind === 'creality-mjpeg',
+      )
+      sources.set(
+        binding.printerKey,
+        createCrealityDetailStream(binding, { cameraId: camera?.cameraId }),
+      )
+    }
   const vendor = createVendorDetailSources()
   if (config.collection.version === 5) {
     for (const binding of config.collection.anycubic.printers) {

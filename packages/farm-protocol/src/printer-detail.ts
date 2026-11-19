@@ -61,7 +61,7 @@ export const PrinterDetailUpdate = z.strictObject({
   ...base,
   t: z.literal('detail.update'),
   seq: count,
-  vendor: z.enum(['anycubic', 'kobra-x']).optional(),
+  vendor: z.enum(['anycubic', 'kobra-x', 'creality']).optional(),
   capabilities,
   detail: z
     .strictObject({

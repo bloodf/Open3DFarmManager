@@ -61,15 +61,82 @@ const crealitySimulatedCapabilities = {
   cancel: 'simulated',
 } as const satisfies CrealityCatalogProduct['capabilities']
 
+const detailTest = 'tests/unit/creality-detail.test.ts'
+
+/**
+ * Áreas do painel (E22.2) comprovadas apenas pelo simulador Creality do E16 em
+ * loopback, sem impressora física. Cada `simulated` aponta para o teste que o
+ * exercita. Fonte dos comandos: docs/protocols/creality-detail.md.
+ */
+export const crealityControlAreaEvidence = {
+  temperatures: {
+    file: detailTest,
+    test: 'reports temperatures and print status',
+  },
+  printStatus: {
+    file: detailTest,
+    test: 'reports temperatures and print status',
+  },
+  fans: { file: detailTest, test: 'reports fans and the light' },
+  leds: { file: detailTest, test: 'reports fans and the light' },
+  motion: {
+    file: detailTest,
+    test: 'sends every supported set frame to the simulator',
+  },
+  console: { file: detailTest, test: 'console lines follow the E18.1 rules' },
+  webcams: { file: detailTest, test: 'advertises the configured camera' },
+} as const satisfies ControlAreaEvidenceMap
+
+/**
+ * Sem comando ou relato documentado no protocolo LAN de fábrica para estas
+ * áreas; ficam indisponíveis. Fonte: docs/protocols/creality-detail.md.
+ */
+const unsupportedAreas = [
+  'extrusion',
+  'macros',
+  'excludeObject',
+  'jobQueue',
+  'fileManager',
+  'bedMesh',
+  'config',
+  'services',
+  'history',
+  'timelapse',
+  'power',
+  'updates',
+] as const
+const crealityControlAreas: ControlAreaCapabilities = {
+  ...unknownControlAreas,
+  ...(Object.fromEntries(
+    Object.keys(crealityControlAreaEvidence).map((key) => [key, 'simulated']),
+  ) as Partial<ControlAreaCapabilities>),
+  ...(Object.fromEntries(
+    unsupportedAreas.map((key) => [key, 'unsupported']),
+  ) as Partial<ControlAreaCapabilities>),
+}
+const detailSource =
+  'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/protocols/creality-detail.md'
+const protocolSource =
+  'https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/creality.md#L153-L176'
+const detailLimitations = [
+  'Painel LAN de fábrica simulado em loopback, sem impressora física. Movimento cobre apenas referenciar eixos; ventoinhas e iluminação aceitam ligar e desligar.',
+  'Não suportado no painel Creality: gerenciador de arquivos (listagem sem layout de resposta documentado e sem comando de exclusão), extrusão, macros, exclusão de objetos, fila, malha, configuração, serviços, histórico, timelapse, energia e atualizações. Fonte em docs/protocols/creality-detail.md.',
+  'Console `gcodeCmd` desativado por padrão; quando ligado, segue as regras do E18.1. Impressoras com Moonraker usam o painel Moonraker.',
+  'Câmera depende de uma câmera MJPEG configurada localmente no agente.',
+]
+
 export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   {
     id: 'creality-mbox',
-    controlAreas: unknownControlAreas,
+    controlAreas: crealityControlAreas,
+    controlAreaEvidence: crealityControlAreaEvidence,
     firmwareNotes: [
       {
         firmware: 'não verificado',
         note: 'O guia técnico do fabricante descreve os comandos de carga e descarga de filamento na tela, mas não fixa números de versão nem documenta o protocolo LAN de fábrica; nenhuma versão foi qualificada em hardware.',
         sources: [
+          detailSource,
+          protocolSource,
           'https://wiki.creality.com/zh/mBox-series/mBox/filament-replacement-guide',
         ],
       },
@@ -84,6 +151,8 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Aplicativo Creality Park citado; LAN, nuvem e autenticação desconhecidas',
     capabilities: crealitySimulatedCapabilities,
     sources: [
+      detailSource,
+      protocolSource,
       'https://www.prnewswire.com/news-releases/creality-debuts-mbox-a-kid-operated-ai-3d-printer-at-329-302934077.html',
       'https://wiki.creality.com/zh/mBox-series/mBox/filament-replacement-guide',
     ],
@@ -92,17 +161,20 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'O guia técnico oficial descreve extrusão de filamento sem mencionar a sigla FDM.',
       'Recursos do aplicativo móvel e detecção por IA não comprovam API local ou integração com o OpenFarm.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      ...detailLimitations,
     ],
   },
   {
     id: 'creality-ender-3-v3-neo',
-    controlAreas: unknownControlAreas,
+    controlAreas: crealityControlAreas,
+    controlAreaEvidence: crealityControlAreaEvidence,
     firmwareNotes: [
       {
         firmware: 'não verificado',
         note: 'A página oficial do produto não informa versão de firmware nem protocolo local; nenhuma versão foi qualificada em hardware.',
         sources: [
+          detailSource,
+          protocolSource,
           'https://store.creality.com/products/ender-3-v3-neo-3d-printer',
         ],
       },
@@ -117,6 +189,8 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Controle via Creality Cloud anunciado; LAN, Moonraker e autenticação não comprovadas',
     capabilities: crealitySimulatedCapabilities,
     sources: [
+      detailSource,
+      protocolSource,
       'https://www.prnewswire.com/news-releases/creality-launches-ender-3-v3-mega-combo-at-669-for-large-format-printing-and-batch-production-302909893.html',
       'https://store.creality.com/products/ender-3-v3-neo-3d-printer',
       'https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival',
@@ -127,12 +201,13 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Câmera integrada declarada não possui protocolo ou streaming local verificado.',
       'CFS Nano é acessório opcional e não constitui modelo separado.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      ...detailLimitations,
     ],
   },
   {
     id: 'creality-ender-3-v3-mega',
-    controlAreas: unknownControlAreas,
+    controlAreas: crealityControlAreas,
+    controlAreaEvidence: crealityControlAreaEvidence,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -156,6 +231,8 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       files: 'documented',
     },
     sources: [
+      detailSource,
+      protocolSource,
       'https://www.prnewswire.com/news-releases/creality-launches-ender-3-v3-mega-combo-at-669-for-large-format-printing-and-batch-production-302909893.html',
       'https://store.creality.com/products/ender-3-v3-mega-3d-printer',
       'https://store.creality.com/uk/blogs/news/ender-3-v3-neo-mega-new-arrival',
@@ -166,12 +243,13 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Câmera Nebula é acessório opcional e a versão Combo é apenas pacote comercial.',
       'Disponibilidade imediata de estoque varia conforme a região.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      ...detailLimitations,
     ],
   },
   {
     id: 'creality-k3',
-    controlAreas: unknownControlAreas,
+    controlAreas: crealityControlAreas,
+    controlAreaEvidence: crealityControlAreaEvidence,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -189,6 +267,8 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Wi-Fi e Creality Cloud citados; LAN, Moonraker e autenticação não comprovadas',
     capabilities: crealitySimulatedCapabilities,
     sources: [
+      detailSource,
+      protocolSource,
       'https://www.prnewswire.com/news-releases/creality-k3-now-available-at-849-making-multi-color-3d-printing-more-practical-302927557.html',
       'https://www.prnewswire.com/news-releases/creality-k3-opens-for-pre-order-at-849-advancing-multi-color-3d-printing-302906922.html',
       'https://www.creality.com/blog/k3-questions-answered',
@@ -199,17 +279,20 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Remessas para a Europa previstas apenas para dezembro de 2026.',
       'Suporte a múltiplos bicos e materiais no Creality Print não qualifica comandos remotos pelo OpenFarm.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      ...detailLimitations,
     ],
   },
   {
     id: 'creality-ender-3-v4',
-    controlAreas: unknownControlAreas,
+    controlAreas: crealityControlAreas,
+    controlAreaEvidence: crealityControlAreaEvidence,
     firmwareNotes: [
       {
         firmware: 'não verificado',
         note: 'A página oficial do produto e o anúncio da CES não informam versão de firmware nem protocolo local; nenhuma versão foi qualificada em hardware.',
         sources: [
+          detailSource,
+          protocolSource,
           'https://store.creality.com/products/ender-3-v4-combo-3d-printer',
         ],
       },
@@ -224,6 +307,8 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Wi-Fi citado em especificações preliminares; LAN, nuvem e autenticação não comprovadas',
     capabilities: crealitySimulatedCapabilities,
     sources: [
+      detailSource,
+      protocolSource,
       'https://store.creality.com/products/ender-3-v4-combo-3d-printer',
       'https://www.prnewswire.com/news-releases/from-idea-to-print-creality-sparkx-i7-debuts-at-ces-2026-for-everyday-creators-302655772.html',
     ],
@@ -231,7 +316,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'A quinta posição do catálogo permanece em disputa com K2 SE e SPARKX i7 devido à falta de cronologia fechada.',
       'Metadados de criação de página na loja não equivalem a data de lançamento comercial.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
+      ...detailLimitations,
     ],
   },
 ]

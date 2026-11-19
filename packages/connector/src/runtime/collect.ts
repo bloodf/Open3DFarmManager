@@ -141,6 +141,7 @@ export async function collectIntoQueue(input: {
   }
   // Transitions are detected in memory; the first observation after a restart emits none.
   // Changes during unreachability fold into one transition from the last-known state at reconnect.
+  const lastMachine = new Map<string, string>()
   const lastState = new Map<string, PrinterState['state']>()
   function diagnostic(value: Diagnostic) {
     if (diagnosticBudget-- > 0) input.onDiagnostic(value)
@@ -185,7 +186,14 @@ export async function collectIntoQueue(input: {
           totals.queued++
           loss(transition.loss, 'retention')
         }
-        const receipt = queue.enqueue(event.printer, now)
+        const { machine, ...state } = event.printer
+        const fingerprint = machine && JSON.stringify(machine)
+        const changed =
+          fingerprint !== undefined &&
+          lastMachine.get(state.printerKey) !== fingerprint
+        const receipt = queue.enqueue(changed ? event.printer : state, now)
+        if (changed && queue.storageLost === lostBefore)
+          lastMachine.set(state.printerKey, fingerprint)
         totals.queued++
         loss(receipt.loss, 'retention')
         const dropped = queue.storageLost - lostBefore
@@ -260,6 +268,7 @@ export async function collectIntoQueue(input: {
           })
         : undefined
       const subscription = createMoonrakerSubscription({
+        machineProfile: true,
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,

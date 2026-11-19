@@ -133,6 +133,7 @@ export function openMoonrakerClient(input: {
   limits: MoonrakerLimits
   signal: AbortSignal
   discoverObjects?: boolean
+  machineProfile?: boolean
   /** Also subscribe to the print_stats fields a finished-job summary needs. */
   jobFields?: boolean
   /** Connector identity registered with Moonraker on every connection. */
@@ -157,7 +158,10 @@ export function openMoonrakerClient(input: {
   let subscribed = false
   let identified = false
   let discovering = input.discoverObjects === true
-  const baseObjects = input.jobFields ? jobObjects : selectedObjects
+  const baseObjects = {
+    ...(input.jobFields ? jobObjects : selectedObjects),
+    ...(input.machineProfile ? { configfile: ['settings'] } : {}),
+  }
   const baseQueryObjects = input.jobFields
     ? { ...jobObjects, ...temperatureObjects }
     : completeObjects

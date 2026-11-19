@@ -2,6 +2,7 @@ import { mapBambuFirmware } from './firmware.ts'
 import { decodeBambuVersion } from './version.ts'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
+import { bambuMachineProfile } from '../runtime/machine-profile.ts'
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import type { FilamentUsage } from '@open3dfarmmanager/farm-protocol'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
@@ -61,6 +62,7 @@ export function createBambuRuntimeSubscription(input: {
   let fields: Partial<Fields> = {}
   let times: Partial<Record<keyof Fields, number>> = {}
   let connected = false
+  let machine: PrinterState['machine']
   let activeJob = false
   let filamentUsage: FilamentUsage[] | undefined
   const clear = () => {
@@ -68,6 +70,7 @@ export function createBambuRuntimeSubscription(input: {
     version = undefined
     upgradeReport = undefined
     fields = {}
+    machine = undefined
     times = {}
     activeJob = false
     filamentUsage = undefined
@@ -95,6 +98,7 @@ export function createBambuRuntimeSubscription(input: {
     }
     const parsed = PrinterState.safeParse({
       ...fields,
+      ...(machine ? { machine } : {}),
       controls: binding.control ? ['pause', 'resume', 'cancel'] : [],
       printerKey: binding.printerKey,
       observedAt: Date.now(),
@@ -164,6 +168,8 @@ export function createBambuRuntimeSubscription(input: {
             unavailable('invalid-response')
             return
           }
+          const reportedMachine = bambuMachineProfile(rawFirmware)
+          if (reportedMachine) machine = { ...machine, ...reportedMachine }
           if (decodeBambuVersion(rawFirmware)) version = rawFirmware
           if (
             rawFirmware &&
@@ -184,7 +190,7 @@ export function createBambuRuntimeSubscription(input: {
               observedAtMonoMs: performance.now(),
             }
           const result = decodeBambuReport(payload.toString('utf8'))
-          if (result.kind === 'ignored' && firmware) {
+          if (result.kind === 'ignored' && (firmware || reportedMachine)) {
             publish()
             return
           }

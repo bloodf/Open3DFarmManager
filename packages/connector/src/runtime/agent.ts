@@ -1,3 +1,4 @@
+import { createPrinterDetailSources } from './printer-detail-session.ts'
 import {
   discoveryBindings,
   pause,
@@ -360,6 +361,7 @@ async function runConnectorAgentOnce(
             assignmentRefs: refs,
           })
         : undefined
+      const detailSourceFor = createPrinterDetailSources(config)
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -383,7 +385,7 @@ async function runConnectorAgentOnce(
                 identity,
               },
               {
-                genuineStatus: { assignmentRefs: refs },
+                genuineStatus: { assignmentRefs: refs, detailSourceFor },
                 ...(cameraMedia ? { cameraMedia } : {}),
                 onInboxReady() {
                   onAdmitted()

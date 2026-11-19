@@ -85,7 +85,9 @@ export function createPauseDriverRouter(config: {
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
     if (bambu)
-      return bambu.control ? bambuControls(config.bambuModel?.(binding)) : []
+      return bambu.control
+        ? bambuControls(config.bambuModel?.(binding) ?? bambu.model)
+        : []
     return moonrakerControls(moonrakerObjects.get(binding))
   }
   return Object.freeze({

@@ -8,6 +8,12 @@ import {
   type TelemetryRecord,
 } from '../../packages/connector/src/cloud/queue.ts'
 import { drainTelemetryOnce } from '../../packages/connector/src/cloud/drain.ts'
+import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
+import {
+  TELEMETRY_BATCH_JSON_LIMITS,
+  TelemetryBatch,
+} from '../../packages/farm-protocol/src/telemetry.ts'
+import type { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
 import { parseMoonrakerSnapshot } from '../../packages/connector/src/moonraker/parse.ts'
 const raw = readFileSync(
   new URL('../fixtures/moonraker/printing.json', import.meta.url),
@@ -400,6 +406,53 @@ test('cancelled delivery retains the concurrency slot until an abort-ignoring se
       ).status,
       'delivered',
     )
+  } finally {
+    f.cleanup()
+  }
+})
+
+test('a batch the server would refuse for its value count is sent as the largest fitting prefix', async () => {
+  const f = fixture()
+  try {
+    // Extended controls add values per record; 100 of these exceed the
+    // 2000-value bound the sender and server both enforce.
+    const controls: ExtendedControlAction[] = [
+      'pause',
+      'resume',
+      'cancel',
+      'set_temperature',
+      'set_fan',
+      'home',
+      'set_light',
+      'set_speed',
+      'start_print',
+      'load_filament',
+      'unload_filament',
+    ]
+    const busy = { ...state, controls }
+    for (let index = 0; index < 100; index++) f.queue.enqueue(busy, 1000)
+    const sent: number[] = []
+    const send = async (body: string) => {
+      const records = TelemetryBatch.parse(
+        parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS),
+      )
+      sent.push(records.length)
+      return ids(body)
+    }
+    let delivered = 0
+    for (let round = 0; round < 10 && delivered < 100; round++) {
+      const result = await drainTelemetryOnce(
+        f.queue,
+        send,
+        () => 1000,
+        signal(),
+      )
+      assert.equal(result.status, 'delivered')
+      if (result.status === 'delivered') delivered += result.count
+    }
+    assert.equal(delivered, 100)
+    assert.ok(sent[0]! < 100)
+    assert.equal(f.queue.depth, 0)
   } finally {
     f.cleanup()
   }

@@ -130,7 +130,8 @@ if (journeyEnabled())
         page,
         async () => {
           await fill(block)
-          await expect(control).toBeEnabled()
+          // Same allowance as the lifecycle buttons after the last session.
+          await expect(control).toBeEnabled({ timeout: 20_000 })
           await control.click()
         },
         'Confirmar comando',
@@ -138,7 +139,11 @@ if (journeyEnabled())
       )
     }
 
-    async function filamentCommand(page: Page, label: string) {
+    async function filamentCommand(
+      page: Page,
+      label: string,
+      fill: (section: Locator) => Promise<void> = async () => {},
+    ) {
       const section = row(page).getByRole('region', {
         name: 'Macros e filamento de ' + started().printerKey,
       })
@@ -146,7 +151,8 @@ if (journeyEnabled())
       await command(
         page,
         async () => {
-          await expect(button).toBeEnabled()
+          await fill(section)
+          await expect(button).toBeEnabled({ timeout: 20_000 })
           await button.click()
         },
         'Confirmar comando',
@@ -245,7 +251,9 @@ if (journeyEnabled())
     })
 
     test('completa a jornada Bambu no navegador com resultados confirmados ou desconhecidos', async () => {
-      test.setTimeout(5 * 60_000)
+      // Thirteen Connector sessions, each opened only after the previous one
+      // closed (about 30 s apart), plus a timed print and its history entry.
+      test.setTimeout(15 * 60_000)
       const journey = started()
       const page = journey.ownerPage
       await journey.expectLiveTelemetry()
@@ -292,7 +300,10 @@ if (journeyEnabled())
       await extendedCommand(page, 'Definir velocidade', async (block) => {
         await block.getByLabel('Velocidade').selectOption('sport')
       })
-      await filamentCommand(page, 'Carregar filamento')
+      // Bambu loads into a named AMS tray (AMS 1, tray 1 is tray 0).
+      await filamentCommand(page, 'Carregar filamento', async (section) => {
+        await section.getByLabel('Bandeja AMS').selectOption('0')
+      })
       await filamentCommand(page, 'Descarregar filamento')
 
       for (const name of [
@@ -336,6 +347,8 @@ if (journeyEnabled())
         mimeType: 'text/plain',
         buffer: GCODE,
       })
+      // The listing session has ended; upload in the next one.
+      await controlInbox()
       await page.getByRole('button', { name: 'Enviar arquivo' }).click()
       const status = page.getByRole('status').last()
       await expect(status).toHaveText(
@@ -347,6 +360,9 @@ if (journeyEnabled())
       await controlInbox()
       await page.getByRole('button', { name: 'Consultar arquivos' }).click()
       await expect(fileOption).toHaveCount(1, { timeout: 45_000 })
+      // The listing session has ended; start in the next one. The page clears
+      // its confirmation whenever the live view blips, so confirm last.
+      await controlInbox()
       await page.locator('#files-existing').selectOption(FILE)
       await page.getByRole('checkbox').check()
       await page.getByRole('button', { name: 'Iniciar impressão' }).click()

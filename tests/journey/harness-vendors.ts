@@ -263,6 +263,8 @@ export async function startVendorSimulator(
         initialState: 'RUNNING',
         // Matches the 25 % the simulator reports for the running print.
         initialLayer: 25,
+        // A running print reports its nozzle target; filament changes use it.
+        initialTargetTemperature: 210,
         totalLayers: 100,
         printDurationMs: 15_000,
         ...(options.ftpsPort === undefined
@@ -294,6 +296,8 @@ export async function startVendorSimulator(
                   port: sim.port,
                   ftpsPort: sim.ftpsPort,
                   control: options.control === true,
+                  // Locally provisioned model: opts into extended actions.
+                  model: 'X1C',
                   credentialFile,
                   pinSha256: pinOf(sim.syntheticTrust),
                   allowedEndpoints: [{ host: sim.host, port: sim.port }],

@@ -39,6 +39,14 @@ export const telemetryPrinterKey = (record: TelemetryEvent) =>
     : record.kind === 'printer-transition'
       ? record.transition.printerKey
       : null
+/** Bounds a telemetry batch body must meet on both sides of the upload. */
+export const TELEMETRY_BATCH_JSON_LIMITS = Object.freeze({
+  maxBytes: 64 * 1024,
+  maxDepth: 7,
+  maxValues: 2000,
+  maxStringChars: 128,
+})
+
 export const TelemetryBatch = z
   .array(TelemetryEvent)
   .min(1)

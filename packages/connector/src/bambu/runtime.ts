@@ -223,7 +223,10 @@ export function createBambuRuntimeSubscription(input: {
             activeJob &&
             (state === 'FINISH' || state === 'FAILED' || state === 'IDLE')
           ) {
+            // The printer still names the finished job in this report.
+            const filename = observed.filename ?? fields.filename
             observed.lastJob = {
+              ...(filename === undefined ? {} : { filename }),
               outcome:
                 state === 'FINISH'
                   ? 'completed'

@@ -305,3 +305,37 @@ test('advertisement is scoped to each snapshot assignment and overrides observat
     [['home'], []],
   )
 })
+
+test('Bambu extended actions follow the locally provisioned model', () => {
+  const driver = createPauseDriverRouter({
+    allowedOrigins: [],
+    limits,
+    clock: { monotonicNow: () => performance.now() },
+    observe: () => false,
+  })
+  const provision = (model?: string) =>
+    provisionBambuPrinter(scope(), {
+      printerKey: 'printer',
+      serial: 'SYNTHETIC',
+      host: '127.0.0.1',
+      port: 8883,
+      allowedEndpoints: [{ host: '127.0.0.1', port: 8883 }],
+      credentialFile: '/nonexistent/synthetic-credentials',
+      caFile: '/nonexistent/synthetic-ca',
+      control: true,
+      ...(model === undefined ? {} : { model }),
+    })
+  assert.deepEqual(driver.controls(provision()), lifecycle)
+  assert.deepEqual(driver.controls(provision('X1C')), [
+    ...lifecycle,
+    'set_temperature',
+    'set_fan',
+    'home',
+    'set_light',
+    'set_speed',
+    'start_print',
+    'load_filament',
+    'unload_filament',
+  ])
+  assert.throws(() => provision('X1C\nPRINTER'), /Invalid Bambu binding/)
+})

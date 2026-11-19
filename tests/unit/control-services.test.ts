@@ -99,18 +99,18 @@ it('reads cached system data through the existing loopback detail stream with Kl
     stop?.()
     await mock.close()
   })
-  const frame = await new Promise<ReturnType<typeof PrinterDetailStreamUpdate.parse>>(
-    (resolve, reject) => {
-      timeout = setTimeout(
-        () => reject(new Error('System detail timed out')),
-        2500,
-      )
-      stop = detail.subscribe((value) => {
-        const parsed = PrinterDetailStreamUpdate.parse(value)
-        if (parsed.capabilities.includes('system')) resolve(parsed)
-      })
-    },
-  )
+  const frame = await new Promise<
+    ReturnType<typeof PrinterDetailStreamUpdate.parse>
+  >((resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error('System detail timed out')),
+      2500,
+    )
+    stop = detail.subscribe((value) => {
+      const parsed = PrinterDetailStreamUpdate.parse(value)
+      if (parsed.capabilities.includes('system')) resolve(parsed)
+    })
+  })
   expect(frame.detail.host).toMatchObject({
     cpuLoad: 3.1,
     memoryBytes: 4_096_000_000,

@@ -450,7 +450,10 @@ export function encodeLinkHealthFrames(
 }
 
 export function startLinkHealthHeartbeat(
-  read: () => { connector: ConnectorLinkHealth; printers: PrinterLinkHealthFrame[] },
+  read: () => {
+    connector: ConnectorLinkHealth
+    printers: PrinterLinkHealthFrame[]
+  },
   emit: (frames: string[]) => void,
   signal: AbortSignal,
 ): void {

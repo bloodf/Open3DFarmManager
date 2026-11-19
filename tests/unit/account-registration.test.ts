@@ -278,6 +278,25 @@ describe('farm owner invite creation', () => {
     )
     expect(JSON.stringify(args)).not.toContain(result.token)
   })
+  test('an optional invitation email is validated and normalized', async () => {
+    const { runtime } = fixture()
+    const cookie = await cookieHeader(runtime)
+    await createFarmInvite(
+      event('/x', { cookie }, { role: 'viewer', email: 'Person@Example.Test' }),
+      runtime,
+      farmId,
+    )
+    expect(
+      vi.mocked(runtime.registration!.createInvite).mock.calls[0]?.[5],
+    ).toBe('person@example.test')
+    await expect(
+      createFarmInvite(
+        event('/x', { cookie }, { role: 'viewer', email: 'not-an-email' }),
+        runtime,
+        farmId,
+      ),
+    ).rejects.toMatchObject({ status: 400 })
+  })
   test('non-owner gets 403, owner role cannot be invited, anonymous gets 401', async () => {
     const { runtime } = fixture({ createInvite: vi.fn(async () => null) })
     const cookie = await cookieHeader(runtime)

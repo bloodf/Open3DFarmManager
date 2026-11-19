@@ -140,6 +140,7 @@ export async function createFarmInvite(
       body.role,
       resetTokenDigest(token),
       INVITE_TTL_MS,
+      body.email,
     )
   } catch {
     throw unavailable()
@@ -152,7 +153,9 @@ export async function createFarmInvite(
   return { token, expiresAt: expiresAt.toISOString(), role: body.role }
 }
 
-async function readInviteBody(request: Request): Promise<{ role: InviteRole }> {
+async function readInviteBody(
+  request: Request,
+): Promise<{ role: InviteRole; email: string | null }> {
   if (
     request.headers.get('content-type')?.split(';')[0]?.trim() !==
       'application/json' ||
@@ -160,12 +163,12 @@ async function readInviteBody(request: Request): Promise<{ role: InviteRole }> {
   )
     throw createError({ status: 415, message: 'Envie os dados em JSON.' })
   const length = request.headers.get('content-length')
-  if (length !== null && (!/^\d{1,4}$/.test(length) || Number(length) > 256))
+  if (length !== null && (!/^\d{1,4}$/.test(length) || Number(length) > 1024))
     throw createError({ status: 413, message: 'Solicitação muito grande.' })
   let data: unknown
   try {
     const text = await request.text()
-    if (text.length > 256) throw new Error()
+    if (text.length > 1024) throw new Error()
     data = JSON.parse(text)
   } catch {
     throw createError({ status: 400, message: 'Solicitação inválida.' })
@@ -173,11 +176,21 @@ async function readInviteBody(request: Request): Promise<{ role: InviteRole }> {
   if (
     typeof data !== 'object' ||
     data === null ||
-    Object.keys(data).length !== 1 ||
+    Object.keys(data).some((key) => key !== 'role' && key !== 'email') ||
     !('role' in data) ||
     typeof data.role !== 'string' ||
-    !inviteRoles.includes(data.role)
+    !inviteRoles.includes(data.role) ||
+    ('email' in data &&
+      (typeof data.email !== 'string' ||
+        data.email.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)))
   )
     throw createError({ status: 400, message: 'Solicitação inválida.' })
-  return { role: data.role as InviteRole }
+  return {
+    role: data.role as InviteRole,
+    email:
+      'email' in data && typeof data.email === 'string'
+        ? data.email.toLowerCase()
+        : null,
+  }
 }

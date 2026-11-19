@@ -1,5 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { themeScript, themeStyles } from '../utils/pre-hydration'
+
+useHead({
+  script: [{ innerHTML: themeScript }],
+  style: [{ innerHTML: themeStyles }],
+})
+const theme = ref('system')
+let media: MediaQueryList | undefined
+function applyTheme() {
+  document.documentElement.dataset.theme =
+    theme.value === 'system' ? (media?.matches ? 'dark' : 'light') : theme.value
+}
+function changeTheme() {
+  try {
+    localStorage.setItem('farm-theme', theme.value)
+  } catch {}
+  applyTheme()
+}
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem('farm-theme')
+    if (saved === 'light' || saved === 'dark') theme.value = saved
+  } catch {}
+  media = matchMedia('(prefers-color-scheme: dark)')
+  media.addEventListener('change', applyTheme)
+  applyTheme()
+})
+onUnmounted(() => media?.removeEventListener('change', applyTheme))
 
 type FarmPage = { farms: { farmId: string }[] }
 type BrowserDevicePage = { currentRole: string }
@@ -86,6 +114,12 @@ onMounted(async () => {
         {{ link.label }}
       </NuxtLink>
     </nav>
+    <label for="theme-choice">Tema</label>
+    <select id="theme-choice" v-model="theme" @change="changeTheme">
+      <option value="system">Sistema</option>
+      <option value="light">Claro</option>
+      <option value="dark">Escuro</option>
+    </select>
     <slot />
   </div>
 </template>

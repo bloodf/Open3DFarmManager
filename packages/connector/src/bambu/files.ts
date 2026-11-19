@@ -142,7 +142,10 @@ export async function listBambuFiles(
   }
 }
 
-export function parseBambuListing(listing: string): BambuFile[] {
+export function parseBambuListing(
+  listing: string,
+  extension: RegExp = /\.(3mf|gcode)$/i,
+): BambuFile[] {
   const files: BambuFile[] = []
   for (const line of listing.split(/\r?\n/)) {
     const match = /^((?:[^;\s]+=[^;]*;)+) (.+)$/.exec(line)
@@ -163,7 +166,7 @@ export function parseBambuListing(listing: string): BambuFile[] {
     )
     if (
       facts.get('type')?.toLowerCase() !== 'file' ||
-      !/\.(3mf|gcode)$/i.test(name) ||
+      !extension.test(name) ||
       /[\/\\\x00-\x1f\x7f]/.test(name) ||
       !size ||
       !/^\d+$/.test(size) ||

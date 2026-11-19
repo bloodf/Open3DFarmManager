@@ -899,7 +899,11 @@ test('the runner refuses to start without the explicit opt-in', () => {
       import.meta.url,
     ).pathname
     const run = spawnSync(process.execPath, [script, '--image=alpine:latest'], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: {
+        ...process.env,
+        OPENFARM_SIM: 'docker',
+        PATH: `${dir}:${process.env.PATH}`,
+      },
       encoding: 'utf8',
       timeout: 10_000,
     })
@@ -2833,8 +2837,13 @@ test('bounds startup output and reports log failures without hiding verification
     cleanupLedger(requiredLedger(options))
   }
   for (const failure of [
-    { status: 1, stdout: '', stderr: 'private error' },
-    { status: null, stdout: '', stderr: 'private timeout', timedOut: true },
+    { status: 1, stdout: '', stderr: 'startup-log-secret-bd1a error' },
+    {
+      status: null,
+      stdout: '',
+      stderr: 'startup-log-secret-bd1a timeout',
+      timedOut: true,
+    },
   ]) {
     const docker = createFakeDocker({
       klippyArgv: ['python3', '/home/printer/klipper/klippy/klippy.py'],
@@ -2851,7 +2860,10 @@ test('bounds startup output and reports log failures without hiding verification
             error.result?.startupOutput.error,
             failure.timedOut ? 'timeout' : 'docker-logs-failed',
           )
-          assert.equal(JSON.stringify(error.result).includes('private'), false)
+          assert.equal(
+            JSON.stringify(error.result).includes('startup-log-secret-bd1a'),
+            false,
+          )
           return true
         },
       )
@@ -3238,6 +3250,7 @@ process.stdin.on('end', () => {
             cwd: diagnostic.REPOSITORY_ROOT,
             env: {
               ...process.env,
+              OPENFARM_SIM: 'docker',
               PATH: directory,
               SYNTHETIC_DOCKER_SOCKET: socketPath,
             },

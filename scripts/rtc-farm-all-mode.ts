@@ -1,3 +1,4 @@
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
 import { execFile } from 'node:child_process'
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -42,6 +43,7 @@ export function runnableAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
       )
     if (row === 'farm-page-printing-pause')
       return Boolean(
+        env.OPENFARM_SIM?.trim().toLowerCase() === 'docker' &&
         env.RTC_FARM_TEST_SIM_MOONRAKER &&
         env.RTC_FARM_TEST_SIM_SPOOLMAN &&
         env.RTC_FARM_TEST_SIM_PRINTING_PAUSE === 'sv06',
@@ -102,6 +104,8 @@ export function parseLastJson(output: string): unknown {
 export async function runAllAcceptance(checkout: string) {
   const env = process.env
   const rows: AcceptanceRow[] = []
+  const deferred: Omit<AcceptanceRow, 'passed'>[] = []
+  const dockerSim = isDockerSim()
   const evidenceRoot =
     env.RTC_FARM_TEST_ALL_EVIDENCE ??
     join(homedir(), '.local/state/o3dfm/rtc-farm-all')
@@ -173,7 +177,9 @@ export async function runAllAcceptance(checkout: string) {
           : row === 'farm-page-printing-pause'
             ? 'SV06 printing simulator, Moonraker and Spoolman are required'
             : 'Simulator Moonraker and Spoolman origins are required'
-      rows.push({ suite: 'rtc-farm', row, passed: false, detail: missing })
+      if (dockerSim)
+        rows.push({ suite: 'rtc-farm', row, passed: false, detail: missing })
+      else deferred.push({ suite: 'rtc-farm', row, detail: missing })
       continue
     }
     const passed = rowPassed(rtcResults, row)
@@ -234,6 +240,14 @@ export async function runAllAcceptance(checkout: string) {
 
   // Each profile owns a fresh project and fully tears it down before the next.
   for (const profile of ['nat', 'netem', 'udp-block']) {
+    if (!dockerSim) {
+      deferred.push({
+        suite: 'network-fault',
+        row: profile,
+        detail: 'Docker mode only (OPENFARM_SIM=docker)',
+      })
+      continue
+    }
     const result = await execute(
       `netfault-${profile}`,
       'bash',
@@ -254,7 +268,8 @@ export async function runAllAcceptance(checkout: string) {
     env.RTC_FARM_TEST_ALL_SUMMARY ?? join(evidence, 'summary.json')
   await writeFile(
     summaryPath,
-    JSON.stringify({ ...summary, evidence, summaryPath }, null, 2) + '\n',
+    JSON.stringify({ ...summary, deferred, evidence, summaryPath }, null, 2) +
+      '\n',
     { mode: 0o600 },
   )
   await appendFile(
@@ -263,7 +278,8 @@ export async function runAllAcceptance(checkout: string) {
     { mode: 0o600 },
   )
   process.stdout.write(
-    JSON.stringify({ ...summary, evidence, summaryPath }, null, 2) + '\n',
+    JSON.stringify({ ...summary, deferred, evidence, summaryPath }, null, 2) +
+      '\n',
   )
   return summary.result === 'passed' ? 0 : 1
 }

@@ -21,12 +21,7 @@ export async function runSmoke(
   probe: (origin: string) => Promise<unknown> = (origin) =>
     Effect.runPromise(probePrinter(origin)),
 ): Promise<boolean> {
-  const explicitMode = process.env.OPENFARM_SIM?.trim().toLowerCase()
-  const useMocks =
-    targets === undefined &&
-    isMockSim() &&
-    (explicitMode === 'mock' ||
-      (!process.env.SIM_SV06_URL && !process.env.SIM_U1_URL))
+  const useMocks = targets === undefined && isMockSim()
 
   const ownedMocks: MoonrakerMockInstance[] = []
   let resolvedTargets: SmokeTarget[]

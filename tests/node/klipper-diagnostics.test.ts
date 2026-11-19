@@ -31,7 +31,11 @@ esac
       { mode: 0o700 },
     )
     const run = spawnSync(process.execPath, [script, 'synthetic-project'], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: {
+        ...process.env,
+        OPENFARM_SIM: 'docker',
+        PATH: `${dir}:${process.env.PATH}`,
+      },
       encoding: 'utf8',
       timeout: 10000,
     })
@@ -119,7 +123,11 @@ esac
       { mode: 0o700 },
     )
     const run = spawnSync(process.execPath, [script, 'synthetic-project'], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: {
+        ...process.env,
+        OPENFARM_SIM: 'docker',
+        PATH: `${dir}:${process.env.PATH}`,
+      },
       encoding: 'utf8',
       timeout: 10000,
     })
@@ -252,7 +260,11 @@ esac
         { mode: 0o700 },
       )
       const run = spawnSync(process.execPath, [script], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        env: {
+          ...process.env,
+          OPENFARM_SIM: 'docker',
+          PATH: `${dir}:${process.env.PATH}`,
+        },
         encoding: 'utf8',
         timeout: 10000,
       })
@@ -293,7 +305,11 @@ esac
       { mode: 0o700 },
     )
     const run = spawnSync(process.execPath, [script], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: {
+        ...process.env,
+        OPENFARM_SIM: 'docker',
+        PATH: `${dir}:${process.env.PATH}`,
+      },
       encoding: 'utf8',
       timeout: 10000,
     })
@@ -329,7 +345,11 @@ esac
         { mode: 0o700 },
       )
       const run = spawnSync(process.execPath, [script], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        env: {
+          ...process.env,
+          OPENFARM_SIM: 'docker',
+          PATH: `${dir}:${process.env.PATH}`,
+        },
         encoding: 'utf8',
         timeout: 10000,
       })

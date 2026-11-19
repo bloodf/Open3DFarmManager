@@ -258,7 +258,9 @@ try {
     // Exact owned container only: verified by ID, name and label.
     const owned =
       container ??
-      (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
+      (dockerMode
+        ? await docker('inspect', '--format', '{{.Id}}', name).catch(() => '')
+        : '')
     if (owned) {
       assert.equal(
         await docker(

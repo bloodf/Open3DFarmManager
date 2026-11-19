@@ -1,12 +1,25 @@
 name: Simulator
-on: [workflow_dispatch]
+on: [pull_request, workflow_dispatch]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
+  mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: npm ci --ignore-scripts
+      - run: node --test tests/node/e16-358.test.mjs
   klipper:
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      OPENFARM_SIM: docker
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -23,6 +36,9 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down
   spoolman:
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      OPENFARM_SIM: docker
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +74,9 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile spoolman down
   cams:
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      OPENFARM_SIM: docker
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +111,9 @@ jobs:
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile cams down
   rtsp:
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      OPENFARM_SIM: docker
     strategy:
       fail-fast: false
       matrix:

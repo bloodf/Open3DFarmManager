@@ -1,7 +1,7 @@
 // Disposable local PostgreSQL 17 cluster for the Docker-free (OPENFARM_SIM=mock)
 // outage run. Loopback TCP only, trust auth, data inside the caller's work
 // directory, removed with it. Stops exactly the postmaster it started.
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -81,5 +81,13 @@ export async function startLocalPostgres(input: {
     await stop().catch(() => {})
     throw error
   }
-  return { stop, logPath: log }
+  const stopSync = () => {
+    execFileSync(
+      pgCtl,
+      ['-D', data, '-m', 'immediate', '-w', '-t', '30', 'stop'],
+      { timeout: 35000 },
+    )
+    input.ledger({ removed: 'local-postgres-process', data })
+  }
+  return { stop, stopSync, logPath: log }
 }

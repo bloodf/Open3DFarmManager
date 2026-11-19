@@ -1,3 +1,5 @@
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
+import type { mockSimulatorStack } from './sim-acceptance-mocks.ts'
 // Two-printer / four-tool / Spoolman simulator acceptance (issue #2) against
 // the real Klipper/Moonraker and Spoolman simulators, the built farm server,
 // real enrollment and the real Connector CLI. Read-only: no printer command is
@@ -68,6 +70,10 @@ export function simulatorStack(input: {
   workDir: string
   ledger: (value: object) => void
 }) {
+  assert.ok(
+    isDockerSim(),
+    'This container fixture requires OPENFARM_SIM=docker',
+  )
   const { ports } = input
   const override = join(input.workDir, 'ports.override.yml')
   const publish = (pairs: [number, number][]) =>
@@ -125,11 +131,14 @@ export function simulatorStack(input: {
 export async function runSimFarmAcceptance(input: {
   admin: Sql
   ports: SimPorts
+  origins?: ReturnType<typeof mockSimulatorStack>['origins']
   workDir: string
   ledger: (value: object) => void
 }) {
   const { admin, ports, workDir, ledger } = input
   const origin = (port: number) => `http://127.0.0.1:${port}`
+  const simOrigin = (name: keyof NonNullable<typeof input.origins>) =>
+    input.origins?.[name] ?? origin(ports[name])
   const timings: Record<string, number> = {}
   const t0 = performance.now()
   const mark = (name: string) =>
@@ -139,7 +148,7 @@ export async function runSimFarmAcceptance(input: {
   for (const printer of PRINTERS)
     await until(
       () =>
-        Effect.runPromise(probePrinter(origin(ports[printer]))).then(
+        Effect.runPromise(probePrinter(simOrigin(printer))).then(
           () => true,
           () => false,
         ),
@@ -149,7 +158,7 @@ export async function runSimFarmAcceptance(input: {
   mark('printersReady')
 
   // 2. Spoolman seed is repeatable (2 vendors, 4 filaments, 6 spools).
-  const spoolmanOrigin = origin(ports.spoolman)
+  const spoolmanOrigin = simOrigin('spoolman')
   const seeded = await seedSpoolman(spoolmanOrigin)
   assert.deepEqual(await seedSpoolman(spoolmanOrigin), seeded)
 
@@ -157,7 +166,7 @@ export async function runSimFarmAcceptance(input: {
   const discovered: Record<string, object> = {}
   for (const printer of PRINTERS) {
     const result = await discoverMoonraker({
-      origin: origin(ports[printer]),
+      origin: simOrigin(printer),
       limits: LIMITS,
       signal: AbortSignal.timeout(20000),
       client: {
@@ -186,9 +195,9 @@ export async function runSimFarmAcceptance(input: {
   assert.deepEqual((discovered.sv06 as { tools: string[] }).tools, ['extruder'])
   // One JPEG frame from each printer webcam and from the camera service.
   const snapshotBytes = {
-    sv06: await verifyCamera(origin(ports.sv06Cam)),
-    u1: await verifyCamera(origin(ports.u1Cam)),
-    camera: await verifyCamera(origin(ports.camera)),
+    sv06: await verifyCamera(simOrigin('sv06Cam')),
+    u1: await verifyCamera(simOrigin('u1Cam')),
+    camera: await verifyCamera(simOrigin('camera')),
   }
   mark('discovered')
 
@@ -281,7 +290,7 @@ export async function runSimFarmAcceptance(input: {
       workDir,
       printerKeys: PRINTERS,
     })
-    const printerOrigins = PRINTERS.map((printer) => origin(ports[printer]))
+    const printerOrigins = PRINTERS.map((printer) => simOrigin(printer))
     const configPath = join(workDir, 'runtime.json'),
       credentialPath = join(workDir, 'credential.json')
     writeFileSync(
@@ -387,7 +396,7 @@ export async function runSimFarmAcceptance(input: {
     // 6. Telemetry from both genuine printers is ingested into PostgreSQL.
     const perPrinter = async () =>
       (await admin`SELECT COALESCE(payload#>>'{state,printerKey}', payload#>>'{transition,printerKey}') AS printer, count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid GROUP BY 1`) as unknown as {
-        printer: string
+        printer: string | null
         n: number
       }[]
     await until(
@@ -414,6 +423,7 @@ export async function runSimFarmAcceptance(input: {
       )[0]!.n as number
     await until(
       async () =>
+        delivered() >= PRINTERS.length + 1 &&
         delivered() >= connector.count('queued') &&
         (await stored()) === delivered(),
       30000,
@@ -435,9 +445,14 @@ export async function runSimFarmAcceptance(input: {
         d: number
       }[]
     assert.equal(totals!.n, totals!.d, 'each event stored exactly once')
-    assert.equal(totals!.n, summary.queued, 'every queued record stored')
-    assert.equal(agentSummary.delivered, summary.queued, 'every record acked')
-    const rows = await perPrinter()
+    const [inventory] =
+      await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+    assert.equal(inventory!.n, 1, 'one seeded inventory snapshot stored')
+    // The collector summary counts printer records; delivery also carries Spoolman.
+    const queued = Number(summary.queued) + inventory!.n
+    assert.equal(totals!.n, queued, 'every queued record stored')
+    assert.equal(agentSummary.delivered, queued, 'every record acked')
+    const rows = (await perPrinter()).filter((row) => row.printer !== null)
     // Idle simulators: exactly one baseline state record per printer.
     assert.deepEqual(
       Object.fromEntries(rows.map((row) => [row.printer, row.n])),
@@ -458,7 +473,7 @@ export async function runSimFarmAcceptance(input: {
       discovered,
       snapshotBytes,
       exactlyOnce: {
-        queued: summary.queued,
+        queued,
         delivered: agentSummary.delivered,
         stored: totals!.n,
         distinct: totals!.d,

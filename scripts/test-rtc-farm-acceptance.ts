@@ -1,3 +1,8 @@
+import { getFreePort } from '../tests/helpers/disposable-postgres.ts'
+import { startLocalPostgres } from '../tests/helpers/connector-outage-local-postgres.ts'
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 // One-command real-RTC farm-page acceptance (issues #8/#9; Phase 0 base).
 // Disposable digest-pinned PostgreSQL 17 (never pulled), throwaway TLS CA and
 // keys in a private work directory, sealed built farm server over HTTPS, real
@@ -36,23 +41,29 @@ const env = process.env
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
 if (process.argv.length === 3 && process.argv[2] === '--all')
   process.exit(await runAllAcceptance(checkout))
+const pgDocker = env.OPENFARM_PG === 'docker'
 const image = env.RTC_FARM_TEST_IMAGE
-const dbPort = Number(env.RTC_FARM_TEST_DB_PORT)
-const workRoot = env.RTC_FARM_TEST_WORK_ROOT
+const dbPort =
+  env.RTC_FARM_TEST_DB_PORT || pgDocker
+    ? Number(env.RTC_FARM_TEST_DB_PORT)
+    : await getFreePort()
+const requestedRoot = env.RTC_FARM_TEST_WORK_ROOT
 const runs = Number(env.RTC_FARM_TEST_REPEAT ?? '1')
 if (
   process.argv.length !== 2 ||
-  env.RTC_FARM_TEST_ADMITTED !== 'yes' ||
-  !image ||
-  !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(
-    image,
-  ) ||
+  (pgDocker &&
+    (env.RTC_FARM_TEST_ADMITTED !== 'yes' ||
+      !image ||
+      !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(
+        image,
+      ))) ||
   !Number.isInteger(dbPort) ||
   dbPort < 1024 ||
   dbPort > 65535 ||
-  !workRoot ||
-  !isAbsolute(workRoot) ||
-  !relative(checkout, workRoot).startsWith('..') ||
+  (pgDocker && !requestedRoot) ||
+  (requestedRoot !== undefined &&
+    (!isAbsolute(requestedRoot) ||
+      !relative(checkout, requestedRoot).startsWith('..'))) ||
   !Number.isInteger(runs) ||
   runs < 1 ||
   runs > 5
@@ -67,7 +78,10 @@ const snapshotCamera = env.RTC_FARM_TEST_CAMERA_SOURCE === 'moonraker-snapshot'
 const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   ? {
       helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
-      port: Number(env.RTC_FARM_TEST_RTSP_PORT),
+      port:
+        env.RTC_FARM_TEST_RTSP_PORT || isDockerSim()
+          ? Number(env.RTC_FARM_TEST_RTSP_PORT)
+          : await getFreePort(),
     }
   : undefined
 if (
@@ -88,6 +102,8 @@ if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
 const id = randomUUID()
 const name = prefix + '-' + id
 const label = 'org.open3dfarmmanager.rtc-farm-test=' + id
+const workRoot =
+  requestedRoot ?? (await mkdtemp(join(tmpdir(), 'openfarm-rtc-farm-')))
 const workDir = join(workRoot, id)
 const evidence = join(homedir(), '.local/state/o3dfm/rtc-farm-tests', id)
 const ledgerPath = join(evidence, 'resources.jsonl')
@@ -119,6 +135,7 @@ const childEnv: NodeJS.ProcessEnv = Object.fromEntries(
   ALLOWED_ENV.flatMap((key) => (env[key] ? [[key, env[key]]] : [])),
 )
 childEnv.TMPDIR = workDir
+childEnv.OPENFARM_SIM = isDockerSim() ? 'docker' : 'mock'
 
 const KILL_GRACE_MS = 5000
 const LOG_LIMIT_BYTES = 8 * 1024 * 1024
@@ -139,17 +156,19 @@ const stopGroup = (child: ChildProcess | undefined) => {
 // First signal: stop the current group and let finally clean up. Second
 // signal: best-effort synchronous cleanup of exactly this run, then exit.
 let interrupted = false
+let localDb: Awaited<ReturnType<typeof startLocalPostgres>> | undefined
 const interrupt = () => {
   if (interrupted) {
     signalGroup(current, 'SIGKILL')
     try {
-      execFileSync('docker', ['rm', '--force', name], { timeout: 15000 })
+      if (pgDocker)
+        execFileSync('docker', ['rm', '--force', name], { timeout: 15000 })
     } catch {
       /* not created or already removed */
     }
     try {
       // Exact compose project of this run's RTSP simulator, if one was started.
-      if (camera)
+      if (camera && isDockerSim() && !snapshotCamera)
         execFileSync(
           'docker',
           [
@@ -171,7 +190,8 @@ const interrupt = () => {
     } catch {
       /* not started or already removed */
     }
-    rmSync(workDir, { recursive: true, force: true })
+    localDb?.stopSync()
+    rmSync(requestedRoot ? workDir : workRoot, { recursive: true, force: true })
     process.exit(130)
   }
   interrupted = true
@@ -253,31 +273,35 @@ try {
     '',
     'The sealed build requires a clean checkout',
   )
-  // Fails rather than pulling: image ownership and deletion remain with its owner.
-  await docker('image', 'inspect', image)
-  ledger({ resource: 'container', name, label, image })
-  createAttempted = true
-  await docker(
-    ...['create', '--name', name, '--label', label, '--pull', 'never'],
-    ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
-    ...['--security-opt', 'no-new-privileges', '--user', 'postgres'],
-    ...['--tmpfs', '/var/lib/postgresql/data:rw,mode=1777'],
-    ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
-    ...['--tmpfs', '/tmp:rw,mode=1777'],
-    ...['-p', `127.0.0.1:${dbPort}:5432`],
-    ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-    ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
-    ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
-    image,
-  )
-  container = await docker('inspect', '--format', '{{.Id}}', name)
-  assert.match(container, /^[a-f0-9]{64}$/)
-  ledger({ resource: 'container-id', id: container })
-  await docker('start', container)
-  await docker(
-    ...['exec', container, 'sh', '-c'],
-    'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
-  )
+  if (pgDocker && image) {
+    // Fails rather than pulling: image ownership and deletion remain with its owner.
+    await docker('image', 'inspect', image)
+    ledger({ resource: 'container', name, label, image })
+    createAttempted = true
+    await docker(
+      ...['create', '--name', name, '--label', label, '--pull', 'never'],
+      ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
+      ...['--security-opt', 'no-new-privileges', '--user', 'postgres'],
+      ...['--tmpfs', '/var/lib/postgresql/data:rw,mode=1777'],
+      ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
+      ...['--tmpfs', '/tmp:rw,mode=1777'],
+      ...['-p', `127.0.0.1:${dbPort}:5432`],
+      ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
+      ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+      ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
+      image,
+    )
+    container = await docker('inspect', '--format', '{{.Id}}', name)
+    assert.match(container, /^[a-f0-9]{64}$/)
+    ledger({ resource: 'container-id', id: container })
+    await docker('start', container)
+    await docker(
+      ...['exec', container, 'sh', '-c'],
+      'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
+    )
+  } else {
+    localDb = await startLocalPostgres({ workDir, port: dbPort, ledger })
+  }
   sql = postgres({
     host: '127.0.0.1',
     port: dbPort,
@@ -453,12 +477,19 @@ try {
     cleanupFailure ??= error
   }
   try {
+    await localDb?.stop()
+  } catch (error) {
+    cleanupFailure ??= error
+  }
+  try {
     // Exact ownership: recover the ID by name if recording was interrupted.
     // A timed-out `docker create` is not cancelled in the daemon and can still
     // finish later, so keep looking for a bounded time after an attempt.
     let owned =
       container ??
-      (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
+      (pgDocker
+        ? await docker('inspect', '--format', '{{.Id}}', name).catch(() => '')
+        : '')
     for (
       let waited = 0;
       !owned && createAttempted && waited < CREATE_SETTLE_MS;
@@ -510,7 +541,10 @@ try {
   }
   try {
     // Exact path: the work directory this run created (layer, CA, keys, ledgers).
-    await rm(workDir, { recursive: true, force: true })
+    await rm(requestedRoot ? workDir : workRoot, {
+      recursive: true,
+      force: true,
+    })
     ledger({ removed: 'work-directory', path: workDir })
   } catch (error) {
     cleanupFailure ??= error

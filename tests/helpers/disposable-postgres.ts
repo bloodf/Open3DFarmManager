@@ -132,6 +132,7 @@ export interface DisposablePostgresInput {
    */
   through?: string | false
   postgresArgs?: string[]
+  isolated?: boolean
   docker?: DockerCommand | undefined
   image?: string | undefined
 }
@@ -153,7 +154,9 @@ export function disposablePostgres(
 ): DisposablePostgresFixture {
   const { name, ledger = () => {} } = input
   const isDocker = process.env.OPENFARM_PG === 'docker'
-  const testDatabaseUrl = process.env.OPENFARM_TEST_DATABASE_URL
+  const testDatabaseUrl = input.isolated
+    ? undefined
+    : process.env.OPENFARM_TEST_DATABASE_URL
 
   let container: string | undefined
   let sql: Sql | undefined

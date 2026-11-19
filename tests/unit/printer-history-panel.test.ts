@@ -21,7 +21,7 @@ import {
   readDetailHistory,
   readDetailTotals,
 } from '../../packages/connector/src/moonraker/control-history.ts'
-import { PrinterDetailQueryResponse } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamQueryResponse } from '../../packages/farm-protocol/src/printer-detail.ts'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
 import {
   startMoonrakerMock,
@@ -104,7 +104,7 @@ describe('history adapter', () => {
       durationSeconds: 100,
     })
     expect(
-      PrinterDetailQueryResponse.safeParse({
+      PrinterDetailStreamQueryResponse.safeParse({
         v: 1,
         t: 'query.response',
         printerKey: 'printer-a',

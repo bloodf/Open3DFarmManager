@@ -1,4 +1,4 @@
-import { PrinterDetailUpdate } from '../../../farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../../farm-protocol/src/printer-detail.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 
 export function anycubicPrinterDetail(
@@ -53,7 +53,7 @@ export function anycubicPrinterDetail(
       ...(printer.materials && { materials: printer.materials }),
     }),
   }
-  const parsed = PrinterDetailUpdate.safeParse({
+  const parsed = PrinterDetailStreamUpdate.safeParse({
     v: 1,
     t: 'detail.update',
     printerKey: printer.printerKey,

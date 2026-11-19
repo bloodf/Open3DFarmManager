@@ -6,7 +6,7 @@ import {
   moonrakerSession,
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
-import { PrinterDetailUpdate } from '../../../farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../../farm-protocol/src/printer-detail.ts'
 import {
   fields,
   list,
@@ -169,7 +169,7 @@ export function createMoonrakerDetailStream(input: {
       const enriched = new Map(status)
       if (print) enriched.set('print_stats', { ...print, ...metadata })
       const normalized = normalizeDetail(enriched)
-      const frame = PrinterDetailUpdate.safeParse({
+      const frame = PrinterDetailStreamUpdate.safeParse({
         v: 1,
         t: 'detail.update',
         printerKey: input.printerKey,

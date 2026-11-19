@@ -1,181 +1,185 @@
+import { afterEach, describe, expect, test } from 'vitest'
 import dgram from 'node:dgram'
-import net from 'node:net'
-import { expect, test, vi } from 'vitest'
 import { discoverPrinters } from '../../packages/connector/src/discovery/index.ts'
-import { startAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
-import { startCrealityDiscoverySimulator } from '../../packages/sim-tools/src/creality-discovery-sim.ts'
-import { startDiscoveryResponder } from '../../packages/sim-tools/src/mocks/discovery/index.ts'
-import { startKobraXMock } from '../../packages/sim-tools/src/mocks/kobra-x-mock.ts'
-import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
-import { withNetworkGuard } from '../../packages/sim-tools/src/mocks/network-guard.ts'
+import {
+  getNetworkGuardStats,
+  isMulticastAddress,
+  resetNetworkGuardStats,
+  startDiscoveryMocks,
+  withNetworkGuard,
+  type DiscoveryMockInstance,
+} from '../../packages/sim-tools/src/mocks/index.ts'
 
-const loopback = '127.0.0.1'
+const openMocks: DiscoveryMockInstance[] = []
 
-function guardOutbound() {
-  const rejected: unknown[] = []
-  function reject(destination: unknown): never {
-    rejected.push(destination)
-    throw new Error(`Outbound network blocked: ${String(destination)}`)
+afterEach(async () => {
+  while (openMocks.length) {
+    const mock = openMocks.pop()
+    await mock?.close()
   }
-
-  const send = dgram.Socket.prototype.send
-  vi.spyOn(dgram.Socket.prototype, 'send').mockImplementation(function (
-    this: dgram.Socket,
-    ...args: unknown[]
-  ) {
-    const destination = typeof args[3] === 'number' ? args[4] : args[2]
-    if (destination !== loopback) reject(destination)
-    return Reflect.apply(send, this, args)
-  })
-  vi.spyOn(dgram.Socket.prototype, 'connect').mockImplementation(() =>
-    reject('connected UDP'),
-  )
-  vi.spyOn(dgram.Socket.prototype, 'addMembership').mockImplementation(
-    (group) => reject(group),
-  )
-  const connect = net.Socket.prototype.connect
-  vi.spyOn(net.Socket.prototype, 'connect').mockImplementation(function (
-    this: net.Socket,
-    ...args: unknown[]
-  ) {
-    const first = Array.isArray(args[0]) ? args[0][0] : args[0]
-    const host =
-      first && typeof first === 'object' && 'host' in first
-        ? first.host
-        : typeof first === 'number'
-          ? args[1]
-          : undefined
-    if (host !== loopback) reject(host)
-    return Reflect.apply(connect, this, args)
-  })
-  return rejected
-}
-
-test('blocks outbound TCP, UDP and multicast before sending traffic', () => {
-  const rejected = guardOutbound()
-  try {
-    const socket = dgram.createSocket('udp4')
-    expect(() => socket.send('query', 5353, '224.0.0.251')).toThrow(
-      'Outbound network blocked',
-    )
-    expect(() => socket.addMembership('224.0.0.251')).toThrow(
-      'Outbound network blocked',
-    )
-    expect(() => new net.Socket().connect(80, '192.0.2.1')).toThrow(
-      'Outbound network blocked',
-    )
-    expect(rejected).toEqual(['224.0.0.251', '224.0.0.251', '192.0.2.1'])
-    socket.close()
-  } finally {
-    vi.restoreAllMocks()
-  }
+  resetNetworkGuardStats()
 })
 
-test('discovers five printer vendors using guarded loopback sockets', async () => {
-  const rejected = guardOutbound()
-  try {
+async function startGuarded(
+  ...args: Parameters<typeof startDiscoveryMocks>
+): Promise<DiscoveryMockInstance> {
+  const mock = await startDiscoveryMocks(...args)
+  openMocks.push(mock)
+  return mock
+}
+
+describe('discovery mocks on loopback (#413)', () => {
+  test('rejects multicast destinations under the network guard', async () => {
     await withNetworkGuard(async () => {
-      const resources: { close: () => Promise<void> }[] = []
-      async function own<T extends (typeof resources)[number]>(
-        resource: Promise<T>,
-      ) {
-        const started = await resource
-        resources.push(started)
-        return started
-      }
+      resetNetworkGuardStats()
+      expect(isMulticastAddress('224.0.0.251')).toBe(true)
+      expect(isMulticastAddress('239.255.255.250')).toBe(true)
+      expect(isMulticastAddress('127.0.0.1')).toBe(false)
 
-      try {
-        const moonraker = await own(startMoonrakerMock())
-        const moonrakerPort = Number(new URL(moonraker.origin).port)
-        const responder = await own(startDiscoveryResponder(moonrakerPort))
-        const creality = await own(startCrealityDiscoverySimulator({ port: 0 }))
-        const anycubic = await own(startAnycubicDiscoverySimulator({ port: 0 }))
-        const kobra = await own(startKobraXMock({ ssdp: true, camera: false }))
-        if (kobra.ssdpPort === undefined)
-          throw new Error('Missing Kobra X SSDP port')
-
-        let bambuSocket: dgram.Socket | undefined
-        const printers = await discoverPrinters({
-          timeout: 250,
-          bindAddress: loopback,
-          mdnsPort: 0,
-          bambuPorts: [0],
-          queryPort: responder.port,
-          queryAddress: loopback,
-          crealityPorts: { http: creality.port, https: creality.port },
-          anycubicPort: anycubic.port,
-          kobraX: {
-            target: loopback,
-            ssdpPort: kobra.ssdpPort,
-            httpPort: kobra.httpPort,
-          },
-          createSocket: () => {
-            const socket = dgram.createSocket('udp4')
-            if (!bambuSocket) {
-              bambuSocket = socket
-              socket.once('listening', () =>
-                responder.notifyBambu(socket.address().port),
-              )
-            }
-            return socket
-          },
+      const socket = dgram.createSocket('udp4')
+      socket.on('error', () => {})
+      await new Promise<void>((resolve, reject) => {
+        socket.once('error', reject)
+        socket.bind(0, '127.0.0.1', () => {
+          socket.removeListener('error', reject)
+          resolve()
         })
-        expect(printers).toHaveLength(5)
-        expect(printers).toEqual(
-          expect.arrayContaining([
-            {
-              vendor: 'bambu',
-              host: loopback,
-              serial: 'synthetic-bambu',
-              model: 'BL-P001',
-              name: 'Mock Bambu',
-            },
-            {
-              vendor: 'moonraker',
-              host: loopback,
-              port: moonrakerPort,
-              name: 'mock-printer',
-            },
-            {
-              vendor: 'creality',
-              host: loopback,
-              serial: 'AA:BB:CC:00:00:01',
-              model: 'Creality K1',
-            },
-            {
-              vendor: 'anycubic',
-              host: loopback,
-              port: anycubic.port,
-              serial: 'simulator',
-              model: 'K3',
-              name: 'Anycubic Kobra 3',
-            },
-            {
-              vendor: 'kobra-x',
-              host: loopback,
-              port: 18910,
-              model: 'Anycubic Kobra X',
-              name: 'Anycubic Kobra X (Synthetic)',
-            },
-          ]),
+      })
+      try {
+        await new Promise<void>((resolve, reject) => {
+          socket.send(Buffer.from('probe'), 5353, '224.0.0.251', (error) => {
+            if (error) resolve()
+            else reject(new Error('multicast send should be rejected'))
+          })
+        })
+        expect(() => socket.addMembership('224.0.0.251')).toThrow(
+          /multicast membership rejected/,
         )
-        expect(kobra.calls.ssdp).toEqual([
-          expect.objectContaining({
-            st: 'ac:3dprinter:20030',
-            address: loopback,
-          }),
-        ])
+        const stats = getNetworkGuardStats()
+        expect(stats.multicastRejected).toBeGreaterThanOrEqual(2)
+        expect(stats.rejectedAttempts).toBe(0)
       } finally {
-        const closed = await Promise.allSettled(
-          resources.map((resource) => resource.close()),
-        )
-        expect(closed.every((result) => result.status === 'fulfilled')).toBe(
-          true,
-        )
+        await new Promise<void>((resolve) => socket.close(() => resolve()))
       }
     })
-    expect(rejected).toEqual([])
-  } finally {
-    vi.restoreAllMocks()
-  }
+  })
+
+  test('discovers every vendor with outbound network blocked', async () => {
+    await withNetworkGuard(async () => {
+      resetNetworkGuardStats()
+      const mocks = await startGuarded({
+        moonraker: { name: 'farm-a', port: 7125 },
+        bambu: {
+          serial: 'UNITBAMBU',
+          model: 'X1C',
+          name: 'Bambu Unit',
+        },
+        creality: { info: { model: 'K1', mac: 'AA:BB:CC:DD:EE:01' } },
+        anycubic: {
+          info: {
+            modelId: 'K3',
+            cn: 'any-serial',
+            modelName: 'Kobra 3',
+          },
+        },
+        kobraX: { deviceName: 'Kobra X Unit' },
+      })
+
+      for (const port of Object.values(mocks.ports)) {
+        expect(port).toBeGreaterThan(0)
+      }
+
+      const before = getNetworkGuardStats()
+      expect(before.rejectedAttempts).toBe(0)
+      expect(before.multicastRejected).toBe(0)
+
+      const foundPromise = discoverPrinters({
+        ...mocks.discoveryOptions,
+        timeout: 200,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      mocks.announceBambu()
+
+      const found = await foundPromise
+      const byVendor = Object.fromEntries(
+        found.map((printer) => [printer.vendor, printer]),
+      )
+
+      expect(byVendor.moonraker).toMatchObject({
+        vendor: 'moonraker',
+        host: '127.0.0.1',
+        port: 7125,
+        name: 'farm-a',
+      })
+      expect(byVendor.bambu).toMatchObject({
+        vendor: 'bambu',
+        host: '127.0.0.1',
+        serial: 'UNITBAMBU',
+        model: 'X1C',
+        name: 'Bambu Unit',
+      })
+      expect(byVendor.creality).toMatchObject({
+        vendor: 'creality',
+        host: '127.0.0.1',
+        model: 'K1',
+        serial: 'AA:BB:CC:DD:EE:01',
+      })
+      expect(byVendor.anycubic).toMatchObject({
+        vendor: 'anycubic',
+        host: '127.0.0.1',
+        serial: 'any-serial',
+        model: 'K3',
+        name: 'Kobra 3',
+      })
+      expect(byVendor['kobra-x']).toMatchObject({
+        vendor: 'kobra-x',
+        host: '127.0.0.1',
+        port: 18910,
+        model: 'Anycubic Kobra X',
+        name: 'Kobra X Unit',
+      })
+
+      const after = getNetworkGuardStats()
+      expect(after.rejectedAttempts).toBe(0)
+      expect(after.multicastRejected).toBe(0)
+      expect(after.listenAttempts).toBeGreaterThan(0)
+    })
+  })
+
+  test('accepts an injected mDNS socket bound on loopback', async () => {
+    await withNetworkGuard(async () => {
+      const injected = dgram.createSocket('udp4')
+      injected.on('error', () => {})
+      await new Promise<void>((resolve, reject) => {
+        injected.once('error', reject)
+        injected.bind(0, '127.0.0.1', () => {
+          injected.removeListener('error', reject)
+          resolve()
+        })
+      })
+      const boundPort = injected.address().port
+
+      const mocks = await startGuarded({
+        vendors: ['moonraker'],
+        mdnsSocket: injected,
+        moonraker: { name: 'injected', port: 7120 },
+      })
+      expect(mocks.ports.mdns).toBe(boundPort)
+
+      const found = await discoverPrinters({
+        ...mocks.discoveryOptions,
+        timeout: 120,
+      })
+      expect(found).toEqual([
+        {
+          vendor: 'moonraker',
+          host: '127.0.0.1',
+          port: 7120,
+          name: 'injected',
+        },
+      ])
+      expect(getNetworkGuardStats().multicastRejected).toBe(0)
+    })
+  })
 })

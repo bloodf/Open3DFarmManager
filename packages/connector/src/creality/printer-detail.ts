@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import { PrinterDetailUpdate } from '../../../farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamUpdate } from '../../../farm-protocol/src/printer-detail.ts'
 import {
   createCrealityTelemetryClient,
   type CrealityTelemetry,
@@ -15,7 +15,7 @@ import {
  * K-series printers keep the Moonraker detail stream.
  */
 
-type Update = z.infer<typeof PrinterDetailUpdate>
+type Update = z.infer<typeof PrinterDetailStreamUpdate>
 
 export const CREALITY_MAX_CONSOLE_LINE_BYTES = 256
 
@@ -103,7 +103,7 @@ export function crealityDetailUpdate(
   }
   if (options.consoleEnabled) capabilities.push('console')
   if (!capabilities.length) return undefined
-  const parsed = PrinterDetailUpdate.safeParse({
+  const parsed = PrinterDetailStreamUpdate.safeParse({
     v: 1,
     t: 'detail.update',
     printerKey,

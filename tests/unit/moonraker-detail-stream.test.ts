@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   decodePrinterDetailFrame,
-  PrinterDetailUpdate,
+  PrinterDetailStreamUpdate,
 } from '../../packages/farm-protocol/src/printer-detail.ts'
 import {
   createMoonrakerDetailStream,
@@ -76,7 +76,7 @@ describe('Moonraker detail stream', () => {
     const { updates } = watch(stream)
     const first = await until(() => updates()[0])
     const { at: _at, ...frame } = first
-    expect(PrinterDetailUpdate.safeParse(frame).success).toBe(true)
+    expect(PrinterDetailStreamUpdate.safeParse(frame).success).toBe(true)
     expect(first.printerKey).toBe(KEY)
     expect(first.capabilities).toEqual(
       expect.arrayContaining(['heaters', 'fans', 'motion', 'job', 'console']),

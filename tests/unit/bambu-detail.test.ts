@@ -11,7 +11,7 @@ import {
   createBambuSdCard,
 } from '../../packages/connector/src/bambu/printer-detail.ts'
 import { bambuFtps } from '../../packages/connector/src/bambu/ftps-ops.ts'
-import { PrinterDetailQueryKind } from '../../packages/farm-protocol/src/printer-detail.ts'
+import { PrinterDetailStreamQueryKind } from '../../packages/farm-protocol/src/printer-detail.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
 type Frame = {
@@ -245,7 +245,7 @@ describe('Bambu SD card over FTPS', () => {
       trust: { pinSha256: 'a'.repeat(64) },
       port: 1,
     })
-    for (const kind of PrinterDetailQueryKind.options)
+    for (const kind of PrinterDetailStreamQueryKind.options)
       if (kind !== 'files' && kind !== 'timelapse')
         expect(await answerBambuDetailQuery(kind, card, {}, signal())).toEqual({
           error: 'unsupported',

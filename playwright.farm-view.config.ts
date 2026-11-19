@@ -10,6 +10,7 @@ export default defineConfig({
   testMatch: [
     'farm-view.spec.ts',
     'farm-controls.spec.ts',
+    'kobra-x-controls.spec.ts',
     'files-page.spec.ts',
   ],
   workers: 1,

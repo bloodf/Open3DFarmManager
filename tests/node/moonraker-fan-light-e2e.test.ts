@@ -152,7 +152,13 @@ for (const present of [true, false]) {
       )
       assert.deepEqual(requests[2]?.params?.objects, {
         webhooks: ['state'],
-        print_stats: ['state'],
+        print_stats: [
+          'state',
+          'filename',
+          'print_duration',
+          'total_duration',
+          'info',
+        ],
         virtual_sdcard: ['progress'],
         ...(present
           ? {

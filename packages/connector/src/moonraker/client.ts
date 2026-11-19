@@ -97,9 +97,16 @@ const DEFAULT_CLIENT = {
   version: '1',
   url: 'https://open3dfarmmanager.local',
 }
+// Job fields feed the finished-job summary; the published snapshot keeps only state.
 const selectedObjects = {
   webhooks: ['state'],
-  print_stats: ['state'],
+  print_stats: [
+    'state',
+    'filename',
+    'print_duration',
+    'total_duration',
+    'info',
+  ],
   virtual_sdcard: ['progress'],
 }
 const completeObjects = {

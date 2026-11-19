@@ -1,3 +1,4 @@
+import { createPrinterDetailSources } from './printer-detail-session.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
 import type { Logger } from '../../../shared/src/log.ts'
@@ -367,6 +368,7 @@ async function runConnectorAgentOnce(
             assignmentRefs: refs,
           })
         : undefined
+      const detailSourceFor = createPrinterDetailSources(config)
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -390,7 +392,7 @@ async function runConnectorAgentOnce(
                 identity,
               },
               {
-                genuineStatus: { assignmentRefs: refs },
+                genuineStatus: { assignmentRefs: refs, detailSourceFor },
                 ...(cameraMedia ? { cameraMedia } : {}),
                 onInboxReady() {
                   onAdmitted()

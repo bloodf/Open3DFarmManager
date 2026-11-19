@@ -5,9 +5,9 @@ import {
   withNetworkGuard,
 } from '../../packages/sim-tools/src/mocks/index.ts'
 import {
-  beginOidcAuthorization,
+  beginGoogleAuthorization,
   finishGoogleAuthorization,
-} from '../../apps/farm/server/utils/oidc-login.ts'
+} from '../../apps/farm/server/utils/oidc-google.ts'
 
 const redirectUri = 'http://127.0.0.1/api/auth/oidc/callback'
 
@@ -25,11 +25,7 @@ test('Google requires a verified email after OIDC validation', async () => {
         { execute: [client.allowInsecureRequests] },
       )
       async function round(mismatch?: 'state' | 'nonce') {
-        const transaction = await beginOidcAuthorization(
-          config,
-          redirectUri,
-          'openid email profile',
-        )
+        const transaction = await beginGoogleAuthorization(config, redirectUri)
         const response = await fetch(transaction.url, { redirect: 'manual' })
         const callback = new URL(response.headers.get('location') ?? '')
         return finishGoogleAuthorization(config, callback, {
@@ -40,11 +36,7 @@ test('Google requires a verified email after OIDC validation', async () => {
       expect((await round()).email).toBe('person@example.test')
       await expect(round('state')).rejects.toMatchObject({ code: 'state' })
       await expect(round('nonce')).rejects.toMatchObject({ code: 'nonce' })
-      const once = await beginOidcAuthorization(
-        config,
-        redirectUri,
-        'openid email profile',
-      )
+      const once = await beginGoogleAuthorization(config, redirectUri)
       const response = await fetch(once.url, { redirect: 'manual' })
       const callback = new URL(response.headers.get('location') ?? '')
       await finishGoogleAuthorization(config, callback, once)

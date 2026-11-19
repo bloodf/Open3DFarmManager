@@ -87,18 +87,17 @@ export function classifyOidcProtocolError(error: unknown): OidcProtocolError {
   return new OidcProtocolError('invalid', detail)
 }
 
-/** Authorization code + S256 PKCE, with fresh state and nonce. */
+/** Authorization code + S256 PKCE, with fresh state and nonce. Scope is only `openid`. */
 export async function beginOidcAuthorization(
   config: Configuration,
   redirectUri: string,
-  scope = 'openid',
 ): Promise<OidcTransaction & { url: URL }> {
   const codeVerifier = randomPKCECodeVerifier()
   const state = randomState()
   const nonce = randomNonce()
   const url = buildAuthorizationUrl(config, {
     redirect_uri: redirectUri,
-    scope,
+    scope: 'openid',
     code_challenge: await calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: 'S256',
     state,
@@ -121,7 +120,8 @@ export function oidcCallbackUrl(redirectUri: string, incoming: URL): URL {
  * Exchanges the code and returns the verified issuer and subject.
  * Email claims stay internal until a provider-specific policy accepts them.
  */
-async function finishOidcClaims(
+/** Provider policies that accept email claims must validate them before use. */
+export async function finishOidcClaims(
   config: Configuration,
   currentUrl: URL,
   transaction: OidcTransaction,
@@ -172,29 +172,8 @@ export async function finishOidcAuthorization(
   return Object.freeze({ issuer, subject })
 }
 
-/** Call only for the Google provider after normal OIDC token validation. */
-export async function finishGoogleAuthorization(
-  config: Configuration,
-  currentUrl: URL,
-  transaction: OidcTransaction,
-): Promise<OidcIdentity & { readonly email: string }> {
-  const claims = await finishOidcClaims(config, currentUrl, transaction)
-  if (
-    claims.email_verified !== true ||
-    typeof claims.email !== 'string' ||
-    claims.email.length > 254 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(claims.email)
-  )
-    throw new OidcProtocolError('invalid', 'verified email required')
-  return Object.freeze({
-    issuer: claims.issuer,
-    subject: claims.subject,
-    email: claims.email.toLowerCase(),
-  })
-}
-
-const usernamePattern = /^[a-z0-9_-]{3,64}$/
-const digestPattern = /^[a-f0-9]{64}$/
+export const usernamePattern = /^[a-z0-9_-]{3,64}$/
+export const digestPattern = /^[a-f0-9]{64}$/
 
 /**
  * An existing link signs in as that account.
@@ -238,34 +217,4 @@ export async function decideOidcAccount(
     created: true,
     role: linked.role,
   }
-}
-
-export interface GoogleDirectory {
-  signInGoogle(input: {
-    issuer: string
-    subject: string
-    email: string
-    username?: string | undefined
-    inviteDigest?: string | undefined
-  }): Promise<{ accountId: string; created: boolean } | null>
-}
-
-/** Only pass identities returned by finishGoogleAuthorization to this function. */
-export async function decideGoogleAccount(
-  identity: OidcIdentity & { readonly email: string },
-  pending: { username?: string | undefined; inviteDigest?: string | undefined },
-  directory: GoogleDirectory,
-): Promise<
-  | { ok: true; accountId: string; created: boolean }
-  | { ok: false; code: 'unlinked' }
-> {
-  if (pending.username !== undefined && !usernamePattern.test(pending.username))
-    return { ok: false, code: 'unlinked' }
-  if (
-    pending.inviteDigest !== undefined &&
-    !digestPattern.test(pending.inviteDigest)
-  )
-    return { ok: false, code: 'unlinked' }
-  const result = await directory.signInGoogle({ ...identity, ...pending })
-  return result ? { ok: true, ...result } : { ok: false, code: 'unlinked' }
 }

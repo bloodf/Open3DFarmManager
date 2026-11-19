@@ -25,7 +25,9 @@ import {
 } from '../../packages/farm-protocol/src/browser-device-http.ts'
 import {
   startMoonrakerSimulator,
+  type MoonrakerMockOptions,
   type MoonrakerSimulator,
+  type PrinterModel,
 } from './moonraker-simulator.ts'
 import {
   startKobraXMock,
@@ -77,6 +79,20 @@ export type JourneyOptions = Readonly<{
    * Off by default: the read-only journey stays unchanged.
    */
   signedControl?: boolean
+  /**
+   * Moonraker fixture only: the admin's per-printer G-code console switch in
+   * the Connector configuration (`consoleAssignmentIds`). Off by default, as
+   * the product ships it; needs `signedControl`.
+   */
+  consoleEnabled?: boolean
+  /**
+   * Moonraker fixture only: the initial printer model and the seeded mock
+   * (macros, files, queue, power devices, mesh profiles, config files...).
+   */
+  moonraker?: Readonly<{
+    initial?: Partial<PrinterModel>
+    mock?: Omit<MoonrakerMockOptions, 'initial'>
+  }>
   /**
    * Stores Connector telemetry on the server for the whole journey (the
    * upload path is open from the start), so finished jobs reach the history
@@ -143,6 +159,7 @@ export type JourneyHarness = Readonly<{
     owner: string
     admin: string
     viewer: string
+    operator: string
     password: string
   }>
   /** The owner page: signed in, device key stored, on the origin. */
@@ -214,6 +231,7 @@ const ENV_KEYS = [
   'SIGNALLING_HTTPS_SIM_SPOOLMAN',
   'SIGNALLING_HTTPS_FARM_PAUSE',
   'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
+  'SIGNALLING_HTTPS_CONSOLE',
 ] as const
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
@@ -397,7 +415,10 @@ export async function startJourneyHarness(
     let printer: MoonrakerSimulator | undefined
     let vendor: VendorSimulator | undefined
     if (isMoonraker) {
-      printer = await startMoonrakerSimulator()
+      printer = await startMoonrakerSimulator(
+        options.moonraker?.initial,
+        options.moonraker?.mock,
+      )
       const moonraker = printer
       undo.push(() => moonraker.close())
       Object.assign(process.env, {
@@ -423,6 +444,9 @@ export async function startJourneyHarness(
       delete process.env.SIGNALLING_HTTPS_FARM_PAUSE
       delete process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
     }
+    if (options.consoleEnabled && options.signedControl)
+      process.env.SIGNALLING_HTTPS_CONSOLE = 'yes'
+    else delete process.env.SIGNALLING_HTTPS_CONSOLE
     const runtime = await createRuntimeMoonrakerFixture()
     undo.push(async () => {
       const pid = runtime.observe().packagedPid
@@ -796,6 +820,7 @@ export async function startJourneyHarness(
         owner: database.owner.username,
         admin: database.admin.username,
         viewer: database.viewer.username,
+        operator: database.operator.username,
         password: database.password,
       }),
       ownerPage,

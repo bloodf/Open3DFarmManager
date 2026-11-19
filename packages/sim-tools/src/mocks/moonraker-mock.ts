@@ -184,6 +184,11 @@ export interface MoonrakerMockOptions {
     | undefined
   /** Seeds `configfile.settings`; the object is absent when not given. */
   configfileSettings?: Record<string, unknown> | undefined
+  /**
+   * Seeds `configfile.config`, the raw sections the Connector reads macro
+   * parameters from (`gcode_macro NAME` -> `{ gcode }`).
+   */
+  configfileConfig?: Record<string, Record<string, unknown>> | undefined
   spoolId?: number | null | undefined
   restartDelayMs?: number | undefined
   maxUploadBytes?: number | undefined
@@ -485,7 +490,8 @@ export async function startMoonrakerMock(
       macro.startsWith('gcode_macro ') ? macro : `gcode_macro ${macro}`,
     )
   }
-  if (options.configfileSettings) objectSet.add('configfile')
+  if (options.configfileSettings || options.configfileConfig)
+    objectSet.add('configfile')
   const objectList = [...objectSet]
 
   const webcams = (options.webcams ?? DEFAULT_WEBCAMS[profile]).map((cam) => ({
@@ -1038,6 +1044,8 @@ export async function startMoonrakerMock(
         temperature: m.extruders.extruder?.temperature ?? m.extruder,
         target: m.extruders.extruder?.target ?? m.extruderTarget,
         power: (m.extruders.extruder?.target ?? m.extruderTarget) > 0 ? 0.5 : 0,
+        // Klipper reports it from min_extrude_temp (170 °C by default).
+        can_extrude: (m.extruders.extruder?.temperature ?? m.extruder) >= 170,
       },
       heater_bed: {
         temperature: m.bed,
@@ -1048,9 +1056,14 @@ export async function startMoonrakerMock(
         speed: m.fan,
       },
     }
-    if (options.configfileSettings)
+    if (options.configfileSettings || options.configfileConfig)
       all.configfile = {
-        settings: structuredClone(options.configfileSettings),
+        ...(options.configfileSettings
+          ? { settings: structuredClone(options.configfileSettings) }
+          : {}),
+        ...(options.configfileConfig
+          ? { config: structuredClone(options.configfileConfig) }
+          : {}),
         save_config_pending: false,
       }
 
@@ -1062,6 +1075,7 @@ export async function startMoonrakerMock(
           temperature: ext.temperature,
           target: ext.target,
           power: ext.target > 0 ? 0.5 : 0,
+          can_extrude: ext.temperature >= 170,
         }
       } else if (obj.startsWith('output_pin ')) {
         const name = obj.slice('output_pin '.length)

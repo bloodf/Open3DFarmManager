@@ -138,3 +138,5 @@ Rate limits are independent per printer and action class; one class must not con
 Emergency stop keeps its existing rate-limit exemption. Limits do not permit command retries or override state, role, or configured-bound checks.
 
 Later issues implementing any row above must link this section and preserve its role, state, bounds, and rate limit.
+
+| `start_library_print` | Owner or admin | Stopped/idle; refuse if printer state is unknown | Requires a farm-library version and SHA-256. Connector independently verifies authorization, hash and blocking compatibility before dispatch. No automatic retry after uncertain outcome. | Lifecycle |

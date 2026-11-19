@@ -469,7 +469,7 @@ export class PauseBrowserPeer {
             result.ok &&
             (result.download !== undefined) !==
               (download !== undefined ||
-                (config &&
+                (config !== undefined &&
                   'configPath' in config &&
                   config.configPath !== undefined))
           )

@@ -4,21 +4,35 @@ import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
 import { createMoonrakerDetailStream } from '../../packages/connector/src/moonraker/detail-stream.ts'
 import { PrinterDetailUpdate } from '../../packages/farm-protocol/src/printer-detail.ts'
 
+const startMock = startMoonrakerMock
+type Webcam = NonNullable<
+  NonNullable<Parameters<typeof startMock>[0]>['webcams']
+>[number]
+
 it('lists both cameras with their orientation over the detail socket without exposing URLs', async () => {
+  function startMoonrakerMock({
+    webcams,
+  }: {
+    webcams: readonly (Omit<Webcam, 'stream_url' | 'snapshot_url'> &
+      Partial<Pick<Webcam, 'stream_url' | 'snapshot_url'>>)[]
+  }) {
+    return startMock({
+      webcams: webcams.map((webcam) => ({
+        stream_url: '',
+        snapshot_url: '',
+        ...webcam,
+      })),
+    })
+  }
+
   const camera = await startCameraMock()
   try {
     const moonraker = await startMoonrakerMock({
       webcams: [
-        {
-          name: 'Mesa',
-          uid: 'mesa',
-          stream_url: camera.rtspUrl,
-          snapshot_url: '',
-        },
+        { name: 'Mesa', uid: 'mesa', stream_url: camera.rtspUrl },
         {
           name: 'Bico',
           uid: 'bico',
-          stream_url: '',
           snapshot_url: `${camera.cameraUrl}/?action=snapshot`,
           rotation: 90,
           flip_horizontal: true,

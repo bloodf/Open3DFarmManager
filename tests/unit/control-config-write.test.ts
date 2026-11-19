@@ -13,6 +13,9 @@ let mock: Awaited<ReturnType<typeof startMoonrakerMock>>
 let idle: boolean
 let editor: ReturnType<typeof createConfigEditor>
 
+const withSignal = (init: RequestInit, signal?: AbortSignal): RequestInit =>
+  signal ? { ...init, signal } : init
+
 async function request(path: string, options?: RequestInit) {
   const response = await fetch(mock.origin + path, options)
   if (!response.ok) throw Error(`Moonraker fixture returned ${response.status}`)
@@ -23,7 +26,7 @@ const fileUrl = (name: string) =>
   `/server/files/config/${encodeURIComponent(name)}`
 async function read(name: string, signal?: AbortSignal) {
   return Buffer.from(
-    await (await request(fileUrl(name), { signal })).arrayBuffer(),
+    await (await request(fileUrl(name), withSignal({}, signal))).arrayBuffer(),
   )
 }
 
@@ -32,13 +35,16 @@ async function write(name: string, content: Uint8Array, signal?: AbortSignal) {
   body.set('root', 'config')
   body.set('file', new Blob([Uint8Array.from(content)]), name)
   await (
-    await request('/server/files/upload', { method: 'POST', body, signal })
+    await request(
+      '/server/files/upload',
+      withSignal({ method: 'POST', body }, signal),
+    )
   ).body?.cancel()
 }
 
 async function list(signal?: AbortSignal): Promise<string[]> {
   const { result } = await (
-    await request('/server/files/list?root=config', { signal })
+    await request('/server/files/list?root=config', withSignal({}, signal))
   ).json()
   return result.map((entry: { path: string }) => entry.path)
 }
@@ -56,7 +62,7 @@ function save(content = updated, base = original) {
 
 describe('config editor storage transaction', () => {
   beforeEach(async () => {
-    mock = await startMoonrakerMock({ host: '127.0.0.1', port: 0 })
+    mock = await startMoonrakerMock()
     idle = true
     await write(path, original)
     editor = createConfigEditor({
@@ -65,7 +71,7 @@ describe('config editor storage transaction', () => {
       list,
       async remove(name, signal) {
         await (
-          await request(fileUrl(name), { method: 'DELETE', signal })
+          await request(fileUrl(name), withSignal({ method: 'DELETE' }, signal))
         ).body?.cancel()
       },
       async isIdle() {

@@ -39,10 +39,11 @@ export const PrinterDetailCapability = z.enum([
   'timelapse',
   'updates',
   'console',
+  'webcams',
 ])
 const capabilities = z
   .array(PrinterDetailCapability)
-  .max(17)
+  .max(18)
   .refine((items) => new Set(items).size === items.length)
 
 export const PrinterDetailSubscribe = z.strictObject({
@@ -76,6 +77,18 @@ export const PrinterDetailUpdate = z.strictObject({
         white: fraction.optional(),
       }),
       outputs: named({ value: number }),
+      webcams: named({
+        uid: name.nullable(),
+        enabled: z.boolean(),
+        rotation: z.union([
+          z.literal(0),
+          z.literal(90),
+          z.literal(180),
+          z.literal(270),
+        ]),
+        flipHorizontal: z.boolean(),
+        flipVertical: z.boolean(),
+      }),
       speedFactor: number.nonnegative(),
       flowFactor: number.nonnegative(),
       offsets: xyz,

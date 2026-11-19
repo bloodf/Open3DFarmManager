@@ -1,3 +1,5 @@
+import type { Ref } from 'vue'
+import type { NetworkAdoption } from './network-adoption.ts'
 import { listenForAuthInvalidation } from './auth-invalidation.ts'
 import type { openPrinterDiscoverySession } from './printer-discovery-view-session.ts'
 import { createKobraContext } from './printer-setup-context.ts'
@@ -16,6 +18,7 @@ import type {
 } from './printer-setup-state.ts'
 
 type Hooks = {
+  adoption?: Ref<NetworkAdoption | null>
   handleKobraException(
     cause: unknown,
     opContext: KobraOperationContext | null,
@@ -29,7 +32,7 @@ type Hooks = {
 export function createPrinterSetup(
   state: PrinterSetupRefs,
   epoch: KobraEpoch,
-  { handleKobraException, openPrinterDiscoverySession }: Hooks,
+  { handleKobraException, openPrinterDiscoverySession, adoption }: Hooks,
 ) {
   const live = createLiveStatus(state, epoch)
   const pendingOps = createPendingOperationStore(state)
@@ -69,5 +72,56 @@ export function createPrinterSetup(
       stop()
     }
   }
-  return { ...deps, ...context, ...operation, ...discovery, watchSession }
+  async function initialize() {
+    const target = adoption?.value
+    if (adoption) adoption.value = null
+    const loaded = farm.loadFarms()
+    const generation = farm.currentGeneration()
+    await loaded
+    if (!target || state.error.value || generation !== farm.currentGeneration())
+      return
+    state.farmId.value = target.farmId
+    await context.selectFarm()
+    if (!state.canManage.value || state.farmId.value !== target.farmId) return
+    const hasConnector = () =>
+      state.connectors.value.some(
+        (connector) => connector.agentId === target.agentId,
+      )
+    if (!hasConnector() && state.nextConnector.value) {
+      await farm.run(async (signal, current) => {
+        while (
+          !signal.aborted &&
+          !hasConnector() &&
+          state.nextConnector.value
+        ) {
+          await farm.loadConnectors(signal, current, state.nextConnector.value)
+        }
+      })
+    }
+    if (!state.canManage.value || state.farmId.value !== target.farmId) return
+    if (!hasConnector()) {
+      state.message.value =
+        'O Connector da impressora descoberta está indisponível.'
+      return
+    }
+    if (state.kobraAgentId.value !== target.agentId) {
+      state.kobraAgentId.value = target.agentId
+      await context.refreshKobraContext()
+    }
+    if (
+      state.canManage.value &&
+      state.farmId.value === target.farmId &&
+      state.kobraAgentId.value === target.agentId &&
+      !state.kobraOperation.value
+    )
+      discovery.selectDiscovery(target.printer)
+  }
+  return {
+    ...deps,
+    ...context,
+    ...operation,
+    ...discovery,
+    watchSession,
+    initialize,
+  }
 }

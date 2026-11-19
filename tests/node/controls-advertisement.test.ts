@@ -190,6 +190,7 @@ test('Moonraker snapshot advertises every detected driver action and round-trips
     'set_light',
     'set_speed',
     'extrude',
+    'set_pin',
   ])
   assert.deepEqual(
     PrinterState.parse(JSON.parse(JSON.stringify(printer))),
@@ -197,7 +198,7 @@ test('Moonraker snapshot advertises every detected driver action and round-trips
   )
   assert.deepEqual(
     remote.requests.map((request) => request.method),
-    ['printer.objects.list'],
+    ['printer.objects.list', 'server.info'],
   )
 })
 

@@ -12,6 +12,8 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import { queueMarkers } from './control-job-queue.ts'
+import { readMacroParams, type MacroParamMap } from './control-macros.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
@@ -39,16 +41,22 @@ export function moonrakerControls(
   )
 }
 
-/**
- * One read-only printer.objects.list on its own short connection to the
- * locally bound, allowlisted origin. Sends nothing else and never retries.
- */
-export function detectMoonrakerObjects(input: {
+type DetectInput = {
   binding: PrinterBinding
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   signal: AbortSignal
-}): Promise<readonly string[]> {
+}
+
+/**
+ * One read-only request on its own short connection to the locally bound,
+ * allowlisted origin. Sends nothing else and never retries.
+ */
+function readOnlyOnce<T>(
+  input: DetectInput,
+  request: { method: string; params?: unknown },
+  parse: (result: unknown) => T,
+): Promise<T> {
   const mapping = readPrinterBinding(input.binding)
   if (!mapping || !mapping.moonraker_origin || input.signal.aborted)
     return Promise.reject(new Error('Moonraker support detection unavailable'))
@@ -60,17 +68,17 @@ export function detectMoonrakerObjects(input: {
     allowedOrigins: input.allowedOrigins,
     limits: input.limits,
   })
-  return new Promise<readonly string[]>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const socket = createMoonrakerSocket(selected.origin, selected.limits)
     let settled = false
-    const finish = (objects?: readonly string[]) => {
+    const finish = (parsed?: { value: T }) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       input.signal.removeEventListener('abort', abort)
       socket.terminate()
-      if (objects && readPrinterBinding(input.binding) === mapping)
-        resolve(objects)
+      if (parsed && readPrinterBinding(input.binding) === mapping)
+        resolve(parsed.value)
       else reject(new Error('Moonraker support detection unavailable'))
     }
     const abort = () => finish()
@@ -87,11 +95,7 @@ export function detectMoonrakerObjects(input: {
     socket.on('open', () => {
       if (settled) return
       socket.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'printer.objects.list',
-        }),
+        JSON.stringify({ jsonrpc: '2.0', id: 1, ...request }),
         { binary: false, compress: false },
         (error) => {
           if (error) abort()
@@ -104,12 +108,48 @@ export function detectMoonrakerObjects(input: {
           decodeMoonrakerFrame(data, binary, selected.limits.maxMessageBytes),
         )
         if (reply.id !== 1) throw new Error('Unexpected reply')
-        finish(
-          Object.freeze([...MoonrakerObjectList.parse(reply.result).objects]),
-        )
+        finish({ value: parse(reply.result) })
       } catch {
         abort()
       }
     })
   })
+}
+
+/** One read-only printer.objects.list. */
+export function detectMoonrakerObjects(
+  input: DetectInput,
+): Promise<readonly string[]> {
+  return readOnlyOnce(input, { method: 'printer.objects.list' }, (result) =>
+    Object.freeze([...MoonrakerObjectList.parse(result).objects]),
+  )
+}
+
+/**
+ * One read-only configfile query: the parameters each advertised macro reads.
+ * A failure rejects; the caller keeps "no parameters" rather than guessing.
+ */
+export function detectMoonrakerMacroParams(
+  input: DetectInput,
+  macros: readonly string[],
+): Promise<MacroParamMap> {
+  return readOnlyOnce(
+    input,
+    {
+      method: 'printer.objects.query',
+      params: { objects: { configfile: ['config'] } },
+    },
+    (result) => readMacroParams(result, macros),
+  )
+}
+
+/**
+ * One read-only server.info: a marker for each Moonraker component the
+ * Connector drives (the job queue). A failure rejects; the caller advertises
+ * nothing for those components rather than guessing.
+ */
+export function detectMoonrakerComponents(
+  input: DetectInput,
+): Promise<readonly string[]> {
+  return readOnlyOnce(input, { method: 'server.info' }, queueMarkers)
 }

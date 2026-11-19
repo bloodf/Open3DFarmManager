@@ -30,6 +30,9 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   set_factor: 'Definir velocidade e fluxo',
   exclude_object: 'Excluir objeto',
   extrude: 'Extrudar filamento',
+  set_led: 'Definir LED',
+  set_pin: 'Definir saída',
+  queue_op: 'Gerenciar fila de impressão',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action

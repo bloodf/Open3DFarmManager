@@ -36,6 +36,7 @@ import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
+import type { LibraryJobLinks } from './library-job-links.ts'
 
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
@@ -120,6 +121,8 @@ export async function collectIntoQueue(input: {
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
+  /** Links a finished job to the library version that was started on this printer (#385). */
+  libraryLinks?: Pick<LibraryJobLinks, 'attach'>
   queue: TelemetryQueue
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
@@ -188,12 +191,14 @@ export async function collectIntoQueue(input: {
           totals.queued++
           loss(transition.loss, 'retention')
         }
-        const { machine, ...state } = event.printer
+        const printer =
+          input.libraryLinks?.attach(event.printer) ?? event.printer
+        const { machine, ...state } = printer
         const fingerprint = machine && JSON.stringify(machine)
         const changed =
           fingerprint !== undefined &&
           lastMachine.get(state.printerKey) !== fingerprint
-        const receipt = queue.enqueue(changed ? event.printer : state, now)
+        const receipt = queue.enqueue(changed ? printer : state, now)
         if (changed && queue.storageLost === lostBefore)
           lastMachine.set(state.printerKey, fingerprint)
         totals.queued++

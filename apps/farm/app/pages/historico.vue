@@ -158,6 +158,7 @@ onBeforeUnmount(cancel)
           <th scope="col">Arquivo</th>
           <th scope="col">Término</th>
           <th scope="col">Duração</th>
+          <th scope="col">Biblioteca</th>
         </tr>
       </thead>
       <tbody>
@@ -167,6 +168,7 @@ onBeforeUnmount(cancel)
           <td>{{ row.filename }}</td>
           <td>{{ row.endedAt }}</td>
           <td>{{ row.duration }}</td>
+          <td>{{ row.library }}</td>
         </tr>
       </tbody>
     </table>

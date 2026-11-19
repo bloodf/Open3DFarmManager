@@ -47,6 +47,7 @@ const links = computed(() => [
   { to: '/arquivos', label: 'Arquivos' },
   { to: '/biblioteca', label: 'Biblioteca' },
   { to: '/historico', label: 'Histórico' },
+  { to: '/painel', label: 'Painel (TV)' },
   { to: '/connectors', label: 'Connectors' },
   { to: '/rede', label: 'Rede' },
   ...(canApproveConnectors.value

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { DetailSubscription } from '../../utils/webrtc/readonly-peer.ts'
+import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import { DEFAULT_UNSUPPORTED_REASON } from '../../utils/printer-detail-view.ts'
 import Button from '../ui/Button.vue'
 import { printStatusEta } from './print-status-eta.ts'
 import { ExcludeObjectArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 
 const props = defineProps<{
-  frame: Parameters<DetailSubscription['onUpdate']>[0]
+  frame: Parameters<WebcamDetailOptions['onUpdate']>[1]
   canExclude: boolean
   excludeReason?: string | undefined
   objectReason?: string | undefined

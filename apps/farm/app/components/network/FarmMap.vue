@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import AdoptDiscoveredPrinter from './AdoptDiscoveredPrinter.vue'
+import type { DiscoveredPrinter } from '../../utils/printer-setup-state.ts'
 import DataTable from '../ui/DataTable.vue'
 import {
   defaultView,
@@ -22,7 +24,12 @@ const props = defineProps<{
   live: boolean
   /** When the server data was read; shown as its age when not live. */
   asOf: number | null
+  managedAgents?: ReadonlySet<string>
   initialView?: 'map' | 'table'
+}>()
+
+const emit = defineEmits<{
+  adopt: [agentId: string, printer: DiscoveredPrinter]
 }>()
 
 // Server render and first paint start on the table (narrow screens);
@@ -101,6 +108,16 @@ const rows = computed(() =>
 )
 const hrefById = computed(
   () => new Map(visible.value.map((entry) => [entry.id, entry.href])),
+)
+const discoveryById = computed(
+  () =>
+    new Map(
+      visible.value.flatMap((entry) =>
+        entry.discovery && props.managedAgents?.has(entry.agentId)
+          ? [[entry.id, entry.discovery] as const]
+          : [],
+      ),
+    ),
 )
 const statuses = Object.keys(statusInfo) as NetworkStatus[]
 </script>
@@ -236,8 +253,24 @@ const statuses = Object.keys(statusInfo) as NetworkStatus[]
           row.cells.name
         }}</a>
         <template v-else>{{ row.cells.name }}</template>
+        <AdoptDiscoveredPrinter
+          v-if="discoveryById.has(row.id)"
+          :found="discoveryById.get(row.id)!"
+          @adopt="emit('adopt', discoveryById.get(row.id)!.agentId, $event)"
+        />
       </template>
     </DataTable>
+    <ul v-if="view === 'map' && discoveryById.size">
+      <template v-for="entry in visible" :key="entry.id">
+        <li v-if="entry.discovery && discoveryById.has(entry.id)">
+          {{ entry.name }} · {{ entry.connectorName }}
+          <AdoptDiscoveredPrinter
+            :found="entry.discovery"
+            @adopt="emit('adopt', entry.agentId, $event)"
+          />
+        </li>
+      </template>
+    </ul>
   </section>
 </template>
 

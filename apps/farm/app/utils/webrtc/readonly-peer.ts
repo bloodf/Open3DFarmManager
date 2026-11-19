@@ -1,4 +1,10 @@
 import {
+  assemblePrinterDetailFrames,
+  decodePrinterDetailFrame,
+  type PrinterDetailUpdate,
+} from '../../../../../packages/farm-protocol/src/printer-detail.ts'
+import type { z } from 'zod'
+import {
   captureEffectiveRtcDescriptions,
   checkEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
@@ -37,30 +43,17 @@ export type FixtureOnlyVideoHooks = Readonly<{
   ) => void
   stop: () => void
 }>
-import {
-  assemblePrinterDetailFrames,
-  decodePrinterDetailFrame,
-  PrinterDetailSubscribe,
-} from '../../../../../packages/farm-protocol/src/printer-detail.ts'
-import type { z } from 'zod'
-import type { PrinterDetailUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
-
-export type DetailSubscription = {
-  printerKey: string
-  onUpdate(frame: z.infer<typeof PrinterDetailUpdate>): void
-}
-
 type Options = {
   /** Earlier owner deadlines only; absolute performance.now() milliseconds. */
   authDeadline?: number | undefined
   lifetimeDeadline?: number
-  detail?: DetailSubscription
   genuineStatus?: GenuineStatusOptions
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
   fixtureOnlyVideo?: FixtureOnlyVideoHooks
   /** Opt-in camera-purpose V3 media; exclusive with fixture video. */
+  webcamDetail?: WebcamDetailOptions
   cameraMedia?: BrowserCameraHooks
   privateKey: CryptoKey
   expectedAgentId: string
@@ -72,8 +65,6 @@ export class ReadonlyBrowserPeer {
   #peer: RTCPeerConnection
   #proof: RTCDataChannel | undefined
   #application: RTCDataChannel | undefined
-  #detailParts: string[] = []
-  #detailSubscribed = false
   #inbox: RtcProofInbox
   #options: Readonly<Options>
   #binding: Promise<RtcSessionBinding>
@@ -244,6 +235,7 @@ export class ReadonlyBrowserPeer {
         !this.#application
       ) {
         this.#application = channel
+        let detailChunks: string[] = []
         channel.onmessage = ({ data }) => {
           if (this.#terminal) return
           try {
@@ -256,53 +248,34 @@ export class ReadonlyBrowserPeer {
             this.close('application-before-proof')
             return
           }
-          const detail = this.#options.detail
+          const detail = this.#options.webcamDetail
           if (
             detail &&
-            this.current() &&
-            this.#session.snapshot().state === 'verified' &&
             typeof data === 'string' &&
-            /"t":"detail\./.test(data)
+            this.current() &&
+            this.#session.snapshot().state === 'verified'
           ) {
             try {
-              let frame = decodePrinterDetailFrame(data)
-              if (frame.printerKey !== detail.printerKey)
-                throw Error('Detail assignment mismatch')
-              if (frame.t === 'detail.chunk') {
-                if (frame.index !== this.#detailParts.length)
-                  throw Error('Detail chunk order')
-                this.#detailParts.push(data)
-                if (this.#detailParts.length < frame.total) return
-                const parts = this.#detailParts
-                this.#detailParts = []
-                frame = assemblePrinterDetailFrames(parts)
+              const decoded = decodePrinterDetailFrame(data)
+              if (decoded.printerKey !== detail.printerKey) return
+              let frame = decoded
+              if (decoded.t === 'detail.chunk') {
+                if (decoded.index === 0) detailChunks = []
+                if (decoded.index !== detailChunks.length) return
+                detailChunks.push(data)
+                if (detailChunks.length !== decoded.total) return
+                const chunks = detailChunks
+                detailChunks = []
+                frame = assemblePrinterDetailFrames(chunks)
               }
-              if (frame.t === 'detail.update') detail.onUpdate(frame)
+              if (frame.t === 'detail.update')
+                detail.onUpdate(frame.detail.webcams ?? null, frame)
+              return
             } catch {
-              this.close('invalid-detail-frame')
+              detailChunks = []
             }
-            return
           }
           this.#session.receiveApplication(data)
-          // A status frame proves the Connector completed its side of the handshake.
-          if (
-            !this.#detailSubscribed &&
-            detail &&
-            this.#session.snapshot().state === 'verified' &&
-            this.current() &&
-            this.#application?.readyState === 'open'
-          ) {
-            this.#detailSubscribed = true
-            this.#application.send(
-              JSON.stringify(
-                PrinterDetailSubscribe.parse({
-                  v: 1,
-                  t: 'detail.subscribe',
-                  printerKey: detail.printerKey,
-                }),
-              ),
-            )
-          }
         }
       } else if (
         channel.label === CAMERA_CHANNEL_LABEL &&
@@ -461,11 +434,37 @@ export class ReadonlyBrowserPeer {
       throw Error('Actual certificate mismatch')
     this.#certificateMatched = true
     this.#stage = 'role-proofs'
+    const genuineStatus = this.#options.genuineStatus
+    const webcamDetail = this.#options.webcamDetail
+    let subscribed = false
     this.#session = new ReadonlyRtcSession({
       binding: validated,
       role: 'browser',
-      ...(this.#options.genuineStatus
-        ? { genuineStatus: this.#options.genuineStatus }
+      ...(genuineStatus
+        ? {
+            genuineStatus: {
+              ...genuineStatus,
+              onStatus: (message) => {
+                genuineStatus.onStatus?.(message)
+                // A validated status confirms that the Connector has verified our proof.
+                if (
+                  !subscribed &&
+                  webcamDetail &&
+                  this.current() &&
+                  this.#application?.readyState === 'open'
+                ) {
+                  this.#application.send(
+                    JSON.stringify({
+                      v: 1,
+                      t: 'detail.subscribe',
+                      printerKey: webcamDetail.printerKey,
+                    }),
+                  )
+                  subscribed = true
+                }
+              },
+            },
+          }
         : {}),
       authDeadline: this.#authDeadline,
       lifetimeDeadline: this.#lifetimeDeadline,
@@ -612,4 +611,14 @@ export class ReadonlyBrowserPeer {
         : undefined,
     }
   }
+}
+
+export type WebcamDetailOptions = {
+  printerKey: string
+  onUpdate: (
+    value: NonNullable<
+      z.infer<typeof PrinterDetailUpdate>['detail']['webcams']
+    > | null,
+    frame: z.infer<typeof PrinterDetailUpdate>,
+  ) => void
 }

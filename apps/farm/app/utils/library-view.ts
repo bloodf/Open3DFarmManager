@@ -21,6 +21,7 @@ export type LibraryVersion = {
   id: string
   itemId: string
   versionNumber: number
+  sha256: string
   sizeBytes: number
   storageLocation: StorageMode
   agentId: string | null

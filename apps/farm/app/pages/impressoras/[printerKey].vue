@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
+import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
-import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  ExtendedControlAction,
+  QueueOpArguments,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
@@ -20,9 +25,26 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
-definePageMeta({ key: (route) => route.path })
 const printerKey = computed(() => String(route.params.printerKey ?? ''))
-const view = useFarmView(() => printerKey.value)
+const initialPrinterKey = String(route.params.printerKey ?? '')
+const webcams = shallowRef<
+  Parameters<WebcamDetailOptions['onUpdate']>[0] | null
+>(null)
+const printStatus = shallowRef<
+  Parameters<WebcamDetailOptions['onUpdate']>[1] | null
+>(null)
+const view = useFarmView({
+  printerKey: initialPrinterKey,
+  onUpdate(value, frame) {
+    printStatus.value = frame
+    webcams.value = value
+  },
+  onClose() {
+    webcams.value = null
+    printStatus.value = null
+  },
+})
+definePageMeta({ key: (route) => route.path })
 const { ready, now } = view
 const heading = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
@@ -78,6 +100,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
   const found: DetailCapability[] = [
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
   ]
@@ -134,6 +157,47 @@ const extrusion = computed(() => {
         : undefined,
   }
 })
+const outputs = computed(() => {
+  const controls = state.value?.controls ?? []
+  const advertised = {
+    fan: controls.includes('set_fan'),
+    led: controls.includes('set_led'),
+    pin: controls.includes('set_pin'),
+  }
+  // The panel is one form set: it is on only when every advertised action is.
+  const blocked = (
+    [
+      ['set_fan', advertised.fan],
+      ['set_led', advertised.led],
+      ['set_pin', advertised.pin],
+    ] as const
+  )
+    .filter(([, offered]) => offered)
+    .map(([action]) => availability(action))
+    .find((item) => !item.available)
+  return {
+    advertised,
+    canCommand: !blocked && !commandInFlight.value,
+    reason: blocked
+      ? blocked.reason
+      : commandInFlight.value
+        ? 'Um comando já está em andamento.'
+        : undefined,
+  }
+})
+const queueAvailability = computed(() => availability('queue_op'))
+const queue = computed(() => {
+  const advertised = state.value?.controls?.includes('queue_op') ?? false
+  return {
+    advertised,
+    canCommand: queueAvailability.value.available && !commandInFlight.value,
+    reason: queueAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? queueAvailability.value.reason
+        : undefined,
+  }
+})
 const motionAvailability = computed(() =>
   Object.fromEntries(
     (
@@ -158,11 +222,40 @@ const motionAvailability = computed(() =>
   ),
 )
 
+const macroAvailability = computed(() => availability('run_macro'))
+const macros = computed(() => {
+  const advertised = state.value?.controls?.includes('run_macro') ?? false
+  const params = state.value?.macroParams ?? {}
+  return {
+    advertised,
+    list: (state.value?.macros ?? [])
+      .filter((name) => !name.startsWith('_'))
+      .map((name) => ({ name, params: params[name] ?? [] })),
+    canCommand: macroAvailability.value.available && !commandInFlight.value,
+    reason: !advertised
+      ? undefined
+      : macroAvailability.value.available
+        ? 'Um comando já está em andamento.'
+        : macroAvailability.value.reason,
+  }
+})
+
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
     void openControl(row.value, 'set_temperature', event, {
       heater,
       target_c: targetC,
+    })
+}
+function runMacro(
+  name: string,
+  params: Record<string, string> | undefined,
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'run_macro', event, {
+      name,
+      ...(params ? { params } : {}),
     })
 }
 function control(
@@ -179,6 +272,23 @@ function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
       length_mm: lengthMm,
       feed,
     })
+}
+function setFan(fan: string, percent: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_fan', event, { fan, percent })
+}
+function setLed(
+  name: string,
+  channels: { r: number; g: number; b: number; w?: number },
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'set_led', event, { name, ...channels })
+}
+function setPin(name: string, value: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_pin', event, { name, value })
+}
+function queueOp(args: QueueOpArguments, event: Event) {
+  if (row.value) void openControl(row.value, 'queue_op', event, args)
 }
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
@@ -244,9 +354,7 @@ onMounted(() => heading.value?.focus())
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
       :print-status="
-        view.detail.value?.printerKey === printerKey
-          ? view.detail.value
-          : undefined
+        printStatus?.printerKey === printerKey ? printStatus : undefined
       "
       :exclude-available="
         live &&
@@ -265,9 +373,24 @@ onMounted(() => heading.value?.focus())
         (name, event) => control('exclude_object', event, { name })
       "
       :extrusion="extrusion"
+      :queue="queue"
+      :macros="macros"
+      :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
+      @queue-op="queueOp"
+      @run-macro="runMacro"
+      @set-fan="setFan"
+      @set-led="setLed"
+      @set-pin="setPin"
       @emergency-stop="emergencyStop"
+    />
+    <WebcamsPanel
+      v-if="row && live && webcams && printerKey === initialPrinterKey"
+      :webcams="webcams"
+      :stream-for="
+        (uid) => (row ? view.cameraFor(row.assignment.assignmentId, uid) : null)
+      "
     />
     <dialog
       ref="pauseDialog"

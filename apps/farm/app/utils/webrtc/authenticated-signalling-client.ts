@@ -1,3 +1,4 @@
+import type { WebcamDetailOptions } from './readonly-peer.ts'
 import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
@@ -21,10 +22,7 @@ import {
   SignallingClientChannel,
   type SocketPort,
 } from '../../../../../packages/connector/src/webrtc/signalling-client-channel.ts'
-import {
-  ReadonlyBrowserPeer,
-  type DetailSubscription,
-} from './readonly-peer.ts'
+import { ReadonlyBrowserPeer } from './readonly-peer.ts'
 import type { BrowserCameraHooks } from './camera-media.ts'
 
 const protocol = 'open3dfarm.signalling.v1'
@@ -84,7 +82,6 @@ type Peer = Partial<Pick<ReadonlyBrowserPeer, 'diagnostics'>> & {
   close(reason?: string): void
 }
 type PeerOptions = {
-  detail?: DetailSubscription
   privateKey: CryptoKey
   expectedAgentId: string
   admittedBinding: Promise<unknown>
@@ -94,6 +91,7 @@ type PeerOptions = {
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
+  webcamDetail?: WebcamDetailOptions
   cameraMedia?: BrowserCameraHooks
 }
 type CameraFactory = (
@@ -109,10 +107,10 @@ export class AuthenticatedBrowserSignallingClient {
   #thumbprint: string | undefined
   #admission: VerifiedRtcAdmission | undefined
   #options: Readonly<{
-    detail?: DetailSubscription
     genuineStatus?: GenuineStatusOptions
     onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
     onTerminal?: (reason: string) => void
+    webcamDetail?: WebcamDetailOptions
     cameraMedia?: CameraFactory
   }>
   #peer: Peer | undefined
@@ -133,11 +131,11 @@ export class AuthenticatedBrowserSignallingClient {
     scope: Scope,
     options: {
       peerFactory?: (options: PeerOptions) => Peer
-      detail?: DetailSubscription
       genuineStatus?: GenuineStatusOptions
       onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
       onTerminal?: (reason: string) => void
       /** Opt-in camera media per peer; violations close this session. */
+      webcamDetail?: WebcamDetailOptions
       cameraMedia?: CameraFactory
     } = {},
   ) {
@@ -249,7 +247,9 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
-        ...(this.#options.detail ? { detail: this.#options.detail } : {}),
+        ...(this.#options.webcamDetail
+          ? { webcamDetail: this.#options.webcamDetail }
+          : {}),
         ...(this.#options.cameraMedia
           ? {
               cameraMedia: this.#options.cameraMedia((reason) =>

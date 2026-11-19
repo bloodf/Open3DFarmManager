@@ -5,6 +5,12 @@ import {
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { buildMoonrakerCommand } from './commands.ts'
+import {
+  checkExtrudeProbe,
+  ExtrudeRefused,
+  extrudeProbeWire,
+  parseExtrude,
+} from './control-extrusion.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
@@ -458,6 +464,31 @@ export function openFixedMoonrakerPause(input: {
       return undefined
     }
   }
+  /**
+   * Cold-extrusion guard: one read-only query of the live tool, then the
+   * single command. Every refusal happens before a write and is never retried.
+   */
+  async function extrude(
+    args: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    if (!input.objects || request.binding !== binding || !prepared || attempted)
+      throw new ExtrudeRefused('state')
+    const { name } = parseExtrude(args, input.objects)
+    try {
+      checkExtrudeProbe(await requestRead(11, extrudeProbeWire(11, name)), name)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ExtrudeRefused
+        ? error
+        : new ExtrudeRefused('state')
+    }
+    extended = true
+    return send(extendedWire('extrude', args), request, 5000)
+  }
+  const requestRead = (id: number, wire: string) =>
+    request(id, wire, lifetimeDeadline)
   const driver: PauseDriver = Object.freeze({
     execute(
       action: ExtendedControlAction,
@@ -466,6 +497,7 @@ export function openFixedMoonrakerPause(input: {
     ) {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
+      if (action === 'extrude') return extrude(args, request)
       extended = true
       return send(extendedWire(action, args), request, 5000)
     },

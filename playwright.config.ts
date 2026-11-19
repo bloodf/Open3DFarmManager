@@ -44,6 +44,8 @@ const server = (serverPort: string, env: Record<string, string> = {}) => ({
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Opt-in journeys on the E16 harness: playwright.farm-manager.config.ts.
+  testIgnore: '**/farm-manager/**',
   timeout: 30_000 * timeoutScale,
   expect: { timeout: 5_000 * timeoutScale },
   use: {

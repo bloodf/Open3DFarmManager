@@ -136,13 +136,21 @@ export class ZipArchive {
   readonly entries: readonly ZipEntryInfo[]
   private readonly byKey: ReadonlyMap<string, ZipEntryInfo>
   private inflated = 0
+  private readonly source: ZipSource
+  private readonly limits: ZipLimits
+  private readonly centralOffset: number
 
+  // No parameter properties: the Connector runs this file under Node's
+  // type-stripping, which does not support them.
   private constructor(
-    private readonly source: ZipSource,
-    private readonly limits: ZipLimits,
-    private readonly centralOffset: number,
+    source: ZipSource,
+    limits: ZipLimits,
+    centralOffset: number,
     entries: ZipEntryInfo[],
   ) {
+    this.source = source
+    this.limits = limits
+    this.centralOffset = centralOffset
     this.entries = entries
     this.byKey = new Map(
       entries.map((entry) => [entry.name.toLowerCase(), entry]),

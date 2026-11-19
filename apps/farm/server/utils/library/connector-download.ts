@@ -273,7 +273,10 @@ export function createConnectorLibraryAuthenticator(input: {
 
 /** Blob lookup, enrollment read and audit rows on the `farm_library` login. */
 export class PostgresConnectorLibraryDownloads implements ConnectorEnrollmentReader {
-  constructor(private readonly sql: Sql) {}
+  private readonly sql: Sql
+  constructor(sql: Sql) {
+    this.sql = sql
+  }
 
   async find(farmId: string, agentId: string) {
     const rows = await this.sql<{ status: string; publicKeySpki: string }[]>`

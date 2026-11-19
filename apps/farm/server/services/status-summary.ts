@@ -22,6 +22,9 @@ export interface StatusSummaryPrinter {
   groupName: string | null
   location: string | null
   state: PrinterStateRow['state']
+  /** Absent when the printer reported no progress; never coerced to zero. */
+  progress?: number
+  temperatures: { toolCelsius?: number; bedCelsius?: number }
   observedAt: number
   dataAgeMs: number
 }
@@ -88,6 +91,15 @@ export function buildStatusSummary(
       groupName: text(row.groupName),
       location: text(row.location),
       state: row.state,
+      ...(row.progress !== undefined ? { progress: row.progress } : {}),
+      temperatures: {
+        ...(row.toolTemperatureCelsius !== undefined
+          ? { toolCelsius: row.toolTemperatureCelsius }
+          : {}),
+        ...(row.bedTemperatureCelsius !== undefined
+          ? { bedCelsius: row.bedTemperatureCelsius }
+          : {}),
+      },
       observedAt: row.observedAt,
       dataAgeMs: Math.max(0, now - row.observedAt),
     }))

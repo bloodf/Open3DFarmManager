@@ -99,8 +99,9 @@ function dateLabel(time: number) {
       <h3 :id="`printer-${row.assignment.assignmentId}`" class="opaque">
         {{ row.assignment.printerKey }}
       </h3>
+      <slot name="summary" />
       <PrinterAlerts
-        v-if="cardAlerts.length"
+        v-if="cardAlerts.length && !$slots.summary"
         :chips="cardAlerts"
         label="Alertas da impressora"
       />

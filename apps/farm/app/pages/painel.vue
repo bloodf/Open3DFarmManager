@@ -2,10 +2,11 @@
 definePageMeta({ layout: false })
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import PrinterKiosk from '../components/farm/PrinterKiosk.vue'
+import type { LastKnownState } from '../composables/useLastKnownStates-core.ts'
 import {
-  parseLastKnownStates,
-  type LastKnownState,
-} from '../composables/useLastKnownStates-core.ts'
+  parseStatusSummary,
+  statusSummaryPath,
+} from '../utils/status-summary.ts'
 import {
   KIOSK_PAGE_MS,
   KIOSK_POLL_MS,
@@ -15,7 +16,7 @@ import {
   kioskRemPx,
 } from '../utils/kiosk-wall.ts'
 
-// Read-only wall for a TV. It polls the stored printer states (works for any
+// Read-only wall for a TV. It polls the farm status summary (works for any
 // member session, no browser-device enrollment) and renders no control.
 const route = useRoute()
 const states = shallowRef<readonly LastKnownState[]>([])
@@ -66,17 +67,19 @@ async function poll() {
         return
       }
     }
-    const parsed = parseLastKnownStates(
-      await $fetch<unknown>(`/api/farms/${farmId}/printer-states`, {
+    // `no-cache` revalidates with the route's ETag: an unchanged farm answers
+    // 304 and the 5 s poll stays cheap.
+    const parsed = parseStatusSummary(
+      await $fetch<unknown>(statusSummaryPath(farmId), {
         signal: run.signal,
         retry: 0,
         timeout: 10_000,
-        cache: 'no-store',
+        cache: 'no-cache',
       }),
     )
     if (run.signal.aborted) return
     if (!parsed.ok) throw new Error('invalid-response')
-    states.value = parsed.states
+    states.value = parsed.summary.states
     fetchedAt.value = Date.now()
     failed.value = false
     noFarm.value = false

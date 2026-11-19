@@ -18,6 +18,8 @@ const keys = [
   'firmwareNotes',
   'connection',
   'capabilities',
+  'controlAreas',
+  'controlAreaEvidence',
   'sources',
   'limitations',
 ]

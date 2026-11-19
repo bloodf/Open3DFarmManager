@@ -4,6 +4,8 @@ import {
   capabilityLabels,
   capabilityStatusLabels,
   compatibilityPageCatalog,
+  controlAreaKeys,
+  controlAreaLabels,
   filterCompatibility,
   klipperFamilyIds,
 } from '../utils/compatibility/index'
@@ -57,6 +59,13 @@ const products = computed(() =>
         >
           <dt>{{ capabilityLabels[capability] }}</dt>
           <dd>{{ capabilityStatusLabels[status] }}</dd>
+        </template>
+      </dl>
+      <h3>Áreas de controle</h3>
+      <dl>
+        <template v-for="area in controlAreaKeys" :key="area">
+          <dt>{{ controlAreaLabels[area] }}</dt>
+          <dd>{{ capabilityStatusLabels[product.controlAreas[area]] }}</dd>
         </template>
       </dl>
       <template v-if="product.firmwareNotes?.length">

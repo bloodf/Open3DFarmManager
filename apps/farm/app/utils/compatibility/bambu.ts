@@ -1,3 +1,9 @@
+import { unknownControlAreas } from './control-areas'
+import type {
+  ControlAreaCapabilities,
+  ControlAreaEvidenceMap,
+} from './control-areas'
+
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'
 
@@ -26,6 +32,8 @@ export interface BambuCatalogProduct {
       CatalogCapability
     >
   >
+  readonly controlAreas: ControlAreaCapabilities
+  readonly controlAreaEvidence?: ControlAreaEvidenceMap
   readonly sources: readonly string[]
   readonly limitations: readonly string[]
 }
@@ -84,6 +92,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     id: 'bambu-a2l',
+    controlAreas: unknownControlAreas,
     model: 'A2L',
     releaseDate: '2026-06-01',
     sources: [
@@ -97,6 +106,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   {
     ...common,
     id: 'bambu-x2d',
+    controlAreas: unknownControlAreas,
     model: 'X2D',
     releaseDate: '2026-04-14',
     sources: [
@@ -111,6 +121,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
     id: 'bambu-h2c',
+    controlAreas: unknownControlAreas,
     model: 'H2C',
     releaseDate: '2025-11-14',
     sources: [
@@ -125,6 +136,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
     id: 'bambu-p2s',
+    controlAreas: unknownControlAreas,
     model: 'P2S',
     releaseDate: '2025-10-14',
     sources: [
@@ -139,6 +151,7 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
     ...common,
     capabilities: { ...bambuCapabilities, camera: 'simulated' },
     id: 'bambu-h2s',
+    controlAreas: unknownControlAreas,
     model: 'H2S',
     releaseDate: '2025-08-26',
     sources: [

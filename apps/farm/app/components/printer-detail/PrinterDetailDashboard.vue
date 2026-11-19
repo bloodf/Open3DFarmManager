@@ -5,6 +5,7 @@ import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
+import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import {
@@ -39,6 +40,12 @@ const props = defineProps<{
     canCommand: boolean
     reason?: string
   }
+  /** Named fans, LEDs and pins: shown with the reason when not advertised. */
+  outputs?: {
+    advertised: { fan: boolean; led: boolean; pin: boolean }
+    canCommand: boolean
+    reason?: string
+  }
   canEmergencyStop: boolean
   /** Motion controls; the panel shows only when the printer advertises motion. */
   motionAvailability?: MotionAvailabilityMap
@@ -56,6 +63,14 @@ const emit = defineEmits<{
     feed: number,
     event: Event,
   ): void
+  (e: 'set-fan', fan: string, percent: number, event: Event): void
+  (
+    e: 'set-led',
+    name: string,
+    channels: { r: number; g: number; b: number; w?: number },
+    event: Event,
+  ): void
+  (e: 'set-pin', name: string, value: number, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -177,6 +192,19 @@ const heaterReason = computed(
             (tool, lengthMm, feed, event) =>
               emit('extrude', tool, lengthMm, feed, event)
           "
+        />
+        <OutputsPanel
+          v-if="outputs"
+          :advertised="outputs.advertised"
+          :can-command="outputs.canCommand"
+          :disabled-reason="outputs.reason"
+          @set-fan="
+            (fan, percent, event) => emit('set-fan', fan, percent, event)
+          "
+          @set-led="
+            (name, channels, event) => emit('set-led', name, channels, event)
+          "
+          @set-pin="(name, value, event) => emit('set-pin', name, value, event)"
         />
       </template>
       <template

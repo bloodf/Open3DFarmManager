@@ -79,6 +79,37 @@ export const LibraryPrintArgs = z.strictObject({
 })
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+export const MACRO_PARAM_MAX_KEYS = 16
+export const MACRO_PARAM_MAX_VALUE_CHARS = 64
+/** Klipper macro parameter name: a safe identifier. */
+export const MacroParamName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,31}$/)
+/**
+ * One G-code token: no whitespace, control characters, `;` (command
+ * separator) or `#`/`*` (comment and checksum), so a value never splits a
+ * script line or smuggles a second command.
+ */
+export const MacroParamValue = z
+  .string()
+  .min(1)
+  .max(MACRO_PARAM_MAX_VALUE_CHARS)
+  .regex(/^[^\s\x00-\x1f\x7f;#*]+$/)
+/** Bounded `KEY=value` parameters of one macro run. */
+export const MacroParams = z.custom<Record<string, string>>((value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  const keys = Object.keys(value)
+  return (
+    keys.length <= MACRO_PARAM_MAX_KEYS &&
+    keys.every(
+      (key) =>
+        MacroParamName.safeParse(key).success &&
+        MacroParamValue.safeParse((value as Record<string, unknown>)[key])
+          .success,
+    )
+  )
+})
 export function controlRoleAllowed(
   role: string,
   action?: ExtendedControlAction,
@@ -142,7 +173,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
-    args: z.strictObject({ name: MacroName }),
+    args: z.strictObject({ name: MacroName, params: MacroParams.optional() }),
   }),
   z.strictObject({
     action: z.literal('load_filament'),

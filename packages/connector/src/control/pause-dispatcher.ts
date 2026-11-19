@@ -12,6 +12,10 @@ import {
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
+import {
+  macroParamsAllowed,
+  type MacroParamMap,
+} from '../moonraker/control-macros.ts'
 import { z } from 'zod'
 import {
   decodeCommandV2,
@@ -150,6 +154,7 @@ export interface PauseDriver {
     },
   ): Promise<PauseRpcResult>
   macros?(binding: PrinterBinding): readonly string[] | undefined
+  macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   pauseOnce(input: {
     args?: Record<string, unknown>
@@ -234,6 +239,7 @@ export function createPauseDispatcher(config: {
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
+    macroParams: config.driver.macroParams?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
     closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
@@ -551,7 +557,12 @@ export function createPauseDispatcher(config: {
         if (
           command.action === 'run_macro' &&
           (typeof command.args.name !== 'string' ||
-            !driver.macros?.(printerBinding)?.includes(command.args.name))
+            !driver.macros?.(printerBinding)?.includes(command.args.name) ||
+            !macroParamsAllowed(
+              driver.macroParams?.(printerBinding),
+              command.args.name,
+              command.args.params,
+            ))
         )
           return 'unsupported-action'
         if (

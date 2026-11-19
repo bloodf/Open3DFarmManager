@@ -1,3 +1,4 @@
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { createPrinterDetailSources } from './printer-detail-session.ts'
 import {
   discoveryBindings,
@@ -236,6 +237,8 @@ async function runConnectorAgentOnce(
     printerKey: assignment.printer_key,
   }))
   let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
+  let macroParamsFor:
+    ((assignmentId: string) => MacroParamMap | undefined) | undefined
   let macrosFor:
     ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
@@ -307,6 +310,7 @@ async function runConnectorAgentOnce(
           },
           controlsFor: (id) => controlsFor?.(id),
           macrosFor: (id) => macrosFor?.(id),
+          macroParamsFor: (id) => macroParamsFor?.(id),
           localWebUiOriginFor: (id) => {
             const assignment = config.assignments.find(
               (item) => item.assignment_id === id,
@@ -577,6 +581,9 @@ async function runConnectorAgentOnce(
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
+          onMacroParams(read) {
+            macroParamsFor = read
+          },
           onMacros(read) {
             macrosFor = read
           },

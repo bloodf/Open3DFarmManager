@@ -184,11 +184,40 @@ const motionAvailability = computed(() =>
   ),
 )
 
+const macroAvailability = computed(() => availability('run_macro'))
+const macros = computed(() => {
+  const advertised = state.value?.controls?.includes('run_macro') ?? false
+  const params = state.value?.macroParams ?? {}
+  return {
+    advertised,
+    list: (state.value?.macros ?? [])
+      .filter((name) => !name.startsWith('_'))
+      .map((name) => ({ name, params: params[name] ?? [] })),
+    canCommand: macroAvailability.value.available && !commandInFlight.value,
+    reason: !advertised
+      ? undefined
+      : macroAvailability.value.available
+        ? 'Um comando já está em andamento.'
+        : macroAvailability.value.reason,
+  }
+})
+
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
     void openControl(row.value, 'set_temperature', event, {
       heater,
       target_c: targetC,
+    })
+}
+function runMacro(
+  name: string,
+  params: Record<string, string> | undefined,
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'run_macro', event, {
+      name,
+      ...(params ? { params } : {}),
     })
 }
 function control(
@@ -284,9 +313,11 @@ onMounted(() => heading.value?.focus())
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
       :extrusion="extrusion"
+      :macros="macros"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
+      @run-macro="runMacro"
       @set-fan="setFan"
       @set-led="setLed"
       @set-pin="setPin"

@@ -4,6 +4,7 @@ import Button from '../ui/Button.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
+import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
@@ -40,6 +41,16 @@ const props = defineProps<{
     canCommand: boolean
     reason?: string
   }
+  /** Macro control: shown with its reason when not advertised. */
+  macros?: {
+    advertised: boolean
+    list: readonly {
+      name: string
+      params: readonly { name: string; default?: string }[]
+    }[]
+    canCommand: boolean
+    reason?: string
+  }
   /** Named fans, LEDs and pins: shown with the reason when not advertised. */
   outputs?: {
     advertised: { fan: boolean; led: boolean; pin: boolean }
@@ -61,6 +72,12 @@ const emit = defineEmits<{
     tool: number,
     lengthMm: number,
     feed: number,
+    event: Event,
+  ): void
+  (
+    e: 'run-macro',
+    name: string,
+    params: Record<string, string> | undefined,
     event: Event,
   ): void
   (e: 'set-fan', fan: string, percent: number, event: Event): void
@@ -191,6 +208,16 @@ const heaterReason = computed(
           @extrude="
             (tool, lengthMm, feed, event) =>
               emit('extrude', tool, lengthMm, feed, event)
+          "
+        />
+        <MacrosPanel
+          v-if="macros"
+          :advertised="macros.advertised"
+          :macros="macros.list"
+          :can-command="macros.canCommand"
+          :disabled-reason="macros.reason"
+          @run-macro="
+            (name, params, event) => emit('run-macro', name, params, event)
           "
         />
         <OutputsPanel

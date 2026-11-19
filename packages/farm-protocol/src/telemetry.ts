@@ -2,6 +2,27 @@ import { z } from 'zod'
 import { PrinterState } from './state.ts'
 import { SpoolInventory } from './inventory.ts'
 
+import {
+  DiscoveryPrinter,
+  MAX_DISCOVERY_RESULTS,
+} from './configuration-discovery.ts'
+
+export const DiscoveryResults = z
+  .array(
+    DiscoveryPrinter.extend({
+      model: DiscoveryPrinter.shape.model.unwrap().nullable(),
+      name: DiscoveryPrinter.shape.name.unwrap().nullable(),
+      port: DiscoveryPrinter.shape.port.unwrap().nullable(),
+      firstSeen: z.number().int().nonnegative(),
+      lastSeen: z.number().int().nonnegative(),
+      adopted: z.boolean(),
+    })
+      .strict()
+      .refine((value) => value.firstSeen <= value.lastSeen),
+  )
+  .max(MAX_DISCOVERY_RESULTS)
+export type DiscoveryResults = z.infer<typeof DiscoveryResults>
+
 const envelope = {
   eventId: z.uuidv4(),
   queuedAt: z.number().int().nonnegative(),
@@ -26,6 +47,11 @@ export const TelemetryEvent = z.discriminatedUnion('kind', [
     ...envelope,
     kind: z.literal('printer-transition'),
     transition: PrinterTransition,
+  }),
+  z.strictObject({
+    ...envelope,
+    kind: z.literal('discovery'),
+    discovery: DiscoveryResults,
   }),
   z.strictObject({
     ...envelope,

@@ -32,8 +32,7 @@ export function createPrinterLinkHealth(
   const reconnects: { at: number }[] = []
 
   return {
-    success(startedAt: number) {
-      const at = mono()
+    success(startedAt: number, at = mono()) {
       expire(samples, at - 60_000)
       samples.push({ at, ms: Math.max(0, at - startedAt) })
       health.state = 'connected'

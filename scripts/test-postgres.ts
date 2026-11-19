@@ -167,6 +167,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'WEBHOOKS_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-library.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'LIBRARY_SYNTHETIC_TEST_PORT',
+      admitted: 'LIBRARY_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-members.ts': {
     migrations: 'full',
     fixture: {
@@ -369,7 +376,8 @@ export function formatSummary(results: readonly SuiteResult[]): string {
 const USAGE =
   'Run with POSTGRES_TEST_IMAGE=<digest-pinned PostgreSQL 17 image already present locally; never pulled> ' +
   'to start one disposable labelled container per fixture. ' +
-  'Optional POSTGRES_TEST_SUITES=test-postgres-a.ts,test-postgres-b.ts reruns a subset. No arguments.'
+  'Optional POSTGRES_TEST_SUITES=test-postgres-a.ts,test-postgres-b.ts reruns a subset; ' +
+  '`--only <text>` keeps suites whose name contains the text (the migration round trips always run).'
 
 const SUITE_TIMEOUT_MS = 600_000
 const RUNNER_LABEL = 'org.open3dfarmmanager.postgres-runner'
@@ -381,7 +389,10 @@ interface JobHandle {
 }
 
 async function main(): Promise<number> {
-  if (process.argv.length !== 2) throw new Error(USAGE)
+  const args = process.argv.slice(2)
+  const onlyFlag =
+    args.length === 2 && args[0] === '--only' && args[1] ? args[1] : undefined
+  if (args.length !== 0 && onlyFlag === undefined) throw new Error(USAGE)
   const env = process.env
   const isDocker = env.OPENFARM_PG === 'docker'
   let image: string | undefined
@@ -444,7 +455,13 @@ async function main(): Promise<number> {
       )
   }
   const skipped: string[] = []
-  const runnable = suites.filter((suite) => !only || only.includes(suite))
+  const runnable = suites.filter(
+    (suite) =>
+      (!only || only.includes(suite)) &&
+      (onlyFlag === undefined || suite.includes(onlyFlag)),
+  )
+  if (onlyFlag !== undefined && !runnable.length)
+    throw new Error(`No suite matches --only ${onlyFlag}`)
   const order = planJobs(runnable)
 
   const id = randomUUID()

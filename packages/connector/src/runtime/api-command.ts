@@ -7,7 +7,11 @@ import {
   type ApiEnvelopeRefusalCode,
   type ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
-import { controlSourceState } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  controlSourceState,
+  LibraryPrintArgs,
+  LIBRARY_PRINT_API_SCOPE,
+} from '../../../farm-protocol/src/control-actions.ts'
 import type { SignallingServerFrame } from '../../../farm-protocol/src/signalling-socket.ts'
 import {
   createOfflineAuthority,
@@ -31,6 +35,7 @@ import {
 import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
 import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
 import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
+import type { createLibraryPrintStarter } from './library-print-start.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
 export type ApiGrant = Readonly<{
@@ -65,12 +70,15 @@ const IDLE_ONLY = new Set([
   'unload_filament',
   'run_macro',
   'start_print',
+  'start_library_print',
 ])
 const MAX_EXECUTE_MS = 5000
 
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
 export function apiEnvelopeScope(envelope: ApiEnvelopeV1): string {
   if (envelope.kind === 'job') return 'jobs:start'
+  if (envelope.action!.action === 'start_library_print')
+    return LIBRARY_PRINT_API_SCOPE
   return CONTROL_BASIC.has(envelope.action!.action)
     ? 'control:basic'
     : 'control:extended'
@@ -109,6 +117,8 @@ export function createApiCommandRunner(config: {
     targetFor(printerKey: string): FileUploadTarget | undefined
     ca?: string | Buffer
   }
+  /** Library print starts; without it `start_library_print` is refused as unsupported. */
+  libraryPrint?: ReturnType<typeof createLibraryPrintStarter>
 }) {
   const sample = (): AuthoritySample => ({
     wall: config.clock.wallNow(),
@@ -195,9 +205,14 @@ export function createApiCommandRunner(config: {
       return null
     }
     const { action, args } = envelope.action!
+    // A library start runs the driver's ordinary `start_print` after the file is in place.
+    const libraryStart = action === 'start_library_print'
     if (
       !config.driver.execute ||
-      !(config.driver.controls?.(binding) ?? []).includes(action) ||
+      (libraryStart && (!config.libraryPrint || !jobTarget(binding))) ||
+      !(config.driver.controls?.(binding) ?? []).includes(
+        libraryStart ? 'start_print' : action,
+      ) ||
       !controlWithinLimits(action, args, config.controlLimits) ||
       (action === 'run_macro' &&
         !config.driver
@@ -225,7 +240,10 @@ export function createApiCommandRunner(config: {
       (observed.printState === 'printing' || observed.printState === 'paused')
     )
       return ['printer-busy', 'printer is printing']
-    if (action === 'start_print' && observed.printState !== 'idle')
+    if (
+      (action === 'start_print' || action === 'start_library_print') &&
+      observed.printState !== 'idle'
+    )
       return ['wrong-state', `printer is ${observed.printState}`]
     if (!controlSourceState(action, observed.printState))
       return ['wrong-state', `printer is ${observed.printState}`]
@@ -359,7 +377,9 @@ export function createApiCommandRunner(config: {
       permitted = true
       return true
     }
-    const executeDriver = async () => {
+    const executeDriver = async (
+      driverRequest: NonNullable<ApiEnvelopeV1['action']> = request,
+    ) => {
       await config.driver.prepare?.({ binding, signal })
       lastRefusal =
         authorityRefusal(envelope, sample()) ?? stateRefusal(action, binding)
@@ -367,14 +387,18 @@ export function createApiCommandRunner(config: {
         attempted = true
         acknowledged =
           (
-            await config.driver.execute!(action, args, {
-              binding,
-              beforeSend,
-              signal,
-            })
+            await config.driver.execute!(
+              driverRequest.action,
+              driverRequest.args,
+              {
+                binding,
+                beforeSend,
+                signal,
+              },
+            )
           ).acknowledged === true
         if (permitted && acknowledged && config.confirmEffect)
-          confirmed = await config.confirmEffect(request, {
+          confirmed = await config.confirmEffect(driverRequest, {
             binding,
             sentMono,
             signal,
@@ -382,7 +406,46 @@ export function createApiCommandRunner(config: {
       }
     }
     try {
-      if (envelope.kind === 'job' && envelope.job) {
+      if (action === 'start_library_print') {
+        const mapping = readPrinterBinding(binding)
+        const target = jobTarget(binding)
+        const parsed = LibraryPrintArgs.safeParse(args)
+        if (!target || !config.libraryPrint || !parsed.success)
+          throw new JobFileError('unsupported')
+        const authorize = () => {
+          lastRefusal =
+            config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
+              ? ['grant-revoked', 'issuer no longer trusted']
+              : (authorityRefusal(envelope, sample()) ??
+                safetyRefusal(envelope, binding) ??
+                stateRefusal(action, binding))
+          return (
+            !lastRefusal &&
+            !signal.aborted &&
+            !config.storageDegraded?.() &&
+            readPrinterBinding(binding) === mapping
+          )
+        }
+        const outcome = await config.libraryPrint.start({
+          args: parsed.data,
+          target,
+          signal,
+          authorize,
+          start: (file, extra) =>
+            executeDriver({
+              action: 'start_print',
+              args: { file, ...extra },
+            }),
+        })
+        if (!outcome.ok && !attempted)
+          lastRefusal = [
+            outcome.code === 'checksum-mismatch' ||
+            outcome.code === 'unsupported'
+              ? outcome.code
+              : 'not-ready',
+            outcome.code,
+          ]
+      } else if (envelope.kind === 'job' && envelope.job) {
         const mapping = readPrinterBinding(binding)
         const target = jobTarget(binding)
         if (!target || !config.jobFiles) throw new JobFileError('unsupported')
@@ -407,7 +470,7 @@ export function createApiCommandRunner(config: {
           directory: config.jobFiles.directory,
           signal,
           authorize,
-          start: executeDriver,
+          start: () => executeDriver(),
           ...(config.jobFiles.ca ? { ca: config.jobFiles.ca } : {}),
         })
       } else await executeDriver()

@@ -13,6 +13,7 @@ export const ExtendedControlAction = z.enum([
   'set_light',
   'set_speed',
   'start_print',
+  'start_library_print',
   'firmware_restart',
   'run_macro',
   'load_filament',
@@ -21,7 +22,14 @@ export const ExtendedControlAction = z.enum([
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
-export const ControlResultCode = z.enum(['bambu-authorization-required'])
+export const ControlResultCode = z.enum([
+  'bambu-authorization-required',
+  'incompatible',
+  'download-failed',
+  'checksum-mismatch',
+  'cache-full',
+  'local-file-missing',
+])
 export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
   'pause',
@@ -31,6 +39,23 @@ export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
 export function controlsForBackend(backend: string): readonly ControlAction[] {
   return backend === 'moonraker' ? MOONRAKER_CONTROLS : []
 }
+/** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
+export const LIBRARY_PRINT_API_SCOPE = 'jobs:write'
+/** One Bambu AMS slot per filament of the plate; -1 leaves a filament unmapped. */
+export const AmsMapping = z.array(z.number().int().min(-1).max(255)).max(64)
+/** `start_print` file name: a plain name, no path or control characters. */
+const PrintFileName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..'))
+const PlateNumber = z.number().int().min(1).max(1000)
+export const LibraryPrintArgs = z.strictObject({
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  plate: PlateNumber.optional(),
+  ams_mapping: AmsMapping.optional(),
+})
+export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 export function controlRoleAllowed(
   role: string,
@@ -135,12 +160,14 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('start_print'),
     args: z.strictObject({
-      file: z
-        .string()
-        .min(1)
-        .max(255)
-        .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..')),
+      file: PrintFileName,
+      plate: PlateNumber.optional(),
+      ams_mapping: AmsMapping.optional(),
     }),
+  }),
+  z.strictObject({
+    action: z.literal('start_library_print'),
+    args: LibraryPrintArgs,
   }),
 ])
 export type ControlArgs = z.infer<typeof ControlArguments>['args']

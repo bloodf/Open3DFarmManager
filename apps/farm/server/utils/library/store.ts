@@ -62,12 +62,40 @@ export interface LibraryVersion {
   kind: 'gcode' | '3mf'
   plateCount: number
   metadata: PrintFileMetadata
+  hasThumbnail: boolean
   notes: string
   uploadedBy: string
   createdAt: number
   deletedAt: number | null
   /** Set once retention removed the stored file; replays show "arquivo removido". */
   purgedAt: number | null
+}
+export interface LibraryLocation {
+  location: StorageMode
+  /** Connector that holds the copies (Connector location only). */
+  agentId: string | null
+  files: number
+  bytes: number
+}
+export interface LibrarySearch {
+  /** Substring of the title, case-insensitive. */
+  title?: string
+  tag?: string
+  /** Substring of the printer model, case-insensitive. */
+  printerModel?: string
+  nozzle?: number
+  /** Filament type of any tool, case-insensitive. */
+  material?: string
+  /** Substring of the slicer name, case-insensitive. */
+  slicer?: string
+}
+export interface LibraryCursor {
+  createdAt: number
+  id: string
+}
+export interface LibraryListing extends LibraryItem {
+  /** Newest version that is not deleted. */
+  latest: LibraryVersion
 }
 export interface LibraryItem {
   id: string
@@ -107,13 +135,15 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const sha256Pattern = /^[0-9a-f]{64}$/
 const writers = ['owner', 'admin', 'operator']
 const managers = ['owner', 'admin']
+const MAX_PAGE = 100
 
 const ITEM_COLUMNS = (tx: Sql) =>
   tx`id, title, tags, archived, created_at::float8 AS "createdAt"`
-const VERSION_COLUMNS = (tx: Sql) =>
-  tx`v.id, v.item_id AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes",
+/** `lite` drops the thumbnail payload (up to 256 KiB per version) from lists. */
+const VERSION_COLUMNS = (tx: Sql, lite = false) =>
+  tx`${lite ? tx`v.metadata - 'thumbnail' AS metadata` : tx`v.metadata`}, jsonb_exists(v.metadata, 'thumbnail') AS "hasThumbnail", v.id, v.item_id AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes",
      v.storage_location AS "storageLocation", b.agent_id AS "agentId", v.original_name AS "originalName", v.kind,
-     v.plate_count AS "plateCount", v.metadata, v.notes, v.uploaded_by AS "uploadedBy",
+     v.plate_count AS "plateCount", v.notes, v.uploaded_by AS "uploadedBy",
      v.created_at::float8 AS "createdAt", v.deleted_at::float8 AS "deletedAt", b.purged_at::float8 AS "purgedAt"`
 
 /**
@@ -214,14 +244,24 @@ export class PostgresLibrary {
     )
   }
 
+  /** Where the farm's files actually are, per location and Connector. A mode switch never moves them. */
+  private locationsOf(tx: Sql, farmId: string): Promise<LibraryLocation[]> {
+    return tx<
+      LibraryLocation[]
+    >`SELECT storage_location AS location, agent_id AS "agentId", count(*)::int AS files, COALESCE(sum(size_bytes), 0)::float8 AS bytes
+      FROM farm.library_blobs WHERE farm_id=${farmId}::uuid GROUP BY storage_location, agent_id ORDER BY storage_location, agent_id`
+  }
+
   getSettings(input: Authority) {
     return this.scoped<{
       ok: true
       settings: LibrarySettings
+      locations: LibraryLocation[]
       canManage: boolean
     }>(input, async (tx, member) => ({
       ok: true as const,
       settings: await this.settingsOf(tx, input.farmId),
+      locations: await this.locationsOf(tx, input.farmId),
       canManage: managers.includes(member.role),
     }))
   }
@@ -250,21 +290,52 @@ export class PostgresLibrary {
         ))
     )
       return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
-    return this.scoped<{ ok: true; settings: LibrarySettings }>(
-      input,
-      async (tx, member, accountId, now) => {
-        if (!managers.includes(member.role))
-          return { ok: false as const, reason: 'denied' as const }
-        const next = { ...(await this.settingsOf(tx, input.farmId)) }
-        if (storageMode !== undefined) next.storageMode = storageMode
-        if (quotaBytes !== undefined) next.quotaBytes = quotaBytes
-        if (retentionDays !== undefined) next.retentionDays = retentionDays
-        if (keepVersions !== undefined) next.keepVersions = keepVersions
-        await tx`INSERT INTO farm.library_settings (farm_id, storage_mode, quota_bytes, retention_days, keep_versions, updated_by, updated_at)
+    return this.scoped<{
+      ok: true
+      settings: LibrarySettings
+      locations: LibraryLocation[]
+    }>(input, async (tx, member, accountId, now) => {
+      if (!managers.includes(member.role))
+        return { ok: false as const, reason: 'denied' as const }
+      const next = { ...(await this.settingsOf(tx, input.farmId)) }
+      if (storageMode !== undefined) next.storageMode = storageMode
+      if (quotaBytes !== undefined) next.quotaBytes = quotaBytes
+      if (retentionDays !== undefined) next.retentionDays = retentionDays
+      if (keepVersions !== undefined) next.keepVersions = keepVersions
+      await tx`INSERT INTO farm.library_settings (farm_id, storage_mode, quota_bytes, retention_days, keep_versions, updated_by, updated_at)
         VALUES (${input.farmId}::uuid, ${next.storageMode}, ${next.quotaBytes}, ${next.retentionDays}, ${next.keepVersions}, ${accountId}, ${now})
         ON CONFLICT (farm_id) DO UPDATE SET storage_mode=EXCLUDED.storage_mode, quota_bytes=EXCLUDED.quota_bytes,
           retention_days=EXCLUDED.retention_days, keep_versions=EXCLUDED.keep_versions, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`
-        return { ok: true as const, settings: next }
+      return {
+        ok: true as const,
+        settings: next,
+        locations: await this.locationsOf(tx, input.farmId),
+      }
+    })
+  }
+
+  /**
+   * Refuses an upload before any byte moves: writers only and, in Connector
+   * mode, an approved Connector of this farm.
+   */
+  uploadContext(input: Authority & { agentId?: string }) {
+    if (input.agentId !== undefined && !uuid.test(input.agentId))
+      return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
+    return this.scoped<{ ok: true; settings: LibrarySettings }>(
+      input,
+      async (tx, member) => {
+        if (!writers.includes(member.role))
+          return { ok: false as const, reason: 'denied' as const }
+        const settings = await this.settingsOf(tx, input.farmId)
+        if (settings.storageMode === 'connector') {
+          if (!input.agentId)
+            return { ok: false as const, reason: 'invalid-input' as const }
+          const enrolled =
+            await tx`SELECT 1 FROM farm.connector_enrollments WHERE farm_id=${input.farmId}::uuid AND agent_id=${input.agentId}::uuid AND status='approved' FOR SHARE`
+          if (!enrolled[0])
+            return { ok: false as const, reason: 'forbidden' as const }
+        }
+        return { ok: true as const, settings }
       },
     )
   }
@@ -408,6 +479,66 @@ export class PostgresLibrary {
     )
   }
 
+  /**
+   * Items whose newest live version matches every given filter, newest first.
+   * Keyset paging on (created_at, id): an insert never shifts a later page.
+   */
+  searchItems(
+    input: Authority & {
+      search?: LibrarySearch
+      after?: LibraryCursor
+      limit?: number
+    },
+  ) {
+    const f = input.search ?? {}
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), MAX_PAGE)
+    if (
+      (input.after !== undefined &&
+        !(
+          uuid.test(input.after.id) &&
+          Number.isSafeInteger(input.after.createdAt)
+        )) ||
+      (f.nozzle !== undefined && !(Number.isFinite(f.nozzle) && f.nozzle > 0))
+    )
+      return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
+    return this.scoped<{
+      ok: true
+      items: LibraryListing[]
+      next: LibraryCursor | null
+    }>(input, async (tx) => {
+      const farm = input.farmId
+      const contains = (column: ReturnType<Sql>, value: string) =>
+        tx`position(lower(${value}) in lower(coalesce(${column}, ''))) > 0`
+      const rows = await tx<
+        (LibraryItem & { latest: LibraryVersion })[]
+      >`SELECT i.id, i.title, i.tags, i.archived, i.created_at::float8 AS "createdAt", to_jsonb(lv) AS latest
+        FROM farm.library_items i
+        JOIN LATERAL (SELECT ${VERSION_COLUMNS(tx, true)} FROM farm.library_versions v
+          JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256
+          WHERE v.farm_id=i.farm_id AND v.item_id=i.id AND v.deleted_at IS NULL
+          ORDER BY v.version_number DESC LIMIT 1) lv ON true
+        WHERE i.farm_id=${farm}::uuid
+        ${f.title ? tx`AND ${contains(tx`i.title`, f.title)}` : tx``}
+        ${f.tag ? tx`AND EXISTS (SELECT 1 FROM unnest(i.tags) g WHERE lower(g)=lower(${f.tag}))` : tx``}
+        ${f.printerModel ? tx`AND ${contains(tx`lv.metadata->>'printerModel'`, f.printerModel)}` : tx``}
+        ${f.slicer ? tx`AND ${contains(tx`lv.metadata->>'slicer'`, f.slicer)}` : tx``}
+        ${f.material ? tx`AND EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(lv.metadata->'tools', '[]'::jsonb)) t WHERE lower(t->>'filamentType')=lower(${f.material}))` : tx``}
+        ${f.nozzle !== undefined ? tx`AND EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(lv.metadata->'tools', '[]'::jsonb)) t WHERE (t->>'nozzleDiameter')::numeric=${String(f.nozzle)}::numeric)` : tx``}
+        ${input.after ? tx`AND (i.created_at < ${input.after.createdAt} OR (i.created_at = ${input.after.createdAt} AND i.id > ${input.after.id}::uuid))` : tx``}
+        ORDER BY i.created_at DESC, i.id LIMIT ${limit + 1}`
+      const page = rows.slice(0, limit)
+      const last = page[page.length - 1]
+      return {
+        ok: true as const,
+        items: page,
+        next:
+          rows.length > limit && last
+            ? { createdAt: last.createdAt, id: last.id }
+            : null,
+      }
+    })
+  }
+
   listItems(input: Authority) {
     return this.scoped<{ ok: true; items: LibraryItem[] }>(
       input,
@@ -418,6 +549,33 @@ export class PostgresLibrary {
         >`SELECT ${ITEM_COLUMNS(tx)} FROM farm.library_items WHERE farm_id=${input.farmId}::uuid ORDER BY created_at DESC, id LIMIT 200`,
       }),
     )
+  }
+
+  /** One live version with its full metadata, thumbnail included. */
+  getVersion(input: Authority & { versionId: string }) {
+    if (!uuid.test(input.versionId))
+      return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
+    return this.scoped<{
+      ok: true
+      version: LibraryVersion
+      item: LibraryItem
+    }>(input, async (tx) => {
+      const version = (
+        await tx<
+          LibraryVersion[]
+        >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v
+          JOIN farm.library_blobs b ON b.farm_id=v.farm_id AND b.sha256=v.sha256
+          WHERE v.farm_id=${input.farmId}::uuid AND v.id=${input.versionId}::uuid AND v.deleted_at IS NULL`
+      )[0]
+      if (!version) return { ok: false as const, reason: 'not-found' as const }
+      const item = (
+        await tx<
+          LibraryItem[]
+        >`SELECT ${ITEM_COLUMNS(tx)} FROM farm.library_items WHERE farm_id=${input.farmId}::uuid AND id=${version.itemId}::uuid`
+      )[0]
+      if (!item) return { ok: false as const, reason: 'not-found' as const }
+      return { ok: true as const, version, item }
+    })
   }
 
   /** Soft-deleted versions are hidden unless asked for; each row reports its real location. */
@@ -468,7 +626,7 @@ export class PostgresLibrary {
     return this.scoped<{ ok: true; deletedAt: number }>(
       input,
       async (tx, member, _accountId, now) => {
-        if (!writers.includes(member.role))
+        if (!managers.includes(member.role))
           return { ok: false as const, reason: 'denied' as const }
         const rows = await tx<
           { deletedAt: number }[]

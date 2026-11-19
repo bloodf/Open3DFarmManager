@@ -45,6 +45,31 @@ Connector storage, its Connector identity. Replay always retrieves the exact
 selected version by hash, verifies it, and runs compatibility checks before
 starting. A blocked version cannot be replayed.
 
+## Session API
+
+Routes live under `/api/farms/{farmId}/library`. Viewers read; operators and
+above upload; owners and admins delete and change settings. A farm the caller
+does not belong to answers 404 on reads and 403 on writes.
+
+- `POST /` uploads a raw `application/octet-stream` body (`.gcode` or `.3mf`,
+  at most 512 MiB) with `name`, optional `title`, `itemId` (adds a version),
+  repeated `tag`, `notes` and, in Connector mode, `agentId`. Server mode stores
+  the file under `OPENFARM_LIBRARY_DIR`; Connector mode relays it to the
+  Connector and keeps no bytes on the server.
+- `GET /` lists items newest first. Filters `title`, `tag`, `printerModel`,
+  `nozzle`, `material` and `slicer` combine; `limit` (max 100) and `cursor`
+  page without skipping or repeating items when new ones arrive.
+- `GET /versions/{id}`, `GET /versions/{id}/thumbnail` (immutable cache
+  headers, `ETag` is the file hash), `DELETE /versions/{id}` (soft delete),
+  `GET /items/{id}/versions`.
+- `GET`/`PUT /settings` read and change `storageMode`, `quotaBytes` and
+  `retentionDays`. Both answers include `locations`: how many files and bytes
+  stay on the server and on each Connector. Nothing is migrated.
+
+Connector mode needs a relay between the server and the Connector; until one is
+wired the upload answers 503 while list, search and get keep working from
+server metadata.
+
 ## Quota and retention
 
 The default quota is 20 GiB per farm; `OPENFARM_LIBRARY_QUOTA_BYTES` changes the

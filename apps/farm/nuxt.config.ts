@@ -79,6 +79,8 @@ export default defineNuxtConfig({
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
+    /** A farm_library login; `directory` is OPENFARM_LIBRARY_DIR (absolute) and enables server mode. */
+    library: { enabled: false, databaseUrl: '', directory: '' },
     /** A login that is a member of farm_spoolman_settings. */
     spoolmanSettings: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },

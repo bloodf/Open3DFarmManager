@@ -142,6 +142,12 @@ export const PrinterState = z
         totalDuration: z.number().finite().nonnegative().optional(),
         filamentUsedMillimetres: z.number().finite().nonnegative().optional(),
         filamentUsage: z.array(FilamentUsage).max(17).optional(),
+        /** Library version that was printed; absent for jobs started outside the library. */
+        sha256: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+        plate: z.number().int().min(1).max(1000).optional(),
         endedAt: z.number().int().nonnegative(),
       })
       .optional(),

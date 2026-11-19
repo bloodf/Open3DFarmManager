@@ -101,6 +101,7 @@ export async function startJourneyDatabase(
   const name = `o3dfm-journey-${runId}`
   const labelKey = 'org.open3dfarmmanager.journey'
   const fixture = disposablePostgres({
+    isolated: true,
     name,
     labelKey,
     labelValue: runId,

@@ -168,6 +168,7 @@ klipper_job() {
     return 2
   fi
   if ! docker image inspect "$sim_image" >/dev/null 2>&1; then sim_image_preexisting=0; fi
+  local -x OPENFARM_SIM=docker
   npm ci --ignore-scripts
   docker compose -p "$project_name" -f infra/sim/docker-compose.yml --profile klipper config --quiet
   sim_started=1

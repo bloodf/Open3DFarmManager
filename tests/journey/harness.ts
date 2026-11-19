@@ -277,6 +277,7 @@ export async function startJourneyHarness(
     })())
   // A killed worker skips `close`: remove the labelled container regardless.
   const onExit = () => {
+    if (process.env.OPENFARM_PG !== 'docker') return
     try {
       execFileSync(
         'docker',

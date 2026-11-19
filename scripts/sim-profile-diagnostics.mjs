@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: MIT
 // Bounded Compose diagnostics for spoolman/cams/rtsp profile failures.
 // Deliberately excludes raw configs, environment and secrets.
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
 import { spawnSync } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+if (!isDockerSim()) {
+  console.log('Docker mode only (OPENFARM_SIM=docker)')
+  process.exit(0)
+}
 const profiles = {
   spoolman: ['spoolman'],
   cams: ['camera'],

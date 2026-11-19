@@ -1,3 +1,4 @@
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -41,6 +42,10 @@ export async function testPrintingPausePage(input: {
   assert.equal(url.protocol, 'http:')
   // Prove the target is the explicitly supplied infra/sim sv06 container,
   // rather than trusting a loopback origin (which may front real hardware).
+  assert.ok(
+    isDockerSim(),
+    'This container fixture requires OPENFARM_SIM=docker',
+  )
   const container = process.env.SIGNALLING_HTTPS_SIM_CONTAINER ?? ''
   assert.match(
     container,

@@ -17,7 +17,7 @@ const isDocker = process.env.OPENFARM_PG === 'docker'
 const image = process.env.AUTH_E2E_IMAGE
 if (
   process.argv.length !== 2 ||
-  process.env.AUTH_E2E_ADMITTED !== 'yes' ||
+  (isDocker && process.env.AUTH_E2E_ADMITTED !== 'yes') ||
   (isDocker && (!image || !POSTGRES_IMAGE_PATTERN.test(image)))
 )
   throw new Error('AUTH_E2E_ADMITTED=yes required')
@@ -63,6 +63,7 @@ const appPort = await freePort(process.env.AUTH_E2E_APP_PORT)
 const tlsPort = await freePort(process.env.AUTH_E2E_TLS_PORT)
 
 const database = disposablePostgres({
+  isolated: true,
   name,
   labelKey: 'org.open3dfarmmanager.auth-e2e',
   labelValue: id,
@@ -84,8 +85,16 @@ try {
   )
   assert.equal(migrated, 0, 'Migrations failed')
   process.exitCode = await run(
-    'npx',
-    ['playwright', 'test', '-c', 'playwright.auth-session.config.ts'],
+    'npm',
+    [
+      'exec',
+      '--offline',
+      '--',
+      'playwright',
+      'test',
+      '-c',
+      'playwright.auth-session.config.ts',
+    ],
     {
       AUTH_E2E_DISPOSABLE: 'yes',
       AUTH_E2E_DB_PORT: String(dbPort),

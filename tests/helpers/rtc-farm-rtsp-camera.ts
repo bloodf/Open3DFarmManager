@@ -1,3 +1,4 @@
+import { isMockSim } from '../../packages/sim-tools/src/mocks/env.ts'
 // Task-owned RTSP camera resources for the RTC farm acceptance runner: the
 // `rtsp` simulator profile under an exact compose project and loopback port,
 // and a verified copy of the prebuilt ingest helper (see
@@ -71,7 +72,7 @@ export async function startRtspCamera(input: {
   if ((await sha256(helperPath)) !== helperSha256)
     throw new Error('Ingest helper copy SHA-256 mismatch')
   input.ledger({ resource: 'rtsp-helper', path: helperPath })
-  if (process.env.OPENFARM_SIM?.trim().toLowerCase() === 'mock') {
+  if (isMockSim()) {
     const mock = await startCameraMock({ rtspPort: input.port })
     input.ledger({ resource: 'rtsp-mock', port: input.port })
     return {

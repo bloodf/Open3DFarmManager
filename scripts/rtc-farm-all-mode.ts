@@ -42,6 +42,7 @@ export function runnableAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
       )
     if (row === 'farm-page-printing-pause')
       return Boolean(
+        env.OPENFARM_SIM?.trim().toLowerCase() === 'docker' &&
         env.RTC_FARM_TEST_SIM_MOONRAKER &&
         env.RTC_FARM_TEST_SIM_SPOOLMAN &&
         env.RTC_FARM_TEST_SIM_PRINTING_PAUSE === 'sv06',

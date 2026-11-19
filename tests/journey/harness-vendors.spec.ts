@@ -73,6 +73,7 @@ if (journeyEnabled())
         if (!journey) throw new Error('Harness did not start')
         try {
           expect(journey.simulator).toBe(vendor)
+          expect(new URL(journey.origin).hostname).toBe('127.0.0.1')
           expect(journey.vendor?.name).toBe(vendor)
           await journey.expectLiveTelemetry()
           // A scripted progress step from the simulator reaches the page.

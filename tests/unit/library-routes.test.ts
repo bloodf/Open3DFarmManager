@@ -321,6 +321,19 @@ class FakeLibrary {
       ? { ok: true, version, item }
       : { ok: false, reason: 'not-found' }
   }
+  getVersionBySha256: LibraryStore['getVersionBySha256'] = async (input) => {
+    if (!this.role(input)) return { ok: false, reason: 'forbidden' }
+    const version = this.versions.find(
+      (v) =>
+        v.sha256 === input.sha256 &&
+        v.farmId === input.farmId &&
+        v.deletedAt === null,
+    )
+    const item = this.items.find((i) => i.id === version?.itemId)
+    return version && item
+      ? { ok: true, version, item }
+      : { ok: false, reason: 'not-found' }
+  }
   listVersions: LibraryStore['listVersions'] = async (input) => {
     if (!this.role(input)) return { ok: false, reason: 'forbidden' }
     return {
@@ -501,6 +514,8 @@ function operation(
   if (!a) {
     if (method === 'GET') return { op: 'list', target: {} }
     if (method === 'POST') return { op: 'upload', target: {} }
+  } else if (a === 'replay-source' && !b && method === 'GET') {
+    return { op: 'replay-source', target: {} }
   } else if (a === 'settings' && !b) {
     if (method === 'GET') return { op: 'settings', target: {} }
     if (method === 'PUT') return { op: 'settings-update', target: {} }
@@ -1171,6 +1186,22 @@ describe('get, thumbnail and delete', () => {
       expect(body.version.metadata.thumbnail).toBeUndefined()
       expect(body.item.title).toBe('p')
     }
+  })
+
+  test('looks up a version for replay by SHA-256', async () => {
+    const found = await call(
+      'GET',
+      `/replay-source?sha256=${uploaded.version.sha256}`,
+      { as: 'viewer' },
+    )
+    expect(found.status).toBe(200)
+    expect(await found.json()).toMatchObject({
+      version: { id: uploaded.version.id, sha256: uploaded.version.sha256 },
+    })
+    expect(
+      (await call('GET', `/replay-source?sha256=${'b'.repeat(64)}`)).status,
+    ).toBe(404)
+    expect((await call('GET', '/replay-source?sha256=zz')).status).toBe(400)
   })
 
   test('thumbnail carries content type and cache headers, and revalidates', async () => {

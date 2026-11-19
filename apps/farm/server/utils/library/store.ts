@@ -597,6 +597,34 @@ export class PostgresLibrary {
     })
   }
 
+  /** Newest live version with this content hash, for replaying a finished job. */
+  getVersionBySha256(input: Authority & { sha256: string }) {
+    if (!/^[0-9a-f]{64}$/.test(input.sha256))
+      return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
+    return this.scoped<{
+      ok: true
+      version: LibraryVersion
+      item: LibraryItem
+    }>(input, async (tx) => {
+      const version = (
+        await tx<
+          LibraryVersion[]
+        >`SELECT ${VERSION_COLUMNS(tx)} FROM farm.library_versions v
+          JOIN farm.library_blobs b ON ${VERSION_BLOB_JOIN(tx)}
+          WHERE v.farm_id=${input.farmId}::uuid AND v.sha256=${input.sha256} AND v.deleted_at IS NULL
+          ORDER BY v.created_at DESC, v.id LIMIT 1`
+      )[0]
+      if (!version) return { ok: false as const, reason: 'not-found' as const }
+      const item = (
+        await tx<
+          LibraryItem[]
+        >`SELECT ${ITEM_COLUMNS(tx)} FROM farm.library_items WHERE farm_id=${input.farmId}::uuid AND id=${version.itemId}::uuid`
+      )[0]
+      if (!item) return { ok: false as const, reason: 'not-found' as const }
+      return { ok: true as const, version, item }
+    })
+  }
+
   /** Soft-deleted versions are hidden unless asked for; each row reports its real location. */
   listVersions(
     input: Authority & { itemId: string; includeDeleted?: boolean },

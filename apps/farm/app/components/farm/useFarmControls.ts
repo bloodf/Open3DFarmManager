@@ -148,7 +148,11 @@ export function useFarmControls(
       onState,
     })
   }
-  async function connectFiles(row: FarmRow, signal: AbortSignal) {
+  async function connectFiles(
+    row: FarmRow,
+    signal: AbortSignal,
+    observe?: (state: FarmPauseControlState) => void,
+  ) {
     const current = ready.value
     if (
       !current?.scope ||
@@ -164,6 +168,7 @@ export function useFarmControls(
     try {
       await new Promise<void>((resolve, reject) => {
         control = connectControl(row, scope, keys.selected, (state) => {
+          observe?.(state)
           if (state.kind === 'ready') resolve()
           if (state.kind === 'failed' || state.kind === 'settled')
             reject(Error('File session closed'))

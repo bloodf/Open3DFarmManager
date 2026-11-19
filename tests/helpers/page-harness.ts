@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { readdirSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Browser, Page } from '@playwright/test'
 import { build } from 'esbuild'
@@ -157,7 +157,7 @@ function entrySource() {
   `
 }
 
-async function bundle() {
+async function bundle(replace: Readonly<Record<string, string>>) {
   const result = await build({
     stdin: { contents: entrySource(), resolveDir: root, loader: 'js' },
     bundle: true,
@@ -166,6 +166,16 @@ async function bundle() {
     define: { 'process.env.NODE_ENV': '"production"' },
     logLevel: 'silent',
     plugins: [
+      {
+        // A test may stand in for one module (e.g. a live WebRTC session).
+        name: 'module-replacement',
+        setup(b) {
+          b.onResolve({ filter: /\.ts$/ }, (args) => {
+            const target = replace[resolve(args.resolveDir, args.path)]
+            return target ? { path: target } : undefined
+          })
+        },
+      },
       {
         // Pages that import vue-router get the harness route, not a router.
         name: 'vue-router-shim',
@@ -250,6 +260,8 @@ export type OpenOptions = {
   route?: PageRoute
   /** Install a fake clock so polling and stale ages can be fast-forwarded. */
   clock?: boolean
+  /** Script run in the page before the app starts, e.g. to seed a stand-in module. */
+  init?: string
   width?: number
 }
 
@@ -270,8 +282,15 @@ export type PageHarness = {
   close: () => Promise<void>
 }
 
-export async function createPageHarness(): Promise<PageHarness> {
-  const assets = await bundle()
+export type HarnessOptions = {
+  /** Absolute module path -> absolute path of the module that replaces it. */
+  replace?: Readonly<Record<string, string>>
+}
+
+export async function createPageHarness(
+  options: HarnessOptions = {},
+): Promise<PageHarness> {
+  const assets = await bundle(options.replace ?? {})
   const browser: Browser = await launchBrowser({
     args: ['--disable-background-networking'],
   })
@@ -332,6 +351,7 @@ export async function createPageHarness(): Promise<PageHarness> {
         return route.fulfill({ contentType: 'text/css', body: assets.css })
       return route.continue()
     })
+    if (options.init) await context.addInitScript(options.init)
     const page = await context.newPage()
     if (options.clock) await page.clock.install()
     await page.goto(server.origin)

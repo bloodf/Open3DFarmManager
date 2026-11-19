@@ -13,6 +13,7 @@ import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
+  detectMoonrakerComponents,
   detectMoonrakerMacroParams,
   detectMoonrakerObjects,
   moonrakerControls,
@@ -114,6 +115,17 @@ export function createPauseDriverRouter(config: {
         }
         const objects = await detectMoonrakerObjects(detect)
         moonrakerObjects.set(binding, objects)
+        try {
+          // Components such as the job queue are not Klipper objects.
+          const markers = await detectMoonrakerComponents(detect)
+          if (markers.length)
+            moonrakerObjects.set(
+              binding,
+              Object.freeze([...objects, ...markers]),
+            )
+        } catch {
+          // Unknown components stay unadvertised.
+        }
         const macros = advertisedMoonrakerMacros(objects) ?? []
         if (macros.length)
           try {

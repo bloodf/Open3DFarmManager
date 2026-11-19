@@ -529,10 +529,10 @@ for (const c of moonrakerCases) {
         c.action === 'emergency_stop' ? 'error' : 'printing',
       )
     }
-    // One detection read at provisioning, then exactly one command.
+    // Two detection reads at provisioning (objects, components), then exactly one command.
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list', c.method],
+      ['printer.objects.list', 'server.info', c.method],
     )
     assert.deepEqual(f.moonraker?.gcodeScripts, c.script ? [c.script] : [])
   })
@@ -564,7 +564,7 @@ test('Moonraker advertises exactly the actions its detected objects support', as
   })
   assert.deepEqual(
     commands(bare).map((request) => request.method),
-    ['printer.objects.list'],
+    ['printer.objects.list', 'server.info'],
   )
 })
 
@@ -599,7 +599,7 @@ for (const action of ['start_print', 'firmware_restart'] as const) {
     })
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list'],
+      ['printer.objects.list', 'server.info'],
     )
   })
 }

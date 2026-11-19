@@ -99,6 +99,8 @@ export interface MoonrakerMockOptions {
   initial?: Partial<MoonrakerModel> | undefined
   scenario?: ScenarioStep<MoonrakerModel>[] | undefined
   objects?: readonly string[] | undefined
+  /** Moonraker components server.info lists; defaults to the mock's own. */
+  components?: readonly string[] | undefined
   macros?: readonly string[] | undefined
   webcams?: readonly MoonrakerWebcamEntry[] | undefined
   files?: readonly MoonrakerFileEntry[] | undefined
@@ -1540,9 +1542,10 @@ export async function startMoonrakerMock(
       moonraker_version: 'v0.9.3-mock',
       api_version: [1, 5, 0],
       api_version_string: '1.5.0',
-      components: [
+      components: options.components ?? [
         'file_manager',
         'history',
+        'job_queue',
         'spoolman',
         'update_manager',
         'webcam',

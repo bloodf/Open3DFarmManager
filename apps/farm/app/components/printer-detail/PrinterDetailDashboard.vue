@@ -6,9 +6,11 @@ import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
 import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
+import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
+import type { QueueOpArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   DEFAULT_UNSUPPORTED_REASON,
   detailTabs,
@@ -57,6 +59,14 @@ const props = defineProps<{
     canCommand: boolean
     reason?: string
   }
+  /** Job queue control and the queue the detail session reported. */
+  queue?: {
+    advertised: boolean
+    state?: string
+    jobs?: readonly QueueJob[]
+    canCommand: boolean
+    reason?: string
+  }
   canEmergencyStop: boolean
   /** Motion controls; the panel shows only when the printer advertises motion. */
   motionAvailability?: MotionAvailabilityMap
@@ -88,6 +98,7 @@ const emit = defineEmits<{
     event: Event,
   ): void
   (e: 'set-pin', name: string, value: number, event: Event): void
+  (e: 'queue-op', args: QueueOpArguments, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -239,7 +250,16 @@ const heaterReason = computed(
         :key="tab.id"
         #[tab.id]
       >
-        <p>Sem dados de {{ tab.label }} neste momento.</p>
+        <JobQueuePanel
+          v-if="tab.id === 'fila' && queue"
+          :advertised="queue.advertised"
+          :state="queue.state"
+          :jobs="queue.jobs"
+          :can-command="queue.canCommand"
+          :disabled-reason="queue.reason"
+          @queue-op="(args, event) => emit('queue-op', args, event)"
+        />
+        <p v-else>Sem dados de {{ tab.label }} neste momento.</p>
       </template>
     </Tabs>
     <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">

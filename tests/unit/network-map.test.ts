@@ -343,18 +343,26 @@ describe('accessibility', () => {
                 (await new AxeBuilder({ page }).analyze()).violations,
               ).toEqual([])
               // Keyboard: view buttons, two filters, then the content.
+              // Start from the heading, not from wherever the browser left
+              // focus after the previous page, and stop once Tab leaves the
+              // document: with few rows the walk would otherwise wrap into
+              // browser UI and change where the next page's first Tab lands.
+              await page
+                .getByRole('heading', { name: 'Rede da farm', level: 1 })
+                .click()
               const focused: string[] = []
               for (let step = 0; step < 8; step++) {
                 await page.keyboard.press('Tab')
-                focused.push(
-                  await page.evaluate(
-                    () =>
-                      document.activeElement?.getAttribute('href') ??
-                      (document.activeElement?.id ||
-                        document.activeElement?.textContent?.trim()) ??
-                      '',
-                  ),
-                )
+                const stop = await page.evaluate(() => {
+                  const active = document.activeElement
+                  if (!active || active === document.body) return null
+                  return (
+                    active.getAttribute('href') ??
+                    (active.id || active.textContent?.trim() || '')
+                  )
+                })
+                if (stop === null) break
+                focused.push(stop)
               }
               expect(focused.slice(0, 4)).toEqual([
                 'Mapa',

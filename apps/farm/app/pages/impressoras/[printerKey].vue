@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
@@ -19,7 +20,10 @@ import type {
   QueueOpArguments,
   TimelapseArguments,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
-import { liveControlActionAvailability } from '../../utils/farm-control.ts'
+import {
+  actionDialogTitle,
+  liveControlActionAvailability,
+} from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -42,8 +46,14 @@ const webcams = shallowRef<
 const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
 const vendorFrame = computed(() =>
-  detailFrame.value?.vendor ? detailFrame.value : undefined,
+  detailFrame.value?.vendor && detailFrame.value.vendor !== 'bambu'
+    ? detailFrame.value
+    : undefined,
 )
+const vendorCatalog = computed(() => {
+  const vendor = detailFrame.value?.vendor
+  return vendor ? vendorDetailCatalog[vendor] : undefined
+})
 const printFile = ref('')
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
@@ -458,6 +468,7 @@ onMounted(() => heading.value?.focus())
           : 'sem conexão direta'
       "
       :live="live"
+      :vendor-catalog="vendorCatalog"
       :supported-only="vendorFrame?.vendor === 'creality'"
       :last-known-text="lastKnownText"
       :capabilities="capabilities"
@@ -576,6 +587,14 @@ onMounted(() => heading.value?.focus())
         />
       </template>
     </PrinterDetailDashboard>
+    <button
+      v-if="vendorCatalog && state?.controls?.includes('pause')"
+      type="button"
+      :disabled="!availability('pause').available || commandInFlight"
+      @click="(event) => control('pause', event)"
+    >
+      Pausar impressão
+    </button>
     <section
       v-if="row && live && vendorFrame"
       aria-label="Detalhes da impressora"
@@ -691,7 +710,11 @@ onMounted(() => heading.value?.focus())
     >
       <template v-if="pauseTarget">
         <h2 id="pause-dialog-title">
-          {{ extendedLabel(pauseTarget.action) }} — {{ pauseTarget.printerKey }}
+          {{
+            pauseTarget.action === 'pause'
+              ? actionDialogTitle('pause', pauseTarget.printerKey)
+              : `${extendedLabel(pauseTarget.action)} — ${pauseTarget.printerKey}`
+          }}
         </h2>
         <p id="pause-dialog-description">
           <template v-if="pauseTarget.action === 'power'">

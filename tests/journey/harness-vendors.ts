@@ -275,6 +275,12 @@ export async function startVendorSimulator(
         initialTargetTemperature: 210,
         totalLayers: 100,
         printDurationMs: 15_000,
+        // State changes are reported at once; the repeated report is slow
+        // enough for the Connector's telemetry queue to run empty between
+        // uploads, yet well inside the binding's 5 s staleness limit. A queue
+        // that never empties uploads without pause and keeps the credential
+        // proof slot away from both signalling inboxes.
+        reportIntervalMs: 2000,
         ...(options.ftpsPort === undefined
           ? {}
           : { ftpsPort: options.ftpsPort }),
@@ -291,6 +297,9 @@ export async function startVendorSimulator(
         await privateJson(credentialFile, { accessCode: BAMBU_ACCESS_CODE })
         return {
           version: 3,
+          // Uploads and signalling inboxes share one credential proof
+          // slot on the server; spaced uploads leave it free for commands.
+          telemetryIdleMs: 5000,
           collection: {
             version: 3,
             allowedOrigins: [],

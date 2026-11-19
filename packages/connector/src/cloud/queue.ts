@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 import { acquireQueueLock } from './queue-lock.ts'
 import {
   DiscoveryResults,
+  HeartbeatHealth,
   TelemetryEvent,
   PrinterState,
   PrinterTransition,
@@ -83,7 +84,8 @@ function parseRecord(value: unknown): TelemetryRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error('Invalid queue record')
   const record = value as Record<string, unknown>
-  if (record.kind === 'discovery') return TelemetryEvent.parse(record)
+  if (record.kind === 'discovery' || record.kind === 'heartbeat')
+    return TelemetryEvent.parse(record)
   const transition = record.kind === 'printer-transition'
   const inventory = record.kind === 'inventory-snapshot'
   if (
@@ -480,12 +482,19 @@ export class TelemetryQueue {
       now,
     )
   }
+  enqueueHeartbeat(health: HeartbeatHealth, now: number) {
+    return this.append(
+      { kind: 'heartbeat', health: HeartbeatHealth.parse(health) },
+      now,
+    )
+  }
   private append(
     body:
       | { kind: 'printer-state'; state: PrinterState }
       | { kind: 'printer-transition'; transition: PrinterTransition }
       | { kind: 'inventory-snapshot'; inventory: SpoolInventory }
-      | { kind: 'discovery'; discovery: DiscoveryResults },
+      | { kind: 'discovery'; discovery: DiscoveryResults }
+      | { kind: 'heartbeat'; health: HeartbeatHealth },
     now: number,
   ): { eventId: string; loss: QueueLoss } {
     // Degraded storage stops enqueueing: the record is counted, never stored.
@@ -566,7 +575,10 @@ export class TelemetryQueue {
     for (const record of this.records.slice(0, maxRecords)) {
       if (
         records.length &&
-        (record.kind === 'discovery' || records[0]?.kind === 'discovery')
+        (record.kind === 'discovery' ||
+          record.kind === 'heartbeat' ||
+          records[0]?.kind === 'discovery' ||
+          records[0]?.kind === 'heartbeat')
       )
         break
       const extra =

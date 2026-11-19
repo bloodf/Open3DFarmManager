@@ -9,6 +9,8 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
     return root !== null && '__vue_app__' in root
   })
   await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Minha farm' })).toBeFocused()
+  await page.keyboard.press('Tab')
   await expect(
     page.getByRole('link', { name: 'Consultar Connectors' }),
   ).toBeFocused()
@@ -23,6 +25,10 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
   await page.keyboard.press('Tab')
   await expect(
     page.getByRole('link', { name: 'Entrar', exact: true }),
+  ).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(
+    page.getByRole('link', { name: 'Convidar pessoa' }),
   ).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(

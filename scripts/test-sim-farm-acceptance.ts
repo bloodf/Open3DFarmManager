@@ -1,8 +1,12 @@
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
+import { mockSimulatorStack } from '../tests/helpers/sim-acceptance-mocks.ts'
+import { tmpdir } from 'node:os'
+import { mkdtemp } from 'node:fs/promises'
 // Explicit test-only runner: two-printer / four-tool / Spoolman simulator
 // acceptance (issue #2). Starts the infra/sim Compose stack under its own
 // project, a disposable digest-pinned PostgreSQL 17, the built farm server and
 // the real Connector CLI. Read-only: never sends a printer command and never
-// contacts a physical printer. Needs a built app: pnpm --dir apps/farm build
+// contacts a physical printer. Needs a built app: npm run build -w @open3dfarmmanager/farm
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -14,6 +18,7 @@ import { promisify } from 'node:util'
 import {
   POSTGRES_IMAGE_PATTERN,
   disposablePostgres,
+  getFreePort,
 } from '../tests/helpers/disposable-postgres.ts'
 import { interruption } from '../tests/helpers/connector-outage-fixtures.ts'
 import {
@@ -24,21 +29,25 @@ import {
 
 const exec = promisify(execFile)
 const env = process.env
+const dockerSim = isDockerSim()
+const dockerPg = env.OPENFARM_PG === 'docker'
 const image = env.SIM_ACCEPT_IMAGE
-const base = Number(env.SIM_ACCEPT_PORT_BASE)
-const workRoot = env.SIM_ACCEPT_WORK_ROOT
+const base = Number(
+  env.SIM_ACCEPT_PORT_BASE ?? (dockerSim || dockerPg ? NaN : 0),
+)
+const requestedRoot = env.SIM_ACCEPT_WORK_ROOT
 const project = env.SIM_ACCEPT_PROJECT ?? 'o3dfm-sim-accept'
 if (
   process.argv.length !== 2 ||
-  env.SIM_ACCEPT_ADMITTED !== 'yes' ||
-  !image ||
-  !POSTGRES_IMAGE_PATTERN.test(image) ||
+  ((dockerSim || dockerPg) && env.SIM_ACCEPT_ADMITTED !== 'yes') ||
+  (dockerPg && (!image || !POSTGRES_IMAGE_PATTERN.test(image))) ||
   !Number.isInteger(base) ||
-  base < 1024 ||
+  (base < 1024 && base !== 0) ||
   base > 65526 ||
-  !workRoot ||
-  !isAbsolute(workRoot) ||
-  !relative(process.cwd(), workRoot).startsWith('..') ||
+  ((dockerSim || dockerPg) && (!requestedRoot || base === 0)) ||
+  (requestedRoot !== undefined &&
+    (!isAbsolute(requestedRoot) ||
+      !relative(process.cwd(), requestedRoot).startsWith('..'))) ||
   !/^o3dfm-[a-z0-9-]{1,40}$/.test(project)
 )
   throw new Error(
@@ -46,7 +55,17 @@ if (
   )
 await access(new URL('../apps/farm/.output/server/index.mjs', import.meta.url))
 const ports = simPorts(base)
-for (const port of Object.values(ports))
+if (!base) {
+  const allocated = new Set<number>()
+  for (const key of ['db', 'app', 'proxy'] as const) {
+    let port: number
+    do port = await getFreePort()
+    while (allocated.has(port))
+    allocated.add(port)
+    ports[key] = port
+  }
+}
+for (const port of base ? Object.values(ports) : [])
   await new Promise<void>((resolveProbe, reject) => {
     const probe = createServer()
     probe.once('error', () =>
@@ -62,20 +81,29 @@ const docker = async (...args: string[]) =>
   (
     await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
   ).stdout.trim()
-const endpoint =
-  env.DOCKER_HOST ??
-  (await docker('context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'))
-assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
-assert.equal(
-  await docker(
-    'ps',
-    '-aq',
-    '--filter',
-    `label=com.docker.compose.project=${project}`,
-  ),
-  '',
-  `Compose project ${project} already has containers`,
-)
+if (dockerSim || dockerPg) {
+  const endpoint =
+    env.DOCKER_HOST ??
+    (await docker(
+      'context',
+      'inspect',
+      '--format',
+      '{{.Endpoints.docker.Host}}',
+    ))
+  assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
+  assert.equal(
+    await docker(
+      'ps',
+      '-aq',
+      '--filter',
+      `label=com.docker.compose.project=${project}`,
+    ),
+    '',
+    `Compose project ${project} already has containers`,
+  )
+}
+const workRoot =
+  requestedRoot ?? (await mkdtemp(join(tmpdir(), 'openfarm-sim-accept-')))
 const id = randomUUID()
 const workDir = join(workRoot, id)
 const ledgerPath = join(workRoot, id + '.ledger.jsonl')
@@ -99,15 +127,16 @@ const disk = async () =>
   )
 const startedAt = performance.now()
 const database = disposablePostgres({
-  docker,
-  image,
+  isolated: true,
+  ...(dockerPg ? { docker, image } : {}),
   name: `${project}-db-${id}`,
   labelKey: 'org.open3dfarmmanager.sim-acceptance',
   labelValue: id,
   port: ports.db,
   ledger,
 })
-const stack = simulatorStack({ project, ports, workDir, ledger })
+const mocks = dockerSim ? undefined : mockSimulatorStack()
+const stack = mocks ?? simulatorStack({ project, ports, workDir, ledger })
 let failure: unknown
 let cleanupFailure: unknown
 let report: Awaited<ReturnType<typeof runSimFarmAcceptance>> | undefined
@@ -115,7 +144,13 @@ try {
   assert.ok(BigInt(await disk()) >= 10n * 1024n ** 3n, 'At least 10 GiB free')
   await stack.up()
   const admin = await database.start()
-  report = await runSimFarmAcceptance({ admin, ports, workDir, ledger })
+  report = await runSimFarmAcceptance({
+    admin,
+    ports,
+    workDir,
+    ledger,
+    ...(mocks ? { origins: mocks.origins } : {}),
+  })
   if (interrupted) throw interrupted
 } catch (error) {
   failure = interrupted ?? error
@@ -170,5 +205,8 @@ try {
   await writeFile(resultPath, JSON.stringify(result, null, 2), { mode: 0o600 })
   console.log(JSON.stringify(result, null, 2))
 }
+if (!requestedRoot && !failure && !cleanupFailure)
+  await rm(workRoot, { recursive: true })
+if (failure || cleanupFailure) process.exitCode = 1
 if (failure) throw failure
 if (cleanupFailure) throw cleanupFailure

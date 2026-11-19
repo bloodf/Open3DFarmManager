@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 
 /**
  * Camera opt-in for the RTC farm-page row, set by the acceptance runner from

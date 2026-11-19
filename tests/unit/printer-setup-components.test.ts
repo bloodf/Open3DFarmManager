@@ -78,7 +78,7 @@ export async function render(name, configure, provideState = true) {
     format: 'cjs',
     write: false,
     define: { 'process.env.NODE_ENV': '"production"' },
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
     logLevel: 'silent',
   })
   scratch = mkdtempSync(join(tmpdir(), 'printer-setup-'))

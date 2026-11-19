@@ -6,12 +6,14 @@ import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.t
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
 import type { Printer } from '../../packages/connector/src/discovery/index.ts'
 import { probeBambuLan } from '../../packages/connector/src/provisioning/bambu.ts'
+import { probeKobraXLan } from '../../packages/connector/src/provisioning/kobra-x.ts'
 import { runConfigurationConnector } from '../../packages/connector/src/runtime/configuration-command.ts'
 
 type Probes = Readonly<{
   creality?: number
   anycubic?: number
   bambuPort?: number
+  kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
 }>
 
 async function main() {
@@ -50,6 +52,19 @@ async function main() {
         (printer): printer is Printer => printer !== undefined,
       )
     },
+    // The setup form's private LAN address is mapped to the loopback mock here
+    // and nowhere else: the production probe never overrides the address.
+    ...(probes.kobraX === undefined
+      ? {}
+      : {
+          kobraXProbe: (input) =>
+            probeKobraXLan({
+              ...input,
+              address: '127.0.0.1',
+              httpPort: probes.kobraX!.httpPort,
+              mqttPort: probes.kobraX!.mqttPort,
+            }),
+        }),
     ...(probes.bambuPort === undefined
       ? {}
       : {

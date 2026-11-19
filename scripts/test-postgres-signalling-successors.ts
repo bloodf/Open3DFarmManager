@@ -1,6 +1,5 @@
 // Explicit test-only runner: signalling with renewed (successor) Connector
-// credentials on a fresh, task-owned, digest-pinned PostgreSQL 17 container.
-// Never accepts a database URL or an existing container; never pulls an image.
+// credentials on a fresh, task-owned disposable PostgreSQL cluster.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -13,82 +12,60 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { testPostgresSignallingSuccessors } from '../tests/helpers/postgres-signalling-successors-integration.ts'
+import {
+  POSTGRES_IMAGE_PATTERN,
+  disposablePostgres,
+  type DockerCommand,
+} from '../tests/helpers/disposable-postgres.ts'
 
 const exec = promisify(execFile)
+const isDocker = process.env.OPENFARM_PG === 'docker'
 const image = process.env.SIGNALLING_SUCCESSOR_TEST_IMAGE
 const prefix =
   process.env.SIGNALLING_SUCCESSOR_TEST_NAME_PREFIX ?? 'o3dfm-signal-successor'
 if (
   process.argv.length !== 2 ||
   process.env.SIGNALLING_SUCCESSOR_TEST_ADMITTED !== 'yes' ||
-  !image ||
-  !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(
-    image,
-  ) ||
+  (isDocker && (!image || !POSTGRES_IMAGE_PATTERN.test(image))) ||
   !/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix)
 )
   throw new Error(
-    'SIGNALLING_SUCCESSOR_TEST_ADMITTED=yes and a locally available digest-pinned PostgreSQL 17 SIGNALLING_SUCCESSOR_TEST_IMAGE are required',
+    'SIGNALLING_SUCCESSOR_TEST_ADMITTED=yes and a valid test prefix required',
   )
 const id = randomUUID()
 const name = prefix + '-' + id
 const labelKey = 'org.open3dfarmmanager.signalling-successor-test'
-const docker = async (...args: string[]) =>
-  (
-    await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
-  ).stdout.trim()
-let container: string | undefined
+
+let dockerCmd: DockerCommand | undefined
+if (isDocker) {
+  dockerCmd = async (...args: string[]) =>
+    (
+      await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+    ).stdout.trim()
+}
+
+const database = disposablePostgres({
+  name,
+  labelKey,
+  labelValue: id,
+  port: 0,
+  through: false,
+  ...(isDocker ? { docker: dockerCmd, image } : {}),
+})
+
 let sql: ReturnType<typeof postgres> | undefined
 let failure: unknown
 let cleanupFailure: unknown
 let checks: string[] = []
 try {
-  // Fails rather than pulling: image ownership remains with its owner.
-  await docker('image', 'inspect', image)
-  await docker(
-    ...['create', '--name', name, '--label', `${labelKey}=${id}`],
-    ...['--pull', 'never', '--cpus', '2', '--memory', '2g', '--read-only'],
-    ...['--cap-drop', 'ALL', '--security-opt', 'no-new-privileges'],
-    ...[
-      '--user',
-      'postgres',
-      '--tmpfs',
-      '/var/lib/postgresql/data:rw,mode=1777',
-    ],
-    ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
-    ...['--tmpfs', '/tmp:rw,mode=1777', '-p', '127.0.0.1::5432'],
-    ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-    ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
-    ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
-    image,
-  )
-  container = await docker('inspect', '--format', '{{.Id}}', name)
-  assert.match(container, /^[a-f0-9]{64}$/)
-  await docker('start', container)
-  await docker(
-    ...['exec', container, 'sh', '-c'],
-    'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
-  )
-  const mapping = await docker('port', container, '5432/tcp')
-  assert.match(mapping, /^127\.0\.0\.1:[0-9]+$/)
-  const port = Number(mapping.split(':')[1])
-  sql = postgres({
-    host: '127.0.0.1',
-    port,
-    database: 'fixture',
-    username: 'fixture',
-    password: '',
-    ssl: false,
-    max: 4,
-    connect_timeout: 3,
-    connection: { application_name: name, statement_timeout: 10000 },
-  })
+  sql = await database.start()
+  const port = database.port
+
   assert.equal(
     (await sql`SELECT to_regnamespace('farm') AS n`)[0]?.n,
     null,
     'fresh task-owned cluster only',
   )
-  assert.match((await sql`SHOW server_version`)[0]?.server_version, /^17\./)
   const full = await loadMigrationCatalog()
   catalogThrough(full, '0030_signalling_successor_credentials')
   await runMigrations(sql, full, { kind: 'up' })
@@ -126,21 +103,7 @@ try {
     cleanupFailure ??= error
   }
   try {
-    const owned =
-      container ??
-      (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
-    if (owned) {
-      assert.equal(
-        await docker(
-          'inspect',
-          '--format',
-          `{{index .Config.Labels "${labelKey}"}}`,
-          owned,
-        ),
-        id,
-      )
-      await docker('rm', '--force', owned)
-    }
+    await database.stop()
   } catch (error) {
     cleanupFailure ??= error
   }

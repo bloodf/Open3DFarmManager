@@ -23,6 +23,7 @@ function fixture(t) {
     'scripts/local-ci.sh',
     'scripts/klipper-diagnostics.mjs',
     '.github/workflows/ci.yml',
+    'apps/farm/Dockerfile',
     'package.json',
     '.nvmrc',
   ]) {
@@ -82,14 +83,14 @@ exec "$REGRESSION_REAL_NODE" "$@"
   )
 })
 
-test('workflow-only pnpm pin drift fails the selftest', (t) => {
+test('workflow-only Node pin drift fails the selftest', (t) => {
   const root = fixture(t)
   const path = join(root, '.github/workflows/ci.yml')
   writeFileSync(
     path,
-    readFileSync(path, 'utf8').replace(
-      /version: '[0-9]+\.[0-9]+\.[0-9]+'/,
-      "version: '99.0.0'",
+    readFileSync(path, 'utf8').replaceAll(
+      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
+      "node-version: '99.0.0'",
     ),
   )
   const result = run(root)
@@ -100,11 +101,19 @@ test('workflow-only pnpm pin drift fails the selftest', (t) => {
 test('maintained Node pins changing together expose stale runner guards', (t) => {
   const root = fixture(t)
   const path = join(root, '.github/workflows/ci.yml')
+  const dockerfile = join(root, 'apps/farm/Dockerfile')
   writeFileSync(
     path,
-    readFileSync(path, 'utf8').replace(
-      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/,
+    readFileSync(path, 'utf8').replaceAll(
+      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
       "node-version: '99.0.0'",
+    ),
+  )
+  writeFileSync(
+    dockerfile,
+    readFileSync(dockerfile, 'utf8').replaceAll(
+      /FROM node:[0-9]+\.[0-9]+\.[0-9]+-alpine/g,
+      'FROM node:99.0.0-alpine',
     ),
   )
   writeFileSync(join(root, '.nvmrc'), '99.0.0\n')

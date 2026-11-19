@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import test, { type TestContext } from 'node:test'
 import {
+  checkRtspHelperStatus,
+  getRtspHelperStatusSync,
   openHelperSource,
   type HelperSource,
   type HelperSourceOptions,
@@ -514,4 +516,21 @@ test('a nonregular executable is rejected before spawn', async (t) => {
   const f = await fixture(t)
   f.options.executable = { ...f.executable, path: await realpath(f.directory) }
   await assert.rejects(f.open(), code('HELPER_EXECUTABLE'))
+})
+
+test('helper status reports unavailable when missing or mismatched and available when attested', async (t) => {
+  const f = await fixture(t)
+  const missing = await checkRtspHelperStatus({
+    path: join(f.directory, 'missing-rtsp-ingest'),
+    sha256: f.executable.sha256,
+  })
+  assert.equal(missing.available, false)
+  assert.equal(missing.status, 'unavailable')
+  assert.equal(missing.reason, 'helper-unavailable')
+  assert.match(missing.message, /helper is unavailable/i)
+
+  const valid = getRtspHelperStatusSync(f.executable)
+  assert.equal(valid.available, true)
+  assert.equal(valid.status, 'available')
+  assert.equal(valid.sha256, f.executable.sha256)
 })

@@ -19,7 +19,7 @@ import { seedSandbox } from './sandbox-seed.ts'
 
 const action = process.argv[2]
 if (process.argv.length > 3 || (action && !['stop', 'down'].includes(action))) {
-  throw new Error('Uso: pnpm run sandbox [stop|down]')
+  throw new Error('Uso: node scripts/sandbox.ts [stop|down]')
 }
 const uid = process.getuid?.()
 const gid = process.getgid?.()
@@ -94,7 +94,7 @@ try {
     const seedMarker = join(state, 'seed-started')
     if (existsSync(seedMarker) && !existsSync(clientPath)) {
       throw new Error(
-        'Inicialização anterior incompleta. Execute pnpm run sandbox down para recriar o sandbox.',
+        'Inicialização anterior incompleta. Execute node scripts/sandbox.ts down para recriar o sandbox.',
       )
     }
     const cert = join(state, 'tls.crt')
@@ -127,7 +127,7 @@ try {
       !existsSync('apps/farm/.output/server/index.mjs') ||
       !existsSync('packages/connector/dist/cli.js')
     )
-      execFileSync('pnpm', ['run', 'build'], { stdio: 'inherit' })
+      execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
     docker([
       'up',
       '-d',

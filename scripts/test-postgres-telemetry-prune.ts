@@ -34,8 +34,9 @@ try {
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
-  assert.equal(catalog.at(-2)?.id, '0038_reset_link_owner_farm')
-  assert.equal(catalog.at(-1)?.id, '0039_oidc_identities')
+  // The fixture carries the whole catalog; later migrations must not be pinned
+  // here, only the prune migration this suite exercises.
+  assert.equal(journal.at(-1)?.id, catalog.at(-1)?.id)
   assert.equal(
     catalog.find((entry) => entry.id === '0036_telemetry_prune')?.id,
     '0036_telemetry_prune',

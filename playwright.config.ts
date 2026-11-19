@@ -1,35 +1,50 @@
 import { execFileSync } from 'node:child_process'
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
 
-// Pick a free loopback port once and pass it to Playwright workers as well.
-if (!process.env.E2E_PORT) {
-  process.env.E2E_PORT = execFileSync(
+// Pick free loopback ports once and pass them to Playwright workers as well.
+const freePortScript = `const net = require('node:net')
+const a = net.createServer()
+const b = net.createServer()
+a.listen(0, '127.0.0.1', () => b.listen(0, '127.0.0.1', () => {
+  console.log(a.address().port + ' ' + b.address().port)
+  a.close()
+  b.close()
+}))`
+if (!process.env.E2E_PORT || !process.env.E2E_LEGACY_FLAG_PORT) {
+  const [first, second] = execFileSync(
     process.execPath,
-    [
-      '-e',
-      `const server = require('node:net').createServer()
-server.listen(0, '127.0.0.1', () => {
-  console.log(server.address().port)
-  server.close()
-})`,
-    ],
-    { encoding: 'utf8' },
-  ).trim()
+    ['-e', freePortScript],
+    {
+      encoding: 'utf8',
+    },
+  )
+    .trim()
+    .split(' ')
+  process.env.E2E_PORT ||= first
+  process.env.E2E_LEGACY_FLAG_PORT ||= second
 }
 const port = e2ePort('E2E_PORT', 3100)
+// Same build started with the removed farm view flag set to hide the route;
+// tests/e2e/skeleton.spec.ts checks the stale setting no longer hides /farm.
+const legacyFlagPort = e2ePort('E2E_LEGACY_FLAG_PORT', 3102)
+
+const server = (serverPort: string, env: Record<string, string> = {}) => ({
+  command: 'node apps/farm/.output/server/index.mjs',
+  url: `http://127.0.0.1:${serverPort}/healthz`,
+  env: { NITRO_HOST: '127.0.0.1', NITRO_PORT: serverPort, ...env },
+  reuseExistingServer: false,
+})
 
 export default defineConfig({
   testDir: './tests/e2e',
-  use: { baseURL: `http://127.0.0.1:${port}` },
-  webServer: {
-    command: 'node apps/farm/.output/server/index.mjs',
-    url: `http://127.0.0.1:${port}/healthz`,
-    env: {
-      NITRO_HOST: '127.0.0.1',
-      NITRO_PORT: port,
-      NUXT_PUBLIC_FLAGS_FARM_VIEW: 'false',
-    },
-    reuseExistingServer: false,
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    ...browserOptions(),
   },
+  webServer: [
+    server(port),
+    server(legacyFlagPort, { NUXT_PUBLIC_FLAGS_FARM_VIEW: 'false' }),
+  ],
 })

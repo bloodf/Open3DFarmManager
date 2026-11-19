@@ -1,69 +1,45 @@
-import { createServer } from 'node:tls'
-import type { TLSSocket } from 'node:tls'
+// SPDX-License-Identifier: MIT
+import {
+  encodePacket,
+  startMqttBroker,
+  type MqttMockInstance,
+} from './mocks/mqtt-broker.ts'
+import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
+import type { ThrowawayTlsMaterial } from './mocks/tls.ts'
+import { startBambuFtpsSim } from './bambu-ftps-sim.ts'
 
-// Public disposable synthetic identity. Never use for a real printer.
-export const syntheticBambuCertificate = `-----BEGIN CERTIFICATE-----
-MIIDDzCCAfegAwIBAgIUIz5W9pVEWkuHCHkhRPa1b/Gp/BAwDQYJKoZIhvcNAQEL
-BQAwHzEdMBsGA1UEAwwUU1lOVEhFVElDLUJBTUJVLU9OTFkwHhcNMjYxMTE0MDgx
-NzI0WhcNMzYxMTExMDgxNzI0WjAfMR0wGwYDVQQDDBRTWU5USEVUSUMtQkFNQlUt
-T05MWTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANQ/B37QifJRnGYI
-xK5nNxIWux356aE+SJ4IruzP7oCHAnulW7B89ziQZsk1jCs/wkNw/yDlJUS9T2hb
-ieU7HMLSdm+A3ItVaM7umEIIdi5TvWPXjFC+tRqMuk2HiMCRzeNOzybF58rTqMcg
-FGTaP9bTXhsiISyX+mhkrbuyUovjFV8mgjGCou8nRQuiPyScug0bTs8D5JnGit/9
-bYc6v1jH9kkWpxfGc2thHEgMx0aSty9AuQ7BdAM50YHrY2Cea9Fj0xfLTNGNxNBV
-69lYRD8bEwhJEHHA+wv/6qBdl/9+cI9Pc+w4R3TejHJx1/ufietvhWOU3mwNX8z/
-a3vi35ECAwEAAaNDMEEwHQYDVR0OBBYEFEpxYUzS0fNExWC23ZsLevVAhBipMA8G
-A1UdEwEB/wQFMAMBAf8wDwYDVR0RBAgwBocEfwAAATANBgkqhkiG9w0BAQsFAAOC
-AQEAQNQVLPbrRtyh32AjJEctDcbALJRqt0Vm0Bmwdbc4xM8qPxp8fnEs75XPZfex
-e/gfD2WpYsWBbKm5Ii9yhcwd3Q0RPqH7k3w5qRSQfqR2qjPgVoHGJ2w2CPFfdT6y
-43Q2gO7TSqlijLiyVADC7s4Uo7YvjFzyUirP1zLXT3dEpx0A+qOLjAquFEmwa6zQ
-iuqR6YDi9FxrT2nMoDB/zqBJn0phcCjeFpsh2uOLnZih1MhiXH+IHgvRthu4NfVO
-97uWo29eqlhic+SMgJ+dmWeWW4JDhaRsbr4eLDkt8sq9smRf9M+Q15bMeWp5iTSI
-2Qch7i7xHkiDog0JmvgNxH6oTg==
------END CERTIFICATE-----
-`
-const cert = syntheticBambuCertificate
-const key = `-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDUPwd+0InyUZxm
-CMSuZzcSFrsd+emhPkieCK7sz+6AhwJ7pVuwfPc4kGbJNYwrP8JDcP8g5SVEvU9o
-W4nlOxzC0nZvgNyLVWjO7phCCHYuU71j14xQvrUajLpNh4jAkc3jTs8mxefK06jH
-IBRk2j/W014bIiEsl/poZK27slKL4xVfJoIxgqLvJ0ULoj8knLoNG07PA+SZxorf
-/W2HOr9Yx/ZJFqcXxnNrYRxIDMdGkrcvQLkOwXQDOdGB62NgnmvRY9MXy0zRjcTQ
-VevZWEQ/GxMISRBxwPsL/+qgXZf/fnCPT3PsOEd03oxycdf7n4nrb4VjlN5sDV/M
-/2t74t+RAgMBAAECggEAAbvdlG9A7zw0MD+yVp/keub5Ypht7ImpF3Rn9GqK7t0b
-e7XZOsb8kIdadZqUwW4xCLLBvMuuayI2RbqYtOkPljZYrhbCBnfdRjJ8By8RQxXf
-SlNik67JJTVA2N0KdJNEWK7mQZF0kCs8Ods023GOe7NolYVo+rennaZz5mCBrN+b
-VWtC6c2N4/MqS/OtHgV5K3hR1wRCg1W4UP55N1AytDfRSlH0X83XTcU+j+0txsFV
-Hr/kUZA5D/nHTxDrcq7tDH45L1ZpDIi/AbKVXiocnOVpbkw4lNTzKR7p6EpbK+ez
-NFwFjdB5MyQO6JfKEPDNKN5Txy3pqAs1WaVs7tx2wQKBgQD7jXm0jum5jLE8zw17
-FmKM5TlvBuijuT/7A/8bwsML4xKHSrt9FuZZTZDBYxftP52bZDLUevAOo0+AdpTQ
-5UmrYHC2og8jC929AIPgYbgkn7YYdv/0fMgTcmpQi1BZfpyrWOsbtF/j3qcBrtEs
-7Nhb310FkuS3jrGyLsRPPmfcMQKBgQDX/6dD1PCuzo9/EMgi0WWJ41RtR0/HMooy
-CSlQYAiEsvbCbZe9J+wvGkOshRZ3MnqEiGdWdoKeAKgDiRtkWVJekyDPkKVx0rI4
-+HtJF6SIk7os+VWZc34ystUBctOF/AMhSpsi675ScATztbnQyG5P2y+JrJ1Xt/I7
-lZyPKaBBYQKBgBJHM2K1R7Jd0LsUaGxbMgn+1e+FVv4ehdGddrnzquyAMWZ3PaxX
-L6Gpiy0iICjzCGa0HyVlUXAe2bYB58pN/s5fEZGTsPng8Nm84dg6AYFXwYmBjBOd
-xYP0Ollj5hC6rHOe4GaA8r7B/OyYYUacZxQ15LJ0+/2CdtL1pvoDFNThAoGAXyJR
-yHWEYGnIF/4LOBKkNzwyFkN/ZsvixDD2yljRx6iPOIlOeNiZlRFrVxPzFiLchX0S
-jql51B+T4KLFtsgEmHUS0Xjy9ZQIPUFsA4BvTlxKdr6GriSJI8lSOeYaNfwOYN5c
-P+A3HlYKSFD0+3kb5P40DN5DGryA6y91GjUKSWECgYEAgui9u5WIC2KULU/ZOSw7
-S6up1338Pu2151983Vpj032FB3kdSM7lSSirUNbO8WBC2FEXY28zq+0ZvssHX2In
-2cp9o2RfdQe0dAysbdKUGRv8P61TT6kFzSh96Z14JqNjU5ZWLCVddOdH0jIem3fL
-2xq2f+nS9vnMvhfNWtiBonA=
------END PRIVATE KEY-----
-`
-const MAX = 65536
-export function packet(header: number, body: Buffer) {
-  const length: number[] = []
-  let n = body.length
-  do {
-    let digit = n % 128
-    n = Math.floor(n / 128)
-    if (n) digit |= 128
-    length.push(digit)
-  } while (n)
-  return Buffer.concat([Buffer.from([header, ...length]), body])
+export { encodePacket as packet }
+
+export interface BambuSimulatorState {
+  gcodeState?: string | undefined
+  extended: Record<string, unknown>
 }
+
+export interface BambuSimulatorOptions {
+  printDurationMs?: number | undefined
+  totalLayers?: number | undefined
+  serial?: string | undefined
+  accessCode?: string | undefined
+  /** Listen address; loopback unless explicitly opted in (Docker sandbox). */
+  host?: string | undefined
+  port?: number | undefined
+  ftpsPort?: number | undefined
+  initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
+  initialTargetTemperature?: number | undefined
+  versionModules?: { name: string; sw_ver: string }[] | undefined
+  confirmCommands?: boolean | undefined
+  credentials?:
+    { username?: string | undefined; password?: string | undefined } | undefined
+  tls?:
+    | (
+        | { key: Buffer; cert: Buffer; ca?: Buffer | undefined }
+        | ThrowawayTlsMaterial
+      )
+    | undefined
+  reuseSharedTls?: boolean | undefined
+  scenario?: ScenarioStep<BambuSimulatorState>[] | undefined
+}
+
 export async function startBambuSimulator({
   serial = 'SYNTHETIC',
   accessCode = 'secret',
@@ -76,19 +52,11 @@ export async function startBambuSimulator({
   versionModules,
   printDurationMs,
   totalLayers = 100,
-}: {
-  printDurationMs?: number
-  totalLayers?: number
-  serial?: string
-  accessCode?: string
-  host?: string
-  port?: number
-  ftpsPort?: number
-  initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
-  initialTargetTemperature?: number
-  versionModules?: { name: string; sw_ver: string }[]
-  confirmCommands?: boolean
-} = {}) {
+  credentials,
+  tls,
+  reuseSharedTls = true,
+  scenario: scenarioSteps,
+}: BambuSimulatorOptions = {}) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   if (!accessCode || /[\r\n]/.test(accessCode))
@@ -101,11 +69,13 @@ export async function startBambuSimulator({
       totalLayers < 1)
   )
     throw new Error('Invalid print configuration')
+
   const uploads = new Map<string, Buffer>()
   let timer: ReturnType<typeof setInterval> | undefined
   let elapsed = 0
   let lastTick = 0
   const reportTopic = `device/${serial}/report`
+  const requestTopic = `device/${serial}/request`
   let gcodeState: string | undefined = initialState
   const extended: Record<string, unknown> = {
     nozzle_temper: 210,
@@ -125,29 +95,33 @@ export async function startBambuSimulator({
       : { nozzle_target_temper: initialTargetTemperature }),
   }
   const requests: { command: string; sequence_id: string }[] = []
-  function report(socket: TLSSocket) {
-    const topic = Buffer.from(reportTopic)
-    const length = Buffer.alloc(2)
-    length.writeUInt16BE(topic.length)
-    socket.write(
-      packet(
-        48,
-        Buffer.concat([
-          length,
-          topic,
-          Buffer.from(
-            JSON.stringify({
-              print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
-            }),
-          ),
-        ]),
-      ),
-    )
+
+  let brokerRef: MqttMockInstance | undefined
+  let closed = false
+
+  function currentReportPayload() {
+    return {
+      print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
+    }
   }
+
+  function hasSubscribers(): boolean {
+    if (!brokerRef) return false
+    for (const topics of brokerRef.control.subscriptions.values()) {
+      if (topics.size > 0) return true
+    }
+    return false
+  }
+
+  function emitCurrentReport() {
+    brokerRef?.control.publish(reportTopic, currentReportPayload())
+  }
+
   function stopTimer() {
     if (timer) clearInterval(timer)
     timer = undefined
   }
+
   function startTimer() {
     if (printDurationMs === undefined) return
     stopTimer()
@@ -165,392 +139,248 @@ export async function startBambuSimulator({
           gcodeState = 'FINISH'
           stopTimer()
         }
-        for (const subscriber of subscribed) report(subscriber)
+        emitCurrentReport()
       },
       Math.min(100, Math.max(5, printDurationMs / 10)),
     )
   }
-  const sockets = new Set<TLSSocket>()
-  const subscribed = new Set<TLSSocket>()
-  const server = createServer(
-    { cert: syntheticBambuCertificate, key, handshakeTimeout: 3000 },
-    (socket) => {
-      let buffer = Buffer.alloc(0)
-      let connected = false
-      const reports = setInterval(() => {
-        if (gcodeState && subscribed.has(socket)) report(socket)
-      }, 100)
-      socket.once('close', () => clearInterval(reports))
-      socket.setTimeout(10000, () => socket.destroy())
-      socket.on('data', (chunk) => {
-        buffer = Buffer.concat([buffer, chunk])
-        if (buffer.length > MAX) {
-          socket.destroy()
+
+  const broker = await startMqttBroker({
+    host,
+    port,
+    handshakeTimeout: 3000,
+    socketTimeout: 10000,
+    strictConnect: true,
+    tls,
+    reuseSharedTls: tls ? false : reuseSharedTls,
+    auth: credentials,
+    authorizeSubscribe: (topic) => topic === reportTopic,
+    onSubscribe: () => {
+      if (gcodeState) emitCurrentReport()
+    },
+    onPublish: async (msg) => {
+      if (msg.topic !== requestTopic) throw new Error('Invalid request topic')
+      const value = JSON.parse(msg.payload.toString('utf8'))
+      if (value?.info?.command === 'get_version') {
+        requests.push({
+          command: 'get_version',
+          sequence_id: value.info.sequence_id,
+        })
+        if (versionModules) {
+          broker.control.publish(reportTopic, {
+            info: {
+              command: 'get_version',
+              module: versionModules,
+            },
+          })
+        }
+        return
+      }
+      const request = value?.print ?? value?.system
+      const command = request?.command
+      if (
+        ![
+          'pause',
+          'resume',
+          'stop',
+          'gcode_line',
+          'ledctrl',
+          'print_speed',
+          'project_file',
+          'ams_change_filament',
+        ].includes(command) ||
+        typeof request?.sequence_id !== 'string'
+      )
+        throw new Error('Invalid request')
+      requests.push({ command, sequence_id: request.sequence_id })
+      if (!confirmCommands) return
+
+      if (command === 'gcode_line') {
+        const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
+        const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+        if (!match && !home) throw new Error('Invalid gcode')
+      } else if (
+        command === 'ledctrl' &&
+        request.led_node === 'chamber_light' &&
+        ['on', 'off'].includes(request.led_mode)
+      ) {
+        // valid
+      } else if (command === 'print_speed' && /^[1-4]$/.test(request.param)) {
+        // valid
+      } else if (
+        command === 'project_file' &&
+        request.param === 'Metadata/plate_1.gcode' &&
+        typeof request.url === 'string' &&
+        request.url.startsWith('file:///sdcard/')
+      ) {
+        if (
+          printDurationMs !== undefined &&
+          !uploads.has(sdcardFileName(request.url))
+        )
+          throw new Error('File not uploaded')
+      } else if (
+        command === 'ams_change_filament' &&
+        Number.isInteger(request.target) &&
+        ((request.target >= 0 && request.target <= 15) ||
+          request.target === 255) &&
+        Number.isInteger(request.curr_temp) &&
+        request.curr_temp >= 0 &&
+        request.curr_temp <= 300 &&
+        Number.isInteger(request.tar_temp) &&
+        request.tar_temp >= 0 &&
+        request.tar_temp <= 300
+      ) {
+        // valid
+      } else if (!['pause', 'resume', 'stop'].includes(command))
+        throw new Error('Invalid request')
+
+      const ackFault = broker.control.faults.matchFault({
+        topic: msg.topic,
+        method: 'ACK',
+      })
+      if (ackFault) {
+        if (ackFault.type === 'drop') {
+          await broker.control.disconnectClients()
           return
         }
-        try {
-          while (buffer.length >= 2) {
-            let size = 0,
-              factor = 1,
-              offset = 1
-            while (true) {
-              if (offset >= buffer.length) return
-              const digit = buffer[offset++]!
-              size += (digit & 127) * factor
-              if (size > MAX || offset > 5) throw new Error('Packet limit')
-              if (!(digit & 128)) break
-              factor *= 128
-            }
-            if (buffer.length < offset + size) return
-            const header = buffer[0]!
-            const body = buffer.subarray(offset, offset + size)
-            buffer = buffer.subarray(offset + size)
-            if (!connected) {
-              if (
-                header !== 16 ||
-                body.length < 12 ||
-                body.subarray(0, 7).toString('hex') !== '00044d51545404' ||
-                (body[7] !== 2 && body[7] !== 194)
-              )
-                throw new Error('CONNECT required')
-              let cursor = 10
-              const fields = body[7] === 194 ? 3 : 1
-              for (let field = 0; field < fields; field++) {
-                if (cursor + 2 > body.length)
-                  throw new Error('Missing CONNECT field')
-                const length = body.readUInt16BE(cursor)
-                cursor += 2
-                if (!length || cursor + length > body.length)
-                  throw new Error('Invalid CONNECT field')
-                cursor += length
-              }
-              if (cursor !== body.length)
-                throw new Error('Trailing CONNECT bytes')
-              connected = true
-              socket.write(Buffer.from([32, 2, 0, 0]))
-            } else if (header === 130) {
-              if (body.length < 5 || body.readUInt16BE(0) === 0)
-                throw new Error('Invalid subscription')
-              const length = body.readUInt16BE(2)
-              if (body.length !== length + 5 || body.at(-1) !== 0)
-                throw new Error('Only QoS 0 supported')
-              const accepted =
-                body.subarray(4, 4 + length).toString() === reportTopic
-              if (accepted) subscribed.add(socket)
-              socket.write(
-                Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),
-              )
-              if (accepted && gcodeState) report(socket)
-            } else if (header === 48) {
-              if (body.length < 2) throw new Error('Invalid request')
-              const length = body.readUInt16BE(0)
-              if (
-                body.subarray(2, 2 + length).toString() !==
-                `device/${serial}/request`
-              )
-                throw new Error('Invalid request topic')
-              const value = JSON.parse(body.subarray(2 + length).toString())
-              if (value?.info?.command === 'get_version') {
-                requests.push({
-                  command: 'get_version',
-                  sequence_id: value.info.sequence_id,
-                })
-                if (versionModules) {
-                  const topic = Buffer.from(reportTopic)
-                  const length = Buffer.alloc(2)
-                  length.writeUInt16BE(topic.length)
-                  socket.write(
-                    packet(
-                      48,
-                      Buffer.concat([
-                        length,
-                        topic,
-                        Buffer.from(
-                          JSON.stringify({
-                            info: {
-                              command: 'get_version',
-                              module: versionModules,
-                            },
-                          }),
-                        ),
-                      ]),
-                    ),
-                  )
-                }
-                continue
-              }
-              const request = value?.print ?? value?.system
-              const command = request?.command
-              if (
-                ![
-                  'pause',
-                  'resume',
-                  'stop',
-                  'gcode_line',
-                  'ledctrl',
-                  'print_speed',
-                  'project_file',
-                  'ams_change_filament',
-                ].includes(command) ||
-                typeof request?.sequence_id !== 'string'
-              )
-                throw new Error('Invalid request')
-              requests.push({ command, sequence_id: request.sequence_id })
-              if (confirmCommands) {
-                if (command === 'gcode_line') {
-                  const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(
-                    request.param,
-                  )
-                  const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
-                  if (match) extended[match[1]!] = Number(match[2])
-                  else if (home) extended.homed_axes = home[1]
-                  else throw new Error('Invalid gcode')
-                } else if (
-                  command === 'ledctrl' &&
-                  request.led_node === 'chamber_light' &&
-                  ['on', 'off'].includes(request.led_mode)
-                )
-                  extended.light = request.led_mode
-                else if (
-                  command === 'print_speed' &&
-                  /^[1-4]$/.test(request.param)
-                )
-                  extended.speed = request.param
-                else if (
-                  command === 'project_file' &&
-                  request.param === 'Metadata/plate_1.gcode' &&
-                  typeof request.url === 'string' &&
-                  request.url.startsWith('file:///sdcard/')
-                ) {
-                  if (
-                    printDurationMs !== undefined &&
-                    !uploads.has(
-                      decodeURIComponent(
-                        request.url.slice('file:///sdcard/'.length),
-                      ),
-                    )
-                  )
-                    throw new Error('File not uploaded')
-                  extended.file = request.url
-                  const fileName = decodeURIComponent(
-                    request.url.slice('file:///sdcard/'.length),
-                  )
-                  extended.subtask_name = fileName
-                  extended.gcode_file = fileName
-                  gcodeState = 'RUNNING'
-                  elapsed = 0
-                  extended.mc_percent = 0
-                  if (printDurationMs !== undefined) {
-                    extended.layer_num = 0
-                    extended.total_layer_num = totalLayers
-                    startTimer()
-                  } else delete extended.mc_percent
-                } else if (
-                  command === 'ams_change_filament' &&
-                  Number.isInteger(request.target) &&
-                  ((request.target >= 0 && request.target <= 15) ||
-                    request.target === 255) &&
-                  Number.isInteger(request.curr_temp) &&
-                  request.curr_temp >= 0 &&
-                  request.curr_temp <= 300 &&
-                  Number.isInteger(request.tar_temp) &&
-                  request.tar_temp >= 0 &&
-                  request.tar_temp <= 300
-                )
-                  extended.ams = { tray_now: String(request.target) }
-                else if (!['pause', 'resume', 'stop'].includes(command))
-                  throw new Error('Invalid request')
-                if (['pause', 'resume', 'stop'].includes(command))
-                  gcodeState =
-                    command === 'pause'
-                      ? 'PAUSE'
-                      : command === 'resume'
-                        ? 'RUNNING'
-                        : 'IDLE'
-                if (command === 'pause' || command === 'stop') stopTimer()
-                if (command === 'resume') startTimer()
-                for (const subscriber of subscribed) report(subscriber)
-              }
-            } else if (header === 192 && !size)
-              socket.write(Buffer.from([208, 0]))
-            else if (header === 224 && !size) socket.destroy()
-            else throw new Error('Unsupported packet; commands forbidden')
-          }
-        } catch {
-          socket.destroy()
+        if (ackFault.type === 'refuse' || ackFault.type === 'stall') {
+          return
         }
-      })
-    },
-  )
-  const ftpsSockets = new Set<TLSSocket>()
-  const passiveServers = new Set<ReturnType<typeof createServer>>()
-  const ftps = createServer({ cert, key }, (control) => {
-    ftpsSockets.add(control)
-    control.on('error', () => {})
-    control.on('close', () => ftpsSockets.delete(control))
-    control.write('220 Bambu simulator ready\r\n')
-    let buffer = ''
-    let dataServer: ReturnType<typeof createServer> | undefined
-    let dataSocket: TLSSocket | undefined
-    control.on('data', (chunk) => {
-      buffer += chunk.toString()
-      if (buffer.length > 65536) return control.destroy()
-      let end: number
-      while ((end = buffer.indexOf('\r\n')) >= 0) {
-        const line = buffer.slice(0, end)
-        buffer = buffer.slice(end + 2)
-        if (line === 'USER bblp') control.write('331 password required\r\n')
-        else if (line.startsWith('PASS '))
-          control.write(
-            line === `PASS ${accessCode}`
-              ? '230 logged in\r\n'
-              : '530 invalid credentials\r\n',
-          )
-        else if (line === 'PASV') {
-          dataServer?.close()
-          dataSocket = undefined
-          dataServer = createServer({ cert, key }, (socket) => {
-            ftpsSockets.add(socket)
-            dataSocket = socket
-            socket.on('error', () => {})
-            socket.on('close', () => ftpsSockets.delete(socket))
-          })
-          passiveServers.add(dataServer)
-          dataServer.once('close', () => passiveServers.delete(dataServer!))
-          dataServer.listen(0, host, () => {
-            const address = dataServer!.address()
-            if (!address || typeof address === 'string')
-              return control.destroy()
-            const octets = host.split('.').map(Number)
-            control.write(
-              `227 Entering Passive Mode (${[...octets, address.port >> 8, address.port & 255].join(',')})\r\n`,
-            )
-          })
-        } else if (line === 'MLSD') {
-          control.write('150 Opening protected data connection\r\n')
-          const writeListing = () => {
-            if (!dataSocket) return control.destroy()
-            const listing = [...uploads]
-              .map(
-                ([name, data]) =>
-                  `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`,
-              )
-              .join('')
-            dataSocket.end(listing, () => {
-              control.write('226 Listing complete\r\n')
-              dataServer?.close()
-            })
-          }
-          if (dataSocket) writeListing()
-          else
-            dataServer?.once('secureConnection', (socket) => {
-              dataSocket = socket
-              ftpsSockets.add(socket)
-              socket.on('error', () => {})
-              socket.on('close', () => ftpsSockets.delete(socket))
-              writeListing()
-            })
-        } else if (line.startsWith('STOR ')) {
-          const name = line.slice(5)
-          if (!/^[A-Za-z0-9_. -]{1,255}$/.test(name)) {
-            control.write('550 Invalid name\r\n')
-            continue
-          }
-          control.write('150 Opening protected data connection\r\n')
-          const receiveFile = (socket: TLSSocket) => {
-            const chunks: Buffer[] = []
-            socket.on('data', (data: Buffer) => chunks.push(data))
-            socket.on('end', () => {
-              uploads.set(name, Buffer.concat(chunks))
-              control.write('226 Transfer complete\r\n')
-              dataServer?.close()
-            })
-          }
-          if (dataSocket) receiveFile(dataSocket)
-          else
-            dataServer?.once('secureConnection', (socket) => {
-              dataSocket = socket
-              ftpsSockets.add(socket)
-              socket.on('error', () => {})
-              socket.on('close', () => ftpsSockets.delete(socket))
-              receiveFile(socket)
-            })
-        } else if (line === 'QUIT') {
-          control.write('221 goodbye\r\n')
-          control.end()
-        } else control.write('200 ok\r\n')
+        if (ackFault.type === 'malformed') {
+          broker.control.publish(reportTopic, ackFault.payload ?? '{malformed')
+          return
+        }
+        if (ackFault.type === 'delay') {
+          await new Promise((r) => setTimeout(r, ackFault.delayMs))
+          if (closed) return
+        }
       }
-    })
+
+      if (command === 'gcode_line') {
+        const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
+        const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+        if (match) extended[match[1]!] = Number(match[2])
+        else if (home) extended.homed_axes = home[1]
+      } else if (command === 'ledctrl') {
+        extended.light = request.led_mode
+      } else if (command === 'print_speed') {
+        extended.speed = request.param
+      } else if (command === 'project_file') {
+        extended.file = request.url
+        const fileName = sdcardFileName(request.url)
+        extended.subtask_name = fileName
+        extended.gcode_file = fileName
+        gcodeState = 'RUNNING'
+        elapsed = 0
+        extended.mc_percent = 0
+        if (printDurationMs !== undefined) {
+          extended.layer_num = 0
+          extended.total_layer_num = totalLayers
+          startTimer()
+        } else delete extended.mc_percent
+      } else if (command === 'ams_change_filament') {
+        extended.ams = { tray_now: String(request.target) }
+      }
+
+      if (['pause', 'resume', 'stop'].includes(command))
+        gcodeState =
+          command === 'pause'
+            ? 'PAUSE'
+            : command === 'resume'
+              ? 'RUNNING'
+              : 'IDLE'
+      if (command === 'pause' || command === 'stop') stopTimer()
+      if (command === 'resume') startTimer()
+
+      emitCurrentReport()
+    },
   })
-  ftps.on('tlsClientError', () => {})
-  await new Promise<void>((resolve, reject) => {
-    ftps.once('error', reject)
-    ftps.listen(ftpsPort, host, () => {
-      ftps.removeListener('error', reject)
-      resolve()
-    })
+  brokerRef = broker
+
+  const scenario = new ScenarioController<BambuSimulatorState>({
+    steps: scenarioSteps,
+    applyState: (patch) => {
+      if ('gcodeState' in patch) gcodeState = patch.gcodeState
+      if (patch.extended) Object.assign(extended, patch.extended)
+    },
+    publishReport: (value) => {
+      broker.control.publish(reportTopic, value)
+    },
+    getState: () => ({ gcodeState, extended: { ...extended } }),
   })
-  const ftpsAddress = ftps.address()
-  if (!ftpsAddress || typeof ftpsAddress === 'string')
-    throw new Error('Missing FTPS listener')
-  server.on('connection', (socket) => {
-    sockets.add(socket as TLSSocket)
-    socket.on('error', () => {})
-    socket.on('close', () => {
-      sockets.delete(socket as TLSSocket)
-      subscribed.delete(socket as TLSSocket)
+
+  const periodicReports = setInterval(() => {
+    if (gcodeState && hasSubscribers()) emitCurrentReport()
+  }, 100)
+
+  const tlsMaterial = broker.control.tlsMaterial
+  const syntheticTrust = tlsMaterial
+    ? `${tlsMaterial.server.cert.toString('utf8')}\n${tlsMaterial.ca.cert.toString('utf8')}`
+    : tls && !('server' in tls)
+      ? `${tls.cert.toString('utf8')}${tls.ca ? `\n${tls.ca.toString('utf8')}` : ''}`
+      : ''
+
+  const ftpsIdentity = tlsMaterial
+    ? tlsMaterial.server
+    : tls && !('server' in tls)
+      ? tls
+      : tls?.server
+  if (!ftpsIdentity) throw new Error('Missing simulator TLS identity')
+  let ftps: Awaited<ReturnType<typeof startBambuFtpsSim>>
+  try {
+    ftps = await startBambuFtpsSim({
+      host,
+      port: ftpsPort,
+      accessCode,
+      key: ftpsIdentity.key,
+      cert: ftpsIdentity.cert,
+      uploads,
     })
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, host, () => {
-      server.removeListener('error', reject)
-      resolve()
-    })
-  })
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Missing listener')
-  async function disconnectClients() {
-    await Promise.all(
-      [...sockets].map(
-        (socket) =>
-          new Promise<void>((resolve) => {
-            socket.once('close', resolve)
-            socket.destroy()
-          }),
-      ),
-    )
+  } catch (error) {
+    clearInterval(periodicReports)
+    scenario.stop()
+    await broker.close()
+    throw error
   }
+
+  function publishReport(value: unknown) {
+    broker.control.publish(reportTopic, value)
+  }
+
+  function disconnectClients() {
+    return broker.control.disconnectClients()
+  }
+
   let closing: Promise<void> | undefined
+
   return {
     host,
-    port: address.port,
-    ftpsPort: ftpsAddress.port,
-    syntheticTrust: cert,
+    port: broker.ports.default,
+    ftpsPort: ftps.port,
+    origin: broker.origin,
+    ports: broker.ports,
+    syntheticTrust,
     reportTopic,
     requests,
     uploads,
+    calls: broker.calls,
+    control: {
+      faults: broker.control.faults,
+      scenario,
+      publish: broker.control.publish,
+      publishReport,
+      disconnectClients,
+      subscriptions: broker.control.subscriptions,
+      sockets: broker.control.sockets,
+      tlsMaterial: broker.control.tlsMaterial,
+    },
     get extendedState() {
       return { ...extended }
     },
     get gcodeState() {
       return gcodeState
     },
-    publishReport(value: unknown) {
-      const payload = Buffer.from(
-        typeof value === 'string' ? value : JSON.stringify(value),
-      )
-      if (payload.length > MAX - 256) throw new Error('Report too large')
-      const topic = Buffer.from(reportTopic)
-      const length = Buffer.alloc(2)
-      length.writeUInt16BE(topic.length)
-      const bytes = packet(48, Buffer.concat([length, topic, payload]))
-      for (const socket of subscribed) {
-        if (socket.writableLength > MAX) socket.destroy()
-        else socket.write(bytes)
-      }
-    },
+    publishReport,
     uploadFile(name: string, data: Uint8Array) {
       if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
         throw new Error('Invalid upload')
@@ -563,7 +393,7 @@ export async function startBambuSimulator({
       stopTimer()
       gcodeState = 'RUNNING'
       extended.mc_percent = percent
-      for (const subscriber of subscribed) report(subscriber)
+      emitCurrentReport()
     },
     /** Journey control: the running print completes. */
     finishPrint() {
@@ -572,33 +402,30 @@ export async function startBambuSimulator({
       stopTimer()
       gcodeState = 'FINISH'
       extended.mc_percent = 100
-      for (const subscriber of subscribed) report(subscriber)
+      emitCurrentReport()
     },
     failPrint() {
       if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
         throw new Error('No active print')
       stopTimer()
       gcodeState = 'FAILED'
-      for (const subscriber of subscribed) report(subscriber)
+      emitCurrentReport()
     },
     disconnectClients,
     close() {
+      closed = true
       stopTimer()
+      clearInterval(periodicReports)
+      scenario.stop()
       closing ??= (async () => {
-        for (const socket of ftpsSockets) socket.destroy()
-        await Promise.all(
-          [ftps, ...passiveServers].map(
-            (listener) =>
-              new Promise<void>((resolve) => listener.close(() => resolve())),
-          ),
-        )
-        const closed = new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        )
-        await disconnectClients()
-        await closed
+        await ftps.close()
+        await broker.close()
       })()
       return closing
     },
   }
+}
+
+function sdcardFileName(url: string) {
+  return decodeURIComponent(url.slice('file:///sdcard/'.length))
 }

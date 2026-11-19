@@ -5,7 +5,7 @@
 // the real `configure` runtime in its own process.
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -33,11 +33,19 @@ export async function startConfigurator(input: {
   ownerPage: Page
   machinePost(path: string, body: unknown): Promise<unknown>
   /** Loopback discovery responder ports (info endpoints) per vendor. */
-  probes: Readonly<{ creality?: number; anycubic?: number; bambuPort?: number }>
+  probes: Readonly<{
+    creality?: number
+    anycubic?: number
+    bambuPort?: number
+    kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
+  }>
   /** Private host route allowed for the loopback Bambu simulator. */
   printerNetworks?: readonly string[]
 }): Promise<Configurator> {
-  const root = await mkdtemp(join(tmpdir(), 'journey-configurator-'))
+  // Connector storage rejects symlinked ancestors (macOS /var -> /private/var).
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), 'journey-configurator-')),
+  )
   const dataDirectory = join(root, 'identity')
   await mkdir(dataDirectory, { mode: 0o700 })
   const identity = loadOrCreateIdentity(dataDirectory)

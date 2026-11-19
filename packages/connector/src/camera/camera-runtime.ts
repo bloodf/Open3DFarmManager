@@ -10,12 +10,90 @@ import {
 } from '../anycubic/camera.ts'
 import { openBambuCameraSource } from '../bambu/camera-media.ts'
 import type { BambuCameraSource } from '../bambu/camera.ts'
-import type { HelperExecutable } from '../../../../tools/rtsp-ingest/supervisor/process.ts'
+import {
+  getRtspHelperStatusSync,
+  type HelperExecutable,
+  type RtspHelperStatus,
+} from '../../../../tools/rtsp-ingest/supervisor/process.ts'
 import type { CameraRuntimeConfig } from '../config/camera.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { AssignmentRef } from '../webrtc/readonly-session.ts'
 import { createMoonrakerSnapshotSource } from '../moonraker/snapshot.ts'
 import { ConnectorCameraMedia } from './camera-media.ts'
+
+export type RtspCameraEntryStatus = Readonly<
+  | {
+      cameraId: string
+      assignmentId: string
+      kind: 'rtsp'
+      available: boolean
+      status: 'available' | 'unavailable'
+      reason?: 'helper-unavailable' | undefined
+      message: string
+    }
+  | {
+      cameraId: string
+      assignmentId: string
+      kind: 'moonraker-snapshot'
+      available: true
+      status: 'available'
+      reason?: undefined
+      message: string
+    }
+>
+
+export type RtspCameraRuntimeStatus = Readonly<{
+  helper: RtspHelperStatus
+  available: boolean
+  status: 'available' | 'unavailable'
+  reason?: 'helper-unavailable' | undefined
+  message: string
+  cameras: readonly RtspCameraEntryStatus[]
+}>
+
+export function getRtspCameraStatus(
+  config: CameraRuntimeConfig,
+): RtspCameraRuntimeStatus {
+  const helper = getRtspHelperStatusSync(config.helper)
+  const cameras: RtspCameraEntryStatus[] = config.cameras.map((camera) => {
+    if (
+      'kind' in camera.source &&
+      camera.source.kind === 'moonraker-snapshot'
+    ) {
+      return Object.freeze({
+        cameraId: camera.cameraId,
+        assignmentId: camera.assignmentId,
+        kind: 'moonraker-snapshot' as const,
+        available: true as const,
+        status: 'available' as const,
+        message: 'Moonraker snapshot camera is available',
+      })
+    }
+    return Object.freeze({
+      cameraId: camera.cameraId,
+      assignmentId: camera.assignmentId,
+      kind: 'rtsp' as const,
+      available: helper.available,
+      status: helper.status,
+      ...(helper.reason ? { reason: helper.reason } : {}),
+      message: helper.message,
+    })
+  })
+  return Object.freeze({
+    helper,
+    available: helper.available,
+    status: helper.status,
+    ...(helper.reason ? { reason: helper.reason } : {}),
+    message: helper.message,
+    cameras: Object.freeze(cameras),
+  })
+}
+
+export async function checkRtspCameraStatus(
+  config: CameraRuntimeConfig,
+): Promise<RtspCameraRuntimeStatus> {
+  return getRtspCameraStatus(config)
+}
 
 /** Builds one ConnectorCameraMedia per RTC peer from the opt-in camera config.
  * Source locations stay behind opaque handles in this closure. */
@@ -178,7 +256,7 @@ export async function createCameraMediaFactory(input: {
     ? Object.freeze({ ...input.bambu.ffmpeg })
     : undefined
   let active = 0
-  return (onViolation: (reason: string) => void) =>
+  const factory = (onViolation: (reason: string) => void) =>
     new ConnectorCameraMedia({
       native: { Video, RtpPacketizationConfig, H264RtpPacketizer },
       expectedAgentId: agentId,
@@ -306,4 +384,7 @@ export async function createCameraMediaFactory(input: {
       },
       onViolation,
     })
+  return Object.assign(factory, {
+    getCameraStatus: () => getRtspCameraStatus(config),
+  })
 }

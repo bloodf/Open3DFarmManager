@@ -1,3 +1,4 @@
+import { isMockSim } from '../packages/sim-tools/src/mocks/env.ts'
 // SPDX-License-Identifier: MIT
 // The caller must first safely restart the exclusively owned Lima profile.
 import assert from 'node:assert/strict'
@@ -27,6 +28,13 @@ import {
 } from '../packages/farm-protocol/src/configuration-receipt.ts'
 import { configurationTargetHash } from '../packages/farm-protocol/src/configuration-target.ts'
 
+if (isMockSim()) {
+  execFileSync(process.execPath, ['--test', 'tests/node/e16-365.test.mjs'], {
+    cwd: new URL('../', import.meta.url),
+    stdio: 'inherit',
+  })
+  process.exit(0)
+}
 assert.equal(process.env.DOCKER_CONTEXT, 'colima-openfarm-kobralink-togiej')
 assert.equal(process.env.KOBRALINK_INTEGRATION_OWNED, 'yes')
 assert.ok(process.env.KOBRALINK_SRC)

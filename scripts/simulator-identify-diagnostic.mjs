@@ -6,6 +6,7 @@
 // never retries a failed run and never promotes a result to a CI pass. It reuses
 // the existing observer unchanged and emits only validated observer data plus
 // process lifecycle metadata.
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -2564,6 +2565,10 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
+  if (!isDockerSim()) {
+    console.log('Docker mode only (OPENFARM_SIM=docker)')
+    process.exit(0)
+  }
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code
   })

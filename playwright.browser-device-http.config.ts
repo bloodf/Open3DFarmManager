@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -13,10 +14,10 @@ export default defineConfig({
   // The fixture issues a disposable loopback certificate. No production TLS override.
   use: {
     baseURL: process.env.BROWSER_DEVICE_HTTP_TEST_ORIGIN,
-    browserName: 'chromium',
     ignoreHTTPSErrors: true,
     trace: 'off',
     screenshot: 'off',
     video: 'off',
+    ...browserOptions(),
   },
 })

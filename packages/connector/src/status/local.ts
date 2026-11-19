@@ -1,5 +1,6 @@
 import { connectorVersionMetadata } from './version.ts'
 import { createServer } from 'node:http'
+import type { RtcBackendStatus } from '../webrtc/rtc-backend.ts'
 
 export function parseStatusPort(value: string): number {
   if (!/^[1-9][0-9]{0,4}$/.test(value)) throw new Error('Invalid status port')
@@ -17,11 +18,29 @@ export type LocalStatus = {
   storageDegraded?: boolean
   /** Records dropped while storage was degraded. */
   storageLost?: number
+  /** Active WebRTC backend; absent when the runtime has not probed it. */
+  rtc?: RtcBackendStatus
+}
+
+const RTC_BACKENDS = ['node-datachannel', 'none'] as const
+const RTC_REASONS = ['native-binary-missing', 'native-load-failed'] as const
+
+// Re-project so an unexpected value never reaches the response.
+function projectRtc(value: RtcBackendStatus | undefined) {
+  if (!value || !RTC_BACKENDS.includes(value.backend)) return undefined
+  const degraded = value.backend === 'none'
+  const reason = RTC_REASONS.find((item) => item === value.reason)
+  return {
+    backend: value.backend,
+    mode: degraded ? ('read-only-degraded' as const) : ('direct' as const),
+    ...(degraded && reason ? { reason } : {}),
+  }
 }
 
 // Construct the public response field by field. Never serialize runtime config.
 export function projectStatus(value: LocalStatus) {
   const count = (n: number) => (Number.isSafeInteger(n) && n >= 0 ? n : 0)
+  const rtc = projectRtc(value.rtc)
   return {
     ...connectorVersionMetadata,
     queueDepth: count(value.queueDepth),
@@ -32,6 +51,7 @@ export function projectStatus(value: LocalStatus) {
     ...(value.storageDegraded === true
       ? { storage: 'storage-degraded' as const }
       : {}),
+    ...(rtc ? { rtc } : {}),
     ...(count(value.storageLost ?? 0) > 0
       ? { storageLost: count(value.storageLost ?? 0) }
       : {}),
@@ -88,7 +108,7 @@ export async function openLocalStatus(input: {
         res
           .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           .end(
-            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd><dt>Armazenamento da fila</dt><dd>${'storage' in status ? 'Degradado: sem espaço ou erro de disco. Novos registros não são gravados e os comandos são recusados.' : 'Normal'}</dd><dt>Registros perdidos por falha de armazenamento</dt><dd>${'storageLost' in status ? status.storageLost : 0}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
+            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd><dt>Armazenamento da fila</dt><dd>${'storage' in status ? 'Degradado: sem espaço ou erro de disco. Novos registros não são gravados e os comandos são recusados.' : 'Normal'}</dd>${'rtc' in status && status.rtc ? `<dt>Backend WebRTC</dt><dd>${status.rtc.backend === 'none' ? 'Indisponível: modo somente leitura degradado. Sem sessões WebRTC no navegador.' : 'node-datachannel (direto)'}</dd>` : ''}<dt>Registros perdidos por falha de armazenamento</dt><dd>${'storageLost' in status ? status.storageLost : 0}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
           )
       }
     } catch {

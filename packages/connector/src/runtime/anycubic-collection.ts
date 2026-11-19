@@ -5,6 +5,7 @@ import {
   decodeAnycubicReport,
 } from '../anycubic/index.ts'
 import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
+import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
@@ -17,6 +18,27 @@ export function createAnycubicCollection(input: {
   transport?: typeof createAnycubicLanClient
 }) {
   if (input.signal.aborted) return { done: Promise.resolve() }
+  let clientCert: { certificatePem: string; keyPem: string } | undefined
+  if (input.binding.clientCertFile) {
+    const loaded = readKobraClientCertMaterial(input.binding.clientCertFile)
+    if (!loaded.ok) {
+      const now = performance.now()
+      input.onObservation({
+        printerKey: input.binding.printerKey,
+        epoch: 1,
+        printer: PrinterState.parse({
+          printerKey: input.binding.printerKey,
+          state: 'offline',
+          statusReason: 'client-certificate-missing',
+          observedAt: Date.now(),
+        }),
+        receivedAtMonoMs: now,
+        fieldObservedAtMonoMs: { connection: now },
+      })
+      return { done: Promise.resolve() }
+    }
+    clientCert = loaded.cert
+  }
   let password: unknown
   try {
     password = readPrivateJsonFile(input.binding.passwordFile, {
@@ -52,6 +74,9 @@ export function createAnycubicCollection(input: {
     serial: input.binding.modelId + '/' + input.binding.deviceId,
     ...(input.binding.caFile
       ? { caPem: readFileSync(input.binding.caFile, 'utf8') }
+      : {}),
+    ...(clientCert
+      ? { certPem: clientCert.certificatePem, keyPem: clientCert.keyPem }
       : {}),
     ...(input.binding.pinSha256 ? { pinSha256: input.binding.pinSha256 } : {}),
     credentials: { username: input.binding.username, password },

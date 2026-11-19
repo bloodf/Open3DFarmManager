@@ -4,6 +4,7 @@ import {
   parseTemperatureFields,
   type TemperatureFields,
 } from './temperature-observation.ts'
+import { moonrakerLastJob } from './normalize.ts'
 import { parseMoonrakerSnapshot } from './parse.ts'
 import {
   MoonrakerClientError,
@@ -137,6 +138,8 @@ export function createMoonrakerSubscription(input: {
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   discoverObjects?: boolean
+  /** Request job fields and report the last job this subscription watched end. */
+  jobFields?: boolean
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -180,6 +183,9 @@ export function createMoonrakerSubscription(input: {
     }
   }
   let epoch = 0
+  // Last job this subscription watched end. Telemetry repeats it until the
+  // next one ends; jobs that ended unwatched come from the history import.
+  let lastJob: PrinterState['lastJob']
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
@@ -203,6 +209,8 @@ export function createMoonrakerSubscription(input: {
       let stale = false
       let baseline: z.infer<typeof Snapshot> | undefined
       let fingerprint: string | undefined
+      // Reset per connection: an end seen only after a reconnect is unwatched.
+      let watchingJob = false
       function publish(
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
@@ -266,15 +274,34 @@ export function createMoonrakerSubscription(input: {
             ),
           )
         }
+        const jobState = value.status.print_stats.state
+        if (!input.jobFields) watchingJob = false
+        else if (jobState === 'printing' || jobState === 'paused')
+          watchingJob = true
+        else if (watchingJob) {
+          const ended = moonrakerLastJob(
+            value.status,
+            parsed.printer.observedAt,
+          )
+          if (ended) {
+            lastJob = ended
+            watchingJob = false
+          }
+        }
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
           parsed.printer.fans,
           parsed.printer.light,
+          lastJob?.endedAt,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint
-        emit({ kind: 'snapshot', ...parsed })
+        emit({
+          kind: 'snapshot',
+          ...parsed,
+          printer: lastJob ? { ...parsed.printer, lastJob } : parsed.printer,
+        })
       }
       try {
         await readMoonrakerReady({ origin, limits, signal })
@@ -284,6 +311,7 @@ export function createMoonrakerSubscription(input: {
           limits,
           signal,
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
+          ...(input.jobFields ? { jobFields: true } : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,

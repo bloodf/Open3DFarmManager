@@ -5,7 +5,8 @@ import { gzipSync } from 'node:zlib'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type Page } from '@playwright/test'
+import { type Page } from '@playwright/test'
+import { launchBrowser } from '../helpers/browser.ts'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
@@ -505,7 +506,7 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
   }).listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/')
@@ -574,7 +575,7 @@ test('network capture keeps a finished body the page navigated away from', async
   }).listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/page')
@@ -614,7 +615,7 @@ test('a body read in the same tick as a reload is still captured whole', async (
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const evidence = await mkdtemp(join(tmpdir(), 'kobralink-observe-'))
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   try {
     for (let round = 0; round < 5; round++) {
       const page = await browser.newPage()

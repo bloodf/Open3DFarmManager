@@ -4,7 +4,11 @@ import { discoverPrinters } from '../packages/connector/src/discovery/index.ts'
 
 const usage =
   'Uso: node scripts/discover-printers.ts [--timeout <ms> | --probe <host>]\n'
-export async function main(args: string[]): Promise<number> {
+export async function main(
+  args: string[],
+  discover: typeof discoverPrinters = discoverPrinters,
+  probe: typeof probePrinterHost = probePrinterHost,
+): Promise<number> {
   if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) {
     process.stdout.write(usage)
     return 0
@@ -23,8 +27,8 @@ export async function main(args: string[]): Promise<number> {
   try {
     const printers =
       args[0] === '--probe'
-        ? ((await probePrinterHost(args[1]!)) ?? null)
-        : await discoverPrinters({
+        ? ((await probe(args[1]!)) ?? null)
+        : await discover({
             timeout: args.length ? Number(args[1]) : 3000,
           })
     process.stdout.write(JSON.stringify(printers) + '\n')

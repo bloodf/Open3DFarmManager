@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -17,6 +18,7 @@ import {
   assertFarmReadOnly,
   assertFarmStatusFlowing,
 } from '../helpers/sim-netfault-observation.ts'
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const harness = join(root, 'infra/sim/netfault')
@@ -61,6 +63,13 @@ for (const profile of profiles) {
 test('Compose parses offline and installed Docker validates every profile', (t) => {
   for (const profile of profiles)
     assert.ok(compose.services.connector.profiles.includes(profile))
+  // The Docker CLI is a real external tool; only an explicit opt-in may run it.
+  if (!isDockerSim()) {
+    t.diagnostic(
+      'OPENFARM_SIM is not docker; offline profile parsing passed; CLI validation not requested',
+    )
+    return
+  }
   const available = spawnSync('docker', ['--version'], { encoding: 'utf8' })
   if (
     available.error &&
@@ -267,9 +276,12 @@ fi
 `,
       )
       chmodSync(docker, 0o700)
-      // Supply a tiny dependency closure without requiring pnpm in offline tests.
+      // Supply a tiny dependency closure without requiring an install in offline tests.
+      const modules = join(directory, 'modules')
+      mkdirSync(join(modules, 'node-datachannel'), { recursive: true })
+      mkdirSync(join(modules, 'detect-libc'), { recursive: true })
       const realpath = join(directory, 'realpath')
-      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/ndc\\n" "$FIXTURE"\n')
+      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/modules\\n" "$FIXTURE"\n')
       chmodSync(realpath, 0o700)
       const result = spawnSync(
         'bash',

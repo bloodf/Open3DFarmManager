@@ -71,6 +71,10 @@ export const ConfigurationErrorCode = z.enum([
   'identity-conflict',
   'firmware-unsupported',
   'bridge-unavailable',
+  'client-cert-missing',
+  'client-cert-unreadable',
+  'client-cert-wrong-subject',
+  'client-cert-expired',
   'moonraker-unavailable',
   'moonraker-not-ready',
   'moonraker-invalid-response',
@@ -133,7 +137,7 @@ const limits = {
   maxBytes: MAX_CONFIGURATION_FRAME_WIRE_BYTES,
   maxDepth: 8,
   maxValues: 160,
-  maxStringChars: 512,
+  maxStringChars: 12_288,
 }
 const requestCodec = configurationCodec(
   ConfigurationRequestFrame,

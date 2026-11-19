@@ -29,6 +29,7 @@ import {
   type ConfigurationRuntime,
 } from './configuration.ts'
 import type { BambuProbe } from '../provisioning/bambu.ts'
+import type { KobraXProbe } from '../provisioning/kobra-x.ts'
 
 export interface ConfigurationCommandInput {
   trustedKeys?: TrustedKeyStore
@@ -45,6 +46,8 @@ export interface ConfigurationCommandInput {
   discovery?: DiscoveryScanner
   /** Read-only Bambu LAN probe override, normally unset in production. */
   bambuProbe?: BambuProbe
+  /** Native Kobra X connection confirmation override for loopback journeys. */
+  kobraXProbe?: KobraXProbe
   clock?: () => number
 }
 
@@ -191,6 +194,7 @@ export async function runConfigurationConnector(
     credentialJti: () => credential()?.jti ?? null,
     ...(input.discovery ? { discovery: input.discovery } : {}),
     ...(input.bambuProbe ? { bambuProbe: input.bambuProbe } : {}),
+    ...(input.kobraXProbe ? { kobraXProbe: input.kobraXProbe } : {}),
     clock,
     onDiagnostic: input.onDiagnostic,
   })

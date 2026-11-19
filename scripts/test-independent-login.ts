@@ -11,7 +11,7 @@ import { createServer as createTCPServer } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import { createServer, request } from 'node:https'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { chromium, type Browser } from '@playwright/test'
+import { launchBrowser, type Browser } from '../tests/helpers/browser.ts'
 
 const port = Number(process.env.LOGIN_SYNTHETIC_TEST_PORT)
 const username = process.env.LOGIN_SYNTHETIC_TEST_USERNAME
@@ -424,7 +424,7 @@ try {
   )
 
   stage = 'chromium-pages'
-  browser = await chromium.launch({ headless: true, timeout: 15_000 })
+  browser = await launchBrowser({ timeout: 15_000 })
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   page.setDefaultTimeout(10_000)

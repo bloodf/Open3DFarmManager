@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DEFAULT_KOBRA_X_SETUP_MODE } from '../../utils/kobra-x-setup-mode.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
 import { usePrinterSetupActions } from '../../utils/printer-setup-actions.ts'
 import AnycubicFields from './AnycubicFields.vue'
@@ -13,9 +14,16 @@ const {
   kobraStage,
   kobraLabel,
   kobraExpectedDeviceId,
+  kobraSetupMode,
   onboardingFamily,
 } = usePrinterSetup()
 const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
+
+// A new setup starts on the native default again after any family change.
+function onFamilyChanged() {
+  kobraSetupMode.value = DEFAULT_KOBRA_X_SETUP_MODE
+  closeKobraSession()
+}
 </script>
 
 <template>
@@ -29,7 +37,7 @@ const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
       <select
         id="onboarding-family"
         v-model="onboardingFamily"
-        @change="closeKobraSession"
+        @change="onFamilyChanged"
       >
         <option value="anycubic-lan">Anycubic (LAN)</option>
         <option value="anycubic-kobra-x">Anycubic Kobra X</option>

@@ -36,9 +36,9 @@ import type {
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   farmConnectionNotice,
+  formatPrinterStateLabel,
   localInterfaceOrigin,
   observationAge,
-  printerStateLabel,
   resolvedLocalInterfaceOrigin,
   type FarmRow,
 } from '../utils/farm-view.ts'
@@ -742,7 +742,7 @@ function dateLabel(time: number) {
                     <dd>
                       {{
                         row.observation
-                          ? printerStateLabel[row.observation.state.state]
+                          ? formatPrinterStateLabel(row.observation.state)
                           : 'Nenhum estado recebido'
                       }}
                     </dd>

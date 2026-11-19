@@ -4,6 +4,14 @@ import {
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
 
+/** Callers on schemas that may predate migration 0033 probe before writing. */
+export async function latestStateTableExists(
+  tx: TransactionSql,
+): Promise<boolean> {
+  const rows = await tx`SELECT to_regclass('farm.printer_latest_state') AS t`
+  return Boolean(rows[0]?.t)
+}
+
 export async function recordLatestStates(
   tx: TransactionSql,
   scope: { farmId: string; agentId: string },

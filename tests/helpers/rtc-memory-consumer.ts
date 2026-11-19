@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { createInterface } from 'node:readline'
 import { native, Command, type Role, until } from './rtc-memory-wire.ts'
-import type { DataChannel } from '../../packages/connector/node_modules/node-datachannel'
+import type { DataChannel } from 'node-datachannel'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { ReadonlyRtcSession } from '../../packages/connector/src/webrtc/readonly-session.ts'
 import { PauseControlSession } from '../../packages/connector/src/webrtc/pause-control-session.ts'

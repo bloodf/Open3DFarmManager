@@ -4,6 +4,7 @@ import { describeBambuConfigurationError } from './bambu-onboarding.ts'
 import { describeCrealityConfigurationError } from './creality-onboarding.ts'
 import {
   describeConfigurationError,
+  describeKobraXNativeError,
   describeRecoveryReason,
   describeUnknownReason,
   type ConfigurationSessionOutcome,
@@ -57,6 +58,7 @@ export function createKobraOperation(
     isAnycubicOnboarding,
     isBambuOnboarding,
     isCrealityOnboarding,
+    isKobraXNativeOperation,
   } = state
   const {
     loadAssignments,
@@ -69,6 +71,7 @@ export function createKobraOperation(
   } = deps
 
   const describeBackendError = (code: string) =>
+    (isKobraXNativeOperation.value ? describeKobraXNativeError(code) : null) ??
     (isAnycubicOnboarding.value
       ? describeAnycubicConfigurationError(code)
       : null) ??

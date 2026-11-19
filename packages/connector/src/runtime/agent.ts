@@ -27,6 +27,10 @@ import type {
 } from './pause-control.ts'
 import { recordAuthorityStale } from './pause-authority-audit.ts'
 import {
+  probeRtcBackend,
+  type RtcBackendStatus,
+} from '../webrtc/rtc-backend.ts'
+import {
   createOfflineAuthority,
   type OfflineAuthorityStaleReason,
 } from '../auth/offline-authority.ts'
@@ -34,6 +38,12 @@ import {
 type AgentDiagnostic =
   | CollectionDiagnostic
   | { kind: 'rtc-bind-non-loopback'; address: string }
+  | {
+      kind: 'rtc-backend'
+      backend: RtcBackendStatus['backend']
+      mode: RtcBackendStatus['mode']
+      reason?: NonNullable<RtcBackendStatus['reason']>
+    }
   | RenewalDiagnostic
   | PauseControlDiagnostic
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
@@ -232,6 +242,15 @@ async function runConnectorAgentOnce(
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
+    // One startup probe of the native RTC module. Without it the agent keeps
+    // collecting and reporting but offers no browser RTC session.
+    const rtcBackend = await probeRtcBackend()
+    diagnostic({
+      kind: 'rtc-backend',
+      backend: rtcBackend.backend,
+      mode: rtcBackend.mode,
+      ...(rtcBackend.reason ? { reason: rtcBackend.reason } : {}),
+    })
     if (input.statusPort !== undefined) {
       localStatus = await openLocalStatus({
         port: input.statusPort,
@@ -243,6 +262,7 @@ async function runConnectorAgentOnce(
             totals.credentialExpired || clock.now() >= credential.expires_at,
           storageDegraded: queue.storageDegraded,
           storageLost: queue.storageLost,
+          rtc: rtcBackend,
         }),
         onError: fail,
       })
@@ -320,7 +340,12 @@ async function runConnectorAgentOnce(
         typeof import('./pause-control.ts').runPauseControl
       >[0]['apiHandlers']
     > = new Map()
-    if (config.signalling && lookupId && snapshots) {
+    if (
+      config.signalling &&
+      lookupId &&
+      snapshots &&
+      rtcBackend.mode === 'direct'
+    ) {
       const { AuthenticatedConnectorSignallingClient } =
         await import('../cloud/authenticated-signalling-client.ts')
       const { FarmStatusSender } =

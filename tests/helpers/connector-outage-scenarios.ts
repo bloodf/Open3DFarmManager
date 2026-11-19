@@ -1,9 +1,15 @@
 // Outage and restart acceptance for the Connector against the built farm server.
-// Caller owns the disposable PostgreSQL container, work directory and port range.
+// Caller owns the disposable PostgreSQL (container or local cluster), work directory and port range.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'
@@ -19,6 +25,7 @@ import {
   startFaultProxy,
   until,
 } from './connector-outage-fixtures.ts'
+import { automaticLockRecovery } from './queue-lock-platform.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
 import { runOutagePauseScenarios } from './connector-outage-pause.ts'
 
@@ -36,8 +43,12 @@ export async function runConnectorOutageScenarios(input: {
   admin: Sql
   ports: Ports
   workDir: string
-  container: string
-  docker: (...args: string[]) => Promise<string>
+  /**
+   * Freezes and thaws PostgreSQL: Docker pause/unpause (OPENFARM_SIM=docker) or a
+   * blackhole on the loopback fault proxy in front of the cluster (mock).
+   * Established and new connections stall; nothing is lost while stalled.
+   */
+  dbStall: { stall: () => Promise<void>; resume: () => Promise<void> }
   ledger: (value: object) => void
 }) {
   const { admin, ports, workDir, ledger } = input
@@ -466,7 +477,7 @@ export async function runConnectorOutageScenarios(input: {
 
     await scenario('2-database-unavailable-and-startup-gate-503', async () => {
       const current = connector!
-      await input.docker('pause', input.container)
+      await input.dbStall.stall()
       const outageStart = performance.now()
       let paused = true
       try {
@@ -495,7 +506,7 @@ export async function runConnectorOutageScenarios(input: {
         }
         assert.ok(gate503 >= 1, 'Connector observed the startup gate 503')
         await new Promise((r) => setTimeout(r, 3000))
-        await input.docker('unpause', input.container)
+        await input.dbStall.resume()
         paused = false
         // The same gated process must recover on its own: no restart fallback.
         const gated = app!
@@ -523,7 +534,7 @@ export async function runConnectorOutageScenarios(input: {
           drainMs,
         }
       } finally {
-        if (paused) await input.docker('unpause', input.container)
+        if (paused) await input.dbStall.resume()
       }
     })
 
@@ -552,11 +563,27 @@ export async function runConnectorOutageScenarios(input: {
         'SIGKILL left the owner lock behind',
       )
       const restartAt = performance.now()
+      if (!automaticLockRecovery) {
+        // No machine/boot/PID-namespace identity (not Linux): the Connector must fail
+        // closed and leave the lock alone until the operator removes that exact lock.
+        const refused = launchConnector()
+        await until(
+          () => !refused.running,
+          20000,
+          'fail-closed on unproven lock',
+        )
+        assert.equal(
+          (JSON.parse(readFileSync(lockFile, 'utf8')) as { pid: number }).pid,
+          killedPid,
+          'refused start left the lock untouched',
+        )
+        unlinkSync(lockFile)
+      }
       const restarted = await startConnectorAndBaseline()
       assert.equal(
         restarted.count('queue-lock-recovered'),
-        1,
-        'automatic stale-lock recovery diagnostic',
+        automaticLockRecovery ? 1 : 0,
+        'stale-lock recovery diagnostic matches platform support',
       )
       const drainMs = await drained()
       const replays = proxy.log.filter(
@@ -572,7 +599,7 @@ export async function runConnectorOutageScenarios(input: {
         assert.equal(after.filter((r) => r.id === id).length, 1, 'no duplicate')
       return {
         heldEventIds: eventIds.length,
-        automaticLockRecovery: true,
+        automaticLockRecovery,
         replays,
         drainMs,
       }

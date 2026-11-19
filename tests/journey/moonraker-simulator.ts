@@ -1,10 +1,17 @@
-import { once } from 'node:events'
-import { createServer, type Server } from 'node:http'
-import { createRequire } from 'node:module'
-import type {
-  WebSocket,
-  WebSocketServer,
-} from '../../packages/connector/node_modules/@types/ws'
+import {
+  startHttpMock,
+  startMoonrakerMock,
+  type MoonrakerMockInstance,
+  type MoonrakerMockOptions,
+  type MoonrakerModel,
+} from '../../packages/sim-tools/src/mocks/index.ts'
+
+export {
+  startMoonrakerMock,
+  type MoonrakerMockInstance,
+  type MoonrakerMockOptions,
+  type MoonrakerModel,
+}
 
 /** What the simulated printer reports; journeys change it with `update`. */
 export type PrinterModel = Readonly<{
@@ -26,195 +33,72 @@ export type MoonrakerSimulator = Readonly<{
   update(patch: Partial<PrinterModel>): void
   /** JSON-RPC calls received, by method. */
   calls(): Readonly<Record<string, number>>
+  control: MoonrakerMockInstance['control']
   close(): Promise<void>
 }>
 
-const OBJECTS = [
-  'webhooks',
-  'print_stats',
-  'virtual_sdcard',
-  'extruder',
-  'heater_bed',
-  'fan',
-] as const
-
-function statusOf(model: PrinterModel): Record<string, object> {
+function projectModel(model: MoonrakerModel): PrinterModel {
   return {
-    webhooks: { state: 'ready' },
-    print_stats: { state: model.state, filename: model.filename },
-    virtual_sdcard: { progress: model.progress },
-    extruder: { temperature: model.extruder },
-    heater_bed: { temperature: model.bed },
-    fan: { speed: model.fan },
+    state: model.state,
+    progress: model.progress,
+    filename: model.filename,
+    extruder: model.extruder,
+    bed: model.bed,
+    fan: model.fan,
   }
 }
-
-function pick(
-  status: Record<string, object>,
-  requested: unknown,
-): Record<string, object> {
-  if (!requested || typeof requested !== 'object') return {}
-  const out: Record<string, object> = {}
-  for (const [name, fields] of Object.entries(requested)) {
-    const source = status[name] as Record<string, unknown> | undefined
-    if (!source) continue
-    out[name] = Array.isArray(fields)
-      ? Object.fromEntries(
-          fields.flatMap((field) =>
-            typeof field === 'string' && field in source
-              ? [[field, source[field]]]
-              : [],
-          ),
-        )
-      : source
-  }
-  return out
-}
-
-async function listen(server: Server) {
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Simulator listener missing')
-  return `http://127.0.0.1:${address.port}`
-}
-
-const closeServer = (server: Server) =>
-  new Promise<void>((resolve, reject) => {
-    server.closeAllConnections()
-    server.close((error) => (error ? reject(error) : resolve()))
-  })
 
 /**
- * Loopback Moonraker speaking the read-only subset the Connector uses today:
- * `/server/info`, `printer.objects.list|subscribe|query` and
- * `notify_status_update`. It answers no command method, so none can reach a
- * printer. A Spoolman answering an empty inventory accompanies it.
+ * Harness-backed Moonraker + empty Spoolman simulator on loopback.
  */
 export async function startMoonrakerSimulator(
   initial: Partial<PrinterModel> = {},
+  options: Omit<MoonrakerMockOptions, 'initial'> = {},
 ): Promise<MoonrakerSimulator> {
-  const {
-    WebSocketServer: Sockets,
-  }: { WebSocketServer: typeof WebSocketServer } = createRequire(
-    new URL('../../packages/connector/package.json', import.meta.url),
-  )('ws')
-  let model: PrinterModel = {
-    state: 'printing',
-    progress: 0.25,
-    filename: 'journey.gcode',
-    extruder: 210,
-    bed: 60,
-    fan: 0.5,
-    ...initial,
-  }
-  let eventtime = 1
-  const calls: Record<string, number> = {}
-  const sockets = new Sockets({
-    noServer: true,
-    maxPayload: 65536,
-    perMessageDeflate: false,
-  })
-  const moonraker = createServer((request, response) => {
-    if (request.method !== 'GET' || request.url !== '/server/info') {
-      response.writeHead(404).end()
-      return
-    }
-    response.setHeader('content-type', 'application/json')
-    response.end(
-      JSON.stringify({
-        result: {
-          klippy_connected: true,
-          klippy_state: 'ready',
-          moonraker_version: 'journey-simulator',
-          websockets: sockets.clients.size,
-        },
-      }),
-    )
-  })
-  moonraker.on('upgrade', (request, socket, head) => {
-    if (request.url !== '/websocket') {
-      socket.destroy()
-      return
-    }
-    sockets.handleUpgrade(request, socket, head, (ws) =>
-      sockets.emit('connection', ws, request),
-    )
-  })
-  sockets.on('connection', (socket: WebSocket) => {
-    socket.on('error', () => socket.terminate())
-    socket.on('message', (data) => {
-      let call: { id?: unknown; method?: unknown; params?: unknown }
-      try {
-        call = JSON.parse(data.toString('utf8'))
-      } catch {
-        socket.terminate()
-        return
-      }
-      const method = typeof call.method === 'string' ? call.method : 'unknown'
-      calls[method] = (calls[method] ?? 0) + 1
-      const reply = (result: unknown) =>
-        socket.send(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }))
-      if (method === 'server.connection.identify') reply({ connection_id: 1 })
-      else if (method === 'printer.objects.list')
-        reply({ objects: [...OBJECTS] })
-      else if (
-        method === 'printer.objects.subscribe' ||
-        method === 'printer.objects.query'
-      ) {
-        const requested = (call.params as { objects?: unknown } | undefined)
-          ?.objects
-        reply({
-          eventtime,
-          status: pick(statusOf(model), requested),
-        })
-      } else
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: call.id,
-            error: { code: -32601, message: 'Method not found' },
-          }),
-        )
-    })
-  })
-  const spoolman = createServer((request, response) => {
-    if (request.method !== 'GET' || !request.url?.startsWith('/api/v1/spool')) {
-      response.writeHead(404).end()
-      return
-    }
-    response.setHeader('content-type', 'application/json')
-    response.end('[]')
-  })
-  const [origin, spoolmanOrigin] = [
-    await listen(moonraker),
-    await listen(spoolman),
-  ]
-  return Object.freeze({
-    origin,
-    spoolmanOrigin,
-    model: () => model,
-    update(patch: Partial<PrinterModel>) {
-      model = { ...model, ...patch }
-      eventtime++
-      const status = statusOf(model)
-      for (const socket of sockets.clients)
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'notify_status_update',
-            params: [status, eventtime],
-          }),
-        )
+  const moonraker = await startMoonrakerMock({
+    ...options,
+    initial: {
+      state: 'printing',
+      progress: 0.25,
+      filename: 'journey.gcode',
+      extruder: 210,
+      bed: 60,
+      fan: 0.5,
+      ...initial,
     },
-    calls: () => ({ ...calls }),
+  })
+
+  let spoolman: Awaited<ReturnType<typeof startHttpMock>>
+  try {
+    spoolman = await startHttpMock({
+      handler: (request, response) => {
+        if (
+          request.method !== 'GET' ||
+          !request.url?.startsWith('/api/v1/spool')
+        ) {
+          response.writeHead(404).end()
+          return
+        }
+        response.setHeader('content-type', 'application/json')
+        response.end('[]')
+      },
+    })
+  } catch (error) {
+    await moonraker.close()
+    throw error
+  }
+
+  return Object.freeze({
+    origin: moonraker.origin,
+    spoolmanOrigin: spoolman.origin,
+    model: () => projectModel(moonraker.control.model()),
+    update(patch: Partial<PrinterModel>) {
+      moonraker.control.update(patch)
+    },
+    calls: () => moonraker.calls(),
+    control: moonraker.control,
     async close() {
-      for (const socket of sockets.clients) socket.terminate()
-      await new Promise<void>((resolve, reject) =>
-        sockets.close((error) => (error ? reject(error) : resolve())),
-      )
-      await Promise.all([closeServer(moonraker), closeServer(spoolman)])
+      await Promise.all([moonraker.close(), spoolman.close()])
     },
   })
 }

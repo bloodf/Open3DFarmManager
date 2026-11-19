@@ -82,6 +82,8 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
   #session: { stop(): void } | undefined
   #rtpBase = randomInt(0, 2 ** 32)
   #sent = 0
+  #unavailableReason: 'helper-unavailable' | undefined
+  #unavailableMessage: string | undefined
   constructor(options: ConnectorCameraMediaOptions) {
     this.#options = Object.freeze({
       ...options,
@@ -203,10 +205,27 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
           signal: this.#abort.signal,
         },
         registry: this.#registry,
-        openSource: (handle, signal) =>
-          this.#options.openSource(handle, signal, this.#deadline, () =>
-            this.current(),
-          ),
+        openSource: async (handle, signal) => {
+          try {
+            return await this.#options.openSource(
+              handle,
+              signal,
+              this.#deadline,
+              () => this.current(),
+            )
+          } catch (error: unknown) {
+            if (
+              error instanceof Error &&
+              (('code' in error && error.code === 'HELPER_EXECUTABLE') ||
+                ('reason' in error && error.reason === 'helper-unavailable'))
+            ) {
+              this.#unavailableReason = 'helper-unavailable'
+              this.#unavailableMessage =
+                'RTSP camera unavailable: rtsp-ingest helper is unavailable'
+            }
+            throw error
+          }
+        },
         sink: {
           trySend: (unit) => this.send(unit),
           close: () => this.stopMedia(),
@@ -272,6 +291,31 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
       state: this.#state,
       trackOpen: this.#track?.isOpen() ?? false,
       sent: this.#sent,
+      ...(this.#unavailableReason
+        ? {
+            status: 'unavailable' as const,
+            reason: this.#unavailableReason,
+            message: this.#unavailableMessage,
+          }
+        : {}),
+    })
+  }
+  getStatus() {
+    return Object.freeze({
+      state: this.#state,
+      trackOpen: this.#track?.isOpen() ?? false,
+      sent: this.#sent,
+      available: this.#unavailableReason === undefined,
+      status:
+        this.#unavailableReason !== undefined
+          ? ('unavailable' as const)
+          : ('available' as const),
+      ...(this.#unavailableReason
+        ? {
+            reason: this.#unavailableReason,
+            message: this.#unavailableMessage,
+          }
+        : {}),
     })
   }
 }

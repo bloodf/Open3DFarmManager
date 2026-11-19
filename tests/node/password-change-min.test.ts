@@ -2,7 +2,7 @@
 // to the new password, refusing short ones with registration's 400 error shape.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createError } from '../../apps/farm/node_modules/nuxt/dist/server/index.js'
+import { createError } from 'nuxt/server'
 import { MIN_PASSWORD_CHARS } from '../../apps/farm/server/services/account-registration.ts'
 import { parsePasswordChange } from '../../apps/farm/server/services/password-change.ts'
 

@@ -6,6 +6,8 @@ import {
 } from './harness.ts'
 import type { KobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
+// Legacy path: new Kobra X setup is native (kobra-x-native.spec.ts); this journey
+// keeps the explicit KobraLink bridge and its existing assignments covered.
 // Opt-in: OPENFARM_JOURNEY=1. One KobraLink printer walks the whole journey in
 // the browser against the loopback bridge stand-in: found by the Connector's
 // probe, set up on the printers page, live telemetry, every command the
@@ -16,7 +18,7 @@ const UPLOAD = 'journey-part.gcode'
 const GCODE = '; synthetic journey file\nG28\nG1 X10 Y10 F3000\n'
 
 if (journeyEnabled())
-  test.describe('KobraLink journey', () => {
+  test.describe('KobraLink journey (legacy bridge, explicit opt-in)', () => {
     test.describe.configure({ mode: 'serial' })
     let harness: JourneyHarness | undefined
     let found: unknown

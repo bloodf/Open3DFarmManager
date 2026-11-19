@@ -142,7 +142,6 @@ test('postgres job exists and keeps the existing checkout and setup pattern', ()
   const uses = steps.map((step) => step.uses).filter(Boolean)
   assert.deepEqual(uses, [
     'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
-    'pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1',
     'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
   ])
 })
@@ -162,10 +161,10 @@ test('postgres job runs test:postgres with bounded output and pipefail', () => {
     'package.json must define test:postgres',
   )
   const runs = steps.map((step) => String(step.run ?? ''))
-  const command = runs.find((run) => run.includes('pnpm run test:postgres'))
-  assert.ok(command, 'a step must run pnpm run test:postgres')
+  const command = runs.find((run) => run.includes('npm run test:postgres'))
+  assert.ok(command, 'a step must run npm run test:postgres')
   assert.match(command, /set -o pipefail/)
-  assert.match(command, /pnpm run test:postgres 2>&1 \| tail -c 200000/)
+  assert.match(command, /npm run test:postgres 2>&1 \| tail -c 200000/)
 })
 
 test('postgres job does not run on any trigger other than workflow_dispatch', () => {

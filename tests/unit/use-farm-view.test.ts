@@ -1,10 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import type { FarmStatusFeed } from '../../apps/farm/app/utils/farm-view.ts'
 
-declare global {
-  // Nuxt auto-import used by the composable; stubbed per test.
-  var $fetch: <T>(path: string, options?: object) => Promise<T>
-}
 type FeedInput = Parameters<FarmStatusFeed['open']>[0]
 const peers: { input: FeedInput; closed: number }[] = []
 const leave: (() => void)[] = []
@@ -12,7 +8,7 @@ const mounted: (() => void)[] = []
 const unmounted: (() => void)[] = []
 // vue and vue-router are app dependencies; mock them by their resolved Node
 // entries. Only lifecycle registration matters here, not rendering.
-vi.mock('../../apps/farm/node_modules/vue/index.mjs', () => ({
+vi.mock('vue', () => ({
   shallowRef: <T>(value: T) => ({ value }),
   computed: <T>(get: () => T) => ({
     get value() {
@@ -22,7 +18,7 @@ vi.mock('../../apps/farm/node_modules/vue/index.mjs', () => ({
   onMounted: (hook: () => void) => mounted.push(hook),
   onBeforeUnmount: (hook: () => void) => unmounted.push(hook),
 }))
-vi.mock('../../apps/farm/node_modules/vue-router/vue-router.node.mjs', () => ({
+vi.mock('vue-router', () => ({
   onBeforeRouteLeave: (hook: () => void) => leave.push(hook),
 }))
 vi.mock('../../apps/farm/app/utils/webrtc/farm-status-feed.ts', () => ({

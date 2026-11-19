@@ -4,7 +4,6 @@
   "version": "0.0.1",
   "license": "MIT",
   "type": "module",
-  "packageManager": "pnpm@12.18.0",
   "engines": {
     "node": ">=24.22.2 <25"
   },
@@ -13,9 +12,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm --dir apps/farm dev",
-    "build": "pnpm --dir packages/connector build && pnpm --dir apps/farm build",
-    "typecheck": "tsc --noEmit && pnpm --dir apps/farm typecheck",
+    "dev": "npm run dev -w @open3dfarmmanager/farm",
+    "build": "npm run build -w @open3dfarmmanager/connector && npm run build -w @open3dfarmmanager/farm",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit && npm run typecheck -w @open3dfarmmanager/farm",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:journey": "OPENFARM_JOURNEY=1 playwright test -c playwright.journey.config.ts",
@@ -24,7 +23,7 @@
     "test:rtc-farm:all": "node scripts/test-rtc-farm-acceptance.ts --all",
     "test:connector-outage": "node scripts/test-connector-outage-recovery.ts",
     "test:sim-farm": "node scripts/test-sim-farm-acceptance.ts",
-    "check:all": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:node && pnpm run test:rtsp-supervisor && pnpm run test:rtsp-framing && pnpm run build",
+    "check:all": "npm run lint && npm run typecheck && npm run test && npm run test:node && npm run test:rtsp-supervisor && npm run test:rtsp-framing && npm run build",
     "sim:smoke": "node packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",
     "format": "prettier --write .",
@@ -36,25 +35,34 @@
     "test:rtsp-supervisor": "node --test --test-concurrency=1 tools/rtsp-ingest/supervisor/*.test.ts",
     "test:rtsp-framing": "node --test tools/rtsp-ingest/integration/moving-fixture-input.test.ts",
     "test:upgrade-rehearsal": "node --test --test-force-exit --test-timeout=1800000 tests/docker/upgrade-rehearsal.test.ts",
-    "test:rtc-memory": "node scripts/test-rtc-memory.ts",
-    "sandbox": "node scripts/sandbox.ts"
+    "test:rtc-memory": "node scripts/test-rtc-memory.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.65.0",
     "@redocly/openapi-core": "2.79.0",
     "@types/node": "24.19.2",
+    "@types/ws": "8.18.2",
     "effect": "4.1.4",
     "esbuild": "0.28.2",
+    "node-datachannel": "0.33.6",
+    "nuxt": "4.6.4",
+    "openid-client": "6.9.0",
+    "playwright-core": "1.65.0",
     "prettier": "3.10.1",
-    "typescript": "7.0.2",
+    "typescript": "6.0.3",
+    "typescript7": "npm:typescript@7.0.2",
     "vitest": "5.1.0",
-    "yaml": "2.9.1"
+    "vue": "3.5.45",
+    "vue-router": "5.5.1",
+    "ws": "8.23.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   },
   "dependencies": {
-    "@open3dfarmmanager/farm-protocol": "workspace:*",
-    "@open3dfarmmanager/shared": "workspace:*",
-    "@open3dfarmmanager/sim-tools": "workspace:*",
+    "@open3dfarmmanager/farm-protocol": "*",
+    "@open3dfarmmanager/shared": "*",
+    "@open3dfarmmanager/sim-tools": "*",
     "postgres": "4.1.1"
   }
 }

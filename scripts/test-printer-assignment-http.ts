@@ -15,13 +15,14 @@ import {
   loadMigrationCatalog,
   validateMigrationHistory,
 } from './db/migrations.ts'
+import { isSupportedNodeVersion } from '../tests/helpers/node-version.ts'
 
 const ledger = process.env.PRINTER_HTTP_TEST_LEDGER
 const portText = process.env.PRINTER_HTTP_SYNTHETIC_TEST_PORT
 const port = Number(portText)
 if (
   process.versions.bun ||
-  !process.versions.node.startsWith('24.') ||
+  !isSupportedNodeVersion(process.versions.node) ||
   process.argv.length !== 2 ||
   !ledger ||
   !isAbsolute(ledger) ||

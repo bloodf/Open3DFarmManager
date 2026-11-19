@@ -5,9 +5,7 @@ import { realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createSignallingBoundaryLifecycle } from '../../apps/farm/server/services/signalling-boundary-lifecycle.ts'
 const nuxtRequire = createRequire(
-  realpathSync(
-    new URL('../../apps/farm/node_modules/nuxt/package.json', import.meta.url),
-  ),
+  realpathSync(createRequire(import.meta.url).resolve('nuxt/package.json')),
 )
 const builderRequire = createRequire(nuxtRequire.resolve('@nuxt/nitro-server'))
 const nitroRequire = createRequire(

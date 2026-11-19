@@ -43,6 +43,16 @@ import {
   prepareBambu,
   type BambuProbe,
 } from './bambu.ts'
+import {
+  assertKobraXUnclaimed,
+  commitKobraX,
+  discardStagedKobraX,
+  kobraXRuntimeContains,
+  kobraXTrustPath,
+  prepareKobraX,
+  readKobraXTrust,
+  type KobraXProbe,
+} from './kobra-x.ts'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
@@ -57,7 +67,16 @@ import {
   type SignedConfigurationReceipt,
 } from '../../../farm-protocol/src/configuration-receipt.ts'
 import { deriveConfigurationAssignmentIdentity } from '../../../farm-protocol/src/configuration-inventory.ts'
-import { configurationTargetHash } from '../../../farm-protocol/src/configuration-target.ts'
+import {
+  configurationTargetHash,
+  withoutKobraClientCertificate,
+} from '../../../farm-protocol/src/configuration-target.ts'
+import {
+  assignmentKobraCertPath,
+  commitStagedKobraClientCert,
+  discardStagedKobraCert,
+  stageKobraClientCert,
+} from '../config/kobra-x-cert.ts'
 import {
   createKobraLinkClient,
   KobraLinkError,
@@ -123,6 +142,8 @@ export interface ProvisioningEngineOptions {
   crealityProbe?: CrealityProbe
   /** Read-only Bambu LAN probe. Tests inject a fixture; default opens TLS/MQTT. */
   bambuProbe?: BambuProbe
+  /** Native Kobra X connection confirmation. Tests drive the loopback mock. */
+  kobraXProbe?: KobraXProbe
   /** Connection-test transport for Spoolman. Tests inject a fixture. */
   spoolmanFetch?: typeof fetch
   timeoutMs?: number
@@ -325,6 +346,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             return finalizeCommit(op)
           return save(op, 'prepared', { plan: null })
         }
+        if (op.target.backend === 'kobra-x') {
+          if (!op.plan) return toRecovery(op, 'journal-inconsistent')
+          if (kobraXRuntimeContains(options.runtime, op.plan))
+            return finalizeCommit(op)
+          return save(op, 'prepared', { plan: null })
+        }
         const bridge = op.bridge_instance_id
           ? custody.find(op.bridge_instance_id)
           : null
@@ -369,6 +396,8 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       removePrivateFile(
         spoolmanStagedPath(options.stateDirectory, op.operation_id),
       )
+    if (op.target.backend === 'kobra-x')
+      discardStagedKobraX(options.stateDirectory, op.operation_id)
     return committed
   }
 
@@ -457,6 +486,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       discardStagedAnycubic(options.stateDirectory, op.operation_id)
     if (op.target.backend === 'bambu')
       discardStagedBambu(options.stateDirectory, op.operation_id)
+    if (op.target.backend === 'kobralink-anycubic')
+      discardStagedKobraCert(options.stateDirectory, op.operation_id)
+    if (op.target.backend === 'kobra-x')
+      discardStagedKobraX(options.stateDirectory, op.operation_id)
     const failed = save(op, 'failed', { failure: code })
     finish(failed)
     return failed
@@ -664,6 +697,25 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       )
         return errorFrame(frame.request_id, 'busy')
     }
+    if (frame.target.backend === 'kobra-x') {
+      const host = frame.target.endpoint.ipv4
+      if (
+        frame.target.endpoint.port !== KOBRA_X_PRINTER_PORT ||
+        !policy.allows(host)
+      )
+        return errorFrame(frame.request_id, 'invalid-request')
+      if (
+        state.operations.some((id) => {
+          const prior = journal.readOperation(id)
+          return (
+            prior?.target.backend === 'kobra-x' &&
+            prior.target.endpoint.ipv4 === host &&
+            prior.stage === 'local-committed'
+          )
+        })
+      )
+        return errorFrame(frame.request_id, 'busy')
+    }
     if (frame.expected_revision !== state.revision)
       return errorFrame(frame.request_id, 'revision-conflict')
     if (
@@ -722,7 +774,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
                 }) => safe)(frame.target)
               : frame.target.backend === 'bambu'
                 ? (({ access_code: _code, ...safe }) => safe)(frame.target)
-                : frame.target,
+                : frame.target.backend === 'kobralink-anycubic' ||
+                    frame.target.backend === 'kobra-x'
+                  ? withoutKobraClientCertificate(frame.target)
+                  : frame.target,
       target_sha256: targetHash,
       expected_revision: frame.expected_revision,
       bridge_instance_id: null,
@@ -940,6 +995,69 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         frame,
         save(op, 'prepared', { prepared, latest: prepared }),
       )
+    }
+    if (frame.target.backend === 'kobra-x') {
+      const prepared = await prepareKobraX(
+        options.stateDirectory,
+        op.operation_id,
+        frame.target,
+        options.kobraXProbe,
+        clock(),
+      )
+      if (!prepared.ok) return describe(frame, await fail(op, prepared.code))
+      const { trust, identity } = prepared
+      const expected = frame.target.device_id
+      if (
+        expected &&
+        expected !== identity.device_id &&
+        expected !== trust.deviceId
+      )
+        return describe(frame, await fail(op, 'identity-conflict'))
+      // Claimed by another assignment, or by a KobraLink row, is a conflict
+      // found before anything is offered for commit.
+      try {
+        assertKobraXUnclaimed(options.runtime, trust, {
+          assignment_id: '',
+          printer_key: '',
+        })
+      } catch {
+        return describe(frame, await fail(op, 'identity-conflict'))
+      }
+      if (!(await stillCurrent(context)))
+        return describe(frame, await fail(op, 'capability-rejected'))
+      op = save(op, 'discovering', {
+        bridge_instance_id: identity.bridge_instance_id,
+        printer: {
+          id: identity.device_id,
+          device_id: identity.device_id,
+          ip: frame.target.endpoint.ipv4,
+          model: trust.model,
+          firmware: trust.firmware,
+          ownership: 'preexisting',
+        },
+      })
+      const receipt = await signOperationReceipt(
+        options.connector,
+        op,
+        'prepared',
+        clock(),
+      )
+      return describe(
+        frame,
+        save(op, 'prepared', { prepared: receipt, latest: receipt }),
+      )
+    }
+    if (
+      frame.target.backend === 'kobralink-anycubic' &&
+      frame.target.client_certificate
+    ) {
+      const staged = await stageKobraClientCert(
+        options.stateDirectory,
+        op.operation_id,
+        frame.target.client_certificate,
+        clock(),
+      )
+      if (!staged.ok) return describe(frame, await fail(op, staged.code))
     }
     const bridge = await resolveBridge(op)
     if (typeof bridge === 'string')
@@ -1185,6 +1303,56 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       if (credentialFile !== stagedPath) removePrivateFile(stagedPath)
       return describe(frame, await finalizeCommit(committing))
     }
+    if (op.target.backend === 'kobra-x') {
+      if (!op.printer || !op.bridge_instance_id)
+        return errorFrame(frame.request_id, 'identity-conflict')
+      const identity = await deriveConfigurationAssignmentIdentity({
+        account_id: context.account_id,
+        farm_id: context.farm_id,
+        agent_id: context.agent_id,
+        bridge_instance_id: op.bridge_instance_id,
+        device_id: op.printer.device_id,
+      })
+      const trustPath = kobraXTrustPath(options.stateDirectory, op.operation_id)
+      const certFile = assignmentKobraCertPath(
+        options.stateDirectory,
+        identity.assignment_id,
+      )
+      try {
+        assertKobraXUnclaimed(
+          options.runtime,
+          readKobraXTrust(trustPath),
+          identity,
+        )
+      } catch {
+        return errorFrame(frame.request_id, 'identity-conflict')
+      }
+      if (!(await stillCurrent(context)))
+        return errorFrame(frame.request_id, 'capability-rejected')
+      const plan = {
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+        credential_file: certFile,
+        client_cert_file: certFile,
+        committed_revision: op.expected_revision + 1,
+      }
+      const committing = save(op, 'committing', { plan })
+      try {
+        commitKobraX(
+          options.runtime,
+          options.stateDirectory,
+          op.operation_id,
+          plan,
+          trustPath,
+        )
+      } catch {
+        if (!kobraXRuntimeContains(options.runtime, plan)) {
+          save(committing, 'prepared', { plan: null })
+          return errorFrame(frame.request_id, 'not-available')
+        }
+      }
+      return describe(frame, await finalizeCommit(committing))
+    }
     const bridge = op.bridge_instance_id
       ? custody.find(op.bridge_instance_id)
       : null
@@ -1217,6 +1385,12 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (!(await stillCurrent(context)))
       return errorFrame(frame.request_id, 'capability-rejected')
     const assignmentId = identity.assignment_id
+    ensurePrivateDirectory(join(options.stateDirectory, 'credentials'))
+    const clientCertFile = commitStagedKobraClientCert(
+      options.stateDirectory,
+      op.operation_id,
+      assignmentId,
+    )
     const plan = {
       assignment_id: assignmentId,
       printer_key: identity.printer_key,
@@ -1225,9 +1399,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         'credentials',
         `${assignmentId}.json`,
       ),
+      ...(clientCertFile ? { client_cert_file: clientCertFile } : {}),
       committed_revision: op.expected_revision + 1,
     }
-    ensurePrivateDirectory(join(options.stateDirectory, 'credentials'))
     const committing = save(op, 'committing', { plan })
     try {
       commitRuntimeAssignment(options.runtime, plan, bridge, op.printer)
@@ -1282,6 +1456,18 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       op.stage !== 'inventory-confirmed'
     )
       discardStagedBambu(options.stateDirectory, op.operation_id)
+    if (
+      op.target.backend === 'kobralink-anycubic' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      discardStagedKobraCert(options.stateDirectory, op.operation_id)
+    if (
+      op.target.backend === 'kobra-x' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      discardStagedKobraX(options.stateDirectory, op.operation_id)
     switch (op.stage) {
       case 'local-committed':
       case 'inventory-confirmed':
@@ -1493,8 +1679,14 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             const bambu = op.target.backend === 'bambu'
             const creality = op.target.backend === 'creality'
             const anycubic = op.target.backend === 'anycubic'
+            const kobraX = op.target.backend === 'kobra-x'
             const identity =
-              (bridge || moonraker || bambu || creality || anycubic) &&
+              (bridge ||
+                moonraker ||
+                bambu ||
+                creality ||
+                anycubic ||
+                kobraX) &&
               op.bridge_instance_id
                 ? await deriveConfigurationAssignmentIdentity({
                     account_id: context.account_id,
@@ -1506,36 +1698,43 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
                 : null
             // The committed runtime must still hold exactly this assignment.
             if (
-              (!bridge && !moonraker && !bambu && !creality && !anycubic) ||
+              (!bridge &&
+                !moonraker &&
+                !bambu &&
+                !creality &&
+                !anycubic &&
+                !kobraX) ||
               !identity ||
               identity.assignment_id !== op.plan.assignment_id ||
               identity.printer_key !== op.plan.printer_key ||
               !(op.target.backend === 'anycubic'
                 ? anycubicRuntimeContains(options.runtime, op.target, op.plan)
-                : op.target.backend === 'moonraker'
-                  ? moonrakerRuntimeContains(
-                      options.runtime,
-                      new URL(op.target.origin).origin,
-                      op.plan,
-                    )
-                  : op.target.backend === 'bambu'
-                    ? bambuRuntimeContains(
+                : op.target.backend === 'kobra-x'
+                  ? kobraXRuntimeContains(options.runtime, op.plan)
+                  : op.target.backend === 'moonraker'
+                    ? moonrakerRuntimeContains(
                         options.runtime,
-                        op.target.serial,
+                        new URL(op.target.origin).origin,
                         op.plan,
                       )
-                    : op.target.backend === 'creality'
-                      ? crealityRuntimeContains(
+                    : op.target.backend === 'bambu'
+                      ? bambuRuntimeContains(
                           options.runtime,
-                          op.target.host,
+                          op.target.serial,
                           op.plan,
                         )
-                      : bridge &&
-                        runtimeContains(
-                          options.runtime,
-                          bindingFor(op.plan, bridge, op.printer),
-                          op.plan,
-                        ))
+                      : op.target.backend === 'creality'
+                        ? crealityRuntimeContains(
+                            options.runtime,
+                            op.target.host,
+                            op.plan,
+                          )
+                        : bridge &&
+                          runtimeContains(
+                            options.runtime,
+                            bindingFor(op.plan, bridge, op.printer),
+                            op.plan,
+                          ))
             )
               return { ok: false, reason: 'mismatch' }
             let accepted = false

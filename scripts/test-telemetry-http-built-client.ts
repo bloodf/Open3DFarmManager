@@ -6,8 +6,9 @@ import { ConnectorIdentity } from '../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../packages/connector/src/cloud/queue.ts'
 import { drainTelemetryOnce } from '../packages/connector/src/cloud/drain.ts'
 import { createAuthenticatedTelemetrySender } from '../packages/connector/src/cloud/authenticated-http-telemetry.ts'
+import { assertSupportedNodeRuntime } from '../tests/helpers/node-version.ts'
 
-if (process.version !== 'v24.22.3') throw new Error('Node 24.22.3 is required')
+assertSupportedNodeRuntime()
 const path = process.env.TELEMETRY_HTTP_BUILT_FIXTURE
 const phase = process.env.TELEMETRY_HTTP_BUILT_PHASE
 if (

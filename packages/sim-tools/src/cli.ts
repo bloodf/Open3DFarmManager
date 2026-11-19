@@ -1,5 +1,10 @@
 import { Effect } from 'effect'
 import { probePrinter } from './probe.ts'
+import { isMockSim } from './mocks/env.ts'
+import {
+  startMoonrakerMock,
+  type MoonrakerMockInstance,
+} from './mocks/moonraker-mock.ts'
 
 export interface SmokeTarget {
   name: string
@@ -12,45 +17,66 @@ export const profileTargets: SmokeTarget[] = [
 ]
 
 export async function runSmoke(
-  targets: SmokeTarget[] = profileTargets,
+  targets?: SmokeTarget[],
   probe: (origin: string) => Promise<unknown> = (origin) =>
     Effect.runPromise(probePrinter(origin)),
 ): Promise<boolean> {
-  const deadline = Date.now() + 90_000
-  const pending = new Set(targets)
-  const ready = new Set<string>()
-  const lastErrors = new Map<string, string>()
+  const useMocks = targets === undefined && isMockSim()
 
-  while (pending.size > 0 && Date.now() < deadline) {
-    for (const target of [...pending]) {
-      try {
-        await probe(target.origin)
-        ready.add(target.name)
-        pending.delete(target)
-      } catch (error) {
-        lastErrors.set(
-          target.name,
-          error instanceof Error ? error.message : 'probe failed',
-        )
+  const ownedMocks: MoonrakerMockInstance[] = []
+  let resolvedTargets: SmokeTarget[]
+  try {
+    if (useMocks) {
+      const sv06 = await startMoonrakerMock({ profile: 'sv06' })
+      ownedMocks.push(sv06)
+      const u1 = await startMoonrakerMock({ profile: 'u1' })
+      ownedMocks.push(u1)
+      resolvedTargets = [
+        { name: 'sv06', origin: sv06.origin },
+        { name: 'u1', origin: u1.origin },
+      ]
+    } else {
+      resolvedTargets = targets ?? profileTargets
+    }
+
+    const deadline = Date.now() + 90_000
+    const pending = new Set(resolvedTargets)
+    const ready = new Set<string>()
+    const lastErrors = new Map<string, string>()
+
+    while (pending.size > 0 && Date.now() < deadline) {
+      for (const target of [...pending]) {
+        try {
+          await probe(target.origin)
+          ready.add(target.name)
+          pending.delete(target)
+        } catch (error) {
+          lastErrors.set(
+            target.name,
+            error instanceof Error ? error.message : 'probe failed',
+          )
+        }
+      }
+      if (pending.size > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     }
-    if (pending.size > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    for (const target of resolvedTargets) {
+      if (ready.has(target.name))
+        console.log(
+          `SIM_SMOKE_READY: ${target.name} Moonraker connected and Klipper ready`,
+        )
+      else
+        console.error(
+          `SIM_SMOKE_NOT_READY: ${target.name} did not reach ready state within 90 seconds${lastErrors.has(target.name) ? ` (${lastErrors.get(target.name)})` : ''}`,
+        )
     }
-  }
 
-  for (const target of targets) {
-    if (ready.has(target.name))
-      console.log(
-        `SIM_SMOKE_READY: ${target.name} Moonraker connected and Klipper ready`,
-      )
-    else
-      console.error(
-        `SIM_SMOKE_NOT_READY: ${target.name} did not reach ready state within 90 seconds${lastErrors.has(target.name) ? ` (${lastErrors.get(target.name)})` : ''}`,
-      )
+    return pending.size === 0
+  } finally {
+    await Promise.allSettled(ownedMocks.map((mock) => mock.close()))
   }
-
-  return pending.size === 0
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

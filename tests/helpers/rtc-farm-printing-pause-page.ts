@@ -1,3 +1,4 @@
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -5,7 +6,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { expect } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import type { ProvisionedSignallingFixture } from './signalling-https-fixture-contract.ts'
 import { runPrintingPause, PAUSED_UI } from './rtc-farm-printing-pause.ts'
 
@@ -41,6 +42,10 @@ export async function testPrintingPausePage(input: {
   assert.equal(url.protocol, 'http:')
   // Prove the target is the explicitly supplied infra/sim sv06 container,
   // rather than trusting a loopback origin (which may front real hardware).
+  assert.ok(
+    isDockerSim(),
+    'This container fixture requires OPENFARM_SIM=docker',
+  )
   const container = process.env.SIGNALLING_HTTPS_SIM_CONTAINER ?? ''
   assert.match(
     container,

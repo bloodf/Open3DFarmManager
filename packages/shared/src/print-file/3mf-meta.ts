@@ -1,5 +1,12 @@
-import { parseGcodeMetadata, type GcodeSource } from './gcode-meta.ts'
-import type { PrintFileMetadata } from './metadata.ts'
+import {
+  GCODE_HEAD_BYTES,
+  GCODE_TAIL_BYTES,
+  type GcodeByteSource,
+} from './gcode-meta.ts'
+import {
+  readLibraryGcodeMetadata,
+  type PrintFileMetadata,
+} from './metadata.ts'
 import {
   bufferSource,
   ZipArchive,
@@ -14,8 +21,8 @@ const SLICE_INFO = 'Metadata/slice_info.config'
 const PROJECT_SETTINGS = 'Metadata/project_settings.config'
 const CONFIG_MAX_BYTES = 8 * 1024 * 1024
 const THUMBNAIL_MAX_BYTES = 512 * 1024
-const GCODE_HEAD = 4 * 1024 * 1024
-const GCODE_TAIL = 256 * 1024
+const GCODE_HEAD = GCODE_HEAD_BYTES
+const GCODE_TAIL = GCODE_TAIL_BYTES
 const MAX_PLATES = 256
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
@@ -143,7 +150,7 @@ async function readProject(zip: ZipArchive): Promise<ThreeMfProject> {
     if (thumbnail) plate.thumbnail = thumbnail
     if (gcodePath) {
       plate.gcodePath = gcodePath
-      plate.gcode = await parseGcodeMetadata(
+      plate.gcode = await readLibraryGcodeMetadata(
         await windowedSource(zip, gcodePath),
       )
     }
@@ -185,7 +192,7 @@ async function readThumbnail(
 async function windowedSource(
   zip: ZipArchive,
   name: string,
-): Promise<GcodeSource> {
+): Promise<GcodeByteSource> {
   const { size, head, tail } = await zip.scan(name, GCODE_HEAD, GCODE_TAIL)
   const tailStart = size - tail.length
   return {

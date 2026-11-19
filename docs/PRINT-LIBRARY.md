@@ -122,6 +122,19 @@ the `library.storage.report` frame. File listings carry metadata, thumbnail and
 hash only (`packages/farm-protocol/src/library-storage.ts`). Errors for a full
 disk, a missing file and a hash mismatch are distinct and shown in pt-BR.
 
+`packages/connector/src/library/store.ts` (`ConnectorLibraryStore`) is the
+published in-memory store contract with the same content-addressed, quota and
+hash-verification rules; the host store above adds the persistent index, the
+streaming upload path and the protocol reports that Connector mode needs.
+
+### Print file metadata
+
+G-code metadata is read by `packages/shared/src/print-file/gcode-meta.ts`
+(`readGcodeMetadata`, first and last 256 KiB only, `schema.ts` shape). The
+library stores a flat shape (`print-file/metadata.ts`); `fromGcodeMetadata`
+maps the parser result onto it for uploads, 3MF plate G-code and replay
+compatibility checks.
+
 ### Migration over the Connector session
 
 Switching mode alone never copies or deletes files. A migration, in either

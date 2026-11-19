@@ -226,7 +226,16 @@ async function refreshAccount() {
       </label>
     </header>
     <aside class="sidebar">
-      <ShellNavigation :links="links" :path="route.path" />
+      <nav aria-label="Navegação principal">
+        <NuxtLink
+          v-for="link in links"
+          :key="link.to"
+          :to="link.to"
+          :aria-current="route.path === link.to ? 'page' : undefined"
+        >
+          {{ link.label }}
+        </NuxtLink>
+      </nav>
     </aside>
     <div id="conteudo-shell" class="content" tabindex="-1">
       <header v-if="section && section.to !== '/'">
@@ -313,6 +322,25 @@ input {
 }
 .sidebar {
   background: var(--surface-raised);
+}
+.sidebar nav {
+  display: grid;
+  gap: var(--space-2);
+}
+.sidebar a {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  padding-inline: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.sidebar a[aria-current='page'] {
+  background: var(--surface);
+  font-weight: 700;
+}
+a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 .content ol {
   display: flex;

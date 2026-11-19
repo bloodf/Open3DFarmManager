@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
+import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
 import {
   formatPrinterStateLabel,
@@ -8,19 +9,27 @@ import {
   type FarmObservation,
 } from '../../utils/farm-view.ts'
 
-const props = defineProps<{
-  name: string
-  detailHref: string
-  group?: string
-  location?: string
-  observation?: FarmObservation | null
-  now: { wall: number; mono: number }
-  nozzleTarget?: number
-  bedTarget?: number
-  thumbnailUrl?: string
-  activeSpools?: readonly ActiveSpool[]
-  alerts?: readonly string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    name: string
+    detailHref: string
+    group?: string
+    location?: string
+    observation?: FarmObservation | null
+    now: { wall: number; mono: number }
+    nozzleTarget?: number
+    bedTarget?: number
+    thumbnailUrl?: string
+    activeSpools?: readonly ActiveSpool[]
+    /** Plain labels, or the farm alerts so each chip keeps its kind. */
+    alerts?: readonly (string | FarmAlert)[]
+    /** Heading level of the printer name, to fit the page outline. */
+    headingLevel?: 2 | 3 | 4
+    /** Inside another printer article: render a block, not a second article. */
+    embedded?: boolean
+  }>(),
+  { headingLevel: 2, embedded: false },
+)
 
 const icons = {
   idle: '○',
@@ -70,6 +79,13 @@ function temperature(value: number | undefined) {
     : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
 }
 
+const alertLabel = (alert: string | FarmAlert) =>
+  typeof alert === 'string' ? alert : alert.label
+const alertKey = (alert: string | FarmAlert) =>
+  typeof alert === 'string' ? alert : alert.id
+const alertKind = (alert: string | FarmAlert) =>
+  typeof alert === 'string' ? undefined : alert.kind
+
 function spoolLabel(spool: ActiveSpool) {
   return (
     spool.name ||
@@ -80,10 +96,10 @@ function spoolLabel(spool: ActiveSpool) {
 </script>
 
 <template>
-  <article class="wall-printer">
-    <h2>
+  <component :is="embedded ? 'div' : 'article'" class="wall-printer">
+    <component :is="`h${headingLevel}`">
       <a :href="detailHref">{{ name }}</a>
-    </h2>
+    </component>
     <p v-if="group || location">
       {{ [group, location].filter(Boolean).join(' · ') }}
     </p>
@@ -162,8 +178,13 @@ function spoolLabel(spool: ActiveSpool) {
       </li>
     </ul>
     <ul v-if="alerts?.length" class="wall-printer__alerts" aria-label="Alertas">
-      <li v-for="alert in alerts" :key="alert" class="wall-printer__badge">
-        {{ alert }}
+      <li
+        v-for="alert in alerts"
+        :key="alertKey(alert)"
+        class="wall-printer__badge"
+        :data-alert-kind="alertKind(alert)"
+      >
+        {{ alertLabel(alert) }}
       </li>
     </ul>
     <p v-if="!age">Nenhuma atualização recebida</p>
@@ -175,7 +196,7 @@ function spoolLabel(spool: ActiveSpool) {
       }}
       <span v-if="age.stale"> · Dados desatualizados</span>
     </p>
-  </article>
+  </component>
 </template>
 
 <style>

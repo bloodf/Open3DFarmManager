@@ -18,6 +18,10 @@ import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
+import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
+import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
+import { useStatusSummary } from '../composables/useStatusSummary.ts'
+import { wallCardProps } from '../utils/farm-wall-card.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
 import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
@@ -69,6 +73,11 @@ const offlineStates = computed(() =>
 const offlineVisible = computed(
   () => !liveFeedConnected.value && offlineStates.value.length > 0,
 )
+// The whole farm in one bounded request: counts and latest states even for
+// printers outside the assignment page the wall lists.
+const statusSummary = useStatusSummary({
+  farmId: () => ready.value?.scope?.farmId,
+})
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -271,6 +280,12 @@ function cancelPause(event: Event) {
           "
         />
         <PrinterAlerts :alerts="alertsSummary" />
+        <PrinterWallSummary
+          :summary="statusSummary.summary.value"
+          :fetched-at="statusSummary.fetchedAt.value"
+          :failed="statusSummary.failed.value"
+          :now-wall-ms="liveNow().wall"
+        />
         <section
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"
@@ -365,6 +380,21 @@ function cancelPause(event: Event) {
                     @save="saveLink(row.assignment.assignmentId)"
                     @cancel="delete drafts[row.assignment.assignmentId]"
                   >
+                    <template #summary>
+                      <PrinterWallCard
+                        v-bind="
+                          wallCardProps(
+                            row,
+                            alertsSummary.byAssignment[
+                              row.assignment.assignmentId
+                            ] ?? [],
+                          )
+                        "
+                        :now="liveNow()"
+                        :heading-level="wallQuery.groupBy ? 4 : 3"
+                        embedded
+                      />
+                    </template>
                     <template #local-link>
                       <a
                         :href="displayLocalOrigin(row) ?? undefined"

@@ -33,7 +33,7 @@ const rows = computed(() =>
   jobs.value.map((job) => ({ ...jobHistoryRow(job), job })),
 )
 // Replay: printers and the live signed session are read when a row is opened.
-const live = useReplayLive()
+const live = useReplayLive(farmId)
 const assignments = ref<LibraryReplayAssignment[]>([])
 const profiles = ref<PrinterProfile[]>([])
 const replayPrinters = computed(() =>

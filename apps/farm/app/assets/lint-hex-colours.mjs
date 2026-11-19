@@ -16,13 +16,18 @@ function check(path) {
   const source = readFileSync(path, 'utf8')
   const styles = path.endsWith('.css')
     ? [source]
-    : Array.from(source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g), match => match[1])
+    : Array.from(
+        source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g),
+        (match) => match[1],
+      )
   for (const style of styles) {
     const css = style.replace(/\/\*[\s\S]*?\*\//g, '')
     const declarations = css.matchAll(/(?<=[;{])\s*([\w-]+)\s*:\s*([^;{}]*)/g)
     for (const [, property, value] of declarations) {
       if (path === tokenFile && property.startsWith('--')) continue
-      const hex = value.match(/#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{4}|[\da-f]{3})(?![\w-])/gi)
+      const hex = value.match(
+        /#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{4}|[\da-f]{3})(?![\w-])/gi,
+      )
       if (hex) {
         console.error(`${path}: ${property} uses ${hex.join(', ')}`)
         process.exitCode = 1

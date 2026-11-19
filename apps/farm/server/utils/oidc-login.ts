@@ -87,17 +87,18 @@ export function classifyOidcProtocolError(error: unknown): OidcProtocolError {
   return new OidcProtocolError('invalid', detail)
 }
 
-/** Authorization code + S256 PKCE, with fresh state and nonce. Scope is only `openid`. */
+/** Authorization code + S256 PKCE, with fresh state and nonce. */
 export async function beginOidcAuthorization(
   config: Configuration,
   redirectUri: string,
+  scope = 'openid',
 ): Promise<OidcTransaction & { url: URL }> {
   const codeVerifier = randomPKCECodeVerifier()
   const state = randomState()
   const nonce = randomNonce()
   const url = buildAuthorizationUrl(config, {
     redirect_uri: redirectUri,
-    scope: 'openid',
+    scope,
     code_challenge: await calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: 'S256',
     state,
@@ -118,13 +119,13 @@ export function oidcCallbackUrl(redirectUri: string, incoming: URL): URL {
 
 /**
  * Exchanges the code and returns the verified issuer and subject.
- * Email, role and group claims are not returned.
+ * Email claims stay internal until a provider-specific policy accepts them.
  */
-export async function finishOidcAuthorization(
+async function finishOidcClaims(
   config: Configuration,
   currentUrl: URL,
   transaction: OidcTransaction,
-): Promise<OidcIdentity> {
+): Promise<OidcIdentity & { email?: unknown; email_verified?: unknown }> {
   try {
     const tokens = await authorizationCodeGrant(config, currentUrl, {
       pkceCodeVerifier: transaction.codeVerifier,
@@ -146,10 +147,50 @@ export async function finishOidcAuthorization(
       /[\u0000-\u001f\u007f]/.test(subject)
     )
       throw new OidcProtocolError('invalid', 'rejected identity')
-    return Object.freeze({ issuer, subject })
+    return Object.freeze({
+      issuer,
+      subject,
+      email: claims.email,
+      email_verified: claims.email_verified,
+    })
   } catch (error) {
     throw classifyOidcProtocolError(error)
   }
+}
+
+/** Generic OIDC deliberately does not expose provider email claims. */
+export async function finishOidcAuthorization(
+  config: Configuration,
+  currentUrl: URL,
+  transaction: OidcTransaction,
+): Promise<OidcIdentity> {
+  const { issuer, subject } = await finishOidcClaims(
+    config,
+    currentUrl,
+    transaction,
+  )
+  return Object.freeze({ issuer, subject })
+}
+
+/** Call only for the Google provider after normal OIDC token validation. */
+export async function finishGoogleAuthorization(
+  config: Configuration,
+  currentUrl: URL,
+  transaction: OidcTransaction,
+): Promise<OidcIdentity & { readonly email: string }> {
+  const claims = await finishOidcClaims(config, currentUrl, transaction)
+  if (
+    claims.email_verified !== true ||
+    typeof claims.email !== 'string' ||
+    claims.email.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(claims.email)
+  )
+    throw new OidcProtocolError('invalid', 'verified email required')
+  return Object.freeze({
+    issuer: claims.issuer,
+    subject: claims.subject,
+    email: claims.email.toLowerCase(),
+  })
 }
 
 const usernamePattern = /^[a-z0-9_-]{3,64}$/

@@ -91,6 +91,20 @@ npm run test:e2e
 
 O segundo fluxo requer o build produzido pelo primeiro. Para reproduzir os jobs e seus pré-requisitos, consulte [CI local](docs/LOCAL-CI.md). Para Klipper, veja o [guia do simulador](infra/sim/README.md). Os testes automatizados não devem enviar comandos a impressoras físicas.
 
+## Rodar no desktop
+
+Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 24.22.x**, npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
+
+```sh
+npm ci --ignore-scripts          # sem rede: bundle offline, veja docs/desktop-offline-install.md
+npm run build
+npm run dev                      # interface de desenvolvimento em http://127.0.0.1:3000
+npm run desktop:check -- --only app-smoke   # app compilado + Connector + simuladores; abre /farm no Chrome
+npm run desktop:check -- --list  # passos disponíveis
+```
+
+Os simuladores rodam como processos de teste em loopback; não há um comando persistente para mantê-los de pé. `OPENFARM_SIM=mock` (padrão) e `OPENFARM_PG` (cluster local) mantêm tudo fora do Docker; `OPENFARM_SIM=docker` e `OPENFARM_PG=docker` são opt-in e recusados pelo `desktop:check`. Offline, a Bambu Cloud fica desligada e as câmeras RTSP só funcionam com Go. Detalhes e limites em [docs/DESKTOP.md](docs/DESKTOP.md).
+
 ## Como as peças se conectam
 
 ```mermaid

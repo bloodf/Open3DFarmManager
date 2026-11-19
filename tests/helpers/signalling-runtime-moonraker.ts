@@ -256,7 +256,13 @@ export async function createRuntimeMoonrakerFixture() {
                     audience: 'open3dfarmmanager:pause',
                     credentialAudience: input.audience,
                   },
-                  control: { assignmentId: ref.assignmentId },
+                  control: {
+                    assignmentId: ref.assignmentId,
+                    // The admin's per-printer console switch (off unless named).
+                    ...(process.env.SIGNALLING_HTTPS_CONSOLE === 'yes'
+                      ? { consoleAssignmentIds: [ref.assignmentId] }
+                      : {}),
+                  },
                 },
               }
             : {}),

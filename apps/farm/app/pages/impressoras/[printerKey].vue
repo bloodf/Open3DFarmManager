@@ -872,7 +872,7 @@ onMounted(() => heading.value?.focus())
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
-      <template #config-editor>
+      <template #configuracao>
         <ConfigEditorPanel
           v-if="configAdvertised"
           :key="row.assignment.assignmentId"

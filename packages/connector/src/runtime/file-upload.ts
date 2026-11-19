@@ -269,9 +269,17 @@ export function createFileUpload(
           busy = false
         })
     },
-    async close() {
+    /**
+     * Ends the handler. The browser closes the file channel as soon as a
+     * transfer is done, and the staged config must outlive that: the signed
+     * `config_write` that consumes it arrives afterwards on the control
+     * channel. `keepStaged` is for that channel close; the peer's own close
+     * clears the staged payload.
+     */
+    async close(options?: { keepStaged?: boolean }) {
       closed = true
-      if (stagedTransport) stagedConfigs.delete(stagedTransport)
+      if (stagedTransport && !options?.keepStaged)
+        stagedConfigs.delete(stagedTransport)
       controller.abort()
       await transfer?.abort()
       transfer = undefined

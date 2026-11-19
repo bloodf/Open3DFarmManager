@@ -11,7 +11,7 @@ import {
   createPrinterDetailSubscriptions,
   decodePrinterDetailFrame,
   encodePrinterDetailFrames,
-  MAX_PRINTER_DETAIL_WIRE_BYTES,
+  MAX_PRINTER_DETAIL_APPLICATION_BYTES,
 } from '../../packages/farm-protocol/src/printer-detail.ts'
 import {
   installNetworkGuard,
@@ -245,7 +245,7 @@ describe('printer detail stream protocol', () => {
     expect(wires.length).toBeGreaterThan(2)
     for (const wire of wires) {
       expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(
-        MAX_PRINTER_DETAIL_WIRE_BYTES,
+        MAX_PRINTER_DETAIL_APPLICATION_BYTES,
       )
       expect(decodePrinterDetailFrame(wire).t).toBe('detail.chunk')
     }
@@ -259,6 +259,37 @@ describe('printer detail stream protocol', () => {
       }),
     )
     expect(() => assemblePrinterDetailFrames(wrongPrinter)).toThrow()
+  })
+
+  it('never emits a wire over the 2048-byte RTC application cap', () => {
+    // A frame between 2 and 8 KiB used to go out whole and close the session.
+    const rows = Array.from({ length: 10 }, (_, row) =>
+      Array.from({ length: 10 }, (_, col) => -0.05 - row * 0.011 + col * 0.003),
+    )
+    const mesh = {
+      ...update,
+      capabilities: ['heaters', 'bed-mesh'],
+      detail: {
+        ...update.detail,
+        bedMesh: {
+          profile: 'frio',
+          min: [0, 0],
+          max: [220, 220],
+          rows,
+          probed: rows,
+          profiles: ['default', 'frio'],
+        },
+      },
+    }
+    const wires = encodePrinterDetailFrames(mesh, 'transfer-a')
+    expect(wires.length).toBeGreaterThan(1)
+    for (const wire of wires)
+      expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(
+        MAX_PRINTER_DETAIL_APPLICATION_BYTES,
+      )
+    expect(assemblePrinterDetailFrames(wires)).toEqual(mesh)
+    const small = encodePrinterDetailFrames(update, 'transfer-a')
+    expect(small).toHaveLength(1)
   })
 
   it('deduplicates per session, releases on page leave, and closes remaining subscriptions', () => {

@@ -379,6 +379,8 @@ describe('Moonraker console on the E16 mock', () => {
           const result = await attempt('gcode', { line })
           expect(result).toMatchObject({ ok: false, guard: 0 })
           expect((result.error as ConsoleRefusal).code).toBe('not-allowed')
+          // The dispatcher turns this into a not-sent result, not "unknown".
+          expect(result.error).toMatchObject({ refusal: 'invalid-command' })
         }
         expect(mock.control.gcodeScripts).toEqual([])
         expect((await attempt('gcode', { line: 'M220 S120' })).ok).toBe(true)
@@ -413,6 +415,7 @@ describe('Moonraker console on the E16 mock', () => {
       async (mock, attempt) => {
         const result = await attempt('gcode', { line: 'M105' })
         expect((result.error as ConsoleRefusal).code).toBe('unknown-state')
+        expect(result.error).toMatchObject({ refusal: 'state' })
         expect(mock.control.gcodeScripts).toEqual([])
       },
     )

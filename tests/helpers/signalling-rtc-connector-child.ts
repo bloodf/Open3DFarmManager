@@ -12,6 +12,7 @@ import {
   PairingProofAudience,
 } from '../../packages/farm-protocol/src/pairing-proof.ts'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
+import { PACKAGED_CONNECTOR_LIMITS } from './packaged-connector-bounds.ts'
 import type { AuthenticatedConnectorSignallingClient } from '../../packages/connector/src/cloud/authenticated-signalling-client.ts'
 import type { FarmStatusSender } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 
@@ -82,7 +83,7 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
-    packagedFiles: z.number().int().min(0).max(64),
+    packagedFiles: z.number().int().min(0).max(PACKAGED_CONNECTOR_LIMITS.files),
     pauses: z.number().int().min(0).max(64),
     pauseInboxReady: z.boolean(),
     pauseInboxes: z.number().int().nonnegative(),

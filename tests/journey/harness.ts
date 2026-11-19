@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Page } from '@playwright/test'
 import { browserBundle } from '../helpers/browser-bundle.ts'
@@ -324,6 +325,17 @@ export async function startJourneyHarness(
     const machinePost = machinePoster(
       origin,
       await readFile(app.certificatePath),
+    )
+    // The runtime fixture runs the packaged Connector CLI, so build dist/
+    // from this checkout first; a fresh checkout has no build output.
+    execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL('../../packages/connector/build.mjs', import.meta.url),
+        ),
+      ],
+      { timeout: 120_000, stdio: 'pipe' },
     )
     Object.assign(process.env, {
       SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',

@@ -11,7 +11,6 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  realpath,
   rm,
   symlink,
   writeFile,
@@ -21,6 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { signallingHttpsProxy } from '../helpers/signalling-https-proxy.ts'
 import { CAPABILITIES, type JourneyDatabase } from './database.ts'
+import { resolveNuxtInstall } from './nuxt-install.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 export const AUDIENCE = 'open3dfarmmanager:signalling'
@@ -83,7 +83,9 @@ async function run(
   try {
     const [code] = (await once(child, 'close')) as [number | null]
     if (code !== 0)
-      throw new Error(`${command} ${args[0] ?? ''} failed (${code})\n${tail}`)
+      throw new Error(
+        `${[command, ...args].join(' ')} failed (${code})\n${tail}`,
+      )
   } finally {
     clearTimeout(timer)
   }
@@ -125,11 +127,10 @@ export async function startFarmApp(
     const layer = join(directory, 'layer')
     const built = join(layer, 'output')
     await mkdir(layer, { mode: 0o700 })
-    await symlink(
-      await realpath(join(farm, 'node_modules')),
-      join(layer, 'node_modules'),
-      'dir',
-    )
+    // npm workspaces may hoist nuxt to the root; use whichever install the
+    // farm workspace resolves instead of assuming apps/farm/node_modules.
+    const nuxt = await resolveNuxtInstall(farm)
+    await symlink(nuxt.nodeModules, join(layer, 'node_modules'), 'dir')
     await writeFile(
       join(layer, 'nuxt.config.ts'),
       `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(built)} } } })\n`,
@@ -141,14 +142,14 @@ export async function startFarmApp(
       NODE_ENV: 'production',
     }
     await run(
-      join(farm, 'node_modules/.bin/nuxt'),
-      ['prepare'],
+      process.execPath,
+      [nuxt.cli, 'prepare'],
       { cwd: farm, env: buildEnv },
       300_000,
     )
     await run(
-      join(layer, 'node_modules/.bin/nuxt'),
-      ['build'],
+      process.execPath,
+      [nuxt.cli, 'build'],
       { cwd: layer, env: buildEnv },
       900_000,
     )

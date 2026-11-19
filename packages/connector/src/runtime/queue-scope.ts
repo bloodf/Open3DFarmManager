@@ -9,7 +9,7 @@ import {
   linkSync,
   unlinkSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { TelemetryQueue } from '../cloud/queue.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
@@ -37,11 +37,13 @@ export function assertUnscopedCollection(directory: string): void {
 /** Receipt absence never authorizes adoption of a previously initialized queue. */
 export function openScopedTelemetryQueue(input: {
   dataDirectory: string
+  telemetryDirectory?: string
   config: AgentRuntimeConfig
   credential: RuntimeCredential
   now: number
 }): TelemetryQueue {
-  const directory = join(input.dataDirectory, 'telemetry')
+  const directory =
+    input.telemetryDirectory ?? join(input.dataDirectory, 'telemetry')
   const receipt = join(directory, RECEIPT)
   const pending = join(directory, PENDING)
   const expected = canonicalize({
@@ -79,7 +81,7 @@ export function openScopedTelemetryQueue(input: {
   } else {
     // Exclusive directory creation rejects a competing initializer, even an empty one.
     mkdirSync(directory, { mode: 0o700 })
-    syncDirectory(input.dataDirectory)
+    syncDirectory(dirname(directory))
     for (const name of [
       'telemetry.jsonl',
       'telemetry.lock',

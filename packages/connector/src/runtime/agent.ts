@@ -115,6 +115,7 @@ type AgentInput = {
   configPath: string
   credentialPath: string
   dataDirectory: string
+  telemetryDirectory?: string
   signal: AbortSignal
   onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
@@ -201,6 +202,9 @@ async function runConnectorAgentOnce(
   if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
+    ...(input.telemetryDirectory
+      ? { telemetryDirectory: input.telemetryDirectory }
+      : {}),
     config,
     credential,
     now: clock.now(),

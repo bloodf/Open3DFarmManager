@@ -28,6 +28,8 @@ export const CAPABILITIES = [
   'farm_connector_telemetry_writer',
   'farm_job_history_reader',
   'farm_printer_state_reader',
+  // Print library (server storage mode), for the library and replay journeys.
+  'farm_library',
 ] as const
 
 export type Account = Readonly<{ id: string; username: string }>

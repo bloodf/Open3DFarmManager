@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
+import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
@@ -20,7 +22,20 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
-const view = useFarmView()
+const initialPrinterKey = String(route.params.printerKey ?? '')
+const webcams = shallowRef<
+  Parameters<WebcamDetailOptions['onUpdate']>[0] | null
+>(null)
+const view = useFarmView({
+  printerKey: initialPrinterKey,
+  onUpdate(value) {
+    webcams.value = value
+  },
+  onClose() {
+    webcams.value = null
+  },
+})
+definePageMeta({ key: (route) => route.path })
 const { ready, now } = view
 const heading = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
@@ -322,6 +337,13 @@ onMounted(() => heading.value?.focus())
       @set-led="setLed"
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
+    />
+    <WebcamsPanel
+      v-if="row && live && webcams && printerKey === initialPrinterKey"
+      :webcams="webcams"
+      :stream-for="
+        (uid) => (row ? view.cameraFor(row.assignment.assignmentId, uid) : null)
+      "
     />
     <dialog
       ref="pauseDialog"

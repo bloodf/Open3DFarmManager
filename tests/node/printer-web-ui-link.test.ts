@@ -134,7 +134,10 @@ test('web UI origins reject credentials and the manual override remains credenti
 test('farm page renders the derived link as a safe external anchor', async () => {
   const { readFile } = await import('node:fs/promises')
   const page = await readFile(
-    new URL('../../apps/farm/app/pages/farm.vue', import.meta.url),
+    new URL(
+      '../../apps/farm/app/components/farm/FarmLocalOrigin.vue',
+      import.meta.url,
+    ),
     'utf8',
   )
   const anchor =

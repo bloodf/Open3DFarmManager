@@ -1,26 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { build, type Plugin } from 'esbuild'
 
 const app = resolve(import.meta.dirname, '../../apps/farm')
 const components = join(app, 'app/components')
 const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 
-// Compile the production components and the farm page's actual confirmation dialog.
+// Compile the production components and the farm confirmation dialog component.
 export async function farmControlsBundle() {
-  const page = readFileSync(join(app, 'app/pages/farm.vue'), 'utf8')
-  const start = page.indexOf('    <dialog\n      ref="pauseDialog"')
-  const end = page.indexOf('    </dialog>', start) + '    </dialog>'.length
-  if (start < 0 || end < start)
-    throw new Error('Farm confirmation dialog not found')
-  const dialog = page.slice(start, end)
   const entry = `<script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import PrinterControls from './PrinterControls.vue'
 import FarmExtendedControls from './FarmExtendedControls.vue'
-import { actionDialogTitle, actionDialogDescription, actionButtonConfirmationLabel, type ControlAction } from '../utils/farm-control.ts'
-import { extendedLabel } from '../utils/farm-control-extended.ts'
+import FarmControlDialog from './farm/FarmControlDialog.vue'
+import type { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import type { FarmPauseControlState } from '../utils/webrtc/farm-pause-control.ts'
 const now = { wall: Date.now(), mono: performance.now() }
 const keys = { kind: 'available', selected: 'synthetic-key', choices: [] }
 // A spec may mount its own printers (name, state, controls) before the bundle runs.
@@ -33,14 +28,24 @@ const printers: any[] = (window as any).farmControlsPrinters ?? [
 const rows = printers.map(({name, controls, state}) => ({ assignment: { assignmentId: name, printerKey: name, status: 'active', connectorStatus: 'approved' }, connection: 'authenticated', observation: { state: { state: state ?? (name === 'Klipper' ? 'idle' : 'printing'), observedAt: now.wall, controls }, received: now, historical: false, sourceClockComparable: true } }))
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
-const pauseTarget = ref<any>(null)
-const pauseState = ref({ kind: 'ready' })
+const pauseTarget = ref<{
+  assignmentId: string
+  printerKey: string
+  action: ExtendedControlAction
+  args: Record<string, unknown>
+} | null>(null)
+const pauseState = ref<FarmPauseControlState>({ kind: 'ready' })
 const pauseRemaining = 60
 const pauseStatus = ''
 const issued: unknown[] = []
 ;(window as any).farmControlsIssued = issued
-async function open(row: any, action: string, args: Record<string, unknown> = {}) {
-  pauseTarget.value = { printerKey: row.assignment.printerKey, action, args }
+async function open(row: any, action: ExtendedControlAction, args: Record<string, unknown> = {}) {
+  pauseTarget.value = {
+    assignmentId: row.assignment.assignmentId,
+    printerKey: row.assignment.printerKey,
+    action,
+    args,
+  }
   await nextTick()
   pauseDialog.value?.showModal()
   pauseCancel.value?.focus()
@@ -52,7 +57,19 @@ function cancelPause(event: Event) { event.preventDefault(); closePause() }
 <template><div><article v-for="row in rows" :key="row.assignment.printerKey" :aria-label="row.assignment.printerKey">
 <PrinterControls :row="row" :keys="keys" :control-enabled="true" :command-in-flight="false" :now="now" @action="(action) => open(row, action)" />
 <FarmExtendedControls :row="row" :keys="keys" :control-enabled="true" :command-in-flight="false" :now="now" @action="(action, args) => open(row, action, args)" />
-</article>${dialog}</div></template>`
+</article>
+<FarmControlDialog
+  v-model:pause-dialog="pauseDialog"
+  v-model:pause-cancel="pauseCancel"
+  :pause-target="pauseTarget"
+  :pause-state="pauseState"
+  :pause-remaining="pauseRemaining"
+  :pause-status="pauseStatus"
+  @confirm="confirmControl"
+  @close="closePause"
+  @cancel="cancelPause"
+/>
+</div></template>`
   const compile = (source: string, filename: string) => {
     const { descriptor, errors } = sfc.parse(source, { filename })
     if (errors.length) throw errors[0]
@@ -65,7 +82,8 @@ function cancelPause(event: Event) { event.preventDefault(); closePause() }
       builder.onLoad({ filter: /\.vue$/ }, ({ path }) => ({
         contents: compile(readFileSync(path, 'utf8'), path),
         loader: 'ts',
-        resolveDir: components,
+        // Resolve relative imports from the SFC file, including nested farm/.
+        resolveDir: dirname(path),
       }))
     },
   }

@@ -26,6 +26,8 @@ export interface BambuSimulatorOptions {
   ftpsPort?: number | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   initialTargetTemperature?: number | undefined
+  /** Layer of a print already in progress (RUNNING or PAUSE) at start-up. */
+  initialLayer?: number | undefined
   /** Reported as `nozzle_diameter`; absent unless given. */
   nozzleDiameter?: string | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
@@ -50,6 +52,7 @@ export async function startBambuSimulator({
   ftpsPort = 0,
   initialState,
   initialTargetTemperature,
+  initialLayer,
   nozzleDiameter,
   confirmCommands = true,
   versionModules,
@@ -73,11 +76,23 @@ export async function startBambuSimulator({
   )
     throw new Error('Invalid print configuration')
 
+  if (
+    initialLayer !== undefined &&
+    (initialState === undefined ||
+      initialState === 'IDLE' ||
+      !Number.isInteger(initialLayer) ||
+      initialLayer < 0 ||
+      initialLayer > totalLayers)
+  )
+    throw new Error('Invalid initial layer')
+
   const uploads = new Map<string, Buffer>()
   const timelapse = new Map<string, Buffer>()
   /** Every accepted `gcode_line` script, in arrival order. */
   const gcodeLines: string[] = []
   let timer: ReturnType<typeof setInterval> | undefined
+  // Only an uploaded print advances on its own; resume keeps that mode.
+  let timed = false
   let elapsed = 0
   let lastTick = 0
   const reportTopic = `device/${serial}/report`
@@ -99,6 +114,9 @@ export async function startBambuSimulator({
     ...(initialTargetTemperature === undefined
       ? {}
       : { nozzle_target_temper: initialTargetTemperature }),
+    ...(initialLayer === undefined
+      ? {}
+      : { layer_num: initialLayer, total_layer_num: totalLayers }),
     ...(nozzleDiameter === undefined
       ? {}
       : { nozzle_diameter: nozzleDiameter }),
@@ -146,6 +164,7 @@ export async function startBambuSimulator({
         extended.total_layer_num = totalLayers
         if (fraction === 1) {
           gcodeState = 'FINISH'
+          timed = false
           stopTimer()
         }
         emitCurrentReport()
@@ -287,6 +306,7 @@ export async function startBambuSimulator({
         if (printDurationMs !== undefined) {
           extended.layer_num = 0
           extended.total_layer_num = totalLayers
+          timed = true
           startTimer()
         } else delete extended.mc_percent
       } else if (command === 'ams_change_filament') {
@@ -300,8 +320,9 @@ export async function startBambuSimulator({
             : command === 'resume'
               ? 'RUNNING'
               : 'IDLE'
+      if (command === 'stop') timed = false
       if (command === 'pause' || command === 'stop') stopTimer()
-      if (command === 'resume') startTimer()
+      if (command === 'resume' && timed) startTimer()
 
       emitCurrentReport()
     },
@@ -409,6 +430,7 @@ export async function startBambuSimulator({
     setPrintProgress(percent: number) {
       if (!Number.isInteger(percent) || percent < 0 || percent > 99)
         throw new Error('Invalid progress')
+      timed = false
       stopTimer()
       gcodeState = 'RUNNING'
       extended.mc_percent = percent
@@ -418,6 +440,7 @@ export async function startBambuSimulator({
     finishPrint() {
       if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
         throw new Error('No active print')
+      timed = false
       stopTimer()
       gcodeState = 'FINISH'
       extended.mc_percent = 100
@@ -426,6 +449,7 @@ export async function startBambuSimulator({
     failPrint() {
       if (gcodeState !== 'RUNNING' && gcodeState !== 'PAUSE')
         throw new Error('No active print')
+      timed = false
       stopTimer()
       gcodeState = 'FAILED'
       emitCurrentReport()

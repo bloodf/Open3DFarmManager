@@ -15,6 +15,7 @@ export {
   TelemetryEvent,
   DiscoveryResults,
   TelemetryBatch,
+  TELEMETRY_BATCH_JSON_LIMITS,
   PrinterTransition,
   telemetryPrinterKey,
 } from './telemetry.ts'

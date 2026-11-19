@@ -96,7 +96,7 @@ export function createPauseDriverRouter(config: {
     if (bambu)
       return bambu.control
         ? bambuControls(
-            config.bambuModel?.(binding),
+            config.bambuModel?.(binding) ?? bambu.model,
             config.gcodeConsole?.(binding) === true,
           )
         : []

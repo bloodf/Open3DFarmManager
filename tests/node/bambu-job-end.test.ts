@@ -163,6 +163,7 @@ test(
         await until(() => latest()?.lastJob?.outcome === outcome)
         const finished = latest()?.lastJob
         assert.ok(Number.isSafeInteger(finished?.endedAt))
+        assert.equal(finished?.filename, 'test.3mf')
         await delay(100)
         assert.deepEqual(latest()?.lastJob, finished)
       }

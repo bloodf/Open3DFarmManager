@@ -73,6 +73,16 @@ function requireSync(callback: () => void) {
 let generation = 0
 
 /** Injection only. The caller supplies existing keys; current authorization remains server-owned. */
+function rateLimited(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const status =
+    'statusCode' in error
+      ? error.statusCode
+      : 'status' in error
+        ? error.status
+        : undefined
+  return status === 429
+}
 export function createAuthenticatedFarmStatusFeed(
   options: Options,
 ): FarmStatusFeed {
@@ -480,8 +490,10 @@ export function createAuthenticatedFarmStatusFeed(
           if (!current()) return
           await client.start()
           if (!current()) return
-        } catch {
-          close('rejected')
+        } catch (error) {
+          // A rate-limited lookup is server pacing, not a rejected Connector:
+          // the view reopens it with backoff instead of stopping for good.
+          close(rateLimited(error) ? 'disconnected' : 'rejected')
         }
       })()
       return { close }

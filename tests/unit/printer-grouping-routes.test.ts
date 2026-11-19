@@ -250,12 +250,23 @@ describe('printer grouping', () => {
     expect(up).toMatch(
       /\(farm_id, display_name\)\s+WHERE display_name IS NOT NULL/,
     )
+    expect(up).toContain(
+      'GRANT UPDATE (display_name, group_name, location, sort_order)',
+    )
+    expect(up).not.toContain(
+      'REVOKE UPDATE (display_name, group_name, location, sort_order)',
+    )
+    expect(up).toContain('OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL')
     expect(down).toContain('DROP INDEX farm.printer_assignments_display_name')
     expect(down).toContain(
       'REVOKE UPDATE (display_name, group_name, location, sort_order)',
     )
-    expect(down).toContain(
-      previous.split('CREATE FUNCTION ')[1]?.split('CREATE TRIGGER')[0],
-    )
+    const functionBody = (sql: string) =>
+      sql
+        .match(/BEGIN[\s\S]*?\nEND;\s*\$\$;/)?.[0]
+        .replace(/\s+/g, ' ')
+        .replace(/\( /g, '(')
+        .replace(/ \)/g, ')')
+    expect(functionBody(down)).toBe(functionBody(previous))
   })
 })

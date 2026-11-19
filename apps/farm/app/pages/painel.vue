@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: false })
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import PrinterKiosk from '../components/farm/PrinterKiosk.vue'
 import {

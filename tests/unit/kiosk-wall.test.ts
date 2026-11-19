@@ -136,3 +136,15 @@ it('polls every 5 s and requests the screen wake lock', async () => {
   expect(page).toContain('/printer-states')
   expect(page).toContain('background: #0b0d10')
 })
+
+it('shows displayName when present and falls back to printerKey', async () => {
+  const html = await renderFarmComponent(file, {
+    ...props,
+    states: [
+      { ...printer(1), displayName: 'Bancada Alfa' },
+      { ...printer(2), displayName: null },
+    ],
+  })
+  expect(html).toContain('<h2>Bancada Alfa</h2>')
+  expect(html).toContain('<h2>impressora-2</h2>')
+})

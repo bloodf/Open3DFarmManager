@@ -2,6 +2,7 @@ import {
   FileListRequest,
   FileListResponse,
   MAX_FILE_LIST_WIRE_BYTES,
+  type FileListExtra,
   type FileListResult,
 } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { z } from 'zod'
@@ -415,7 +416,7 @@ export class PauseBrowserPeer {
     printerKey: string,
     directory?: string,
     download?: string,
-    config?: { config: true; configPath?: string; offset?: number },
+    config?: FileListExtra,
   ): Promise<FileListResult> {
     const request = FileListRequest.parse({
       ...config,
@@ -467,7 +468,10 @@ export class PauseBrowserPeer {
           if (
             result.ok &&
             (result.download !== undefined) !==
-              (download !== undefined || config?.configPath !== undefined)
+              (download !== undefined ||
+                (config &&
+                  'configPath' in config &&
+                  config.configPath !== undefined))
           )
             throw Error('Unexpected file response')
           cleanup()

@@ -283,7 +283,7 @@ export function readAgentRuntimeConfig(
     renewal: input.renewal,
     assignments,
     signalling: input.signalling,
-    library: input.library,
+    ...(input.library ? { library: input.library } : {}),
     pause,
     /**
      * Local provisioned mapping resolver. It returns the exact handle that was

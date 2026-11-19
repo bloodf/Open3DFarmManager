@@ -10,10 +10,14 @@ import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
 import HistoryPanel from './HistoryPanel.vue'
+import TimelapsePanel from './TimelapsePanel.vue'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 import type { PrinterHistoryJob, PrinterHistoryTotals } from './history-view.ts'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
-import type { QueueOpArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  QueueOpArguments,
+  TimelapseArguments,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   DEFAULT_UNSUPPORTED_REASON,
   detailTabs,
@@ -71,6 +75,16 @@ const props = defineProps<{
     reason?: string
   }
   canEmergencyStop: boolean
+  /** Timelapse: the panel shows the catalog reason when not advertised. */
+  timelapse?: {
+    advertised: boolean
+    files?: readonly string[]
+    rendering?: boolean
+    canCommand: boolean
+    canTransfer?: boolean
+    reason?: string
+    transferReason?: string
+  }
   /** Per-printer history: the panel shows with the catalog reason when not advertised. */
   jobHistory?: {
     advertised: boolean
@@ -113,6 +127,13 @@ const emit = defineEmits<{
   ): void
   (e: 'set-pin', name: string, value: number, event: Event): void
   (e: 'queue-op', args: QueueOpArguments, event: Event): void
+  (e: 'timelapse-op', args: TimelapseArguments, event: Event): void
+  (
+    e: 'timelapse-transfer',
+    kind: 'play' | 'download',
+    file: string,
+    event: Event,
+  ): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -275,6 +296,26 @@ const heaterReason = computed(
           :can-command="queue.canCommand"
           :disabled-reason="queue.reason"
           @queue-op="(args, event) => emit('queue-op', args, event)"
+        />
+        <TimelapsePanel
+          v-else-if="tab.id === 'timelapse' && timelapse"
+          :advertised="timelapse.advertised"
+          :files="timelapse.files"
+          :rendering="timelapse.rendering"
+          :can-command="timelapse.canCommand"
+          :can-transfer="timelapse.canTransfer"
+          :disabled-reason="timelapse.reason"
+          :transfer-reason="timelapse.transferReason"
+          @render="(event) => emit('timelapse-op', { op: 'render' }, event)"
+          @delete="
+            (file, event) => emit('timelapse-op', { op: 'delete', file }, event)
+          "
+          @play="
+            (file, event) => emit('timelapse-transfer', 'play', file, event)
+          "
+          @download="
+            (file, event) => emit('timelapse-transfer', 'download', file, event)
+          "
         />
         <HistoryPanel
           v-else-if="tab.id === 'historico' && jobHistory"

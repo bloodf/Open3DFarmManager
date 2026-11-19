@@ -16,6 +16,7 @@ export const ExtendedControlAction = z.enum([
   'start_library_print',
   'firmware_restart',
   'service',
+  'timelapse',
   'run_macro',
   'load_filament',
   'unload_filament',
@@ -116,6 +117,19 @@ export const ServiceArguments = z.strictObject({
   op: z.enum(['klipper_restart', 'firmware_restart', 'moonraker_restart']),
 })
 export type ServiceOperation = z.infer<typeof ServiceArguments>['op']
+
+/** Timelapse video: a plain file name in the timelapse root, no path. */
+export const TimelapseFileName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && v !== '.' && v !== '..')
+/** Render the captured frames, or delete one rendered video. */
+export const TimelapseArguments = z.discriminatedUnion('op', [
+  z.strictObject({ op: z.literal('render') }),
+  z.strictObject({ op: z.literal('delete'), file: TimelapseFileName }),
+])
+export type TimelapseArguments = z.infer<typeof TimelapseArguments>
 
 export function controlRoleAllowed(
   role: string,
@@ -220,6 +234,7 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
+  z.strictObject({ action: z.literal('timelapse'), args: TimelapseArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({

@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 8
+const SCHEMA_VERSION = 9
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -213,9 +213,13 @@ const queueActionSchema = outputActionSchema.replace(
   "'set_factor'",
   "'set_factor','queue_op'",
 )
-const actionSchema = queueActionSchema.replace(
+const serviceActionSchema = queueActionSchema.replace(
   "'queue_op'",
   "'queue_op','service'",
+)
+const actionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','timelapse'",
 )
 const previousActionSchemas: Record<number, string> = {
   2: legacyActionSchema,
@@ -224,6 +228,7 @@ const previousActionSchemas: Record<number, string> = {
   5: motionActionSchema,
   6: outputActionSchema,
   7: queueActionSchema,
+  8: serviceActionSchema,
 }
 const schema = [
   actionSchema,
@@ -370,7 +375,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION].includes(
+      (![1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION].includes(
         Number(initialVersion),
       ) ||
         initialApplication !== APPLICATION_ID)

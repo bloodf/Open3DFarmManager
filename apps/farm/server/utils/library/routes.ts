@@ -374,8 +374,11 @@ async function upload(
         true,
         'message' in added ? added.message : undefined,
       )
-    // The bytes are referenced unless a Connector already held them and this server copy is surplus.
-    keep = !added.orphanedServerCopy
+    // Keep the stored file only when the recorded version actually points to it.
+    keep =
+      !added.orphanedServerCopy &&
+      added.version.storageLocation === mode &&
+      (mode === 'server' || added.version.agentId === q.agentId)
     event.res.status = 201
     return {
       item: added.item,

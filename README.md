@@ -78,12 +78,6 @@ Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse
 
 Para entender a configuração, comece pelos contratos de [sessão](docs/SESSION-PERSISTENCE-CONTRACT.md), [pareamento](docs/PAIRING-CONTRACTS.md) e [autorização da farm](docs/FARM-AUTHORIZATION-CHECKPOINT.md). Mantenha credenciais e configuração privada fora do Git.
 
-### Execute no desktop offline
-
-Para Linux x64, prepare Node.js 22.18 ou superior (o projeto fixa Node 24.22.2 ou superior na série 24), npm, Google Chrome e PostgreSQL local antes de desconectar. Go 1.26 ou superior é opcional. Instale as dependências com `npm ci --ignore-scripts`; sem rede, use o cache preparado conforme o [guia do desktop](docs/DESKTOP.md). Docker é opcional e não é usado na verificação desktop.
-
-Execute `npm run desktop:check` para iniciar mocks e um banco PostgreSQL isolado, verificar o servidor compilado e abrir `/farm` no Chrome durante o teste. O teste encerra esses recursos ao terminar; não fornece uma demonstração interativa persistente. Para iniciar a interface de desenvolvimento, use `npm run dev` e abra http://127.0.0.1:3000/farm no Chrome. A página exige configuração e autenticação próprias; esse comando não cria uma farm simulada.
-
 ### Verificação local
 
 ```sh
@@ -96,6 +90,20 @@ npm run test:e2e
 ```
 
 O segundo fluxo requer o build produzido pelo primeiro. Para reproduzir os jobs e seus pré-requisitos, consulte [CI local](docs/LOCAL-CI.md). Para Klipper, veja o [guia do simulador](infra/sim/README.md). Os testes automatizados não devem enviar comandos a impressoras físicas.
+
+## Rodar no desktop
+
+Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 24.22.x**, npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
+
+```sh
+npm ci --ignore-scripts          # sem rede: bundle offline, veja docs/desktop-offline-install.md
+npm run build
+npm run dev                      # interface de desenvolvimento em http://127.0.0.1:3000
+npm run desktop:check -- --only app-smoke   # app compilado + Connector + simuladores; abre /farm no Chrome
+npm run desktop:check -- --list  # passos disponíveis
+```
+
+Os simuladores rodam como processos de teste em loopback; não há um comando persistente para mantê-los de pé. `OPENFARM_SIM=mock` (padrão) e `OPENFARM_PG` (cluster local) mantêm tudo fora do Docker; `OPENFARM_SIM=docker` e `OPENFARM_PG=docker` são opt-in e recusados pelo `desktop:check`. Offline, a Bambu Cloud fica desligada e as câmeras RTSP só funcionam com Go. Detalhes e limites em [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Como as peças se conectam
 

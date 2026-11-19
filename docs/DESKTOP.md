@@ -1,35 +1,137 @@
-# Desktop offline
+# Rodar o Open3DFarmManager no desktop
 
-Prepare um Linux x64 com Node.js 22.18 ou superior, npm, Google Chrome e os executáveis PostgreSQL (`initdb`, `pg_ctl` e `postgres`, versão 13 ou superior). O `package.json` deste checkout exige Node 24.22.2 ou superior e inferior a 25; use essa versão para instalar o projeto. Go 1.26 ou superior é opcional e necessário para compilar o helper de câmeras RTSP. Instale tudo antes de bloquear a rede.
+Este guia leva uma máquina de desktop do zero até uma página da farm com impressoras simuladas, sem Docker e sem rede externa. Os comandos abaixo são os mesmos que o `npm run desktop:check` exercita; a seção do README é a versão curta.
 
-Com rede disponível, instale as dependências na raiz do repositório:
+Os detalhes de cada etapa do check estão em [desktop-check.md](desktop-check.md). O bundle offline de dependências está em [desktop-offline-install.md](desktop-offline-install.md).
+
+## Pré-requisitos
+
+| Item          | Requisito                                                          | Observação                                                                                                         |
+| ------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Node.js       | 24.22.x (`package.json` declara `>=24.22.2 <25`; a CI usa 24.22.3) | O preflight do `desktop:check` aceita de 22.18 até 24.x. Use 24.22.x para a versão validada pela CI.               |
+| npm           | Incluído no Node.js                                                | Não use pnpm: o lockfile é do npm.                                                                                 |
+| Google Chrome | Instalado no sistema                                               | Defina `OPENFARM_CHROME_PATH` se ele não estiver em um caminho padrão. O Playwright não baixa navegadores offline. |
+| PostgreSQL    | 17 ou superior (`initdb`, `pg_ctl`, `postgres`)                    | Os testes de banco exigem 17+.                                                                                     |
+| Go            | 1.26+, opcional                                                    | Só para o helper RTSP (`npm run build:rtsp-ingest`). Sem Go, esse passo é pulado e o resumo informa o motivo.      |
+| Docker        | Não necessário                                                     | Recusado por padrão. Veja [Chaves de ambiente](#chaves-de-ambiente).                                               |
+
+## 1. Instalar as dependências
+
+Com rede, a partir da raiz do repositório:
 
 ```sh
 npm ci --ignore-scripts
 ```
 
-Para uma máquina sem rede, gere em outra máquina um cache para Linux x64 e transfira o arquivo com o código do mesmo checkout. Veja [o guia do cache offline](desktop-offline-install.md) para detalhes e limitações de arquitetura.
+Sem rede, use o bundle offline `linux-x64` descrito em [desktop-offline-install.md](desktop-offline-install.md):
 
 ```sh
-node scripts/desktop-bundle.mjs --out /tmp/open3dfarmmanager-npm-cache-linux-x64.tar.gz
+mkdir -p "$HOME/openfarm-npm-cache"
+tar -xzf open3dfarmmanager-npm-cache-linux-x64.tar.gz -C "$HOME/openfarm-npm-cache"
+npm ci --offline --ignore-scripts --cache "$HOME/openfarm-npm-cache"
 ```
 
-No desktop, extraia o arquivo transferido e instale a partir dele:
+Para listar as lacunas do mirror e os pacotes de plataforma Linux x64 presentes no lockfile, sem rede:
 
 ```sh
-mkdir -p /tmp/openfarm-npm-cache
-tar -xzf open3dfarmmanager-npm-cache-linux-x64.tar.gz -C /tmp/openfarm-npm-cache
-npm ci --offline --ignore-scripts --cache /tmp/openfarm-npm-cache
+node scripts/desktop-deps-report.mjs
 ```
 
-Para verificar o conjunto offline, execute:
+O `.npmrc` mantém `ignore-scripts=true`. A instalação não executa scripts de pacotes.
+
+## 2. Compilar
 
 ```sh
-npm run desktop:check
+npm run build
 ```
 
-O teste cria um cluster PostgreSQL local isolado e temporário, inicia mocks de impressoras e Spoolman, compila o servidor e abre `/farm` no Chrome. Ele encerra os recursos ao terminar. O teste atual verifica que a página carrega e contém texto; não comprova que os cartões de impressoras aparecem. Consulte [desktop-check.md](desktop-check.md) para isolamento de rede, opções e resultados.
+Isso gera `apps/farm/.output/` e o Connector compilado.
 
-Para executar a interface de desenvolvimento, use `npm run dev` e abra http://127.0.0.1:3000/farm no Chrome. Como alternativa, execute `npm run build` e depois `node apps/farm/.output/server/index.mjs`. Esses comandos não criam contas, banco ou farm de demonstração. Configure banco e autenticação conforme [DATABASE-MIGRATIONS.md](DATABASE-MIGRATIONS.md); a página depende da flag `farmView` e de acesso autorizado. Ainda não há comando documentado para manter a farm simulada aberta interativamente.
+## 3. Criar o banco local
 
-Os testes usam mocks locais por padrão. `OPENFARM_SIM=docker` e `OPENFARM_PG=docker` selecionam caminhos Docker explícitos em runners compatíveis; `desktop:check` rejeita ambos. Bambu cloud permanece desligada offline. Sem Go, o helper RTSP não é compilado e câmeras RTSP ficam indisponíveis. Sem conexão WebRTC direta, o navegador fica em modo somente leitura; comandos continuam sujeitos à autorização e às verificações do Connector.
+O banco roda no próprio computador, escuta só em `127.0.0.1` e não usa Docker. O exemplo usa a porta `5433` e autenticação `trust`, adequada apenas a este cluster local de desenvolvimento.
+
+```sh
+export OPENFARM_DB_DIR="$HOME/openfarm-pg"
+initdb -D "$OPENFARM_DB_DIR" -U openfarm --auth=trust
+pg_ctl -D "$OPENFARM_DB_DIR" -o "-h 127.0.0.1 -p 5433" -l "$OPENFARM_DB_DIR/server.log" start
+createdb -h 127.0.0.1 -p 5433 -U openfarm openfarm
+```
+
+Para o servidor aplicar as migrações ao iniciar:
+
+```sh
+export NUXT_DATABASE_ENABLED=true
+export NUXT_DATABASE_DATABASE_URL=postgres://openfarm@127.0.0.1:5433/openfarm
+export NUXT_DATABASE_MIGRATIONS=apply
+```
+
+Para parar o banco depois: `pg_ctl -D "$OPENFARM_DB_DIR" stop`.
+
+## 4. Subir o servidor
+
+Modo de desenvolvimento, com recarga automática:
+
+```sh
+npm run dev
+```
+
+Abra **http://127.0.0.1:3000**. Esse modo mostra a interface de desenvolvimento. Sem as variáveis de banco da etapa 3, não há contas nem persistência.
+
+Modo compilado, depois de `npm run build`:
+
+```sh
+NITRO_HOST=127.0.0.1 NITRO_PORT=3000 node apps/farm/.output/server/index.mjs
+```
+
+## 5. Farm de demonstração com simuladores
+
+Os simuladores (Moonraker sv06 e u1, Spoolman e câmera) são processos de teste em loopback. Não existe um comando persistente que os mantenha de pé para navegação manual:
+
+- `npm run sim:verify` sobe os mocks, verifica as quatro ferramentas, a troca de extrusora, as webcams e o Spoolman, e encerra os mocks ao final.
+- `npm run desktop:check -- --only app-smoke` sobe o banco descartável, os mocks, o Connector real e o app compilado; então carrega **http://127.0.0.1:3000/farm** no Chrome com todo host não local bloqueado no navegador. Exige `npm run build` antes.
+
+Para abrir a página da farm no seu próprio Chrome, use o endereço do servidor da etapa 4 e acrescente `/farm`. As impressoras aparecem nessa página somente após o pareamento do Connector, que o `app-smoke` faz sozinho. O `app-smoke` verifica que a página carrega, renderiza texto e não contata hosts externos; ele não confere os nomes das impressoras na tela.
+
+## 6. Verificar o ambiente
+
+```sh
+npm run desktop:check -- --list                  # nomes dos passos
+npm run desktop:check                            # todos os passos
+npm run desktop:check -- --only lint,build       # subconjunto (marcado como parcial)
+npm run desktop:check -- --skip test-e2e --receipt receipt.json
+```
+
+Em Linux, para provar que nada sai da máquina, rode o check em um namespace de rede vazio, conforme [desktop-check.md](desktop-check.md#network-guard):
+
+```sh
+npm run desktop:check -- --require-isolated-network
+```
+
+O `desktop:check` não envia comandos a impressoras físicas. Ele registra cada tentativa de conexão não loopback e falha quando há alguma.
+
+## Chaves de ambiente
+
+| Variável               | Padrão                     | Efeito                                                                                                                                                                                                                     |
+| ---------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENFARM_SIM`         | `mock`                     | `mock` usa os simuladores em processo e em loopback. `docker` é opt-in para o Compose de `infra/sim/` e é recusado pelo `desktop:check`.                                                                                   |
+| `OPENFARM_PG`          | local                      | Cluster PostgreSQL descartável criado com `initdb`/`pg_ctl` em loopback. `docker` é opt-in e recusado pelo `desktop:check`. `OPENFARM_TEST_DATABASE_URL` aponta para um superusuário existente em vez de criar um cluster. |
+| `OPENFARM_CHROME_PATH` | caminhos padrão do sistema | Chrome usado pelos testes de interface e pelo `app-smoke`.                                                                                                                                                                 |
+| `DOCKER_HOST`          | não definido               | Se definido, o preflight falha: Docker não é permitido em uma execução de desktop.                                                                                                                                         |
+| `NUXT_BAMBU_CLOUD`     | desligado                  | Mantenha desligado. Com `true`, o preflight falha.                                                                                                                                                                         |
+
+## O que funciona offline e o que não funciona
+
+- **Bambu Cloud:** desligada. A importação pela nuvem exige rede e fica fora do modo desktop.
+- **Câmeras RTSP:** o helper de ingestão precisa de Go 1.26+ (`npm run build:rtsp-ingest`). Sem Go, a ingestão RTSP não é construída e o vídeo fica indisponível. O resumo do `desktop:check` informa o motivo.
+- **WebRTC:** o binário nativo de `node-datachannel` pode estar ausente em um pacote offline. Sem ele, a conexão WebRTC falha fechada e a interface fica somente leitura. Não há fallback por TURN ou HTTP para comandos do navegador.
+- **Impressoras físicas:** nenhum teste automatizado envia comandos a elas. O guia não muda isso.
+- **Docker:** não é usado. Os simuladores em Compose e o PostgreSQL em contêiner são opt-in e ficam fora do caminho desktop.
+
+## Limites conhecidos
+
+- O preflight aceita Node a partir de 22.18, mas o `package.json` declara `>=24.22.2 <25`. Use Node 24.22.x.
+- O preflight aceita PostgreSQL 13 ou superior, mas os testes de banco exigem 17 ou superior. Use 17+.
+- O `app-smoke` não confere nomes de impressoras na página da farm.
+- `npm run dev` não é executado pelo `desktop:check`.
+- Nada deste guia foi validado em hardware físico (not proven on hardware).

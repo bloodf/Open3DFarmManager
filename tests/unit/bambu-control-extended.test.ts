@@ -75,6 +75,15 @@ async function send(
       signal: controller.signal,
       beforeSend: () => true,
     })
+    // The first report after the send settles the dispatch, and baseline
+    // reports can arrive while the QoS 0 publish is still in flight inside
+    // the broker; wait (bounded) until the simulator has recorded it.
+    for (
+      let i = 0;
+      i < 100 && !sim.requests.length && !sim.gcodeLines.length;
+      i++
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20))
     return { sim, result }
   } finally {
     await control.close()

@@ -80,6 +80,7 @@ const runtimeConfigFor = (
       retryMaxMs: 30000,
       idleMs: 500,
     },
+    discovery: { enabled: true, intervalMs: 600_000 },
     renewal: undefined,
     assignments: [
       {

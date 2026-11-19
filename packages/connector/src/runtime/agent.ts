@@ -308,7 +308,6 @@ async function runConnectorAgentOnce(
       )
       if (loss.expired || loss.capacity) logger.warn('queue-loss', { ...loss })
     }
-    enqueueHeartbeat(readHeartbeat())
     startLinkHealthHeartbeat(
       () => {
         const health = readHeartbeat()

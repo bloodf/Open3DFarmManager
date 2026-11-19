@@ -1,3 +1,8 @@
+import {
+  discoveryBindings,
+  pause,
+  runBackgroundDiscovery,
+} from './background-discovery.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
 import type { Logger } from '../../../shared/src/log.ts'
@@ -74,18 +79,6 @@ function bootstrapNetworking() {
   process.env.WS_NO_BUFFER_UTIL = '1'
   process.env.WS_NO_UTF_8_VALIDATE = '1'
   bootstrapped = true
-}
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    function done() {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', done)
-      resolve()
-    }
-    const timer = setTimeout(done, ms)
-    signal.addEventListener('abort', done, { once: true })
-    if (signal.aborted) done()
-  })
 }
 function untilAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -696,6 +689,19 @@ async function runConnectorAgentOnce(
               onRawUnavailable: snapshots.invalidate,
             }
           : {}),
+      }).catch(fail),
+    )
+    tasks.push(
+      runBackgroundDiscovery({
+        ...config.discovery,
+        signal,
+        bindings: discoveryBindings(config.collection),
+        now: () => clock.now(),
+        report(results, now) {
+          const { loss } = queue.enqueueDiscovery(results, now)
+          if (loss.expired || loss.capacity)
+            logger.warn('queue-loss', { ...loss })
+        },
       }).catch(fail),
     )
     tasks.push(drainLoop().catch(fail))

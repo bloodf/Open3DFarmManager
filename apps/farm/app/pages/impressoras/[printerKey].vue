@@ -142,6 +142,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
     ...(controls?.includes('power') ? (['power'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
+    ...(controls?.includes('bed_mesh') ? (['bed-mesh'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
     ...(controls?.includes('gcode') ? (['console'] as const) : []),
@@ -259,6 +260,27 @@ const queue = computed(() => {
         : undefined,
   }
 })
+const bedMesh = computed(() => {
+  const result = availability('bed_mesh')
+  const one = commandInFlight.value
+    ? { available: false, reason: 'Um comando já está em andamento.' }
+    : result.available
+      ? { available: true }
+      : { available: false, reason: result.reason }
+  return {
+    mesh:
+      live.value && detailFrame.value?.printerKey === printerKey.value
+        ? detailFrame.value.detail.bedMesh
+        : undefined,
+    availability: Object.fromEntries(
+      (['calibrate', 'load', 'save', 'remove', 'clear'] as const).map((op) => [
+        op,
+        one,
+      ]),
+    ),
+  }
+})
+
 const motionAvailability = computed(() =>
   Object.fromEntries(
     (
@@ -448,6 +470,8 @@ onMounted(() => heading.value?.focus())
           : temperatureAvailability.reason
       "
       :can-emergency-stop="stopAvailability.available && !commandInFlight"
+      :bed-mesh="bedMesh"
+      @bed-mesh="(args, event) => control('bed_mesh', event, args)"
       :motion-availability="motionAvailability"
       @home="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
       @jog="

@@ -19,6 +19,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   home: 'Referenciar eixos',
   set_light: 'Definir luz',
   set_speed: 'Definir velocidade',
+  power: 'Alterar energia do dispositivo',
   service: 'Reiniciar serviço',
   timelapse: 'Gerenciar timelapse',
   firmware_restart: 'Reiniciar firmware',

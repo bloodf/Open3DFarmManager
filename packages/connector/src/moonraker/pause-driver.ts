@@ -5,6 +5,7 @@ import {
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
+import { executePower } from './control-power.ts'
 import {
   FileOperationRefused,
   fileOperationAcknowledged,
@@ -780,6 +781,20 @@ export function openFixedMoonrakerPause(input: {
       }
       if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'extrude') return extrude(args, request)
+      if (action === 'power') {
+        extended = 'power'
+        return executePower(
+          args,
+          input.objects ?? [],
+          request,
+          requestRead,
+          send,
+          async () => {
+            stop()
+            await closed
+          },
+        )
+      }
       if (action === 'queue_op') return queueOp(args, request)
       if (action === 'timelapse') return timelapse(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')

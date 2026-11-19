@@ -1,3 +1,6 @@
+import { anycubicPrinterDetail } from '../anycubic/printer-detail.ts'
+import { kobraXPrinterDetail } from '../kobra-x/printer-detail.ts'
+import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { randomUUID } from 'node:crypto'
 import type { z } from 'zod'
 import {
@@ -35,13 +38,15 @@ const METHOD_NOT_FOUND = -32601
 
 export type PrinterDetailSourceFor = (
   printerKey: string,
-) => MoonrakerDetailStream | BambuDetailStream | undefined
+) => PrinterDetailSource | undefined
 
-/** One lazy stream per Moonraker assignment; nothing connects until subscribed. */
-export function createPrinterDetailSources(
-  config: AgentRuntimeConfig,
-): PrinterDetailSourceFor {
-  const sources = new Map<string, MoonrakerDetailStream | BambuDetailStream>()
+type PrinterDetailSource = Pick<MoonrakerDetailStream, 'subscribe'> &
+  Partial<Pick<MoonrakerDetailStream, 'request' | 'readConfig'>> &
+  Partial<Pick<BambuDetailStream, 'query'>>
+
+/** Moonraker and Bambu streams connect on subscription. Anycubic frames reuse collection. */
+export function createPrinterDetailSources(config: AgentRuntimeConfig) {
+  const sources = new Map<string, PrinterDetailSource>()
   const { printers, limits, allowedOrigins } = config.collection
   if (config.collection.version === 3)
     for (const binding of config.collection.bambu.printers)
@@ -66,7 +71,70 @@ export function createPrinterDetailSources(
     if (selected.origin === assignment.moonraker_origin)
       sources.set(selected.printerKey, createMoonrakerDetailStream(selected))
   }
-  return (printerKey) => sources.get(printerKey)
+  const vendor = createVendorDetailSources()
+  if (config.collection.version === 5) {
+    for (const binding of config.collection.anycubic.printers) {
+      if (!['20024', '20030'].includes(binding.modelId)) continue
+      const assignment = config.assignments.find(
+        ({ printer_key }) => printer_key === binding.printerKey,
+      )
+      const cameraId = config.camera?.cameras.find(
+        ({ assignmentId }) => assignmentId === assignment?.assignment_id,
+      )?.cameraId
+      sources.set(
+        binding.printerKey,
+        vendor.register(binding.printerKey, (printer, seq) =>
+          binding.modelId === '20030'
+            ? kobraXPrinterDetail(printer, seq, cameraId)
+            : anycubicPrinterDetail(printer, seq, { cameraId }),
+        ),
+      )
+    }
+  }
+  return {
+    sourceFor: (printerKey: string) => sources.get(printerKey),
+    observe: vendor.observe,
+    invalidate: vendor.invalidate,
+  }
+}
+
+export function createVendorDetailSources() {
+  const publish = new Map<string, (printer: PrinterState) => void>()
+  return {
+    register(
+      key: string,
+      frame: (printer: PrinterState, seq: number) => unknown,
+    ): PrinterDetailSource {
+      const listeners = new Set<(frame: unknown) => void>()
+      let latest: unknown
+      let seq = 0
+      publish.set(key, (printer) => {
+        const next = frame(printer, ++seq)
+        if (!next) return
+        latest = next
+        for (const listener of listeners) listener(next)
+      })
+      return {
+        subscribe(listener) {
+          listeners.add(listener)
+          if (latest) listener(latest)
+          return () => {
+            listeners.delete(listener)
+          }
+        },
+      }
+    },
+    observe(printer: PrinterState) {
+      publish.get(printer.printerKey)?.(printer)
+    },
+    invalidate(printerKey: string) {
+      publish.get(printerKey)?.({
+        printerKey,
+        state: 'offline',
+        observedAt: Date.now(),
+      })
+    },
+  }
 }
 
 /**
@@ -138,17 +206,23 @@ type Query = z.infer<typeof PrinterDetailQueryRequest>
 
 async function answer(
   frame: Query,
-  source: MoonrakerDetailStream | BambuDetailStream,
+  source: PrinterDetailSource,
   signal: AbortSignal,
 ) {
   const { path: _path, ...rest } = frame as Query & { path?: string }
   const base = { ...rest, t: 'query.response' as const }
-  if ('query' in source) {
+  if (source.query) {
     const reply = await source.query(frame.kind, signal)
     return PrinterDetailQueryResponse.parse({ ...base, ...reply })
   }
   try {
-    const data = await query(frame, source, signal)
+    if (!source.request || !source.readConfig)
+      return PrinterDetailQueryResponse.parse({ ...base, error: 'unsupported' })
+    const data = await query(
+      frame,
+      { request: source.request, readConfig: source.readConfig },
+      signal,
+    )
     return PrinterDetailQueryResponse.parse({ ...base, data })
   } catch (error) {
     const reason =
@@ -171,7 +245,10 @@ const ms = (seconds: unknown) => count(Number(seconds) * 1000)
 
 async function query(
   frame: Query,
-  { request, readConfig }: MoonrakerDetailStream,
+  {
+    request,
+    readConfig,
+  }: Pick<MoonrakerDetailStream, 'request' | 'readConfig'>,
   signal: AbortSignal,
 ) {
   switch (frame.kind) {

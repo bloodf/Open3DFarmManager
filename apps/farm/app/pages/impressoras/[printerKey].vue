@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
@@ -35,6 +36,10 @@ const webcams = shallowRef<
 >(null)
 const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const vendorFrame = computed(() =>
+  detailFrame.value?.vendor ? detailFrame.value : undefined,
+)
+const printFile = ref('')
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
     ? detailFrame.value
@@ -114,6 +119,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
       ? (['system'] as const)
       : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('power') ? (['power'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
@@ -175,7 +181,7 @@ const extrusion = computed(() => {
 const outputs = computed(() => {
   const controls = state.value?.controls ?? []
   const advertised = {
-    fan: controls.includes('set_fan'),
+    fan: !vendorFrame.value && controls.includes('set_fan'),
     led: controls.includes('set_led'),
     pin: controls.includes('set_pin'),
   }
@@ -200,6 +206,7 @@ const outputs = computed(() => {
         : undefined,
   }
 })
+const powerAvailability = computed(() => availability('power'))
 const serviceAvailability = computed(() => availability('service'))
 const timelapseAvailability = computed(() => availability('timelapse'))
 const timelapse = computed(() => {
@@ -442,6 +449,21 @@ onMounted(() => heading.value?.focus())
         />
       </template>
       <template #sistema>
+        <PowerPanel
+          v-if="state?.controls?.includes('power')"
+          :devices="
+            live && detailFrame?.printerKey === printerKey
+              ? detailFrame.detail.powerDevices
+              : undefined
+          "
+          :can-command="live && powerAvailability.available && !commandInFlight"
+          :reason="
+            commandInFlight
+              ? 'Um comando já está em andamento.'
+              : powerAvailability.reason
+          "
+          @toggle="(args, event) => control('power', event, args)"
+        />
         <SystemServicesPanel
           :firmware="systemFrame?.detail.firmware"
           :host="systemFrame?.detail.host"
@@ -458,6 +480,96 @@ onMounted(() => heading.value?.focus())
         />
       </template>
     </PrinterDetailDashboard>
+    <section
+      v-if="row && live && vendorFrame"
+      aria-label="Detalhes da impressora"
+    >
+      <h2>Impressão</h2>
+      <p v-if="vendorFrame.detail.print?.file">
+        {{ vendorFrame.detail.print.file }}
+      </p>
+      <p v-if="vendorFrame.detail.print?.progress !== undefined">
+        Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
+      </p>
+      <form
+        v-if="state?.controls?.includes('start_print')"
+        @submit.prevent="
+          (event) => control('start_print', event, { file: printFile })
+        "
+      >
+        <label for="detail-print-file">Nome do arquivo na impressora</label>
+        <input
+          id="detail-print-file"
+          v-model.trim="printFile"
+          required
+          maxlength="255"
+        />
+        <button
+          type="submit"
+          :disabled="!availability('start_print').available || commandInFlight"
+        >
+          Iniciar impressão
+        </button>
+      </form>
+      <template v-if="vendorFrame.detail.fans?.length">
+        <h2>Ventoinhas</h2>
+        <div v-for="fan in vendorFrame.detail.fans" :key="fan.name">
+          <p>
+            {{
+              fan.name === 'part'
+                ? 'Peça'
+                : fan.name === 'aux'
+                  ? 'Auxiliar'
+                  : 'Câmara'
+            }}: {{ Math.round(fan.speed * 100) }}%
+          </p>
+          <button
+            v-if="state?.controls?.includes('set_fan')"
+            type="button"
+            :disabled="!availability('set_fan').available || commandInFlight"
+            @click="(event) => setFan(fan.name, fan.speed > 0 ? 0 : 100, event)"
+          >
+            {{
+              fan.speed > 0 ? 'Desligar ventoinha' : 'Ligar ventoinha a 100%'
+            }}
+          </button>
+        </div>
+      </template>
+      <template v-if="vendorFrame.detail.lights?.length">
+        <h2>Iluminação</h2>
+        <p>
+          {{ vendorFrame.detail.lights[0]?.white ? 'Ligada' : 'Desligada' }}
+        </p>
+        <button
+          v-if="state?.controls?.includes('set_light')"
+          type="button"
+          :disabled="!availability('set_light').available || commandInFlight"
+          @click="
+            (event) =>
+              control('set_light', event, {
+                on: !vendorFrame?.detail.lights?.[0]?.white,
+              })
+          "
+        >
+          {{
+            vendorFrame.detail.lights[0]?.white ? 'Desligar luz' : 'Ligar luz'
+          }}
+        </button>
+      </template>
+      <template v-if="vendorFrame.detail.materials?.length">
+        <h2>Slots ACE</h2>
+        <ul>
+          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
+            {{ slot.slot
+            }}<template v-if="slot.materialType">
+              · {{ slot.materialType }}</template
+            >
+            <template v-if="slot.active"> · Em uso</template>
+          </li>
+        </ul>
+      </template>
+    </section>
+
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"
@@ -476,8 +588,13 @@ onMounted(() => heading.value?.focus())
           {{ extendedLabel(pauseTarget.action) }} — {{ pauseTarget.printerKey }}
         </h2>
         <p id="pause-dialog-description">
-          Confirme o comando para esta impressora. Ele será enviado diretamente
-          ao Connector e não será repetido automaticamente.
+          <template v-if="pauseTarget.action === 'power'">
+            Confirme se deseja {{ pauseTarget.args.on ? 'ligar' : 'desligar' }}
+            {{ pauseTarget.args.device }} nesta impressora.
+          </template>
+          <template v-else>Confirme o comando para esta impressora.</template>
+          Ele será enviado diretamente ao Connector e não será repetido
+          automaticamente.
         </p>
         <p v-if="pauseTarget.action === 'file_op'">
           {{

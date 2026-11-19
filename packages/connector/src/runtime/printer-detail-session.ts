@@ -238,7 +238,10 @@ async function answer(
   }
   try {
     if (!source.request || !source.readConfig)
-      return PrinterDetailStreamQueryResponse.parse({ ...base, error: 'unsupported' })
+      return PrinterDetailStreamQueryResponse.parse({
+        ...base,
+        error: 'unsupported',
+      })
     const data = await query(
       frame,
       { request: source.request, readConfig: source.readConfig },

@@ -645,7 +645,9 @@ export class ReadonlyBrowserPeer {
 
 export type WebcamDetailOptions = {
   onGcodeHelp?: (commands: readonly string[]) => void
-  onGcodeResponse?: (frame: z.infer<typeof PrinterDetailStreamGcodeResponse>) => void
+  onGcodeResponse?: (
+    frame: z.infer<typeof PrinterDetailStreamGcodeResponse>,
+  ) => void
   onDetail?: (frame: z.infer<typeof PrinterDetailStreamUpdate>) => void
   printerKey: string
   onUpdate: (

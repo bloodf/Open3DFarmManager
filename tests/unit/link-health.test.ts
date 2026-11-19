@@ -313,7 +313,6 @@ describe('mock delay and drop fault hooks', () => {
   })
 })
 
-
 const connector: ConnectorLinkHealth = {
   version: '1.2.3',
   uptimeMs: 60_000,

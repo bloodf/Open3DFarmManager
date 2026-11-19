@@ -45,7 +45,9 @@ import {
   type MoonrakerSimulator,
 } from '../../journey/moonraker-simulator.ts'
 import {
+  startDiscoveryMocks,
   startKobraXMock,
+  type DiscoveryMockInstance,
   type KobraXMockInstance,
 } from '../../../packages/sim-tools/src/mocks/index.ts'
 
@@ -108,16 +110,25 @@ export type PrinterSeed = Readonly<{
   groupName?: string | null
   location?: string | null
   sortOrder?: number | null
+  /** Which Connector hosts this printer (default: 1; 2 uses the secondary Connector). */
+  connector?: 1 | 2
+  /**
+   * True to configure the Connector to collect live telemetry from this printer
+   * when seeding multiple Moonraker printers or a second Connector.
+   */
+  live?: boolean
 }>
 
 export type SeededPrinter = Readonly<{
   family: PrinterFamily
   printerKey: string
-  assignmentId?: string
+  connector?: 1 | 2
   agentId?: string
+  assignmentId?: string
   /**
    * True when a Connector collects this printer, so the farm page shows live
-   * telemetry. Single-printer boots and `connectAll: true` boots are live.
+   * telemetry. Single-printer boots, explicit `live: true` seeds and
+   * `connectAll: true` boots are live.
    */
   live: boolean
   /** The loopback mock of this printer, for scripted state and assertions. */
@@ -137,6 +148,8 @@ export type BootOptions = Readonly<{
    * telemetry snapshots.
    */
   connectAll?: boolean
+  /** Starts an unadopted Moonraker mock + loopback mDNS discovery responder on Connector 2. */
+  discoveredMoonraker?: Readonly<{ name?: string }>
   /** Opt the Bambu mock into local commands. */
   control?: boolean
 }>
@@ -145,7 +158,15 @@ export type FarmManager = Readonly<{
   harness: JourneyHarness
   origin: string
   farmId: string
+  /** Paired Connector agent IDs in boot order (1, then 2 if started). */
+  connectors: readonly string[]
   printers: readonly SeededPrinter[]
+  /** Discovered-only Moonraker mock + mDNS name (`discoveredMoonraker`). */
+  discovered?: Readonly<{
+    name: string
+    origin: string
+    mock: MoonrakerSimulator
+  }>
   /** The signed-in owner page (device key enrolled, on the origin). */
   owner: Page
   /** A fresh page, in a fresh guarded context, signed in as `role`. */
@@ -316,12 +337,65 @@ async function bootFarm(
     throw new Error(
       'The first printer is the live one and must be moonraker, bambu, creality, anycubic or kobralink; Kobra X mocks are seeded after it',
     )
+  if (first.connector === 2)
+    throw new Error('The first printer must be hosted on Connector 1')
   process.env.OPENFARM_JOURNEY = '1'
   const keyOf = (seed: PrinterSeed, index: number) =>
     seed.printerKey ?? `${seed.family}-${index + 1}`
   const keys = options.printers.map(keyOf)
   if (new Set(keys).size !== keys.length)
     throw new Error('Printer keys must be unique')
+
+  const liveExtras = new Map<string, MoonrakerSimulator>()
+  const c1LivePrinters: { printerKey: string; origin: string }[] = []
+  const c2LivePrinters: { printerKey: string; origin: string }[] = []
+  for (const [offset, seed] of rest.entries()) {
+    const printerKey = keys[offset + 1]!
+    if (seed.connector === 2 && seed.live !== false) {
+      if (seed.family !== 'moonraker')
+        throw new Error('Connector 2 live printers currently require moonraker')
+      const sim = await startMoonrakerSimulator()
+      onClose(() => sim.close())
+      liveExtras.set(printerKey, sim)
+      c2LivePrinters.push({ printerKey, origin: sim.origin })
+    } else if (seed.live === true) {
+      if (seed.family !== 'moonraker')
+        throw new Error(
+          'Extra live printers on Connector 1 currently require moonraker',
+        )
+      if (first.family !== 'moonraker')
+        throw new Error(
+          'Multi-printer live Connector 1 requires moonraker as the first printer',
+        )
+      const sim = await startMoonrakerSimulator()
+      onClose(() => sim.close())
+      liveExtras.set(printerKey, sim)
+      c1LivePrinters.push({ printerKey, origin: sim.origin })
+    }
+  }
+
+  let discovered:
+    | {
+        name: string
+        origin: string
+        mock: MoonrakerSimulator
+        discovery: DiscoveryMockInstance
+      }
+    | undefined
+  if (options.discoveredMoonraker) {
+    const mock = await startMoonrakerSimulator()
+    onClose(() => mock.close())
+    const name = options.discoveredMoonraker.name ?? 'moonraker-discovered'
+    const discovery = await startDiscoveryMocks({
+      vendors: ['moonraker'],
+      moonraker: {
+        name,
+        port: Number(new URL(mock.origin).port),
+      },
+    })
+    onClose(() => discovery.close())
+    discovered = { name, origin: mock.origin, mock, discovery }
+  }
 
   const harness = await startJourneyHarness({
     browser: guardedBrowser(browser, guard),
@@ -332,19 +406,46 @@ async function bootFarm(
     ...(options.signedControl === undefined
       ? {}
       : { signedControl: options.signedControl }),
+    ...(c1LivePrinters.length ? { extraPrinters: c1LivePrinters } : {}),
+    ...(c2LivePrinters.length || discovered
+      ? {
+          secondaryConnector: {
+            ...(c2LivePrinters.length
+              ? { initialPrinters: c2LivePrinters }
+              : {}),
+            ...(discovered
+              ? { probes: { discovery: discovered.discovery.discoveryOptions } }
+              : {}),
+          },
+        }
+      : {}),
   })
+  onClose(() => harness.close())
+
+  const secondaryAssignments = new Map(
+    (harness.configurator?.assignments ?? []).map((item) => [
+      item.printerKey,
+      item,
+    ]),
+  )
+  const uncollectedC1 =
+    !options.connectAll &&
+    rest.some(
+      (seed, offset) =>
+        seed.connector !== 2 && !liveExtras.has(keys[offset + 1]!),
+    )
   const seeded: (SeededPrinter | undefined)[] = Array.from({
     length: options.printers.length,
   })
   seeded[0] = {
     family: first.family,
     printerKey: keys[0]!,
-    assignmentId: harness.assignmentId,
+    connector: 1,
     agentId: harness.agentId,
-    live: rest.length === 0 || options.connectAll === true,
+    assignmentId: harness.assignmentId,
+    live: !uncollectedC1,
     mock: harness.vendor ?? harness.printer,
   }
-  onClose(() => harness.close())
   try {
     await applyGrouping(
       harness.ownerPage,
@@ -355,39 +456,78 @@ async function bootFarm(
       first,
     )
     if (!options.connectAll) {
-      // The harness configures the Connector for one printer. The others are
-      // registered on the same paired Connector through the farm's own
-      // assignment API and get their own loopback mock; the Connector does not
-      // collect them, and registering them drops the direct connection.
       for (const [offset, seed] of rest.entries()) {
         const printerKey = keys[offset + 1]!
+        const liveMock = liveExtras.get(printerKey)
+        if (liveMock) {
+          if (seed.connector === 2) {
+            const item = secondaryAssignments.get(printerKey)
+            if (!item)
+              throw new Error(`Missing secondary assignment for ${printerKey}`)
+            await applyGrouping(
+              harness.ownerPage,
+              harness.farmId,
+              item.agentId,
+              item.assignmentId,
+              printerKey,
+              seed,
+            )
+            seeded[offset + 1] = {
+              family: seed.family,
+              printerKey,
+              connector: 2,
+              agentId: item.agentId,
+              assignmentId: item.assignmentId,
+              live: true,
+              mock: liveMock,
+            }
+          } else {
+            seeded[offset + 1] = {
+              family: seed.family,
+              printerKey,
+              connector: 1,
+              agentId: harness.agentId,
+              live: true,
+              mock: liveMock,
+            }
+          }
+          continue
+        }
+        const targetConnector = seed.connector ?? 1
+        const targetAgentId =
+          targetConnector === 2
+            ? harness.configurator?.agentId
+            : harness.agentId
+        if (!targetAgentId)
+          throw new Error('Secondary Connector is not running for assignment')
         const mock = await startSeedMock(seed.family, printerKey)
         onClose(() => closeMock(mock))
-        const registered = (await pagePost(
+        const created = (await pagePost(
           harness.ownerPage,
           `/api/farms/${harness.farmId}/printers`,
           {
-            agentId: harness.agentId,
+            agentId: targetAgentId,
             printerKey,
             confirmedLocalConfiguration: true,
           },
-        )) as { assignmentId?: string }
-        if (registered.assignmentId)
+        )) as { assignmentId?: unknown }
+        if (typeof created.assignmentId === 'string')
           await applyGrouping(
             harness.ownerPage,
             harness.farmId,
-            harness.agentId,
-            registered.assignmentId,
+            targetAgentId,
+            created.assignmentId,
             printerKey,
             seed,
           )
         seeded[offset + 1] = {
           family: seed.family,
           printerKey,
-          ...(registered.assignmentId
-            ? { assignmentId: registered.assignmentId }
+          connector: targetConnector,
+          agentId: targetAgentId,
+          ...(typeof created.assignmentId === 'string'
+            ? { assignmentId: created.assignmentId }
             : {}),
-          agentId: harness.agentId,
           live: false,
           mock,
         }
@@ -680,11 +820,25 @@ async function bootFarm(
     return page
   }
 
+  const connectors = harness.configurator
+    ? Object.freeze([harness.agentId, harness.configurator.agentId])
+    : Object.freeze([harness.agentId])
+
   return Object.freeze({
     harness,
     origin: harness.origin,
     farmId: harness.farmId,
+    connectors,
     printers: Object.freeze(finalizedSeeded),
+    ...(discovered
+      ? {
+          discovered: Object.freeze({
+            name: discovered.name,
+            origin: discovered.origin,
+            mock: discovered.mock,
+          }),
+        }
+      : {}),
     owner: harness.ownerPage,
     signInAs,
     async openFarm(page: Page = harness.ownerPage) {

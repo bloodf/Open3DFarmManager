@@ -23,7 +23,7 @@ export const CAPABILITIES = [
   'farm_connector_credential_acceptor',
   'farm_printer_ownership',
   'farm_configuration_authority',
-  // Journey extras: signed control, telemetry ingestion and job history.
+  // Journey extras: signed control, telemetry ingestion, job history and network reader.
   'farm_pause_authority',
   'farm_connector_telemetry_writer',
   'farm_job_history_reader',

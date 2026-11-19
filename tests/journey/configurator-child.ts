@@ -4,7 +4,10 @@
 // Started only by harness-configurator.ts with an isolated environment.
 import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.ts'
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
-import type { Printer } from '../../packages/connector/src/discovery/index.ts'
+import {
+  discoverPrinters,
+  type Printer,
+} from '../../packages/connector/src/discovery/index.ts'
 import { probeBambuLan } from '../../packages/connector/src/provisioning/bambu.ts'
 import { probeKobraXLan } from '../../packages/connector/src/provisioning/kobra-x.ts'
 import { runConfigurationConnector } from '../../packages/connector/src/runtime/configuration-command.ts'
@@ -14,6 +17,7 @@ type Probes = Readonly<{
   anycubic?: number
   bambuPort?: number
   kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
+  discovery?: Parameters<typeof discoverPrinters>[0]
 }>
 
 async function main() {
@@ -40,17 +44,29 @@ async function main() {
     signal: abort.signal,
     onDiagnostic: (event) => console.log(JSON.stringify(event)),
     async discovery() {
-      const found = await Promise.all([
-        probes.creality === undefined
-          ? undefined
-          : probeCreality('127.0.0.1', { https: 1, http: probes.creality }),
-        probes.anycubic === undefined
-          ? undefined
-          : probeAnycubic('127.0.0.1', probes.anycubic),
+      const [lanFound, probed] = await Promise.all([
+        probes.discovery
+          ? discoverPrinters({
+              timeout: 200,
+              anycubicPort: 1,
+              ...probes.discovery,
+            })
+          : Promise.resolve([] as Printer[]),
+        Promise.all([
+          probes.creality === undefined
+            ? undefined
+            : probeCreality('127.0.0.1', { https: 1, http: probes.creality }),
+          probes.anycubic === undefined
+            ? undefined
+            : probeAnycubic('127.0.0.1', probes.anycubic),
+        ]),
       ])
-      return found.filter(
-        (printer): printer is Printer => printer !== undefined,
-      )
+      return [
+        ...lanFound,
+        ...probed.filter(
+          (printer): printer is Printer => printer !== undefined,
+        ),
+      ]
     },
     // The setup form's private LAN address is mapped to the loopback mock here
     // and nowhere else: the production probe never overrides the address.

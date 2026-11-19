@@ -298,6 +298,11 @@ if (journeyEnabled())
       test.setTimeout(15 * 60_000)
       const journey = started()
       const page = journey.ownerPage
+      // Telemetry uploads and both signalling inboxes share one credential
+      // proof slot; uploads running next to every command kept the live view
+      // and its controls away. Uploads wait until the history step reads the
+      // finished job (historyEntry); the Connector queues them meanwhile.
+      journey.setTelemetryUpload(false)
       await journey.expectLiveTelemetry()
       const printer = row(page)
       await expect(printer).toContainText(

@@ -12,7 +12,10 @@ import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/index.ts'
 
 import { createFileList } from '../../packages/connector/src/runtime/file-list.ts'
 import { actionsForControlRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
-import { createFileUpload } from '../../packages/connector/src/runtime/file-upload.ts'
+import {
+  consumeStagedConfig,
+  createFileUpload,
+} from '../../packages/connector/src/runtime/file-upload.ts'
 import type { PauseCapabilityHandle } from '../../packages/connector/src/auth/pause-capability.ts'
 import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
@@ -245,6 +248,69 @@ describe('Moonraker configuration storage', () => {
       await fixed.close()
       await refused.close()
       await upload.close()
+      await rmdir(directory)
+    }
+  })
+
+  it('keeps a staged config after the file channel closes and clears it with the peer', async () => {
+    const { input } = await setup()
+    const origin = mock!.origin
+    const transportId = randomUUID()
+    const directory = await mkdtemp(join(tmpdir(), 'openfarm-config-stage-'))
+    const handle = {
+      current: {
+        role: 'admin',
+        printer_key: 'printer-config',
+        transport_id: transportId,
+        actions: ['config_write'],
+      },
+    } as unknown as PauseCapabilityHandle
+    const offer = JSON.stringify({
+      type: 'offer',
+      config: true,
+      transfer_id: randomUUID(),
+      name: path,
+      printer_key: 'printer-config',
+      sha256: input.sha256,
+      size: content.length,
+    })
+    const chunk = Buffer.alloc(4 + content.length)
+    content.copy(chunk, 4)
+    const stage = async () => {
+      const upload = createFileUpload({
+        directory,
+        targetFor: () => ({ backend: 'moonraker', origin }),
+        admittedHandle: () => handle,
+        send: () => {},
+      })
+      for (const message of [
+        offer,
+        chunk,
+        JSON.stringify({ type: 'complete' }),
+      ]) {
+        upload.receive(message)
+        await upload.settled()
+      }
+      return upload
+    }
+    try {
+      // The browser closes the channel when the transfer ends; the signed
+      // write follows on the control channel and still finds the payload.
+      const channelClosed = await stage()
+      await channelClosed.close({ keepStaged: true })
+      expect(consumeStagedConfig(transportId, path, input.sha256)).toEqual(
+        content,
+      )
+      expect(
+        consumeStagedConfig(transportId, path, input.sha256),
+      ).toBeUndefined()
+      // The peer's own close clears it.
+      const peerClosed = await stage()
+      await peerClosed.close()
+      expect(
+        consumeStagedConfig(transportId, path, input.sha256),
+      ).toBeUndefined()
+    } finally {
       await rmdir(directory)
     }
   })

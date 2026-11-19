@@ -4,6 +4,7 @@ import { useRuntimeConfig } from 'nuxt/server'
 import { loadTelemetryVerificationKeys } from '../services/telemetry-key-registry.ts'
 import { parseTelemetryRuntimeConfig } from '../services/telemetry-runtime-config.ts'
 import { PostgresConnectorLibraryDownloads } from '../utils/library/connector-download.ts'
+import { recordConnectorStorage } from '../utils/library/quota.ts'
 import { startConnectorLibraryRelay } from '../utils/library/connector-relay.ts'
 
 const logger = createLogger('farm-library')
@@ -68,6 +69,13 @@ export default defineNitroPlugin((nitro) => {
           publicKeys,
         },
         enrollments: new PostgresConnectorLibraryDownloads(pool),
+        async recordStorage(identity, report) {
+          const result = await recordConnectorStorage(pool, {
+            ...identity,
+            ...report,
+          })
+          return result.ok
+        },
       }).stop
       sql = pool
     } catch (error) {

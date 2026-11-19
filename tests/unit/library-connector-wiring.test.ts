@@ -20,6 +20,7 @@ import { libraryRuntime } from '../../apps/farm/server/utils/library/runtime.ts'
 import type { AuthRuntime } from '../../apps/farm/server/utils/auth/runtime.ts'
 import { createConnectorLibrary } from '../../packages/connector/src/runtime/library-print-wiring.ts'
 import pollRoute from '../../apps/farm/server/api/connector/library/relay/poll.post.ts'
+import storageRoute from '../../apps/farm/server/api/connector/library/relay/storage.post.ts'
 import bodyRoute from '../../apps/farm/server/api/connector/library/relay/[opId]/body.get.ts'
 import resultRoute from '../../apps/farm/server/api/connector/library/relay/[opId]/result.post.ts'
 
@@ -207,6 +208,8 @@ async function world(
           : null,
     },
     pollMs: 500,
+    // The host's storage report; its recording is covered by library-retention-links-wiring.
+    recordStorage: async () => true,
     claimMs: 700,
   })
   cleanups.push(() => relay.stop())
@@ -235,11 +238,13 @@ async function world(
     const handler =
       url.pathname === '/api/connector/library/relay/poll'
         ? pollRoute
-        : op?.[2] === 'body'
-          ? bodyRoute
-          : op?.[2] === 'result'
-            ? resultRoute
-            : undefined
+        : url.pathname === '/api/connector/library/relay/storage'
+          ? storageRoute
+          : op?.[2] === 'body'
+            ? bodyRoute
+            : op?.[2] === 'result'
+              ? resultRoute
+              : undefined
     const response = handler
       ? ((await (handler as unknown as (e: unknown) => unknown)(
           event,

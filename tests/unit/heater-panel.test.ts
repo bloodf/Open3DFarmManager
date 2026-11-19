@@ -7,6 +7,7 @@ import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-
 import {
   clampTarget,
   commandHeaterName,
+  fieldText,
   heatersFromObservation,
   mergeSamples,
   powerText,
@@ -40,6 +41,14 @@ describe('heater temperature rules', () => {
     expect(clampTarget('abc', 120)).toBeUndefined()
     expect(clampTarget(0, 120)).toBe(0)
     expect(clampTarget(80, undefined)).toBe(80)
+  })
+
+  it('reads a typed number field as text (v-model casts type=number to a number)', () => {
+    expect(fieldText(200)).toBe('200')
+    expect(fieldText(' 59.6 ')).toBe('59.6')
+    expect(fieldText('')).toBe('')
+    expect(fieldText(undefined)).toBe('')
+    expect(fieldText(null)).toBe('')
   })
 
   it('names the command heater and reads limits from the machine profile', () => {

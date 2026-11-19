@@ -12,7 +12,15 @@ import {
   type PrintFileMetadata,
 } from '../../../shared/src/print-file/metadata.ts'
 import type { ZipSource } from '../../../shared/src/print-file/zip.ts'
-import type { LibraryPrintArgs } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  LibraryPrintArgs,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
+import type {
+  PauseDriver,
+  PreparedPauseDriver,
+} from '../control/pause-dispatcher.ts'
+import type { PrinterBinding } from '../control/printer-binding.ts'
 import type { LibraryStore } from './library-store.ts'
 import { LibraryStoreError } from './library-store.ts'
 import {
@@ -292,6 +300,122 @@ export function createLibraryPrintStarter(config: {
       }
     },
   }
+}
+
+type ExecuteRequest = Parameters<NonNullable<PauseDriver['execute']>>[2]
+
+/** What a library start printed, so the finished job links to it (#385). */
+export type LibraryPrintLink = { name: string; sha256: string; plate?: number }
+
+/** A refusal the dispatcher records as not sent: nothing reached the printer. */
+function driverRefusal(result: Extract<LibraryPrintResult, { ok: false }>) {
+  return Object.assign(new Error(result.message), {
+    refusal:
+      result.code === 'unsupported'
+        ? 'unsupported-action'
+        : result.code === 'incompatible' || result.code === 'checksum-mismatch'
+          ? 'invalid-command'
+          : 'state',
+    ...(result.code === 'unsupported' ? {} : { resultCode: result.code }),
+  })
+}
+
+/**
+ * `start_library_print` on the browser's signed control path (#386). The
+ * dispatcher keeps every rule it applies to any signed command (capability,
+ * role, replay and busy journal, fresh printer state, one send, no retry);
+ * this wrapper adds the library steps of the API path in between: the hash
+ * check, the server-mode cache or the Connector-mode local copy, the
+ * compatibility check and the upload. The single send is the driver's own
+ * `start_print`, guarded by the dispatcher's `beforeSend`.
+ */
+export function withLibraryPrint<D extends PreparedPauseDriver>(
+  driver: D,
+  config: {
+    starter: ReturnType<typeof createLibraryPrintStarter> | undefined
+    /** Upload target of the locally provisioned printer behind a binding. */
+    targetFor(binding: PrinterBinding): FileUploadTarget | undefined
+    remember?(binding: PrinterBinding, link: LibraryPrintLink): void
+  },
+): D {
+  const { starter } = config
+  const execute = driver.execute?.bind(driver)
+  if (!starter || !execute) return driver
+  const controls = (binding: PrinterBinding) =>
+    driver.controls?.(binding) ?? (['pause'] as const)
+  /** File each binding's current attempt started; its effect must name it. */
+  const started = new WeakMap<PrinterBinding, string>()
+  return Object.freeze({
+    ...driver,
+    controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
+      const base = controls(binding)
+      return base.includes('start_print') &&
+        !base.includes('start_library_print') &&
+        config.targetFor(binding)
+        ? Object.freeze([...base, 'start_library_print' as const])
+        : base
+    },
+    async execute(
+      action: ExtendedControlAction,
+      args: Record<string, unknown>,
+      request: ExecuteRequest,
+    ) {
+      if (action !== 'start_library_print')
+        return execute(action, args, request)
+      const { binding, signal } = request
+      started.delete(binding)
+      const parsed = LibraryPrintArgs.safeParse(args)
+      if (!parsed.success)
+        throw Object.assign(new Error('Invalid library print'), {
+          refusal: 'invalid-command',
+        })
+      const target = config.targetFor(binding)
+      if (!target || !controls(binding).includes('start_print'))
+        throw Object.assign(new Error('Library print unavailable'), {
+          refusal: 'unsupported-action',
+        })
+      let rpc: Awaited<ReturnType<typeof execute>> | undefined
+      const outcome = await starter.start({
+        args: parsed.data,
+        target,
+        signal,
+        // Capability, role and printer state are re-read at every step.
+        authorize: () =>
+          !signal.aborted && request.stillAuthorized?.() === true,
+        async start(name, extra) {
+          started.set(binding, name)
+          rpc = await execute('start_print', { file: name, ...extra }, request)
+        },
+      })
+      if (!outcome.ok) throw driverRefusal(outcome)
+      config.remember?.(binding, {
+        name: outcome.name,
+        sha256: parsed.data.sha256,
+        ...(parsed.data.plate === undefined
+          ? {}
+          : { plate: parsed.data.plate }),
+      })
+      return rpc!
+    },
+    async waitForPaused(
+      input: Parameters<PreparedPauseDriver['waitForPaused']>[0],
+    ) {
+      if (input.action !== ('start_library_print' as string))
+        return driver.waitForPaused(input)
+      const name = started.get(input.binding)
+      if (!name) return null
+      const observation = await driver.waitForPaused({
+        ...input,
+        action: 'start_print' as never,
+        args: { file: name },
+      })
+      // Only the file this attempt uploaded confirms the start.
+      return observation?.effect?.kind === 'file' &&
+        observation.effect.filename === name
+        ? observation
+        : null
+    },
+  }) as D
 }
 
 /**

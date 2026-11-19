@@ -1,9 +1,8 @@
+import { formatDuration } from './ui-format.ts'
 import type { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 
 export function formatJobTime(seconds: number | undefined): string | undefined {
-  if (seconds === undefined) return undefined
-  const minutes = Math.floor(seconds / 60)
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+  return formatDuration(seconds, 'hour-minute')
 }
 
 export function farmJobView(state: PrinterState) {

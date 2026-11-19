@@ -1,3 +1,4 @@
+import { formatDateTime } from './ui-format.ts'
 import { formatJobTime } from './farm-job-view.ts'
 
 export interface JobHistoryItem {
@@ -18,11 +19,6 @@ export const jobOutcomeLabel = {
   failed: 'Falhou',
 } as const
 
-const dateFormat = new Intl.DateTimeFormat('pt-BR', {
-  dateStyle: 'short',
-  timeStyle: 'medium',
-  timeZone: 'America/Sao_Paulo',
-})
 /** pt-BR text for the library link of a job; null when it was not started from the library. */
 export function jobLibraryLabel(job: {
   librarySha256?: string | undefined
@@ -39,7 +35,7 @@ export function jobHistoryRow(job: JobHistoryItem) {
     printerKey: job.printerKey,
     outcome: jobOutcomeLabel[job.outcome],
     filename: job.filename ?? 'Arquivo desconhecido',
-    endedAt: dateFormat.format(new Date(job.endedAt)),
+    endedAt: formatDateTime(job.endedAt) ?? 'Não informada',
     duration:
       formatJobTime(job.printDurationSeconds ?? job.totalDurationSeconds) ??
       'Não informada',

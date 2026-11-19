@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import ProgressRing from '../components/ui/charts/ProgressRing.vue'
+import Sparkline from '../components/ui/charts/Sparkline.vue'
+import ColorScaleLegend from '../components/ui/charts/ColorScaleLegend.vue'
+import { formatTemperature } from '../utils/ui-format.ts'
 import { ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
@@ -51,6 +55,26 @@ const rows = [
       <Dialog v-model="dialogOpen" title="Detalhes da impressão">
         <p>O arquivo suporte.gcode está em impressão.</p>
       </Dialog>
+    </Card>
+
+    <Card>
+      <h2>Gráficos</h2>
+      <ProgressRing label="Progresso informado da impressão" :value="42.5" />
+      <p>Temperatura da mesa: {{ formatTemperature(61.5) }}</p>
+      <Sparkline
+        label="Tendência de temperatura da mesa"
+        :points="[
+          { time: 0, value: 58 },
+          { time: 1000, value: 61.5 },
+        ]"
+      />
+      <ColorScaleLegend
+        label="Escala de altura da malha"
+        :stops="[
+          { label: '−0,2 mm', color: '#28347a' },
+          { label: '0,2 mm', color: '#ffdb59' },
+        ]"
+      />
     </Card>
 
     <Card>

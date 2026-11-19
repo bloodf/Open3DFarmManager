@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../../utils/ui-format.ts'
 import EmptyState from '../ui/EmptyState.vue'
 import {
   describeSpoolmanResult,
@@ -20,11 +21,7 @@ defineProps<{
   canManage?: boolean
 }>()
 
-const when = (value: number) =>
-  new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value))
+const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível'
 </script>
 
 <template>

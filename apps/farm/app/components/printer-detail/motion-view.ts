@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { formatNumber } from '../../utils/ui-format.ts'
 /** Pure helpers of the motion panel: steps, labels and readout text. */
 
 export type MotionControl =
@@ -18,7 +19,7 @@ export const BABYSTEP_STEPS_MM: readonly number[] = [0.005, 0.01, 0.025, 0.05]
 export const DEFAULT_MOTION_REASON = 'Comando indisponível.'
 
 const number = (value: number) =>
-  value.toLocaleString('pt-BR', { maximumFractionDigits: 3 })
+  formatNumber(value, { maximumFractionDigits: 3 })
 export const mmText = (value: number) => `${number(value)} mm`
 
 /** `X: 10,25 mm`, or `X: Indisponível` when the printer reports no position. */

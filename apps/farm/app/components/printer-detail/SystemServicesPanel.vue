@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  formatNumber,
+  formatPercentage,
+  formatTemperature,
+} from '../../utils/ui-format.ts'
 import type { ServiceOperation } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 
 defineProps<{
@@ -23,7 +28,6 @@ const states: Record<string, string> = {
   error: 'Erro',
   disconnected: 'Desconectado',
 }
-const format = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
 </script>
 
 <template>
@@ -39,7 +43,9 @@ const format = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
     <dt>Uso de CPU</dt>
     <dd>
       {{
-        host?.cpuLoad == null ? 'Sem dados' : format.format(host.cpuLoad) + '%'
+        host?.cpuLoad == null
+          ? 'Sem dados'
+          : (formatPercentage(host.cpuLoad) ?? 'Sem dados')
       }}
     </dd>
     <dt>Memória em uso</dt>
@@ -47,16 +53,14 @@ const format = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
       {{
         host?.memoryBytes == null
           ? 'Sem dados'
-          : format.format(host.memoryBytes / 1048576) + ' MiB'
+          : formatNumber(host.memoryBytes / 1048576, {
+              maximumFractionDigits: 1,
+            }) + ' MiB'
       }}
     </dd>
     <dt>Temperatura da CPU</dt>
     <dd>
-      {{
-        host?.temperatureC == null
-          ? 'Sem dados'
-          : format.format(host.temperatureC) + ' °C'
-      }}
+      {{ formatTemperature(host?.temperatureC) ?? 'Sem dados' }}
     </dd>
   </dl>
   <h2>Atualizações</h2>

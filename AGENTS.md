@@ -10,7 +10,7 @@
 - Internal Codex agents managed by this session or T3 Code, Claude (Anthropic) Sonnet and Opus subagents managed by this session's coordinator, Google agents available through configured Antigravity providers, and MiniMax M3.1 through configured T3 Code providers are authorized for development. Do not use external chats or other external AI agents without separate explicit approval.
 - The coordinator must delegate implementation and must not edit implementation code directly. Assign GPT Sol to large tasks, Terra to medium tasks, and Luna to simple tasks. Authorized Claude subagents follow the same idea: Opus for large or risky tasks, Sonnet for medium and simple tasks. Authorized Google and MiniMax agents follow the same complexity-based assignment. Use only the actual authorized model/provider instances available in the runtime; do not claim a model or capacity that is not exposed as available.
 - Use npm workspaces, Nuxt 4 and TypeScript. Run `npm run check:all` before publishing changes; report pending integration checks explicitly.
-- Commit one coherent subtask at a time using English conventional commit messages. User-facing copy is pt-BR and accessible.
+- Commit one coherent subtask at a time using English conventional commit messages. User-facing copy is pt-BR and accessible. Follow the [UI glossary](docs/UI-GLOSSARY.md).
 
 ## Disk space and task cleanup
 

@@ -12,6 +12,7 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import { queueMarkers, serverInfoWire } from './control-job-queue.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
@@ -40,8 +41,10 @@ export function moonrakerControls(
 }
 
 /**
- * One read-only printer.objects.list on its own short connection to the
- * locally bound, allowlisted origin. Sends nothing else and never retries.
+ * One read-only printer.objects.list, then one read-only server.info, on its
+ * own short connection to the locally bound, allowlisted origin. Sends nothing
+ * else and never retries. The component list adds a marker entry when the job
+ * queue is loaded; a missing or unreadable server.info only leaves it out.
  */
 export function detectMoonrakerObjects(input: {
   binding: PrinterBinding
@@ -63,17 +66,21 @@ export function detectMoonrakerObjects(input: {
   return new Promise<readonly string[]>((resolve, reject) => {
     const socket = createMoonrakerSocket(selected.origin, selected.limits)
     let settled = false
+    // Set once the object list is read; server.info then only adds markers.
+    let detected: readonly string[] | undefined
+    let infoTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (objects?: readonly string[]) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(infoTimer)
       input.signal.removeEventListener('abort', abort)
       socket.terminate()
       if (objects && readPrinterBinding(input.binding) === mapping)
         resolve(objects)
       else reject(new Error('Moonraker support detection unavailable'))
     }
-    const abort = () => finish()
+    const abort = () => finish(input.signal.aborted ? undefined : detected)
     const timer = setTimeout(
       abort,
       Math.min(
@@ -103,9 +110,26 @@ export function detectMoonrakerObjects(input: {
         const reply = Reply.parse(
           decodeMoonrakerFrame(data, binary, selected.limits.maxMessageBytes),
         )
+        if (detected) {
+          if (reply.id !== 2) throw new Error('Unexpected reply')
+          finish(Object.freeze([...detected, ...queueMarkers(reply.result)]))
+          return
+        }
         if (reply.id !== 1) throw new Error('Unexpected reply')
-        finish(
-          Object.freeze([...MoonrakerObjectList.parse(reply.result).objects]),
+        detected = Object.freeze([
+          ...MoonrakerObjectList.parse(reply.result).objects,
+        ])
+        // A server that never answers server.info keeps its object list.
+        infoTimer = setTimeout(
+          abort,
+          Math.min(1000, selected.limits.requestTimeoutMs),
+        )
+        socket.send(
+          serverInfoWire(2),
+          { binary: false, compress: false },
+          (error) => {
+            if (error) abort()
+          },
         )
       } catch {
         abort()

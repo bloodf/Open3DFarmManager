@@ -6,6 +6,15 @@ import {
 } from '../../../farm-protocol/src/control-actions.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import {
+  parseQueueOp,
+  parseQueueStatus,
+  queueNeedsStatus,
+  queueStatusWire,
+  QueueRefused,
+  queueSupported,
+  refuseQueueOp,
+} from './control-job-queue.ts'
+import {
   checkExtrudeProbe,
   ExtrudeRefused,
   extrudeProbeWire,
@@ -532,6 +541,40 @@ export function openFixedMoonrakerPause(input: {
     extended = true
     return send(extendedWire('extrude', args), request, 5000)
   }
+  /**
+   * Queue operation: refusals are decided from one read of the queue before
+   * the single send. A refused operation closes the attempt having written
+   * nothing, and an uncertain send is never repeated.
+   */
+  async function queueOp(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !queueSupported(input.objects)
+      )
+        throw new QueueRefused('unsupported-action')
+      const { op } = parseQueueOp(args)
+      const wire = extendedWire('queue_op', args)
+      if (wire === undefined) throw new QueueRefused('invalid-command')
+      refuseQueueOp(
+        op,
+        queueNeedsStatus(op)
+          ? parseQueueStatus(await requestRead(11, queueStatusWire(11)))
+          : undefined,
+      )
+      extended = true
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof QueueRefused ? error : failure()
+    }
+  }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
   const driver: PauseDriver = Object.freeze({
@@ -547,6 +590,7 @@ export function openFixedMoonrakerPause(input: {
         return executeMotion(action, args, request)
       }
       if (action === 'extrude') return extrude(args, request)
+      if (action === 'queue_op') return queueOp(args, request)
       extended = true
       return send(extendedWire(action, args), request, 5000)
     },

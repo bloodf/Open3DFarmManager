@@ -4,7 +4,10 @@ import { useRoute } from 'vue-router'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
-import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  ExtendedControlAction,
+  QueueOpArguments,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
@@ -77,6 +80,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
   const found: DetailCapability[] = [
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
   ]
@@ -132,6 +136,19 @@ const extrusion = computed(() => {
         : undefined,
   }
 })
+const queueAvailability = computed(() => availability('queue_op'))
+const queue = computed(() => {
+  const advertised = state.value?.controls?.includes('queue_op') ?? false
+  return {
+    advertised,
+    canCommand: queueAvailability.value.available && !commandInFlight.value,
+    reason: queueAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? queueAvailability.value.reason
+        : undefined,
+  }
+})
 const motionAvailability = computed(() =>
   Object.fromEntries(
     (
@@ -177,6 +194,9 @@ function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
       length_mm: lengthMm,
       feed,
     })
+}
+function queueOp(args: QueueOpArguments, event: Event) {
+  if (row.value) void openControl(row.value, 'queue_op', event, args)
 }
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
@@ -242,8 +262,10 @@ onMounted(() => heading.value?.focus())
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
       :extrusion="extrusion"
+      :queue="queue"
       @set-temperature="setTemperature"
       @extrude="extrude"
+      @queue-op="queueOp"
       @emergency-stop="emergencyStop"
     />
     <dialog

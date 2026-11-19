@@ -23,6 +23,7 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'queue_op',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -120,7 +121,46 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+/** Most files or jobs one queue operation may name. */
+export const QUEUE_OP_MAX_ITEMS = 32
+/** Queue file: a gcodes-relative path, no traversal, no control characters. */
+const QueueFileName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (v) =>
+      !/[\\\x00-\x1f\x7f]/.test(v) &&
+      !v.startsWith('/') &&
+      !v.split('/').some((part) => part === '' || part === '..' || part === '.'),
+  )
+/** Moonraker queue job id, as the queue status reports it. */
+const QueueJobId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
+const uniqueItems = <T extends z.ZodType<string>>(item: T, max: number) =>
+  z
+    .array(item)
+    .min(1)
+    .max(max)
+    .refine((values) => new Set(values).size === values.length)
+/** One queue operation; each op names exactly the items it needs. */
+export const QueueOpArguments = z.discriminatedUnion('op', [
+  z.strictObject({
+    op: z.literal('add'),
+    files: uniqueItems(QueueFileName, QUEUE_OP_MAX_ITEMS),
+  }),
+  z.strictObject({
+    op: z.literal('remove'),
+    job_ids: uniqueItems(QueueJobId, QUEUE_OP_MAX_ITEMS),
+  }),
+  z.strictObject({
+    op: z.literal('jump'),
+    job_ids: uniqueItems(QueueJobId, 1),
+  }),
+  z.strictObject({ op: z.enum(['start', 'pause']) }),
+])
+export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

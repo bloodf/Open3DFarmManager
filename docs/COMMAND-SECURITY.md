@@ -75,3 +75,31 @@ When receiving an API-originated command envelope, the Connector executes the fo
 10. **Single consumption and uncertainty policy:**
     - Consumes the replay claim exactly once; no automatic retry of uncertain commands.
     - If the physical dispatch result or connection to the printer driver fails or is ambiguous, the Connector records and reports uncertainty explicitly rather than retrying.
+
+## Full printer control rules (E18.1, #390)
+
+These rules are set before code. Each implementing issue must link the rule it implements. Nothing in this section is implemented on this branch.
+
+Roles are the farm memberships `owner`, `admin`, `operator` and `viewer`. A viewer never sends a printer command.
+
+| Action                                 | Role                                                             | Allowed printer states                                                                                     | Bounds                                                                                                                                        |
+| -------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| G-code console line                    | `admin` only; off by default per printer and enabled by an admin | Idle: accepted subject to the motion and bounds rules below. Printing or paused: tuning allow-list only    | One line, at most 256 bytes, no control characters                                                                                            |
+| Tuning allow-list (printing or paused) | `admin` only                                                     | Printing or paused                                                                                         | `M220`, `M221`, `SET_GCODE_OFFSET Z_ADJUST`, `SET_FAN_SPEED`, `SET_LED`, `SET_PIN`, `M117`, `GET_POSITION`, `QUERY_*`, `M105`, `M114`, `M115` |
+| Motion (move, home)                    | Not set by #390 (open)                                           | Refused while printing. Z babystep (`SET_GCODE_OFFSET Z_ADJUST`) is the only motion allowed while printing | Unhomed axes refused. Axis limits from the Klipper `configfile` section. Distance and feed caps not set (open)                                |
+| Extrusion                              | Not set by #390 (open)                                           | Refused while printing                                                                                     | Amount and temperature caps not set (open)                                                                                                    |
+| Config write (`config_write`)          | `admin` only                                                     | Refused while printing or paused                                                                           | Backup before every save. Refused if the file changed since it was opened. Path allow-list not set (open)                                     |
+| Service restart                        | `owner` only                                                     | Refused while printing or paused                                                                           | Not set by #390 (open)                                                                                                                        |
+| Emergency stop                         | Unchanged; see the command authorization rules above             | Unchanged                                                                                                  | Unchanged. Not rate limited                                                                                                                   |
+
+Rate limits apply per action class. The numeric limits per class are not set by #390 (open).
+
+### Open decisions
+
+These are not decided by #390 and must be resolved before the implementing issues:
+
+1. Role for motion and homing, and for extrusion.
+2. Whether paused counts as printing for motion and extrusion. Config write and service restart already refuse paused.
+3. Numeric caps: jog distance, feed rate, extrusion amount and temperature, and per-class rate limits.
+4. Whether the owner role inherits G-code console access. #390 grants it to the admin role only.
+5. Config write path allow-list and service restart target list.

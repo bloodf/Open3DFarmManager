@@ -3,6 +3,7 @@ import {
   FileListResponse,
   PrinterFile,
   MAX_FILE_LIST_WIRE_BYTES,
+  MAX_PRINTER_DOWNLOAD_BYTES,
 } from '../../../farm-protocol/src/file-list.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
 import { awaitAdmittedHandle } from '../files/admission-grace.ts'
@@ -71,7 +72,11 @@ export function createFileList(
           !!handle &&
           current === handle &&
           cap?.printer_key === request.printer_key &&
-          cap.actions.includes('start_print')
+          cap.actions.includes(
+            request.directory === undefined && request.download === undefined
+              ? 'start_print'
+              : 'file_op',
+          )
         )
       }
       const send = (result: object) => {
@@ -115,11 +120,32 @@ export function createFileList(
           }
           const target = input.targetFor(request.printer_key)
           if (!target) throw Error('offline')
+          if (request.download) {
+            if (target.backend !== 'moonraker' || !target.thumbnailSource)
+              throw Error('unsupported')
+            const download = await Promise.race([
+              readPrinterDownload(
+                createThumbnailDownload({
+                  ...target.thumbnailSource,
+                  signal: controller.signal,
+                }),
+                request.download,
+              ),
+              deadline,
+            ])
+            send(
+              authorized()
+                ? { ok: true, files: [], download }
+                : { ok: false, reason: 'unauthorized' },
+            )
+            return
+          }
           const entries = await Promise.race([
             readPrinterFiles(target, {
               signal: controller.signal,
               authorized,
               previews: true,
+              directory: request.directory,
             }),
             deadline,
           ])
@@ -185,10 +211,47 @@ export function createFileList(
   }
 }
 
+async function readPrinterDownload(
+  fetchFile: (path: string) => Promise<Response>,
+  path: string,
+): Promise<string> {
+  const response = await fetchFile(`gcodes/${path}`)
+  const reader = response.body?.getReader()
+  if (!reader) throw Error('File unavailable')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    if (
+      !response.ok ||
+      Number(response.headers.get('content-length')) >
+        MAX_PRINTER_DOWNLOAD_BYTES
+    )
+      throw Error('File unavailable')
+    while (true) {
+      const part = await reader.read()
+      if (part.done) break
+      size += part.value.byteLength
+      if (size > MAX_PRINTER_DOWNLOAD_BYTES) throw Error('File too large')
+      chunks.push(part.value)
+    }
+    return Buffer.concat(chunks).toString('base64')
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
+}
+
 export async function readPrinterFiles(
   target: FileListTarget,
-  input: { signal: AbortSignal; authorized(): boolean; previews: boolean },
+  input: {
+    signal: AbortSignal
+    authorized(): boolean
+    previews: boolean
+    directory?: string | undefined
+  },
 ) {
+  if (input.directory !== undefined && target.backend !== 'moonraker')
+    throw Error('unsupported')
   switch (target.backend) {
     case 'creality':
     case 'anycubic':
@@ -210,7 +273,8 @@ export async function readPrinterFiles(
     case 'moonraker':
       return listMoonrakerFiles(
         {
-          request: (method, params) => target.client.request(method, params),
+          request: (method, params) =>
+            target.client.request(method, params, input.signal),
           ...(input.previews && target.thumbnailSource
             ? {
                 downloadThumbnail: createThumbnailDownload({
@@ -225,7 +289,7 @@ export async function readPrinterFiles(
                 }
               : {}),
         },
-        { limit: 200, metadata: input.previews },
+        { limit: 200, metadata: input.previews, directory: input.directory },
       )
     case 'bambu':
       return (await listBambuFiles({ ...target, signal: input.signal })).map(

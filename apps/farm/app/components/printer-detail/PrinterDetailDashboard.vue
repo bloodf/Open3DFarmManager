@@ -280,7 +280,9 @@ const heaterReason = computed(
           v-else-if="tab.id === 'historico' && jobHistory"
           v-bind="jobHistory"
         />
-        <p v-else>Sem dados de {{ tab.label }} neste momento.</p>
+        <slot v-else :name="tab.id"
+          ><p>Sem dados de {{ tab.label }} neste momento.</p></slot
+        >
       </template>
     </Tabs>
     <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">

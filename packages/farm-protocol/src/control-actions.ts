@@ -24,6 +24,7 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'file_op',
   'set_led',
   'set_pin',
   'queue_op',
@@ -137,7 +138,8 @@ export function controlSourceState(
   if (action === 'jog' || action === 'motors_off')
     return state === 'idle' || state === 'cancelled'
   // Extrusion moves filament: only a stopped printer may do it.
-  if (action === 'extrude') return state === 'idle' || state === 'cancelled'
+  if (action === 'file_op' || action === 'extrude')
+    return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
   return action === 'resume'
@@ -178,6 +180,30 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+export const PrinterGcodePath = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (path) =>
+      !/[\\%:\u0000-\u001f\u007f-\u009f]/.test(path) &&
+      path
+        .split('/')
+        .every(
+          (part) =>
+            part.trim() === part && part && part !== '.' && part !== '..',
+        ),
+  )
+export const FileOperation = z.discriminatedUnion('op', [
+  z.strictObject({ op: z.literal('delete'), path: PrinterGcodePath }),
+  z.strictObject({ op: z.literal('mkdir'), path: PrinterGcodePath }),
+  z.strictObject({
+    op: z.literal('move'),
+    path: PrinterGcodePath,
+    to: PrinterGcodePath,
+  }),
+])
+
 /** Most files or jobs one queue operation may name. */
 export const QUEUE_OP_MAX_ITEMS = 32
 /** Queue file: a gcodes-relative path, no traversal, no control characters. */
@@ -219,6 +245,7 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
 ])
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),

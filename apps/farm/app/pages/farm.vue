@@ -34,6 +34,12 @@ import {
   actionDialogTitle,
 } from '../utils/farm-control.ts'
 import { extendedLabel } from '../utils/farm-control-extended.ts'
+import { farmViewErrorText } from '../utils/farm-view-error.ts'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
 const view = useFarmView()
 const {
   state,
@@ -84,21 +90,9 @@ watch(
   },
 )
 onMounted(() => heading.value?.focus())
-const errorText = computed(() => {
-  if (state.value.kind !== 'error') return ''
-  switch (state.value.reason) {
-    case 'forbidden':
-      return 'Esta farm não está disponível para sua conta.'
-    case 'rate-limit':
-      return 'Aguarde antes de tentar novamente.'
-    case 'account-changed':
-      return 'A conta mudou. Entre novamente para confirmar seus dados.'
-    case 'invalid-response':
-      return 'Não foi possível confirmar os dados recebidos. Tente novamente.'
-    case 'unavailable':
-      return 'Não foi possível confirmar seus dados. Tente novamente.'
-  }
-})
+const errorText = computed(() =>
+  state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
+)
 const route = useRoute()
 watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
   if (
@@ -233,9 +227,10 @@ function cancelPause(event: Event) {
       Os controles desta página são somente leitura, exceto a pausa, que exige
       confirmação e uma conexão direta segura.
     </p>
-    <p v-if="state.kind === 'loading'" role="status" aria-busy="true">
-      Carregando suas farms…
-    </p>
+    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
@@ -243,13 +238,16 @@ function cancelPause(event: Event) {
       <p>Entre na sua conta para consultar suas farms.</p>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
     </section>
-    <section v-else-if="state.kind === 'error'" aria-label="Falha na consulta">
+    <ErrorState
+      v-else-if="state.kind === 'error'"
+      title="Não foi possível carregar suas farms"
+    >
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorText }}</p>
       <div class="actions">
-        <button type="button" @click="discover()">Tentar novamente</button
-        ><NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
       </div>
-    </section>
+    </ErrorState>
     <template v-else-if="ready">
       <p class="opaque">Conta atual: {{ ready.accountId }}</p>
       <FarmScopeSelector
@@ -282,9 +280,14 @@ function cancelPause(event: Event) {
             O cadastro informa atribuições e aprovações. O estado da impressora
             depende da conexão direta.
           </p>
-          <p v-if="ready.inventory === 'loading'" role="status">
-            Carregando o cadastro de impressoras…
-          </p>
+          <div
+            v-if="ready.inventory === 'loading'"
+            class="loading"
+            aria-busy="true"
+          >
+            <p role="status">Carregando o cadastro de impressoras…</p>
+            <Skeleton /><Skeleton /><Skeleton />
+          </div>
           <template v-else>
             <div class="actions">
               <button
@@ -311,14 +314,17 @@ function cancelPause(event: Event) {
             <p v-if="ready.printerAfter">
               Exibindo outra página de atribuições.
             </p>
-            <p v-if="!ready.rows.length">
-              {{
+            <EmptyState
+              v-if="!ready.rows.length"
+              :title="
                 ready.printerAfter || ready.nextPrinter
                   ? 'Nenhuma atribuição nesta página.'
                   : 'Nenhuma impressora atribuída a esta farm.'
-              }}
+              "
+              description="Atribua uma impressora a um Connector para acompanhar o estado dela aqui."
+            >
               <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
-            </p>
+            </EmptyState>
             <PrinterWallFilters
               v-model="wallQuery"
               :facets="facets"
@@ -396,11 +402,10 @@ function cancelPause(event: Event) {
           aria-describedby="last-known-description"
         >
           <h2 id="last-known-heading">Última observação conhecida</h2>
-          <p id="last-known-description">
-            Sem conexão direta, estes são os últimos estados que o servidor
-            observou. As informações são somente leitura e podem estar
-            desatualizadas.
-          </p>
+          <StaleNotice
+            id="last-known-description"
+            description="Sem conexão direta, estes são os últimos estados que o servidor observou. As informações são somente leitura e podem estar desatualizadas."
+          />
           <ul class="last-known-list">
             <li v-for="state in offlineStates" :key="state.assignmentId">
               <LastKnownStates :state="state" :now-wall-ms="now.wall" />

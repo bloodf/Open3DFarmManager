@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
+import StaleNotice from '../ui/StaleNotice.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
@@ -15,6 +16,7 @@ import HistoryPanel from './HistoryPanel.vue'
 import TimelapsePanel from './TimelapsePanel.vue'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 import type { PrinterHistoryJob, PrinterHistoryTotals } from './history-view.ts'
+import ConsolePanel from './ConsolePanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import type {
   QueueOpArguments,
@@ -38,6 +40,7 @@ const props = defineProps<{
   live: boolean
   /** Age of the last known data, shown while not live. */
   lastKnownText?: string
+  supportedOnly?: boolean
   capabilities?: readonly DetailCapability[]
   /** Catalog reasons per capability the printer does not advertise. */
   reasons?: Readonly<Partial<Record<DetailCapability, string>>>
@@ -75,6 +78,16 @@ const props = defineProps<{
     jobs?: readonly QueueJob[]
     canCommand: boolean
     reason?: string
+  }
+  /** G-code console tab; the Connector enforces role, state and rate. */
+  gcodeConsole?: {
+    advertised: boolean
+    canCommand: boolean
+    reason?: string
+    printerKey: string
+    printing?: boolean
+    commands?: readonly string[]
+    responses?: readonly { seq: number; lines: readonly string[] }[]
   }
   canEmergencyStop: boolean
   /** Timelapse: the panel shows the catalog reason when not advertised. */
@@ -140,6 +153,7 @@ const emit = defineEmits<{
     file: string,
     event: Event,
   ): void
+  (e: 'send-gcode', line: string, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -183,13 +197,11 @@ const heaterReason = computed(
         <StatusBadge :tone="live ? stateTone : 'stale'" :label="stateLabel" />
         <span>Connector: {{ connectorLabel }}</span>
       </p>
-      <p v-if="!live" role="status">
-        Sem conexão direta: exibindo o último valor conhecido<template
-          v-if="lastKnownText"
-          >, {{ lastKnownText }}</template
-        >. Somente leitura.
-      </p>
-      <p>
+      <StaleNotice
+        v-if="!live"
+        :description="`Sem conexão direta: exibindo o último valor conhecido${lastKnownText ? `, ${lastKnownText}` : ''}. Somente leitura.`"
+      />
+      <p v-if="!supportedOnly || canEmergencyStop">
         <Button
           class="printer-detail__stop"
           :disabled="!canEmergencyStop"
@@ -198,7 +210,7 @@ const heaterReason = computed(
           >Parada de emergência</Button
         >
       </p>
-      <p id="stop-help">
+      <p v-if="!supportedOnly || canEmergencyStop" id="stop-help">
         {{
           canEmergencyStop
             ? 'Abre uma confirmação. Nada é enviado antes de você confirmar.'
@@ -232,7 +244,7 @@ const heaterReason = computed(
               emit('set-temperature', heater, target, event)
           "
         />
-        <section v-else aria-labelledby="heaters-title">
+        <section v-else-if="!supportedOnly" aria-labelledby="heaters-title">
           <h2 id="heaters-title">Aquecedores</h2>
           <p>{{ heaterReason }}</p>
         </section>
@@ -256,7 +268,7 @@ const heaterReason = computed(
             (speed, flow, event) => emit('set-factor', speed, flow, event)
           "
         />
-        <section v-else aria-labelledby="motion-title">
+        <section v-else-if="!supportedOnly" aria-labelledby="motion-title">
           <h2 id="motion-title">Movimento</h2>
           <p>{{ motionReason }}</p>
         </section>
@@ -281,6 +293,7 @@ const heaterReason = computed(
             (name, params, event) => emit('run-macro', name, params, event)
           "
         />
+        <slot name="painel" />
         <OutputsPanel
           v-if="outputs"
           :advertised="outputs.advertised"
@@ -295,9 +308,24 @@ const heaterReason = computed(
           @set-pin="(name, value, event) => emit('set-pin', name, value, event)"
         />
       </template>
+      <template v-if="gcodeConsole" #console>
+        <ConsolePanel
+          :advertised="gcodeConsole.advertised"
+          :can-command="gcodeConsole.canCommand"
+          :disabled-reason="gcodeConsole.reason"
+          :printer-key="gcodeConsole.printerKey"
+          :printing="gcodeConsole.printing"
+          :commands="gcodeConsole.commands"
+          :responses="gcodeConsole.responses"
+          @send-line="(line, event) => emit('send-gcode', line, event)"
+        />
+      </template>
       <template
         v-for="tab in tabs.available.filter(
-          ({ id }) => id !== 'painel' && id !== 'sistema',
+          ({ id }) =>
+            id !== 'painel' &&
+            id !== 'sistema' &&
+            !(id === 'console' && gcodeConsole),
         )"
         :key="tab.id"
         #[tab.id]
@@ -340,7 +368,10 @@ const heaterReason = computed(
         >
       </template>
     </Tabs>
-    <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">
+    <section
+      v-if="!supportedOnly && tabs.unavailable.length"
+      aria-labelledby="unavailable-title"
+    >
       <h2 id="unavailable-title">Recursos indisponíveis</h2>
       <ul>
         <li v-for="tab in tabs.unavailable" :key="tab.id">

@@ -37,6 +37,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   set_led: 'Definir LED',
   set_pin: 'Definir saída',
   queue_op: 'Gerenciar fila de impressão',
+  gcode: 'Enviar G-code',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action

@@ -61,7 +61,7 @@ export const PrinterDetailUpdate = z.strictObject({
   ...base,
   t: z.literal('detail.update'),
   seq: count,
-  vendor: z.enum(['anycubic', 'kobra-x']).optional(),
+  vendor: z.enum(['anycubic', 'kobra-x', 'creality']).optional(),
   capabilities,
   detail: z
     .strictObject({
@@ -203,6 +203,7 @@ const queryResults = {
     state: name,
     jobs: z.array(z.strictObject({ id: name, file: path })).max(256),
   }),
+  'gcode-help': z.array(name).max(512),
   'power-devices': named({ on: z.boolean() }),
   timelapse: z.strictObject({
     enabled: z.boolean(),

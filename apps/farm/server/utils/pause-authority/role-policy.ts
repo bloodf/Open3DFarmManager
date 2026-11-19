@@ -22,6 +22,7 @@ export function actionsForControlRole(
         'exclude_object',
         'set_led',
         'set_pin',
+        'gcode',
         'jog',
         'motors_off',
         'z_babystep',

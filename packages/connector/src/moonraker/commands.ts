@@ -1,4 +1,5 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { buildConsoleScript } from './control-console.ts'
 import { buildMacroScript } from './control-macros.ts'
 import {
   buildMotionScript,
@@ -188,6 +189,13 @@ export function buildMoonrakerCommand(
   if (action === 'queue_op') {
     if (!queueSupported(objects)) throw new Error('Queue unavailable')
     return parseQueueOp(args).call
+  }
+  if (action === 'gcode') {
+    keys(['line'])
+    return {
+      method: 'printer.gcode.script',
+      params: { script: buildConsoleScript(args) },
+    }
   }
 
   if (action === 'extrude') {

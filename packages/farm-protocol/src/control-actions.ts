@@ -35,6 +35,7 @@ export const ExtendedControlAction = z.enum([
   'set_led',
   'set_pin',
   'queue_op',
+  'gcode',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -88,6 +89,14 @@ export const LibraryPrintArgs = z.strictObject({
   ams_mapping: AmsMapping.optional(),
 })
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
+/** Console line: one line of printable ASCII, at most 256 bytes. */
+export const GCODE_LINE_MAX_BYTES = 256
+export const GcodeLine = z
+  .string()
+  .min(1)
+  .max(GCODE_LINE_MAX_BYTES)
+  .refine((line) => !/[^\x20-\x7e]/.test(line))
+  .refine((line) => line.trim().length > 0)
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 export const MACRO_PARAM_MAX_KEYS = 16
 export const MACRO_PARAM_MAX_VALUE_CHARS = 64
@@ -143,8 +152,9 @@ export function controlRoleAllowed(
   action?: ExtendedControlAction,
 ): boolean {
   if (action === 'service') return role === 'owner'
-  if (action === 'power') return role === 'owner' || role === 'admin'
-  if (action === 'run_macro') return role === 'owner' || role === 'admin'
+  if (action === 'gcode') return role === 'admin'
+  if (action === 'power' || action === 'run_macro')
+    return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
 export function controlSourceState(
@@ -287,6 +297,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('run_macro'),
     args: z.strictObject({ name: MacroName, params: MacroParams.optional() }),
+  }),
+  z.strictObject({
+    action: z.literal('gcode'),
+    args: z.strictObject({ line: GcodeLine }),
   }),
   z.strictObject({
     action: z.literal('load_filament'),

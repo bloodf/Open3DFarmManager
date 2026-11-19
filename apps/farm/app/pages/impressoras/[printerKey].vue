@@ -7,6 +7,11 @@ import SystemServicesPanel from '../../components/printer-detail/SystemServicesP
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
+import Button from '../../components/ui/Button.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import ErrorState from '../../components/ui/ErrorState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import { farmViewErrorText } from '../../utils/farm-view-error.ts'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
 import type {
@@ -45,7 +50,21 @@ const systemFrame = computed(() =>
     ? detailFrame.value
     : undefined,
 )
+const consoleCommands = shallowRef<readonly string[]>([])
+const consoleResponses = shallowRef<
+  readonly { seq: number; lines: readonly string[] }[]
+>([])
+let consoleSequence = 0
 const view = useFarmView({
+  onGcodeHelp(commands) {
+    consoleCommands.value = commands
+  },
+  onGcodeResponse(frame) {
+    consoleResponses.value = [
+      ...consoleResponses.value.slice(-999),
+      { seq: consoleSequence++, lines: frame.lines },
+    ]
+  },
   onDetail(frame) {
     detailFrame.value = frame
   },
@@ -56,10 +75,11 @@ const view = useFarmView({
   onClose() {
     webcams.value = null
     detailFrame.value = undefined
+    consoleCommands.value = []
   },
 })
 definePageMeta({ key: (route) => route.path })
-const { ready, now } = view
+const { state: viewState, ready, now, discover } = view
 const heading = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
@@ -124,6 +144,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
     ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
+    ...(controls?.includes('gcode') ? (['console'] as const) : []),
   ]
   return found.length ? found : undefined
 })
@@ -262,6 +283,20 @@ const motionAvailability = computed(() =>
   ),
 )
 
+const gcodeAvailability = computed(() => availability('gcode'))
+const gcodeConsole = computed(() => ({
+  advertised: state.value?.controls?.includes('gcode') ?? false,
+  canCommand: gcodeAvailability.value.available && !commandInFlight.value,
+  reason: gcodeAvailability.value.available
+    ? 'Um comando já está em andamento.'
+    : gcodeAvailability.value.reason,
+  printerKey: printerKey.value,
+  commands: consoleCommands.value,
+  responses: consoleResponses.value,
+  printing:
+    state.value?.state === 'printing' || state.value?.state === 'paused',
+}))
+
 const macroAvailability = computed(() => availability('run_macro'))
 const macros = computed(() => {
   const advertised = state.value?.controls?.includes('run_macro') ?? false
@@ -333,6 +368,9 @@ function queueOp(args: QueueOpArguments, event: Event) {
 function timelapseOp(args: TimelapseArguments, event: Event) {
   if (row.value) void openControl(row.value, 'timelapse', event, args)
 }
+function sendGcode(line: string, event: Event) {
+  if (row.value) void openControl(row.value, 'gcode', event, { line })
+}
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
 }
@@ -350,15 +388,42 @@ onMounted(() => heading.value?.focus())
       <NuxtLink to="/farm">Minha farm</NuxtLink>
       <NuxtLink to="/impressoras">Impressoras</NuxtLink>
     </nav>
-    <p v-if="!ready" ref="heading" role="status" tabindex="-1">
-      Carregando a impressora…
-    </p>
+    <div
+      v-if="viewState.kind === 'loading' || ready?.inventory === 'loading'"
+      class="loading"
+      aria-busy="true"
+    >
+      <p ref="heading" role="status" tabindex="-1">Carregando a impressora…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <section
+      v-else-if="viewState.kind === 'sign-in-required'"
+      aria-label="Acesso à farm"
+    >
+      <h1 ref="heading" tabindex="-1">Entre para ver a impressora</h1>
+      <p>Entre na sua conta para consultar esta impressora.</p>
+      <NuxtLink to="/entrar">Entrar</NuxtLink>
+    </section>
+    <ErrorState
+      v-else-if="viewState.kind === 'error'"
+      title="Não foi possível carregar a impressora"
+    >
+      <p ref="heading" role="alert" tabindex="-1">
+        {{ farmViewErrorText(viewState.reason) }}
+      </p>
+      <div class="actions">
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+      </div>
+    </ErrorState>
     <template v-else-if="!row">
       <h1 ref="heading" tabindex="-1">Impressora não encontrada</h1>
-      <p>
-        Nenhuma impressora com este identificador está atribuída à farm
-        selecionada.
-      </p>
+      <EmptyState
+        title="Nenhuma impressora com este identificador"
+        description="Nenhuma impressora com este identificador está atribuída à farm selecionada."
+      >
+        <NuxtLink to="/impressoras">Ver impressoras da farm</NuxtLink>
+      </EmptyState>
     </template>
     <PrinterDetailDashboard
       v-else
@@ -371,6 +436,7 @@ onMounted(() => heading.value?.focus())
           : 'sem conexão direta'
       "
       :live="live"
+      :supported-only="vendorFrame?.vendor === 'creality'"
       :last-known-text="lastKnownText"
       :capabilities="capabilities"
       :heaters="heaters"
@@ -419,12 +485,14 @@ onMounted(() => heading.value?.focus())
       :queue="queue"
       :timelapse="timelapse"
       :macros="macros"
+      :gcode-console="gcodeConsole"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @queue-op="queueOp"
       @timelapse-op="timelapseOp"
       @run-macro="runMacro"
+      @send-gcode="sendGcode"
       @set-fan="setFan"
       @set-led="setLed"
       @set-pin="setPin"
@@ -491,6 +559,16 @@ onMounted(() => heading.value?.focus())
       <p v-if="vendorFrame.detail.print?.progress !== undefined">
         Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
       </p>
+      <button
+        v-if="
+          vendorFrame.vendor === 'creality' && state?.controls?.includes('home')
+        "
+        type="button"
+        :disabled="!availability('home').available || commandInFlight"
+        @click="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
+      >
+        Referenciar todos os eixos
+      </button>
       <form
         v-if="state?.controls?.includes('start_print')"
         @submit.prevent="

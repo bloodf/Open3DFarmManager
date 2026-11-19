@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
+import EmptyState from '../ui/EmptyState.vue'
 import {
   assignableRoles,
   memberDisplayName,
@@ -55,7 +56,14 @@ function selectId(member: FarmMember) {
 <template>
   <section aria-labelledby="members-heading">
     <h2 id="members-heading">Membros</h2>
-    <p v-if="members.length === 0" role="status">Nenhum membro nesta farm.</p>
+    <EmptyState
+      :level="3"
+      v-if="members.length === 0"
+      title="Nenhum membro nesta farm"
+      description="Convide uma pessoa para que ela passe a participar desta farm."
+    >
+      <NuxtLink to="/convites">Convidar uma pessoa</NuxtLink>
+    </EmptyState>
     <ul v-else class="member-list">
       <li v-for="member in members" :key="member.accountId">
         <div class="identity">

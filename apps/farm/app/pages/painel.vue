@@ -22,6 +22,7 @@ const states = shallowRef<readonly LastKnownState[]>([])
 const fetchedAt = ref<number | null>(null)
 const failed = ref(false)
 const problem = ref('')
+const noFarm = ref(false)
 const now = ref(0)
 const page = ref(0)
 const size = ref({ width: 1920, height: 1080 })
@@ -61,7 +62,7 @@ async function poll() {
       farmId =
         (farms.find((f) => f.farmId === wanted) ?? farms[0])?.farmId ?? ''
       if (!farmId) {
-        problem.value = 'Nenhuma farm disponível para esta conta.'
+        noFarm.value = true
         return
       }
     }
@@ -78,6 +79,7 @@ async function poll() {
     states.value = parsed.states
     fetchedAt.value = Date.now()
     failed.value = false
+    noFarm.value = false
     problem.value = ''
   } catch (cause) {
     if (run.signal.aborted) return
@@ -142,12 +144,20 @@ onBeforeUnmount(() => {
 
 <template>
   <main id="conteudo" class="kiosk-root" :style="{ fontSize: `${fontPx}px` }">
-    <p v-if="problem" class="kiosk-root__problem" role="alert">{{ problem }}</p>
+    <p
+      v-if="problem && fetchedAt !== null"
+      class="kiosk-root__problem"
+      role="alert"
+    >
+      {{ problem }}
+    </p>
     <PrinterKiosk
       :states="states"
       :now-wall-ms="now"
       :fetched-at="fetchedAt"
       :failed="failed"
+      :no-farm="noFarm"
+      :problem="problem"
       :page="page"
       :per-page="perPage"
     />

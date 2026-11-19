@@ -145,21 +145,35 @@ export function detectMoonrakerMacroParams(
   )
 }
 
+const PowerComponent = z.object({
+  components: z.array(z.string()).max(512),
+})
+
+/** True only when a `server.info` reply lists the power component. */
+const powerListed = (result: unknown) => {
+  const info = PowerComponent.safeParse(result)
+  return info.success && info.data.components.includes('power')
+}
+
 /**
- * Read the Moonraker components and power device catalogue independently.
- * Advertise each capability only when its probe succeeds.
+ * Read the Moonraker components, then the power device catalogue only when
+ * `server.info` lists the power component. Advertise each capability only
+ * when its probe succeeds.
  */
 export async function detectMoonrakerComponents(
   input: DetectInput,
 ): Promise<readonly string[]> {
-  const [components, power] = await Promise.all([
-    readOnlyOnce(input, { method: 'server.info' }, (result) => [
-      ...queueMarkers(result),
-      ...timelapseMarkers(result),
-    ]).catch(() => []),
-    readPowerDevices((method) =>
-      readOnlyOnce(input, { method }, (result) => result),
-    ).catch(() => []),
-  ])
-  return [...components, ...(power.length ? [POWER_MARKER] : [])]
+  const info = await readOnlyOnce(
+    input,
+    { method: 'server.info' },
+    (result) => ({
+      markers: [...queueMarkers(result), ...timelapseMarkers(result)],
+      power: powerListed(result),
+    }),
+  ).catch(() => ({ markers: [], power: false }))
+  if (!info.power) return info.markers
+  const devices = await readPowerDevices((method) =>
+    readOnlyOnce(input, { method }, (result) => result),
+  ).catch(() => [])
+  return [...info.markers, ...(devices.length ? [POWER_MARKER] : [])]
 }

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import Card from './Card.vue'
 
-defineProps<{ title: string; description?: string }>()
+withDefaults(
+  defineProps<{ title: string; description?: string; level?: 2 | 3 }>(),
+  { level: 2 },
+)
 </script>
 
 <template>
   <Card>
-    <h2>{{ title }}</h2>
+    <component :is="`h${level}`">{{ title }}</component>
     <p v-if="description">{{ description }}</p>
     <slot />
   </Card>

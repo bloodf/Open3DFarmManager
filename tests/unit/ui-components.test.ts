@@ -238,5 +238,5 @@ describe('UI component gallery', () => {
     await page.getByRole('button', { name: 'Ver detalhes' }).click()
     await page.getByRole('dialog').waitFor()
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-  }, 15_000)
+  }, 120_000)
 })

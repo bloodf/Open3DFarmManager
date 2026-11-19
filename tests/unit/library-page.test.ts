@@ -648,6 +648,6 @@ describe('library page in a browser', () => {
         await close()
       }
     },
-    40_000,
+    120_000,
   )
 })

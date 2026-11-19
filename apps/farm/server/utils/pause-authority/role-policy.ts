@@ -15,6 +15,8 @@ export function actionsForControlRole(
         'load_filament',
         'unload_filament',
         'extrude',
+        'set_led',
+        'set_pin',
         'jog',
         'motors_off',
         'z_babystep',

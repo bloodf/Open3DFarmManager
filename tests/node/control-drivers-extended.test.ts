@@ -45,6 +45,7 @@ const MOONRAKER_ALL = [
   'set_light',
   'set_speed',
   'extrude',
+  'set_pin',
 ]
 const BAMBU_ALL = [
   ...LIFECYCLE,
@@ -552,6 +553,10 @@ test('Moonraker advertises exactly the actions its detected objects support', as
     'set_fan',
     'home',
     'set_speed',
+    'jog',
+    'motors_off',
+    'z_babystep',
+    'set_factor',
   ])
   assert.deepEqual(await bare.dispatch(), {
     kind: 'rejected',

@@ -132,6 +132,34 @@ const extrusion = computed(() => {
         : undefined,
   }
 })
+const outputs = computed(() => {
+  const controls = state.value?.controls ?? []
+  const advertised = {
+    fan: controls.includes('set_fan'),
+    led: controls.includes('set_led'),
+    pin: controls.includes('set_pin'),
+  }
+  // The panel is one form set: it is on only when every advertised action is.
+  const blocked = (
+    [
+      ['set_fan', advertised.fan],
+      ['set_led', advertised.led],
+      ['set_pin', advertised.pin],
+    ] as const
+  )
+    .filter(([, offered]) => offered)
+    .map(([action]) => availability(action))
+    .find((item) => !item.available)
+  return {
+    advertised,
+    canCommand: !blocked && !commandInFlight.value,
+    reason: blocked
+      ? blocked.reason
+      : commandInFlight.value
+        ? 'Um comando já está em andamento.'
+        : undefined,
+  }
+})
 const motionAvailability = computed(() =>
   Object.fromEntries(
     (
@@ -207,6 +235,20 @@ function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
       feed,
     })
 }
+function setFan(fan: string, percent: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_fan', event, { fan, percent })
+}
+function setLed(
+  name: string,
+  channels: { r: number; g: number; b: number; w?: number },
+  event: Event,
+) {
+  if (row.value)
+    void openControl(row.value, 'set_led', event, { name, ...channels })
+}
+function setPin(name: string, value: number, event: Event) {
+  if (row.value) void openControl(row.value, 'set_pin', event, { name, value })
+}
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
 }
@@ -272,9 +314,13 @@ onMounted(() => heading.value?.focus())
       "
       :extrusion="extrusion"
       :macros="macros"
+      :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @run-macro="runMacro"
+      @set-fan="setFan"
+      @set-led="setLed"
+      @set-pin="setPin"
       @emergency-stop="emergencyStop"
     />
     <dialog

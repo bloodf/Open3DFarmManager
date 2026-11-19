@@ -23,6 +23,8 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'set_led',
+  'set_pin',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -43,6 +45,22 @@ export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
 export function controlsForBackend(backend: string): readonly ControlAction[] {
   return backend === 'moonraker' ? MOONRAKER_CONTROLS : []
 }
+/** Klipper object name (the part after the section type); never free text. */
+export const OutputName = z.string().regex(/^[A-Za-z0-9_]{1,64}$/)
+const Channel = z.number().int().min(0).max(255)
+/** LED channels are 0-255; `w` is left out for RGB-only strips. */
+export const SetLedArguments = z.strictObject({
+  name: OutputName,
+  r: Channel,
+  g: Channel,
+  b: Channel,
+  w: Channel.optional(),
+})
+/** PWM duty or digital level, 0 to 1 (Klipper's default `scale`). */
+export const SetPinArguments = z.strictObject({
+  name: OutputName,
+  value: z.number().finite().min(0).max(1),
+})
 /** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
 export const LIBRARY_PRINT_API_SCOPE = 'jobs:write'
 /** One Bambu AMS slot per filament of the plate; -1 leaves a filament unmapped. */
@@ -203,9 +221,19 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('set_fan'),
     args: z.strictObject({
-      fan: z.enum(['part', 'aux', 'chamber']),
+      // 'part' is the default fan; any other value is a fan_generic or
+      // controller_fan name the Connector checks against the object list.
+      fan: OutputName,
       percent: z.number().int().min(0).max(100),
     }),
+  }),
+  z.strictObject({
+    action: z.literal('set_led'),
+    args: SetLedArguments,
+  }),
+  z.strictObject({
+    action: z.literal('set_pin'),
+    args: SetPinArguments,
   }),
   z.strictObject({
     action: z.literal('home'),

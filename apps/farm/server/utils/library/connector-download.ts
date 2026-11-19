@@ -1,4 +1,6 @@
 import type { Readable } from 'node:stream'
+import type { Sql } from 'postgres'
+import { verifyConnectorCredential } from '../connector-credentials.ts'
 import { IntegrationLimits } from '../integration-auth-limits.ts'
 import { BlobStoreError, parseRange, type BlobRange } from './blob-store.ts'
 
@@ -207,4 +209,124 @@ export function connectorLibraryDownload():
 }
 export function deactivateConnectorLibraryDownload(): void {
   active = undefined
+}
+
+/** Same credential policy the telemetry endpoint accepts; the keys are the issuer's public keys. */
+export interface ConnectorCredentialPolicy {
+  issuer: string
+  audience: string
+  ttlSeconds: number
+  publicKeys: ReadonlyMap<string, CryptoKey>
+}
+export interface ConnectorEnrollmentReader {
+  /** Current enrollment of this agent in this farm, read at call time; null when none. */
+  find(
+    farmId: string,
+    agentId: string,
+  ): Promise<{ status: string; publicKeySpki: string } | null>
+}
+
+const BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/
+
+/**
+ * Authenticates a download from the Connector credential (`Authorization:
+ * Bearer`, `x-connector-agent`, `x-connector-farm`, the headers telemetry uses).
+ * The signature, claims and key binding are verified, and the enrollment must
+ * be approved right now, so a revoked Connector is refused at once. Anything
+ * else is null; a storage failure throws and answers 503.
+ */
+export function createConnectorLibraryAuthenticator(input: {
+  credentials: ConnectorCredentialPolicy
+  enrollments: ConnectorEnrollmentReader
+  now?: () => number
+}): ConnectorLibraryDownloadDeps['authenticate'] {
+  const now = input.now ?? Date.now
+  return async (headers) => {
+    const authorization = headers.get('authorization') ?? ''
+    const agentId = headers.get('x-connector-agent') ?? ''
+    const farmId = headers.get('x-connector-farm') ?? ''
+    const token = BEARER.exec(authorization)?.[1]
+    if (
+      !token ||
+      authorization.length > 8199 ||
+      !UUID.test(agentId) ||
+      !UUID.test(farmId)
+    )
+      return null
+    const enrollment = await input.enrollments.find(farmId, agentId)
+    if (!enrollment || enrollment.status !== 'approved') return null
+    try {
+      await verifyConnectorCredential({
+        ...input.credentials,
+        token,
+        agentId,
+        farmId,
+        publicKeySpki: enrollment.publicKeySpki,
+        nowSeconds: Math.floor(now() / 1000),
+      })
+    } catch {
+      return null
+    }
+    return { agentId, farmId }
+  }
+}
+
+/** Blob lookup, enrollment read and audit rows on the `farm_library` login. */
+export class PostgresConnectorLibraryDownloads implements ConnectorEnrollmentReader {
+  constructor(private readonly sql: Sql) {}
+
+  async find(farmId: string, agentId: string) {
+    const rows = await this.sql<{ status: string; publicKeySpki: string }[]>`
+      SELECT status, public_key_spki AS "publicKeySpki"
+      FROM farm.connector_enrollments
+      WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid`
+    return rows[0] ?? null
+  }
+
+  /** Only a file of this farm that has not been purged. */
+  async findBlob(
+    farmId: string,
+    sha256: string,
+  ): Promise<LibraryBlobRecord | null> {
+    const rows = await this.sql<LibraryBlobRecord[]>`
+      SELECT storage_location AS "storageLocation", size_bytes::float8 AS "sizeBytes"
+      FROM farm.library_blobs
+      WHERE farm_id = ${farmId}::uuid AND sha256 = ${sha256} AND purged_at IS NULL`
+    return rows[0] ?? null
+  }
+
+  async audit(entry: DownloadAuditEntry): Promise<void> {
+    await this.sql`
+      INSERT INTO farm.library_download_audit
+        (farm_id, agent_id, sha256, outcome, range_start, range_end, bytes, occurred_at)
+      VALUES (${entry.farmId}::uuid, ${entry.agentId}::uuid, ${entry.sha256}, ${entry.outcome},
+        ${entry.range?.start ?? null}, ${entry.range?.end ?? null}, ${entry.bytes}, ${entry.occurredAt})`
+  }
+}
+
+/**
+ * Composes the download handler from its ports and activates the route. The
+ * returned `stop` deactivates it again. Throws when a handler is already active.
+ */
+export function startConnectorLibraryDownload(
+  input: Omit<ConnectorLibraryDownloadDeps, 'authenticate'> & {
+    credentials: ConnectorCredentialPolicy
+    enrollments: ConnectorEnrollmentReader
+  },
+): { stop(): void } {
+  const { credentials, enrollments, ...deps } = input
+  const handler = createConnectorLibraryDownload({
+    ...deps,
+    authenticate: createConnectorLibraryAuthenticator({
+      credentials,
+      enrollments,
+      ...(deps.now ? { now: deps.now } : {}),
+    }),
+  })
+  activateConnectorLibraryDownload(handler)
+  return {
+    stop() {
+      if (active === handler) deactivateConnectorLibraryDownload()
+    },
+  }
 }

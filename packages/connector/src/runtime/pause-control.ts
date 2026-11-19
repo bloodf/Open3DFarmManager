@@ -133,6 +133,12 @@ type PauseControlInput = {
     ) => void
   >
   freshness: CachedAuthorityFreshness
+  /** Library print starter of one assignment (#384); absent: `start_library_print` is refused as unsupported. */
+  libraryPrint?: (
+    assignmentId: string,
+  ) => Parameters<typeof receiveApiCommand>[0]['libraryPrint']
+  /** Remembers what a library start printed so the finished job links to it (#385). */
+  libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
   /** Transport seam for tests. Defaults to the authenticated pause client. */
@@ -310,6 +316,7 @@ async function runAssignmentControl(
         : {}),
       bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
     })
+    const libraryPrint = input.libraryPrint?.(assignmentId)
     if (trustedKeys)
       input.apiHandlers?.set(assignmentId, (frame, inbox) => {
         if (input.signal.aborted || apiWork.size >= 8) return
@@ -322,6 +329,8 @@ async function runAssignmentControl(
             journal,
             clock,
             driver: router,
+            ...(libraryPrint ? { libraryPrint } : {}),
+            ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
             jobFiles: {
               directory: join(input.dataDirectory, 'job-file-staging'),
               targetFor(printerKey) {

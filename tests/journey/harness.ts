@@ -226,6 +226,9 @@ export function reportedProgress(row: Locator): Locator {
   })
 }
 
+/** Same reported-progress bar; the name the journey specs import. */
+export const reportedPrintProgressBar = reportedProgress
+
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
   return env.OPENFARM_JOURNEY === '1'
 }

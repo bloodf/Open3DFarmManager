@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   journeyEnabled,
+  reportedPrintProgressBar,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
@@ -36,7 +37,7 @@ if (journeyEnabled())
         const row = await journey.openFarm()
         // Printing state and a scripted progress step reach the page.
         await journey.advanceSimulator()
-        await expect(row.getByRole('progressbar')).toHaveAttribute(
+        await expect(reportedPrintProgressBar(row)).toHaveAttribute(
           'value',
           '0.75',
           { timeout: 10_000 },

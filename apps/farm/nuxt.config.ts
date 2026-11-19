@@ -2,6 +2,22 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-11-04',
   devtools: { enabled: false },
   nitro: { preset: 'node-server' },
+  hooks: {
+    // impressoras.vue is a page, not a layout: serve the detail route beside
+    // it instead of nesting it in a parent that has no <NuxtPage />.
+    'pages:resolved'(pages) {
+      const parent = pages.find((page) => page.path === '/impressoras')
+      const children = parent?.children ?? []
+      if (!parent || !children.length) return
+      parent.children = []
+      pages.push(
+        ...children.map((child) => ({
+          ...child,
+          path: `/impressoras/${child.path}`,
+        })),
+      )
+    },
+  },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
   routeRules: Object.fromEntries(
     [

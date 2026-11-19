@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { createError } from 'nuxt/server'
 import {
@@ -46,7 +46,11 @@ export interface ConnectorRelayOptions {
 }
 
 type Outcome =
-  | { kind: 'json'; value: ReturnType<typeof LibraryRelayResult.parse> }
+  | {
+      kind: 'json'
+      value: ReturnType<typeof LibraryRelayResult.parse>
+      streamed?: { sha256: string; size: number } | undefined
+    }
   | { kind: 'bytes'; bytes: Uint8Array }
 
 interface Operation {
@@ -57,6 +61,7 @@ interface Operation {
   claimed: boolean
   body: AsyncIterable<Uint8Array> | undefined
   bodyTaken: boolean
+  streamed?: { sha256: string; size: number }
   timer: ReturnType<typeof setTimeout> | undefined
   succeed(outcome: Outcome): void
   fail(error: unknown): void
@@ -152,11 +157,17 @@ export class ConnectorLibraryRelayHub
     )
       throw new Error('Connector relay answered out of turn')
     const { sha256, size, created } = outcome.value
-    if (size > input.maxBytes)
-      throw new BlobStoreError(
-        'too-large',
-        'O arquivo excede o limite de 512 MiB.',
-      )
+    const { streamed } = outcome
+    if (streamed?.sha256 !== sha256 || streamed.size !== size) {
+      if (created) {
+        await this.discard({
+          farmId: input.farmId,
+          agentId: input.agentId,
+          sha256,
+        }).catch(() => {})
+      }
+      throw new Error('O Conector retornou dados de integridade divergentes.')
+    }
     return { sha256, size, created }
   }
 
@@ -394,6 +405,7 @@ export class ConnectorLibraryRelayHub
     let sent = 0
     const stream = Readable.from(
       (async function* () {
+        const hash = createHash('sha256')
         try {
           for await (const chunk of source) {
             sent += chunk.byteLength
@@ -402,9 +414,11 @@ export class ConnectorLibraryRelayHub
                 'too-large',
                 'O arquivo excede o limite de 512 MiB.',
               )
+            hash.update(chunk)
             hub.arm(op, hub.runMs, 'O Conector parou de responder.')
             yield chunk
           }
+          op.streamed = { sha256: hash.digest('hex'), size: sent }
         } catch (error) {
           // The caller's upload failed or was too big: the operation fails with it.
           op.fail(error)
@@ -455,7 +469,7 @@ export class ConnectorLibraryRelayHub
       return { status: 204 }
     }
     if (value.type !== op.spec.type) return { status: 400 }
-    op.succeed({ kind: 'json', value })
+    op.succeed({ kind: 'json', value, streamed: op.streamed })
     return { status: 204 }
   }
 

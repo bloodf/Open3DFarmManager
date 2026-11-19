@@ -2,8 +2,10 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   filterFarmRows,
-  type FarmFilter,
-  type FarmSort,
+  groupFarmRows,
+  readFarmWallQuery,
+  summarizeFarmRows,
+  writeFarmWallQuery,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
@@ -12,7 +14,7 @@ import { offlineCards } from '../composables/useLastKnownStates-core.ts'
 import LastKnownStates from '../components/farm/LastKnownStates.vue'
 import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
 import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
-import FarmFilters from '../components/farm/FarmFilters.vue'
+import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
@@ -94,20 +96,55 @@ const errorText = computed(() => {
       return 'Não foi possível confirmar seus dados. Tente novamente.'
   }
 })
-const query = ref('')
-const filter = ref<FarmFilter>('all')
-const sort = ref<FarmSort>('original')
-const renderedRows = computed(() =>
-  filterFarmRows(
-    ready.value?.rows ?? [],
-    query.value,
-    filter.value,
-    sort.value,
+const route = useRoute()
+const router = useRouter()
+const wallQuery = computed({
+  get: () => readFarmWallQuery(route.query),
+  set: (value) => {
+    void router.replace({
+      query: {
+        ...router.currentRoute.value.query,
+        ...writeFarmWallQuery(value),
+      },
+      hash: route.hash,
+    })
+  },
+})
+const rows = computed(() => ready.value?.rows ?? [])
+const facets = computed(() => {
+  const fields = [
+    { key: 'group', field: 'groupName', label: 'Grupo' },
+    { key: 'location', field: 'location', label: 'Local' },
+    { key: 'connector', field: 'agentId', label: 'Connector' },
+  ] as const
+  return fields.map(({ key, field, label }) => {
+    const options = new Set(
+      rows.value
+        .map((row) => row.assignment[field])
+        .filter((value): value is string => !!value),
+    )
+    if (wallQuery.value[key]) options.add(wallQuery.value[key])
+    return {
+      key,
+      label,
+      options: [...options].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    }
+  })
+})
+const renderedRows = computed(() => {
+  const filters = wallQuery.value
+  return filterFarmRows(
+    rows.value,
+    filters.query,
+    filters.filter,
+    filters.sort,
     now.value,
-  ).map((row) => ({
-    ...row,
-    draft: drafts.value[row.assignment.assignmentId],
-  })),
+    filters,
+  ).map((row) => ({ ...row, draft: drafts.value[row.assignment.assignmentId] }))
+})
+const counts = computed(() => summarizeFarmRows(renderedRows.value, now.value))
+const groups = computed(() =>
+  groupFarmRows(renderedRows.value, wallQuery.value.groupBy),
 )
 // role="status" announces only live <-> unavailable; per-row text shows transient steps.
 const connectionNotice = computed(() =>
@@ -271,50 +308,62 @@ function cancelPause(event: Event) {
               }}
               <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
             </p>
-            <FarmFilters
-              v-model:query="query"
-              v-model:filter="filter"
-              v-model:sort="sort"
+            <PrinterWallFilters
+              v-model="wallQuery"
+              :facets="facets"
+              :counts="counts"
               :total="ready.rows.length"
               :visible="renderedRows.length"
             />
-            <ul class="printers">
-              <FarmPrinterCard
-                v-for="row in renderedRows"
-                :key="row.assignment.assignmentId"
-                :row="row"
-                :farm-id="ready.scope.farmId"
-                :camera-for="cameraFor"
-                :live-now="liveNow"
-                @setup="setupLink(row.assignment.assignmentId)"
-                @save="saveLink(row.assignment.assignmentId)"
-                @cancel="delete drafts[row.assignment.assignmentId]"
-              >
-                <template #local-link>
-                  <a
-                    :href="displayLocalOrigin(row) ?? undefined"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    referrerpolicy="no-referrer"
-                    :aria-describedby="`local-help-${row.assignment.assignmentId}`"
-                    >Abrir interface local de
-                    <span class="opaque">{{
-                      row.assignment.printerKey
-                    }}</span></a
-                  >
-                </template>
-                <FarmCardControls
+            <template v-for="group in groups" :key="group.key ?? ''">
+              <h3 v-if="wallQuery.groupBy">
+                {{
+                  group.key ??
+                  (wallQuery.groupBy === 'groupName'
+                    ? 'Sem grupo'
+                    : 'Sem local')
+                }}
+              </h3>
+              <ul class="printers">
+                <FarmPrinterCard
+                  v-for="row in group.rows"
+                  :key="row.assignment.assignmentId"
                   :row="row"
-                  :keys="ready.keys"
-                  :control-enabled="pauseEnabled"
-                  :command-in-flight="commandInFlight"
+                  :farm-id="ready.scope.farmId"
+                  :camera-for="cameraFor"
                   :live-now="liveNow"
-                  :last-result="lastControlResults[row.assignment.assignmentId]"
-                  :availability="availability"
-                  :open-control="openControl"
-                />
-              </FarmPrinterCard>
-            </ul>
+                  @setup="setupLink(row.assignment.assignmentId)"
+                  @save="saveLink(row.assignment.assignmentId)"
+                  @cancel="delete drafts[row.assignment.assignmentId]"
+                >
+                  <template #local-link>
+                    <a
+                      :href="displayLocalOrigin(row) ?? undefined"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      referrerpolicy="no-referrer"
+                      :aria-describedby="`local-help-${row.assignment.assignmentId}`"
+                      >Abrir interface local de
+                      <span class="opaque">{{
+                        row.assignment.printerKey
+                      }}</span></a
+                    >
+                  </template>
+                  <FarmCardControls
+                    :row="row"
+                    :keys="ready.keys"
+                    :control-enabled="pauseEnabled"
+                    :command-in-flight="commandInFlight"
+                    :live-now="liveNow"
+                    :last-result="
+                      lastControlResults[row.assignment.assignmentId]
+                    "
+                    :availability="availability"
+                    :open-control="openControl"
+                  />
+                </FarmPrinterCard>
+              </ul>
+            </template>
           </template>
         </section>
         <section

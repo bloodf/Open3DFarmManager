@@ -168,34 +168,37 @@ if (journeyEnabled())
     }
 
     /**
-     * One file operation over a fresh control session. When the page reports
-     * it undone, the operator checks the printer and asks again; the journey
-     * asks again only while the printer shows nothing arrived. Starting a
-     * print is never repeated.
+     * Settles one file operation the test just asked for. When the page
+     * reports it undone (a failed session, or one it cancelled because the
+     * live view blinked), the operator checks the printer and asks again; the
+     * journey asks again only while the printer shows nothing arrived.
+     * Starting a print is never repeated and never passes through here.
      */
-    async function fileOperation(
+    async function repeatUndone(
       page: Page,
       label: string,
       result: string,
       untouched: () => boolean,
     ) {
-      const input = page.locator('#files-upload')
       const status = page.getByRole('status').last()
+      const undone = new RegExp(`^(${FILES_UNDONE.map(escape).join('|')})$`)
       const settled = new RegExp(
         `^(${[result, ...FILES_UNDONE].map(escape).join('|')})$`,
       )
       for (let attempt = 1; ; attempt++) {
-        await controlInbox()
-        await expect(input).toBeEnabled({ timeout: 45_000 })
-        await page.getByRole('button', { name: label, exact: true }).click()
         await expect(status).toHaveText(settled, { timeout: 60_000 })
         const text = (await status.textContent()) ?? ''
-        if (text === result) return
+        if (!undone.test(text)) return
         expect(
           untouched(),
           `${label} reached the printer without a confirmation: ${text}`,
         ).toBe(true)
         expect(attempt, text).toBeLessThan(5)
+        await controlInbox()
+        await expect(page.locator('#files-upload')).toBeEnabled({
+          timeout: 45_000,
+        })
+        await page.getByRole('button', { name: label, exact: true }).click()
       }
     }
 
@@ -374,8 +377,10 @@ if (journeyEnabled())
       await printers.selectOption(journey.assignmentId)
       const input = page.locator('#files-upload')
       await expect(input).toBeEnabled({ timeout: 30_000 })
+      await controlInbox()
+      await page.getByRole('button', { name: 'Consultar arquivos' }).click()
       // Listing is read-only, so an undone listing is always safe to repeat.
-      await fileOperation(
+      await repeatUndone(
         page,
         'Consultar arquivos',
         'Nenhum arquivo nesta impressora.',
@@ -391,18 +396,26 @@ if (journeyEnabled())
         mimeType: 'text/plain',
         buffer: GCODE,
       })
-      // The listing session has ended; upload in the next one. An undone
-      // upload is repeated only while the printer has not stored the file.
-      await fileOperation(
+      // The listing session has ended; upload in the next one.
+      await controlInbox()
+      await page.getByRole('button', { name: 'Enviar arquivo' }).click()
+      // Asked again only while the printer has not stored the file.
+      await repeatUndone(
         page,
         'Enviar arquivo',
         'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
         () => !simulator().uploads.has(FILE),
       )
       const status = page.getByRole('status').last()
+      await expect(status).toHaveText(
+        'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
+        { timeout: 60_000 },
+      )
       expect(simulator().uploads.get(FILE)).toEqual(GCODE)
 
-      await fileOperation(
+      await controlInbox()
+      await page.getByRole('button', { name: 'Consultar arquivos' }).click()
+      await repeatUndone(
         page,
         'Consultar arquivos',
         'Arquivos atualizados.',

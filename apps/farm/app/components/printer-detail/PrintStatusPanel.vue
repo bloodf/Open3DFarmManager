@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
+import type { z } from 'zod'
+import type { PrinterDetailStreamUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import { DEFAULT_UNSUPPORTED_REASON } from '../../utils/printer-detail-view.ts'
 import Button from '../ui/Button.vue'
 import { printStatusEta } from './print-status-eta.ts'
 import { ExcludeObjectArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 
 const props = defineProps<{
-  frame: Parameters<WebcamDetailOptions['onUpdate']>[1]
+  frame: z.infer<typeof PrinterDetailStreamUpdate>
   canExclude: boolean
   excludeReason?: string | undefined
   objectReason?: string | undefined
@@ -37,7 +38,7 @@ const estimates = computed(() => {
   const { print, virtualFile, speedFactor } = props.frame.detail
   if (!print || !active.value) return []
   const eta = printStatusEta({
-    elapsed: print.elapsedSeconds,
+    elapsed: print.elapsedSeconds ?? Number.NaN,
     progress: virtualFile?.progress,
     estimatedSeconds: print.estimatedSeconds,
     filamentUsed: print.filamentUsedMm,
@@ -57,8 +58,10 @@ const clock = new Intl.DateTimeFormat('pt-BR', {
   month: '2-digit',
 })
 const number = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
-function duration(seconds: number) {
-  return `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} min ${Math.floor(seconds) % 60} s`
+function duration(seconds?: number) {
+  return seconds === undefined
+    ? 'Indisponível'
+    : `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} min ${Math.floor(seconds) % 60} s`
 }
 function factor(value?: number) {
   return value === undefined ? 'Indisponível' : `${number.format(value * 100)}%`

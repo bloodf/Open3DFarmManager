@@ -49,6 +49,29 @@ test('README section exists, links the guide and keeps npm (no pnpm)', () => {
   assert.match(section, /Docker[^.]*opt-in/)
 })
 
+// The orchestrator gate runs this file in a tree without node_modules, so the
+// README's own first command is exercised here: install when absent.
+const installed = () =>
+  existsSync(join(ROOT, 'node_modules/.package-lock.json'))
+
+test(
+  'README step 1: npm ci --ignore-scripts leaves a usable install',
+  { timeout: 600_000 },
+  () => {
+    if (!installed()) {
+      const install = run('npm', ['ci', '--ignore-scripts'], {
+        timeout: 540_000,
+      })
+      assert.equal(install.status, 0, install.stdout + install.stderr)
+    }
+    assert.ok(installed(), 'node_modules is installed')
+    assert.ok(
+      existsSync(join(ROOT, 'node_modules/.bin/nuxt')),
+      'nuxt is installed',
+    )
+  },
+)
+
 test('every "npm run" script named in the section and guide exists in package.json', () => {
   const names = [...new Set(npmScripts(docs))]
   assert.ok(names.length >= 5, `expected documented scripts, got ${names}`)

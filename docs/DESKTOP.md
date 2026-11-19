@@ -89,7 +89,7 @@ NITRO_HOST=127.0.0.1 NITRO_PORT=3000 node apps/farm/.output/server/index.mjs
 Os simuladores (Moonraker sv06 e u1, Spoolman e câmera) são processos de teste em loopback. Não existe um comando persistente que os mantenha de pé para navegação manual:
 
 - `npm run sim:verify` sobe os mocks, verifica as quatro ferramentas, a troca de extrusora, as webcams e o Spoolman, e encerra os mocks ao final.
-- `npm run desktop:check -- --only app-smoke` sobe o banco descartável, os mocks, o Connector real e o app compilado; então carrega **http://127.0.0.1:3000/farm** no Chrome com todo host não local bloqueado no navegador. Exige `npm run build` antes.
+- `npm run desktop:check -- --only app-smoke` sobe o banco descartável, os mocks, o Connector real e o app compilado; então carrega a rota **/farm** em uma porta livre de loopback no Chrome com todo host não local bloqueado no navegador. Exige `npm run build` antes.
 
 Para abrir a página da farm no seu próprio Chrome, use o endereço do servidor da etapa 4 e acrescente `/farm`. As impressoras aparecem nessa página somente após o pareamento do Connector, que o `app-smoke` faz sozinho. O `app-smoke` verifica que a página carrega, renderiza texto e não contata hosts externos; ele não confere os nomes das impressoras na tela.
 
@@ -97,7 +97,7 @@ Para abrir a página da farm no seu próprio Chrome, use o endereço do servidor
 
 ```sh
 npm run desktop:check -- --list                  # nomes dos passos
-npm run desktop:check                            # todos os passos
+npm run desktop:check                            # cada passo, em ordem
 npm run desktop:check -- --only lint,build       # subconjunto (marcado como parcial)
 npm run desktop:check -- --skip test-e2e --receipt receipt.json
 ```

@@ -21,6 +21,8 @@ export const PrintFileMetadata = z.object({
   bedSize: z.array(z.number()).optional(),
   estimatedTimeSeconds: z.number().nonnegative().optional(),
   totalLayers: z.number().int().nonnegative().optional(),
-  thumbnail: z.object({ mimeType: z.enum(['image/png', 'image/jpeg']), data: z.string() }).optional(),
+  thumbnail: z
+    .object({ mimeType: z.enum(['image/png', 'image/jpeg']), data: z.string() })
+    .optional(),
 })
 export type PrintFileMetadata = z.infer<typeof PrintFileMetadata>

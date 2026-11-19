@@ -618,6 +618,9 @@ export async function startMoonrakerMock(
   }
 
   const directories = new Set<string>()
+  // Stats for directories made via `server.files.post_directory`; others keep
+  // the default live mtime and 4096-byte size in listings.
+  const directoryStats = new Map<string, { modified: number; size: number }>()
   for (const dir of options.directories ?? []) {
     const root = dir.root ?? 'gcodes'
     const safe = safeFilePath(dir.path)
@@ -1878,6 +1881,7 @@ export async function startMoonrakerMock(
       .map((p) => ({
         modified: Math.floor(Date.now() / 1000),
         size: 4096,
+        ...directoryStats.get(fileKey(root, p)),
         permissions: 'rw',
         dirname: dirPath ? p.slice(prefix.length) : p,
       }))
@@ -2036,6 +2040,80 @@ export async function startMoonrakerMock(
         },
         source_item: { root: source.root, path: source.path },
         action: 'move_dir' as const,
+      }
+    }
+    return { error: 'Not found' as const }
+  }
+
+  // `server.files.post_directory` creates the directory like createDirectory
+  // but records deterministic zero stats, so listings stay stable in tests.
+  function postDirectory(rawPath: string) {
+    const result = createDirectory(rawPath)
+    if ('error' in result) return result
+    const { root, path } = result.item
+    directoryStats.set(fileKey(root, path), { modified: 0, size: 0 })
+    return {
+      ...result,
+      item: { ...result.item, modified: 0, size: 0 },
+    }
+  }
+
+  // Mirrors Moonraker's `server.files.copy`: duplicates a file or a
+  // directory tree within one root and acknowledges with create_file/create_dir.
+  function copyFileOrDir(sourceRaw: string, destRaw: string) {
+    const source = splitRootPath(sourceRaw)
+    const dest = splitRootPath(destRaw)
+    if (!source?.path || !dest?.path) return { error: 'Invalid path' as const }
+    if (source.root !== dest.root)
+      return { error: 'Cross-root copy refused' as const }
+    const modified = Math.floor(Date.now() / 1000)
+    const file = filesMap.get(fileKey(source.root, source.path))
+    if (file) {
+      const copied = { ...file, path: dest.path, modified }
+      filesMap.set(fileKey(dest.root, dest.path), copied)
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified,
+          size: copied.size,
+          permissions: 'rw',
+        },
+        action: 'create_file' as const,
+      }
+    }
+    if (directories.has(fileKey(source.root, source.path))) {
+      const sourcePrefix = `${source.path}/`
+      const nestedDirs = [...directories]
+        .filter((key) => key.startsWith(`${source.root}:`))
+        .map((key) => key.slice(source.root.length + 1))
+        .filter((rel) => rel.startsWith(sourcePrefix))
+      const nestedFiles = [...filesMap.values()].filter(
+        (f) => f.root === source.root && f.path.startsWith(sourcePrefix),
+      )
+      directories.add(fileKey(dest.root, dest.path))
+      for (const rel of nestedDirs) {
+        directories.add(
+          fileKey(dest.root, dest.path + rel.slice(source.path.length)),
+        )
+      }
+      for (const nested of nestedFiles) {
+        const nextPath = dest.path + nested.path.slice(source.path.length)
+        filesMap.set(fileKey(dest.root, nextPath), {
+          ...nested,
+          path: nextPath,
+          modified,
+        })
+      }
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified,
+          size: 4096,
+          permissions: 'rw',
+        },
+        action: 'create_dir' as const,
       }
     }
     return { error: 'Not found' as const }
@@ -3169,6 +3247,23 @@ export async function startMoonrakerMock(
         return
       }
 
+      // Moonraker's documented JSON-RPC name for creating a directory; used by
+      // the Connector file manager.
+      if (method === 'server.files.post_directory') {
+        const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
+        if (typeof dirPath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = postDirectory(dirPath)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
       if (method === 'server.files.create_directory') {
         const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
         if (typeof dirPath !== 'string') {
@@ -3225,6 +3320,25 @@ export async function startMoonrakerMock(
           return
         }
         const result = moveFileOrDir(params.source, params.dest)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.copy') {
+        const params = reqObj.params as
+          { source?: unknown; dest?: unknown } | undefined
+        if (
+          typeof params?.source !== 'string' ||
+          typeof params?.dest !== 'string'
+        ) {
+          replyError(-32602, 'Invalid source or dest')
+          return
+        }
+        const result = copyFileOrDir(params.source, params.dest)
         if ('error' in result) {
           replyError(-32602, result.error)
           return

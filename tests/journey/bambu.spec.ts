@@ -1,10 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import {
+  BAMBU_LAN_ADDRESS,
   journeyEnabled,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
+import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -189,11 +191,9 @@ if (journeyEnabled())
         control: true,
         signedControl: true,
         history: true,
-        setup: async ({ page, origin, farmId, configurator, vendor }) => {
+        setup: async ({ page, origin, farmId, configurator }) => {
           if (!configurator)
             throw new Error('Bambu browser set-up needs its config Connector')
-          const host = (vendor?.raw as BambuSim | undefined)?.host
-          if (!host) throw new Error('Bambu simulator host missing')
           await page.goto(origin + '/impressoras', {
             waitUntil: 'domcontentloaded',
           })
@@ -214,9 +214,9 @@ if (journeyEnabled())
             await expect(ready).toBeVisible({ timeout: 10_000 })
           }).toPass({ timeout: 150_000 })
           await page.locator('#onboarding-family').selectOption('bambu-lan')
-          await page.locator('#bambu-ip').fill(host)
+          await page.locator('#bambu-ip').fill(BAMBU_LAN_ADDRESS)
           await page.locator('#bambu-serial').fill('JOURNEYBAMBU')
-          await page.locator('#bambu-access-code').fill('journeyaccess')
+          await page.locator('#bambu-access-code').fill(BAMBU_ACCESS_CODE)
           await page.locator('#bambu-control').check()
           await page
             .getByRole('button', { name: 'Preparar Bambu Lab (LAN)' })
@@ -228,6 +228,7 @@ if (journeyEnabled())
           await page
             .getByRole('button', { name: 'Confirmar e ativar impressora' })
             .click()
+          // The assignment exists only once the Connector signed the commit.
           await expect(
             page.getByText(
               'Impressora adicionada e confirmada com recibo assinado pelo Connector.',

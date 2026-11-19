@@ -6,6 +6,7 @@ import {
   BrowserDeviceUuid,
 } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import { PairingPublicKey } from '../../../../packages/farm-protocol/src/pairing.ts'
+import { ConfigurationPrinterKey } from '../../../../packages/farm-protocol/src/configuration-inventory.ts'
 import {
   PairingProofAudience,
   PairingProofOrigin,
@@ -101,9 +102,7 @@ export const ConfigurationReceiptRegistration = z.strictObject({
   bridge_instance_id: configurationOpaqueId,
   device_id: configurationOpaqueId,
   assignment_id: BrowserDeviceUuid,
-  printer_key: z
-    .string()
-    .regex(/^(?:kobra-x|moonraker)-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+  printer_key: ConfigurationPrinterKey,
   committed_revision: revision,
   registered_at: configurationTime,
 })

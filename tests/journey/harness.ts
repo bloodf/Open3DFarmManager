@@ -6,7 +6,6 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Page } from '@playwright/test'
@@ -137,11 +136,6 @@ export type JourneyHarness = Readonly<{
   signInAs(role: 'admin' | 'viewer'): Promise<Page>
   /** Opens the farm view and returns the printer's article. */
   openFarm(page?: Page): Promise<ReturnType<Page['locator']>>
-  /**
-   * The printer's article on the farm view already open, without reloading:
-   * a reload drops the live direct connection and must negotiate a new one.
-   */
-  farmRow(page?: Page): ReturnType<Page['locator']>
   /** Waits for the authenticated direct connection and a state on the row. */
   expectLiveTelemetry(page?: Page): Promise<void>
   /** Waits until the row's progress bar shows `fraction` (0..1). */
@@ -246,47 +240,14 @@ function machinePoster(origin: string, ca: Buffer) {
 
 /** Private address the Kobra X setup form is given; the probe maps it to the mock. */
 const KOBRA_X_LAN_ADDRESS = '10.0.0.5'
+/**
+ * Private address the Bambu setup form is given. The configuration probe maps
+ * it to the loopback simulator, so set-up needs no host LAN route.
+ */
+export const BAMBU_LAN_ADDRESS = '10.0.0.6'
 
 /** Removes every resource a failed start already created. */
 type Undo = () => Promise<void>
-
-const isPrivateAddress = (host: string) => {
-  const [first, second] = host.split('.').map(Number)
-  return (
-    first === 10 ||
-    (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  )
-}
-
-function routedAddress(): string | undefined {
-  try {
-    const route = execFileSync('ip', ['route', 'get', '1.1.1.1'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    return /\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(route)?.[1]
-  } catch {
-    return undefined // no default route, as on an offline desktop
-  }
-}
-
-function journeyPrinterHost() {
-  const interfaceAddress = Object.values(networkInterfaces())
-    .flatMap((addresses) => addresses ?? [])
-    .find(
-      (address) =>
-        address.family === 'IPv4' &&
-        !address.internal &&
-        isPrivateAddress(address.address),
-    )?.address
-  const host = [routedAddress(), interfaceAddress].find(
-    (candidate) => candidate && isPrivateAddress(candidate),
-  )
-  if (!host)
-    throw new Error('The Bambu simulator needs a private route address')
-  return host
-}
 
 export async function startJourneyHarness(
   options: JourneyOptions,
@@ -296,9 +257,9 @@ export async function startJourneyHarness(
   const simulator = options.simulator ?? 'moonraker-fixture'
   if (!Object.hasOwn(SIMULATORS, simulator))
     throw new Error(`Unknown simulator "${simulator}"`)
-  const printerKey = options.printerKey ?? `journey-${simulator}`
-  const bambuHost =
-    simulator === 'bambu' && options.setup ? journeyPrinterHost() : undefined
+  // Browser set-up adopts the key the Connector derives for the printer.
+  let printerKey = options.printerKey ?? `journey-${simulator}`
+  const bambuSetup = simulator === 'bambu' && options.setup !== undefined
   const runId = randomUUID().slice(0, 8)
   const undo: Undo[] = []
   let appOutput: (() => string) | undefined
@@ -391,7 +352,6 @@ export async function startJourneyHarness(
       vendor = await startVendorSimulator(simulator as VendorName, {
         printerKey,
         ...(options.control === undefined ? {} : { control: options.control }),
-        ...(bambuHost ? { host: bambuHost } : {}),
       })
       const started = vendor
       undo.push(() => started.close())
@@ -587,7 +547,14 @@ export async function startJourneyHarness(
         ownerPage,
         machinePost,
         probes,
-        ...(bambuHost ? { printerNetworks: [`${bambuHost}/32`] } : {}),
+        // Bambu set-up configures the runtime Connector itself, so the
+        // browser-created assignment belongs to the agent the journey runs.
+        ...(bambuSetup
+          ? {
+              paired: { dataDirectory: runtime.dataDirectory, claim },
+              printerNetworks: [`${BAMBU_LAN_ADDRESS}/32`],
+            }
+          : {}),
         ...(kobraX ? { printerNetworks: [`${KOBRA_X_LAN_ADDRESS}/32`] } : {}),
       })
       const started = configurator
@@ -618,15 +585,23 @@ export async function startJourneyHarness(
           status?: unknown
         }[]
       } | null
-      const created = listed?.printers?.find(
+      const created = listed?.printers?.filter(
         (printer) =>
-          printer.printerKey === printerKey &&
           printer.agentId === claim.agent_id &&
-          printer.status === 'active',
+          printer.status === 'active' &&
+          (options.printerKey === undefined ||
+            printer.printerKey === options.printerKey),
       )
-      if (typeof created?.assignmentId !== 'string')
+      const only = created?.length === 1 ? created[0] : undefined
+      if (
+        typeof only?.assignmentId !== 'string' ||
+        typeof only.printerKey !== 'string'
+      )
         throw new Error('Browser set-up did not create the assignment')
-      assignmentId = created.assignmentId
+      assignmentId = only.assignmentId
+      printerKey = only.printerKey
+      // One process per Connector identity: configuration ends before runtime.
+      await configurator?.close()
     } else {
       const registration = (await pagePost(ownerPage, path, {
         agentId: claim.agent_id,
@@ -655,10 +630,6 @@ export async function startJourneyHarness(
         : {}),
     })
 
-    const farmRow = (page: Page = ownerPage) =>
-      page.getByRole('article').filter({
-        has: page.getByRole('heading', { name: printerKey, exact: true }),
-      })
     const openFarm = async (page: Page = ownerPage) => {
       const response = await page.goto(origin + '/farm', {
         waitUntil: 'domcontentloaded',
@@ -667,7 +638,9 @@ export async function startJourneyHarness(
       await expect(
         page.getByRole('heading', { name: 'Minha farm', exact: true }),
       ).toBeVisible()
-      return farmRow(page)
+      return page.getByRole('article').filter({
+        has: page.getByRole('heading', { name: printerKey, exact: true }),
+      })
     }
     const asRole = async (role: 'admin' | 'viewer') => {
       const context = await options.browser.newContext({
@@ -723,9 +696,11 @@ export async function startJourneyHarness(
           '0.25',
         )
       },
-      farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
-        await expect(farmRow(page).getByRole('progressbar')).toHaveAttribute(
+        const row = page.getByRole('article').filter({
+          has: page.getByRole('heading', { name: printerKey, exact: true }),
+        })
+        await expect(row.getByRole('progressbar')).toHaveAttribute(
           'value',
           String(fraction),
           { timeout: 15_000 },

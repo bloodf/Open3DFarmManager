@@ -75,3 +75,29 @@ test('uploaded prints progress, complete, cancel and fail', async () => {
     await peer.close()
   }
 })
+
+test('a print already running reports its seeded layer', async () => {
+  const peer = await startBambuSimulator({
+    initialState: 'RUNNING',
+    initialLayer: 25,
+    totalLayers: 100,
+  })
+  try {
+    assert.equal(peer.extendedState.layer_num, 25)
+    assert.equal(peer.extendedState.total_layer_num, 100)
+  } finally {
+    await peer.close()
+  }
+  await assert.rejects(
+    startBambuSimulator({ initialState: 'IDLE', initialLayer: 1 }),
+    /Invalid initial layer/,
+  )
+  await assert.rejects(
+    startBambuSimulator({
+      initialState: 'RUNNING',
+      initialLayer: 11,
+      totalLayers: 10,
+    }),
+    /Invalid initial layer/,
+  )
+})

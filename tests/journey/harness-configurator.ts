@@ -5,7 +5,7 @@
 // the real `configure` runtime in its own process.
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -25,30 +25,13 @@ export type Configurator = Readonly<{
   close(): Promise<void>
 }>
 
-export async function startConfigurator(input: {
-  origin: string
-  audience: string
-  farmId: string
-  certificatePath: string
-  ownerPage: Page
-  machinePost(path: string, body: unknown): Promise<unknown>
-  /** Loopback discovery responder ports (info endpoints) per vendor. */
-  probes: Readonly<{
-    creality?: number
-    anycubic?: number
-    bambuPort?: number
-    kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
-  }>
-  /** Private host route allowed for the loopback Bambu simulator. */
-  printerNetworks?: readonly string[]
-}): Promise<Configurator> {
-  // Provisioning storage refuses any symbolic link in its path; the macOS
-  // default temporary directory (/var/folders) is one, so resolve it first.
-  // Connector storage rejects symlinked ancestors (macOS /var -> /private/var).
-  const root = await realpath(
-    await mkdtemp(join(await realpath(tmpdir()), 'journey-configurator-')),
-  )
-  const dataDirectory = join(root, 'identity')
+type ConfiguratorInput = Parameters<typeof startConfigurator>[0]
+
+/** Pairs and approves a fresh configuration Connector identity. */
+async function pairConfigurator(
+  input: ConfiguratorInput,
+  dataDirectory: string,
+) {
   await mkdir(dataDirectory, { mode: 0o700 })
   const identity = loadOrCreateIdentity(dataDirectory)
   const started = PairingStartResponse.parse(
@@ -85,6 +68,49 @@ export async function startConfigurator(input: {
   )
   if (claim.status !== 'approved' || claim.farm_id !== input.farmId)
     throw new Error('Configurator pairing did not complete')
+  return { identity, claim }
+}
+
+export async function startConfigurator(input: {
+  origin: string
+  audience: string
+  farmId: string
+  certificatePath: string
+  ownerPage: Page
+  machinePost(path: string, body: unknown): Promise<unknown>
+  /** Loopback discovery responder ports (info endpoints) per vendor. */
+  probes: Readonly<{
+    creality?: number
+    anycubic?: number
+    bambuPort?: number
+    kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
+  }>
+  /** Private setup-form networks the Connector accepts (mapped to loopback). */
+  printerNetworks?: readonly string[]
+  /**
+   * Runs as an already approved Connector (its identity directory and claim)
+   * instead of pairing a new one. The caller stops it before reusing the
+   * identity elsewhere.
+   */
+  paired?: Readonly<{
+    dataDirectory: string
+    claim: Extract<PairingPollResponse, { status: 'approved' }>
+  }>
+}): Promise<Configurator> {
+  // Provisioning custody rejects symbolic-link ancestors, and the macOS
+  // temporary directory sits under one (/var -> /private/var).
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), 'journey-configurator-')),
+  )
+  const paired = input.paired
+  const dataDirectory = paired
+    ? await realpath(paired.dataDirectory)
+    : join(root, 'identity')
+  const { identity, claim } = paired
+    ? { identity: loadOrCreateIdentity(dataDirectory), claim: paired.claim }
+    : await pairConfigurator(input, dataDirectory)
+  if (claim.farm_id !== input.farmId)
+    throw new Error('Configurator Connector belongs to another farm')
 
   const credentialPath = join(root, 'credential.json')
   const provisioningPath = join(root, 'provisioning.json')
@@ -182,6 +208,8 @@ export async function startConfigurator(input: {
           child.kill('SIGKILL')
           await once(child, 'exit')
         }
+        // The configurator owns its private state directory.
+        await rm(root, { recursive: true, force: true })
       })()),
   })
 }

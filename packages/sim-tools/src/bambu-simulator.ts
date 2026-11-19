@@ -26,6 +26,8 @@ export interface BambuSimulatorOptions {
   ftpsPort?: number | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   initialTargetTemperature?: number | undefined
+  /** Layer of a print already in progress (RUNNING or PAUSE) at start-up. */
+  initialLayer?: number | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
   confirmCommands?: boolean | undefined
   credentials?:
@@ -48,6 +50,7 @@ export async function startBambuSimulator({
   ftpsPort = 0,
   initialState,
   initialTargetTemperature,
+  initialLayer,
   confirmCommands = true,
   versionModules,
   printDurationMs,
@@ -69,6 +72,16 @@ export async function startBambuSimulator({
       totalLayers < 1)
   )
     throw new Error('Invalid print configuration')
+
+  if (
+    initialLayer !== undefined &&
+    (initialState === undefined ||
+      initialState === 'IDLE' ||
+      !Number.isInteger(initialLayer) ||
+      initialLayer < 0 ||
+      initialLayer > totalLayers)
+  )
+    throw new Error('Invalid initial layer')
 
   const uploads = new Map<string, Buffer>()
   let timer: ReturnType<typeof setInterval> | undefined
@@ -93,6 +106,9 @@ export async function startBambuSimulator({
     ...(initialTargetTemperature === undefined
       ? {}
       : { nozzle_target_temper: initialTargetTemperature }),
+    ...(initialLayer === undefined
+      ? {}
+      : { layer_num: initialLayer, total_layer_num: totalLayers }),
   }
   const requests: { command: string; sequence_id: string }[] = []
 

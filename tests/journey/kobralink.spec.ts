@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
   journeyEnabled,
+  reportedProgress,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
@@ -207,9 +208,10 @@ if (journeyEnabled())
       expect(bridge().observed.signIns).toBeGreaterThan(0)
       journey().controls.setProgress(75)
       await journey().expectProgress(0.75)
-      await expect(
-        row().getByText('Progresso informado da impressão: 75%'),
-      ).toBeVisible()
+      await expect(reportedProgress(row())).toHaveAttribute(
+        'aria-valuetext',
+        '75%',
+      )
     })
 
     test('commands without a bridge route are shown as not supported', async () => {

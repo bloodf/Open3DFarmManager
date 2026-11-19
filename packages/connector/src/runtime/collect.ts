@@ -261,6 +261,7 @@ export async function collectIntoQueue(input: {
         : undefined
       const subscription = createMoonrakerSubscription({
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
+        jobFields: true,
         assignment,
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,

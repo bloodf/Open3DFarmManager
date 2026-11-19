@@ -263,7 +263,7 @@ describe('library page in a browser', () => {
         contents: `
           import { createApp } from 'vue'
           import Page from './apps/farm/app/pages/biblioteca.vue'
-          import './apps/farm/app/assets/main.css'
+          import './apps/farm/app/assets/css/main.css'
           // Nuxt provides $fetch; this is the part of ofetch the page uses.
           globalThis.$fetch = async (url, o = {}) => {
             const q = o.query ? '?' + new URLSearchParams(o.query) : ''

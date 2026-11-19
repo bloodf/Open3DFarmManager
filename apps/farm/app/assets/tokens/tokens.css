@@ -1,0 +1,115 @@
+/**
+ * Design tokens (E21.1 / #432).
+ * Hex colours live only in this file. Consumers use the custom properties.
+ *
+ * Contrast pairs checked by tests/unit/design-tokens-contrast.test.ts (WCAG 2.x AA):
+ *   --color-text on --color-surface
+ *   --color-text-muted on --color-surface
+ *   --color-accent on --color-surface
+ *   --color-on-accent on --color-accent
+ *   --state-*-color on --color-surface (idle, printing, paused, error, offline, stale)
+ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surface and text */
+  --color-surface: #f4f5f3;
+  --color-surface-raised: #ffffff;
+  --color-text: #202522;
+  --color-text-muted: #4a5550;
+  --color-accent: #176544;
+  --color-on-accent: #ffffff;
+  --color-border: #c5ccc7;
+  --color-focus-ring: #176544;
+
+  /* Printer-state colours paired with icon names */
+  --state-idle-color: #1a6b45;
+  --state-idle-icon: 'idle';
+  --state-printing-color: #0b5f8a;
+  --state-printing-icon: 'printing';
+  --state-paused-color: #8a5a00;
+  --state-paused-icon: 'paused';
+  --state-error-color: #a11a1a;
+  --state-error-icon: 'error';
+  --state-offline-color: #4a5560;
+  --state-offline-icon: 'offline';
+  --state-stale-color: #5c6570;
+  --state-stale-icon: 'stale';
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 3rem;
+
+  /* Radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  /* Type scale */
+  --font-sans: system-ui, sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.75rem;
+  --font-size-2xl: 2.5rem;
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.6;
+  --font-weight-semibold: 600;
+
+  /* Elevation */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 0.08);
+  --elevation-2: 0 4px 12px rgb(0 0 0 / 0.12);
+
+  /* Focus ring */
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-surface: #181c19;
+    --color-surface-raised: #222826;
+    --color-text: #e6ebe7;
+    --color-text-muted: #a8b3ac;
+    --color-accent: #8dd9b1;
+    --color-on-accent: #181c19;
+    --color-border: #3a423d;
+    --color-focus-ring: #8dd9b1;
+
+    --state-idle-color: #8dd9b1;
+    --state-printing-color: #7ec8e3;
+    --state-paused-color: #e0b35a;
+    --state-error-color: #f0a0a0;
+    --state-offline-color: #a8b0b8;
+    --state-stale-color: #9aa3ad;
+  }
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-surface: #181c19;
+  --color-surface-raised: #222826;
+  --color-text: #e6ebe7;
+  --color-text-muted: #a8b3ac;
+  --color-accent: #8dd9b1;
+  --color-on-accent: #181c19;
+  --color-border: #3a423d;
+  --color-focus-ring: #8dd9b1;
+
+  --state-idle-color: #8dd9b1;
+  --state-printing-color: #7ec8e3;
+  --state-paused-color: #e0b35a;
+  --state-error-color: #f0a0a0;
+  --state-offline-color: #a8b0b8;
+  --state-stale-color: #9aa3ad;
+}

@@ -238,7 +238,17 @@ async function withMock<T>(
     detected: readonly string[],
   ) => Promise<T>,
 ): Promise<T> {
-  const mock = await startMoonrakerMock(options)
+  // The E16 mock queues only files it stores, as Moonraker does.
+  const mock = await startMoonrakerMock({
+    files: [
+      'cube.gcode',
+      'pecas/gear.gcode',
+      'a.gcode',
+      'b.gcode',
+      'c.gcode',
+    ].map((path) => ({ path })),
+    ...options,
+  })
   try {
     const binding = createPrinterBindingRegistry({
       allowedOrigins: [mock.origin],
@@ -385,7 +395,8 @@ describe('queue_op on the E16 mock', () => {
         ok: true,
         guard: 1,
       })
-      expect((await queued(mock.origin)).queue_state).toBe('ready')
+      // The E16 mock starts the queued job, as Moonraker does.
+      expect((await queued(mock.origin)).queue_state).toBe('loading')
       expect(writes(mock)).toEqual([
         'server.job_queue.pause',
         'server.job_queue.post_job',

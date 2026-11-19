@@ -138,7 +138,7 @@ describe('HeaterPanel', () => {
       )
         .flat()
         .join('\n')
-    const css = `${await read('../../apps/farm/app/assets/main.css')}\n${await styles(
+    const css = `${await read('../../apps/farm/app/assets/tokens/tokens.css')}\n${await read('../../apps/farm/app/assets/css/main.css')}\n${await styles(
       [
         '../../apps/farm/app/components/printer-detail/HeaterPanel.vue',
         '../../apps/farm/app/components/ui/Button.vue',

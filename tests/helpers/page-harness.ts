@@ -102,7 +102,7 @@ function entrySource() {
     ${modules.map((m, i) => `import * as m${i} from ${JSON.stringify(m)}`).join('\n')}
     ${components.map((c, i) => `import c${i} from ${JSON.stringify(c)}`).join('\n')}
     ${pageFiles.map((p, i) => `import p${i} from ${JSON.stringify(p)}`).join('\n')}
-    import ${JSON.stringify(join(appDir, 'assets/main.css'))}
+    import ${JSON.stringify(join(appDir, 'assets/css/main.css'))}
 
     const state = { navigated: [], route: reactive({ path: '/', query: {}, params: {} }) }
     const shared = new Map()

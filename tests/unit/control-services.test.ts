@@ -111,7 +111,10 @@ it('reads cached system data through the existing loopback detail stream with Kl
       })
     },
   )
-  expect(frame.detail.host).toMatchObject({ cpuLoad: 0, memoryBytes: 0 })
+  expect(frame.detail.host).toMatchObject({
+    cpuLoad: 3.1,
+    memoryBytes: 4_096_000_000,
+  })
   expect(frame.detail.updates).toContainEqual({
     name: 'klipper',
     installed: 'v1',

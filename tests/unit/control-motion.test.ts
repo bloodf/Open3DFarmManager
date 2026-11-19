@@ -268,7 +268,8 @@ async function withMock<T>(
     ) => Promise<{ ok: boolean; error?: unknown; guard: number }>,
   ) => Promise<T>,
 ): Promise<T> {
-  const mock = await startMoonrakerMock(options)
+  // Start unhomed so every test homes first, as on a fresh boot.
+  const mock = await startMoonrakerMock({ homedAxes: '', ...options })
   try {
     const registry = createPrinterBindingRegistry({
       allowedOrigins: [mock.origin],
@@ -593,7 +594,7 @@ describe('MotionPanel keyboard and layout', () => {
       )
         .flat()
         .join('\n')
-    const css = `${await read('../../apps/farm/app/assets/main.css')}\n${await styles(
+    const css = `${await read('../../apps/farm/app/assets/tokens/tokens.css')}\n${await read('../../apps/farm/app/assets/css/main.css')}\n${await styles(
       [
         '../../apps/farm/app/components/printer-detail/MotionPanel.vue',
         '../../apps/farm/app/components/ui/Button.vue',

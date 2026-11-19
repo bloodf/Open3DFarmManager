@@ -97,6 +97,10 @@ describe('signed power control', () => {
       const mock = await startMoonrakerMock({
         initial: { extruderTarget: target },
         objects: ['print_stats', 'webhooks', 'extruder', 'heater_bed'],
+        // The E16 default relay locks while printing; this one does not.
+        powerDevices: [
+          { device: 'printer', status: 'off', locked_while_printing: false },
+        ],
       })
       onTestFinished(() => mock.close())
       const allowedOrigins = [mock.origin]

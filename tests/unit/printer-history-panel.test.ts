@@ -310,7 +310,7 @@ describe('HistoryPanel', () => {
     const html = await renderFarmComponent(panel, { ...base, jobs: many })
     const read = (path: string) =>
       readFile(new URL(path, import.meta.url), 'utf8')
-    const css = `${await read('../../apps/farm/app/assets/main.css')}\n${(
+    const css = `${await read('../../apps/farm/app/assets/tokens/tokens.css')}\n${await read('../../apps/farm/app/assets/css/main.css')}\n${(
       await Promise.all(
         [
           '../../apps/farm/app/components/printer-detail/HistoryPanel.vue',

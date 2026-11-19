@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatWeight } from '../utils/ui-format.ts'
 import {
   spoolInventoryStale,
   type FarmRow,
@@ -35,7 +36,9 @@ const sections = computed(() =>
   }),
 )
 function grams(value: number | null) {
-  return value === null ? 'Indisponível' : `${value.toLocaleString('pt-BR')} g`
+  return value === null
+    ? 'Indisponível'
+    : (formatWeight(value) ?? 'Indisponível')
 }
 </script>
 <template>

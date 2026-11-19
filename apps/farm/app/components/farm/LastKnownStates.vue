@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatPercentage, formatTemperature } from '../../utils/ui-format.ts'
 import {
   OFFLINE_CONNECTION_LABEL,
   lastKnownStateAgeLabel,
@@ -23,7 +24,7 @@ const observed = computed(() => ({
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+    : (formatTemperature(value) ?? 'Indisponível')
 }
 </script>
 
@@ -53,7 +54,7 @@ function temperatureLabel(value: number | undefined): string {
     </dl>
     <p v-if="state.progress !== undefined">
       Progresso informado da impressão:
-      {{ Math.round(state.progress * 100) }}%
+      {{ formatPercentage(state.progress * 100) }}
     </p>
     <p class="opaque">
       Somente leitura: sem conexão direta, nenhum comando é enviado a esta

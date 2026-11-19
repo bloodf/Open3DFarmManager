@@ -2,6 +2,9 @@
 import { ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
+import ColorScaleLegend from '../components/ui/charts/ColorScaleLegend.vue'
+import ProgressRing from '../components/ui/charts/ProgressRing.vue'
+import Sparkline from '../components/ui/charts/Sparkline.vue'
 import DataTable from '../components/ui/DataTable.vue'
 import Dialog from '../components/ui/Dialog.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -16,6 +19,13 @@ import StaleNotice from '../components/ui/StaleNotice.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import Tabs from '../components/ui/Tabs.vue'
 import Toast from '../components/ui/Toast.vue'
+import {
+  formatDateTime,
+  formatDuration,
+  formatPercentage,
+  formatTemperature,
+  formatWeight,
+} from '../utils/ui-format.ts'
 
 const dialogOpen = ref(false)
 const selectedTab = ref('jobs')
@@ -27,6 +37,16 @@ const tabs = [
 const columns = [
   { id: 'name', label: 'Arquivo' },
   { id: 'status', label: 'Estado' },
+]
+const start = Date.UTC(2026, 10, 19, 12)
+const trend = [201, 205, 209, 212, 214, 215].map((value, i) => ({
+  time: start + i * 60_000,
+  value,
+}))
+const scale = [
+  { label: '-0,120 mm', color: 'rgb(68, 1, 84)' },
+  { label: '0,000 mm', color: 'rgb(33, 144, 141)' },
+  { label: '0,120 mm', color: 'rgb(253, 231, 37)' },
 ]
 const rows = [
   { id: 'support', cells: { name: 'suporte.gcode', status: 'Em impressão' } },
@@ -51,6 +71,25 @@ const rows = [
       <Dialog v-model="dialogOpen" title="Detalhes da impressão">
         <p>O arquivo suporte.gcode está em impressão.</p>
       </Dialog>
+    </Card>
+
+    <Card>
+      <h2>Gráficos e formatos</h2>
+      <ProgressRing label="Progresso do trabalho" :value="42" />
+      <Sparkline label="Tendência da temperatura do bico" :points="trend" />
+      <ColorScaleLegend label="Escala de cores da malha" :stops="scale" />
+      <dl>
+        <dt>Início</dt>
+        <dd>{{ formatDateTime(start) }}</dd>
+        <dt>Duração</dt>
+        <dd>{{ formatDuration(5_400) }}</dd>
+        <dt>Bico</dt>
+        <dd>{{ formatTemperature(215.04) }}</dd>
+        <dt>Filamento</dt>
+        <dd>{{ formatWeight(742.5) }}</dd>
+        <dt>Progresso</dt>
+        <dd>{{ formatPercentage(42) }}</dd>
+      </dl>
     </Card>
 
     <Card>

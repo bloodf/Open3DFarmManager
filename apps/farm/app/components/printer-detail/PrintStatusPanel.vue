@@ -4,6 +4,7 @@ import type { z } from 'zod'
 import type { PrinterDetailStreamUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
 import { DEFAULT_UNSUPPORTED_REASON } from '../../utils/printer-detail-view.ts'
 import Button from '../ui/Button.vue'
+import { formatPercentage } from '../../utils/ui-format.ts'
 import { printStatusEta } from './print-status-eta.ts'
 import { ExcludeObjectArguments } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 
@@ -64,7 +65,9 @@ function duration(seconds?: number) {
     : `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} min ${Math.floor(seconds) % 60} s`
 }
 function factor(value?: number) {
-  return value === undefined ? 'Indisponível' : `${number.format(value * 100)}%`
+  return value === undefined
+    ? 'Indisponível'
+    : (formatPercentage(value * 100) ?? 'Indisponível')
 }
 </script>
 

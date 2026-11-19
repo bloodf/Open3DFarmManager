@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatTemperature } from '../../utils/ui-format.ts'
+import ProgressRing from '../ui/charts/ProgressRing.vue'
 import {
   lastKnownStateAgeSeconds,
   type LastKnownState,
@@ -78,7 +80,7 @@ const headLabel = computed(
 function temperature(value: number | undefined) {
   return value === undefined
     ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+    : (formatTemperature(value) ?? 'Indisponível')
 }
 </script>
 
@@ -135,7 +137,10 @@ function temperature(value: number | undefined) {
             {{ formatPrinterStateLabel(card.state) }}
           </p>
           <p v-if="card.state.progress !== undefined" class="kiosk__progress">
-            {{ Math.round(card.state.progress * 100) }}%
+            <ProgressRing
+              label="Progresso da impressão"
+              :value="card.state.progress * 100"
+            />
           </p>
           <p>
             Bico {{ temperature(card.state.temperatures.toolCelsius) }} · Mesa

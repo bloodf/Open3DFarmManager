@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { formatDateTime } from '../../utils/ui-format.ts'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
 import DataTable from '../ui/DataTable.vue'
@@ -71,7 +72,7 @@ const rows = computed(() =>
     id: v.id,
     cells: {
       number: `v${v.versionNumber}`,
-      date: new Date(v.createdAt).toLocaleString('pt-BR'),
+      date: formatDateTime(v.createdAt) ?? 'Horário não confirmado',
       file: v.originalName,
       size: formatBytes(v.sizeBytes),
       where: locationLabel(v.storageLocation),

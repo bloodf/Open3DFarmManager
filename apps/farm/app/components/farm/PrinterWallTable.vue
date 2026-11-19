@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="Row extends FarmRow">
 import { computed, onMounted, ref } from 'vue'
+import { formatPercentage, formatTemperature } from '../../utils/ui-format.ts'
 import {
   formatPrinterStateLabel,
   observationAge,
@@ -41,7 +42,7 @@ const columns = [
   { label: 'Estado' },
   {
     label: 'Progresso',
-    format: (value: number) => `${Math.round(value * 100)}%`,
+    format: (value: number) => formatPercentage(value * 100) ?? 'Indisponível',
   },
   { label: 'Tempo restante', format: formatJobTime },
   { label: 'Bico', format: temperature },
@@ -53,7 +54,7 @@ const columns = [
 ]
 
 function temperature(value: number) {
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+  return formatTemperature(value) ?? 'Indisponível'
 }
 
 const sort = ref({ index: 0, descending: false })

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import Button from '../ui/Button.vue'
+import ColorScaleLegend from '../ui/charts/ColorScaleLegend.vue'
 import {
   DEFAULT_MESH_REASON,
   DEFAULT_VIEW,
@@ -55,7 +56,17 @@ const summary = computed(() =>
   meshSummary(rows.value, shown.value, props.mesh?.profile ?? null),
 )
 const profiles = computed(() => props.mesh?.profiles ?? [])
-const scaleGradient = `linear-gradient(to right, ${SCALE_STOPS.join(', ')})`
+const legendStops = computed(() =>
+  SCALE_STOPS.map((color, index) => ({
+    color,
+    label: meshMm(
+      stats.value
+        ? stats.value.min +
+            (stats.value.range * index) / (SCALE_STOPS.length - 1)
+        : 0,
+    ),
+  })),
+)
 const reasons = computed(() => [
   ...new Set(
     (['calibrate', 'load', 'save', 'remove', 'clear'] as const)
@@ -179,16 +190,11 @@ function run(op: MeshOp, name: string, event: Event) {
           >Restaurar a vista</Button
         >
       </div>
-      <div class="mesh-legend">
-        <span>{{ meshMm(stats.min) }}</span>
-        <span
-          class="mesh-scale"
-          :style="{ background: scaleGradient }"
-          role="img"
-          aria-label="Escala de cores: do mais baixo, azul escuro, ao mais alto, amarelo"
-        ></span>
-        <span>{{ meshMm(stats.max) }}</span>
-      </div>
+      <ColorScaleLegend
+        class="mesh-legend"
+        label="Escala de cores: do mais baixo, azul escuro, ao mais alto, amarelo"
+        :stops="legendStops"
+      />
       <h3 id="mesh-grid-title">Grade de cores (vista de cima)</h3>
       <div
         class="mesh-grid"
@@ -334,16 +340,7 @@ function run(op: MeshOp, name: string, event: Event) {
   margin-block: var(--space-3);
 }
 .mesh-legend {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   margin-block: var(--space-3);
-}
-.mesh-scale {
-  flex: 1;
-  max-width: 16rem;
-  height: 1rem;
-  border: 1px solid currentcolor;
 }
 .mesh-grid {
   display: grid;

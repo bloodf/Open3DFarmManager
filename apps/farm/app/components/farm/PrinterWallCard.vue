@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
+import { formatPercentage, formatTemperature } from '../../utils/ui-format.ts'
+import ProgressRing from '../ui/charts/ProgressRing.vue'
 import {
   formatPrinterStateLabel,
   observationAge,
@@ -76,7 +78,7 @@ const finish = computed(() => {
 function temperature(value: number | undefined) {
   return value === undefined
     ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+    : (formatTemperature(value) ?? 'Indisponível')
 }
 
 const alertLabel = (alert: string | FarmAlert) =>
@@ -114,13 +116,11 @@ function spoolLabel(spool: ActiveSpool) {
       alt="Miniatura da impressão"
       loading="lazy"
     />
-    <p v-if="progress !== undefined">
-      <progress
-        :value="progress"
-        max="100"
-        aria-label="Progresso da impressão"
-      />
-      {{ progress }}%
+    <p v-if="progress !== undefined" class="wall-printer__progress">
+      <ProgressRing label="Progresso da impressão" :value="progress" />
+      <span class="wall-printer__progress-text">{{
+        formatPercentage(progress)
+      }}</span>
     </p>
     <dl>
       <dt>Camada</dt>
@@ -207,9 +207,13 @@ function spoolLabel(spool: ActiveSpool) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.wall-printer img,
-.wall-printer progress {
+.wall-printer img {
   max-width: 100%;
+}
+.wall-printer__progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .wall-printer dd {
   margin: 0 0 0.5rem;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import EmptyState from '../ui/EmptyState.vue'
+import { formatDateTime } from '../../utils/ui-format.ts'
 import {
   describeSpoolmanResult,
   describeSpoolmanStatus,
@@ -21,10 +22,7 @@ defineProps<{
 }>()
 
 const when = (value: number) =>
-  new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value))
+  formatDateTime(value) ?? 'Horário não confirmado'
 </script>
 
 <template>

@@ -2,6 +2,7 @@
 import { computed, reactive } from 'vue'
 import Button from '../ui/Button.vue'
 import LineChart from '../ui/charts/LineChart.vue'
+import Sparkline from '../ui/charts/Sparkline.vue'
 import {
   clampTarget,
   commandHeaterName,
@@ -68,7 +69,13 @@ function submit(heater: HeaterReading, event: Event) {
         <h3>{{ heater.label }}</h3>
         <dl>
           <dt>Atual</dt>
-          <dd>{{ temperatureText(heater.temperature) }}</dd>
+          <dd>
+            {{ temperatureText(heater.temperature) }}
+            <Sparkline
+              :label="`Tendência de ${heater.label}`"
+              :points="heater.points"
+            />
+          </dd>
           <dt>Alvo</dt>
           <dd>{{ temperatureText(heater.target) }}</dd>
           <dt>Potência</dt>

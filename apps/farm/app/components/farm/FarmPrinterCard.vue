@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import {
+  formatDateTime,
+  formatPercentage,
+  formatTemperature,
+} from '../../utils/ui-format.ts'
+import ProgressRing from '../ui/charts/ProgressRing.vue'
 import FarmMaterials from '../FarmMaterials.vue'
 import FarmEnvironment from '../FarmEnvironment.vue'
 import CameraDisplay from '../CameraDisplay.vue'
@@ -35,7 +41,7 @@ const emit = defineEmits<{ setup: []; save: []; cancel: [] }>()
 function temperatureLabel(value: number | undefined): string {
   return value === undefined
     ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+    : (formatTemperature(value) ?? 'Indisponível')
 }
 
 const DEFAULT_SPOOL_SLOTS = [
@@ -88,7 +94,7 @@ function receiptAge(row: FarmRow) {
 }
 function dateLabel(time: number) {
   return time <= 8_640_000_000_000_000
-    ? new Date(time).toLocaleString('pt-BR')
+    ? (formatDateTime(time) ?? 'Horário não confirmado')
     : 'Horário não confirmado'
 }
 </script>
@@ -241,14 +247,13 @@ function dateLabel(time: number) {
             row.observation.state.progress !== undefined
           "
         >
-          <progress
-            :value="row.observation.state.progress"
-            :max="1"
-            :aria-labelledby="`progress-${row.assignment.assignmentId}`"
+          <ProgressRing
+            :label="`Progresso informado da impressão ${row.assignment.printerKey}`"
+            :value="row.observation.state.progress * 100"
           />
           <span :id="`progress-${row.assignment.assignmentId}`"
             >Progresso informado da impressão:
-            {{ Math.round(row.observation.state.progress * 100) }}%</span
+            {{ formatPercentage(row.observation.state.progress * 100) }}</span
           >
         </p>
       </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/ui-format.ts'
 import {
   BrowserDeviceHttpListResponse,
   BrowserDeviceHttpFarmPageResponse,
@@ -236,7 +237,7 @@ async function decide(
   }
 }
 function date(value: number) {
-  return new Date(value).toLocaleString('pt-BR')
+  return formatDateTime(value) ?? 'Horário não confirmado'
 }
 onMounted(() => {
   heading.value?.focus()

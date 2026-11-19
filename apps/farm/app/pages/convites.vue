@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/ui-format.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
@@ -57,7 +58,8 @@ async function submit() {
       },
     )
     link.value = `${window.location.origin}/criar-conta#codigo=${result.token}`
-    expiresAt.value = new Date(result.expiresAt).toLocaleString('pt-BR')
+    expiresAt.value =
+      formatDateTime(result.expiresAt) ?? 'Horário não confirmado'
   } catch (error: unknown) {
     const status =
       error && typeof error === 'object' && 'statusCode' in error

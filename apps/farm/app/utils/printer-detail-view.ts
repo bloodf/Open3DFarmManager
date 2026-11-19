@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { z } from 'zod'
+import { formatTemperature } from './ui-format.ts'
 import type { PrinterDetailStreamCapability } from '../../../../packages/farm-protocol/src/printer-detail.ts'
 
 export type DetailCapability = z.infer<typeof PrinterDetailStreamCapability>
@@ -151,7 +152,7 @@ export function clampTarget(
 export function temperatureText(value: number | undefined): string {
   return value === undefined || !Number.isFinite(value)
     ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+    : (formatTemperature(value) ?? 'Indisponível')
 }
 export function powerText(power: number | undefined): string {
   return power === undefined || !Number.isFinite(power)

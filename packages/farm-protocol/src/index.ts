@@ -12,6 +12,7 @@ export * from './encoding.ts'
 export * from './sign.ts'
 export {
   TelemetryEvent,
+  DiscoveryResults,
   TelemetryBatch,
   PrinterTransition,
   telemetryPrinterKey,

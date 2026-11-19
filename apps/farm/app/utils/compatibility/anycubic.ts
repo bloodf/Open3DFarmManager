@@ -1,3 +1,9 @@
+import { unknownControlAreas } from './control-areas'
+import type {
+  ControlAreaCapabilities,
+  ControlAreaEvidenceMap,
+} from './control-areas'
+
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'
 
@@ -26,6 +32,8 @@ export interface AnycubicCatalogProduct {
       CatalogCapability
     >
   >
+  readonly controlAreas: ControlAreaCapabilities
+  readonly controlAreaEvidence?: ControlAreaEvidenceMap
   readonly sources: readonly string[]
   readonly limitations: readonly string[]
 }
@@ -49,6 +57,7 @@ const unknownCapabilities = {
 export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   {
     id: 'anycubic-kobra-3-max-v2',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 Max V2',
     releaseStatus: 'Data de lançamento desconhecida',
@@ -76,6 +85,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-4',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 4',
     releaseStatus: 'Apresentada em feira; lançamento desconhecido',
@@ -102,6 +112,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-x',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra X',
     releaseStatus: 'Apresentada na Formnext 2025',
@@ -139,6 +150,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-s1-max',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra S1 Max',
     releaseStatus: 'Apresentada na Formnext 2025',
@@ -165,6 +177,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'anycubic-kobra-3-v2',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 V2',
     releaseStatus: 'Candidata; data de lançamento desconhecida',

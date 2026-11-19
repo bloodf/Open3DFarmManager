@@ -1,0 +1,276 @@
+<script setup lang="ts">
+import FarmMaterials from '../FarmMaterials.vue'
+import FarmEnvironment from '../FarmEnvironment.vue'
+import CameraDisplay from '../CameraDisplay.vue'
+import ActiveSpoolAssign from './ActiveSpoolAssign.vue'
+import FarmLocalInterface from './FarmLocalInterface.vue'
+import {
+  formatPrinterStateLabel,
+  observationAge,
+  type FarmRow,
+} from '../../utils/farm-view.ts'
+import { farmJobOutcome } from '../../utils/farm-job-outcome.ts'
+import { farmJobView } from '../../utils/farm-job-view.ts'
+import {
+  KOBRA_X_DEVICE_CAPABILITIES,
+  isKobraXAssignment,
+} from '../../utils/kobralink-onboarding.ts'
+const { liveNow } = defineProps<{
+  row: FarmRow & {
+    draft?: { value: string; confirmed: boolean; error: string }
+  }
+  farmId: string
+  cameraFor: (id: string) => MediaStream | null
+  liveNow: () => { wall: number; mono: number }
+}>()
+const emit = defineEmits<{ setup: []; save: []; cancel: [] }>()
+function temperatureLabel(value: number | undefined): string {
+  return value === undefined
+    ? 'Indisponível'
+    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+}
+
+const DEFAULT_SPOOL_SLOTS = [
+  'external',
+  'ams:0:0',
+  'ams:0:1',
+  'ams:0:2',
+  'ams:0:3',
+]
+
+function moonrakerActiveSpool(row: FarmRow): boolean {
+  const materials = row.observation?.state.materials ?? []
+  return materials.some(
+    (material) => material.slot === 'external' && material.active === true,
+  )
+}
+
+function activeSpoolSlots(row: FarmRow): string[] {
+  const fromMaterials = (row.observation?.state.materials ?? []).map(
+    (material) => material.slot,
+  )
+  return fromMaterials.length ? fromMaterials : [...DEFAULT_SPOOL_SLOTS]
+}
+function connectionText(row: FarmRow) {
+  switch (row.connection) {
+    case 'authenticated':
+      return row.observation
+        ? 'Conexão direta autenticada'
+        : 'Conexão direta autenticada; aguardando estado.'
+    case 'connecting':
+      return 'Estabelecendo conexão direta…'
+    case 'verifying':
+      return 'Verificando conexão direta…'
+    case 'closed':
+      return row.observation
+        ? 'Conexão direta indisponível. Exibindo a última observação.'
+        : 'Conexão direta indisponível'
+    case 'unavailable':
+      return 'Conexão direta indisponível'
+  }
+}
+function receiptAge(row: FarmRow) {
+  if (!row.observation) return ''
+  const seconds = observationAge(row.observation, liveNow()).seconds
+  return seconds === null
+    ? 'Horário de recebimento não confirmado'
+    : seconds >= 86_400
+      ? 'Atualização recebida há mais de 24 h'
+      : `Atualização recebida há ${seconds} s`
+}
+function dateLabel(time: number) {
+  return time <= 8_640_000_000_000_000
+    ? new Date(time).toLocaleString('pt-BR')
+    : 'Horário não confirmado'
+}
+</script>
+
+<template>
+  <li class="printer-card">
+    <article :aria-labelledby="`printer-${row.assignment.assignmentId}`">
+      <h3 :id="`printer-${row.assignment.assignmentId}`" class="opaque">
+        {{ row.assignment.printerKey }}
+      </h3>
+      <p>
+        {{
+          row.assignment.status === 'active'
+            ? 'Atribuição ativa'
+            : 'Atribuição revogada'
+        }}. Connector
+        {{
+          {
+            approved: 'aprovado',
+            pending: 'pendente',
+            revoked: 'revogado',
+          }[row.assignment.connectorStatus]
+        }}.
+      </p>
+      <dl>
+        <dt>Connector</dt>
+        <dd class="opaque">{{ row.assignment.agentId }}</dd>
+        <dt>Atribuição</dt>
+        <dd class="opaque">{{ row.assignment.assignmentId }}</dd>
+        <dt>Conexão direta</dt>
+        <dd>{{ connectionText(row) }}</dd>
+        <dt>Último estado informado</dt>
+        <dd>
+          {{
+            row.observation
+              ? formatPrinterStateLabel(row.observation.state)
+              : 'Nenhum estado recebido'
+          }}
+        </dd>
+      </dl>
+      <template v-if="row.observation">
+        <p>
+          {{ receiptAge(row) }}. Recebido neste navegador em
+          {{ dateLabel(row.observation.received.wall) }}.
+        </p>
+        <p v-if="observationAge(row.observation, liveNow()).sourceConfirmed">
+          Observado pelo Connector em
+          {{ dateLabel(row.observation.state.observedAt) }}. Idade da observação
+          estimada a partir do relógio do Connector.
+        </p>
+        <p v-else>Horário da observação não confirmado</p>
+        <p v-if="observationAge(row.observation, liveNow()).stale">
+          Dados desatualizados. A impressora pode ter mudado de estado.
+        </p>
+        <dl aria-label="Temperaturas observadas">
+          <div>
+            <dt>Bico</dt>
+            <dd>
+              {{
+                temperatureLabel(row.observation.state.toolTemperatureCelsius)
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>Mesa</dt>
+            <dd>
+              {{
+                temperatureLabel(row.observation.state.bedTemperatureCelsius)
+              }}
+            </dd>
+          </div>
+        </dl>
+        <FarmMaterials :materials="row.observation.state.materials" />
+        <ActiveSpoolAssign
+          v-if="farmId"
+          :farm-id="farmId"
+          :printer-key="row.assignment.printerKey"
+          :slots="activeSpoolSlots(row)"
+          :moonraker-managed="moonrakerActiveSpool(row)"
+        />
+        <FarmEnvironment
+          :fans="row.observation.state.fans"
+          :light="row.observation.state.light"
+        />
+        <div aria-live="polite" aria-atomic="true">
+          <template v-if="farmJobOutcome(row.observation.state)">
+            <p>
+              {{ farmJobOutcome(row.observation.state)?.label }}
+            </p>
+            <dl aria-label="Último trabalho">
+              <div v-if="farmJobOutcome(row.observation.state)?.filename">
+                <dt>Arquivo</dt>
+                <dd class="opaque">
+                  {{ farmJobOutcome(row.observation.state)?.filename }}
+                </dd>
+              </div>
+              <div>
+                <dt>Fim</dt>
+                <dd>
+                  {{ farmJobOutcome(row.observation.state)?.endedAt }}
+                </dd>
+              </div>
+              <div v-if="farmJobOutcome(row.observation.state)?.duration">
+                <dt>Duração</dt>
+                <dd>
+                  {{ farmJobOutcome(row.observation.state)?.duration }}
+                </dd>
+              </div>
+            </dl>
+          </template>
+        </div>
+        <dl aria-label="Trabalho atual">
+          <div v-if="farmJobView(row.observation.state).filename">
+            <dt>Arquivo</dt>
+            <dd>
+              {{ farmJobView(row.observation.state).filename }}
+            </dd>
+          </div>
+          <div v-if="farmJobView(row.observation.state).layer">
+            <dt>Camada</dt>
+            <dd>{{ farmJobView(row.observation.state).layer }}</dd>
+          </div>
+          <div v-if="farmJobView(row.observation.state).elapsed">
+            <dt>Tempo decorrido</dt>
+            <dd>
+              {{ farmJobView(row.observation.state).elapsed }}
+            </dd>
+          </div>
+          <div v-if="farmJobView(row.observation.state).remaining">
+            <dt>Tempo restante estimado</dt>
+            <dd>
+              {{ farmJobView(row.observation.state).remaining }}
+            </dd>
+          </div>
+        </dl>
+        <p
+          v-if="
+            (row.observation.state.state === 'printing' ||
+              row.observation.state.state === 'paused') &&
+            row.observation.state.progress !== undefined
+          "
+        >
+          <progress
+            :value="row.observation.state.progress"
+            :max="1"
+            :aria-labelledby="`progress-${row.assignment.assignmentId}`"
+          />
+          <span :id="`progress-${row.assignment.assignmentId}`"
+            >Progresso informado da impressão:
+            {{ Math.round(row.observation.state.progress * 100) }}%</span
+          >
+        </p>
+      </template>
+      <section
+        v-if="isKobraXAssignment(row.assignment)"
+        :aria-labelledby="'capabilities-' + row.assignment.assignmentId"
+      >
+        <h4 :id="'capabilities-' + row.assignment.assignmentId">
+          Capacidades admitidas deste dispositivo (Anycubic Kobra X)
+        </h4>
+        <p>
+          Qualificação provisória de modelo; firmware não qualificado. Comandos
+          remotos não estão disponíveis.
+        </p>
+        <dl>
+          <div v-for="cap in KOBRA_X_DEVICE_CAPABILITIES" :key="cap.id">
+            <dt>{{ cap.label }}</dt>
+            <dd>{{ cap.statusText }} — {{ cap.reason }}</dd>
+          </div>
+        </dl>
+      </section>
+      <CameraDisplay
+        v-if="
+          row.assignment.status === 'active' &&
+          row.assignment.connectorStatus === 'approved' &&
+          !isKobraXAssignment(row.assignment)
+        "
+        :stream="cameraFor(row.assignment.assignmentId)"
+        :printer-name="row.assignment.printerKey"
+      />
+      <FarmLocalInterface
+        :row="row"
+        @setup="emit('setup')"
+        @save="emit('save')"
+        @cancel="emit('cancel')"
+        ><slot name="local-link"
+      /></FarmLocalInterface>
+      <slot />
+    </article>
+  </li>
+</template>
+
+<style scoped src="./farm-view.css"></style>

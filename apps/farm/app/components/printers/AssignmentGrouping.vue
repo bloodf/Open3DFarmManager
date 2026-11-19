@@ -26,6 +26,11 @@ function startEdit() {
   editing.value = true
 }
 
+function cancelEdit() {
+  editing.value = false
+  feedback.value = ''
+}
+
 async function save() {
   if (!canManage.value || printer.status !== 'active') return
   const target = printer
@@ -128,15 +133,7 @@ async function save() {
             step="1"
         /></label>
         <button type="submit">Salvar</button>
-        <button
-          type="button"
-          @click="
-            editing = false
-            feedback = ''
-          "
-        >
-          Cancelar
-        </button>
+        <button type="button" @click="cancelEdit">Cancelar</button>
       </fieldset>
     </form>
     <p role="status">{{ feedback }}</p>

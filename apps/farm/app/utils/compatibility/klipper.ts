@@ -1,4 +1,6 @@
 import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic'
+import { unknownControlAreas } from './control-areas'
+import type { ControlAreaEvidenceMap } from './control-areas'
 
 export type { CatalogCapability }
 export type KlipperCatalogProduct = AnycubicCatalogProduct
@@ -20,7 +22,94 @@ const simulatedControl = {
   cancel: 'simulated',
 } as const satisfies KlipperCatalogProduct['capabilities']
 
+const fullMock = 'tests/unit/mock-moonraker-full.test.ts'
+const lifecycleMock = 'tests/node/e16-352.test.mjs'
+
+/**
+ * Áreas de controle comprovadas somente pelo simulador Moonraker do E16
+ * (loopback, porta 0). Cada `simulated` aponta para o teste que o exercita;
+ * áreas sem teste em simulador permanecem `unknown`.
+ */
+export const klipperControlAreaEvidence = {
+  temperatures: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  motion: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  fans: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  leds: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  console: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  excludeObject: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  bedMesh: {
+    file: fullMock,
+    test: 'updates objects and emits a G-code console response across transports',
+  },
+  fileManager: {
+    file: fullMock,
+    test: 'creates directories, moves between roots, downloads and deletes files',
+  },
+  history: {
+    file: fullMock,
+    test: 'records print history and manages the queue',
+  },
+  jobQueue: {
+    file: fullMock,
+    test: 'records print history and manages the queue',
+  },
+  power: {
+    file: fullMock,
+    test: 'controls power, timelapse and restarts and reports fixture stats',
+  },
+  timelapse: {
+    file: fullMock,
+    test: 'controls power, timelapse and restarts and reports fixture stats',
+  },
+  services: {
+    file: fullMock,
+    test: 'controls power, timelapse and restarts and reports fixture stats',
+  },
+  updates: {
+    file: fullMock,
+    test: 'controls power, timelapse and restarts and reports fixture stats',
+  },
+  printStatus: {
+    file: lifecycleMock,
+    test: 'Print lifecycle (standby, printing, pause, resume, cancel, complete, error) and macro calls',
+  },
+  macros: {
+    file: lifecycleMock,
+    test: 'Print lifecycle (standby, printing, pause, resume, cancel, complete, error) and macro calls',
+  },
+  webcams: {
+    file: lifecycleMock,
+    test: 'SV06 and U1 profiles match Docker simulator capabilities and pass discovery + sim-tools verification',
+  },
+} as const satisfies ControlAreaEvidenceMap
+
+const klipperControlAreas = {
+  ...unknownControlAreas,
+  ...Object.fromEntries(
+    Object.keys(klipperControlAreaEvidence).map((key) => [key, 'simulated']),
+  ),
+} as KlipperCatalogProduct['controlAreas']
+
 const commonLimitations = [
+  'As áreas de controle marcadas como Simulado foram exercitadas apenas no simulador Moonraker em loopback, nunca em hardware; extrusão manual direta, configuração e demais áreas sem teste em simulador permanecem Desconhecido.',
   'Telemetria, câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
   'Macros anunciadas e comandos de carregar e descarregar filamento foram exercitados em simulador Moonraker; dependem das macros configuradas e não são comprovados em hardware.',
   'O rótulo Simulado não habilita comandos nem concede autoridade de controle; qualquer comando exige autorização própria do OpenFarm.',
@@ -29,6 +118,8 @@ const commonLimitations = [
 export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   {
     id: 'klipper-generic-moonraker',
+    controlAreas: klipperControlAreas,
+    controlAreaEvidence: klipperControlAreaEvidence,
     brand: 'Klipper',
     model: 'Klipper + Moonraker genérico',
     releaseStatus:
@@ -62,6 +153,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   },
   {
     id: 'creality-k1-series-moonraker-root',
+    controlAreas: klipperControlAreas,
+    controlAreaEvidence: klipperControlAreaEvidence,
     brand: 'Creality',
     model: 'Série K1 (K1, K1C, K1 Max) com Klipper e Moonraker via root',
     releaseStatus:
@@ -95,6 +188,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   },
   {
     id: 'voron-2-4-kit',
+    controlAreas: klipperControlAreas,
+    controlAreaEvidence: klipperControlAreaEvidence,
     brand: 'Voron Design',
     model: 'Voron 2.4 (kit de montagem própria)',
     releaseStatus:
@@ -127,6 +222,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   },
   {
     id: 'sovol-sv08',
+    controlAreas: klipperControlAreas,
+    controlAreaEvidence: klipperControlAreaEvidence,
     brand: 'Sovol',
     model: 'SV08',
     releaseStatus:
@@ -159,6 +256,8 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   },
   {
     id: 'voron-trident-kit',
+    controlAreas: klipperControlAreas,
+    controlAreaEvidence: klipperControlAreaEvidence,
     brand: 'Voron Design',
     model: 'Voron Trident (kit de montagem própria)',
     releaseStatus: 'Projeto aberto; data de lançamento não verificada',

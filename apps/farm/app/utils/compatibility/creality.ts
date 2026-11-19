@@ -1,3 +1,9 @@
+import { unknownControlAreas } from './control-areas'
+import type {
+  ControlAreaCapabilities,
+  ControlAreaEvidenceMap,
+} from './control-areas'
+
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'
 
@@ -26,6 +32,8 @@ export interface CrealityCatalogProduct {
       CatalogCapability
     >
   >
+  readonly controlAreas: ControlAreaCapabilities
+  readonly controlAreaEvidence?: ControlAreaEvidenceMap
   readonly sources: readonly string[]
   readonly limitations: readonly string[]
 }
@@ -56,6 +64,7 @@ const crealitySimulatedCapabilities = {
 export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   {
     id: 'creality-mbox',
+    controlAreas: unknownControlAreas,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -88,6 +97,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v3-neo',
+    controlAreas: unknownControlAreas,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -122,6 +132,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v3-mega',
+    controlAreas: unknownControlAreas,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -160,6 +171,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-k3',
+    controlAreas: unknownControlAreas,
     firmwareNotes: [
       {
         firmware: 'não verificado',
@@ -192,6 +204,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   },
   {
     id: 'creality-ender-3-v4',
+    controlAreas: unknownControlAreas,
     firmwareNotes: [
       {
         firmware: 'não verificado',

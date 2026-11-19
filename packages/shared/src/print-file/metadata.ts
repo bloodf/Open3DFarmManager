@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { readGcodeMetadata, type GcodeByteSource } from './gcode-meta.ts'
+import {
+  parseGcodeMetadata,
+  readGcodeMetadata,
+  type GcodeByteSource,
+} from './gcode-meta.ts'
 import type { PrintFileMetadata as GcodeMetadata } from './schema.ts'
 
 const ToolMetadata = z.object({
@@ -36,7 +40,15 @@ export type PrintFileMetadata = z.infer<typeof PrintFileMetadata>
  */
 export type LibraryFileMetadata = PrintFileMetadata
 
-/** Maps the published G-code metadata (schema.ts) onto the stored library shape. */
+/** The library shows Bambu's slicer by the name its 3MF projects carry. */
+const librarySlicerName = (name: string): string =>
+  name === 'BambuStudio' ? 'Bambu Studio' : name
+
+/**
+ * Maps the published G-code metadata (schema.ts) onto the stored library
+ * shape. Colours are stored as lower-case hex (compatibility compares them
+ * case-insensitively).
+ */
 export function fromGcodeMetadata(meta: GcodeMetadata): PrintFileMetadata {
   const tools: NonNullable<PrintFileMetadata['tools']> = []
   for (const tool of meta.tools) {
@@ -46,14 +58,14 @@ export function fromGcodeMetadata(meta: GcodeMetadata): PrintFileMetadata {
         nozzleDiameter: tool.nozzleDiameterMm,
       }),
       ...(tool.filamentType && { filamentType: tool.filamentType }),
-      ...(tool.colour && { filamentColour: tool.colour }),
+      ...(tool.colour && { filamentColour: tool.colour.toLowerCase() }),
       ...(tool.grams !== undefined && { filamentGrams: tool.grams }),
     }
   }
   const filamentProfile = meta.tools.find((t) => t.filamentProfile)
     ?.filamentProfile
   return {
-    ...(meta.slicer && { slicer: meta.slicer.name }),
+    ...(meta.slicer && { slicer: librarySlicerName(meta.slicer.name) }),
     ...(meta.slicer?.version && { slicerVersion: meta.slicer.version }),
     ...(meta.printerModel && { printerModel: meta.printerModel }),
     ...(meta.printerProfile && { printerProfile: meta.printerProfile }),
@@ -89,4 +101,9 @@ export async function readLibraryGcodeMetadata(
   source: GcodeByteSource,
 ): Promise<PrintFileMetadata> {
   return fromGcodeMetadata(await readGcodeMetadata(source))
+}
+
+/** Parses bounded G-code header/footer text into the library shape. */
+export function parseGcodeMetadataText(text: string): PrintFileMetadata {
+  return fromGcodeMetadata(parseGcodeMetadata(text))
 }

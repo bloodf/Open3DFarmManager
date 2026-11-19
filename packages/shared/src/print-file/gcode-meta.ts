@@ -348,7 +348,8 @@ class Scan {
           : undefined
 
     const nozzles = list(get('nozzle_diameter') ?? '', /,/)
-    const types = list(get('filament_type') ?? '', /;/)
+    // Cura-family headers separate types with commas as well as semicolons.
+    const types = list(get('filament_type') ?? '', /[;,]/)
     const colours = list(get('filament_colour') ?? '', /[;,]/)
     const grams = list(
       get('filament_used_g', 'total_filament_weight_g') ?? '',
@@ -403,6 +404,7 @@ class Scan {
         (() => {
           const raw = get(
             'estimated_printing_time_normal_mode',
+            'estimated_printing_time',
             'total_estimated_time',
             'estimated_print_time',
             'time',
@@ -411,7 +413,12 @@ class Scan {
         })(),
     )
     const layers = num(
-      get('total_layer_number', 'total_layers_count', 'layer_count'),
+      get(
+        'total_layer_number',
+        'total_layers_count',
+        'total_layer_count',
+        'layer_count',
+      ),
       0,
       10_000_000,
     )

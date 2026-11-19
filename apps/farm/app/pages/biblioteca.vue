@@ -48,7 +48,7 @@ const canManage = ref(false)
 const connectors = ref<{ agentId: string }[]>([])
 const profiles = ref<PrinterProfile[]>([])
 const assignments = ref<LibraryReplayAssignment[]>([])
-const live = useReplayLive()
+const live = useReplayLive(farmId)
 const replayPrinters = computed(() =>
   libraryReplayPrinters(assignments.value, profiles.value, live.liveFor),
 )

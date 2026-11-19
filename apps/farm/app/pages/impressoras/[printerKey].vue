@@ -34,6 +34,10 @@ const webcams = shallowRef<
 >(null)
 const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const vendorFrame = computed(() =>
+  detailFrame.value?.vendor ? detailFrame.value : undefined,
+)
+const printFile = ref('')
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
     ? detailFrame.value
@@ -172,7 +176,7 @@ const extrusion = computed(() => {
 const outputs = computed(() => {
   const controls = state.value?.controls ?? []
   const advertised = {
-    fan: controls.includes('set_fan'),
+    fan: !vendorFrame.value && controls.includes('set_fan'),
     led: controls.includes('set_led'),
     pin: controls.includes('set_pin'),
   }
@@ -437,6 +441,96 @@ onMounted(() => heading.value?.focus())
         />
       </template>
     </PrinterDetailDashboard>
+    <section
+      v-if="row && live && vendorFrame"
+      aria-label="Detalhes da impressora"
+    >
+      <h2>Impressão</h2>
+      <p v-if="vendorFrame.detail.print?.file">
+        {{ vendorFrame.detail.print.file }}
+      </p>
+      <p v-if="vendorFrame.detail.print?.progress !== undefined">
+        Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
+      </p>
+      <form
+        v-if="state?.controls?.includes('start_print')"
+        @submit.prevent="
+          (event) => control('start_print', event, { file: printFile })
+        "
+      >
+        <label for="detail-print-file">Nome do arquivo na impressora</label>
+        <input
+          id="detail-print-file"
+          v-model.trim="printFile"
+          required
+          maxlength="255"
+        />
+        <button
+          type="submit"
+          :disabled="!availability('start_print').available || commandInFlight"
+        >
+          Iniciar impressão
+        </button>
+      </form>
+      <template v-if="vendorFrame.detail.fans?.length">
+        <h2>Ventoinhas</h2>
+        <div v-for="fan in vendorFrame.detail.fans" :key="fan.name">
+          <p>
+            {{
+              fan.name === 'part'
+                ? 'Peça'
+                : fan.name === 'aux'
+                  ? 'Auxiliar'
+                  : 'Câmara'
+            }}: {{ Math.round(fan.speed * 100) }}%
+          </p>
+          <button
+            v-if="state?.controls?.includes('set_fan')"
+            type="button"
+            :disabled="!availability('set_fan').available || commandInFlight"
+            @click="(event) => setFan(fan.name, fan.speed > 0 ? 0 : 100, event)"
+          >
+            {{
+              fan.speed > 0 ? 'Desligar ventoinha' : 'Ligar ventoinha a 100%'
+            }}
+          </button>
+        </div>
+      </template>
+      <template v-if="vendorFrame.detail.lights?.length">
+        <h2>Iluminação</h2>
+        <p>
+          {{ vendorFrame.detail.lights[0]?.white ? 'Ligada' : 'Desligada' }}
+        </p>
+        <button
+          v-if="state?.controls?.includes('set_light')"
+          type="button"
+          :disabled="!availability('set_light').available || commandInFlight"
+          @click="
+            (event) =>
+              control('set_light', event, {
+                on: !vendorFrame?.detail.lights?.[0]?.white,
+              })
+          "
+        >
+          {{
+            vendorFrame.detail.lights[0]?.white ? 'Desligar luz' : 'Ligar luz'
+          }}
+        </button>
+      </template>
+      <template v-if="vendorFrame.detail.materials?.length">
+        <h2>Slots ACE</h2>
+        <ul>
+          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
+            {{ slot.slot
+            }}<template v-if="slot.materialType">
+              · {{ slot.materialType }}</template
+            >
+            <template v-if="slot.active"> · Em uso</template>
+          </li>
+        </ul>
+      </template>
+    </section>
+
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"

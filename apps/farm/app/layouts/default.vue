@@ -19,6 +19,9 @@ const links = computed(() => [
   { to: '/arquivos', label: 'Arquivos' },
   { to: '/historico', label: 'Histórico' },
   { to: '/connectors', label: 'Connectors' },
+  ...(canApproveConnectors.value
+    ? [{ to: '/spoolman', label: 'Spoolman' }]
+    : []),
   { to: '/dispositivos', label: 'Dispositivos do navegador' },
   ...(canApproveConnectors.value
     ? [{ to: '/parear', label: 'Aprovar Connector' }]

@@ -25,6 +25,14 @@ import {
   commitMoonraker,
 } from './moonraker.ts'
 import {
+  commitSpoolman,
+  prepareSpoolman,
+  spoolmanCredentialPath,
+  spoolmanIdentity,
+  spoolmanRuntimeContains,
+  spoolmanStagedPath,
+} from './spoolman.ts'
+import {
   bambuCredentialPath,
   bambuIdentity,
   bambuRuntimeContains,
@@ -123,6 +131,8 @@ export interface ProvisioningEngineOptions {
   crealityProbe?: CrealityProbe
   /** Read-only Bambu LAN probe. Tests inject a fixture; default opens TLS/MQTT. */
   bambuProbe?: BambuProbe
+  /** Connection-test transport for Spoolman. Tests inject a fixture. */
+  spoolmanFetch?: typeof fetch
   timeoutMs?: number
   clock?: () => number
   /** Observability hook after each durable stage write. Never an authority. */
@@ -293,6 +303,18 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             return finalizeCommit(op)
           return save(op, 'prepared', { plan: null })
         }
+        if (op.target.backend === 'spoolman') {
+          if (!op.plan) return toRecovery(op, 'journal-inconsistent')
+          if (
+            spoolmanRuntimeContains(
+              options.runtime,
+              new URL(op.target.origin).origin,
+              op.plan,
+            )
+          )
+            return finalizeCommit(op)
+          return save(op, 'prepared', { plan: null })
+        }
         if (op.target.backend === 'anycubic') {
           if (!op.plan) return toRecovery(op, 'journal-inconsistent')
           if (anycubicRuntimeContains(options.runtime, op.target, op.plan))
@@ -350,6 +372,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (op.target.backend === 'anycubic')
       removePrivateFile(
         anycubicCredentialPath(options.stateDirectory, op.operation_id),
+      )
+    if (op.target.backend === 'spoolman')
+      removePrivateFile(
+        spoolmanStagedPath(options.stateDirectory, op.operation_id),
       )
     return committed
   }
@@ -430,6 +456,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (op.target.backend === 'moonraker')
       removePrivateFile(
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
+      )
+    if (op.target.backend === 'spoolman')
+      removePrivateFile(
+        spoolmanStagedPath(options.stateDirectory, op.operation_id),
       )
     if (op.target.backend === 'anycubic')
       discardStagedAnycubic(options.stateDirectory, op.operation_id)
@@ -686,18 +716,25 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
           ? (({ username: _username, password: _password, ...safe }) => safe)(
               frame.target,
             )
-          : frame.target.backend === 'moonraker'
+          : frame.target.backend === 'spoolman'
             ? (({
-                api_key: _key,
+                token: _token,
                 username: _username,
                 password: _password,
                 ...safe
               }) => safe)(frame.target)
-            : frame.target.backend === 'bambu'
-              ? (({ access_code: _code, ...safe }) => safe)(frame.target)
-              : frame.target.backend === 'kobralink-anycubic'
-                ? withoutKobraClientCertificate(frame.target)
-                : frame.target,
+            : frame.target.backend === 'moonraker'
+              ? (({
+                  api_key: _key,
+                  username: _username,
+                  password: _password,
+                  ...safe
+                }) => safe)(frame.target)
+              : frame.target.backend === 'bambu'
+                ? (({ access_code: _code, ...safe }) => safe)(frame.target)
+                : frame.target.backend === 'kobralink-anycubic'
+                  ? withoutKobraClientCertificate(frame.target)
+                  : frame.target,
       target_sha256: targetHash,
       expected_revision: frame.expected_revision,
       bridge_instance_id: null,
@@ -774,6 +811,45 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       if (!(await stillCurrent(context)))
         return describe(frame, await fail(op, 'capability-rejected'))
       const identity = crealityIdentity(frame.target.host)
+      if (
+        frame.target.device_id &&
+        frame.target.device_id !== identity.device_id
+      )
+        return describe(frame, await fail(op, 'identity-conflict'))
+      op = save(op, 'discovering', {
+        bridge_instance_id: identity.bridge_instance_id,
+        printer: {
+          id: identity.device_id,
+          device_id: identity.device_id,
+          ip: null,
+          model: null,
+          firmware: null,
+          ownership: 'preexisting',
+        },
+      })
+      const prepared = await signOperationReceipt(
+        options.connector,
+        op,
+        'prepared',
+        clock(),
+      )
+      return describe(
+        frame,
+        save(op, 'prepared', { prepared, latest: prepared }),
+      )
+    }
+    if (frame.target.backend === 'spoolman') {
+      const origin = new URL(frame.target.origin).origin
+      const probe = await prepareSpoolman(
+        options.stateDirectory,
+        op.operation_id,
+        frame.target,
+        options.spoolmanFetch,
+      )
+      if (!probe.ok) return describe(frame, await fail(op, probe.code))
+      if (!(await stillCurrent(context)))
+        return describe(frame, await fail(op, 'capability-rejected'))
+      const identity = spoolmanIdentity(origin)
       if (
         frame.target.device_id &&
         frame.target.device_id !== identity.device_id
@@ -973,6 +1049,41 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         }
       }
       if (credentialFile !== stagedPath) removePrivateFile(stagedPath)
+      return describe(frame, await finalizeCommit(committing))
+    }
+    if (op.target.backend === 'spoolman') {
+      if (!op.printer || !op.bridge_instance_id)
+        return errorFrame(frame.request_id, 'identity-conflict')
+      const origin = new URL(op.target.origin).origin
+      const identity = await deriveConfigurationAssignmentIdentity({
+        account_id: context.account_id,
+        farm_id: context.farm_id,
+        agent_id: context.agent_id,
+        bridge_instance_id: op.bridge_instance_id,
+        device_id: op.printer.device_id,
+      })
+      if (!(await stillCurrent(context)))
+        return errorFrame(frame.request_id, 'capability-rejected')
+      const plan = {
+        assignment_id: identity.assignment_id,
+        printer_key: identity.printer_key,
+        credential_file: spoolmanCredentialPath(options.stateDirectory),
+        committed_revision: op.expected_revision + 1,
+      }
+      const committing = save(op, 'committing', { plan })
+      try {
+        commitSpoolman(
+          options.runtime,
+          origin,
+          plan,
+          spoolmanStagedPath(options.stateDirectory, op.operation_id),
+        )
+      } catch {
+        if (!spoolmanRuntimeContains(options.runtime, origin, plan)) {
+          save(committing, 'prepared', { plan: null })
+          return errorFrame(frame.request_id, 'not-available')
+        }
+      }
       return describe(frame, await finalizeCommit(committing))
     }
     if (op.target.backend === 'anycubic') {
@@ -1182,6 +1293,14 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         moonrakerCredentialPath(options.stateDirectory, op.operation_id),
       )
     if (
+      op.target.backend === 'spoolman' &&
+      op.stage !== 'local-committed' &&
+      op.stage !== 'inventory-confirmed'
+    )
+      removePrivateFile(
+        spoolmanStagedPath(options.stateDirectory, op.operation_id),
+      )
+    if (
       op.target.backend === 'anycubic' &&
       op.stage !== 'local-committed' &&
       op.stage !== 'inventory-confirmed'
@@ -1328,7 +1447,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
           .operations.map((id) => journal.readOperation(id))
           .filter(
             (op): op is OperationRecord =>
-              op?.stage === 'local-committed' && op.latest !== null,
+              op?.stage === 'local-committed' &&
+              op.latest !== null &&
+              // A farm setting has no printer inventory to confirm.
+              op.target.backend !== 'spoolman',
           )
           .map((op) => ({
             operation_id: op.operation_id,
@@ -1348,6 +1470,7 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
           const op = journal.readOperation(id)
           if (
             op?.plan &&
+            op.target.backend !== 'spoolman' &&
             (op.stage === 'committing' || op.stage === 'local-committed')
           )
             pending.add(op.plan.assignment_id)
@@ -1383,6 +1506,9 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
             const op = journal.readOperation(ack.operation_id)
             if (!op || !op.plan || !op.latest || !op.printer)
               return { ok: false, reason: 'unknown' }
+            // A Spoolman setting is not inventory: nothing to acknowledge.
+            if (op.target.backend === 'spoolman')
+              return { ok: false, reason: 'rejected' }
             if (!sameBinding(op, context) || !(await stillCurrent(context)))
               return { ok: false, reason: 'rejected' }
             const confirmed = op.stage === 'inventory-confirmed'

@@ -21,7 +21,20 @@ const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc') as {
   ): { content: string }
 }
 
+type Compiled = {
+  render(props: Record<string, unknown>): Promise<string>
+  css: string
+}
+// Compile and bundle once per worker; each render still creates a fresh app.
+let compiled: Promise<Compiled> | undefined
+
 export async function renderSpoolInventory(props: Record<string, unknown>) {
+  compiled ??= compile()
+  const { render, css } = await compiled
+  return { html: await render(props), css }
+}
+
+async function compile(): Promise<Compiled> {
   const { descriptor } = sfc.parse(readFileSync(file, 'utf8'), {
     filename: file,
   })
@@ -50,11 +63,12 @@ export const render = (props) => __render(__create(__component, props))`
   try {
     const out = join(dir, 'component.mjs')
     writeFileSync(out, bundled.outputFiles[0]!.text)
-    const module = (await import(pathToFileURL(out).href)) as {
-      render(props: Record<string, unknown>): Promise<string>
-    }
+    const module = (await import(pathToFileURL(out).href)) as Pick<
+      Compiled,
+      'render'
+    >
     return {
-      html: await module.render(props),
+      render: module.render,
       css: descriptor.styles.map((style) => style.content).join('\n'),
     }
   } finally {

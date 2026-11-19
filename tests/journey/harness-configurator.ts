@@ -44,8 +44,9 @@ export async function startConfigurator(input: {
 }): Promise<Configurator> {
   // Provisioning storage refuses any symbolic link in its path; the macOS
   // default temporary directory (/var/folders) is one, so resolve it first.
-  const root = await mkdtemp(
-    join(await realpath(tmpdir()), 'journey-configurator-'),
+  // Connector storage rejects symlinked ancestors (macOS /var -> /private/var).
+  const root = await realpath(
+    await mkdtemp(join(await realpath(tmpdir()), 'journey-configurator-')),
   )
   const dataDirectory = join(root, 'identity')
   await mkdir(dataDirectory, { mode: 0o700 })

@@ -36,6 +36,7 @@ import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
 import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
 import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
 import type { createLibraryPrintStarter } from './library-print-start.ts'
+import type { LibraryJobLinks } from './library-job-links.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
 export type ApiGrant = Readonly<{
@@ -119,6 +120,8 @@ export function createApiCommandRunner(config: {
   }
   /** Library print starts; without it `start_library_print` is refused as unsupported. */
   libraryPrint?: ReturnType<typeof createLibraryPrintStarter>
+  /** Remembers what a library start printed so the finished job links to it (#385). */
+  libraryLinks?: Pick<LibraryJobLinks, 'remember'>
 }) {
   const sample = (): AuthoritySample => ({
     wall: config.clock.wallNow(),
@@ -437,6 +440,14 @@ export function createApiCommandRunner(config: {
               args: { file, ...extra },
             }),
         })
+        if (outcome.ok && mapping)
+          config.libraryLinks?.remember(mapping.printer_key, {
+            name: outcome.name,
+            sha256: parsed.data.sha256,
+            ...(parsed.data.plate === undefined
+              ? {}
+              : { plate: parsed.data.plate }),
+          })
         if (!outcome.ok && !attempted)
           lastRefusal = [
             outcome.code === 'checksum-mismatch' ||

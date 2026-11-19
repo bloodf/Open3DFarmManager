@@ -19,6 +19,11 @@ import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
+import { connectorVersionMetadata } from '../status/version.ts'
+import {
+  createPrinterLinkHealth,
+  startLinkHealthHeartbeat,
+} from './link-health.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
 import {
   readBambuPrinterBinding,
@@ -138,6 +143,7 @@ async function runConnectorAgentOnce(
   input: AgentInput,
   logger: Logger,
 ): Promise<boolean> {
+  const startedAt = performance.now()
   const identity = loadExistingIdentity(input.dataDirectory)
   // Config scope only needs agent/farm, which an expired envelope still binds.
   const config = readAgentRuntimeConfig(
@@ -262,9 +268,43 @@ async function runConnectorAgentOnce(
       })
     }
     if (signal.aborted) return false
+    const links = new Map(
+      config.collection.printers.map(({ printerKey }) => [
+        printerKey,
+        createPrinterLinkHealth(printerKey),
+      ]),
+    )
+    startLinkHealthHeartbeat(
+      () => ({
+        connector: {
+          version: connectorVersionMetadata.connectorVersion,
+          uptimeMs: Math.floor(performance.now() - startedAt),
+          queueBacklog: queue.depth,
+          storage: queue.storageDegraded ? 'degraded' : 'healthy',
+          rtcScope:
+            !lookupId || rtcBackend.mode !== 'direct'
+              ? 'disabled'
+              : isLoopbackBindAddress(config.rtc.bindAddress)
+                ? 'loopback'
+                : 'lan',
+        },
+        printers: Array.from(links.values(), (link) => link.read()),
+      }),
+      (frames) => {
+        for (const frame of frames)
+          logger.info('link-health-heartbeat', JSON.parse(frame))
+      },
+      signal,
+    )
     snapshots = config.signalling
       ? createFarmSnapshotSource({
           assignmentRefs: refs,
+          linkHealthFor(printerKey) {
+            const health = links.get(printerKey)
+            if (!health) return
+            const { printerKey: _printerKey, ...status } = health.read()
+            return status
+          },
           controlsFor: (id) => controlsFor?.(id),
           macrosFor: (id) => macrosFor?.(id),
           localWebUiOriginFor: (id) => {
@@ -671,6 +711,7 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        linkHealthFor: (printerKey) => links.get(printerKey),
         discoverMoonrakerObjects: true,
         importMoonrakerHistory: true,
         onLoss: (value) => logger.warn('queue-loss', { ...value }),

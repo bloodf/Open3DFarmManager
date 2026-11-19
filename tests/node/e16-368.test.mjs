@@ -19,22 +19,6 @@ import {
 } from '../../packages/sim-tools/src/mocks/index.ts'
 
 const address = '127.0.0.1'
-const recovery = {
-  query: () => ({
-    ts: String(Date.now()),
-    nonce: 'mock-368',
-    sign: '0'.repeat(32),
-    did: 'fixture',
-  }),
-  encrypted(token, response) {
-    assert.equal(response.code, 200)
-    return {
-      key: Buffer.from(token.slice(16)),
-      iv: Buffer.from(response.data.token),
-      ciphertext: Buffer.from(response.data.info, 'base64'),
-    }
-  },
-}
 const signed = { beforeSend: () => true }
 
 async function until(check, label = 'condition') {
@@ -59,7 +43,6 @@ async function open(t, mockOptions = {}, adapterOptions = {}) {
     address,
     printerKey: 'kobra-x-368',
     clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
-    recovery,
     httpPort: mock.httpPort,
     mqttPort: mock.mqttPort,
     reconnectMs: 100,

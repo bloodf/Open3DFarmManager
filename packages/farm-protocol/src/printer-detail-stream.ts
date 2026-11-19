@@ -22,6 +22,12 @@ const base = { v: z.literal(1), printerKey: RtcAssignmentRef.shape.printerKey }
 const named = <T extends z.ZodRawShape>(shape: T) =>
   z.array(z.strictObject({ ...shape, name })).max(64)
 
+const meshRows = z
+  .array(z.array(number).min(1).max(64))
+  .min(1)
+  .max(64)
+  .refine((rows) => rows.every((row) => row.length === rows[0]?.length))
+
 export const PrinterDetailStreamCapability = z.enum([
   'motion',
   'heaters',
@@ -141,13 +147,12 @@ export const PrinterDetailStreamUpdate = z.strictObject({
         profile: name.nullable(),
         min: z.tuple([number, number]),
         max: z.tuple([number, number]),
-        rows: z
-          .array(z.array(number).min(1).max(64))
-          .min(1)
-          .max(64)
-          .refine((rows) =>
-            rows.every((row) => row.length === rows[0]?.length),
-          ),
+        // The interpolated matrix Klipper compensates with.
+        rows: z.union([meshRows, z.tuple([])]),
+        // The points actually probed; absent when the printer reports none.
+        probed: meshRows.optional(),
+        // Saved profile names.
+        profiles: z.array(name).max(64).optional(),
       }),
       idle: z.strictObject({
         state: name,

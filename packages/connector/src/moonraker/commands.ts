@@ -1,3 +1,8 @@
+import {
+  bedMeshScript,
+  bedMeshSupported,
+  BedMeshRefused,
+} from './control-bed-mesh.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { buildConsoleScript } from './control-console.ts'
 import { buildMacroScript } from './control-macros.ts'
@@ -124,6 +129,7 @@ export function supportedMoonrakerActions(
     supported.push('unload_filament')
   // The queue is a Moonraker component; detection marks it next to the objects.
   if (objects.includes(POWER_MARKER)) supported.push('power')
+  if (bedMeshSupported(objects)) supported.push('bed_mesh')
   if (queueSupported(objects)) supported.push('queue_op')
   // Timelapse is a plugin component; detection marks it next to the objects.
   if (timelapseSupported(objects)) supported.push('timelapse')
@@ -185,6 +191,14 @@ export function buildMoonrakerCommand(
     }
   }
 
+  if (action === 'bed_mesh') {
+    if (!bedMeshSupported(objects))
+      throw new BedMeshRefused('unsupported-action')
+    return {
+      method: 'printer.gcode.script',
+      params: { script: bedMeshScript(args) },
+    }
+  }
   if (action === 'power') return powerCommand(args, objects)
   if (action === 'queue_op') {
     if (!queueSupported(objects)) throw new Error('Queue unavailable')

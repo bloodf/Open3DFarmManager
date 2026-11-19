@@ -14,6 +14,7 @@ export const extendedActions = [
 ] as const
 export type FarmExtendedAction = (typeof extendedActions)[number]
 const labels: Partial<Record<ExtendedControlAction, string>> = {
+  bed_mesh: 'Malha da mesa',
   set_temperature: 'Definir temperatura',
   set_fan: 'Definir ventilador',
   home: 'Referenciar eixos',

@@ -35,6 +35,7 @@ export const ExtendedControlAction = z.enum([
   'set_led',
   'set_pin',
   'queue_op',
+  'bed_mesh',
   'gcode',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
@@ -147,12 +148,42 @@ export const TimelapseArguments = z.discriminatedUnion('op', [
 ])
 export type TimelapseArguments = z.infer<typeof TimelapseArguments>
 
+/** Saved bed mesh profile name: a Klipper-safe token, never free text. */
+export const MeshProfileName = z.string().regex(/^[A-Za-z0-9_]{1,32}$/)
+export const BED_MESH_OPS = [
+  'calibrate',
+  'load',
+  'save',
+  'remove',
+  'clear',
+] as const
+/**
+ * `calibrate` takes an optional profile, `load`, `save` and `remove` need one
+ * and `clear` takes none. No probe coordinates are ever sent: Klipper uses
+ * its own configured mesh bounds.
+ */
+export const BedMeshArguments = z
+  .strictObject({
+    op: z.enum(BED_MESH_OPS),
+    profile: MeshProfileName.optional(),
+  })
+  .refine(({ op, profile }) =>
+    op === 'clear'
+      ? profile === undefined
+      : op === 'calibrate' || profile !== undefined,
+  )
+/** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
 export function controlRoleAllowed(
   role: string,
   action?: ExtendedControlAction,
 ): boolean {
   if (action === 'service') return role === 'owner'
-  if (action === 'power' || action === 'run_macro' || action === 'gcode')
+  if (
+    action === 'bed_mesh' ||
+    action === 'power' ||
+    action === 'run_macro' ||
+    action === 'gcode'
+  )
     return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
@@ -170,7 +201,7 @@ export function controlSourceState(
   if (action === 'jog' || action === 'motors_off')
     return state === 'idle' || state === 'cancelled'
   // Extrusion moves filament: only a stopped printer may do it.
-  if (action === 'file_op' || action === 'extrude')
+  if (action === 'bed_mesh' || action === 'file_op' || action === 'extrude')
     return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
@@ -292,6 +323,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
     action: z.literal('exclude_object'),
     args: ExcludeObjectArguments,
   }),
+  z.strictObject({ action: z.literal('bed_mesh'), args: BedMeshArguments }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

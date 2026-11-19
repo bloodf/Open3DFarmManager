@@ -14,7 +14,10 @@ function fixture() {
   }
   vi.stubGlobal('Element', ElementFixture)
   let timeStamp = 0
-  function press(key: string, overrides: Partial<KeyboardEvent> = {}) {
+  type PressOverrides = Partial<Omit<KeyboardEvent, 'composedPath'>> & {
+    composedPath?: () => readonly unknown[]
+  }
+  function press(key: string, overrides: PressOverrides = {}) {
     const event = {
       key,
       timeStamp: (timeStamp += 100),

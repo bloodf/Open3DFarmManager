@@ -2,6 +2,7 @@ import {
   FileListRequest,
   FileListResponse,
   MAX_FILE_LIST_WIRE_BYTES,
+  type FileListExtra,
   type FileListResult,
 } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { z } from 'zod'
@@ -415,8 +416,10 @@ export class PauseBrowserPeer {
     printerKey: string,
     directory?: string,
     download?: string,
+    config?: FileListExtra,
   ): Promise<FileListResult> {
     const request = FileListRequest.parse({
+      ...config,
       type: 'files.list',
       directory,
       download,
@@ -464,7 +467,11 @@ export class PauseBrowserPeer {
             throw Error('Invalid file list correlation')
           if (
             result.ok &&
-            (result.download !== undefined) !== (download !== undefined)
+            (result.download !== undefined) !==
+              (download !== undefined ||
+                (config !== undefined &&
+                  'configPath' in config &&
+                  config.configPath !== undefined))
           )
             throw Error('Unexpected file response')
           cleanup()

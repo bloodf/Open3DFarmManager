@@ -157,6 +157,8 @@ export interface PauseDriver {
     input: {
       binding: PrinterBinding
       beforeSend(): boolean
+      transportId?: string
+      stillAuthorized?(): boolean
       signal: AbortSignal
     },
   ): Promise<PauseRpcResult>
@@ -791,6 +793,8 @@ export function createPauseDispatcher(config: {
             ? driver.execute(command.action, command.args, {
                 binding: printerBinding,
                 beforeSend,
+                transportId: command.transport_id,
+                stillAuthorized: () => !live(),
                 signal: controller.signal,
               })
             : driver.pauseOnce({
@@ -829,6 +833,10 @@ export function createPauseDispatcher(config: {
           const now = sample()
           if (!now || now.mono >= resultDeadline) {
             interrupted('deadline')
+            return
+          }
+          if (command.action === 'config_write') {
+            finalize('applied', 'applied', 'applied', now.wall)
             return
           }
           const paused = await driver.waitForPaused({

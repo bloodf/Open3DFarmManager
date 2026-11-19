@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import { useRoute } from 'vue-router'
+import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
@@ -29,6 +37,14 @@ import {
   formatPrinterStateLabel,
   observationAge,
 } from '../../utils/farm-view.ts'
+import {
+  applyDetailQuery,
+  backfillHistory,
+  downloadTimelapse,
+  emptyDetailQueries,
+  type DetailQueryState,
+} from '../../utils/detail-query-view.ts'
+import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 import {
   heatersFromObservation,
   mergeSamples,
@@ -60,6 +76,7 @@ const systemFrame = computed(() =>
     ? detailFrame.value
     : undefined,
 )
+const detailQueries = shallowRef<DetailQueryState>(emptyDetailQueries)
 const consoleCommands = shallowRef<readonly string[]>([])
 const consoleResponses = shallowRef<
   readonly { seq: number; lines: readonly string[] }[]
@@ -78,6 +95,18 @@ const view = useFarmView({
   onDetail(frame) {
     detailFrame.value = frame
   },
+  onQuery(frame) {
+    detailQueries.value = applyDetailQuery(detailQueries.value, frame)
+    if (frame.kind === 'temperature-store')
+      history.value = backfillHistory(
+        history.value,
+        frame,
+        Date.now(),
+        Date.now(),
+      )
+  },
+  // The queue and timelapse areas are advertised by the printer's controls.
+  advertised: () => capabilities.value ?? [],
   printerKey: initialPrinterKey,
   onUpdate(value) {
     webcams.value = value
@@ -86,6 +115,7 @@ const view = useFarmView({
     webcams.value = null
     detailFrame.value = undefined
     consoleCommands.value = []
+    detailQueries.value = emptyDetailQueries
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -137,9 +167,28 @@ const live = computed(
     !!age.value &&
     !age.value.stale,
 )
-const heaters = computed(() =>
-  state.value ? heatersFromObservation(state.value) : [],
-)
+const heaters = computed(() => {
+  const observed = state.value ? heatersFromObservation(state.value) : []
+  const reported =
+    detailFrame.value?.printerKey === printerKey.value
+      ? detailFrame.value.detail.heaters
+      : undefined
+  // Targets and power come from the detail feed when it reports the heater.
+  return observed.map((heater) => {
+    const found = reported?.find(
+      ({ name }) =>
+        name === heater.name ||
+        (heater.name === 'heater_bed' && name === 'bed'),
+    )
+    return found
+      ? {
+          ...heater,
+          ...(found.target === undefined ? {} : { target: found.target }),
+          ...(found.power === undefined ? {} : { power: found.power }),
+        }
+      : heater
+  })
+})
 // Motion capabilities come from the controls the Connector advertises.
 const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
@@ -157,6 +206,15 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
     ...(controls?.includes('gcode') ? (['console'] as const) : []),
   ]
+  // What the detail feed itself advertises: print history, and the timelapse
+  // files of printers whose controls do not list the plugin (Bambu SD card).
+  for (const area of ['job', 'timelapse'] as const)
+    if (
+      detailFrame.value?.printerKey === printerKey.value &&
+      detailFrame.value.capabilities.includes(area) &&
+      !found.includes(area)
+    )
+      found.push(area)
   return found.length ? found : undefined
 })
 const lastKnownText = computed(() =>
@@ -180,6 +238,55 @@ watch(
   { immediate: true },
 )
 
+// OpenFarm's own record of this printer's jobs, merged into the Histórico tab.
+const openfarmJobs = shallowRef<readonly JobHistoryItem[]>([])
+let queryAbort: AbortController | undefined
+const jobAdvertised = computed(
+  () => capabilities.value?.includes('job') ?? false,
+)
+watch(
+  () => [jobAdvertised.value, ready.value?.scope?.farmId, printerKey.value],
+  async ([advertised, farmId, key]) => {
+    queryAbort?.abort()
+    openfarmJobs.value = []
+    if (!advertised || !farmId || !key) return
+    const controller = (queryAbort = new AbortController())
+    try {
+      const page = await $fetch<{ jobs: JobHistoryItem[] }>(
+        '/api/job-history',
+        {
+          query: { farmId, printerKey: key, limit: 50 },
+          signal: controller.signal,
+          retry: 0,
+          timeout: 15000,
+        },
+      )
+      if (!controller.signal.aborted) openfarmJobs.value = page.jobs
+    } catch {
+      // The printer's own history still shows; the merge simply has no OpenFarm rows.
+    }
+  },
+  { immediate: true },
+)
+const historyError = computed(() =>
+  detailQueries.value.errors.history
+    ? 'Não foi possível consultar o histórico da impressora.'
+    : undefined,
+)
+const jobHistory = computed(() => ({
+  advertised: jobAdvertised.value,
+  jobs: detailQueries.value.history ?? [],
+  totals: detailQueries.value.totals ?? null,
+  openfarmJobs: openfarmJobs.value,
+  pending:
+    jobAdvertised.value &&
+    live.value &&
+    !detailQueries.value.history &&
+    !historyError.value,
+  ...(historyError.value ? { error: historyError.value } : {}),
+  replayHref: (sha: string) => `/biblioteca?versao=${encodeURIComponent(sha)}`,
+}))
+
 function availability(action: ExtendedControlAction) {
   void now.value
   const current = ready.value
@@ -192,6 +299,146 @@ function availability(action: ExtendedControlAction) {
       )
     : { available: false as const, reason: 'Impressora não carregada.' }
 }
+const configAdvertised = computed(
+  () => state.value?.controls?.includes('config_write') === true,
+)
+const configReason = computed(() => {
+  if (!ready.value?.canManage)
+    return 'Apenas proprietários e administradores podem editar a configuração.'
+  const status = availability('config_write')
+  if (!status.available) return status.reason
+  if (commandInFlight.value) return 'Um comando já está em andamento.'
+})
+
+async function withConfigSession<T>(
+  signal: AbortSignal,
+  operation: (
+    session: Awaited<ReturnType<typeof connectFiles>>,
+    key: string,
+  ) => Promise<T>,
+) {
+  const current = row.value
+  if (!current || !configAdvertised.value || configReason.value)
+    throw Error(configReason.value || 'Editor de configuração indisponível.')
+  let session: Awaited<ReturnType<typeof connectFiles>> | undefined
+  const close = () => session?.close()
+  signal.addEventListener('abort', close, { once: true })
+  try {
+    session = await connectFiles(current, signal)
+    signal.throwIfAborted()
+    return await operation(session, current.assignment.printerKey)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Configuração:'))
+      throw error
+    throw Error('Não foi possível concluir a operação de configuração.')
+  } finally {
+    signal.removeEventListener('abort', close)
+    session?.close()
+    await session?.dispose()
+  }
+}
+
+function listConfig(signal: AbortSignal) {
+  return withConfigSession(signal, async (session, key) => {
+    const result = await session.listFiles(key, undefined, undefined, {
+      config: true,
+    })
+    if (!result.ok) throw Error('Lista indisponível')
+    return result.files.map(({ name }) => name)
+  })
+}
+
+async function configHash(bytes: Uint8Array<ArrayBuffer>) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+}
+
+function readConfig(path: string, signal: AbortSignal) {
+  return withConfigSession(signal, async (session, key) => {
+    let bytes: Uint8Array<ArrayBuffer> | undefined
+    let sha256 = ''
+    let backups: string[] = []
+    let offset = 0
+    do {
+      signal.throwIfAborted()
+      const result = await session.listFiles(key, undefined, undefined, {
+        config: true,
+        configPath: path,
+        offset,
+      })
+      if (!result.ok || !result.config || result.download === undefined)
+        throw Error('Arquivo indisponível')
+      if (!bytes) {
+        bytes = new Uint8Array(result.config.size)
+        sha256 = result.config.sha256
+        backups = result.config.backups
+      }
+      const chunk = atob(result.download)
+      if (
+        result.config.sha256 !== sha256 ||
+        (chunk.length === 0 && offset < bytes.length)
+      )
+        throw Error('Arquivo incompleto')
+      bytes.set(
+        Uint8Array.from(chunk, (char) => char.charCodeAt(0)),
+        offset,
+      )
+      offset += chunk.length
+    } while (offset < bytes.length)
+    if ((await configHash(bytes)) !== sha256) throw Error('Arquivo alterado')
+    return {
+      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        bytes,
+      ),
+      sha256,
+      backups,
+    }
+  })
+}
+
+function saveConfig(
+  path: string,
+  base_sha256: string,
+  change: { text: string; restart: boolean } | { backup: string },
+  signal: AbortSignal,
+) {
+  return withConfigSession(signal, async (session, key) => {
+    let args: Record<string, unknown> = { path, base_sha256 }
+    if ('backup' in change) args = { ...args, backup: change.backup }
+    else {
+      const bytes = new TextEncoder().encode(change.text)
+      if (bytes.length > 1024 * 1024)
+        throw Error('Configuração: limite de 1 MiB excedido.')
+      const sha256 = await configHash(bytes)
+      const result = await session.sendFile(
+        {
+          type: 'offer',
+          config: true,
+          transfer_id: crypto.randomUUID(),
+          printer_key: key,
+          name: path,
+          size: bytes.length,
+          sha256,
+        },
+        new Blob([bytes]),
+        signal,
+      )
+      if (!result.ok) throw Error('Transferência recusada')
+      args = { ...args, sha256, restart: change.restart }
+    }
+    signal.throwIfAborted()
+    const result = await session.issueControlCommand('config_write', args)
+    if (result !== 'applied')
+      throw Error(
+        result === 'outcome-unknown'
+          ? 'Configuração: resultado incerto. Abra o arquivo e confira antes de tentar novamente.'
+          : 'Configuração: gravação recusada. Confira o estado da impressora e abra o arquivo novamente.',
+      )
+  })
+}
+
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
 const excludeAvailability = computed(() => availability('exclude_object'))
@@ -241,8 +488,32 @@ const outputs = computed(() => {
 const powerAvailability = computed(() => availability('power'))
 const serviceAvailability = computed(() => availability('service'))
 const timelapseAvailability = computed(() => availability('timelapse'))
+type Transfer =
+  { kind: 'idle' } | { kind: 'busy' | 'done' | 'error'; message: string }
+const transfer = shallowRef<Transfer>({ kind: 'idle' })
+const playback = shallowRef<{ name: string; url: string } | undefined>()
+let transferAbort: AbortController | undefined
+function clearPlayback() {
+  if (playback.value) URL.revokeObjectURL(playback.value.url)
+  playback.value = undefined
+}
+onBeforeUnmount(() => {
+  transferAbort?.abort()
+  clearPlayback()
+  queryAbort?.abort()
+})
 const timelapse = computed(() => {
-  const advertised = state.value?.controls?.includes('timelapse') ?? false
+  const advertised =
+    (state.value?.controls?.includes('timelapse') ?? false) ||
+    (detailFrame.value?.printerKey === printerKey.value &&
+      detailFrame.value.capabilities.includes('timelapse'))
+  const canTransfer =
+    advertised &&
+    live.value &&
+    pauseEnabled.value &&
+    transfer.value.kind !== 'busy' &&
+    !commandInFlight.value &&
+    (timelapseAvailability.value.available || availability('file_op').available)
   return {
     advertised,
     canCommand: timelapseAvailability.value.available && !commandInFlight.value,
@@ -251,10 +522,14 @@ const timelapse = computed(() => {
       : advertised
         ? timelapseAvailability.value.reason
         : undefined,
-    // Play and download wait for the file-transfer channel of the session.
-    canTransfer: false,
-    transferReason:
-      'Reproduzir e baixar exigem o canal de transferência de arquivos, ainda não aberto nesta sessão.',
+    files: detailQueries.value.timelapse?.files,
+    rendering: detailQueries.value.timelapse?.rendering,
+    canTransfer,
+    transferReason: canTransfer
+      ? undefined
+      : transfer.value.kind === 'busy'
+        ? 'Uma transferência já está em andamento.'
+        : 'Reproduzir e baixar exigem conexão direta atual e autorizada.',
   }
 })
 const queueAvailability = computed(() => availability('queue_op'))
@@ -262,6 +537,8 @@ const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
   return {
     advertised,
+    state: detailQueries.value.queue?.state,
+    jobs: detailQueries.value.queue?.jobs,
     canCommand: queueAvailability.value.available && !commandInFlight.value,
     reason: queueAvailability.value.available
       ? 'Um comando já está em andamento.'
@@ -400,6 +677,66 @@ function queueOp(args: QueueOpArguments, event: Event) {
 function timelapseOp(args: TimelapseArguments, event: Event) {
   if (row.value) void openControl(row.value, 'timelapse', event, args)
 }
+const videoTypes: Record<string, string> = {
+  mp4: 'video/mp4',
+  avi: 'video/x-msvideo',
+  mov: 'video/quicktime',
+  jpg: 'image/jpeg',
+}
+async function timelapseTransfer(
+  kind: 'play' | 'download',
+  file: string,
+  _event: Event,
+) {
+  const current = row.value
+  if (!current || !timelapse.value.canTransfer) return
+  transferAbort?.abort()
+  const controller = (transferAbort = new AbortController())
+  transfer.value = { kind: 'busy', message: `Transferindo ${file}…` }
+  let session: Awaited<ReturnType<typeof connectFiles>> | undefined
+  try {
+    session = await connectFiles(current, controller.signal)
+    const bytes = await downloadTimelapse(
+      session,
+      current.assignment.printerKey,
+      file,
+      controller.signal,
+    )
+    const blob = new Blob([bytes], {
+      type:
+        videoTypes[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'video/mp4',
+    })
+    const url = URL.createObjectURL(blob)
+    if (kind === 'play') {
+      clearPlayback()
+      playback.value = { name: file, url }
+    } else {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = file.split('/').pop() ?? file
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
+    transfer.value = {
+      kind: 'done',
+      message:
+        kind === 'play'
+          ? `${file} pronto para reprodução.`
+          : `${file} baixado.`,
+    }
+  } catch {
+    if (!controller.signal.aborted)
+      transfer.value = {
+        kind: 'error',
+        message:
+          'Não foi possível transferir o timelapse pela conexão direta. Tente novamente.',
+      }
+  } finally {
+    session?.close()
+    await session?.dispose()
+    if (transferAbort === controller) transferAbort = undefined
+  }
+}
 function sendGcode(line: string, event: Event) {
   if (row.value) void openControl(row.value, 'gcode', event, { line })
 }
@@ -519,6 +856,7 @@ onMounted(() => heading.value?.focus())
       :extrusion="extrusion"
       :queue="queue"
       :timelapse="timelapse"
+      :job-history="jobHistory"
       :macros="macros"
       :gcode-console="gcodeConsole"
       :outputs="outputs"
@@ -526,6 +864,7 @@ onMounted(() => heading.value?.focus())
       @extrude="extrude"
       @queue-op="queueOp"
       @timelapse-op="timelapseOp"
+      @timelapse-transfer="timelapseTransfer"
       @run-macro="runMacro"
       @send-gcode="sendGcode"
       @set-fan="setFan"
@@ -533,6 +872,16 @@ onMounted(() => heading.value?.focus())
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
+      <template #config-editor>
+        <ConfigEditorPanel
+          v-if="configAdvertised"
+          :key="row.assignment.assignmentId"
+          :reason="configReason"
+          :list="listConfig"
+          :read="readConfig"
+          :save="saveConfig"
+        />
+      </template>
       <template #arquivos>
         <FileManagerPanel
           :key="row.assignment.assignmentId"
@@ -695,6 +1044,34 @@ onMounted(() => heading.value?.focus())
       </template>
     </section>
 
+    <section
+      v-if="row && (playback || transfer.kind !== 'idle')"
+      aria-labelledby="timelapse-playback-title"
+    >
+      <h2 id="timelapse-playback-title">Transferência de timelapse</h2>
+      <p
+        :role="transfer.kind === 'error' ? 'alert' : 'status'"
+        aria-live="polite"
+      >
+        {{ transfer.kind === 'idle' ? '' : transfer.message }}
+      </p>
+      <template v-if="playback">
+        <video
+          :src="playback.url"
+          controls
+          muted
+          :aria-label="`Reprodução de ${playback.name} (sem áudio)`"
+        >
+          <track
+            kind="captions"
+            src="data:text/vtt,WEBVTT"
+            srclang="pt-BR"
+            label="Sem áudio"
+          />
+        </video>
+        <Button type="button" @click="clearPlayback">Fechar reprodução</Button>
+      </template>
+    </section>
     <WebcamsPanel
       v-if="row && live && webcams && printerKey === initialPrinterKey"
       :webcams="webcams"

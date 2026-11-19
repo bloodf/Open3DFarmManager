@@ -1,6 +1,7 @@
 import {
   assemblePrinterDetailFrames,
   decodePrinterDetailFrame,
+  type PrinterDetailStreamCapability,
   type PrinterDetailStreamUpdate,
   type PrinterDetailStreamGcodeResponse,
 } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
@@ -30,6 +31,10 @@ import {
   RtcProofInbox,
   boundRtcApplicationFrame,
 } from '../../../../../packages/connector/src/webrtc/rtc-proof-inbox.ts'
+import {
+  createDetailQueries,
+  type DetailQueryResponse,
+} from './detail-queries.ts'
 import {
   CAMERA_CHANNEL_LABEL,
   type BrowserCameraHooks,
@@ -89,6 +94,7 @@ export class ReadonlyBrowserPeer {
   #cameraChannel = false
   #authDeadline = performance.now() + 8000
   #lifetimeDeadline = performance.now() + 30000
+  #queryTimer: ReturnType<typeof setInterval> | undefined
   #authTimer: ReturnType<typeof setTimeout>
   #lifetimeTimer: ReturnType<typeof setTimeout>
   constructor(options: Options) {
@@ -238,6 +244,19 @@ export class ReadonlyBrowserPeer {
         this.#application = channel
         let requestedGcodeHelp = false
         let detailChunks: string[] = []
+        const queries = this.#options.webcamDetail?.onQuery
+          ? createDetailQueries({
+              printerKey: this.#options.webcamDetail.printerKey,
+              send: (wire) => {
+                if (channel.readyState === 'open') channel.send(wire)
+              },
+              onResponse: (frame) =>
+                this.#options.webcamDetail?.onQuery?.(frame),
+            })
+          : undefined
+        // ponytail: a fixed 5 s refresh of due queries; no per-query timers.
+        if (queries)
+          this.#queryTimer = setInterval(() => queries.refresh(), 5000)
         channel.onmessage = ({ data }) => {
           if (this.#terminal) return
           try {
@@ -273,6 +292,10 @@ export class ReadonlyBrowserPeer {
               if (frame.t === 'detail.update') {
                 detail.onUpdate(frame.detail.webcams ?? null)
                 detail.onDetail?.(frame)
+                queries?.update([
+                  ...frame.capabilities,
+                  ...(detail.advertised?.() ?? []),
+                ])
                 if (detail.onGcodeHelp && !requestedGcodeHelp) {
                   requestedGcodeHelp = true
                   channel.send(
@@ -287,6 +310,11 @@ export class ReadonlyBrowserPeer {
                 }
               } else if (frame.t === 'detail.gcode_response') {
                 detail.onGcodeResponse?.(frame)
+              } else if (
+                frame.t === 'query.response' &&
+                queries?.receive(frame)
+              ) {
+                // Routed to the page through `onQuery`.
               } else if (
                 frame.t === 'query.response' &&
                 frame.kind === 'gcode-help' &&
@@ -582,6 +610,7 @@ export class ReadonlyBrowserPeer {
     this.#peer.ontrack = null
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
+    clearInterval(this.#queryTimer)
     this.#inbox.close(reason)
     this.#session?.close(reason)
     if (this.#proof) this.#proof.onmessage = null
@@ -649,6 +678,10 @@ export type WebcamDetailOptions = {
     frame: z.infer<typeof PrinterDetailStreamGcodeResponse>,
   ) => void
   onDetail?: (frame: z.infer<typeof PrinterDetailStreamUpdate>) => void
+  /** Answers to the temperature, queue, history, totals and timelapse queries. */
+  onQuery?: (frame: DetailQueryResponse) => void
+  /** Areas the page knows the printer advertises beyond the update frame's own list. */
+  advertised?: () => readonly z.infer<typeof PrinterDetailStreamCapability>[]
   printerKey: string
   onUpdate: (
     value: NonNullable<

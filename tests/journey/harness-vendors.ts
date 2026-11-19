@@ -35,6 +35,8 @@ export type VendorControls = Readonly<{
 
 export type VendorOptions = Readonly<{
   printerKey: string
+  /** Optional unique device suffix when sharing a Connector with siblings. */
+  deviceId?: string
   /** Bambu only: opt the binding in to control commands (default false). */
   control?: boolean
   /** Bambu simulator FTPS port; zero selects an ephemeral loopback port. */
@@ -255,7 +257,9 @@ export async function startVendorSimulator(
     let runtime: VendorSimulator['runtime']
 
     if (name === 'bambu') {
-      const serial = 'JOURNEYBAMBU'
+      const serial = options.deviceId
+        ? `JOURNEYBAMBU_${options.deviceId}`
+        : 'JOURNEYBAMBU'
       const sim = await startBambuSimulator({
         serial,
         accessCode: BAMBU_ACCESS_CODE,
@@ -381,7 +385,7 @@ export async function startVendorSimulator(
         telemetryIdleMs: 5000,
       })
     } else if (name === 'anycubic') {
-      const deviceId = 'JOURNEY'
+      const deviceId = options.deviceId ?? 'JOURNEY'
       const username = 'journey-user'
       const password = 'journey-password'
       const sim = await startAnycubicSimulator({
@@ -449,8 +453,12 @@ export async function startVendorSimulator(
       }
     } else {
       const identity = {
-        id: 'journey-kobra',
-        deviceId: 'OPENFARM_SYNTHETIC_KOBRA_X_JOURNEY',
+        id: options.deviceId
+          ? `journey-kobra-${options.deviceId}`
+          : 'journey-kobra',
+        deviceId: options.deviceId
+          ? `OPENFARM_SYNTHETIC_KOBRA_X_${options.deviceId}`
+          : 'OPENFARM_SYNTHETIC_KOBRA_X_JOURNEY',
         name: 'Synthetic Kobra X',
         email: 'journey@example.test',
         password: 'journey-password',
@@ -517,7 +525,9 @@ export async function startVendorSimulator(
         },
       }
       runtime = async (scope) => {
-        const bridgeInstance = 'journey-bridge'
+        const bridgeInstance = options.deviceId
+          ? `journey-bridge-${options.deviceId}`
+          : 'journey-bridge'
         const credentialFile = join(directory, 'kobralink-credential.json')
         const binding = {
           backend: 'kobralink' as const,

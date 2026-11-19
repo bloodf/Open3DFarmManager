@@ -9,6 +9,10 @@ import { z } from 'zod'
 export const LastKnownPrinterState = z.strictObject({
   assignmentId: z.string().min(1).max(128),
   printerKey: z.string().min(1).max(128),
+  displayName: z.string().nullable().optional(),
+  groupName: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+  sortOrder: z.number().int().nullable().optional(),
   state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
   progress: z.number().min(0).max(1).optional(),
   temperatures: z.strictObject({
@@ -30,6 +34,10 @@ export type LastKnownPrinterStatesResponse = z.infer<
 export type LastKnownState = {
   assignmentId: string
   printerKey: string
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   state: LastKnownPrinterState['state']
   progress: number | undefined
   temperatures: {
@@ -110,6 +118,12 @@ export function parseLastKnownStates(
   const states = parsed.data.states.map((state) => ({
     assignmentId: state.assignmentId,
     printerKey: state.printerKey,
+    ...(state.displayName !== undefined
+      ? { displayName: state.displayName }
+      : {}),
+    ...(state.groupName !== undefined ? { groupName: state.groupName } : {}),
+    ...(state.location !== undefined ? { location: state.location } : {}),
+    ...(state.sortOrder !== undefined ? { sortOrder: state.sortOrder } : {}),
     state: state.state,
     progress: state.progress,
     // A missing reading is not a reading of zero: the key stays present and

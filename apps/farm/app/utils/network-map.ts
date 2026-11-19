@@ -112,7 +112,10 @@ export interface LiveOverlay {
   /** Connectors with an authenticated direct connection from this browser. */
   agents?: ReadonlySet<string>
   /** `${agentId}:${printerKey}` -> latest direct observation. */
-  printers?: ReadonlyMap<string, { online: boolean; at: number }>
+  printers?: ReadonlyMap<
+    string,
+    { online: boolean; at: number; link?: NetworkPrinter['link'] }
+  >
   now: number
 }
 
@@ -201,14 +204,18 @@ export function buildEntries(
     const live = overlay.printers?.get(
       printerOverlayKey(printer.agentId, printer.printerKey),
     )
-    const link = printer.link
+    const link = live?.link ?? printer.link
     let status: NetworkStatus
     let statusText: string
     let lastSeenAt: number | null
     if (live) {
-      status = live.online ? 'connected' : 'offline'
-      statusText = live.online ? 'Conectado' : 'Offline'
-      lastSeenAt = live.at
+      status = !live.online
+        ? 'offline'
+        : live.link?.state === 'reconnecting'
+          ? 'reconnecting'
+          : 'connected'
+      statusText = statusInfo[status].label
+      lastSeenAt = live.link?.lastSuccessAt ?? live.at
     } else if (parent.status === 'offline' || parent.status === 'pending') {
       status = 'offline'
       statusText = `${parent.statusText} (Connector)`

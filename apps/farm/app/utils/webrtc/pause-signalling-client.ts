@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   BrowserDeviceUuid,
@@ -421,14 +422,19 @@ export class PauseBrowserSignallingClient {
       return false
     }
   }
-  async listFiles(printerKey: string, directory?: string, download?: string) {
+  async listFiles(
+    printerKey: string,
+    directory?: string,
+    download?: string,
+    config?: FileListExtra,
+  ) {
     if (
       !this.#channel.current() ||
       !this.#proofsReady ||
       !this.#peer?.listFiles
     )
       throw Error('File list unavailable')
-    return this.#peer.listFiles(printerKey, directory, download)
+    return this.#peer.listFiles(printerKey, directory, download, config)
   }
   async sendFile(...args: Parameters<PauseBrowserPeer['sendFile']>) {
     if (!this.#channel.current() || !this.#proofsReady || !this.#peer?.sendFile)

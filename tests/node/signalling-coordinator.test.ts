@@ -422,6 +422,110 @@ test('per-browser allocation and queued-byte limits fail closed and disposal rel
   f.coordinator.dispose()
   assert.equal(f.clock.tasks.size, 0)
 })
+test('single browser key can open simultaneous contexts across more than two distinct agents', async () => {
+  const clock = new Clock()
+  const browser = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign', 'verify'],
+  )
+  const jwk = await crypto.subtle.exportKey('jwk', browser.publicKey)
+  const browserKey = await validateBrowserDevicePublicKey({
+    kty: jwk.kty,
+    crv: jwk.crv,
+    x: jwk.x,
+    y: jwk.y,
+  })
+  const farmId = randomUUID()
+  const keyId = randomUUID()
+  const byAgent = new Map<string, SignallingAuthority>()
+  for (let i = 0; i < 4; i++) {
+    const agentId = randomUUID()
+    const connector = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
+    const der = await crypto.subtle.exportKey('spki', connector.publicKey)
+    const assignments = await assignmentSetDigest({ farmId, agentId }, [
+      {
+        assignmentId: randomUUID(),
+        agentId,
+        printerKey: `printer-${i + 1}`,
+      },
+    ])
+    byAgent.set(agentId, {
+      assignment_count: assignments.count,
+      assignment_digest: assignments.digest,
+      farm_id: farmId,
+      agent_id: agentId,
+      key_id: keyId,
+      account_id: 'account_text',
+      browser_public_key: browserKey.publicKey,
+      browser_thumbprint: browserKey.thumbprint,
+      connector_public_key_spki: base64url(new Uint8Array(der)),
+      connector_fingerprint:
+        'SHA256:' +
+        base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', der))),
+      credential_jti: randomUUID(),
+      origin: 'https://farm.example',
+      audience: 'test-farm',
+      validUntil: 100000,
+    })
+  }
+  const coordinator = new SignallingCoordinator(
+    {
+      read: async (scope) => {
+        const value = byAgent.get(scope.agentId)
+        return value
+          ? {
+              authority: value,
+              budget: {
+                observedAt: clock.now,
+                validUntil: value.validUntil,
+                monotonicDeadline: value.validUntil,
+              },
+            }
+          : null
+      },
+    },
+    {
+      issue: async () => ({ ok: false, reason: 'denied' }),
+      accept: async () => ({ ok: false, reason: 'denied' }),
+    },
+    clock,
+    clock,
+  )
+  try {
+    const agentIds = [...byAgent.keys()]
+    for (const agentId of agentIds) {
+      const opened = await coordinator.open(
+        { sessionRecordId: 'session_text', farmId, agentId, keyId },
+        new Endpoint(clock),
+      )
+      assert.ok(opened, `expected open context for agent ${agentId}`)
+    }
+    const duplicateSecond = await coordinator.open(
+      { sessionRecordId: 'session_text', farmId, agentId: agentIds[0]!, keyId },
+      new Endpoint(clock),
+    )
+    assert.ok(duplicateSecond)
+    assert.equal(
+      await coordinator.open(
+        {
+          sessionRecordId: 'session_text',
+          farmId,
+          agentId: agentIds[0]!,
+          keyId,
+        },
+        new Endpoint(clock),
+      ),
+      null,
+    )
+  } finally {
+    coordinator.dispose()
+  }
+  assert.equal(clock.tasks.size, 0)
+})
 test('a stalled reader cannot accumulate unbounded queued frames or deliver a late offer', async () => {
   const f = await fixture()
   const connector = await f.admit()

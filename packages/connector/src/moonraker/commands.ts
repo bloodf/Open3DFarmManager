@@ -129,6 +129,8 @@ export function supportedMoonrakerActions(
     supported.push('unload_filament')
   // The queue is a Moonraker component; detection marks it next to the objects.
   if (objects.includes(POWER_MARKER)) supported.push('power')
+  if (objects.includes('configfile') && objects.includes('print_stats'))
+    supported.push('config_write')
   if (bedMeshSupported(objects)) supported.push('bed_mesh')
   if (queueSupported(objects)) supported.push('queue_op')
   // Timelapse is a plugin component; detection marks it next to the objects.

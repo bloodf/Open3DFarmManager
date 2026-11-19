@@ -4,15 +4,21 @@ import {
 } from '../auth/trusted-key-store.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { loadPauseIssuerKeys } from '../config/pause.ts'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { readRuntimeCredential } from '../config/credential.ts'
-import { readProvisioningConfig } from '../config/provisioning.ts'
+import {
+  readProvisioningConfig,
+  type ProvisioningConfig,
+} from '../config/provisioning.ts'
 import { credentialLookupId } from '../config/signalling.ts'
 import {
   loadExistingIdentity,
   type ConnectorIdentity,
 } from '../identity/store.ts'
+import { ensurePrivateDirectory } from '../provisioning/private-fs.ts'
 import {
   configurationConnectorSocket,
   createConfigurationSignallingClient,
@@ -101,6 +107,38 @@ export async function configurationReadiness(input: {
 }
 
 /**
+ * Each confirmed provisioning assignment set owns a dedicated scoped queue
+ * directory so adding or removing printers through `configure` does not reuse a
+ * previous scope's `scope.json` while keeping strict receipt verification intact.
+ */
+export function provisioningQueueDirectory(
+  config: Pick<ProvisioningConfig, 'farm_id' | 'agent_id' | 'stateDirectory'>,
+  configPath: string,
+): string {
+  const runtimeConfig = readAgentRuntimeConfig(configPath, config)
+  const assignments = [...runtimeConfig.assignments].sort((left, right) =>
+    left.assignment_id < right.assignment_id
+      ? -1
+      : left.assignment_id > right.assignment_id
+        ? 1
+        : 0,
+  )
+  const scopeDigest = createHash('sha256')
+    .update(
+      canonicalize({
+        version: 1,
+        farm_id: config.farm_id,
+        agent_id: config.agent_id,
+        assignments,
+      }),
+    )
+    .digest('base64url')
+  const root = join(config.stateDirectory, 'telemetry-scopes')
+  ensurePrivateDirectory(root)
+  return join(root, scopeDigest)
+}
+
+/**
  * `configure`: runs the config-v1 provisioning Connector. A zero-printer
  * Connector waits for an authenticated owner/admin session; after each local
  * commit the existing telemetry runtime is (re)started from the committed
@@ -145,6 +183,7 @@ export async function runConfigurationConnector(
         ...(trustedKeys ? { trustedKeys: trustedKeys.authority } : {}),
         credentialPath: input.credentialPath,
         dataDirectory: input.dataDirectory,
+        telemetryDirectory: provisioningQueueDirectory(config, configPath),
         signal,
         onDiagnostic: (value) => input.onDiagnostic(value),
       })

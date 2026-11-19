@@ -307,6 +307,7 @@ const heaterReason = computed(
           "
         />
         <slot name="painel" />
+        <slot name="config-editor" />
         <OutputsPanel
           v-if="outputs"
           :advertised="outputs.advertised"

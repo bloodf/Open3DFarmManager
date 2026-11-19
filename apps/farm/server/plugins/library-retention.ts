@@ -2,6 +2,7 @@ import postgres from 'postgres'
 import { createLogger } from '@open3dfarmmanager/shared'
 import { useRuntimeConfig } from 'nuxt/server'
 import { createBlobStore } from '../utils/library/blob-store.ts'
+import { activeConnectorLibraryRelay } from '../utils/library/connector-relay.ts'
 import {
   parseLibraryRetentionConfig,
   runLibraryRetention,
@@ -32,10 +33,13 @@ export default defineNitroPlugin((nitro) => {
     if (running) return
     running = true
     try {
-      // Server-mode purge needs the library directory; Connector-mode purge needs a Connector transport (none wired yet: those blobs are reported as deferred).
+      // Server-mode purge needs the library directory; Connector-mode purge goes through the relay hub when it is running (otherwise those blobs are reported as deferred).
       const directory = process.env.OPENFARM_LIBRARY_DIR
       const blobs = directory ? await createBlobStore(directory) : undefined
-      const result = await runLibraryRetention({ sql, blobs }, config)
+      const result = await runLibraryRetention(
+        { sql, blobs, connectors: activeConnectorLibraryRelay() },
+        config,
+      )
       if (Object.values(result).some(Boolean))
         logger.info('library-retention', { ...result })
     } catch (error) {

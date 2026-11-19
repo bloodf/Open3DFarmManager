@@ -4,6 +4,7 @@ import {
   provisionAnycubicPrinter,
   provisionCrealityPrinter,
 } from '../control/printer-binding.ts'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
@@ -21,6 +22,27 @@ import { parsePauseRuntimeConfig } from './pause.ts'
 import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
+
+const LibraryRuntime = z.strictObject({
+  /** Absolute directory of the Connector library store. */
+  directory: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((value) => isAbsolute(value) && !value.includes('\0'))
+    .optional(),
+  quotaBytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
+  keepVersions: z.number().int().min(1).max(1000).optional(),
+  /** Bound of the server-mode download cache. */
+  cacheMaxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
+})
+export type LibraryRuntimeConfig = z.infer<typeof LibraryRuntime>
 
 const Runtime = z.strictObject({
   version: z.union([
@@ -67,6 +89,9 @@ const Runtime = z.strictObject({
   camera: z.unknown().optional(),
   // Optional ICE bind address; absent keeps loopback (config/rtc.ts).
   rtc: z.unknown().optional(),
+  // Optional library store settings (#446). Absent keeps the defaults: the
+  // store lives under `<data directory>/library`, with the server's quota.
+  library: LibraryRuntime.optional(),
 })
 
 export function readAgentRuntimeConfig(
@@ -258,6 +283,7 @@ export function readAgentRuntimeConfig(
     renewal: input.renewal,
     assignments,
     signalling: input.signalling,
+    ...(input.library ? { library: input.library } : {}),
     pause,
     /**
      * Local provisioned mapping resolver. It returns the exact handle that was

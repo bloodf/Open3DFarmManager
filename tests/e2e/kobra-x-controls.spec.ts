@@ -9,21 +9,8 @@ import { farmControlsBundle } from './mount-farm-controls.ts'
 // Loopback Kobra X mock and the native adapter. The farm page is the production
 // controls bound to what the adapter reports and advertises. Every command the
 // page issues is carried out by the adapter on the mock and judged on the outcome.
-const recovery = {
-  query: () => ({
-    ts: String(Date.now()),
-    nonce: 'e2e-368',
-    sign: '0'.repeat(32),
-    did: 'fixture',
-  }),
-  encrypted(token: string, response: any) {
-    return {
-      key: Buffer.from(token.slice(16)),
-      iv: Buffer.from(response.data.token),
-      ciphertext: Buffer.from(response.data.info, 'base64'),
-    }
-  },
-}
+// Credentials come from the adapter's native /ctrl recovery against the mock,
+// which checks the documented query shape (strictCtrlQuery).
 const signed = { beforeSend: () => true }
 
 async function until(check: () => boolean, label: string) {
@@ -67,12 +54,12 @@ test.describe('Kobra X on the farm page', () => {
     mock = await startKobraXMock({
       reportIntervalMs: 0,
       preparationPhases: [],
+      strictCtrlQuery: true,
     })
     adapter = await connectKobraX({
       address: '127.0.0.1',
       printerKey: 'Kobra X',
       clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
-      recovery,
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
       resultTimeoutMs: 1000,

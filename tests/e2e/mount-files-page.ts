@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { build } from 'esbuild'
+import { compileVueSfc, vueSfcPlugin } from './vue-sfc-plugin.ts'
 
 const app = resolve(import.meta.dirname, '../../apps/farm')
 const file = join(app, 'app/pages/arquivos.vue')
-const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 
 export async function filesPageBundle() {
   let source = readFileSync(file, 'utf8')
@@ -44,12 +43,7 @@ async function connect(signal: AbortSignal): Promise<any> {
 }
 ` +
     source.slice(end)
-  const { descriptor, errors } = sfc.parse(source, { filename: file })
-  if (errors.length) throw errors[0]
-  const script = sfc.compileScript(descriptor, {
-    id: 'files-page',
-    inlineTemplate: true,
-  }).content
+  const script = compileVueSfc(source, file)
   const result = await build({
     stdin: {
       contents: `const $fetch = async () => ({ enabled: true, origin: location.origin }); const definePageMeta = () => {};
@@ -60,6 +54,7 @@ window.mountFilesPage = (element) => { const app = createApp(component); app.com
       loader: 'ts',
       resolveDir: join(app, 'app/pages'),
     },
+    plugins: [vueSfcPlugin],
     bundle: true,
     platform: 'browser',
     format: 'iife',

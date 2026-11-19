@@ -37,3 +37,13 @@ Actions are the `ExtendedControlAction` values in `packages/farm-protocol/src/co
 - **Speed levels.** The sources give three modes. The UI has four.
 - **Read-only sources.** Nothing here was captured on a Kobra 3, S1 or other model. The note after kobra-connect §6 says the Rinkhals/Kobra 3 firmware uses `stop`, and that the Kobra 2 docs reference both `stop` and `cancel`.
 - **Dual license on anycubic_ha_local.** The repository ships an AGPL-3.0 `LICENSE` and an MIT `LICENSE-MIT`. This doc cites both and does not decide which one covers a given file.
+
+### Printer detail
+
+The detail view uses the reported print state, temperatures, fan speeds,
+light and ACE slot data. ACE slots are read-only. The file action starts
+an existing file by name. Listing and upload remain unavailable.
+[Camera](anycubic-camera.md) requires per-assignment media configuration.
+Movement, extrusion, macros, console, object exclusion, queues, bed mesh,
+configuration, services, history, timelapse, power and updates are out of
+the documented detail control set above.

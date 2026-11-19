@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { PrinterState } from './state.ts'
 import { z } from 'zod'
 import { parseBoundedJson } from './json.ts'
 import { RtcAssignmentRef } from './rtc-assignment-set.ts'
@@ -41,10 +42,11 @@ export const PrinterDetailCapability = z.enum([
   'system',
   'console',
   'webcams',
+  'materials',
 ])
 const capabilities = z
   .array(PrinterDetailCapability)
-  .max(19)
+  .max(20)
   .refine((items) => new Set(items).size === items.length)
 
 export const PrinterDetailSubscribe = z.strictObject({
@@ -59,6 +61,7 @@ export const PrinterDetailUpdate = z.strictObject({
   ...base,
   t: z.literal('detail.update'),
   seq: count,
+  vendor: z.enum(['anycubic', 'kobra-x']).optional(),
   capabilities,
   detail: z
     .strictObject({
@@ -69,7 +72,11 @@ export const PrinterDetailUpdate = z.strictObject({
           .max(3)
           .refine((axes) => new Set(axes).size === axes.length),
       }),
-      heaters: named({ temperature: number, target: number, power: fraction }),
+      heaters: named({
+        temperature: number,
+        target: number.optional(),
+        power: fraction.optional(),
+      }),
       fans: named({ speed: fraction, rpm: count.optional() }),
       lights: named({
         red: fraction,
@@ -97,10 +104,12 @@ export const PrinterDetailUpdate = z.strictObject({
         file: path.optional(),
         state: name,
         message,
-        elapsedSeconds: number.nonnegative(),
+        elapsedSeconds: number.nonnegative().optional(),
+        progress: fraction.optional(),
         currentLayer: count.optional(),
         totalLayers: count.optional(),
       }),
+      materials: PrinterState.shape.materials,
       virtualFile: z.strictObject({
         active: z.boolean(),
         progress: fraction,

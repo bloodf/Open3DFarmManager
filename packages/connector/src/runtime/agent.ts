@@ -243,6 +243,7 @@ async function runConnectorAgentOnce(
     ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
+  const detailSources = createPrinterDetailSources(config)
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
     // One startup probe of the native RTC module. Without it the agent keeps
@@ -405,7 +406,7 @@ async function runConnectorAgentOnce(
             assignmentRefs: refs,
           })
         : undefined
-      const detailSourceFor = createPrinterDetailSources(config)
+      const detailSourceFor = detailSources.sourceFor
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -735,8 +736,14 @@ async function runConnectorAgentOnce(
         onDiagnostic: diagnostic,
         ...(snapshots
           ? {
-              onRawObservation: snapshots.observe,
-              onRawUnavailable: snapshots.invalidate,
+              onRawObservation: (observation) => {
+                snapshots.observe(observation)
+                detailSources.observe(observation.printer)
+              },
+              onRawUnavailable: (event) => {
+                snapshots.invalidate(event)
+                detailSources.invalidate(event.printerKey)
+              },
             }
           : {}),
       }).catch(fail),

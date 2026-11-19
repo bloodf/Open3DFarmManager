@@ -6,6 +6,7 @@ import {
   MacroParamName,
   MacroParamValue,
 } from './control-actions.ts'
+import { MachineProfile } from './machine-profile.ts'
 
 export const FilamentUsage = z.strictObject({
   tool: z.string().min(1).max(32),
@@ -33,30 +34,8 @@ const LocalWebUiOrigin = z
 
 export { firmwareUpdateAvailable } from './firmware.ts'
 
-const positive = z.number().finite().positive()
-const MachineProfile = z.strictObject({
-  model: z.string().trim().min(1).max(64).optional(),
-  toolCount: z.number().int().min(1).max(17).optional(),
-  nozzleDiameterMm: z
-    .record(z.string().regex(/^(?:[0-9]|1[0-6])$/), positive)
-    .optional(),
-  bedSizeMm: z
-    .strictObject({
-      x: positive.optional(),
-      y: positive.optional(),
-      z: positive.optional(),
-    })
-    .optional(),
-  maxHotendTemperatureCelsius: z
-    .record(z.string().regex(/^(?:[0-9]|1[0-6])$/), positive)
-    .optional(),
-  maxBedTemperatureCelsius: positive.optional(),
-  kinematics: z.string().trim().min(1).max(64).optional(),
-})
-
 export const PrinterState = z
   .strictObject({
-    machine: MachineProfile.optional(),
     macros: z.array(MacroName).max(50).optional(),
     /** Parameters each macro reads (`params.X`), with a literal default if any. */
     macroParams: z
@@ -85,6 +64,8 @@ export const PrinterState = z
         firmware: z.string().min(1).max(1024).optional(),
       })
       .optional(),
+    /** Sent on change only; never part of the live status snapshot. */
+    machine: MachineProfile.optional(),
     firmware: z
       .strictObject({
         current: z.string().min(1).max(64).optional(),

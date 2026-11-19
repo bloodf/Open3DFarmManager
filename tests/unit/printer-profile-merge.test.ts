@@ -120,10 +120,11 @@ describe('detected profile from a stored state', () => {
         ...base,
         machine: {
           model: 'Voron 2.4',
-          nozzleDiameterMm: { '1': 0.6, '0': 0.4 },
+          toolCount: 2,
+          nozzleDiametersMm: [0.4, 0.6],
           bedSizeMm: { x: 350, y: 350, z: 330 },
-          maxHotendTemperatureCelsius: { '0': 300, '1': 280 },
-          maxBedTemperatureCelsius: 120,
+          maxHotendCelsius: 300,
+          maxBedCelsius: 120,
           kinematics: 'corexy',
         },
       }),
@@ -139,11 +140,11 @@ describe('detected profile from a stored state', () => {
     })
   })
 
-  test('falls back to the observed identity model and the hottest tool', () => {
+  test('falls back to the observed identity model', () => {
     const profile = detectedProfile({
       ...base,
       identity: { model: 'Identidade Y' },
-      machine: { maxHotendTemperatureCelsius: { '2': 250, '3': 280 } },
+      machine: { maxHotendCelsius: 280 },
     })
     expect(profile.model).toBe('Identidade Y')
     expect(profile.maxHotendTemperatureCelsius).toBe(280)

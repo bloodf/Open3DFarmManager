@@ -156,8 +156,8 @@ type ObservedTemperatures = {
   toolTemperatureCelsius?: number
   bedTemperatureCelsius?: number
   machine?: {
-    maxHotendTemperatureCelsius?: Readonly<Record<string, number>>
-    maxBedTemperatureCelsius?: number
+    maxHotendCelsius?: number
+    maxBedCelsius?: number
   }
 }
 
@@ -170,16 +170,13 @@ export function heatersFromObservation(
     heaters.push({
       name: 'extruder',
       temperature: state.toolTemperatureCelsius,
-      maxTemp:
-        state.machine?.maxHotendTemperatureCelsius?.['0'] ??
-        DEFAULT_MAX_TEMP.extruder,
+      maxTemp: state.machine?.maxHotendCelsius ?? DEFAULT_MAX_TEMP.extruder,
     })
   if (state.bedTemperatureCelsius !== undefined)
     heaters.push({
       name: 'heater_bed',
       temperature: state.bedTemperatureCelsius,
-      maxTemp:
-        state.machine?.maxBedTemperatureCelsius ?? DEFAULT_MAX_TEMP.heater_bed,
+      maxTemp: state.machine?.maxBedCelsius ?? DEFAULT_MAX_TEMP.heater_bed,
     })
   return heaters
 }

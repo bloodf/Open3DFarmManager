@@ -97,14 +97,6 @@ export function normalizeEdit(
   return { ...edit, compatibleModels: [...new Set(edit.compatibleModels)] }
 }
 
-const firstValue = (record: Record<string, number> | undefined) => {
-  if (!record) return null
-  const preferred = record['0']
-  if (preferred !== undefined) return preferred
-  const keys = Object.keys(record).sort((a, b) => Number(a) - Number(b))
-  return keys.length ? (record[keys[0]!] ?? null) : null
-}
-
 /**
  * Reads what the Connector detected from a stored latest-state snapshot.
  * An invalid or missing snapshot detects nothing instead of failing the read.
@@ -113,18 +105,14 @@ export function detectedProfile(state: unknown): MachineProfileValues {
   const parsed = PrinterState.safeParse(state)
   if (!parsed.success) return { ...EMPTY_DETECTED }
   const { machine, identity } = parsed.data
-  const hotend = machine?.maxHotendTemperatureCelsius
-  const hotendValues = hotend ? Object.values(hotend) : []
   return {
     model: machine?.model ?? identity?.model ?? null,
-    nozzleDiameterMm: firstValue(machine?.nozzleDiameterMm),
+    nozzleDiameterMm: machine?.nozzleDiametersMm?.[0] ?? null,
     bedSizeXMm: machine?.bedSizeMm?.x ?? null,
     bedSizeYMm: machine?.bedSizeMm?.y ?? null,
     bedSizeZMm: machine?.bedSizeMm?.z ?? null,
-    maxHotendTemperatureCelsius: hotendValues.length
-      ? (hotend?.['0'] ?? Math.max(...hotendValues))
-      : null,
-    maxBedTemperatureCelsius: machine?.maxBedTemperatureCelsius ?? null,
+    maxHotendTemperatureCelsius: machine?.maxHotendCelsius ?? null,
+    maxBedTemperatureCelsius: machine?.maxBedCelsius ?? null,
     kinematics: machine?.kinematics ?? null,
   }
 }

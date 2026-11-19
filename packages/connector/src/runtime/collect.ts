@@ -1,5 +1,9 @@
 import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
+import { readMoonrakerMachineProfile } from '../machine-profile/moonraker.ts'
+import { fetchMoonrakerConfigfile } from '../machine-profile/moonraker-fetch.ts'
+import { createMachineProfileGate } from '../machine-profile/on-change.ts'
+import type { MachineProfile } from '../../../farm-protocol/src/machine-profile.ts'
 import { getSpoolmanMaterials } from './spoolman-materials.ts'
 import { parseMoonrakerActiveSpoolId } from '../moonraker/active-spool.ts'
 import { inventoryAt, summarizeSpoolman } from './spool-inventory.ts'
@@ -146,8 +150,9 @@ export async function collectIntoQueue(input: {
   }
   // Transitions are detected in memory; the first observation after a restart emits none.
   // Changes during unreachability fold into one transition from the last-known state at reconnect.
-  const lastMachine = new Map<string, string>()
   const lastState = new Map<string, PrinterState['state']>()
+  // The machine block is queued only when it changes.
+  const machineGate = createMachineProfileGate()
   function diagnostic(value: Diagnostic) {
     if (diagnosticBudget-- > 0) input.onDiagnostic(value)
   }
@@ -193,14 +198,14 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
-        const { machine, ...state } = printer
-        const fingerprint = machine && JSON.stringify(machine)
-        const changed =
-          fingerprint !== undefined &&
-          lastMachine.get(state.printerKey) !== fingerprint
-        const receipt = queue.enqueue(changed ? printer : state, now)
-        if (changed && queue.storageLost === lostBefore)
-          lastMachine.set(state.printerKey, fingerprint)
+        const queued = machineGate.apply(printer)
+        let receipt
+        try {
+          receipt = queue.enqueue(queued, now)
+        } catch (error) {
+          machineGate.forget(printer.printerKey)
+          throw error
+        }
         totals.queued++
         loss(receipt.loss, 'retention')
         const dropped = queue.storageLost - lostBefore
@@ -255,6 +260,9 @@ export async function collectIntoQueue(input: {
       let firmwareObservation: RawPrinterObservation['firmwareObservation']
       let nextFirmwareRead = -Infinity
       let firmwarePending = false
+      let machine: MachineProfile | undefined
+      let nextMachineRead = -Infinity
+      let machinePending = false
       let latest: RawPrinterObservation | undefined
       const history = input.importMoonrakerHistory
         ? createMoonrakerHistoryImport({
@@ -277,7 +285,6 @@ export async function collectIntoQueue(input: {
       const linkHealth = input.linkHealthFor?.(assignment.printerKey)
       const subscription = createMoonrakerSubscription({
         ...(linkHealth ? { linkHealth } : {}),
-        machineProfile: true,
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,
@@ -354,6 +361,32 @@ export async function collectIntoQueue(input: {
                 materialReads.delete(read)
               })
             materialReads.add(read)
+          }
+          // Like firmware, read only when the agent runtime observes this printer.
+          if (
+            !machinePending &&
+            at >= nextMachineRead &&
+            input.onRawObservation
+          ) {
+            machinePending = true
+            nextMachineRead = at + 600_000
+            const machineRead = readMoonrakerMachineProfile({
+              request: () =>
+                fetchMoonrakerConfigfile({
+                  origin: selected.origin,
+                  limits: selected.limits,
+                  signal,
+                }),
+            })
+              .then((profile) => {
+                if (!signal.aborted && profile) machine = profile
+              })
+              .catch(() => {})
+              .finally(() => {
+                machinePending = false
+                materialReads.delete(machineRead)
+              })
+            materialReads.add(machineRead)
           }
           if (
             cachedInventory !== inventory ||
@@ -444,13 +477,16 @@ export async function collectIntoQueue(input: {
               },
             }
           : {}),
-        onEvent: history
-          ? (event) => {
-              onEvent(event)
-              if (event.kind === 'unavailable') history.reconnecting()
-              else history.observe(event.printer.state)
-            }
-          : onEvent,
+        onEvent: (event) => {
+          onEvent(
+            event.kind === 'snapshot' && machine
+              ? { ...event, printer: { ...event.printer, machine } }
+              : event,
+          )
+          if (!history) return
+          if (event.kind === 'unavailable') history.reconnecting()
+          else history.observe(event.printer.state)
+        },
       })
       // Attach rejection handling immediately, before starting another printer.
       subscriptions.push({ done: subscription.done.catch(fail) })

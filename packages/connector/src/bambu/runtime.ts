@@ -1,8 +1,9 @@
 import { mapBambuFirmware } from './firmware.ts'
+import { parseBambuMachineProfile } from '../machine-profile/bambu.ts'
+import type { MachineProfile } from '../../../farm-protocol/src/machine-profile.ts'
 import { decodeBambuVersion } from './version.ts'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
-import { bambuMachineProfile } from '../runtime/machine-profile.ts'
 import { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import type { FilamentUsage } from '@open3dfarmmanager/farm-protocol'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
@@ -55,6 +56,7 @@ export function createBambuRuntimeSubscription(input: {
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let machine: MachineProfile | undefined
   let version: unknown
   let upgradeReport: unknown
   let epoch = 0
@@ -62,15 +64,14 @@ export function createBambuRuntimeSubscription(input: {
   let fields: Partial<Fields> = {}
   let times: Partial<Record<keyof Fields, number>> = {}
   let connected = false
-  let machine: PrinterState['machine']
   let activeJob = false
   let filamentUsage: FilamentUsage[] | undefined
   const clear = () => {
     firmwareObservation = undefined
+    machine = undefined
     version = undefined
     upgradeReport = undefined
     fields = {}
-    machine = undefined
     times = {}
     activeJob = false
     filamentUsage = undefined
@@ -98,6 +99,7 @@ export function createBambuRuntimeSubscription(input: {
     }
     const parsed = PrinterState.safeParse({
       ...fields,
+      // Not time-stamped: hardware limits do not age with the report.
       ...(machine ? { machine } : {}),
       controls: binding.control ? ['pause', 'resume', 'cancel'] : [],
       printerKey: binding.printerKey,
@@ -168,9 +170,8 @@ export function createBambuRuntimeSubscription(input: {
             unavailable('invalid-response')
             return
           }
-          const reportedMachine = bambuMachineProfile(rawFirmware)
-          if (reportedMachine) machine = { ...machine, ...reportedMachine }
           if (decodeBambuVersion(rawFirmware)) version = rawFirmware
+          machine = parseBambuMachineProfile(rawFirmware) ?? machine
           if (
             rawFirmware &&
             typeof rawFirmware === 'object' &&
@@ -190,7 +191,7 @@ export function createBambuRuntimeSubscription(input: {
               observedAtMonoMs: performance.now(),
             }
           const result = decodeBambuReport(payload.toString('utf8'))
-          if (result.kind === 'ignored' && (firmware || reportedMachine)) {
+          if (result.kind === 'ignored' && firmware) {
             publish()
             return
           }

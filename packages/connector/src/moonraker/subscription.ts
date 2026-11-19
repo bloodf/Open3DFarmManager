@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { moonrakerMachineProfile } from '../runtime/machine-profile.ts'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
   parseTemperatureFields,
@@ -97,7 +96,6 @@ const Snapshot = z.object({
 })
 const TemperatureSnapshot = Snapshot.extend({
   status: Status.extend({
-    configfile: z.unknown().optional(),
     extruder: z.unknown().optional(),
     heater_bed: z.unknown().optional(),
   }),
@@ -146,7 +144,6 @@ export function createMoonrakerSubscription(input: {
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   discoverObjects?: boolean
-  machineProfile?: boolean
   /** Request job fields and report the last job this subscription watched end. */
   jobFields?: boolean
   linkHealth?: MoonrakerLinkHealth
@@ -203,7 +200,6 @@ export function createMoonrakerSubscription(input: {
       if (epoch > 0) input.linkHealth?.reconnect()
       if (++epoch > Number.MAX_SAFE_INTEGER) throw Error('Epoch exhausted')
       const currentEpoch = epoch
-      let machine: PrinterState['machine']
       let invalidated = false
       let fieldTimes:
         RawMoonrakerObservation['fieldObservedAtMonoMs'] | undefined
@@ -305,7 +301,6 @@ export function createMoonrakerSubscription(input: {
           parsed.printer.progress,
           parsed.printer.fans,
           parsed.printer.light,
-          machine,
           lastJob?.endedAt,
         ])
         if (nextFingerprint === fingerprint) return
@@ -313,11 +308,7 @@ export function createMoonrakerSubscription(input: {
         emit({
           kind: 'snapshot',
           ...parsed,
-          printer: {
-            ...parsed.printer,
-            ...(lastJob ? { lastJob } : {}),
-            ...(machine ? { machine } : {}),
-          },
+          printer: lastJob ? { ...parsed.printer, lastJob } : parsed.printer,
         })
       }
       try {
@@ -330,7 +321,6 @@ export function createMoonrakerSubscription(input: {
             ? { onRequestSuccess: input.linkHealth.success }
             : {}),
           signal,
-          ...(input.machineProfile ? { machineProfile: true } : {}),
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.jobFields ? { jobFields: true } : {}),
           ...(input.onRawObservation
@@ -395,13 +385,6 @@ export function createMoonrakerSubscription(input: {
                           JSON.stringify(baseline.status)))
                   )
                     throw Error('Ambiguous complete response ordering')
-                  if (
-                    input.machineProfile &&
-                    complete.status.configfile !== undefined
-                  )
-                    machine = moonrakerMachineProfile(
-                      complete.status.configfile,
-                    )
                   fieldTimes = {
                     webhooks: stamp,
                     printState: stamp,
@@ -473,13 +456,7 @@ export function createMoonrakerSubscription(input: {
           },
         })
         const initial = Snapshot.parse(await client.snapshot)
-        if (!input.onRawObservation) {
-          if (input.machineProfile) {
-            const { status } = TemperatureSnapshot.parse(await client.snapshot)
-            machine = moonrakerMachineProfile(status.configfile)
-          }
-          publish(initial)
-        }
+        if (!input.onRawObservation) publish(initial)
         backoff = limits.reconnectMinMs
         const reason = await client.closed
         if (!signal.aborted) {

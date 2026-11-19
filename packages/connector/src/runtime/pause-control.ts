@@ -40,6 +40,8 @@ import {
 } from '../cloud/pause-signalling-client.ts'
 import { createPauseDriverRouter } from './pause-driver-router.ts'
 import { createFileTargets } from './file-targets.ts'
+import type { FileUploadTarget } from './file-upload.ts'
+import { withLibraryPrint } from './library-print-start.ts'
 import { runSignallingLifecycle } from './signalling.ts'
 
 export type PauseControlDiagnostic =
@@ -261,6 +263,58 @@ async function runAssignmentControl(
     wallNow: () => Date.now(),
     monotonicNow: () => performance.now(),
   })
+  /** Upload target of this assignment's locally provisioned printer. */
+  const uploadTargetFor = (
+    printerKey: string,
+  ): FileUploadTarget | undefined => {
+    const mapping = readPrinterBinding(printerBinding)
+    if (!mapping || mapping.printer_key !== printerKey) return undefined
+    const collection = config.collection
+    if (collection.version === 3) {
+      const bambu = collection.bambu.printers.find(
+        (p) => p.printerKey === printerKey,
+      )
+      if (bambu)
+        return {
+          backend: 'bambu',
+          host: bambu.host,
+          serial: bambu.serial,
+          accessCode: readBambuCredentials(bambu).password,
+          trust: {
+            ...(bambu.caFile
+              ? { caPem: readFileSync(bambu.caFile, 'utf8') }
+              : {}),
+            ...(bambu.pinSha256 ? { pinSha256: bambu.pinSha256 } : {}),
+          },
+        }
+    }
+    if ('printers' in collection) {
+      const printer = collection.printers.find(
+        (p) =>
+          p.printerKey === printerKey && p.origin === mapping.moonraker_origin,
+      )
+      if (printer) {
+        const selected = validateMoonrakerInput({
+          assignment: printer,
+          allowedOrigins: collection.allowedOrigins,
+          limits: collection.limits,
+        })
+        const apiKey = moonrakerAuthHeaders(selected.origin, selected.limits)[
+          'X-Api-Key'
+        ]
+        return {
+          backend: 'moonraker',
+          origin: selected.origin,
+          ...(apiKey ? { apiKey } : {}),
+        }
+      }
+    }
+    return createFileTargets({
+      config,
+      assignmentId,
+      dataDirectory: input.dataDirectory,
+    }).fileTransfer.targetFor(printerKey)
+  }
   let relay: ReturnType<typeof createPauseCommandRelay>
   const apiWork = new Set<Promise<unknown>>()
   let observation: ControlObservation | null = null
@@ -283,6 +337,25 @@ async function runAssignmentControl(
         return accepted
       },
     })
+    // The browser path starts library prints with the same starter as the
+    // API path (#386); the API path keeps the plain router and its own steps.
+    const libraryPrint = input.libraryPrint?.(assignmentId)
+    const browserDriver = withLibraryPrint(router, {
+      starter: libraryPrint,
+      targetFor(binding) {
+        const mapping = readPrinterBinding(binding)
+        if (binding !== printerBinding || !mapping) return undefined
+        try {
+          return uploadTargetFor(mapping.printer_key)
+        } catch {
+          return undefined
+        }
+      },
+      remember(binding, link) {
+        const mapping = readPrinterBinding(binding)
+        if (mapping) input.libraryLinks?.remember(mapping.printer_key, link)
+      },
+    })
     input.onMacroParams?.((id) => {
       const binding = config.bindingFor(id)
       return binding ? router.macroParams?.(binding) : undefined
@@ -294,7 +367,7 @@ async function runAssignmentControl(
     if (input.onControls) {
       input.onControls((id) => {
         const binding = config.bindingFor(id)
-        return binding ? router.controls(binding) : []
+        return binding ? browserDriver.controls(binding) : []
       })
       try {
         await router.detect(printerBinding, input.signal)
@@ -310,13 +383,12 @@ async function runAssignmentControl(
       },
       clock,
       journal,
-      driver: router,
+      driver: browserDriver,
       ...(input.storageDegraded
         ? { storageDegraded: input.storageDegraded }
         : {}),
       bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
     })
-    const libraryPrint = input.libraryPrint?.(assignmentId)
     if (trustedKeys)
       input.apiHandlers?.set(assignmentId, (frame, inbox) => {
         if (input.signal.aborted || apiWork.size >= 8) return
@@ -333,60 +405,7 @@ async function runAssignmentControl(
             ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
             jobFiles: {
               directory: join(input.dataDirectory, 'job-file-staging'),
-              targetFor(printerKey) {
-                const mapping = readPrinterBinding(printerBinding)
-                if (!mapping || mapping.printer_key !== printerKey)
-                  return undefined
-                const collection = config.collection
-                if (collection.version === 3) {
-                  const bambu = collection.bambu.printers.find(
-                    (p) => p.printerKey === printerKey,
-                  )
-                  if (bambu)
-                    return {
-                      backend: 'bambu',
-                      host: bambu.host,
-                      serial: bambu.serial,
-                      accessCode: readBambuCredentials(bambu).password,
-                      trust: {
-                        ...(bambu.caFile
-                          ? { caPem: readFileSync(bambu.caFile, 'utf8') }
-                          : {}),
-                        ...(bambu.pinSha256
-                          ? { pinSha256: bambu.pinSha256 }
-                          : {}),
-                      },
-                    }
-                }
-                if ('printers' in collection) {
-                  const printer = collection.printers.find(
-                    (p) =>
-                      p.printerKey === printerKey &&
-                      p.origin === mapping.moonraker_origin,
-                  )
-                  if (printer) {
-                    const selected = validateMoonrakerInput({
-                      assignment: printer,
-                      allowedOrigins: collection.allowedOrigins,
-                      limits: collection.limits,
-                    })
-                    const apiKey = moonrakerAuthHeaders(
-                      selected.origin,
-                      selected.limits,
-                    )['X-Api-Key']
-                    return {
-                      backend: 'moonraker',
-                      origin: selected.origin,
-                      ...(apiKey ? { apiKey } : {}),
-                    }
-                  }
-                }
-                return createFileTargets({
-                  config,
-                  assignmentId,
-                  dataDirectory: input.dataDirectory,
-                }).fileTransfer.targetFor(printerKey)
-              },
+              targetFor: uploadTargetFor,
             },
             printer: (id) => (id === assignmentId ? printerBinding : undefined),
             observe() {

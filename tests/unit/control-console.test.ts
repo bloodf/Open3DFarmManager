@@ -537,7 +537,9 @@ describe('command journal', () => {
             .get() as { sql: string }
         ).sql
         expect(sql).toContain("'set_pin','gcode'")
-        const v14 = sql.replace(",'config_write'", '')
+        const v14 = sql
+          .replace(",'start_library_print'", '')
+          .replace(",'config_write'", '')
         const historical =
           version === 14
             ? v14

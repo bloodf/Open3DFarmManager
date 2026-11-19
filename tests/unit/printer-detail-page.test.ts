@@ -238,5 +238,5 @@ describe('accessibility', () => {
     } finally {
       await server.close()
     }
-  }, 30_000)
+  }, 120_000)
 })

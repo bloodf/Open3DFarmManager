@@ -36,6 +36,7 @@ export type LibraryStore = Pick<
   | 'addVersion'
   | 'searchItems'
   | 'getVersion'
+  | 'getVersionBySha256'
   | 'listVersions'
   | 'softDeleteVersion'
 >
@@ -78,6 +79,7 @@ export type LibraryOperation =
   | 'list'
   | 'upload'
   | 'get'
+  | 'replay-source'
   | 'thumbnail'
   | 'delete'
   | 'versions'
@@ -88,6 +90,7 @@ const METHOD: Record<LibraryOperation, string> = {
   list: 'GET',
   upload: 'POST',
   get: 'GET',
+  'replay-source': 'GET',
   thumbnail: 'GET',
   delete: 'DELETE',
   versions: 'GET',
@@ -493,6 +496,19 @@ export async function libraryRoutes(
       })),
       nextCursor: result.next ? encodeCursor(result.next) : null,
     }
+  }
+
+  if (operation === 'replay-source') {
+    const parsed = z
+      .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/) })
+      .safeParse(query(event.req.url))
+    if (!parsed.success) throw invalid()
+    const result = await runtime.store.getVersionBySha256({
+      ...authority,
+      sha256: parsed.data.sha256,
+    })
+    if (!result.ok) return failure(result.reason, false)
+    return { version: publicVersion(result.version) }
   }
 
   if (operation === 'versions') {

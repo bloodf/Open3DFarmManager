@@ -25,9 +25,9 @@ import {
   type PrinterProfile,
   type StorageMode,
 } from '../utils/library-view.ts'
+import { useReplayLive } from '../composables/useReplayLive.ts'
 import {
   libraryReplayPrinters,
-  sendWithoutSession,
   type LibraryReplayAssignment,
 } from '../utils/library-replay.ts'
 
@@ -47,8 +47,9 @@ const canManage = ref(false)
 const connectors = ref<{ agentId: string }[]>([])
 const profiles = ref<PrinterProfile[]>([])
 const assignments = ref<LibraryReplayAssignment[]>([])
+const live = useReplayLive()
 const replayPrinters = computed(() =>
-  libraryReplayPrinters(assignments.value, profiles.value),
+  libraryReplayPrinters(assignments.value, profiles.value, live.liveFor),
 )
 const view = ref<'grid' | 'list'>('grid')
 const filters = ref<LibraryFilters>({ ...emptyFilters })
@@ -452,7 +453,7 @@ onBeforeUnmount(() => controller?.abort())
         :mode="settings.storageMode"
         :connectors="connectors"
         :replay-printers="replayPrinters"
-        :replay-send="sendWithoutSession"
+        :replay-send="live.send"
         @changed="refreshAll"
       />
     </template>

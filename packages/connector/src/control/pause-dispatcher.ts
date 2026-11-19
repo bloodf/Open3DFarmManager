@@ -94,6 +94,7 @@ export function controlEffectMatches(
 ): boolean {
   if (action === 'pause' || action === 'resume' || action === 'cancel')
     return observation.printState === controlTargetState(action)
+  if (action === 'file_op') return true
   const effect = observation.effect
   if (
     !effect ||

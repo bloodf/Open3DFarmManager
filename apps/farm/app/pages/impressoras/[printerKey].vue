@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
@@ -44,6 +45,7 @@ const {
   pauseStatus,
   commandInFlight,
   openControl,
+  connectFiles,
   confirmControl,
   closePause,
 } = useFarmControls(view, dialog)
@@ -76,6 +78,7 @@ const heaters = computed(() =>
 const capabilities = computed<DetailCapability[] | undefined>(() => {
   const controls = state.value?.controls
   const found: DetailCapability[] = [
+    ...(controls?.includes('file_op') ? (['files'] as const) : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
@@ -245,7 +248,26 @@ onMounted(() => heading.value?.focus())
       @set-temperature="setTemperature"
       @extrude="extrude"
       @emergency-stop="emergencyStop"
-    />
+    >
+      <template #arquivos>
+        <FileManagerPanel
+          :key="row.assignment.assignmentId"
+          :printer-key="row.assignment.printerKey"
+          :farm-id="ready?.scope?.farmId ?? ''"
+          :agent-id="row.assignment.agentId"
+          :can-save="availability('file_op').available"
+          :connect="(signal) => connectFiles(row!, signal)"
+          :enabled="live && pauseEnabled && !commandInFlight"
+          :can-edit="availability('file_op').available"
+          :can-print="
+            availability('start_print').available &&
+            availability('file_op').available
+          "
+          @file-op="(args, event) => control('file_op', event, args)"
+          @print="(file, event) => control('start_print', event, { file })"
+        />
+      </template>
+    </PrinterDetailDashboard>
     <dialog
       ref="pauseDialog"
       aria-labelledby="pause-dialog-title"
@@ -259,6 +281,17 @@ onMounted(() => heading.value?.focus())
         <p id="pause-dialog-description">
           Confirme o comando para esta impressora. Ele será enviado diretamente
           ao Connector e não será repetido automaticamente.
+        </p>
+        <p v-if="pauseTarget.action === 'file_op'">
+          {{
+            { delete: 'Excluir', move: 'Mover', mkdir: 'Criar pasta' }[
+              String(pauseTarget.args.op) as 'delete' | 'move' | 'mkdir'
+            ]
+          }}
+          <strong>{{ pauseTarget.args.path }}</strong>
+          <template v-if="pauseTarget.args.to">
+            para <strong>{{ pauseTarget.args.to }}</strong></template
+          >.
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
         <div class="actions">

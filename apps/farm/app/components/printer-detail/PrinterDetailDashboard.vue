@@ -184,7 +184,9 @@ const heaterReason = computed(
         :key="tab.id"
         #[tab.id]
       >
-        <p>Sem dados de {{ tab.label }} neste momento.</p>
+        <slot :name="tab.id"
+          ><p>Sem dados de {{ tab.label }} neste momento.</p></slot
+        >
       </template>
     </Tabs>
     <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">

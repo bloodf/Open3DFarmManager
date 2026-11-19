@@ -4,6 +4,10 @@ import {
   isMotionAction,
   motionSupported,
 } from './control-motion.ts'
+import {
+  ControlArguments,
+  PrinterGcodePath,
+} from '../../../farm-protocol/src/control-actions.ts'
 import { parseExtrude } from './control-extrusion.ts'
 /**
  * Moonraker extended command builder and capability inspection.
@@ -89,6 +93,8 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('virtual_sdcard'))
+    supported.push('file_op', 'start_print')
   if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))
@@ -148,6 +154,16 @@ export function buildMoonrakerCommand(
     return {
       method: 'printer.gcode.script',
       params: { script: parseExtrude(args, objects).script },
+    }
+  }
+
+  if (action === 'start_print') {
+    const parsed = ControlArguments.parse({ action, args })
+    if (parsed.action !== 'start_print' || !objects.includes('virtual_sdcard'))
+      throw Error('File printing unavailable')
+    return {
+      method: 'printer.print.start',
+      params: { filename: PrinterGcodePath.parse(parsed.args.file) },
     }
   }
 

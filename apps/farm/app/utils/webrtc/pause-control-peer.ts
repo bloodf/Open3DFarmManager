@@ -411,9 +411,15 @@ export class PauseBrowserPeer {
     if (!this.#options.onData) return false
     return this.current() && this.#session.sendCommand(command)
   }
-  async listFiles(printerKey: string): Promise<FileListResult> {
+  async listFiles(
+    printerKey: string,
+    directory?: string,
+    download?: string,
+  ): Promise<FileListResult> {
     const request = FileListRequest.parse({
       type: 'files.list',
+      directory,
+      download,
       request_id: crypto.randomUUID(),
       printer_key: printerKey,
     })
@@ -456,6 +462,11 @@ export class PauseBrowserPeer {
             result.printer_key !== printerKey
           )
             throw Error('Invalid file list correlation')
+          if (
+            result.ok &&
+            (result.download !== undefined) !== (download !== undefined)
+          )
+            throw Error('Unexpected file response')
           cleanup()
           resolve(result)
         } catch {

@@ -23,6 +23,7 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'file_op',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -79,7 +80,8 @@ export function controlSourceState(
   if (action === 'jog' || action === 'motors_off')
     return state === 'idle' || state === 'cancelled'
   // Extrusion moves filament: only a stopped printer may do it.
-  if (action === 'extrude') return state === 'idle' || state === 'cancelled'
+  if (action === 'file_op' || action === 'extrude')
+    return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
   return action === 'resume'
@@ -120,7 +122,31 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+export const PrinterGcodePath = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (path) =>
+      !/[\\%:\u0000-\u001f\u007f-\u009f]/.test(path) &&
+      path
+        .split('/')
+        .every(
+          (part) =>
+            part.trim() === part && part && part !== '.' && part !== '..',
+        ),
+  )
+export const FileOperation = z.discriminatedUnion('op', [
+  z.strictObject({ op: z.literal('delete'), path: PrinterGcodePath }),
+  z.strictObject({ op: z.literal('mkdir'), path: PrinterGcodePath }),
+  z.strictObject({
+    op: z.literal('move'),
+    path: PrinterGcodePath,
+    to: PrinterGcodePath,
+  }),
+])
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

@@ -27,6 +27,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   jog: 'Mover eixo',
   motors_off: 'Desligar motores',
   z_babystep: 'Ajuste fino do Z',
+  file_op: 'Gerenciar arquivos',
   set_factor: 'Definir velocidade e fluxo',
   extrude: 'Extrudar filamento',
 }

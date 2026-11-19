@@ -4,6 +4,12 @@ import {
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  FileOperationRefused,
+  fileOperationAcknowledged,
+  prepareFileOperation,
+  requireStoppedPrinter,
+} from './control-file-manager.ts'
 import { buildMoonrakerCommand } from './commands.ts'
 import {
   checkExtrudeProbe,
@@ -64,6 +70,7 @@ const Snapshot = z.strictObject({
       state: z.enum(['ready', 'startup', 'shutdown', 'error']),
     }),
     print_stats: z.strictObject({
+      filename: z.string().optional(),
       state: z.enum([
         'standby',
         'printing',
@@ -146,8 +153,8 @@ export function openFixedMoonrakerPause(input: {
     prepared = false,
     attempted = false,
     acknowledged = false,
-    audited = false,
-    extended = false
+    audited = false
+  let extended: ExtendedControlAction | undefined
   let sequence = 0,
     sourceTime = -1,
     receivedBytes = 0,
@@ -346,11 +353,24 @@ export function openFixedMoonrakerPause(input: {
   async function query(
     index: number,
     deadline: number,
+    withFilename = false,
   ): Promise<ControlObservation> {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
-      const wire = QUERIES[index]
+      const wire = withFilename
+        ? JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            method: 'printer.objects.query',
+            params: {
+              objects: {
+                webhooks: ['state'],
+                print_stats: ['state', 'filename'],
+              },
+            },
+          })
+        : QUERIES[index]
       if (!wire) throw failure()
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
@@ -375,6 +395,15 @@ export function openFixedMoonrakerPause(input: {
         readyObservedMono: started,
         printStateObservedMono: started,
         receivedMono: received,
+        ...(withFilename && snapshot.status.print_stats.filename !== undefined
+          ? {
+              effect: {
+                kind: 'file' as const,
+                filename: snapshot.status.print_stats.filename,
+                observedMono: started,
+              },
+            }
+          : {}),
       })
       publish(observation)
       current()
@@ -410,6 +439,7 @@ export function openFixedMoonrakerPause(input: {
       signal,
     }: Parameters<PauseDriver['pauseOnce']>[0],
     cap?: number,
+    accepts: (result: unknown) => boolean = (result) => result === 'ok',
   ) {
     if (
       requested !== binding ||
@@ -446,7 +476,7 @@ export function openFixedMoonrakerPause(input: {
     )
       .then((result) => {
         current()
-        if (now() >= operationDeadline || result !== 'ok') throw failure()
+        if (now() >= operationDeadline || !accepts(result)) throw failure()
         current()
         acknowledged = true
         return { acknowledged: true }
@@ -529,7 +559,7 @@ export function openFixedMoonrakerPause(input: {
         ? error
         : new ExtrudeRefused('state')
     }
-    extended = true
+    extended = 'extrude'
     return send(extendedWire('extrude', args), request, 5000)
   }
   const requestRead = (id: number, wire: string) =>
@@ -543,11 +573,33 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
       if (isMotionAction(action)) {
-        extended = true
+        extended = action
         return executeMotion(action, args, request)
       }
+      if (action === 'file_op' || action === 'start_print') {
+        if (!input.objects?.includes('virtual_sdcard'))
+          throw new FileOperationRefused('unsupported-action')
+        extended = action
+        const read = (method: string, params: object) =>
+          requestRead(
+            11,
+            JSON.stringify({ jsonrpc: '2.0', id: 11, method, params }),
+          )
+        if (action === 'start_print')
+          return requireStoppedPrinter(read).then(() =>
+            send(extendedWire(action, args), request, 5000),
+          )
+        return prepareFileOperation(args, read).then((call) =>
+          send(
+            JSON.stringify({ jsonrpc: '2.0', id: 2, ...call }),
+            request,
+            5000,
+            (result) => fileOperationAcknowledged(result, args),
+          ),
+        )
+      }
       if (action === 'extrude') return extrude(args, request)
-      extended = true
+      extended = action
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
@@ -577,7 +629,11 @@ export function openFixedMoonrakerPause(input: {
           // No print-state target exists for an extended action. Report the
           // first state read after the acknowledged request and let the
           // dispatcher judge it.
-          const observation = await query(1, operationDeadline)
+          const observation = await query(
+            1,
+            operationDeadline,
+            extended === 'start_print',
+          )
           detachCommand()
           return observation
         }

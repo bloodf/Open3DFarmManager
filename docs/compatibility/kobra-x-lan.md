@@ -121,23 +121,28 @@ Observed on firmware 2.0.2.8 (S1). Fields:
 
 ### Credential recovery: `POST /ctrl`
 
-Sequence (observed in S1 as the owner's flow, status of each step noted):
+The owner's clean-room follow-up (S6) documents credential recovery on firmware
+2.0.2.8 with LAN mode enabled.
 
-1. `GET /info` returns the `token`. (observed)
-2. `POST /ctrl` with query parameters `ts`, `nonce`, `sign` and `did`. The response body is an
-   AES-128-CBC encrypted blob. (reported by S1 from the owner's flow; the parameter meanings are
-   described in S2/S3 only)
-3. Decrypting the blob yields the MQTT `username`, `password`, `deviceId` and `modeId`. (reported)
+1. Read the 32-character ASCII token from `GET /info`. Use the confirmed sender
+   address for both requests and ignore addresses and URLs in printer payloads.
+2. Send an empty `POST /ctrl` with `Connection: close`. The query contains the
+   current Unix time in milliseconds (`ts`), six random ASCII letters or digits
+   (`nonce`), the signature (`sign`), and literal `did=random`.
+3. Compute lowercase MD5 hex over the first 16 token characters. Concatenate the
+   hex text with `ts` and `nonce`, then compute lowercase MD5 hex again to get
+   `sign`.
+4. Require HTTP 200 and JSON `code: 200`. Decode `data.info` as base64 and decrypt
+   with AES-128-CBC and validated PKCS#7 padding. Use the final 16 token characters
+   as the key and the 16 characters of `data.token` as the IV. Both are ASCII
+   bytes.
+5. Parse UTF-8 JSON. Use `username`, `password`, and `deviceId` and default an
+   absent `modeId` to `20030`. Fail activation on invalid credentials or a
+   printer refusal. Keep the recovered credentials in Connector memory.
 
-Gaps that block a clean implementation (see [Unverified items](#unverified-items)):
-
-- How `sign` is computed is not documented in S1.
-- The AES key and IV source is not documented in S1.
-- The decrypted blob's exact JSON field names are not documented in S1, beyond the four fields above.
-
-The adapter must not implement these steps until a capture or a clean-room note fills these gaps.
-S1 says the owner's Python code carries a decrypt-only AES routine; that code is not a source for
-this specification.
+The focused loopback test checks the supplied signature and ciphertext vectors.
+They are synthetic and establish agreement with S6. Hardware TLS interoperability,
+firmware compatibility, and browser acceptance require separate evidence.
 
 ### `POST /gcode_upload`
 
@@ -442,8 +447,14 @@ The adapter must not depend on these until a capture exists. Each is also marked
 - Flow calibration and time-lapse in `print/start`.
 - Everything under [Print Assist and printer details](#print-assist-and-printer-details-not-verified).
 - `file/deleteVideo`.
-- The `sign` computation for `POST /ctrl`.
-- The AES key and IV for the credential blob.
+- The hardware response to a bad signature or stale timestamp, timestamp tolerance,
+  and the meaning of `did`. The Connector uses the documented literal and rejects
+  a failed request without trying alternate formats.
+- The canonical public MQTT topic variant and client-certificate behavior beyond
+  the documented operator-provided identity. The Connector keeps its existing
+  status subscription and TLS policy, with no legacy cipher fallback.
+- Credential recovery on firmware other than 2.0.2.8.
+- The source of the upload `s` token. Credential recovery does not enable native uploads.
 - The multipart field name for `gcode_upload`.
 - The MQTT client identifier, keepalive, clean-session and QoS settings.
 - The exact full topic of the ack and report paths.
@@ -473,6 +484,8 @@ The adapter must not depend on these until a capture exists. Each is also marked
   Reported facts only, as summarized in S1. No binary content is reproduced here.
 - S5: anycubic-orca-plugin, `anycubic_lan.py` (AGPL-3.0). Reported facts only, as summarized in S1.
 
-This document was written from S1 only. S2, S3, S4 and S5 were not read directly for it, and no code
+- S6: [Owner clean-room follow-up and synthetic vectors](https://github.com/bloodf/Open3DFarmManager/issues/363#issuecomment-6996775853).
+
+This document draws on S1 and S6. S2, S3, S4 and S5 were not read directly for it, and no code
 from any source was copied. Facts that S1 attributes to those sources are restated here in OpenFarm's
 own words and stay `reported` until a Kobra X capture confirms them.

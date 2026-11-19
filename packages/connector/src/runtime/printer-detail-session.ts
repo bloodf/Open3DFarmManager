@@ -24,20 +24,33 @@ import {
   type MoonrakerDetailStream,
 } from '../moonraker/detail-stream.ts'
 
+import {
+  createBambuDetailStream,
+  type BambuDetailStream,
+} from '../bambu/printer-detail.ts'
+
 const MAX_ITEMS = 256
 const MAX_QUERIES_PER_SESSION = 4
 const METHOD_NOT_FOUND = -32601
 
 export type PrinterDetailSourceFor = (
   printerKey: string,
-) => MoonrakerDetailStream | undefined
+) => MoonrakerDetailStream | BambuDetailStream | undefined
 
 /** One lazy stream per Moonraker assignment; nothing connects until subscribed. */
 export function createPrinterDetailSources(
   config: AgentRuntimeConfig,
 ): PrinterDetailSourceFor {
-  const sources = new Map<string, MoonrakerDetailStream>()
+  const sources = new Map<string, MoonrakerDetailStream | BambuDetailStream>()
   const { printers, limits, allowedOrigins } = config.collection
+  if (config.collection.version === 3)
+    for (const binding of config.collection.bambu.printers)
+      if (
+        config.assignments.some(
+          (item) => item.printer_key === binding.printerKey,
+        )
+      )
+        sources.set(binding.printerKey, createBambuDetailStream({ binding }))
   for (const assignment of config.assignments) {
     if (!('moonraker_origin' in assignment) || !assignment.moonraker_origin)
       continue
@@ -125,11 +138,15 @@ type Query = z.infer<typeof PrinterDetailQueryRequest>
 
 async function answer(
   frame: Query,
-  source: MoonrakerDetailStream,
+  source: MoonrakerDetailStream | BambuDetailStream,
   signal: AbortSignal,
 ) {
   const { path: _path, ...rest } = frame as Query & { path?: string }
   const base = { ...rest, t: 'query.response' as const }
+  if ('query' in source) {
+    const reply = await source.query(frame.kind, signal)
+    return PrinterDetailQueryResponse.parse({ ...base, ...reply })
+  }
   try {
     const data = await query(frame, source, signal)
     return PrinterDetailQueryResponse.parse({ ...base, data })

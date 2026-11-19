@@ -19,6 +19,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { acquireQueueLock } from './queue-lock.ts'
 import {
+  DiscoveryResults,
+  TelemetryEvent,
   PrinterState,
   PrinterTransition,
   SpoolInventory,
@@ -31,25 +33,7 @@ const MAX_RECORD = 64 * 1024
 const COMPACT_BYTES = 8 * 1024 * 1024
 const UUID =
   /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
-export type TelemetryRecord =
-  | {
-      eventId: string
-      queuedAt: number
-      kind: 'printer-state'
-      state: PrinterState
-    }
-  | {
-      eventId: string
-      queuedAt: number
-      kind: 'printer-transition'
-      transition: PrinterTransition
-    }
-  | {
-      eventId: string
-      queuedAt: number
-      kind: 'inventory-snapshot'
-      inventory: SpoolInventory
-    }
+export type TelemetryRecord = TelemetryEvent
 export interface QueueLimits {
   maxBytes?: number
   maxAgeMs?: number
@@ -99,6 +83,7 @@ function parseRecord(value: unknown): TelemetryRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error('Invalid queue record')
   const record = value as Record<string, unknown>
+  if (record.kind === 'discovery') return TelemetryEvent.parse(record)
   const transition = record.kind === 'printer-transition'
   const inventory = record.kind === 'inventory-snapshot'
   if (
@@ -489,11 +474,18 @@ export class TelemetryQueue {
       now,
     )
   }
+  enqueueDiscovery(discovery: DiscoveryResults, now: number) {
+    return this.append(
+      { kind: 'discovery', discovery: DiscoveryResults.parse(discovery) },
+      now,
+    )
+  }
   private append(
     body:
       | { kind: 'printer-state'; state: PrinterState }
       | { kind: 'printer-transition'; transition: PrinterTransition }
-      | { kind: 'inventory-snapshot'; inventory: SpoolInventory },
+      | { kind: 'inventory-snapshot'; inventory: SpoolInventory }
+      | { kind: 'discovery'; discovery: DiscoveryResults },
     now: number,
   ): { eventId: string; loss: QueueLoss } {
     // Degraded storage stops enqueueing: the record is counted, never stored.
@@ -572,6 +564,11 @@ export class TelemetryQueue {
     const records: TelemetryRecord[] = []
     let size = 2 // JSON array brackets, with commas between entries.
     for (const record of this.records.slice(0, maxRecords)) {
+      if (
+        records.length &&
+        (record.kind === 'discovery' || records[0]?.kind === 'discovery')
+      )
+        break
       const extra =
         Buffer.byteLength(JSON.stringify(record)) + (records.length ? 1 : 0)
       if (size + extra > maxBytes) break

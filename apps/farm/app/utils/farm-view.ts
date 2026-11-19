@@ -35,6 +35,10 @@ export const FarmAssignmentPage = z
           assignmentId: BrowserDeviceUuid,
           agentId: BrowserDeviceUuid,
           printerKey: exactKey,
+          displayName: exactKey.nullish(),
+          groupName: exactKey.nullish(),
+          location: exactKey.nullish(),
+          sortOrder: z.number().int().min(0).max(9999).nullish(),
           status: z.enum(['active', 'revoked']),
           connectorStatus: z.enum(['pending', 'approved', 'revoked']),
         }),
@@ -126,6 +130,14 @@ function sameInventory(
 ) {
   return !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
 }
+function withoutAgentStorage(
+  storage: Readonly<Record<string, 'degraded'>> | undefined,
+  agentId: string,
+): Readonly<Record<string, 'degraded'>> {
+  if (!storage || !(agentId in storage)) return storage ?? {}
+  const { [agentId]: _removed, ...rest } = storage
+  return rest
+}
 export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
   const elapsed = now.mono - item.received.mono
   return (
@@ -172,6 +184,7 @@ type Ready = {
   feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
   spools: readonly FarmSpoolObservation[]
+  connectorStorage?: Readonly<Record<string, 'degraded'>>
   nextPrinter: string | null
   printerAfter: string | null
   canManage: boolean
@@ -510,6 +523,7 @@ export function createFarmView(deps: Dependencies) {
         scope: null,
         rows: [],
         spools: [],
+        connectorStorage: {},
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
@@ -546,6 +560,7 @@ export function createFarmView(deps: Dependencies) {
               ...item,
               historical: true,
             })),
+            connectorStorage: {},
           }
         : {
             ...previous,
@@ -554,6 +569,7 @@ export function createFarmView(deps: Dependencies) {
             feedScope: deps.feed ? 'idle' : 'disabled',
             rows: [],
             spools: [],
+            connectorStorage: {},
             nextPrinter: null,
             printerAfter: after,
             canManage: false,
@@ -729,6 +745,7 @@ export function createFarmView(deps: Dependencies) {
         observation: null,
         localOrigin: null,
       })),
+      connectorStorage: {},
       keys: { ...keys, selected: keyId },
       feedScope: deps.feed ? 'idle' : 'disabled',
     })
@@ -1042,6 +1059,10 @@ export function createFarmView(deps: Dependencies) {
         )
           publish({
             ...state,
+            connectorStorage: withoutAgentStorage(
+              state.connectorStorage,
+              agentId,
+            ),
             spools: state.spools.map((item) =>
               item.agentId === agentId ? { ...item, historical: true } : item,
             ),
@@ -1182,8 +1203,18 @@ export function createFarmView(deps: Dependencies) {
               const inventory = sameInventory(before, message.inventory)
                 ? (before ?? null)
                 : (message.inventory ?? null)
+              const connectorStorage =
+                message.storage === 'degraded'
+                  ? state.connectorStorage?.[agentId] === 'degraded'
+                    ? state.connectorStorage
+                    : {
+                        ...state.connectorStorage,
+                        [agentId]: 'degraded' as const,
+                      }
+                  : withoutAgentStorage(state.connectorStorage, agentId)
               publish({
                 ...state,
+                connectorStorage,
                 spools: [
                   ...state.spools.filter((item) => item.agentId !== agentId),
                   {

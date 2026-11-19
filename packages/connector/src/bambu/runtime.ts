@@ -1,4 +1,6 @@
 import { mapBambuFirmware } from './firmware.ts'
+import { parseBambuMachineProfile } from '../machine-profile/bambu.ts'
+import type { MachineProfile } from '../../../farm-protocol/src/machine-profile.ts'
 import { decodeBambuVersion } from './version.ts'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
@@ -54,6 +56,7 @@ export function createBambuRuntimeSubscription(input: {
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let machine: MachineProfile | undefined
   let version: unknown
   let upgradeReport: unknown
   let epoch = 0
@@ -65,6 +68,7 @@ export function createBambuRuntimeSubscription(input: {
   let filamentUsage: FilamentUsage[] | undefined
   const clear = () => {
     firmwareObservation = undefined
+    machine = undefined
     version = undefined
     upgradeReport = undefined
     fields = {}
@@ -95,6 +99,8 @@ export function createBambuRuntimeSubscription(input: {
     }
     const parsed = PrinterState.safeParse({
       ...fields,
+      // Not time-stamped: hardware limits do not age with the report.
+      ...(machine ? { machine } : {}),
       controls: binding.control ? ['pause', 'resume', 'cancel'] : [],
       printerKey: binding.printerKey,
       observedAt: Date.now(),
@@ -165,6 +171,7 @@ export function createBambuRuntimeSubscription(input: {
             return
           }
           if (decodeBambuVersion(rawFirmware)) version = rawFirmware
+          machine = parseBambuMachineProfile(rawFirmware) ?? machine
           if (
             rawFirmware &&
             typeof rawFirmware === 'object' &&

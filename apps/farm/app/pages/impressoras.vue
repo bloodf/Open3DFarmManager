@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, provide } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { configurationTargetHash } from '../../../../packages/farm-protocol/src/configuration-target.ts'
 import AssignmentList from '../components/printer-setup/AssignmentList.vue'
@@ -9,6 +9,7 @@ import OperationStatus from '../components/printer-setup/OperationStatus.vue'
 import PreparedReview from '../components/printer-setup/PreparedReview.vue'
 import PrintersFarmSelector from '../components/printer-setup/PrintersFarmSelector.vue'
 import PrintersNavIntro from '../components/printer-setup/PrintersNavIntro.vue'
+import PrintersPageStatus from '../components/printer-setup/PrintersPageStatus.vue'
 import RegisterAssignment from '../components/printer-setup/RegisterAssignment.vue'
 import RevokeConfirmation from '../components/printer-setup/RevokeConfirmation.vue'
 import SetupForm from '../components/printer-setup/SetupForm.vue'
@@ -42,8 +43,10 @@ import {
 } from '../utils/printer-setup-state.ts'
 
 const state = createPrinterSetupState()
-const { farmId, canManage, pending, error, message } = state
-const { heading, errorSummary, kobraErrorSummary, revokeTarget } = state
+const { farmId, canManage } = state
+// True once the first farm read has settled, so the empty state never flashes.
+const started = ref(false)
+const { heading, kobraErrorSummary, revokeTarget } = state
 const { kobraBusy, kobraBootstrap, kobraError, kobraStatus, kobraStage } = state
 const { kobraKeyState, kobraAgentId, kobraKeyId, kobraOperation } = state
 const { kobraIp, kobraLabel, kobraExpectedDeviceId, kobraUnknownNotice } = state
@@ -68,6 +71,7 @@ const epoch: KobraEpoch = {
 const setup = createPrinterSetup(state, epoch, {
   handleKobraException,
   openPrinterDiscoverySession,
+  adoption: useNetworkAdoption(),
 })
 const { closeKobraSession, ensureKobraSession, applySessionOutcome } = setup
 const { persistPendingOperation, clearPersistedOperation } = setup
@@ -527,8 +531,8 @@ async function prepareCrealityPrinter() {
 let stopWatching: (() => void) | undefined
 onMounted(() => {
   heading.value?.focus()
-  void setup.loadFarms()
   stopWatching = setup.watchSession()
+  void setup.initialize().finally(() => (started.value = true))
 })
 
 onBeforeUnmount(() => {
@@ -541,10 +545,7 @@ onBeforeRouteLeave(setup.clear)
   <main id="conteudo">
     <h1 ref="heading" tabindex="-1">Impressoras da farm</h1>
     <PrintersNavIntro />
-    <p v-if="error" ref="errorSummary" role="alert" tabindex="-1">
-      {{ error }} <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
-    </p>
-    <p role="status" aria-live="polite">{{ pending ? 'Aguarde.' : message }}</p>
+    <PrintersPageStatus :started="started" />
     <PrintersFarmSelector />
     <AssignmentList />
     <section

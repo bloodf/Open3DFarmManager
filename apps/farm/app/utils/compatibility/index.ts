@@ -1,9 +1,11 @@
-import { anycubicCatalog } from './anycubic'
-import { bambuCatalog } from './bambu'
-import { crealityCatalog } from './creality'
-import { lanCatalog } from './lan'
-import { klipperCatalog, klipperFamilyIds } from './klipper'
-import type { CatalogCapability, AnycubicCatalogProduct } from './anycubic'
+import { anycubicCatalog } from './anycubic.ts'
+import { bambuCatalog } from './bambu.ts'
+import { crealityCatalog } from './creality.ts'
+import { lanCatalog } from './lan.ts'
+import { klipperCatalog, klipperFamilyIds } from './klipper.ts'
+export { controlAreaKeys, controlAreaLabels } from './control-areas.ts'
+export type { ControlArea } from './control-areas.ts'
+import type { CatalogCapability, AnycubicCatalogProduct } from './anycubic.ts'
 
 export const compatibilityCatalog: readonly AnycubicCatalogProduct[] = [
   ...anycubicCatalog,

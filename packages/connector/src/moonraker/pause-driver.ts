@@ -1,12 +1,76 @@
 import {
+  BedMeshRefused,
+  bedMeshQueryWire,
+  bedMeshSupported,
+  parseBedMeshState,
+  refuseBedMesh,
+} from './control-bed-mesh.ts'
+import {
   controlTargetState,
+  ExcludeObjectArguments,
   controlSourceState,
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
+import { executePower } from './control-power.ts'
+import {
+  FileOperationRefused,
+  fileOperationAcknowledged,
+  prepareFileOperation,
+  requireStoppedPrinter,
+} from './control-file-manager.ts'
+import {
+  ExcludeObjectRefusal,
+  excludeObjectProbe,
+  excludeObjectWire,
+} from './control-print-status.ts'
 import { buildMoonrakerCommand } from './commands.ts'
+import {
+  parseQueueOp,
+  parseQueueStatus,
+  queueNeedsStatus,
+  queueStatusWire,
+  QueueRefused,
+  queueReplyAccepted,
+  queueSupported,
+  refuseQueueOp,
+} from './control-job-queue.ts'
+import {
+  checkExtrudeProbe,
+  ExtrudeRefused,
+  extrudeProbeWire,
+  parseExtrude,
+} from './control-extrusion.ts'
+import { OutputRefused } from './control-outputs.ts'
+import {
+  parseTimelapseOp,
+  parseTimelapseStatus,
+  refuseTimelapseOp,
+  TimelapseRefused,
+  timelapseReplyAccepted,
+  timelapseStatusWire,
+  timelapseSupported,
+} from './control-timelapse.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
+import {
+  ConsoleRefusal,
+  consoleQueryWire,
+  consoleSupported,
+  parseConsoleState,
+  refuseConsole,
+  takeConsoleRate,
+} from './control-console.ts'
+import {
+  MotionRefusal,
+  isMotionAction,
+  motionNeedsState,
+  motionQueryWire,
+  motionSupported,
+  parseMotionState,
+  refuseMotion,
+  type MotionAction,
+} from './control-motion.ts'
 import {
   readPrinterBinding,
   type PrinterBinding,
@@ -44,10 +108,14 @@ const SideNotification = z.strictObject({
 const Snapshot = z.strictObject({
   eventtime: z.number().finite().nonnegative(),
   status: z.strictObject({
+    exclude_object: z
+      .object({ excluded_objects: z.array(z.string()) })
+      .optional(),
     webhooks: z.strictObject({
       state: z.enum(['ready', 'startup', 'shutdown', 'error']),
     }),
     print_stats: z.strictObject({
+      filename: z.string().optional(),
       state: z.enum([
         'standby',
         'printing',
@@ -95,6 +163,8 @@ export function openFixedMoonrakerPause(input: {
    * it and refused without it; lifecycle actions never need it.
    */
   objects?: readonly string[] | undefined
+  /** Local admin switch of the G-code console; off unless provisioned. */
+  gcodeConsole?: boolean | undefined
 }) {
   const candidateMapping = readPrinterBinding(input.binding)
   if (
@@ -130,8 +200,8 @@ export function openFixedMoonrakerPause(input: {
     prepared = false,
     attempted = false,
     acknowledged = false,
-    audited = false,
-    extended = false
+    audited = false
+  let extended: ExtendedControlAction | undefined
   let sequence = 0,
     sourceTime = -1,
     receivedBytes = 0,
@@ -330,11 +400,28 @@ export function openFixedMoonrakerPause(input: {
   async function query(
     index: number,
     deadline: number,
+    withFilename = false,
+    excludedName?: string,
   ): Promise<ControlObservation> {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
-      const wire = QUERIES[index]
+      const wire =
+        excludedName !== undefined
+          ? excludeObjectProbe(id)
+          : withFilename
+            ? JSON.stringify({
+                jsonrpc: '2.0',
+                id,
+                method: 'printer.objects.query',
+                params: {
+                  objects: {
+                    webhooks: ['state'],
+                    print_stats: ['state', 'filename'],
+                  },
+                },
+              })
+            : QUERIES[index]
       if (!wire) throw failure()
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
@@ -359,6 +446,25 @@ export function openFixedMoonrakerPause(input: {
         readyObservedMono: started,
         printStateObservedMono: started,
         receivedMono: received,
+        ...(withFilename && snapshot.status.print_stats.filename !== undefined
+          ? {
+              effect: {
+                kind: 'file' as const,
+                filename: snapshot.status.print_stats.filename,
+                observedMono: started,
+              },
+            }
+          : {}),
+        ...(excludedName &&
+        snapshot.status.exclude_object?.excluded_objects.includes(excludedName)
+          ? {
+              effect: {
+                kind: 'excluded-object' as const,
+                name: excludedName,
+                observedMono: started,
+              },
+            }
+          : {}),
       })
       publish(observation)
       current()
@@ -394,6 +500,7 @@ export function openFixedMoonrakerPause(input: {
       signal,
     }: Parameters<PauseDriver['pauseOnce']>[0],
     cap?: number,
+    accepts: (result: unknown) => boolean = (result) => result === 'ok',
   ) {
     if (
       requested !== binding ||
@@ -430,7 +537,7 @@ export function openFixedMoonrakerPause(input: {
     )
       .then((result) => {
         current()
-        if (now() >= operationDeadline || result !== 'ok') throw failure()
+        if (now() >= operationDeadline || !accepts(result)) throw failure()
         current()
         acknowledged = true
         return { acknowledged: true }
@@ -458,6 +565,267 @@ export function openFixedMoonrakerPause(input: {
       return undefined
     }
   }
+  /**
+   * Motion: refusals are decided from one toolhead read before the single
+   * send. A refused action closes the attempt having written nothing.
+   */
+  async function executeMotion(
+    action: MotionAction,
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !motionSupported(input.objects)
+      )
+        throw new MotionRefusal('unsupported')
+      // Same builder as the send; it also rejects malformed arguments.
+      const wire = extendedWire(action, args)
+      if (wire === undefined) throw new MotionRefusal('invalid')
+      if (motionNeedsState(action))
+        refuseMotion(
+          action,
+          args,
+          parseMotionState(
+            await request(11, motionQueryWire(11), lifetimeDeadline),
+          ),
+        )
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof MotionRefusal ? error : failure()
+    }
+  }
+  /**
+   * Cold-extrusion guard: one read-only query of the live tool, then the
+   * single command. Every refusal happens before a write and is never retried.
+   */
+  async function extrude(
+    args: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    if (!input.objects || request.binding !== binding || !prepared || attempted)
+      throw new ExtrudeRefused('state')
+    const { name } = parseExtrude(args, input.objects)
+    try {
+      checkExtrudeProbe(await requestRead(11, extrudeProbeWire(11, name)), name)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ExtrudeRefused
+        ? error
+        : new ExtrudeRefused('state')
+    }
+    extended = 'extrude'
+    return send(extendedWire('extrude', args), request, 5000)
+  }
+  /**
+   * Queue operation: refusals are decided from one read of the queue before
+   * the single send. A refused operation closes the attempt having written
+   * nothing, and an uncertain send is never repeated.
+   */
+  async function queueOp(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !queueSupported(input.objects)
+      )
+        throw new QueueRefused('unsupported-action')
+      const { op } = parseQueueOp(args)
+      const wire = extendedWire('queue_op', args)
+      if (wire === undefined) throw new QueueRefused('invalid-command')
+      refuseQueueOp(
+        op,
+        queueNeedsStatus(op)
+          ? parseQueueStatus(await requestRead(11, queueStatusWire(11)))
+          : undefined,
+      )
+      extended = 'queue_op'
+      return await send(
+        wire,
+        requested,
+        5000,
+        (result) => result === 'ok' || queueReplyAccepted(result),
+      )
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof QueueRefused ? error : failure()
+    }
+  }
+  /**
+   * Timelapse render or delete: refusals are decided from one read before the
+   * single send; a refusal writes nothing and an uncertain send never repeats.
+   */
+  async function timelapse(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !timelapseSupported(input.objects)
+      )
+        throw new TimelapseRefused('unsupported-action')
+      const { op } = parseTimelapseOp(args)
+      const wire = extendedWire('timelapse', args)
+      if (wire === undefined) throw new TimelapseRefused('invalid-command')
+      refuseTimelapseOp(
+        op,
+        parseTimelapseStatus(
+          op,
+          await requestRead(11, timelapseStatusWire(11, op)),
+        ),
+      )
+      extended = 'timelapse'
+      return await send(wire, requested, 5000, (result) =>
+        timelapseReplyAccepted(op, result),
+      )
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof TimelapseRefused ? error : failure()
+    }
+  }
+  /**
+   * Named fans, LEDs and pins: the name is checked against the object list
+   * before the single write; a refusal sends nothing and is never retried.
+   */
+  async function output(
+    action: ExtendedControlAction,
+    args: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    if (!input.objects || request.binding !== binding || !prepared || attempted)
+      throw new OutputRefused('invalid-command')
+    try {
+      buildMoonrakerCommand(action, args, input.objects)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof OutputRefused
+        ? error
+        : new OutputRefused('invalid-command')
+    }
+    extended = action
+    return send(extendedWire(action, args), request, 5000)
+  }
+  let excludedName: string | undefined
+  async function excludeObject(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    let wire: string
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !input.objects?.includes('exclude_object') ||
+        !input.objects.includes('print_stats')
+      )
+        throw new ExcludeObjectRefusal(
+          'Object exclusion unavailable',
+          'unsupported-action',
+        )
+      const parsed = ExcludeObjectArguments.safeParse(args)
+      if (!parsed.success)
+        throw new ExcludeObjectRefusal(
+          'Invalid print object name',
+          'invalid-command',
+        )
+      wire = excludeObjectWire(
+        parsed.data,
+        await requestRead(11, excludeObjectProbe(11)),
+      )
+      excludedName = parsed.data.name
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ExcludeObjectRefusal
+        ? error
+        : new ExcludeObjectRefusal('Print object state unavailable')
+    }
+    extended = 'exclude_object'
+    return send(wire, requested, 5000)
+  }
+  /**
+   * Bed mesh: refusals are decided from one read of the print, homing and
+   * profile state before the single send; a refusal writes nothing.
+   */
+  async function bedMesh(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (requested.binding !== binding || !prepared || attempted)
+        throw new BedMeshRefused('state')
+      if (!bedMeshSupported(input.objects))
+        throw new BedMeshRefused('unsupported-action')
+      // Same builder as the send; it also rejects malformed arguments.
+      const wire = extendedWire('bed_mesh', args)
+      if (wire === undefined) throw new BedMeshRefused('invalid-command')
+      refuseBedMesh(
+        args,
+        parseBedMeshState(
+          await request(11, bedMeshQueryWire(11), lifetimeDeadline),
+        ),
+      )
+      extended = 'bed_mesh'
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof BedMeshRefused ? error : failure()
+    }
+  }
+  /**
+   * G-code console: switch, support, state and rate refusals all precede the
+   * single write; a refusal closes the attempt having sent nothing.
+   */
+  async function executeConsole(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (!input.gcodeConsole) throw new ConsoleRefusal('disabled')
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !consoleSupported(input.objects)
+      )
+        throw new ConsoleRefusal('unsupported')
+      refuseConsole(
+        args,
+        parseConsoleState(
+          await request(11, consoleQueryWire(11), lifetimeDeadline),
+        ),
+      )
+      const wire = extendedWire('gcode', args)
+      if (wire === undefined) throw new ConsoleRefusal('invalid')
+      takeConsoleRate(binding, input.clock.monotonicNow())
+      extended = 'gcode'
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof ConsoleRefusal ? error : failure()
+    }
+  }
+  const requestRead = (id: number, wire: string) =>
+    request(id, wire, lifetimeDeadline)
   const driver: PauseDriver = Object.freeze({
     execute(
       action: ExtendedControlAction,
@@ -466,7 +834,55 @@ export function openFixedMoonrakerPause(input: {
     ) {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
-      extended = true
+      if (isMotionAction(action)) {
+        extended = action
+        return executeMotion(action, args, request)
+      }
+      if (action === 'file_op' || action === 'start_print') {
+        if (!input.objects?.includes('virtual_sdcard'))
+          throw new FileOperationRefused('unsupported-action')
+        extended = action
+        const read = (method: string, params: object) =>
+          requestRead(
+            11,
+            JSON.stringify({ jsonrpc: '2.0', id: 11, method, params }),
+          )
+        if (action === 'start_print')
+          return requireStoppedPrinter(read).then(() =>
+            send(extendedWire(action, args), request, 5000),
+          )
+        return prepareFileOperation(args, read).then((call) =>
+          send(
+            JSON.stringify({ jsonrpc: '2.0', id: 2, ...call }),
+            request,
+            5000,
+            (result) => fileOperationAcknowledged(result, args),
+          ),
+        )
+      }
+      if (action === 'exclude_object') return excludeObject(args, request)
+      if (action === 'bed_mesh') return bedMesh(args, request)
+      if (action === 'gcode') return executeConsole(args, request)
+      if (action === 'extrude') return extrude(args, request)
+      if (action === 'power') {
+        extended = 'power'
+        return executePower(
+          args,
+          input.objects ?? [],
+          request,
+          requestRead,
+          send,
+          async () => {
+            stop()
+            await closed
+          },
+        )
+      }
+      if (action === 'queue_op') return queueOp(args, request)
+      if (action === 'timelapse') return timelapse(args, request)
+      if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
+        return output(action, args, request)
+      extended = action
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
@@ -496,7 +912,12 @@ export function openFixedMoonrakerPause(input: {
           // No print-state target exists for an extended action. Report the
           // first state read after the acknowledged request and let the
           // dispatcher judge it.
-          const observation = await query(1, operationDeadline)
+          const observation = await query(
+            1,
+            operationDeadline,
+            extended === 'start_print',
+            excludedName,
+          )
           detachCommand()
           return observation
         }

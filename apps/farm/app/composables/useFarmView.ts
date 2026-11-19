@@ -1,3 +1,4 @@
+import type { WebcamDetailOptions } from '../utils/webrtc/readonly-peer.ts'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import {
@@ -10,7 +11,9 @@ import { listDeviceKeys } from '../utils/device-key.ts'
 import { createAuthenticatedFarmStatusFeed } from '../utils/webrtc/farm-status-feed.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-export function useFarmView() {
+export function useFarmView(
+  webcamDetail?: WebcamDetailOptions & { onClose: () => void },
+) {
   // Per component instance, client-only. Never serialize private scope into a Nuxt payload.
   const state = shallowRef<FarmViewState>({ kind: 'loading' })
   const now = shallowRef({ wall: 0, mono: 0 })
@@ -18,7 +21,9 @@ export function useFarmView() {
   let feed: FarmStatusFeed | undefined
   // Streams arrive only through camera-purpose authorization for server
   // assignment refs; revocation publishes null synchronously.
-  const cameras = shallowRef<ReadonlyMap<string, MediaStream>>(new Map())
+  const cameras = shallowRef<
+    ReadonlyMap<string, { stream: MediaStream; cameraId?: string }>
+  >(new Map())
   const view = createFarmView({
     read: (path, signal, query) =>
       $fetch<unknown>(path, {
@@ -52,9 +57,11 @@ export function useFarmView() {
   const hide = () => view.invalidate()
   onMounted(() => {
     feed = createAuthenticatedFarmStatusFeed({
-      onCamera({ assignmentId, stream }) {
+      ...(webcamDetail ? { webcamDetail } : {}),
+      onCamera({ assignmentId, stream, cameraId }) {
         const next = new Map(cameras.value)
-        if (stream) next.set(assignmentId, stream)
+        if (stream)
+          next.set(assignmentId, { stream, ...(cameraId ? { cameraId } : {}) })
         else next.delete(assignmentId)
         cameras.value = next
       },
@@ -101,8 +108,12 @@ export function useFarmView() {
     state,
     now,
     ready: computed(() => (state.value.kind === 'ready' ? state.value : null)),
-    cameraFor: (assignmentId: string) =>
-      cameras.value.get(assignmentId) ?? null,
+    cameraFor: (assignmentId: string, cameraId?: string) => {
+      const camera = cameras.value.get(assignmentId)
+      return camera && (cameraId === undefined || camera.cameraId === cameraId)
+        ? camera.stream
+        : null
+    },
     ...view,
   }
 }

@@ -1,3 +1,4 @@
+import { reportedModelProfile } from './machine-profile.ts'
 import { mapCrealityFirmware } from '../creality/firmware.ts'
 import { createCrealityTelemetryClient } from '../creality/index.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
@@ -12,6 +13,7 @@ export function createCrealityCollection(input: {
   onUnavailable: (epoch: number) => void
 }) {
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let machine: PrinterState['machine']
   let active = false
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -19,6 +21,7 @@ export function createCrealityCollection(input: {
   let stamps: Partial<Record<keyof PrinterState, number>> = {}
   let nestedStamps: Record<string, Record<string, number>> = {}
   const invalidate = () => {
+    machine = undefined
     active = false
     firmwareObservation = undefined
     nestedStamps = {}
@@ -34,6 +37,7 @@ export function createCrealityCollection(input: {
     onTelemetry(report) {
       if (input.signal.aborted) return
       const now = performance.now()
+      machine = reportedModelProfile(report.model) ?? machine
       const firmware = mapCrealityFirmware(report)
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       const delta = {
@@ -112,6 +116,7 @@ export function createCrealityCollection(input: {
       const printer = PrinterState.safeParse({
         ...(finished ? { lastJob: finished } : {}),
         ...values,
+        ...(machine ? { machine } : {}),
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })

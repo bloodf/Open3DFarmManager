@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 14
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -197,10 +197,109 @@ const previousActionSchema = legacyActionSchema.replace(
   "'pause','resume','cancel'",
   "'pause','resume','cancel','emergency_stop','firmware_restart','set_temperature','set_fan','home','set_light','set_speed','start_print'",
 )
-const actionSchema = previousActionSchema.replace(
+const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
+const motionActionSchema = macroActionSchema.replace(
+  "'unload_filament'",
+  "'unload_filament','extrude','jog','motors_off','z_babystep','set_factor'",
+)
+const outputActionSchema = motionActionSchema.replace(
+  "'extrude'",
+  "'extrude','set_led','set_pin'",
+)
+const fileActionSchema = motionActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const mergedFileActionSchema = outputActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const queueActionSchema = outputActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','queue_op'",
+)
+const queuedFileActionSchema = queueActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const serviceActionSchema = queueActionSchema.replace(
+  "'queue_op'",
+  "'queue_op','service'",
+)
+const fileServiceActionSchema = queuedFileActionSchema.replace(
+  "'queue_op'",
+  "'queue_op','service'",
+)
+const excludeActionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','exclude_object'",
+)
+const powerActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','power'",
+)
+const timelapseActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','timelapse'",
+)
+const powerTimelapseActionSchema = timelapseActionSchema.replace(
+  "'timelapse'",
+  "'timelapse','power'",
+)
+const gcodeActionSchema = powerTimelapseActionSchema.replace(
+  "'set_pin'",
+  "'set_pin','gcode'",
+)
+const fileOpActionSchema = gcodeActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const actionSchema = fileOpActionSchema.replace(
+  "'file_op'",
+  "'file_op','bed_mesh'",
+)
+/**
+ * Journals from the power, timelapse and console units were rebuilt from the
+ * merged schema, so their historical shapes also carry `bed_mesh` (and, for
+ * the v9/v10 power and exclude_object journals, `gcode`) without `file_op`.
+ * Each variant is an exact, enumerated schema; unknown shapes stay refused.
+ */
+const withBedMesh = (sql: string) =>
+  sql.replace("'set_factor'", "'set_factor','bed_mesh'")
+const withGcodeBedMesh = (sql: string) =>
+  withBedMesh(sql.replace("'set_pin'", "'set_pin','gcode'"))
+const servicePowerActionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','power'",
+)
+const previousActionSchemas: Record<number, readonly string[]> = {
+  2: [legacyActionSchema],
+  3: [previousActionSchema],
+  4: [macroActionSchema],
+  5: [motionActionSchema],
+  6: [outputActionSchema, fileActionSchema],
+  7: [mergedFileActionSchema, queueActionSchema],
+  8: [queuedFileActionSchema, serviceActionSchema],
+  9: [
+    fileServiceActionSchema,
+    servicePowerActionSchema,
+    excludeActionSchema,
+    withGcodeBedMesh(servicePowerActionSchema),
+    withGcodeBedMesh(excludeActionSchema),
+  ],
+  10: [
+    powerActionSchema,
+    timelapseActionSchema,
+    withGcodeBedMesh(powerActionSchema),
+    withGcodeBedMesh(timelapseActionSchema),
+  ],
+  11: [powerTimelapseActionSchema, withBedMesh(powerTimelapseActionSchema)],
+  12: [gcodeActionSchema],
+  13: [fileOpActionSchema],
+}
 const schema = [
   actionSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
@@ -346,7 +445,9 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, SCHEMA_VERSION].includes(
+        Number(initialVersion),
+      ) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -378,27 +479,28 @@ export function openCommandJournal(input: {
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if ((version === 2 || version === 3) && app === APPLICATION_ID) {
+      } else if (
+        Object.hasOwn(previousActionSchemas, Number(version)) &&
+        app === APPLICATION_ID
+      ) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
           )
           .all()
           .map((row) => row.sql)
-        const legacySchema = schema
-          .map((sql) =>
-            sql === actionSchema
-              ? version === 2
-                ? legacyActionSchema
-                : previousActionSchema
-              : sql,
-          )
-          .sort()
-        if (
-          definitions.length !== legacySchema.length ||
-          definitions.some((sql, index) => sql !== legacySchema[index])
+        const matchesLegacy = previousActionSchemas[Number(version)]?.some(
+          (previous) => {
+            const expected = schema
+              .map((sql) => (sql === actionSchema ? previous : sql))
+              .sort()
+            return (
+              definitions.length === expected.length &&
+              definitions.every((sql, index) => sql === expected[index])
+            )
+          },
         )
-          throw new Error('Invalid command journal schema')
+        if (!matchesLegacy) throw new Error('Invalid command journal schema')
         database.exec(
           'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
         )
@@ -550,11 +652,30 @@ function claimRow(
         if (count >= state.capacity) return { ok: false, reason: 'capacity' }
         const recent = state.database
           .prepare(
-            'SELECT count(*) AS n FROM pause_commands WHERE farm_id=? AND printer_key=? AND claimed_at>?',
+            `SELECT count(*) AS n FROM pause_commands
+             JOIN control_command_actions USING (cmd_id)
+             WHERE farm_id=? AND printer_key=?
+               AND (action='exclude_object')=?
+               AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
-          .get(command.farm_id, printerKey, now - 60000)?.n
+          .get(
+            command.farm_id,
+            printerKey,
+            Number(command.action === 'exclude_object'),
+            now - 60000,
+          )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
         if (recent >= 10) return { ok: false, reason: 'rate-limited' }
+        // Bed mesh is its own class: one accepted dispatch per printer a minute.
+        if (command.action === 'bed_mesh') {
+          const meshes = state.database
+            .prepare(
+              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action='bed_mesh' AND p.claimed_at>?",
+            )
+            .get(command.farm_id, printerKey, now - 60000)?.n
+          if (typeof meshes !== 'number') throw new Error('Invalid mesh count')
+          if (meshes >= 1) return { ok: false, reason: 'rate-limited' }
+        }
         state.database
           .prepare(
             "INSERT INTO pause_commands(cmd_id,key_id,nonce,farm_id,agent_id,assignment_id,account_id,transport_id,capability_id,printer_key,wire_sha256,writer_id,claimed_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed')",

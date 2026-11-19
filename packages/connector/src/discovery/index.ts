@@ -196,6 +196,7 @@ export function moonrakerPrinters(records: RecordData[]): Printer[] {
 type Options = {
   timeout?: number
   bindAddress?: string
+  multicastInterface?: string
   bambuPorts?: number[]
   mdnsPort?: number
   queryAddress?: string
@@ -253,7 +254,9 @@ export async function discoverPrinters(
         if (mdns) {
           if (!options.queryAddress) {
             try {
-              socket.addMembership('224.0.0.251')
+              socket.addMembership('224.0.0.251', options.multicastInterface)
+              if (options.multicastInterface)
+                socket.setMulticastInterface(options.multicastInterface)
             } catch (error) {
               // No multicast-capable interface (offline host): nobody can answer.
               if (isNoMulticastInterface(error)) resolve()

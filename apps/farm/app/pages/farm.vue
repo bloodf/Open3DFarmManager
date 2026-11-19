@@ -1,67 +1,46 @@
 <script setup lang="ts">
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  shallowRef,
-  watch,
-} from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   filterFarmRows,
-  type FarmFilter,
-  type FarmSort,
+  groupFarmRows,
+  readFarmWallQuery,
+  summarizeFarmRows,
+  writeFarmWallQuery,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
-import FarmMaterials from '../components/FarmMaterials.vue'
-import FarmEnvironment from '../components/FarmEnvironment.vue'
-import { farmJobOutcome } from '../utils/farm-job-outcome.ts'
-import { farmJobView } from '../utils/farm-job-view.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
 import LastKnownStates from '../components/farm/LastKnownStates.vue'
-import ActiveSpoolAssign from '../components/farm/ActiveSpoolAssign.vue'
 import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
-import CameraDisplay from '../components/CameraDisplay.vue'
-import PrinterControls from '../components/PrinterControls.vue'
-import FarmExtendedControls from '../components/FarmExtendedControls.vue'
-import FarmMacrosControls from '../components/FarmMacrosControls.vue'
-import { macroArgs } from '../utils/farm-macros.ts'
-import { extendedLabel } from '../utils/farm-control-extended.ts'
-import type {
-  ControlAction,
-  ExtendedControlAction,
-} from '../../../../packages/farm-protocol/src/control-actions.ts'
+import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
+import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
+import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
+import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
+import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
+import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
+import { useFarmControls } from '../components/farm/useFarmControls.ts'
+import { deriveAlerts } from '../utils/farm-alerts.ts'
 import {
   farmConnectionNotice,
-  formatPrinterStateLabel,
-  localInterfaceOrigin,
-  observationAge,
   resolvedLocalInterfaceOrigin,
   type FarmRow,
 } from '../utils/farm-view.ts'
-import { livePauseAvailability, pauseStatusText } from '../utils/farm-pause.ts'
+import type { ControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
-  controlStatusText,
-  actionDialogTitle,
-  actionDialogDescription,
   actionButtonConfirmationLabel,
-  liveControlActionAvailability,
+  actionDialogDescription,
+  actionDialogTitle,
 } from '../utils/farm-control.ts'
-import {
-  openFarmPauseControl,
-  PAUSE_CAPABILITY_MARGIN_MS,
-  type FarmPauseControl,
-  type FarmPauseControlState,
-} from '../utils/webrtc/farm-pause-control.ts'
-import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
-import {
-  KOBRA_X_DEVICE_CAPABILITIES,
-  isKobraXAssignment,
-} from '../utils/kobralink-onboarding.ts'
-
+import { extendedLabel } from '../utils/farm-control-extended.ts'
+import { farmViewErrorText } from '../utils/farm-view-error.ts'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
+const view = useFarmView()
 const {
   state,
   ready,
@@ -71,7 +50,8 @@ const {
   selectKey,
   confirmOrigin,
   cameraFor,
-} = useFarmView()
+} = view
+
 // A live feed owns the printers it reports. While none is authenticated, the
 // stored last known states are read so the page is not empty.
 const liveFeedConnected = computed(() =>
@@ -89,33 +69,6 @@ const offlineStates = computed(() =>
 const offlineVisible = computed(
   () => !liveFeedConnected.value && offlineStates.value.length > 0,
 )
-function temperatureLabel(value: number | undefined): string {
-  return value === undefined
-    ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
-}
-
-const DEFAULT_SPOOL_SLOTS = [
-  'external',
-  'ams:0:0',
-  'ams:0:1',
-  'ams:0:2',
-  'ams:0:3',
-]
-
-function moonrakerActiveSpool(row: FarmRow): boolean {
-  const materials = row.observation?.state.materials ?? []
-  return materials.some(
-    (material) => material.slot === 'external' && material.active === true,
-  )
-}
-
-function activeSpoolSlots(row: FarmRow): string[] {
-  const fromMaterials = (row.observation?.state.materials ?? []).map(
-    (material) => material.slot,
-  )
-  return fromMaterials.length ? fromMaterials : [...DEFAULT_SPOOL_SLOTS]
-}
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -137,72 +90,70 @@ watch(
   },
 )
 onMounted(() => heading.value?.focus())
-const errorText = computed(() => {
-  if (state.value.kind !== 'error') return ''
-  switch (state.value.reason) {
-    case 'forbidden':
-      return 'Esta farm não está disponível para sua conta.'
-    case 'rate-limit':
-      return 'Aguarde antes de tentar novamente.'
-    case 'account-changed':
-      return 'A conta mudou. Entre novamente para confirmar seus dados.'
-    case 'invalid-response':
-      return 'Não foi possível confirmar os dados recebidos. Tente novamente.'
-    case 'unavailable':
-      return 'Não foi possível confirmar seus dados. Tente novamente.'
-  }
-})
-const keyText = computed(() => {
-  const keys = ready.value?.keys
-  if (!keys || keys.kind === 'available') return ''
-  if (keys.kind === 'loading')
-    return 'Consultando os dispositivos deste navegador…'
-  switch (keys.reason) {
-    case 'storage':
-      return 'Não foi possível acessar as chaves salvas neste navegador.'
-    case 'registry':
-      return 'Não foi possível confirmar a aprovação dos dispositivos.'
-    case 'incomplete':
-      return 'A consulta dos dispositivos ficou incompleta. Nenhum dispositivo foi selecionado.'
-    case 'pending':
-      return 'O dispositivo deste navegador aguarda aprovação.'
-    case 'revoked':
-      return 'O dispositivo deste navegador foi revogado.'
-    case 'missing':
-      return 'Nenhuma chave local corresponde a um dispositivo aprovado desta conta e farm.'
-  }
-})
-const query = ref('')
-const filter = ref<FarmFilter>('all')
-const sort = ref<FarmSort>('original')
-function resetFilters() {
-  query.value = ''
-  filter.value = 'all'
-  sort.value = 'original'
-}
-const renderedRows = computed(() =>
-  filterFarmRows(
-    ready.value?.rows ?? [],
-    query.value,
-    filter.value,
-    sort.value,
-    now.value,
-  ).map((row) => ({
-    ...row,
-    draft: drafts.value[row.assignment.assignmentId],
-  })),
+const errorText = computed(() =>
+  state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
 )
+const route = useRoute()
+watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
+  if (
+    typeof farmId === 'string' &&
+    farms?.some((farm) => farm.farmId === farmId) &&
+    ready.value?.scope?.farmId !== farmId
+  )
+    void selectFarm(farmId)
+})
+
+const router = useRouter()
+const wallQuery = computed({
+  get: () => readFarmWallQuery(route.query),
+  set: (value) => {
+    void router.replace({
+      query: {
+        ...router.currentRoute.value.query,
+        ...writeFarmWallQuery(value),
+      },
+      hash: route.hash,
+    })
+  },
+})
+const rows = computed(() => ready.value?.rows ?? [])
+const facets = computed(() => {
+  const fields = [
+    { key: 'group', field: 'groupName', label: 'Grupo' },
+    { key: 'location', field: 'location', label: 'Local' },
+    { key: 'connector', field: 'agentId', label: 'Connector' },
+  ] as const
+  return fields.map(({ key, field, label }) => {
+    const options = new Set(
+      rows.value
+        .map((row) => row.assignment[field])
+        .filter((value): value is string => !!value),
+    )
+    if (wallQuery.value[key]) options.add(wallQuery.value[key])
+    return {
+      key,
+      label,
+      options: [...options].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    }
+  })
+})
+const renderedRows = computed(() => {
+  const filters = wallQuery.value
+  return filterFarmRows(
+    rows.value,
+    filters.query,
+    filters.filter,
+    filters.sort,
+    now.value,
+    filters,
+  ).map((row) => ({ ...row, draft: drafts.value[row.assignment.assignmentId] }))
+})
+const counts = computed(() => summarizeFarmRows(renderedRows.value, now.value))
 // role="status" announces only live <-> unavailable; per-row text shows transient steps.
 const connectionNotice = computed(() =>
   farmConnectionNotice(ready.value?.rows ?? []),
 )
-function chooseFarm(event: Event) {
-  if (event.target instanceof HTMLSelectElement)
-    void selectFarm(event.target.value)
-}
-function chooseKey(event: Event) {
-  if (event.target instanceof HTMLSelectElement) selectKey(event.target.value)
-}
+const alertsSummary = computed(() => deriveAlerts(ready.value, now.value))
 function setupLink(id: string) {
   drafts.value[id] = { value: '', confirmed: false, error: '' }
 }
@@ -216,23 +167,11 @@ function saveLink(id: string) {
   }
   delete drafts.value[id]
 }
-function connectionText(row: FarmRow) {
-  switch (row.connection) {
-    case 'authenticated':
-      return row.observation
-        ? 'Conexão direta autenticada'
-        : 'Conexão direta autenticada; aguardando estado.'
-    case 'connecting':
-      return 'Estabelecendo conexão direta…'
-    case 'verifying':
-      return 'Verificando conexão direta…'
-    case 'closed':
-      return row.observation
-        ? 'Conexão direta indisponível. Exibindo a última observação.'
-        : 'Conexão direta indisponível'
-    case 'unavailable':
-      return 'Conexão direta indisponível'
-  }
+// Reads the once-a-second tick for reactivity, but measures against a fresh
+// sample so a frame received after the last tick never shows a negative age.
+function liveNow() {
+  void now.value
+  return { wall: Date.now(), mono: performance.now() }
 }
 function displayLocalOrigin(row: FarmRow) {
   return resolvedLocalInterfaceOrigin(
@@ -240,274 +179,36 @@ function displayLocalOrigin(row: FarmRow) {
     row.observation?.state.localWebUiOrigin,
   )
 }
-// Reads the once-a-second tick for reactivity, but measures against a fresh
-// sample so a frame received after the last tick never shows a negative age.
-function liveNow() {
-  void now.value
-  return { wall: Date.now(), mono: performance.now() }
-}
-function receiptAge(row: FarmRow) {
-  if (!row.observation) return ''
-  const seconds = observationAge(row.observation, liveNow()).seconds
-  return seconds === null
-    ? 'Horário de recebimento não confirmado'
-    : seconds >= 86_400
-      ? 'Atualização recebida há mais de 24 h'
-      : `Atualização recebida há ${seconds} s`
-}
-// Pause control: one confirmed, signed command per session over WebRTC only.
-const pauseEnabled = ref(false)
-onMounted(async () => {
-  try {
-    const metadata = await $fetch<unknown>('/api/signalling/pause-metadata', {
-      retry: 0,
-      timeout: 10_000,
-      cache: 'no-store',
-    })
-    pauseEnabled.value =
-      !!metadata &&
-      typeof metadata === 'object' &&
-      'enabled' in metadata &&
-      metadata.enabled === true &&
-      'origin' in metadata &&
-      metadata.origin === location.origin
-  } catch {
-    pauseEnabled.value = false
-  }
-})
-function availability(row: FarmRow) {
-  const current = ready.value
-  void now.value
-  return current
-    ? livePauseAvailability(row, current.keys, pauseEnabled.value)
-    : { available: false as const, reason: '' }
-}
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
-const pauseTarget = shallowRef<{
-  assignmentId: string
-  printerKey: string
-  action: ExtendedControlAction
-  args: Record<string, unknown>
-} | null>(null)
-const pauseState = shallowRef<FarmPauseControlState>({ kind: 'connecting' })
-const pauseLost = ref(false)
-const lastControlResults = ref<Record<string, string>>({})
-let pauseControl: FarmPauseControl | undefined
-let pauseTrigger: HTMLElement | null = null
-const pauseRemaining = computed(() =>
-  pauseState.value.kind === 'ready'
-    ? Math.floor(
-        (pauseState.value.expiresAt -
-          PAUSE_CAPABILITY_MARGIN_MS -
-          now.value.wall) /
-          1000,
-      )
-    : 0,
-)
-const pauseStatus = computed(() => {
-  if (!pauseTarget.value) return ''
-  if (
-    pauseLost.value &&
-    (pauseState.value.kind === 'failed' ||
-      pauseState.value.kind === 'connecting')
-  ) {
-    return 'O estado da impressora deixou de estar ao vivo. Nenhum comando foi enviado.'
-  }
-  if (!['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)) {
-    if (pauseState.value.kind === 'settled')
-      return lastControlResults.value[pauseTarget.value.assignmentId] ?? ''
-    return controlStatusText('pause', pauseState.value, pauseRemaining.value)
-  }
-  return controlStatusText(
-    pauseTarget.value.action as ControlAction,
-    pauseState.value,
-    pauseRemaining.value,
-  )
-})
-const pauseResolver = createFarmStatusKeyResolver({
-  readMetadata: async (signal) =>
-    await $fetch<unknown>('/api/signalling/pause-metadata', {
-      signal,
-      retry: 0,
-      timeout: 10_000,
-      cache: 'no-store',
-    }),
-  isCurrent(scope, keyId) {
-    const current = ready.value
-    return (
-      !!current &&
-      current.accountId === scope.accountId &&
-      current.scope?.accountId === scope.accountId &&
-      current.scope.farmId === scope.farmId &&
-      current.scope.viewEpoch === scope.viewEpoch &&
-      current.keys.kind === 'available' &&
-      current.keys.selected === keyId
-    )
+const dialog = {
+  value: {
+    show() {
+      pauseDialog.value?.showModal()
+      pauseCancel.value?.focus()
+    },
+    close() {
+      pauseDialog.value?.close()
+    },
   },
-})
-async function openControl(
-  row: FarmRow,
-  action: ExtendedControlAction,
-  event: Event,
-  args: Record<string, unknown> = {},
-) {
-  const current = ready.value
-  if (
-    (action === 'run_macro' &&
-      !macroArgs(row.observation?.state, String(args.name ?? ''))) ||
-    !current?.scope ||
-    current.keys.kind !== 'available' ||
-    !liveControlActionAvailability(
-      action,
-      row,
-      current.keys,
-      pauseEnabled.value,
-    ).available ||
-    pauseControl
-  )
-    return
-  const scope = current.scope,
-    keyId = current.keys.selected
-  pauseTrigger =
-    event.currentTarget instanceof HTMLElement ? event.currentTarget : null
-  pauseLost.value = false
-  pauseState.value = { kind: 'connecting' }
-  pauseTarget.value = {
-    assignmentId: row.assignment.assignmentId,
-    printerKey: row.assignment.printerKey,
-    action,
-    args,
-  }
-  pauseControl = openFarmPauseControl({
-    accountId: scope.accountId,
-    farmId: scope.farmId,
-    keyId,
-    agentId: row.assignment.agentId,
-    assignmentId: row.assignment.assignmentId,
-    async resolveKey(signal) {
-      const resolved = await pauseResolver({
-        scope,
-        browserKeyId: keyId,
-        signal,
-      })
-      return {
-        publicKey: resolved.localKey.publicKey,
-        privateKey: resolved.localKey.keyPair.privateKey,
-        origin: resolved.origin,
-        audience: resolved.audience,
-      }
-    },
-    onState(state) {
-      pauseState.value = state
-      if (state.kind === 'settled' && pauseTarget.value) {
-        lastControlResults.value[pauseTarget.value.assignmentId] =
-          state.kind === 'settled' &&
-          !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
-            ? {
-                applied: 'Comando confirmado pelo Connector.',
-                rejected: 'Comando recusado.',
-                'not-sent': 'Comando não enviado.',
-                'outcome-unknown':
-                  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
-              }[state.outcome]
-            : controlStatusText(
-                pauseTarget.value.action as ControlAction,
-                state,
-                0,
-              )
-      }
-    },
-  })
-  await nextTick()
-  pauseDialog.value?.showModal()
-  pauseCancel.value?.focus()
 }
-function openPause(row: FarmRow, event: Event) {
-  void openControl(row, 'pause', event)
-}
-function confirmControl() {
-  if (pauseState.value.kind === 'ready' && pauseTarget.value) {
-    const row = ready.value?.rows.find(
-      (item) =>
-        item.assignment.assignmentId === pauseTarget.value?.assignmentId,
-    )
-    if (
-      !row ||
-      !ready.value ||
-      !liveControlActionAvailability(
-        pauseTarget.value.action,
-        row,
-        ready.value.keys,
-        pauseEnabled.value,
-      ).available ||
-      (pauseTarget.value.action === 'run_macro' &&
-        !macroArgs(
-          row.observation?.state,
-          String(pauseTarget.value.args.name ?? ''),
-        ))
-    )
-      return
-    void pauseControl?.issueControlCommand(
-      pauseTarget.value.action,
-      pauseTarget.value.args,
-    )
-  }
-}
-function confirmPause() {
-  confirmControl()
-}
-function closePause() {
-  // A command in flight keeps its session until its outcome settles.
-  if (pauseState.value.kind === 'sending') return
-  const control = pauseControl
-  pauseControl = undefined
-  control?.close()
-  void control?.dispose()
-  pauseDialog.value?.close()
-  pauseTarget.value = null
-  pauseTrigger?.focus()
-  pauseTrigger = null
-}
+const {
+  pauseEnabled,
+  availability,
+  pauseTarget,
+  pauseState,
+  lastControlResults,
+  pauseRemaining,
+  pauseStatus,
+  openControl,
+  confirmControl,
+  closePause,
+  commandInFlight,
+} = useFarmControls(view, dialog)
 function cancelPause(event: Event) {
   // Esc closes the dialog, but never interrupts a command in flight.
   event.preventDefault()
   closePause()
-}
-watch([() => ready.value?.rows, now], () => {
-  const target = pauseTarget.value
-  if (!target || !pauseControl) return
-  const kind = pauseState.value.kind
-  if (kind !== 'connecting' && kind !== 'ready') return
-  const row = ready.value?.rows.find(
-    (item) => item.assignment.assignmentId === target.assignmentId,
-  )
-  if (
-    !row ||
-    (target.action === 'run_macro' &&
-      !macroArgs(row.observation?.state, String(target.args.name ?? ''))) ||
-    !ready.value ||
-    !liveControlActionAvailability(
-      target.action,
-      row,
-      ready.value.keys,
-      pauseEnabled.value,
-    ).available
-  ) {
-    pauseLost.value = true
-    pauseControl.close()
-  }
-})
-onBeforeUnmount(() => {
-  const control = pauseControl
-  pauseControl = undefined
-  control?.close()
-  void control?.dispose()
-})
-function dateLabel(time: number) {
-  return time <= 8_640_000_000_000_000
-    ? new Date(time).toLocaleString('pt-BR')
-    : 'Horário não confirmado'
 }
 </script>
 <template>
@@ -526,9 +227,10 @@ function dateLabel(time: number) {
       Os controles desta página são somente leitura, exceto a pausa, que exige
       confirmação e uma conexão direta segura.
     </p>
-    <p v-if="state.kind === 'loading'" role="status" aria-busy="true">
-      Carregando suas farms…
-    </p>
+    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
@@ -536,87 +238,30 @@ function dateLabel(time: number) {
       <p>Entre na sua conta para consultar suas farms.</p>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
     </section>
-    <section v-else-if="state.kind === 'error'" aria-label="Falha na consulta">
+    <ErrorState
+      v-else-if="state.kind === 'error'"
+      title="Não foi possível carregar suas farms"
+    >
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorText }}</p>
       <div class="actions">
-        <button type="button" @click="discover()">Tentar novamente</button
-        ><NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        <Button @click="discover()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
       </div>
-    </section>
+    </ErrorState>
     <template v-else-if="ready">
       <p class="opaque">Conta atual: {{ ready.accountId }}</p>
-      <section aria-labelledby="farm-scope-heading">
-        <h2 id="farm-scope-heading">Escolha da farm</h2>
-        <label for="farm-scope">Farm atual</label>
-        <select
-          id="farm-scope"
-          :value="ready.scope?.farmId ?? ''"
-          @change="chooseFarm"
-        >
-          <option value="">Selecione uma farm</option>
-          <option
-            v-for="farm in ready.farms"
-            :key="farm.farmId"
-            :value="farm.farmId"
-          >
-            {{ farm.farmId }}
-          </option>
-        </select>
-        <p v-if="ready.scope" class="opaque">
-          Farm atual: {{ ready.scope.farmId }}
-        </p>
-        <p v-if="!ready.farms.length">
-          {{
-            ready.farmAfter || ready.nextFarm
-              ? 'Nenhuma farm nesta página.'
-              : 'Sua conta ainda não tem acesso a uma farm.'
-          }}
-        </p>
-        <div class="actions">
-          <button v-if="ready.farmAfter" type="button" @click="discover()">
-            Primeira página de farms
-          </button>
-          <button
-            v-if="ready.nextFarm"
-            type="button"
-            @click="discover(ready.nextFarm)"
-          >
-            Próximas farms
-          </button>
-        </div>
-      </section>
+      <FarmScopeSelector
+        :ready="ready"
+        @select="selectFarm"
+        @discover="discover"
+      />
       <template v-if="ready.scope">
         <ApprovalPanel :farm-id="ready.scope.farmId" />
-        <section aria-label="Conexão e dispositivo do navegador">
-          <p role="status">{{ connectionNotice }}</p>
-          <p v-if="ready.keys.kind !== 'available'">
-            Este navegador precisa de um dispositivo aprovado para receber o
-            estado. {{ keyText }}
-          </p>
-          <template v-else>
-            <label for="farm-device"
-              >Dispositivo aprovado deste navegador</label
-            >
-            <select
-              id="farm-device"
-              :value="ready.keys.selected"
-              @change="chooseKey"
-            >
-              <option value="">Selecione um dispositivo</option>
-              <option
-                v-for="key in ready.keys.choices"
-                :key="key.keyId"
-                :value="key.keyId"
-              >
-                {{ key.keyId }} · {{ key.thumbprint }}
-              </option>
-            </select>
-            <p>A aprovação do dispositivo não confirma uma conexão direta.</p>
-          </template>
-          <NuxtLink to="/dispositivos"
-            >Gerenciar dispositivos do navegador</NuxtLink
-          >
-        </section>
+        <FarmDeviceSelector
+          :keys="ready.keys"
+          :connection-notice="connectionNotice"
+          @select="selectKey"
+        />
         <SpoolInventory
           :items="ready.spools"
           :rows="ready.rows"
@@ -625,6 +270,7 @@ function dateLabel(time: number) {
             ready.rows.some((row) => row.connection === 'authenticated')
           "
         />
+        <PrinterAlerts :alerts="alertsSummary" />
         <section
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"
@@ -634,9 +280,14 @@ function dateLabel(time: number) {
             O cadastro informa atribuições e aprovações. O estado da impressora
             depende da conexão direta.
           </p>
-          <p v-if="ready.inventory === 'loading'" role="status">
-            Carregando o cadastro de impressoras…
-          </p>
+          <div
+            v-if="ready.inventory === 'loading'"
+            class="loading"
+            aria-busy="true"
+          >
+            <p role="status">Carregando o cadastro de impressoras…</p>
+            <Skeleton /><Skeleton /><Skeleton />
+          </div>
           <template v-else>
             <div class="actions">
               <button
@@ -663,275 +314,58 @@ function dateLabel(time: number) {
             <p v-if="ready.printerAfter">
               Exibindo outra página de atribuições.
             </p>
-            <p v-if="!ready.rows.length">
-              {{
+            <EmptyState
+              v-if="!ready.rows.length"
+              :title="
                 ready.printerAfter || ready.nextPrinter
                   ? 'Nenhuma atribuição nesta página.'
                   : 'Nenhuma impressora atribuída a esta farm.'
-              }}
-              <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
-            </p>
-            <label for="farm-search"
-              >Buscar impressora, Connector ou atribuição</label
+              "
+              description="Atribua uma impressora a um Connector para acompanhar o estado dela aqui."
             >
-            <input id="farm-search" v-model="query" type="search" />
-            <label for="farm-filter">Filtrar por estado ou conexão</label>
-            <select id="farm-filter" v-model="filter">
-              <option value="all">Todos</option>
-              <option value="printing">Imprimindo</option>
-              <option value="idle">Ociosa</option>
-              <option value="paused">Pausada</option>
-              <option value="error">Erro</option>
-              <option value="offline">Indisponível segundo o Connector</option>
-              <option value="unknown">Sem estado recebido</option>
-              <option value="stale">Observação não atual</option>
-              <option value="connected">Conexão autenticada</option>
-              <option value="disconnected">Sem conexão autenticada</option>
-            </select>
-            <label for="farm-sort">Ordenar</label>
-            <select id="farm-sort" v-model="sort">
-              <option value="original">Ordem original</option>
-              <option value="name-asc">Nome crescente</option>
-              <option value="name-desc">Nome decrescente</option>
-            </select>
-            <button type="button" @click="resetFilters">Limpar filtros</button>
-            <p role="status">
-              {{ renderedRows.length }} de {{ ready.rows.length }} impressoras
-              nesta página.
-            </p>
-            <p v-if="ready.rows.length && !renderedRows.length">
-              Nenhuma impressora corresponde aos filtros. Limpe os filtros para
-              ver todas.
-            </p>
-            <ul class="printers">
-              <li
-                v-for="row in renderedRows"
-                :key="row.assignment.assignmentId"
+              <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
+            </EmptyState>
+            <PrinterWallFilters
+              v-model="wallQuery"
+              :facets="facets"
+              :counts="counts"
+              :total="ready.rows.length"
+              :visible="renderedRows.length"
+            />
+            <PrinterWallTable
+              v-slot="{ rows: wallRows }"
+              :rows="renderedRows"
+              :live-now="liveNow"
+            >
+              <template
+                v-for="group in groupFarmRows(wallRows, wallQuery.groupBy)"
+                :key="group.key ?? ''"
               >
-                <article
-                  :aria-labelledby="`printer-${row.assignment.assignmentId}`"
-                >
-                  <h3
-                    :id="`printer-${row.assignment.assignmentId}`"
-                    class="opaque"
-                  >
-                    {{ row.assignment.printerKey }}
-                  </h3>
-                  <p>
-                    {{
-                      row.assignment.status === 'active'
-                        ? 'Atribuição ativa'
-                        : 'Atribuição revogada'
-                    }}. Connector
-                    {{
-                      {
-                        approved: 'aprovado',
-                        pending: 'pendente',
-                        revoked: 'revogado',
-                      }[row.assignment.connectorStatus]
-                    }}.
-                  </p>
-                  <dl>
-                    <dt>Connector</dt>
-                    <dd class="opaque">{{ row.assignment.agentId }}</dd>
-                    <dt>Atribuição</dt>
-                    <dd class="opaque">{{ row.assignment.assignmentId }}</dd>
-                    <dt>Conexão direta</dt>
-                    <dd>{{ connectionText(row) }}</dd>
-                    <dt>Último estado informado</dt>
-                    <dd>
-                      {{
-                        row.observation
-                          ? formatPrinterStateLabel(row.observation.state)
-                          : 'Nenhum estado recebido'
-                      }}
-                    </dd>
-                  </dl>
-                  <template v-if="row.observation">
-                    <p>
-                      {{ receiptAge(row) }}. Recebido neste navegador em
-                      {{ dateLabel(row.observation.received.wall) }}.
-                    </p>
-                    <p
-                      v-if="
-                        observationAge(row.observation, liveNow())
-                          .sourceConfirmed
-                      "
-                    >
-                      Observado pelo Connector em
-                      {{ dateLabel(row.observation.state.observedAt) }}. Idade
-                      da observação estimada a partir do relógio do Connector.
-                    </p>
-                    <p v-else>Horário da observação não confirmado</p>
-                    <p v-if="observationAge(row.observation, liveNow()).stale">
-                      Dados desatualizados. A impressora pode ter mudado de
-                      estado.
-                    </p>
-                    <dl aria-label="Temperaturas observadas">
-                      <div>
-                        <dt>Bico</dt>
-                        <dd>
-                          {{
-                            temperatureLabel(
-                              row.observation.state.toolTemperatureCelsius,
-                            )
-                          }}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Mesa</dt>
-                        <dd>
-                          {{
-                            temperatureLabel(
-                              row.observation.state.bedTemperatureCelsius,
-                            )
-                          }}
-                        </dd>
-                      </div>
-                    </dl>
-                    <FarmMaterials
-                      :materials="row.observation.state.materials"
-                    />
-                    <ActiveSpoolAssign
-                      v-if="ready.scope?.farmId"
-                      :farm-id="ready.scope.farmId"
-                      :printer-key="row.assignment.printerKey"
-                      :slots="activeSpoolSlots(row)"
-                      :moonraker-managed="moonrakerActiveSpool(row)"
-                    />
-                    <FarmEnvironment
-                      :fans="row.observation.state.fans"
-                      :light="row.observation.state.light"
-                    />
-                    <div aria-live="polite" aria-atomic="true">
-                      <template v-if="farmJobOutcome(row.observation.state)">
-                        <p>
-                          {{ farmJobOutcome(row.observation.state)?.label }}
-                        </p>
-                        <dl aria-label="Último trabalho">
-                          <div
-                            v-if="
-                              farmJobOutcome(row.observation.state)?.filename
-                            "
-                          >
-                            <dt>Arquivo</dt>
-                            <dd class="opaque">
-                              {{
-                                farmJobOutcome(row.observation.state)?.filename
-                              }}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Fim</dt>
-                            <dd>
-                              {{
-                                farmJobOutcome(row.observation.state)?.endedAt
-                              }}
-                            </dd>
-                          </div>
-                          <div
-                            v-if="
-                              farmJobOutcome(row.observation.state)?.duration
-                            "
-                          >
-                            <dt>Duração</dt>
-                            <dd>
-                              {{
-                                farmJobOutcome(row.observation.state)?.duration
-                              }}
-                            </dd>
-                          </div>
-                        </dl>
-                      </template>
-                    </div>
-                    <dl aria-label="Trabalho atual">
-                      <div v-if="farmJobView(row.observation.state).filename">
-                        <dt>Arquivo</dt>
-                        <dd>
-                          {{ farmJobView(row.observation.state).filename }}
-                        </dd>
-                      </div>
-                      <div v-if="farmJobView(row.observation.state).layer">
-                        <dt>Camada</dt>
-                        <dd>{{ farmJobView(row.observation.state).layer }}</dd>
-                      </div>
-                      <div v-if="farmJobView(row.observation.state).elapsed">
-                        <dt>Tempo decorrido</dt>
-                        <dd>
-                          {{ farmJobView(row.observation.state).elapsed }}
-                        </dd>
-                      </div>
-                      <div v-if="farmJobView(row.observation.state).remaining">
-                        <dt>Tempo restante estimado</dt>
-                        <dd>
-                          {{ farmJobView(row.observation.state).remaining }}
-                        </dd>
-                      </div>
-                    </dl>
-                    <p
-                      v-if="
-                        (row.observation.state.state === 'printing' ||
-                          row.observation.state.state === 'paused') &&
-                        row.observation.state.progress !== undefined
-                      "
-                    >
-                      <progress
-                        :value="row.observation.state.progress"
-                        :max="1"
-                        :aria-labelledby="`progress-${row.assignment.assignmentId}`"
-                      />
-                      <span :id="`progress-${row.assignment.assignmentId}`"
-                        >Progresso informado da impressão:
-                        {{
-                          Math.round(row.observation.state.progress * 100)
-                        }}%</span
-                      >
-                    </p>
-                  </template>
-                  <section
-                    v-if="isKobraXAssignment(row.assignment)"
-                    :aria-labelledby="
-                      'capabilities-' + row.assignment.assignmentId
+                <h3 v-if="wallQuery.groupBy">
+                  {{
+                    group.key ??
+                    (wallQuery.groupBy === 'groupName'
+                      ? 'Sem grupo'
+                      : 'Sem local')
+                  }}
+                </h3>
+                <ul class="printers">
+                  <FarmPrinterCard
+                    v-for="row in group.rows"
+                    :key="row.assignment.assignmentId"
+                    :row="row"
+                    :farm-id="ready.scope.farmId"
+                    :camera-for="cameraFor"
+                    :live-now="liveNow"
+                    :alerts="
+                      alertsSummary.byAssignment[row.assignment.assignmentId] ??
+                      []
                     "
+                    @setup="setupLink(row.assignment.assignmentId)"
+                    @save="saveLink(row.assignment.assignmentId)"
+                    @cancel="delete drafts[row.assignment.assignmentId]"
                   >
-                    <h4 :id="'capabilities-' + row.assignment.assignmentId">
-                      Capacidades admitidas deste dispositivo (Anycubic Kobra X)
-                    </h4>
-                    <p>
-                      Qualificação provisória de modelo; firmware não
-                      qualificado. Comandos remotos não estão disponíveis.
-                    </p>
-                    <dl>
-                      <div
-                        v-for="cap in KOBRA_X_DEVICE_CAPABILITIES"
-                        :key="cap.id"
-                      >
-                        <dt>{{ cap.label }}</dt>
-                        <dd>{{ cap.statusText }} — {{ cap.reason }}</dd>
-                      </div>
-                    </dl>
-                  </section>
-                  <CameraDisplay
-                    v-if="
-                      row.assignment.status === 'active' &&
-                      row.assignment.connectorStatus === 'approved' &&
-                      !isKobraXAssignment(row.assignment)
-                    "
-                    :stream="cameraFor(row.assignment.assignmentId)"
-                    :printer-name="row.assignment.printerKey"
-                  />
-                  <template
-                    v-if="
-                      row.assignment.status === 'active' &&
-                      row.assignment.connectorStatus !== 'revoked' &&
-                      !isKobraXAssignment(row.assignment)
-                    "
-                  >
-                    <template v-if="displayLocalOrigin(row)">
-                      <p class="opaque">
-                        Interface local da impressora:
-                        {{ displayLocalOrigin(row) }}
-                      </p>
+                    <template #local-link>
                       <a
                         :href="displayLocalOrigin(row) ?? undefined"
                         target="_blank"
@@ -943,154 +377,23 @@ function dateLabel(time: number) {
                           row.assignment.printerKey
                         }}</span></a
                       >
-                      <p>Abre em outra aba.</p>
                     </template>
-                    <button
-                      type="button"
-                      @click="setupLink(row.assignment.assignmentId)"
-                    >
-                      {{
-                        displayLocalOrigin(row)
-                          ? 'Alterar interface local'
-                          : 'Configurar interface local'
-                      }}
-                    </button>
-                    <form
-                      v-if="row.draft"
-                      @submit.prevent="saveLink(row.assignment.assignmentId)"
-                    >
-                      <label :for="`origin-${row.assignment.assignmentId}`"
-                        >Origem da interface local</label
-                      >
-                      <input
-                        :id="`origin-${row.assignment.assignmentId}`"
-                        v-model="row.draft.value"
-                        type="url"
-                        required
-                        autocomplete="off"
-                        spellcheck="false"
-                        :aria-describedby="`local-help-${row.assignment.assignmentId}`"
-                        @input="row.draft.confirmed = false"
-                      />
-                      <p class="opaque">
-                        Origem para conferir:
-                        {{
-                          localInterfaceOrigin(row.draft.value) ??
-                          'Informe uma origem válida.'
-                        }}
-                      </p>
-                      <label class="confirmation"
-                        ><input
-                          v-model="row.draft.confirmed"
-                          type="checkbox"
-                          required
-                        />Conferi que este endereço abre a interface local desta
-                        impressora.</label
-                      >
-                      <p v-if="row.draft.error" role="alert">
-                        {{ row.draft.error }}
-                      </p>
-                      <div class="actions">
-                        <button type="submit">Confirmar interface local</button
-                        ><button
-                          type="button"
-                          @click="delete drafts[row.assignment.assignmentId]"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </form>
-                    <p :id="`local-help-${row.assignment.assignmentId}`">
-                      Acessível apenas se este navegador alcançar a rede da
-                      impressora. O endereço não foi verificado. O endereço fica
-                      somente na memória desta aba e precisa ser confirmado
-                      novamente após recarregar.
-                    </p>
-                  </template>
-                  <FarmMacrosControls
-                    v-if="!isKobraXAssignment(row.assignment)"
-                    :row="row"
-                    :keys="ready.keys"
-                    :control-enabled="pauseEnabled"
-                    :command-in-flight="
-                      pauseControl !== undefined &&
-                      pauseState.kind !== 'settled' &&
-                      pauseState.kind !== 'failed'
-                    "
-                    :now="liveNow()"
-                    @action="
-                      (action, args, event) =>
-                        openControl(row, action, event, args)
-                    "
-                  />
-                  <FarmExtendedControls
-                    v-if="!isKobraXAssignment(row.assignment)"
-                    :row="row"
-                    :keys="ready.keys"
-                    :control-enabled="pauseEnabled"
-                    :command-in-flight="
-                      pauseControl !== undefined &&
-                      pauseState.kind !== 'settled' &&
-                      pauseState.kind !== 'failed'
-                    "
-                    :now="liveNow()"
-                    :last-result="
-                      lastControlResults[row.assignment.assignmentId]
-                    "
-                    @action="
-                      (action, args, event) =>
-                        openControl(row, action, event, args)
-                    "
-                  />
-                  <template v-if="!isKobraXAssignment(row.assignment)">
-                    <template
-                      v-if="row.observation?.state.controls !== undefined"
-                    >
-                      <PrinterControls
-                        :row="row"
-                        :keys="ready.keys"
-                        :control-enabled="pauseEnabled"
-                        :command-in-flight="
-                          pauseControl !== undefined &&
-                          pauseState.kind !== 'settled' &&
-                          pauseState.kind !== 'failed'
-                        "
-                        :now="liveNow()"
-                        :last-result="
-                          lastControlResults[row.assignment.assignmentId]
-                        "
-                        @action="
-                          (action, event) => openControl(row, action, event)
-                        "
-                      />
-                    </template>
-                    <template v-else>
-                      <p
-                        v-if="!availability(row).available"
-                        :id="`pause-help-${row.assignment.assignmentId}`"
-                      >
-                        {{ (availability(row) as { reason: string }).reason }}
-                      </p>
-                      <p
-                        v-else
-                        :id="`pause-help-${row.assignment.assignmentId}`"
-                      >
-                        Abre uma confirmação. Nada é enviado antes de você
-                        confirmar.
-                      </p>
-                      <button
-                        type="button"
-                        :aria-disabled="!availability(row).available"
-                        :aria-describedby="`pause-help-${row.assignment.assignmentId}`"
-                        @click="openPause(row, $event)"
-                      >
-                        Pausar impressão
-                      </button>
-                    </template>
-                  </template>
-                </article>
-              </li>
-            </ul>
+                    <FarmCardControls
+                      :row="row"
+                      :keys="ready.keys"
+                      :control-enabled="pauseEnabled"
+                      :command-in-flight="commandInFlight"
+                      :live-now="liveNow"
+                      :last-result="
+                        lastControlResults[row.assignment.assignmentId]
+                      "
+                      :availability="availability"
+                      :open-control="openControl"
+                    />
+                  </FarmPrinterCard>
+                </ul>
+              </template>
+            </PrinterWallTable>
           </template>
         </section>
         <section
@@ -1099,11 +402,10 @@ function dateLabel(time: number) {
           aria-describedby="last-known-description"
         >
           <h2 id="last-known-heading">Última observação conhecida</h2>
-          <p id="last-known-description">
-            Sem conexão direta, estes são os últimos estados que o servidor
-            observou. As informações são somente leitura e podem estar
-            desatualizadas.
-          </p>
+          <StaleNotice
+            id="last-known-description"
+            description="Sem conexão direta, estes são os últimos estados que o servidor observou. As informações são somente leitura e podem estar desatualizadas."
+          />
           <ul class="last-known-list">
             <li v-for="state in offlineStates" :key="state.assignmentId">
               <LastKnownStates :state="state" :now-wall-ms="now.wall" />
@@ -1172,132 +474,4 @@ function dateLabel(time: number) {
   </main>
 </template>
 
-<style scoped>
-nav,
-section {
-  margin-bottom: 1.5rem;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: center;
-}
-button,
-select,
-input,
-a {
-  font: inherit;
-}
-button,
-select,
-input:not([type='checkbox']),
-a {
-  min-height: 2.75rem;
-}
-button,
-select,
-input:not([type='checkbox']) {
-  padding: 0.6rem;
-  max-width: 100%;
-}
-a {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.25em;
-}
-button {
-  cursor: pointer;
-}
-button:disabled,
-button[aria-disabled='true'] {
-  cursor: not-allowed;
-}
-label {
-  display: block;
-  margin: 0.75rem 0 0.3rem;
-}
-select,
-input[type='url'] {
-  width: 100%;
-  min-width: 0;
-}
-.opaque {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-.printers {
-  padding: 0;
-  list-style: none;
-}
-.printers li {
-  min-width: 0;
-}
-.last-known-list {
-  padding: 0;
-  list-style: none;
-}
-.printers li {
-  border: 1px solid currentColor;
-  padding: 1rem;
-  margin: 1rem 0;
-  min-width: 0;
-}
-h3 {
-  margin: 0 0 0.75rem;
-}
-dt {
-  font-weight: 600;
-  margin-top: 0.75rem;
-}
-dd {
-  margin: 0.25rem 0 0;
-}
-.confirmation {
-  display: flex;
-  gap: 0.65rem;
-  align-items: center;
-  min-height: 2.75rem;
-}
-input[type='checkbox'] {
-  flex: 0 0 auto;
-  width: 1.25rem;
-  height: 1.25rem;
-}
-dialog {
-  max-width: min(36rem, calc(100vw - 2rem));
-  padding: 1.25rem;
-  border: 2px solid currentColor;
-}
-dialog::backdrop {
-  background: rgb(0 0 0 / 0.5);
-}
-progress {
-  display: block;
-  max-width: 100%;
-}
-:is(button, select, input, a):focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
-}
-@media (max-width: 400px) {
-  main {
-    padding-inline: 1rem;
-  }
-  .printers li {
-    padding: 0.75rem;
-  }
-}
-@media (min-width: 48rem) {
-  .printers {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-  }
-  .printers li {
-    margin: 0;
-  }
-}
-</style>
+<style scoped src="../components/farm/farm-view.css"></style>

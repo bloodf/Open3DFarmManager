@@ -2,6 +2,22 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-11-04',
   devtools: { enabled: false },
   nitro: { preset: 'node-server' },
+  hooks: {
+    // impressoras.vue is a page, not a layout: serve the detail route beside
+    // it instead of nesting it in a parent that has no <NuxtPage />.
+    'pages:resolved'(pages) {
+      const parent = pages.find((page) => page.path === '/impressoras')
+      const children = parent?.children ?? []
+      if (!parent || !children.length) return
+      parent.children = []
+      pages.push(
+        ...children.map((child) => ({
+          ...child,
+          path: `/impressoras/${child.path}`,
+        })),
+      )
+    },
+  },
   app: { head: { htmlAttrs: { lang: 'pt-BR' }, title: 'Open3DFarmManager' } },
   routeRules: Object.fromEntries(
     [
@@ -63,6 +79,8 @@ export default defineNuxtConfig({
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
+    /** A farm_library login; `directory` is OPENFARM_LIBRARY_DIR (absolute) and enables server mode. */
+    library: { enabled: false, databaseUrl: '', directory: '' },
     /** A login that is a member of farm_spoolman_settings. */
     spoolmanSettings: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
@@ -74,6 +92,13 @@ export default defineNuxtConfig({
       telemetryRetentionDays: 30,
       jobHistoryRetentionDays: 365,
       batchSize: 500,
+    },
+    /** A login that is a member of farm_library_retention (migration 0057). */
+    libraryRetention: {
+      enabled: false,
+      databaseUrl: '',
+      intervalMs: 3600000,
+      batchSize: 100,
     },
     pauseAuthority: {
       enabled: false,
@@ -125,5 +150,5 @@ export default defineNuxtConfig({
     },
   },
   typescript: { strict: true },
-  css: ['~/assets/main.css'],
+  css: ['~/assets/css/main.css'],
 })

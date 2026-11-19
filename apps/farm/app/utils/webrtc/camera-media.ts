@@ -33,7 +33,11 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
   #options: Readonly<{
     privateKey: CryptoKey
     authorizedPrinterIds: ReadonlySet<string>
-    onStream: (stream: MediaStream | null, printerId?: string) => void
+    onStream: (
+      stream: MediaStream | null,
+      printerId?: string,
+      cameraId?: string,
+    ) => void
     onViolation: (reason: string) => void
   }>
   #state: State = 'waiting'
@@ -46,7 +50,11 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
   constructor(options: {
     privateKey: CryptoKey
     authorizedPrinterIds: readonly string[]
-    onStream: (stream: MediaStream | null, printerId?: string) => void
+    onStream: (
+      stream: MediaStream | null,
+      printerId?: string,
+      cameraId?: string,
+    ) => void
     onViolation: (reason: string) => void
   }) {
     this.#options = Object.freeze({
@@ -124,7 +132,11 @@ export class BrowserCameraMedia implements BrowserCameraHooks {
     this.#channel.send(answer)
     this.#state = 'live'
     this.#attached = true
-    this.#options.onStream(new MediaStream([this.#track]), offered.printer_id)
+    this.#options.onStream(
+      new MediaStream([this.#track]),
+      offered.printer_id,
+      offered.camera_id,
+    )
   }
   private detach() {
     if (!this.#attached) return

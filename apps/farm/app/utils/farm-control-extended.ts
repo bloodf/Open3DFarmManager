@@ -14,16 +14,31 @@ export const extendedActions = [
 ] as const
 export type FarmExtendedAction = (typeof extendedActions)[number]
 const labels: Partial<Record<ExtendedControlAction, string>> = {
+  bed_mesh: 'Malha da mesa',
   set_temperature: 'Definir temperatura',
   set_fan: 'Definir ventilador',
   home: 'Referenciar eixos',
   set_light: 'Definir luz',
   set_speed: 'Definir velocidade',
+  power: 'Alterar energia do dispositivo',
+  service: 'Reiniciar serviço',
+  timelapse: 'Gerenciar timelapse',
   firmware_restart: 'Reiniciar firmware',
   emergency_stop: 'Parada de emergência',
   run_macro: 'Executar macro',
   load_filament: 'Carregar filamento',
   unload_filament: 'Descarregar filamento',
+  jog: 'Mover eixo',
+  motors_off: 'Desligar motores',
+  z_babystep: 'Ajuste fino do Z',
+  file_op: 'Gerenciar arquivos',
+  set_factor: 'Definir velocidade e fluxo',
+  exclude_object: 'Excluir objeto',
+  extrude: 'Extrudar filamento',
+  set_led: 'Definir LED',
+  set_pin: 'Definir saída',
+  queue_op: 'Gerenciar fila de impressão',
+  gcode: 'Enviar G-code',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action

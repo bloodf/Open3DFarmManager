@@ -1,4 +1,5 @@
 export * from './state.ts'
+export * from './machine-profile.ts'
 export * from './status.ts'
 export * from './command.ts'
 export * from './signalling.ts'
@@ -12,6 +13,7 @@ export * from './encoding.ts'
 export * from './sign.ts'
 export {
   TelemetryEvent,
+  DiscoveryResults,
   TelemetryBatch,
   PrinterTransition,
   telemetryPrinterKey,
@@ -19,3 +21,4 @@ export {
 export * from './configuration-signalling.ts'
 
 export * from './control-actions.ts'
+export * from './printer-detail.ts'

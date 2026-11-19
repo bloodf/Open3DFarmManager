@@ -15,6 +15,7 @@ const base = { v: z.literal(1) }
 const envelopeWire = z.string().min(1).max(MAX_API_ENVELOPE_WIRE_BYTES)
 export const ApiInboxScope = z.enum([
   'jobs:start',
+  'jobs:write',
   'control:basic',
   'control:extended',
 ])

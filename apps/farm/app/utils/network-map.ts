@@ -25,10 +25,14 @@ export interface NetworkDiscovered {
   vendor: string
   model?: string | null
   name?: string | null
+  host?: string
+  port?: number | null
+  serial?: string | null
   adopted: boolean
   lastSeen: number
 }
 export interface NetworkData {
+  canManage?: boolean
   connectors: readonly NetworkConnector[]
   printers: readonly NetworkPrinter[]
   discovered: readonly NetworkDiscovered[]
@@ -101,6 +105,7 @@ export interface NetworkEntry {
   p95Ms: number | null
   lastSeenAt: number | null
   href: string | null
+  discovery?: NetworkDiscovered
 }
 
 export interface LiveOverlay {
@@ -241,6 +246,7 @@ export function buildEntries(
       connectorName: parent.name,
       name: found.name || found.model || found.vendor,
       status: 'discovered',
+      discovery: found,
       statusText: 'Descoberta',
       latencyMs: null,
       p95Ms: null,

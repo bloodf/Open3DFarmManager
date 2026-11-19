@@ -6,7 +6,7 @@
 name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-app}
 services:
   postgres:
-    image: postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
+    image: postgres:18@sha256:e754b839f447639b7004895f4d8a4bfcb4e9dbe3a1bc035f27f646562a16fd61
     restart: unless-stopped
     security_opt: ['no-new-privileges:true']
     stop_grace_period: 30s

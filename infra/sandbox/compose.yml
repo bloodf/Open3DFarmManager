@@ -10,7 +10,7 @@ x-node: &node
   security_opt: [no-new-privileges:true]
 services:
   postgres:
-    image: postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232
+    image: postgres:18@sha256:e754b839f447639b7004895f4d8a4bfcb4e9dbe3a1bc035f27f646562a16fd61
     profiles: [sandbox]
     environment:
       POSTGRES_USER: sandbox_bootstrap

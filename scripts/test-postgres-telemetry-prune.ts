@@ -34,8 +34,13 @@ try {
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
-  assert.equal(catalog.at(-2)?.id, '0046_integration_approvals')
-  assert.equal(catalog.at(-1)?.id, '0047_integration_webhooks')
+  // Migrations keep being added: the integration migrations must stay in order.
+  const position = (id: string) => catalog.findIndex((entry) => entry.id === id)
+  assert.ok(position('0046_integration_approvals') >= 0)
+  assert.ok(
+    position('0046_integration_approvals') <
+      position('0048_integration_webhooks'),
+  )
   assert.equal(
     catalog.find((entry) => entry.id === '0036_telemetry_prune')?.id,
     '0036_telemetry_prune',

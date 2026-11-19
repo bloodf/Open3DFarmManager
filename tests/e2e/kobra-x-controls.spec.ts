@@ -82,7 +82,8 @@ test.describe('Kobra X on the farm page', () => {
   }) => {
     await mountPrinter(page, printer())
     const card = page.getByRole('article', { name: 'Kobra X' })
-    await expect(card.getByRole('button', { name: 'Pausar' })).toHaveCount(0)
+    // An idle printer has nothing to pause: the control is shown but disabled.
+    await expect(card.getByRole('button', { name: 'Pausar' })).toBeDisabled()
     await expect(
       card.getByRole('button', { name: 'Referenciar eixos' }),
     ).toBeVisible()

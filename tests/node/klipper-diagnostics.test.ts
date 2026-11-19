@@ -222,6 +222,7 @@ ${Array.from(
 test('rejects invalid project names before invoking Docker', () => {
   const run = spawnSync(process.execPath, [script, 'bad!'], {
     encoding: 'utf8',
+    env: { ...process.env, OPENFARM_SIM: 'docker' },
     timeout: 5000,
   })
   assert.equal(run.status, 2)

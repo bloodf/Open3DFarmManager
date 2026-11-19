@@ -143,16 +143,20 @@ function runText(step: Record<string, Yaml>): string {
   return String(step.run ?? '')
 }
 
-test('Simulator workflow is dispatch-only', () => {
-  assert.deepEqual(workflow.on, ['workflow_dispatch'])
-  assert.equal(
-    Array.isArray(workflow.on) &&
-      workflow.on.length === 1 &&
-      workflow.on[0] === 'workflow_dispatch',
-    true,
-  )
-  assert.doesNotMatch(simSource, /\bon:\s*\n?\s*pull_request\b/)
+test('Simulator workflow runs only the loopback mock job on pull requests', () => {
+  assert.deepEqual(workflow.on, ['pull_request', 'workflow_dispatch'])
   assert.doesNotMatch(simSource, /\bpush:\s/)
+  for (const [name, job] of Object.entries(jobs)) {
+    if (name === 'mock') {
+      assert.equal(job.if, undefined, 'the mock job runs on every trigger')
+      continue
+    }
+    assert.equal(
+      job.if,
+      "github.event_name == 'workflow_dispatch'",
+      `${name} uses Docker and stays manual`,
+    )
+  }
 })
 
 test('spoolman, cams and rtsp jobs matrix amd64 and arm64 runners', () => {

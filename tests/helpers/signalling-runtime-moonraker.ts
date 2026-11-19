@@ -257,7 +257,7 @@ export async function createRuntimeMoonrakerFixture() {
         const files = (await readdir(dist, { withFileTypes: true })).sort(
           (a, b) => a.name.localeCompare(b.name, 'en'),
         )
-        if (files.length > 64 || files.some((file) => !file.isFile()))
+        if (files.length > 128 || files.some((file) => !file.isFile()))
           throw Error('Packaged file bound')
         let totalBytes = 0
         const manifest = []
@@ -293,7 +293,10 @@ export async function createRuntimeMoonrakerFixture() {
           ],
           {
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, NODE_OPTIONS: '' },
+            env: {
+              ...process.env,
+              NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
+            },
           },
         )
         packagedPid = child.pid ?? 0

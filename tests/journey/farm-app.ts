@@ -125,8 +125,11 @@ export async function startFarmApp(
     const layer = join(directory, 'layer')
     const built = join(layer, 'output')
     await mkdir(layer, { mode: 0o700 })
+    // npm workspaces hoist Nuxt to the checkout root; apps/farm/node_modules
+    // holds only nested copies, or does not exist after a clean install.
+    const nuxt = join(checkout, 'node_modules/.bin/nuxt')
     await symlink(
-      await realpath(join(farm, 'node_modules')),
+      await realpath(join(checkout, 'node_modules')),
       join(layer, 'node_modules'),
       'dir',
     )
@@ -140,18 +143,8 @@ export async function startFarmApp(
       BROWSERSLIST: 'defaults',
       NODE_ENV: 'production',
     }
-    await run(
-      join(farm, 'node_modules/.bin/nuxt'),
-      ['prepare'],
-      { cwd: farm, env: buildEnv },
-      300_000,
-    )
-    await run(
-      join(layer, 'node_modules/.bin/nuxt'),
-      ['build'],
-      { cwd: layer, env: buildEnv },
-      900_000,
-    )
+    await run(nuxt, ['prepare'], { cwd: farm, env: buildEnv }, 300_000)
+    await run(nuxt, ['build'], { cwd: layer, env: buildEnv }, 900_000)
 
     const cert = join(directory, 'cert.pem')
     const tlsKey = join(directory, 'tls-key.pem')

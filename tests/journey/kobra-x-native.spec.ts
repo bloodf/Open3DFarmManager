@@ -68,7 +68,9 @@ if (journeyEnabled())
         mimeType: 'application/x-pem-file',
         buffer: Buffer.concat([mock.tls.clientCert, mock.tls.clientKey]),
       })
-      await expect(page.locator('dl')).toContainText('AnycubicSlicer')
+      await expect(
+        page.locator('dl').filter({ hasText: 'AnycubicSlicer' }),
+      ).toBeVisible()
       await page
         .getByRole('button', { name: 'Preparar Anycubic Kobra X' })
         .click()

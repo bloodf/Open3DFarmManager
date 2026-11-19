@@ -9,6 +9,10 @@ import { PostgresMembers } from '../../storage/postgres-members.ts'
 import { PostgresPasswordReset } from '../../storage/postgres-password-reset.ts'
 import { PostgresOidc } from '../../storage/postgres-oidc.ts'
 import { PostgresSignInRules } from '../../storage/sign-in-rules.ts'
+import {
+  PostgresSignInProviderStore,
+  type SignInProviderStore,
+} from '../../storage/sign-in-provider.ts'
 import type { MembersStore } from '../../services/members.ts'
 import {
   configuredAuthOrigin,
@@ -33,6 +37,8 @@ export interface AuthRuntime {
   /** OIDC subject links. Present whenever the auth pool exists; the feature flag is separate. */
   oidc?: PostgresOidc
   signInRules?: PostgresSignInRules
+  /** Installation-level Google (and future) provider settings. */
+  signInProviders?: SignInProviderStore
   /** SHA-256 of the first-owner bootstrap secret; undefined disables bootstrap. */
   bootstrapTokenDigest?: Buffer | undefined
   idleTimeoutMs: number
@@ -89,6 +95,7 @@ export function authRuntime(): AuthRuntime {
       passwordReset: new PostgresPasswordReset(sql),
       oidc: new PostgresOidc(sql),
       signInRules: new PostgresSignInRules(sql),
+      signInProviders: new PostgresSignInProviderStore(sql, secret),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

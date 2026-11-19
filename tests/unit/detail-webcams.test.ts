@@ -9,10 +9,16 @@ it('lists both cameras with their orientation over the detail socket without exp
   try {
     const moonraker = await startMoonrakerMock({
       webcams: [
-        { name: 'Mesa', uid: 'mesa', stream_url: camera.rtspUrl },
+        {
+          name: 'Mesa',
+          uid: 'mesa',
+          stream_url: camera.rtspUrl,
+          snapshot_url: '',
+        },
         {
           name: 'Bico',
           uid: 'bico',
+          stream_url: '',
           snapshot_url: `${camera.cameraUrl}/?action=snapshot`,
           rotation: 90,
           flip_horizontal: true,

@@ -496,8 +496,8 @@ describe('wiring', () => {
   })
 
   test('migration adds the per-assignment table and rolls it back', () => {
-    const up = read('infra/db/migrations/0059_printer_profiles.up.sql')
-    const down = read('infra/db/migrations/0059_printer_profiles.down.sql')
+    const up = read('infra/db/migrations/0062_printer_profiles.up.sql')
+    const down = read('infra/db/migrations/0062_printer_profiles.down.sql')
     expect(up).toContain(
       'assignment_id uuid PRIMARY KEY REFERENCES farm.printer_assignments(id)',
     )

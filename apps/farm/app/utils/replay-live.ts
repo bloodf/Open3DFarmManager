@@ -27,13 +27,8 @@ export function liveReplayInfo(
     connectorOnline: online,
     live:
       online &&
-      controlActionAvailability(
-        'start_library_print',
-        row,
-        keys,
-        controlEnabled,
-        now,
-      ).available,
+      controlActionAvailability('start_print', row, keys, controlEnabled, now)
+        .available,
     ...(state ? { state: state.state } : {}),
     ...(vendor ? { backend: vendor } : {}),
     materials: (state?.materials ?? []).map((m) => ({

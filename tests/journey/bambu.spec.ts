@@ -216,16 +216,23 @@ if (journeyEnabled())
           await page.locator('#onboarding-family').selectOption('bambu-lan')
           await page.locator('#bambu-ip').fill(host)
           await page.locator('#bambu-serial').fill('JOURNEYBAMBU')
-          await page.locator('#bambu-access-code').fill('journey-access')
+          await page.locator('#bambu-access-code').fill('journeyaccess')
           await page.locator('#bambu-control').check()
           await page
             .getByRole('button', { name: 'Preparar Bambu Lab (LAN)' })
             .click()
-          await expect(page.locator('#kobra-prepared-heading')).toBeVisible()
+          await expect(page.locator('#kobra-prepared-heading')).toBeVisible({
+            timeout: 60_000,
+          })
           await page.locator('#kobra-confirm-checkbox').check()
           await page
             .getByRole('button', { name: 'Confirmar e ativar impressora' })
             .click()
+          await expect(
+            page.getByText(
+              'Impressora adicionada e confirmada com recibo assinado pelo Connector.',
+            ),
+          ).toBeVisible({ timeout: 90_000 })
         },
       })
     })

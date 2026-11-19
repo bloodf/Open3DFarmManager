@@ -25,6 +25,7 @@ export const ExtendedControlAction = z.enum([
   'z_babystep',
   'set_factor',
   'extrude',
+  'exclude_object',
   'set_led',
   'set_pin',
   'queue_op',
@@ -143,6 +144,8 @@ export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (action === 'exclude_object')
+    return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
   if (action === 'service') return state === 'idle' || state === 'cancelled'
   if (action === 'firmware_restart')
@@ -192,6 +195,12 @@ export const ExtrudeArguments = z.strictObject({
     .refine((value) => value !== 0),
   feed: z.number().finite().min(1).max(6000),
 })
+export const ExcludeObjectArguments = z.strictObject({
+  name: z
+    .string()
+    .max(128)
+    .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/),
+})
 /** Most files or jobs one queue operation may name. */
 export const QUEUE_OP_MAX_ITEMS = 32
 /** Queue file: a gcodes-relative path, no traversal, no control characters. */
@@ -236,6 +245,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
   z.strictObject({ action: z.literal('timelapse'), args: TimelapseArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),
+  z.strictObject({
+    action: z.literal('exclude_object'),
+    args: ExcludeObjectArguments,
+  }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

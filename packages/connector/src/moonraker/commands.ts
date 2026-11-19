@@ -18,6 +18,7 @@ import {
   pinNames,
   pinScript,
 } from './control-outputs.ts'
+import { parseQueueOp, queueSupported } from './control-job-queue.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -113,6 +114,8 @@ export function supportedMoonrakerActions(
     supported.push('load_filament')
   if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
     supported.push('unload_filament')
+  // The queue is a Moonraker component; detection marks it next to the objects.
+  if (queueSupported(objects)) supported.push('queue_op')
   // Motion actions are advertised only when the printer lists a toolhead.
   if (motionSupported(objects))
     supported.push('jog', 'motors_off', 'z_babystep', 'set_factor')
@@ -169,6 +172,11 @@ export function buildMoonrakerCommand(
       method: 'printer.gcode.script',
       params: { script: buildMotionScript(action, args) },
     }
+  }
+
+  if (action === 'queue_op') {
+    if (!queueSupported(objects)) throw new Error('Queue unavailable')
+    return parseQueueOp(args).call
   }
 
   if (action === 'extrude') {

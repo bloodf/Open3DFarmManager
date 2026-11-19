@@ -12,6 +12,7 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
@@ -140,4 +141,15 @@ export function detectMoonrakerMacroParams(
     },
     (result) => readMacroParams(result, macros),
   )
+}
+
+/**
+ * One read-only server.info: a marker for each Moonraker component the
+ * Connector drives (the job queue). A failure rejects; the caller advertises
+ * nothing for those components rather than guessing.
+ */
+export function detectMoonrakerComponents(
+  input: DetectInput,
+): Promise<readonly string[]> {
+  return readOnlyOnce(input, { method: 'server.info' }, queueMarkers)
 }

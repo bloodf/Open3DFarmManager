@@ -7,7 +7,10 @@ import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
-import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type {
+  ExtendedControlAction,
+  QueueOpArguments,
+} from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
@@ -95,6 +98,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
   const found: DetailCapability[] = [
     ...(controls?.includes('file_op') ? (['files'] as const) : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
   ]
@@ -175,6 +179,19 @@ const outputs = computed(() => {
       ? blocked.reason
       : commandInFlight.value
         ? 'Um comando já está em andamento.'
+        : undefined,
+  }
+})
+const queueAvailability = computed(() => availability('queue_op'))
+const queue = computed(() => {
+  const advertised = state.value?.controls?.includes('queue_op') ?? false
+  return {
+    advertised,
+    canCommand: queueAvailability.value.available && !commandInFlight.value,
+    reason: queueAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? queueAvailability.value.reason
         : undefined,
   }
 })
@@ -267,6 +284,9 @@ function setLed(
 function setPin(name: string, value: number, event: Event) {
   if (row.value) void openControl(row.value, 'set_pin', event, { name, value })
 }
+function queueOp(args: QueueOpArguments, event: Event) {
+  if (row.value) void openControl(row.value, 'queue_op', event, args)
+}
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
 }
@@ -331,10 +351,12 @@ onMounted(() => heading.value?.focus())
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
       :extrusion="extrusion"
+      :queue="queue"
       :macros="macros"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
+      @queue-op="queueOp"
       @run-macro="runMacro"
       @set-fan="setFan"
       @set-led="setLed"

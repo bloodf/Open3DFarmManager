@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import { createMoonrakerSubscription } from '../../packages/connector/src/moonraker/subscription.ts'
+import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import { expect, it, vi } from 'vitest'
 import {
   createPrinterLinkHealth,
@@ -116,5 +119,90 @@ it('emits one heartbeat every 60 seconds until aborted', () => {
   } finally {
     controller.abort()
     vi.useRealTimers()
+  }
+})
+
+it('reports delayed and dropped Moonraker exchanges through the live snapshot provider', async () => {
+  const mock = await startMoonrakerMock()
+  const controller = new AbortController()
+  const printerKey = 'printer'
+  const agentId = randomUUID()
+  const assignmentRefs = [{ printerKey, agentId, assignmentId: randomUUID() }]
+  const health = createPrinterLinkHealth(printerKey)
+  const source = createFarmSnapshotSource({
+    assignmentRefs,
+    linkHealthFor() {
+      const { printerKey: _printerKey, ...status } = health.read()
+      return status
+    },
+  })
+  const observed = vi.fn()
+  mock.control.faults.setFault({
+    method: 'printer.objects.subscribe',
+    fault: { type: 'delay', delayMs: 80 },
+    count: 1,
+  })
+  const subscription = createMoonrakerSubscription({
+    assignment: { printerKey, origin: mock.origin },
+    allowedOrigins: [mock.origin],
+    limits: {
+      maxMessageBytes: 65536,
+      connectTimeoutMs: 1000,
+      requestTimeoutMs: 1000,
+      staleAfterMs: 5000,
+      reconnectMinMs: 200,
+      reconnectMaxMs: 400,
+    },
+    signal: controller.signal,
+    linkHealth: health,
+    onEvent: observed,
+    onRawObservation: source.observe,
+    onRawUnavailable: source.invalidate,
+  })
+  function reportedHealth() {
+    const onComplete = vi.fn()
+    const provider = source.open({
+      binding: { agent_id: agentId } as Parameters<
+        typeof source.open
+      >[0]['binding'],
+      assignmentRefs,
+      deadlineMonoMs: performance.now() + 5000,
+      signal: controller.signal,
+      onComplete,
+      onUnavailable() {},
+    })
+    provider.close()
+    return onComplete.mock.lastCall?.[0].printers[0].linkHealth
+  }
+  try {
+    await vi.waitFor(() => {
+      expect(reportedHealth()).toMatchObject({
+        state: 'connected',
+        p95Ms: expect.any(Number),
+        reconnects: 0,
+        lastErrorCode: null,
+      })
+      expect(reportedHealth().p95Ms).toBeGreaterThanOrEqual(70)
+    })
+    mock.control.faults.setFault({
+      method: 'printer.objects.query',
+      fault: { type: 'drop' },
+      count: 1,
+    })
+    await vi.waitFor(
+      () => {
+        expect(reportedHealth()).toMatchObject({
+          state: 'connected',
+          reconnects: 1,
+          lastErrorCode: expect.any(String),
+        })
+      },
+      { timeout: 3000 },
+    )
+  } finally {
+    controller.abort()
+    source.close()
+    await subscription.done
+    await mock.close()
   }
 })

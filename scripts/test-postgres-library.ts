@@ -1,4 +1,4 @@
-// Synthetic PostgreSQL only. Caller owns the database, migrations (through 0056) and teardown.
+// Synthetic PostgreSQL only. Caller owns the database, migrations (through 0057) and teardown.
 // Library store + blob store: dedupe, per-farm storage mode, crash safety, quota, roles.
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
@@ -123,6 +123,7 @@ try {
     storageMode: 'connector',
     quotaBytes: 21_474_836_480,
     retentionDays: 30,
+    keepVersions: null,
   })
   assert.equal(defaults.canManage, false)
   for (const who of ['viewer', 'operator'] as const)
@@ -413,13 +414,12 @@ try {
     )[0]?.n,
   )
   const big = await blobs.put(bytes('x'.repeat(30 - used)))
-  assert.deepEqual(
-    await library.addVersion({
-      ...auth('operator'),
-      version: server(big.sha256, big.size, { title: 'big' }),
-    }),
-    { ok: false, reason: 'quota-exceeded' },
-  )
+  const refused = await library.addVersion({
+    ...auth('operator'),
+    version: server(big.sha256, big.size, { title: 'big' }),
+  })
+  assert.ok(!refused.ok && refused.reason === 'quota-exceeded')
+  assert.match(refused.message ?? '', /Cota da biblioteca excedida/)
   assert.equal(await blobRows(big.sha256), 0)
   assert.equal(
     Number(
@@ -430,14 +430,21 @@ try {
     0,
     'A refused upload leaves no item behind',
   )
+  assert.deepEqual(
+    await library.softDeleteVersion({
+      ...auth('operator'),
+      versionId: retry.version.id,
+    }),
+    { ok: false, reason: 'denied' },
+  )
   const deleted = await library.softDeleteVersion({
-    ...auth('operator'),
+    ...auth('owner'),
     versionId: retry.version.id,
   })
   assert.ok(deleted.ok)
   assert.deepEqual(
     await library.softDeleteVersion({
-      ...auth('operator'),
+      ...auth('owner'),
       versionId: retry.version.id,
     }),
     { ok: false, reason: 'not-found' },
@@ -466,6 +473,112 @@ try {
     500,
   )
   check('quota-and-soft-delete')
+
+  // --- Search: filters combine, keyset paging survives inserts
+  assert.ok(
+    (
+      await library.setSettings({
+        ...auth('owner'),
+        storageMode: 'connector',
+        quotaBytes: 21_474_836_480,
+      })
+    ).ok,
+  )
+  const specs = [
+    ['find-a', 'Voron 2.4', 0.4, 'PETG', 'OrcaSlicer'],
+    ['find-b', 'Voron 2.4', 0.6, 'PLA', 'PrusaSlicer'],
+    ['find-c', 'Ender 3', 0.4, 'PETG', 'PrusaSlicer'],
+  ] as const
+  const found: string[] = []
+  for (const [title, model, nozzle, material, slicer] of specs) {
+    const added = await library.addVersion({
+      ...auth('operator'),
+      version: version(sha(title), 7, {
+        title,
+        tags: [title === 'find-b' ? 'other' : 'shared'],
+        originalName: title + '.gcode',
+        metadata: {
+          printerModel: model,
+          slicer,
+          tools: [{ nozzleDiameter: nozzle, filamentType: material }],
+        },
+      }),
+    })
+    assert.ok(added.ok)
+    found.push(added.item.id)
+  }
+  const titles = async (search: Record<string, unknown>) => {
+    const r = await library.searchItems({
+      ...auth('viewer'),
+      search: { ...search, title: 'find-' + ((search.title as string) ?? '') },
+    })
+    assert.ok(r.ok)
+    return r.items.map((i) => i.title).sort()
+  }
+  assert.deepEqual(await titles({}), ['find-a', 'find-b', 'find-c'])
+  assert.deepEqual(await titles({ printerModel: 'voron' }), [
+    'find-a',
+    'find-b',
+  ])
+  assert.deepEqual(await titles({ nozzle: 0.4 }), ['find-a', 'find-c'])
+  assert.deepEqual(await titles({ material: 'petg' }), ['find-a', 'find-c'])
+  assert.deepEqual(await titles({ slicer: 'prusa' }), ['find-b', 'find-c'])
+  assert.deepEqual(await titles({ tag: 'SHARED' }), ['find-a', 'find-c'])
+  assert.deepEqual(
+    await titles({ printerModel: 'voron', material: 'petg', nozzle: 0.4 }),
+    ['find-a'],
+  )
+  const pageOne = await library.searchItems({
+    ...auth('viewer'),
+    search: { title: 'find-' },
+    limit: 2,
+  })
+  assert.ok(pageOne.ok && pageOne.next !== null)
+  assert.ok(
+    (
+      await library.addVersion({
+        ...auth('operator'),
+        version: version(sha('find-late'), 7, {
+          title: 'find-late',
+          originalName: 'late.gcode',
+        }),
+      })
+    ).ok,
+  )
+  const pageTwo = await library.searchItems({
+    ...auth('viewer'),
+    search: { title: 'find-' },
+    limit: 2,
+    after: pageOne.next,
+  })
+  assert.ok(pageTwo.ok)
+  const seen = [...pageOne.items, ...pageTwo.items].map((i) => i.id)
+  assert.equal(new Set(seen).size, seen.length, 'No item is repeated')
+  for (const id of found) assert.ok(seen.includes(id), 'No item is skipped')
+  assert.deepEqual(
+    await library.searchItems({ ...auth('stranger'), search: {} }),
+    { ok: false, reason: 'forbidden' },
+  )
+  const foundVersions = await library.listVersions({
+    ...auth('viewer'),
+    itemId: found[0]!,
+  })
+  assert.ok(foundVersions.ok && foundVersions.versions[0])
+  const detail = await library.getVersion({
+    ...auth('viewer'),
+    versionId: foundVersions.versions[0].id,
+  })
+  assert.ok(detail.ok)
+  assert.equal(detail.version.id, foundVersions.versions[0].id)
+  assert.equal(detail.item.id, found[0])
+  assert.deepEqual(
+    await library.getVersion({
+      ...auth('stranger'),
+      versionId: foundVersions.versions[0].id,
+    }),
+    { ok: false, reason: 'forbidden' },
+  )
+  check('search-filters-and-stable-paging')
 
   // --- Least privilege and immutability in the database
   await assert.rejects(runtime`DELETE FROM farm.library_versions`)

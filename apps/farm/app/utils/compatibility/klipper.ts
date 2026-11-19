@@ -1,6 +1,6 @@
-import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic'
-import { unknownControlAreas } from './control-areas'
-import type { ControlAreaEvidenceMap } from './control-areas'
+import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic.ts'
+import { unknownControlAreas } from './control-areas.ts'
+import type { ControlAreaEvidenceMap } from './control-areas.ts'
 
 export type { CatalogCapability }
 export type KlipperCatalogProduct = AnycubicCatalogProduct

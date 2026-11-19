@@ -1,5 +1,5 @@
-import { compatibilityPageCatalog, capabilityStatusLabels } from './index'
-import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic'
+import { compatibilityPageCatalog, capabilityStatusLabels } from './index.ts'
+import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic.ts'
 
 export interface ObservedPrinterIdentity {
   readonly vendor?: string | null

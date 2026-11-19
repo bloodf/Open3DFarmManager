@@ -18,16 +18,16 @@ export async function validatePrinterAssignmentRole(sql: Sql): Promise<void> {
         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND c.relkind IN ('r','p','v','m','f')
         AND (pg_has_role(current_user,c.relowner,'MEMBER')
-          OR (has_table_privilege(current_user,c.oid,'SELECT') AND NOT (n.nspname='farm' AND c.relname IN ('session_accounts','account_sessions','memberships','connector_enrollments','printer_assignments')))
-          OR (has_table_privilege(current_user,c.oid,'INSERT') AND NOT (n.nspname='farm' AND c.relname='printer_assignments'))
+          OR (has_table_privilege(current_user,c.oid,'SELECT') AND NOT (n.nspname='farm' AND c.relname IN ('session_accounts','account_sessions','memberships','connector_enrollments','printer_assignments','printer_profiles','printer_latest_state')))
+          OR (has_table_privilege(current_user,c.oid,'INSERT') AND NOT (n.nspname='farm' AND c.relname IN ('printer_assignments','printer_profiles')))
           OR has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')))
       AND NOT EXISTS (
         SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND a.attnum>0 AND NOT a.attisdropped AND c.relkind IN ('r','p','v','m','f')
-        AND ((has_column_privilege(current_user,c.oid,a.attnum,'SELECT') AND NOT (n.nspname='farm' AND c.relname IN ('session_accounts','account_sessions','memberships','connector_enrollments','printer_assignments')))
-          OR (has_column_privilege(current_user,c.oid,a.attnum,'INSERT') AND NOT (n.nspname='farm' AND c.relname='printer_assignments'))
+        AND ((has_column_privilege(current_user,c.oid,a.attnum,'SELECT') AND NOT (n.nspname='farm' AND c.relname IN ('session_accounts','account_sessions','memberships','connector_enrollments','printer_assignments','printer_profiles','printer_latest_state')))
+          OR (has_column_privilege(current_user,c.oid,a.attnum,'INSERT') AND NOT (n.nspname='farm' AND c.relname IN ('printer_assignments','printer_profiles')))
           OR has_column_privilege(current_user,c.oid,a.attnum,'REFERENCES')
-          OR (has_column_privilege(current_user,c.oid,a.attnum,'UPDATE') AND NOT (n.nspname='farm' AND ((c.relname='session_accounts' AND a.attname='id') OR (c.relname='account_sessions' AND a.attname IN ('last_seen_at','revoked_at')) OR (c.relname='memberships' AND a.attname='farm_id') OR (c.relname='connector_enrollments' AND a.attname='agent_id') OR (c.relname='printer_assignments' AND a.attname IN ('revoked_at','revoked_by','display_name','group_name','location','sort_order')))))))
+          OR (has_column_privilege(current_user,c.oid,a.attnum,'UPDATE') AND NOT (n.nspname='farm' AND ((c.relname='session_accounts' AND a.attname='id') OR (c.relname='account_sessions' AND a.attname IN ('last_seen_at','revoked_at')) OR (c.relname='memberships' AND a.attname='farm_id') OR (c.relname='connector_enrollments' AND a.attname='agent_id') OR (c.relname='printer_assignments' AND a.attname IN ('revoked_at','revoked_by','display_name','group_name','location','sort_order')) OR (c.relname='printer_profiles' AND a.attname IN ('model','nozzle_diameter_mm','bed_size_x_mm','bed_size_y_mm','bed_size_z_mm','max_hotend_temperature_celsius','max_bed_temperature_celsius','kinematics','compatible_models','notes','updated_by','updated_at')))))))
       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND c.relkind='S'
         AND (pg_has_role(current_user,c.relowner,'MEMBER') OR has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE')))
@@ -41,6 +41,10 @@ export async function validatePrinterAssignmentRole(sql: Sql): Promise<void> {
       AND has_table_privilege(current_user,'farm.connector_enrollments','SELECT')
       AND has_table_privilege(current_user,'farm.printer_assignments','SELECT')
       AND has_table_privilege(current_user,'farm.printer_assignments','INSERT')
+      AND has_table_privilege(current_user,'farm.printer_profiles','SELECT')
+      AND has_table_privilege(current_user,'farm.printer_profiles','INSERT')
+      AND has_table_privilege(current_user,'farm.printer_latest_state','SELECT')
+      AND has_column_privilege(current_user,'farm.printer_profiles','notes','UPDATE')
       AND has_column_privilege(current_user,'farm.session_accounts','id','UPDATE')
       AND has_column_privilege(current_user,'farm.account_sessions','last_seen_at','UPDATE')
       AND has_column_privilege(current_user,'farm.account_sessions','revoked_at','UPDATE')

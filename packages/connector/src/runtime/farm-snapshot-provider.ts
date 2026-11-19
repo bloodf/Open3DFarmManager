@@ -66,6 +66,7 @@ const FRAME_LIMIT = 'Application frame limit'
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
+  linkHealthFor?: (printerKey: string) => PrinterState['linkHealth']
   nowMono?: () => number
   macrosFor?: (assignmentId: string) => readonly string[] | undefined
   controlsFor?: (
@@ -146,9 +147,12 @@ export function createFarmSnapshotSource(input: {
         macros: _untrustedMacros,
         firmware: _untrustedFirmware,
         lastJob: _observedLastJob,
+        linkHealth: _observedLinkHealth,
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
+      const linkHealth = input.linkHealthFor?.(ref.printerKey)
+      if (linkHealth) printer.linkHealth = linkHealth
       const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
       if (localWebUiOrigin) printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
@@ -189,10 +193,22 @@ export function createFarmSnapshotSource(input: {
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
     // Fit as many spools as the frame cap allows; the total stays truthful.
-    let message = validatedStatusMessage(
-      { t: 'snapshot', seq: 1024, printers },
-      refs,
-    )
+    let message
+    try {
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    } catch (error) {
+      if (!(error instanceof Error && error.message === FRAME_LIMIT))
+        throw error
+      if (!printers.some((printer) => printer.linkHealth)) throw error
+      for (const printer of printers) delete printer.linkHealth
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    }
     if (spoolState) {
       const elapsed = now - spoolState.receivedMono
       for (let n = spoolState.value.spools.length; n >= 0; n--) {

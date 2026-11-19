@@ -1,8 +1,8 @@
-import { unknownControlAreas } from './control-areas'
+import { unknownControlAreas } from './control-areas.ts'
 import type {
   ControlAreaCapabilities,
   ControlAreaEvidenceMap,
-} from './control-areas'
+} from './control-areas.ts'
 
 export type CatalogCapability =
   'documented' | 'simulated' | 'unknown' | 'unsupported'
@@ -60,6 +60,7 @@ const bambuCapabilities = {
 } satisfies BambuCatalogProduct['capabilities']
 
 const common = {
+  controlAreas: unknownControlAreas,
   brand: 'Bambu Lab',
   releaseStatus: 'Anunciada; disponibilidade regional não verificada',
   firmwareStatus: 'não verificado',

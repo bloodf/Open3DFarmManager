@@ -1,3 +1,4 @@
+import { createPrinterDetailSession } from '../runtime/printer-detail-session.ts'
 import { rtcBindAddress } from '../config/rtc.ts'
 import {
   captureEffectiveRtcDescriptions,
@@ -242,6 +243,7 @@ export class ReadonlyConnectorPeer {
   #admitted: RtcSessionBinding | undefined
   #session: ReadonlyRtcSession | undefined
   #terminal: string | undefined
+  #detail: ReturnType<typeof createPrinterDetailSession> | undefined
   #offerStarted = false
   #offer: string | undefined
   #answer: string | undefined
@@ -391,6 +393,28 @@ export class ReadonlyConnectorPeer {
       if (!this.#session) {
         this.close('application-before-proof')
         return
+      }
+      const genuine = this.#options.genuineStatus
+      if (
+        genuine?.detailSourceFor &&
+        this.#session.snapshot().state === 'verified' &&
+        typeof raw === 'string'
+      ) {
+        this.#detail ??= createPrinterDetailSession(
+          genuine.detailSourceFor,
+          (key) => genuine.assignmentRefs.some((ref) => ref.printerKey === key),
+          (wires) => {
+            if (!this.current() || !this.#application.isOpen()) return
+            const bytes = wires.reduce(
+              (total, wire) => total + Buffer.byteLength(wire),
+              0,
+            )
+            if (this.#status.bufferedAmount() + bytes > READONLY_PENDING_BYTES)
+              return
+            for (const wire of wires) this.#application.sendMessage(wire)
+          },
+        )
+        if (this.#detail.receive(raw)) return
       }
       this.#session.receiveApplication(raw)
     })
@@ -633,6 +657,7 @@ export class ReadonlyConnectorPeer {
     }
     clearTimeout(this.#authTimer)
     clearTimeout(this.#lifetimeTimer)
+    this.#detail?.close()
     this.#status.close()
     this.#inbox.close(reason)
     this.#session?.close(reason)

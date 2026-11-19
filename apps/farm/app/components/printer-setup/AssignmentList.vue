@@ -4,6 +4,7 @@ import {
   isKobraXAssignment,
 } from '../../utils/kobralink-onboarding.ts'
 import AssignmentGrouping from '../printers/AssignmentGrouping.vue'
+import MachineProfile from '../machine-profile/MachineProfile.vue'
 import PrinterIdentity from '../printer-identity/PrinterIdentity.vue'
 import {
   liveConnectionLabel,
@@ -131,6 +132,14 @@ const stateText = (id: string) => livePrinterStateText(setup, id)
         <AssignmentGrouping
           :key="farmId + ':' + printer.assignmentId"
           :printer="printer"
+        />
+        <MachineProfile
+          v-if="printer.status === 'active'"
+          :key="'profile:' + farmId + ':' + printer.assignmentId"
+          :farm-id="farmId"
+          :assignment-id="printer.assignmentId"
+          :label="printer.displayName || printer.printerKey"
+          :can-manage="canManage"
         />
         <button
           v-if="canManage && printer.status === 'active'"

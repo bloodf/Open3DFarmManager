@@ -55,6 +55,9 @@ const links = computed(() => [
     ? [{ to: '/parear', label: 'Aprovar Connector' }]
     : []),
   { to: '/compatibilidade', label: 'Compatibilidade' },
+  ...(canApproveConnectors.value
+    ? [{ to: '/ui-gallery', label: 'Galeria de componentes' }]
+    : []),
   ...(isOwner.value
     ? [
         { to: '/membros', label: 'Membros' },

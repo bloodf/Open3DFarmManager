@@ -1,0 +1,79 @@
+@import '../tokens/tokens.css';
+
+:root {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+h1 {
+  font-size: clamp(var(--font-size-xl), 4vw, var(--font-size-2xl));
+  line-height: var(--line-height-tight);
+  margin: 0 0 var(--space-4);
+}
+p {
+  max-width: 42rem;
+  line-height: var(--line-height-normal);
+}
+a {
+  color: var(--color-accent);
+  text-underline-offset: 0.2em;
+}
+a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+small {
+  display: block;
+  margin-bottom: var(--space-4);
+}
+.account-form {
+  max-width: 26rem;
+}
+.account-form label {
+  display: block;
+  font-weight: var(--font-weight-semibold);
+  margin-top: var(--space-4);
+}
+.account-form input,
+.account-form select {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+.account-form button {
+  min-height: 2.75rem;
+  margin-top: var(--space-4);
+  padding: 0.65rem 1.25rem;
+  font: inherit;
+  cursor: pointer;
+}
+.account-form button:disabled {
+  cursor: wait;
+}
+.account-form input:focus-visible,
+.account-form select:focus-visible,
+.account-form button:focus-visible {
+  outline: var(--focus-ring-width) solid currentColor;
+  outline-offset: 3px;
+}
+.account-form .help {
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}

@@ -17,6 +17,11 @@ export function actionsForControlRole(
         'extrude',
         'set_led',
         'set_pin',
+        'jog',
+        'motors_off',
+        'z_babystep',
+        'set_factor',
+        'start_library_print',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

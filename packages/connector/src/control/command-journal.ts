@@ -201,11 +201,11 @@ const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
-const extrudeActionSchema = macroActionSchema.replace(
+const motionActionSchema = macroActionSchema.replace(
   "'unload_filament'",
-  "'unload_filament','extrude'",
+  "'unload_filament','extrude','jog','motors_off','z_babystep','set_factor'",
 )
-const actionSchema = extrudeActionSchema.replace(
+const actionSchema = motionActionSchema.replace(
   "'extrude'",
   "'extrude','set_led','set_pin'",
 )
@@ -213,7 +213,7 @@ const previousActionSchemas: Record<number, string> = {
   2: legacyActionSchema,
   3: previousActionSchema,
   4: macroActionSchema,
-  5: extrudeActionSchema,
+  5: motionActionSchema,
 }
 const schema = [
   actionSchema,

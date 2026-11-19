@@ -553,6 +553,10 @@ test('Moonraker advertises exactly the actions its detected objects support', as
     'set_fan',
     'home',
     'set_speed',
+    'jog',
+    'motors_off',
+    'z_babystep',
+    'set_factor',
   ])
   assert.deepEqual(await bare.dispatch(), {
     kind: 'rejected',

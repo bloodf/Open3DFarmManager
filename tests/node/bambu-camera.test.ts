@@ -30,7 +30,7 @@ const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9])
 // Offline stand-in for FFmpeg; it exits non-zero if the access code reaches argv.
 const encoder = createFakeEncoder(['synthetic'])
 after(() => encoder.dispose())
-function record(payload = jpeg) {
+function record(payload: Buffer = jpeg) {
   const header = Buffer.alloc(16)
   header.writeUInt32LE(payload.length)
   return Buffer.concat([header, payload])
@@ -179,7 +179,7 @@ async function assertTlsLoopback(media: {
       .update(new X509Certificate(cert).raw)
       .digest('hex')
     let authentications = 0
-    let peerJpeg = jpeg
+    let peerJpeg: Buffer = jpeg
     let encoding = false
     server = createServer(
       { key: readFileSync(join(dir, 'key')), cert },

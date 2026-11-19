@@ -737,10 +737,12 @@ async function runConnectorAgentOnce(
         ...(snapshots
           ? {
               onRawObservation: (observation) => {
+                if (!snapshots) return
                 snapshots.observe(observation)
                 detailSources.observe(observation.printer)
               },
               onRawUnavailable: (event) => {
+                if (!snapshots) return
                 snapshots.invalidate(event)
                 detailSources.invalidate(event.printerKey)
               },

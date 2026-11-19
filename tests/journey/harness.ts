@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
-import { expect, type Browser, type Locator, type Page } from '@playwright/test'
+import { expect, type Browser, type Page } from '@playwright/test'
 import { browserBundle } from '../helpers/browser-bundle.ts'
 import { browserLogin, pagePost } from '../helpers/kobralink-rtc/acceptance.ts'
 import { createRuntimeMoonrakerFixture } from '../helpers/signalling-runtime-moonraker.ts'
@@ -49,7 +49,9 @@ import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-sim
 // fraction, so they target that accessible name.
 export const REPORTED_PROGRESS_NAME = /^Progresso informado da impressão: \d+%$/
 
-export function reportedProgress(row: Locator): Locator {
+export function reportedPrintProgressBar(
+  row: ReturnType<Page['locator']>,
+): ReturnType<Page['locator']> {
   return row.getByRole('progressbar', { name: REPORTED_PROGRESS_NAME })
 }
 
@@ -795,11 +797,14 @@ export async function startJourneyHarness(
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 60_000 })
-        await expect(reportedProgress(row)).toHaveAttribute('value', '0.25')
+        await expect(reportedPrintProgressBar(row)).toHaveAttribute(
+          'value',
+          '0.25',
+        )
       },
       farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
-        await expect(reportedProgress(farmRow(page))).toHaveAttribute(
+        await expect(reportedPrintProgressBar(farmRow(page))).toHaveAttribute(
           'value',
           String(fraction),
           { timeout: 15_000 },

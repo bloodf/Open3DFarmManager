@@ -654,3 +654,46 @@ test('an admission arriving after the auth deadline, before the timer fires, clo
     f.handle.close()
   }
 })
+
+test('a rate-limited key lookup is reported as disconnected, not rejected', async () => {
+  const agentId = randomUUID()
+  const outcomes = new Map<number | undefined, string[]>()
+  for (const status of [429, 403, undefined]) {
+    const reasons: string[] = []
+    let clients = 0
+    const feed = createAuthenticatedFarmStatusFeed({
+      resolveKey: async () => {
+        // The registry read is paced by the server like any other request.
+        throw Object.assign(Error('registry read failed'), {
+          ...(status === undefined ? {} : { statusCode: status }),
+        })
+      },
+      createClient: () => {
+        clients++
+        return { start: async () => {}, close: () => {} }
+      },
+    })
+    const handle = feed.open({
+      scope: { accountId: 'account_test', farmId: randomUUID(), viewEpoch: 1 },
+      agentId,
+      browserKeyId: randomUUID(),
+      assignmentRefs: [
+        { assignmentId: randomUUID(), agentId, printerKey: 'p' },
+      ],
+      signal: new AbortController().signal,
+      onHealth: (value: { kind: string; reason?: string }) => {
+        if (value.reason) reasons.push(value.reason)
+      },
+      onSnapshot: () => {},
+    })
+    for (let i = 0; i < 100 && !reasons.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    handle.close()
+    assert.equal(clients, 0)
+    outcomes.set(status, reasons)
+  }
+  // Only server pacing is retried; every other lookup failure stays rejected.
+  assert.deepEqual(outcomes.get(429), ['disconnected'])
+  assert.deepEqual(outcomes.get(403), ['rejected'])
+  assert.deepEqual(outcomes.get(undefined), ['rejected'])
+})

@@ -14,6 +14,13 @@ const GCODE = Buffer.from('; jornada Bambu\nG28\nG1 X10 Y10 F3000\n')
 const UNKNOWN =
   'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 const NOT_SENT = /Nenhum comando foi enviado\./
+// The page reports a file operation it could not finish (failed session, or
+// cancelled because the live view blinked) with one of these.
+const FILES_UNDONE = [
+  'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
+  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.',
+]
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 if (journeyEnabled())
   test.describe('journey: Bambu Lab', () => {
@@ -158,6 +165,38 @@ if (journeyEnabled())
         'Confirmar comando',
         UNKNOWN,
       )
+    }
+
+    /**
+     * One file operation over a fresh control session. When the page reports
+     * it undone, the operator checks the printer and asks again; the journey
+     * asks again only while the printer shows nothing arrived. Starting a
+     * print is never repeated.
+     */
+    async function fileOperation(
+      page: Page,
+      label: string,
+      result: string,
+      untouched: () => boolean,
+    ) {
+      const input = page.locator('#files-upload')
+      const status = page.getByRole('status').last()
+      const settled = new RegExp(
+        `^(${[result, ...FILES_UNDONE].map(escape).join('|')})$`,
+      )
+      for (let attempt = 1; ; attempt++) {
+        await controlInbox()
+        await expect(input).toBeEnabled({ timeout: 45_000 })
+        await page.getByRole('button', { name: label, exact: true }).click()
+        await expect(status).toHaveText(settled, { timeout: 60_000 })
+        const text = (await status.textContent()) ?? ''
+        if (text === result) return
+        expect(
+          untouched(),
+          `${label} reached the printer without a confirmation: ${text}`,
+        ).toBe(true)
+        expect(attempt, text).toBeLessThan(5)
+      }
     }
 
     async function historyEntry(page: Page, outcome: string) {
@@ -335,8 +374,13 @@ if (journeyEnabled())
       await printers.selectOption(journey.assignmentId)
       const input = page.locator('#files-upload')
       await expect(input).toBeEnabled({ timeout: 30_000 })
-      await controlInbox()
-      await page.getByRole('button', { name: 'Consultar arquivos' }).click()
+      // Listing is read-only, so an undone listing is always safe to repeat.
+      await fileOperation(
+        page,
+        'Consultar arquivos',
+        'Nenhum arquivo nesta impressora.',
+        () => true,
+      )
       const fileOption = page.locator('#files-existing option', {
         hasText: FILE,
       })
@@ -347,18 +391,23 @@ if (journeyEnabled())
         mimeType: 'text/plain',
         buffer: GCODE,
       })
-      // The listing session has ended; upload in the next one.
-      await controlInbox()
-      await page.getByRole('button', { name: 'Enviar arquivo' }).click()
-      const status = page.getByRole('status').last()
-      await expect(status).toHaveText(
+      // The listing session has ended; upload in the next one. An undone
+      // upload is repeated only while the printer has not stored the file.
+      await fileOperation(
+        page,
+        'Enviar arquivo',
         'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
-        { timeout: 60_000 },
+        () => !simulator().uploads.has(FILE),
       )
+      const status = page.getByRole('status').last()
       expect(simulator().uploads.get(FILE)).toEqual(GCODE)
 
-      await controlInbox()
-      await page.getByRole('button', { name: 'Consultar arquivos' }).click()
+      await fileOperation(
+        page,
+        'Consultar arquivos',
+        'Arquivos atualizados.',
+        () => true,
+      )
       await expect(fileOption).toHaveCount(1, { timeout: 45_000 })
       // The listing session has ended; start in the next one. The page clears
       // its confirmation whenever the live view blips, so confirm last.

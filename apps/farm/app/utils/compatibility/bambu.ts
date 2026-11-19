@@ -60,6 +60,7 @@ const bambuCapabilities = {
 } satisfies BambuCatalogProduct['capabilities']
 
 const common = {
+  controlAreas: unknownControlAreas,
   brand: 'Bambu Lab',
   releaseStatus: 'Anunciada; disponibilidade regional não verificada',
   firmwareStatus: 'não verificado',

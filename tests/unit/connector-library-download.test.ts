@@ -52,7 +52,9 @@ function setup(options: { perMinute?: number; failAudit?: boolean } = {}) {
       if (options.failAudit) throw new Error('db down')
       audits.push(entry)
     },
-    perMinute: options.perMinute,
+    ...(options.perMinute === undefined
+      ? {}
+      : { perMinute: options.perMinute }),
   })
   const headers = (extra: Record<string, string> = {}, farmId = farm) =>
     new Headers({

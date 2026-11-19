@@ -373,3 +373,23 @@ test('the offline card is labelled as having no direct connection', async () => 
   assert.match(html, new RegExp(OFFLINE_CONNECTION_LABEL))
   assert.equal(OFFLINE_CONNECTION_LABEL, 'sem conexão direta')
 })
+
+test('parseLastKnownStates accepts optional nullable grouping metadata from printer-states', () => {
+  const parsed = parseLastKnownStates({
+    states: [
+      {
+        ...routeBody([storedState()]).states[0]!,
+        displayName: 'Mesa 1',
+        groupName: 'Protótipos',
+        location: null,
+        sortOrder: 0,
+      },
+    ],
+  })
+  assert.equal(parsed.ok, true)
+  if (!parsed.ok) return
+  assert.equal(parsed.states[0]?.displayName, 'Mesa 1')
+  assert.equal(parsed.states[0]?.groupName, 'Protótipos')
+  assert.equal(parsed.states[0]?.location, null)
+  assert.equal(parsed.states[0]?.sortOrder, 0)
+})

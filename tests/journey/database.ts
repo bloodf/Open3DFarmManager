@@ -27,6 +27,7 @@ export const CAPABILITIES = [
   'farm_pause_authority',
   'farm_connector_telemetry_writer',
   'farm_job_history_reader',
+  'farm_printer_state_reader',
 ] as const
 
 export type Account = Readonly<{ id: string; username: string }>

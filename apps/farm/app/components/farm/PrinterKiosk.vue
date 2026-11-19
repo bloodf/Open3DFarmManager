@@ -129,7 +129,7 @@ function temperature(value: number | undefined) {
           class="kiosk__card"
           :class="{ 'kiosk__card--stale': card.stale }"
         >
-          <h2>{{ card.state.printerKey }}</h2>
+          <h2>{{ card.state.displayName || card.state.printerKey }}</h2>
           <p class="kiosk__state">
             <span aria-hidden="true">{{ icons[card.state.state] }}</span>
             {{ formatPrinterStateLabel(card.state) }}

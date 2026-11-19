@@ -34,6 +34,7 @@ export function createKobraContext(
     kobraBootstrap,
     selectedKobraKey,
     kobraIp,
+    kobraSetupMode,
     kobraLabel,
     kobraExpectedDeviceId,
     kobraBusy,
@@ -297,6 +298,7 @@ export function createKobraContext(
     kobraPrepared.value = null
     kobraConfirmed.value = null
     kobraIp.value = ''
+    kobraSetupMode.value = 'unselected'
     kobraLabel.value = ''
     kobraExpectedDeviceId.value = ''
   }

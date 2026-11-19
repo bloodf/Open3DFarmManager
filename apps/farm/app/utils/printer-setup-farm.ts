@@ -39,6 +39,7 @@ export function createFarmData(
     kobraKeyState,
     kobraBootstrap,
     kobraIp,
+    kobraSetupMode,
     kobraLabel,
     kobraExpectedDeviceId,
     kobraBusy,
@@ -90,6 +91,7 @@ export function createFarmData(
       kobraKeyId.value = ''
       kobraKeyState.value = { kind: 'idle' }
       kobraIp.value = ''
+      kobraSetupMode.value = 'unselected'
       kobraLabel.value = ''
       kobraExpectedDeviceId.value = ''
     }

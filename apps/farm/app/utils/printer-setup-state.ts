@@ -8,6 +8,7 @@ import type {
 import { describeAnycubicTarget } from './anycubic-onboarding.ts'
 import type { LocalDeviceKey } from './device-key.ts'
 import type { FarmObservation } from './farm-view.ts'
+import type { KobraXSetupChoice } from './kobra-x-setup-mode.ts'
 import type {
   KobraCertCachedFile,
   KobraCertSourceMode,
@@ -152,6 +153,7 @@ export function createPrinterSetupState() {
     kobraKeyState = shallowRef<KobraKeyState>({ kind: 'idle' }),
     kobraBootstrap = shallowRef<KobraBootstrapState>({ kind: 'idle' }),
     kobraIp = ref(''),
+    kobraSetupMode = ref<KobraXSetupChoice>('unselected'),
     kobraCertSource = ref<KobraCertSourceMode>('file'),
     kobraCertPassphrase = ref(''),
     kobraCertInstallPath = ref(''),
@@ -289,6 +291,7 @@ export function createPrinterSetupState() {
     kobraKeyState,
     kobraBootstrap,
     kobraIp,
+    kobraSetupMode,
     kobraCertSource,
     kobraCertPassphrase,
     kobraCertInstallPath,

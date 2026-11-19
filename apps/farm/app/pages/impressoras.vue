@@ -25,6 +25,7 @@ import {
   buildKobraCertTargetOption,
   sanitizeTargetForClientStorage,
 } from '../utils/kobra-client-cert-ui.ts'
+import { gateKobraXSetup } from '../utils/kobra-x-setup-mode.ts'
 import { validateKobraXTargetInput } from '../utils/kobralink-onboarding.ts'
 import {
   validateMoonrakerTargetInput,
@@ -47,7 +48,7 @@ const { kobraBusy, kobraBootstrap, kobraError, kobraStatus, kobraStage } = state
 const { kobraKeyState, kobraAgentId, kobraKeyId, kobraOperation } = state
 const { kobraIp, kobraLabel, kobraExpectedDeviceId, kobraUnknownNotice } = state
 const { kobraCertSource, kobraCertInstallPath, kobraCertError } = state
-const { kobraCertInline, clearKobraClientCert } = state
+const { kobraCertInline, clearKobraClientCert, kobraSetupMode } = state
 const { onboardingFamily, anycubicHost, anycubicPort, anycubicModelId } = state
 const { anycubicDeviceId, anycubicUsername, anycubicPassword } = state
 const { anycubicCaFile, anycubicPin, crealityHost } = state
@@ -147,9 +148,11 @@ async function prepareKobraX() {
   if (kobraBusy.value || kobraBootstrap.value.kind !== 'ready') return
   kobraError.value = ''
   kobraStatus.value = ''
-  const certOption =
-    typeof buildKobraCertTargetOption === 'function' &&
-    typeof kobraCertSource !== 'undefined'
+  const gate = gateKobraXSetup(kobraSetupMode.value)
+  const certOption = !gate.ok
+    ? gate
+    : typeof buildKobraCertTargetOption === 'function' &&
+        typeof kobraCertSource !== 'undefined'
       ? buildKobraCertTargetOption({
           source: kobraCertSource.value,
           installPath: kobraCertInstallPath.value,

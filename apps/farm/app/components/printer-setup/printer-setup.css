@@ -9,7 +9,7 @@ section {
 }
 label,
 select,
-input:not([type='checkbox']),
+input:not([type='checkbox']):not([type='radio']),
 button {
   display: block;
   margin-block: 0.6rem;
@@ -21,7 +21,7 @@ button {
   max-width: 100%;
   min-height: 2.75rem;
 }
-input:not([type='checkbox']),
+input:not([type='checkbox']):not([type='radio']),
 select {
   width: 100%;
   min-width: 0;
@@ -56,6 +56,16 @@ fieldset {
   padding: 1rem;
   margin-block: 1rem;
   min-width: 0;
+}
+.kobra-mode-option {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  min-height: 2.75rem;
+}
+.kobra-mode-option input {
+  flex: none;
+  margin-block: 0.7rem 0;
 }
 .kobra-actions {
   display: flex;

@@ -68,6 +68,7 @@ const epoch: KobraEpoch = {
 const setup = createPrinterSetup(state, epoch, {
   handleKobraException,
   openPrinterDiscoverySession,
+  adoption: useNetworkAdoption(),
 })
 const { closeKobraSession, ensureKobraSession, applySessionOutcome } = setup
 const { persistPendingOperation, clearPersistedOperation } = setup
@@ -527,8 +528,8 @@ async function prepareCrealityPrinter() {
 let stopWatching: (() => void) | undefined
 onMounted(() => {
   heading.value?.focus()
-  void setup.loadFarms()
   stopWatching = setup.watchSession()
+  void setup.initialize()
 })
 
 onBeforeUnmount(() => {

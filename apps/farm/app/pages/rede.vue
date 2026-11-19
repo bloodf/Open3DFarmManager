@@ -5,9 +5,19 @@ import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
   buildEntries,
+  connectorName,
   printerOverlayKey,
   type NetworkData,
 } from '../utils/network-map.ts'
+
+import { createPrinterSetup } from '../utils/printer-setup.ts'
+import {
+  createPrinterSetupState,
+  type DiscoveredPrinter,
+} from '../utils/printer-setup-state.ts'
+import { openPrinterDiscoverySession } from '../utils/printer-discovery-view-session.ts'
+import { mergeNetworkDiscoveries } from '../utils/network-adoption.ts'
+import type { NetworkDiscovered } from '../utils/network-map.ts'
 
 const REFRESH_MS = 30_000
 const view = useFarmView()
@@ -22,6 +32,108 @@ let controller: AbortController | undefined
 let timer: ReturnType<typeof setInterval> | undefined
 
 const farmId = computed(() => ready.value?.scope?.farmId ?? '')
+
+const adoption = useNetworkAdoption()
+const router = useRouter()
+const approved = computed(() =>
+  data.value?.canManage
+    ? data.value.connectors.filter(
+        (connector) => connector.status === 'approved',
+      )
+    : [],
+)
+const managedAgents = computed(
+  () => new Set(approved.value.map((connector) => connector.agentId)),
+)
+const scanAgent = ref('')
+const selectedScanAgent = computed(() =>
+  managedAgents.value.has(scanAgent.value)
+    ? scanAgent.value
+    : approved.value[0]?.agentId,
+)
+const scanned = ref<NetworkDiscovered[]>([])
+const scanning = ref(false)
+const scanMessage = ref('')
+let cancelScan: (() => void) | undefined
+
+function resetScan() {
+  cancelScan?.()
+  cancelScan = undefined
+  scanned.value = []
+  scanAgent.value = ''
+  scanning.value = false
+  scanMessage.value = ''
+}
+
+async function scan() {
+  const agentId = selectedScanAgent.value
+  if (scanning.value || !agentId || !managedAgents.value.has(agentId)) return
+  const setupState = createPrinterSetupState()
+  let scanGeneration = 0
+  let scanController: AbortController | undefined
+  const setup = createPrinterSetup(
+    setupState,
+    {
+      generation: () => scanGeneration,
+      next: () => ++scanGeneration,
+      controller: () => scanController,
+      setController: (controller) => (scanController = controller),
+    },
+    {
+      openPrinterDiscoverySession,
+      async handleKobraException() {},
+    },
+  )
+  const cancel = setup.clear
+  cancelScan = cancel
+  setupState.farmId.value = farmId.value
+  setupState.canManage.value = true
+  setupState.kobraAgentId.value = agentId
+  scanning.value = true
+  scanMessage.value = 'Procurando impressoras…'
+  try {
+    await setup.refreshKobraContext(false)
+    if (cancelScan !== cancel) return
+    await setup.searchPrinters()
+    if (cancelScan !== cancel) return
+    const foundAt = Date.now()
+    scanned.value = mergeNetworkDiscoveries(
+      scanned.value,
+      setupState.discoveryPrinters.value.map((printer) => ({
+        ...printer,
+        agentId,
+        adopted: false,
+        lastSeen: foundAt,
+      })),
+    )
+    scanMessage.value =
+      setupState.discoveryMessage.value ||
+      'Verifique se este navegador está aprovado e se o Connector está disponível.'
+  } catch {
+    if (cancelScan === cancel)
+      scanMessage.value =
+        'Não foi possível procurar impressoras. Tente novamente.'
+  } finally {
+    cancel()
+    if (cancelScan === cancel) {
+      cancelScan = undefined
+      scanning.value = false
+    }
+  }
+}
+
+async function adopt(agentId: string, printer: DiscoveredPrinter) {
+  if (!farmId.value || !managedAgents.value.has(agentId)) return
+  if (adoption.value) return
+  const target = { farmId: farmId.value, agentId, printer }
+  adoption.value = target
+  try {
+    if (await router.push('/impressoras')) adoption.value = null
+  } catch {
+    adoption.value = null
+    scanMessage.value = 'Não foi possível abrir a configuração da impressora.'
+  }
+}
 
 async function load() {
   const id = farmId.value
@@ -39,30 +151,60 @@ async function load() {
       { signal, retry: 0, timeout: 10_000, cache: 'no-store' },
     )
     if (signal.aborted) return
+    if (!result.canManage) resetScan()
+    else {
+      const active = new Set(
+        result.connectors
+          .filter((item) => item.status === 'approved')
+          .map((item) => item.agentId),
+      )
+      scanned.value = scanned.value.filter((item) => active.has(item.agentId))
+      if (
+        scanning.value &&
+        selectedScanAgent.value &&
+        !active.has(selectedScanAgent.value)
+      ) {
+        cancelScan?.()
+        cancelScan = undefined
+        scanning.value = false
+        scanMessage.value = 'O Connector da busca está indisponível.'
+      }
+    }
     data.value = result
     readAt.value = Date.now()
     failure.value = ''
   } catch (error) {
     if (signal.aborted) return
-    // Keep the last server data on screen; its age keeps growing.
+    const status = (error as { status?: number }).status
+    if (status === 401 || status === 404) {
+      resetScan()
+      data.value = null
+    }
     failure.value =
-      (error as { status?: number }).status === 401
+      status === 401
         ? 'Entre novamente para consultar a rede.'
         : 'Não foi possível atualizar a rede da farm. Tente novamente.'
   } finally {
     if (!signal.aborted) loading.value = false
   }
 }
-watch(farmId, () => {
-  data.value = null
-  readAt.value = null
-  void load()
-})
+watch(
+  farmId,
+  () => {
+    resetScan()
+    data.value = null
+    readAt.value = null
+    void load()
+  },
+  { flush: 'sync' },
+)
 onMounted(() => {
   heading.value?.focus()
+  if (farmId.value) void load()
   timer = setInterval(() => void load(), REFRESH_MS)
 })
 onBeforeUnmount(() => {
+  resetScan()
   clearInterval(timer)
   controller?.abort()
 })
@@ -100,11 +242,20 @@ const livePrinters = computed(
 )
 const entries = computed(() =>
   data.value
-    ? buildEntries(data.value, {
-        agents: liveAgents.value,
-        printers: livePrinters.value,
-        now: now.value.wall || Date.now(),
-      })
+    ? buildEntries(
+        {
+          ...data.value,
+          discovered: mergeNetworkDiscoveries(
+            data.value.discovered,
+            scanned.value,
+          ),
+        },
+        {
+          agents: liveAgents.value,
+          printers: livePrinters.value,
+          now: now.value.wall || Date.now(),
+        },
+      )
     : [],
 )
 </script>
@@ -142,13 +293,37 @@ const entries = computed(() =>
       <p v-else-if="loading && !data" role="status" aria-busy="true">
         Carregando a rede…
       </p>
-      <FarmMap
-        v-else-if="data"
-        :entries="entries"
-        :now="now.wall || Date.now()"
-        :live="liveAgents.size > 0"
-        :as-of="readAt"
-      />
+      <template v-else-if="data">
+        <div v-if="approved.length">
+          <label for="rede-scan-connector">Connector para a busca</label>
+          <select
+            id="rede-scan-connector"
+            :value="selectedScanAgent"
+            :disabled="scanning"
+            @change="scanAgent = ($event.target as HTMLSelectElement).value"
+          >
+            <option
+              v-for="connector in approved"
+              :key="connector.agentId"
+              :value="connector.agentId"
+            >
+              {{ connectorName(connector.agentId) }}
+            </option>
+          </select>
+          <button type="button" :disabled="scanning" @click="scan()">
+            Procurar agora
+          </button>
+          <p role="status">{{ scanMessage }}</p>
+        </div>
+        <FarmMap
+          :entries="entries"
+          :now="now.wall || Date.now()"
+          :live="liveAgents.size > 0"
+          :as-of="readAt"
+          :managed-agents="managedAgents"
+          @adopt="adopt"
+        />
+      </template>
     </template>
   </main>
 </template>

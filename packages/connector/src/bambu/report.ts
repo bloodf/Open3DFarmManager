@@ -1,4 +1,7 @@
-import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import type {
+  FilamentUsage,
+  PrinterState,
+} from '@open3dfarmmanager/farm-protocol'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 
 /** Maximum payload size in bytes for a Bambu MQTT report frame (128 KiB). */
@@ -10,6 +13,7 @@ export type BambuReportResult =
       state?: PrinterState['state']
       progress?: number
       materials?: PrinterState['materials']
+      filamentUsage?: FilamentUsage[]
       fans?: PrinterState['fans']
       light?: PrinterState['light']
       filename?: string
@@ -294,7 +298,87 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
   }
   const materials = decodeMaterials(printRecord)
   if (materials.length) observation.materials = materials
+  const filamentUsage = decodeFilamentUsage(printRecord)
+  if (filamentUsage.length) observation.filamentUsage = filamentUsage
   return observation
+}
+
+function decodeFilamentUsage(print: Record<string, unknown>): FilamentUsage[] {
+  const object = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  const weight = (tray: Record<string, unknown>): number | undefined => {
+    const raw = tray.used_g ?? tray.filament_used_g
+    const value =
+      typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : undefined
+  }
+  const rows: FilamentUsage[] = []
+  const add = (tool: unknown, source: Record<string, unknown>) => {
+    if (
+      typeof tool !== 'string' ||
+      tool.length < 1 ||
+      tool.length > 32 ||
+      /[\u0000-\u001f\u007f]/.test(tool)
+    )
+      return
+    const grams = weight(source)
+    const rawLength = source.millimetres ?? source.used_m
+    const parsedLength =
+      typeof rawLength === 'string' && rawLength.trim() !== ''
+        ? Number(rawLength)
+        : rawLength
+    const millimetres =
+      typeof parsedLength === 'number' &&
+      Number.isFinite(parsedLength) &&
+      parsedLength >= 0
+        ? source.used_m === undefined
+          ? parsedLength
+          : parsedLength * 1000
+        : undefined
+    if (grams !== undefined || millimetres !== undefined)
+      rows.push({
+        tool,
+        ...(grams === undefined ? {} : { grams }),
+        ...(millimetres === undefined ? {} : { millimetres }),
+      })
+  }
+  const reported = print.filament_usage
+  if (Array.isArray(reported))
+    for (const item of reported.slice(0, 17)) {
+      const entry = object(item)
+      add(entry.tool ?? entry.slot, entry)
+    }
+  const ams = object(print.ams)
+  const slotId = (value: unknown): number | undefined => {
+    const parsed =
+      typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value
+    return typeof parsed === 'number' && Number.isInteger(parsed)
+      ? parsed
+      : undefined
+  }
+  if (Array.isArray(ams.ams)) {
+    for (const rawUnit of ams.ams.slice(0, 4)) {
+      const unit = object(rawUnit)
+      const unitId = slotId(unit.id)
+      if (unitId === undefined || unitId < 0 || unitId > 3) continue
+      if (!Array.isArray(unit.tray)) continue
+      for (const rawTray of unit.tray.slice(0, 4)) {
+        const tray = object(rawTray)
+        const trayId = slotId(tray.id)
+        if (trayId !== undefined && trayId >= 0 && trayId <= 3)
+          add(`ams:${unitId}:${trayId}`, tray)
+      }
+    }
+  }
+  add('external', object(print.vt_tray))
+  const byTool = new Map<string, FilamentUsage>()
+  for (const row of rows)
+    byTool.set(row.tool, { ...byTool.get(row.tool), ...row })
+  return [...byTool.values()].slice(0, 17)
 }
 
 function decodeMaterials(

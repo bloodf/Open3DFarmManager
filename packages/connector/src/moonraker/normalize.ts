@@ -62,6 +62,9 @@ export function moonrakerLastJob(
     ...(valid(stats.total_duration)
       ? { totalDuration: stats.total_duration }
       : {}),
+    ...(valid(stats.filament_used)
+      ? { filamentUsedMillimetres: stats.filament_used }
+      : {}),
     endedAt: observedAt,
   }
 }

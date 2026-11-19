@@ -10,6 +10,7 @@ import { useFarmView } from '../../composables/useFarmView.ts'
 import type {
   ExtendedControlAction,
   QueueOpArguments,
+  TimelapseArguments,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
@@ -26,19 +27,25 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
+const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const initialPrinterKey = String(route.params.printerKey ?? '')
 const webcams = shallowRef<
   Parameters<WebcamDetailOptions['onUpdate']>[0] | null
 >(null)
-const systemFrame =
+const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
-const vendorFrame =
-  shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const vendorFrame = computed(() =>
+  detailFrame.value?.vendor ? detailFrame.value : undefined,
+)
 const printFile = ref('')
+const systemFrame = computed(() =>
+  detailFrame.value?.capabilities.includes('system')
+    ? detailFrame.value
+    : undefined,
+)
 const view = useFarmView({
   onDetail(frame) {
-    if (frame.capabilities.includes('system')) systemFrame.value = frame
-    else if (frame.vendor) vendorFrame.value = frame
+    detailFrame.value = frame
   },
   printerKey: initialPrinterKey,
   onUpdate(value) {
@@ -46,7 +53,7 @@ const view = useFarmView({
   },
   onClose() {
     webcams.value = null
-    vendorFrame.value = undefined
+    detailFrame.value = undefined
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -77,7 +84,6 @@ const {
   closePause,
 } = useFarmControls(view, dialog)
 
-const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const row = computed(
   () =>
     ready.value?.rows.find(
@@ -110,6 +116,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
       : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
+    ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
     ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
   ]
@@ -150,6 +157,7 @@ function availability(action: ExtendedControlAction) {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const excludeAvailability = computed(() => availability('exclude_object'))
 const extrudeAvailability = computed(() => availability('extrude'))
 const extrusion = computed(() => {
   const advertised = state.value?.controls?.includes('extrude') ?? false
@@ -194,6 +202,23 @@ const outputs = computed(() => {
   }
 })
 const serviceAvailability = computed(() => availability('service'))
+const timelapseAvailability = computed(() => availability('timelapse'))
+const timelapse = computed(() => {
+  const advertised = state.value?.controls?.includes('timelapse') ?? false
+  return {
+    advertised,
+    canCommand: timelapseAvailability.value.available && !commandInFlight.value,
+    reason: timelapseAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? timelapseAvailability.value.reason
+        : undefined,
+    // Play and download wait for the file-transfer channel of the session.
+    canTransfer: false,
+    transferReason:
+      'Reproduzir e baixar exigem o canal de transferência de arquivos, ainda não aberto nesta sessão.',
+  }
+})
 const queueAvailability = computed(() => availability('queue_op'))
 const queue = computed(() => {
   const advertised = state.value?.controls?.includes('queue_op') ?? false
@@ -299,6 +324,9 @@ function setPin(name: string, value: number, event: Event) {
 function queueOp(args: QueueOpArguments, event: Event) {
   if (row.value) void openControl(row.value, 'queue_op', event, args)
 }
+function timelapseOp(args: TimelapseArguments, event: Event) {
+  if (row.value) void openControl(row.value, 'timelapse', event, args)
+}
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
 }
@@ -362,13 +390,34 @@ onMounted(() => heading.value?.focus())
         (speed, flow, event) =>
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
+      :print-status="
+        detailFrame?.printerKey === printerKey ? detailFrame : undefined
+      "
+      :exclude-available="
+        live &&
+        !!state?.controls?.includes('exclude_object') &&
+        excludeAvailability.available &&
+        !commandInFlight
+      "
+      :exclude-reason="
+        !state?.controls?.includes('exclude_object')
+          ? undefined
+          : excludeAvailability.available
+            ? 'Aguarde a conexão ou o comando em andamento.'
+            : excludeAvailability.reason
+      "
+      @exclude-object="
+        (name, event) => control('exclude_object', event, { name })
+      "
       :extrusion="extrusion"
       :queue="queue"
+      :timelapse="timelapse"
       :macros="macros"
       :outputs="outputs"
       @set-temperature="setTemperature"
       @extrude="extrude"
       @queue-op="queueOp"
+      @timelapse-op="timelapseOp"
       @run-macro="runMacro"
       @set-fan="setFan"
       @set-led="setLed"

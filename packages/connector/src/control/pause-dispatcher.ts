@@ -82,6 +82,11 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('excluded-object'),
+        name: z.string(),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('light'),
         on: z.boolean(),
         observedMono: mono,
@@ -126,6 +131,8 @@ export function controlEffectMatches(
         typeof args.percent === 'number' &&
         Math.abs(effect.percent - args.percent) <= 1
       )
+    case 'exclude_object':
+      return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
     default:

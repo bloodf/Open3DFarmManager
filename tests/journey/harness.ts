@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Page } from '@playwright/test'
@@ -249,18 +250,40 @@ const KOBRA_X_LAN_ADDRESS = '10.0.0.5'
 /** Removes every resource a failed start already created. */
 type Undo = () => Promise<void>
 
-function journeyPrinterHost() {
-  const route = execFileSync('ip', ['route', 'get', '1.1.1.1'], {
-    encoding: 'utf8',
-  })
-  const host = /\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(route)?.[1]
-  if (!host) throw new Error('No private route address for the Bambu simulator')
+const isPrivateAddress = (host: string) => {
   const [first, second] = host.split('.').map(Number)
-  const privateAddress =
+  return (
     first === 10 ||
     (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
     (first === 192 && second === 168)
-  if (!privateAddress)
+  )
+}
+
+function routedAddress(): string | undefined {
+  try {
+    const route = execFileSync('ip', ['route', 'get', '1.1.1.1'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return /\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/.exec(route)?.[1]
+  } catch {
+    return undefined // no default route, as on an offline desktop
+  }
+}
+
+function journeyPrinterHost() {
+  const interfaceAddress = Object.values(networkInterfaces())
+    .flatMap((addresses) => addresses ?? [])
+    .find(
+      (address) =>
+        address.family === 'IPv4' &&
+        !address.internal &&
+        isPrivateAddress(address.address),
+    )?.address
+  const host = [routedAddress(), interfaceAddress].find(
+    (candidate) => candidate && isPrivateAddress(candidate),
+  )
+  if (!host)
     throw new Error('The Bambu simulator needs a private route address')
   return host
 }

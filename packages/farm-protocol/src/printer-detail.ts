@@ -104,6 +104,9 @@ export const PrinterDetailUpdate = z.strictObject({
         file: path.optional(),
         state: name,
         message,
+        filamentUsedMm: number.nonnegative().optional(),
+        estimatedSeconds: number.positive().optional(),
+        filamentTotalMm: number.positive().optional(),
         elapsedSeconds: number.nonnegative().optional(),
         progress: fraction.optional(),
         currentLayer: count.optional(),
@@ -119,6 +122,18 @@ export const PrinterDetailUpdate = z.strictObject({
       display: z.strictObject({ message, progress: fraction }),
       objects: z.strictObject({
         names: z.array(name).max(256),
+        polygons: z
+          .array(
+            z.strictObject({
+              name,
+              points: z
+                .array(z.tuple([number, number]))
+                .min(3)
+                .max(64),
+            }),
+          )
+          .max(64)
+          .optional(),
         excluded: z.array(name).max(256),
         current: name.nullable(),
       }),

@@ -42,6 +42,17 @@ export type SimPorts = {
   sv06Cam: number
   u1Cam: number
 }
+export type LiveApp = {
+  appOrigin: string
+  connectorRunning: () => boolean
+}
+type LiveHook = (live: LiveApp) => Promise<void>
+async function notifyLive(
+  hook: LiveHook | undefined,
+  live: LiveApp,
+): Promise<void> {
+  await hook?.(live)
+}
 export const simPorts = (base: number): SimPorts => ({
   db: base,
   app: base + 1,
@@ -134,6 +145,8 @@ export async function runSimFarmAcceptance(input: {
   origins?: ReturnType<typeof mockSimulatorStack>['origins']
   workDir: string
   ledger: (value: object) => void
+  /** Runs while the built app and the Connector are both up (desktop:check). */
+  whileRunning?: LiveHook
 }) {
   const { admin, ports, workDir, ledger } = input
   const origin = (port: number) => `http://127.0.0.1:${port}`
@@ -411,6 +424,10 @@ export async function runSimFarmAcceptance(input: {
       'telemetry rows for both printers',
     )
     mark('telemetryIngested')
+    await notifyLive(input.whileRunning, {
+      appOrigin: origin(ports.app),
+      connectorRunning: (): boolean => connector.running,
+    })
     // Exactly-once: let the drain settle, stop the Connector, then compare what
     // the collector queued, what the agent delivered and what was stored.
     const delivered = () =>

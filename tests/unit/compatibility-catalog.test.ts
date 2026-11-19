@@ -63,13 +63,8 @@ describe('áreas de controle do catálogo', () => {
     },
   )
 
-  it('mantém desconhecidas as famílias que não são Klipper até o E22', () => {
-    for (const products of [
-      anycubicCatalog,
-      bambuCatalog,
-      crealityCatalog,
-      lanCatalog,
-    ])
+  it('mantém desconhecidas as famílias que ainda não têm o E22', () => {
+    for (const products of [anycubicCatalog, crealityCatalog, lanCatalog])
       for (const product of products)
         for (const key of controlAreaKeys)
           expect(product.controlAreas[key], `${product.id}.${key}`).toBe(

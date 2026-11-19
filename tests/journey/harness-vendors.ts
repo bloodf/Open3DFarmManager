@@ -253,7 +253,7 @@ export async function startVendorSimulator(
       const serial = 'JOURNEYBAMBU'
       const sim = await startBambuSimulator({
         serial,
-        accessCode: 'journey-access',
+        accessCode: 'journeyaccess',
         ...(options.host === undefined ? {} : { host: options.host }),
         initialState: 'RUNNING',
         printDurationMs: 15_000,
@@ -270,7 +270,7 @@ export async function startVendorSimulator(
       }
       runtime = async (scope) => {
         const credentialFile = join(directory, 'bambu-credential.json')
-        await privateJson(credentialFile, { accessCode: 'journey-access' })
+        await privateJson(credentialFile, { accessCode: 'journeyaccess' })
         return {
           version: 3,
           collection: {

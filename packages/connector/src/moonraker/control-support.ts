@@ -14,6 +14,7 @@ import {
 import { supportedMoonrakerActions } from './commands.ts'
 import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
+import { timelapseMarkers } from './control-timelapse.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
@@ -151,5 +152,8 @@ export function detectMoonrakerMacroParams(
 export function detectMoonrakerComponents(
   input: DetectInput,
 ): Promise<readonly string[]> {
-  return readOnlyOnce(input, { method: 'server.info' }, queueMarkers)
+  return readOnlyOnce(input, { method: 'server.info' }, (result) => [
+    ...queueMarkers(result),
+    ...timelapseMarkers(result),
+  ])
 }

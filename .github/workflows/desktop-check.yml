@@ -1,0 +1,49 @@
+name: Desktop offline check
+on: [workflow_dispatch]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  desktop-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.5'
+      # Last step that touches the network: dependencies are installed here.
+      - run: npm ci --ignore-scripts
+      - name: Remove Docker
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd || true
+          for binary in $(which -a docker || true); do
+            sudo mv "$binary" "$binary.disabled"
+          done
+          if command -v docker; then
+            echo 'docker is still on PATH' >&2
+            exit 1
+          fi
+      - name: Use the installed PostgreSQL binaries
+        run: |
+          echo "OPENFARM_PG_BIN=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)" >> "$GITHUB_ENV"
+      - name: Run desktop:check with the network blocked
+        run: |
+          sudo -E env "PATH=$PATH" unshare --net -- bash -ec '
+            ip link set lo up
+            # Goes nowhere; gives the LAN journeys a private address.
+            ip link add dummy0 type dummy
+            ip addr add 10.77.0.2/24 dev dummy0
+            ip link set dummy0 up
+            exec setpriv --reuid="$SUDO_UID" --regid="$SUDO_GID" --init-groups \
+              npm run desktop:check -- --require-isolated-network --receipt "$RUNNER_TEMP/desktop-check-receipt.json"
+          '
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: desktop-check-receipt
+          path: ${{ runner.temp }}/desktop-check-receipt.json
+          retention-days: 7
+          if-no-files-found: ignore

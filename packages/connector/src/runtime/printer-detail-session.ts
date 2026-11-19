@@ -27,6 +27,11 @@ import {
   type MoonrakerDetailStream,
 } from '../moonraker/detail-stream.ts'
 
+import {
+  createBambuDetailStream,
+  type BambuDetailStream,
+} from '../bambu/printer-detail.ts'
+
 const MAX_ITEMS = 256
 const MAX_QUERIES_PER_SESSION = 4
 const METHOD_NOT_FOUND = -32601
@@ -36,12 +41,21 @@ export type PrinterDetailSourceFor = (
 ) => PrinterDetailSource | undefined
 
 type PrinterDetailSource = Pick<MoonrakerDetailStream, 'subscribe'> &
-  Partial<Pick<MoonrakerDetailStream, 'request' | 'readConfig'>>
+  Partial<Pick<MoonrakerDetailStream, 'request' | 'readConfig'>> &
+  Partial<Pick<BambuDetailStream, 'query'>>
 
-/** Moonraker streams connect on subscription. Vendor frames reuse collection. */
+/** Moonraker and Bambu streams connect on subscription. Anycubic frames reuse collection. */
 export function createPrinterDetailSources(config: AgentRuntimeConfig) {
   const sources = new Map<string, PrinterDetailSource>()
   const { printers, limits, allowedOrigins } = config.collection
+  if (config.collection.version === 3)
+    for (const binding of config.collection.bambu.printers)
+      if (
+        config.assignments.some(
+          (item) => item.printer_key === binding.printerKey,
+        )
+      )
+        sources.set(binding.printerKey, createBambuDetailStream({ binding }))
   for (const assignment of config.assignments) {
     if (!('moonraker_origin' in assignment) || !assignment.moonraker_origin)
       continue
@@ -197,6 +211,10 @@ async function answer(
 ) {
   const { path: _path, ...rest } = frame as Query & { path?: string }
   const base = { ...rest, t: 'query.response' as const }
+  if (source.query) {
+    const reply = await source.query(frame.kind, signal)
+    return PrinterDetailQueryResponse.parse({ ...base, ...reply })
+  }
   try {
     if (!source.request || !source.readConfig)
       return PrinterDetailQueryResponse.parse({ ...base, error: 'unsupported' })

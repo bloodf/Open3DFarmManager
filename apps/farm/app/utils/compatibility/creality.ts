@@ -118,12 +118,12 @@ const detailSource =
   'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/protocols/creality-detail.md'
 const protocolSource =
   'https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/creality.md#L153-L176'
-const detailLimitations = [
+export const crealityDetailLimitations = [
   'Painel LAN de fábrica simulado em loopback, sem impressora física. Movimento cobre apenas referenciar eixos; ventoinhas e iluminação aceitam ligar e desligar.',
   'Não suportado no painel Creality: gerenciador de arquivos (listagem sem layout de resposta documentado e sem comando de exclusão), extrusão, macros, exclusão de objetos, fila, malha, configuração, serviços, histórico, timelapse, energia e atualizações. Fonte em docs/protocols/creality-detail.md.',
   'Console `gcodeCmd` desativado por padrão; quando ligado, segue as regras do E18.1. Impressoras com Moonraker usam o painel Moonraker.',
   'Câmera depende de uma câmera MJPEG configurada localmente no agente.',
-]
+] as const
 
 export const crealityCatalog: readonly CrealityCatalogProduct[] = [
   {
@@ -161,7 +161,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'O guia técnico oficial descreve extrusão de filamento sem mencionar a sigla FDM.',
       'Recursos do aplicativo móvel e detecção por IA não comprovam API local ou integração com o OpenFarm.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      ...detailLimitations,
+      ...crealityDetailLimitations,
     ],
   },
   {
@@ -201,7 +201,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Câmera integrada declarada não possui protocolo ou streaming local verificado.',
       'CFS Nano é acessório opcional e não constitui modelo separado.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      ...detailLimitations,
+      ...crealityDetailLimitations,
     ],
   },
   {
@@ -243,7 +243,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Câmera Nebula é acessório opcional e a versão Combo é apenas pacote comercial.',
       'Disponibilidade imediata de estoque varia conforme a região.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      ...detailLimitations,
+      ...crealityDetailLimitations,
     ],
   },
   {
@@ -279,7 +279,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'Remessas para a Europa previstas apenas para dezembro de 2026.',
       'Suporte a múltiplos bicos e materiais no Creality Print não qualifica comandos remotos pelo OpenFarm.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      ...detailLimitations,
+      ...crealityDetailLimitations,
     ],
   },
   {
@@ -316,7 +316,7 @@ export const crealityCatalog: readonly CrealityCatalogProduct[] = [
       'A quinta posição do catálogo permanece em disputa com K2 SE e SPARKX i7 devido à falta de cronologia fechada.',
       'Metadados de criação de página na loja não equivalem a data de lançamento comercial.',
       'Telemetria, arquivos e comandos simulados contra o protocolo LAN de fábrica; não comprovado em hardware.',
-      ...detailLimitations,
+      ...crealityDetailLimitations,
     ],
   },
 ]

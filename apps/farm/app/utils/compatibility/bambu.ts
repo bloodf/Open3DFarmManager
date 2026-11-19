@@ -114,9 +114,9 @@ const cameraControlAreas = withAreas({
   ...bambuControlAreaEvidence,
   ...cameraEvidence,
 })
-const unsupportedLimitation =
+export const bambuDetailUnsupported =
   'Não suportado no painel Bambu: editor de configuração, malha da mesa, serviços, energia, fila de impressão, atualizações além das versões de firmware, macros, exclusão de objetos e histórico. O protocolo LAN documentado não os expõe; fonte em docs/protocols/bambu-detail.md.'
-const detailLimitation =
+export const bambuDetailHardwareNote =
   'Painel de detalhe: temperaturas, ventoinhas, luz da câmara, referenciar, mover, extrudar e console via gcode_line, níveis de velocidade, bandejas AMS, estado da impressão com camadas, arquivos do cartão SD e timelapse por FTPS foram exercitados somente no simulador em loopback; não comprovado em hardware. A posição do cabeçote não é informada pelo protocolo.'
 
 const common = {
@@ -138,8 +138,8 @@ const common = {
     'Integração e requisitos de conexão não verificados para este modelo',
   capabilities: bambuCapabilities,
   limitations: [
-    detailLimitation,
-    unsupportedLimitation,
+    bambuDetailHardwareNote,
+    bambuDetailUnsupported,
     'A data indica a publicação do anúncio, não a disponibilidade em cada região.',
     'Recursos comerciais não comprovam acesso por terceiros ou compatibilidade com o OpenFarm.',
     'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',

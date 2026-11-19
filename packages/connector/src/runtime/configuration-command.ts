@@ -5,8 +5,21 @@ import {
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { loadPauseIssuerKeys } from '../config/pause.ts'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
+import { TelemetryQueue } from '../cloud/queue.ts'
+import { readPrivateJsonFile } from '../config/local.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import { readRuntimeCredential } from '../config/credential.ts'
 import {
@@ -106,15 +119,13 @@ export async function configurationReadiness(input: {
   })
 }
 
-/**
- * Each confirmed provisioning assignment set owns a dedicated scoped queue
- * directory so adding or removing printers through `configure` does not reuse a
- * previous scope's `scope.json` while keeping strict receipt verification intact.
- */
-export function provisioningQueueDirectory(
+const SCOPES_DIRECTORY = 'telemetry-scopes'
+const RECEIPT = 'scope.json'
+
+function sortedAssignments(
   config: Pick<ProvisioningConfig, 'farm_id' | 'agent_id' | 'stateDirectory'>,
   configPath: string,
-): string {
+) {
   const runtimeConfig = readAgentRuntimeConfig(configPath, config)
   const assignments = [...runtimeConfig.assignments].sort((left, right) =>
     left.assignment_id < right.assignment_id
@@ -123,7 +134,14 @@ export function provisioningQueueDirectory(
         ? 1
         : 0,
   )
-  const scopeDigest = createHash('sha256')
+  return assignments
+}
+
+function scopeDigest(
+  config: Pick<ProvisioningConfig, 'farm_id' | 'agent_id'>,
+  assignments: readonly unknown[],
+): string {
+  return createHash('sha256')
     .update(
       canonicalize({
         version: 1,
@@ -133,9 +151,145 @@ export function provisioningQueueDirectory(
       }),
     )
     .digest('base64url')
-  const root = join(config.stateDirectory, 'telemetry-scopes')
+}
+
+/**
+ * Each confirmed provisioning assignment set owns a dedicated scoped queue
+ * directory so adding or removing printers through `configure` does not reuse a
+ * previous scope's `scope.json` while keeping strict receipt verification intact.
+ * Queued records are carried across by `handOverTelemetryScope`.
+ */
+export function provisioningQueueDirectory(
+  config: Pick<ProvisioningConfig, 'farm_id' | 'agent_id' | 'stateDirectory'>,
+  configPath: string,
+): string {
+  const assignments = sortedAssignments(config, configPath)
+  const root = join(config.stateDirectory, SCOPES_DIRECTORY)
   ensurePrivateDirectory(root)
-  return join(root, scopeDigest)
+  return join(root, scopeDigest(config, assignments))
+}
+
+function syncPath(path: string) {
+  const fd = openSync(path, 'r')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+function receiptIdentity(directory: string) {
+  const entry = lstatSync(directory, { throwIfNoEntry: false })
+  if (!entry?.isDirectory() || existsSync(join(directory, 'scope.pending')))
+    return null
+  try {
+    const receipt = readPrivateJsonFile(join(directory, RECEIPT), {
+      maxBytes: 64 * 1024,
+    })
+    return receipt && typeof receipt === 'object'
+      ? (receipt as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Carries the queue of the previous assignment set into the new scope by
+ * relocating it: the old directory (records, acknowledgement cursor and all)
+ * is re-receipted for the new assignments and renamed to the new scope name.
+ * Event IDs and ordering are untouched, so each record is delivered exactly
+ * once; only a queue whose receipt names this Connector (farm, agent and
+ * fingerprint) is ever adopted. Nothing is read from a queue another process
+ * holds: its lock makes the handover a no-op and the new scope starts empty.
+ * Every step is idempotent, so a crash can be resumed by the next start.
+ */
+export function handOverTelemetryScope(input: {
+  config: Pick<ProvisioningConfig, 'farm_id' | 'agent_id' | 'stateDirectory'>
+  configPath: string
+  fingerprint: string
+  now: number
+  onDiagnostic: (event: Readonly<Record<string, unknown>>) => void
+}): string {
+  const { config } = input
+  const target = provisioningQueueDirectory(config, input.configPath)
+  const root = join(config.stateDirectory, SCOPES_DIRECTORY)
+  const assignments = sortedAssignments(config, input.configPath)
+  const previous = readdirSync(root)
+    .map((name) => join(root, name))
+    .filter((path) => path !== target)
+    .flatMap((path) => {
+      const receipt = receiptIdentity(path)
+      return receipt &&
+        receipt.farm_id === config.farm_id &&
+        receipt.agent_id === config.agent_id &&
+        receipt.fingerprint === input.fingerprint
+        ? [{ path, modified: lstatSync(join(path, RECEIPT)).mtimeMs }]
+        : []
+    })
+    .sort((left, right) => right.modified - left.modified)
+  if (existsSync(target)) {
+    if (previous.length)
+      input.onDiagnostic({
+        kind: 'telemetry-scope-handover',
+        result: 'previous-scope-left',
+        count: previous.length,
+      })
+    return target
+  }
+  const source = previous[0]
+  if (!source) return target
+  try {
+    // Opening takes the queue lock and validates the log before anything moves.
+    const queue = new TelemetryQueue(source.path, input.now)
+    try {
+      const receipt = join(source.path, RECEIPT)
+      const staged = join(source.path, 'scope.handover')
+      // Only a crashed earlier handover leaves this, and we hold the lock.
+      if (existsSync(staged)) unlinkSync(staged)
+      const fd = openSync(
+        staged,
+        constants.O_WRONLY |
+          constants.O_CREAT |
+          constants.O_EXCL |
+          constants.O_NOFOLLOW,
+        0o600,
+      )
+      try {
+        writeFileSync(
+          fd,
+          canonicalize({
+            version: 1,
+            farm_id: config.farm_id,
+            agent_id: config.agent_id,
+            fingerprint: input.fingerprint,
+            assignments,
+          }) + '\n',
+        )
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+      renameSync(staged, receipt)
+      syncPath(source.path)
+    } finally {
+      queue.close()
+    }
+    renameSync(source.path, target)
+    syncPath(root)
+    input.onDiagnostic({
+      kind: 'telemetry-scope-handover',
+      result: 'carried',
+      remaining: previous.length - 1,
+    })
+  } catch {
+    // Locked, damaged or unreviewed: never adopt it. The new scope starts empty.
+    input.onDiagnostic({
+      kind: 'telemetry-scope-handover',
+      result: 'operator-review',
+    })
+  }
+  return target
 }
 
 /**
@@ -183,7 +337,13 @@ export async function runConfigurationConnector(
         ...(trustedKeys ? { trustedKeys: trustedKeys.authority } : {}),
         credentialPath: input.credentialPath,
         dataDirectory: input.dataDirectory,
-        telemetryDirectory: provisioningQueueDirectory(config, configPath),
+        telemetryDirectory: handOverTelemetryScope({
+          config,
+          configPath,
+          fingerprint: identity.fingerprint,
+          now: clock(),
+          onDiagnostic: input.onDiagnostic,
+        }),
         signal,
         onDiagnostic: (value) => input.onDiagnostic(value),
       })

@@ -27,6 +27,10 @@ export type Printer = {
   agentId: string
   printerKey: string
   status: 'active' | 'revoked'
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   connectorStatus: 'pending' | 'approved' | 'revoked'
 }
 

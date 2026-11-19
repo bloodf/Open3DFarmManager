@@ -14,6 +14,10 @@ export interface PrinterAssignmentRow {
   agentId: string
   printerKey: string
   status: 'active' | 'revoked'
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
+  sortOrder?: number | null
   connectorStatus: 'pending' | 'approved' | 'revoked'
 }
 export class PostgresPrinterAssignmentInventory {
@@ -79,7 +83,7 @@ export class PostgresPrinterAssignmentInventory {
           return { ok: false as const, reason: 'forbidden' as const }
         const rows = await tx<
           PrinterAssignmentRow[]
-        >`SELECT p.id AS "assignmentId", p.agent_id AS "agentId", p.printer_key AS "printerKey", CASE WHEN p.revoked_at IS NULL THEN 'active' ELSE 'revoked' END AS status, e.status AS "connectorStatus" FROM farm.printer_assignments p JOIN farm.connector_enrollments e ON e.agent_id=p.agent_id AND e.farm_id=p.farm_id WHERE p.farm_id=${input.farmId}::uuid AND (${input.after}::uuid IS NULL OR p.id>${input.after}::uuid) ORDER BY p.id LIMIT ${input.limit + 1}`
+        >`SELECT p.id AS "assignmentId", p.agent_id AS "agentId", p.printer_key AS "printerKey", p.display_name AS "displayName", p.group_name AS "groupName", p.location AS "location", p.sort_order AS "sortOrder", CASE WHEN p.revoked_at IS NULL THEN 'active' ELSE 'revoked' END AS status, e.status AS "connectorStatus" FROM farm.printer_assignments p JOIN farm.connector_enrollments e ON e.agent_id=p.agent_id AND e.farm_id=p.farm_id WHERE p.farm_id=${input.farmId}::uuid AND (${input.after}::uuid IS NULL OR p.id>${input.after}::uuid) ORDER BY p.id LIMIT ${input.limit + 1}`
         const now = this.clock()
         const current = evaluateSession(
           input.sessionRecordId,

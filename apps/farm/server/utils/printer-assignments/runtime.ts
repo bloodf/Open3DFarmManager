@@ -7,9 +7,15 @@ export interface PrinterAssignmentsRuntime {
   ownership: Pick<PostgresPrinterOwnership, 'register' | 'revoke'>
   inventory: Pick<PostgresPrinterAssignmentInventory, 'list'>
 }
-let instance: Promise<PrinterAssignmentsRuntime> | undefined
+type GroupingRuntime = PrinterAssignmentsRuntime & {
+  ownership: Pick<
+    PostgresPrinterOwnership,
+    'register' | 'revoke' | 'editGrouping'
+  >
+}
+let instance: Promise<GroupingRuntime> | undefined
 let pool: ReturnType<typeof postgres> | undefined
-export function printerAssignmentsRuntime(): Promise<PrinterAssignmentsRuntime> {
+export function printerAssignmentsRuntime(): Promise<GroupingRuntime> {
   const raw: unknown = useRuntimeConfig()['printerAssignments']
   if (
     !raw ||

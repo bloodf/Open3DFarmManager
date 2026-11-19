@@ -415,7 +415,9 @@ export function createFarmSnapshotSource(input: {
     // Bambu and Creality fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
       ...(fieldStamped
-        ? (({ lastJob: _lastJob, ...rest }) => rest)(parsedPrinter.data)
+        ? (({ lastJob: _lastJob, machine: _machine, ...rest }) => rest)(
+            parsedPrinter.data,
+          )
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,

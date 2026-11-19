@@ -26,7 +26,10 @@ export async function recordLatestStates(
   for (const state of states)
     await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
       VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb)
-      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at, state = EXCLUDED.state
+      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at, state = CASE
+  WHEN EXCLUDED.state ? 'machine' OR NOT (printer_latest_state.state ? 'machine') THEN EXCLUDED.state
+  ELSE EXCLUDED.state || jsonb_build_object('machine', printer_latest_state.state->'machine')
+END
       WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at`
 }
 

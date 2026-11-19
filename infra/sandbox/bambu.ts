@@ -1,7 +1,5 @@
-import {
-  startBambuSimulator,
-  syntheticBambuTls,
-} from '../../packages/sim-tools/src/bambu-simulator.ts'
+import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
+import { syntheticBambuTls } from './bambu-synthetic-identity.ts'
 
 const simulator = await startBambuSimulator({
   host: '0.0.0.0',

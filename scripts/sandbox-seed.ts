@@ -5,7 +5,7 @@ import postgres, { type Sql } from 'postgres'
 import { IntegrationAppsService } from '../apps/farm/server/services/integration-apps.ts'
 import { PostgresIntegrationApps } from '../apps/farm/server/storage/integration-apps-postgres.ts'
 import { loadOrCreateIdentity } from '../packages/connector/src/identity/store.ts'
-import { syntheticBambuCertificate } from '../packages/sim-tools/src/bambu-simulator.ts'
+import { syntheticBambuCertificate } from '../infra/sandbox/bambu-synthetic-identity.ts'
 import {
   enrollConnector,
   ENROLLMENT,

@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
-import { build, type Plugin } from 'esbuild'
+import { join, resolve } from 'node:path'
+import { build } from 'esbuild'
+import { compileVueSfc, vueSfcPlugin } from './vue-sfc-plugin.ts'
 
 const app = resolve(import.meta.dirname, '../../apps/farm')
 const pages = join(app, 'app/pages')
-const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 
 const farmId = '11111111-1111-4111-8111-111111111111'
 const adminId = 'admin-account'
@@ -22,33 +21,7 @@ export async function membersPageBundle() {
   await refresh()
 })`,
   )
-  const compile = (text: string, filename: string) => {
-    const { descriptor, errors } = sfc.parse(text, { filename })
-    if (errors.length) throw errors[0]
-    if (!descriptor.script && !descriptor.scriptSetup) {
-      // Template-only components (Skeleton).
-      const template = sfc.compileTemplate({
-        filename,
-        id: filename,
-        source: descriptor.template?.content ?? '',
-      })
-      if (template.errors.length) throw template.errors[0]
-      return `${template.code}\nexport default { render }`
-    }
-    return sfc.compileScript(descriptor, { id: filename, inlineTemplate: true })
-      .content
-  }
-  const vuePlugin: Plugin = {
-    name: 'vue-sfc',
-    setup(builder) {
-      builder.onLoad({ filter: /\.vue$/ }, ({ path }) => ({
-        contents: compile(readFileSync(path, 'utf8'), path),
-        loader: 'ts',
-        resolveDir: dirname(path),
-      }))
-    },
-  }
-  const compiled = compile(source, file)
+  const compiled = compileVueSfc(source, file)
   const result = await build({
     stdin: {
       contents: `const calls = []
@@ -99,7 +72,7 @@ window.mountMembersPage = (element) => {
       resolveDir: pages,
       sourcefile: file,
     },
-    plugins: [vuePlugin],
+    plugins: [vueSfcPlugin],
     bundle: true,
     platform: 'browser',
     format: 'iife',

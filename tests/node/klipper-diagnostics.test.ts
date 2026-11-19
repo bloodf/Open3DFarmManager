@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -220,12 +220,33 @@ ${Array.from(
 })
 
 test('rejects invalid project names before invoking Docker', () => {
-  const run = spawnSync(process.execPath, [script, 'bad!'], {
-    encoding: 'utf8',
-    timeout: 5000,
-  })
-  assert.equal(run.status, 2)
-  assert.match(run.stderr, /Invalid Compose project/)
+  const dir = mkdtempSync(join(tmpdir(), 'open3d-diag-test-'))
+  try {
+    const marker = join(dir, 'docker-invoked')
+    writeFileSync(
+      join(dir, 'docker'),
+      `#!/bin/sh
+echo invoked > '${marker}'
+exit 1
+`,
+      { mode: 0o700 },
+    )
+    const run = spawnSync(process.execPath, [script, 'bad!'], {
+      env: {
+        ...process.env,
+        OPENFARM_SIM: 'docker',
+        PATH: `${dir}:${process.env.PATH}`,
+      },
+      encoding: 'utf8',
+      timeout: 5000,
+    })
+    assert.equal(run.status, 2)
+    assert.match(run.stderr, /Invalid Compose project/)
+    assert.equal(run.stdout, '')
+    assert.equal(existsSync(marker), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 for (const { name, quota, pressure } of [

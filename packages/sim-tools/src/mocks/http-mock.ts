@@ -28,6 +28,9 @@ export interface HttpMockOptions {
   port?: number | undefined
   faults?: FaultController | undefined
   handler?: HttpHandler | undefined
+  /** Handles request streams before the mock buffers them. */
+  streamingHandler?:
+    ((req: IncomingMessage, res: ServerResponse) => void) | undefined
   onUpgrade?:
     | ((
         req: IncomingMessage,
@@ -89,6 +92,10 @@ export async function startHttpMock(
   })
 
   const server: Server = createServer((req, res) => {
+    if (options.streamingHandler) {
+      options.streamingHandler(req, res)
+      return
+    }
     const chunks: Buffer[] = []
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
     req.on('end', async () => {

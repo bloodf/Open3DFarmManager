@@ -28,6 +28,15 @@ import {
   parseExtrude,
 } from './control-extrusion.ts'
 import { OutputRefused } from './control-outputs.ts'
+import {
+  parseTimelapseOp,
+  parseTimelapseStatus,
+  refuseTimelapseOp,
+  TimelapseRefused,
+  timelapseReplyAccepted,
+  timelapseStatusWire,
+  timelapseSupported,
+} from './control-timelapse.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
@@ -605,6 +614,42 @@ export function openFixedMoonrakerPause(input: {
     }
   }
   /**
+   * Timelapse render or delete: refusals are decided from one read before the
+   * single send; a refusal writes nothing and an uncertain send never repeats.
+   */
+  async function timelapse(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !timelapseSupported(input.objects)
+      )
+        throw new TimelapseRefused('unsupported-action')
+      const { op } = parseTimelapseOp(args)
+      const wire = extendedWire('timelapse', args)
+      if (wire === undefined) throw new TimelapseRefused('invalid-command')
+      refuseTimelapseOp(
+        op,
+        parseTimelapseStatus(
+          op,
+          await requestRead(11, timelapseStatusWire(11, op)),
+        ),
+      )
+      extended = true
+      return await send(wire, requested, 5000, (result) =>
+        timelapseReplyAccepted(op, result),
+      )
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof TimelapseRefused ? error : failure()
+    }
+  }
+  /**
    * Named fans, LEDs and pins: the name is checked against the object list
    * before the single write; a refusal sends nothing and is never retried.
    */
@@ -683,6 +728,7 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'queue_op') return queueOp(args, request)
+      if (action === 'timelapse') return timelapse(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
         return output(action, args, request)
       extended = true

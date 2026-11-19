@@ -13,6 +13,7 @@ export function actionsForControlRole(
       ![
         'run_macro',
         'service',
+        'timelapse',
         'load_filament',
         'unload_filament',
         'extrude',

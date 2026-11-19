@@ -6,6 +6,7 @@ import {
   motionSupported,
 } from './control-motion.ts'
 import { serviceCommand } from './control-system-services.ts'
+import { parseTimelapseOp, timelapseSupported } from './control-timelapse.ts'
 import { parseExtrude } from './control-extrusion.ts'
 import {
   ledNames,
@@ -115,6 +116,8 @@ export function supportedMoonrakerActions(
     supported.push('unload_filament')
   // The queue is a Moonraker component; detection marks it next to the objects.
   if (queueSupported(objects)) supported.push('queue_op')
+  // Timelapse is a plugin component; detection marks it next to the objects.
+  if (timelapseSupported(objects)) supported.push('timelapse')
   // Motion actions are advertised only when the printer lists a toolhead.
   if (motionSupported(objects))
     supported.push('jog', 'motors_off', 'z_babystep', 'set_factor')
@@ -199,6 +202,11 @@ export function buildMoonrakerCommand(
       throw new Error('Service control unavailable')
     return serviceCommand(args)
   }
+  if (action === 'timelapse') {
+    if (!timelapseSupported(objects)) throw new Error('Timelapse unavailable')
+    return parseTimelapseOp(args).call
+  }
+
   if (action === 'pause') {
     keys([])
     return { method: 'printer.print.pause' }

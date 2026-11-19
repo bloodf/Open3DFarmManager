@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProgressRing from '../ui/charts/ProgressRing.vue'
+import { formatTemperature } from '../../utils/ui-format.ts'
 import { computed } from 'vue'
 import {
   OFFLINE_CONNECTION_LABEL,
@@ -21,9 +23,7 @@ const observed = computed(() => ({
 }))
 
 function temperatureLabel(value: number | undefined): string {
-  return value === undefined
-    ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+  return formatTemperature(value) ?? 'Indisponível'
 }
 </script>
 
@@ -51,10 +51,11 @@ function temperatureLabel(value: number | undefined): string {
       <dt>Temperatura da mesa</dt>
       <dd>{{ temperatureLabel(state.temperatures.bedCelsius) }}</dd>
     </dl>
-    <p v-if="state.progress !== undefined">
-      Progresso informado da impressão:
-      {{ Math.round(state.progress * 100) }}%
-    </p>
+    <ProgressRing
+      v-if="state.progress !== undefined"
+      label="Progresso informado da impressão"
+      :value="state.progress * 100"
+    />
     <p class="opaque">
       Somente leitura: sem conexão direta, nenhum comando é enviado a esta
       impressora.

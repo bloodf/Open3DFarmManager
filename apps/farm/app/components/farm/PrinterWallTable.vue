@@ -1,4 +1,5 @@
 <script setup lang="ts" generic="Row extends FarmRow">
+import { formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
 import {
   formatPrinterStateLabel,
@@ -53,7 +54,7 @@ const columns = [
 ]
 
 function temperature(value: number) {
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+  return formatTemperature(value) ?? 'Indisponível'
 }
 
 const sort = ref({ index: 0, descending: false })

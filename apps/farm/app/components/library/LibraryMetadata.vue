@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatNumber, formatWeight } from '../../utils/ui-format.ts'
 import {
   formatDuration,
   materials,
@@ -23,7 +24,7 @@ defineProps<{ metadata: LibraryMetadata }>()
         {{
           nozzles(metadata).length
             ? nozzles(metadata)
-                .map((n) => `${String(n).replace('.', ',')} mm`)
+                .map((n) => `${formatNumber(n)} mm`)
                 .join(', ')
             : 'não informado'
         }}
@@ -54,11 +55,7 @@ defineProps<{ metadata: LibraryMetadata }>()
     <div>
       <dt>Filamento</dt>
       <dd>
-        {{
-          totalGrams(metadata) === undefined
-            ? 'não informado'
-            : `${String(totalGrams(metadata)).replace('.', ',')} g`
-        }}
+        {{ formatWeight(totalGrams(metadata)) ?? 'não informado' }}
       </dd>
     </div>
     <div>
@@ -72,7 +69,7 @@ defineProps<{ metadata: LibraryMetadata }>()
     </div>
     <div v-if="metadata.layerHeight">
       <dt>Altura de camada</dt>
-      <dd>{{ String(metadata.layerHeight).replace('.', ',') }} mm</dd>
+      <dd>{{ formatNumber(metadata.layerHeight) }} mm</dd>
     </div>
   </dl>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatWeight } from '../utils/ui-format.ts'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
@@ -391,10 +392,7 @@ onBeforeUnmount(() => controller?.abort())
                     v-if="totalGrams(item.latest.metadata) !== undefined"
                   >
                     ·
-                    {{
-                      String(totalGrams(item.latest.metadata)).replace('.', ',')
-                    }}
-                    g
+                    {{ formatWeight(totalGrams(item.latest.metadata)) }}
                   </template>
                   ·
                   {{ item.latest.metadata.slicer ?? 'fatiador não informado' }}

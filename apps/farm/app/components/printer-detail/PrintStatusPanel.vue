@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import {
+  formatDateTime,
+  formatDuration,
+  formatNumber,
+  formatPercentage,
+} from '../../utils/ui-format.ts'
+import ProgressRing from '../ui/charts/ProgressRing.vue'
 import { computed } from 'vue'
 import type { z } from 'zod'
 import type { PrinterDetailStreamUpdate } from '../../../../../packages/farm-protocol/src/printer-detail.ts'
@@ -51,31 +58,29 @@ const estimates = computed(() => {
     { label: 'Pelo filamento usado', seconds: eta.filament },
   ]
 })
-const clock = new Intl.DateTimeFormat('pt-BR', {
-  hour: '2-digit',
-  minute: '2-digit',
-  day: '2-digit',
-  month: '2-digit',
-})
-const number = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
-function duration(seconds?: number) {
-  return seconds === undefined
-    ? 'Indisponível'
-    : `${Math.floor(seconds / 3600)} h ${Math.floor(seconds / 60) % 60} min ${Math.floor(seconds) % 60} s`
-}
+const progress = computed(() => props.frame.detail.virtualFile?.progress)
 function factor(value?: number) {
-  return value === undefined ? 'Indisponível' : `${number.format(value * 100)}%`
+  return value === undefined
+    ? 'Indisponível'
+    : (formatPercentage(value * 100) ?? 'Indisponível')
 }
 </script>
 
 <template>
   <section v-if="print" aria-labelledby="print-status-title">
     <h2 id="print-status-title">Status da impressão</h2>
+    <ProgressRing
+      v-if="active && progress !== undefined"
+      label="Progresso informado da impressão"
+      :value="progress * 100"
+    />
     <dl>
       <dt>Arquivo</dt>
       <dd>{{ print.file ?? 'Indisponível' }}</dd>
       <dt>Tempo de impressão</dt>
-      <dd>{{ duration(print.elapsedSeconds) }}</dd>
+      <dd>
+        {{ formatDuration(print.elapsedSeconds, 'second') ?? 'Indisponível' }}
+      </dd>
       <dt>Camada</dt>
       <dd>{{ print.currentLayer ?? '—' }} / {{ print.totalLayers ?? '—' }}</dd>
       <dt>Velocidade</dt>
@@ -87,18 +92,18 @@ function factor(value?: number) {
         {{
           print.filamentUsedMm === undefined
             ? 'Indisponível'
-            : `${number.format(print.filamentUsedMm)} mm`
+            : `${formatNumber(print.filamentUsedMm, { maximumFractionDigits: 1 })} mm`
         }}
       </dd>
       <template v-for="{ label, seconds } in estimates" :key="label">
         <dt>{{ label }}</dt>
         <dd v-if="seconds === null">Estimativa indisponível</dd>
         <dd v-else-if="print.state === 'paused'">
-          {{ duration(seconds) }} restantes após retomar
+          {{ formatDuration(seconds, 'second') }} restantes após retomar
         </dd>
         <dd v-else>
-          {{ duration(seconds) }} restantes · término previsto
-          {{ clock.format(Date.now() + seconds * 1000) }}
+          {{ formatDuration(seconds, 'second') }} restantes · término previsto
+          {{ formatDateTime(Date.now() + seconds * 1000) }}
         </dd>
       </template>
     </dl>

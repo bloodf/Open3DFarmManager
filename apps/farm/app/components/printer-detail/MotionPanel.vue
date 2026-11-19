@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatNumber } from '../../utils/ui-format.ts'
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import {
@@ -175,7 +176,7 @@ function applyFactors(event: Event) {
           :key="value"
           :value="String(value)"
         >
-          {{ value.toLocaleString('pt-BR', { maximumFractionDigits: 3 }) }}
+          {{ formatNumber(value, { maximumFractionDigits: 3 }) }}
         </option>
       </select>
       <Button

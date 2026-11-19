@@ -1,3 +1,4 @@
+import { formatDuration as sharedDuration, formatNumber } from './ui-format.ts'
 import { checkCompatibility } from '../../../../packages/shared/src/print-file/compatibility.ts'
 
 export type StorageMode = 'server' | 'connector'
@@ -96,10 +97,11 @@ export function nozzleError(value: string): string | undefined {
 }
 
 export function formatDuration(seconds: number | undefined): string {
-  if (seconds === undefined) return 'não informado'
-  const minutes = Math.round(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`
+  return (
+    sharedDuration(
+      seconds === undefined ? undefined : Math.round(seconds / 60) * 60,
+    ) ?? 'não informado'
+  )
 }
 
 export function formatBytes(bytes: number): string {
@@ -111,7 +113,7 @@ export function formatBytes(bytes: number): string {
     value /= 1024
     unit++
   }
-  return `${value.toFixed(1).replace('.', ',')} ${units[unit]}`
+  return `${formatNumber(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${units[unit]}`
 }
 
 export function totalGrams(metadata: LibraryMetadata): number | undefined {

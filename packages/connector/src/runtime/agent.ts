@@ -26,6 +26,11 @@ import {
   startLinkHealthHeartbeat,
 } from './link-health.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import { createLibraryJobLinks } from './library-job-links.ts'
+import {
+  createConnectorLibrary,
+  createPrinterProfiles,
+} from './library-print-wiring.ts'
 import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
@@ -115,6 +120,7 @@ type AgentInput = {
   configPath: string
   credentialPath: string
   dataDirectory: string
+  telemetryDirectory?: string
   signal: AbortSignal
   onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
@@ -201,6 +207,9 @@ async function runConnectorAgentOnce(
   if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
+    ...(input.telemetryDirectory
+      ? { telemetryDirectory: input.telemetryDirectory }
+      : {}),
     config,
     credential,
     now: clock.now(),
@@ -244,6 +253,26 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   const detailSources = createPrinterDetailSources(config)
+  // Library prints (#384): download from the server or read the local copy,
+  // checked against what each printer itself reported. Never stops the agent.
+  const printerProfiles = createPrinterProfiles()
+  const jobLinks = createLibraryJobLinks()
+  const libraryLinks = {
+    remember: jobLinks.remember,
+    attach(printer: Parameters<typeof jobLinks.attach>[0]) {
+      printerProfiles.observe(printer)
+      return jobLinks.attach(printer)
+    },
+  }
+  const library = await createConnectorLibrary({
+    endpoint: config.telemetry.endpoint,
+    credential,
+    dataDirectory: input.dataDirectory,
+    library: config.library,
+  }).catch((error: unknown) => {
+    logger.warn('library-print-unavailable', { error })
+    return undefined
+  })
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
     // One startup probe of the native RTC module. Without it the agent keeps
@@ -579,6 +608,15 @@ async function runConnectorAgentOnce(
           signal,
           freshness: offline.freshness,
           apiHandlers,
+          libraryLinks,
+          libraryPrint(assignmentId) {
+            const key = refs.find(
+              (ref) => ref.assignmentId === assignmentId,
+            )?.printerKey
+            return library?.starterFor(async () =>
+              key ? printerProfiles.read(key) : undefined,
+            )
+          },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
@@ -720,6 +758,7 @@ async function runConnectorAgentOnce(
       collectIntoQueue({
         config: config.collection,
         linkHealthFor: (printerKey) => links.get(printerKey),
+        libraryLinks,
         discoverMoonrakerObjects: true,
         importMoonrakerHistory: true,
         onLoss: (value) => logger.warn('queue-loss', { ...value }),
@@ -763,6 +802,18 @@ async function runConnectorAgentOnce(
         },
       }).catch(fail),
     )
+    // Connector library storage (#446): answers the server's relay operations
+    // on this host's store. A failure here never stops telemetry.
+    if (library)
+      tasks.push(
+        library
+          .serveRelay(signal, (event) =>
+            logger.warn(event.kind, { reason: event.reason }),
+          )
+          .catch((error: unknown) =>
+            logger.warn('library-relay-stopped', { error }),
+          ),
+      )
     tasks.push(drainLoop().catch(fail))
     await Promise.all(tasks)
   } catch (error) {

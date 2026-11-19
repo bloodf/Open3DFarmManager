@@ -110,8 +110,24 @@ export type JourneyOptions = Readonly<{
     printerKey: string
     vendor: VendorSimulator | undefined
     configurator:
-      Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
+      | Pick<Configurator, 'agentId' | 'fingerprint' | 'assignments' | 'log'>
+      | undefined
   }): Promise<void>
+  /**
+   * Additional Moonraker printers registered on the primary Connector and
+   * activated alongside `printerKey` (only for `simulator === 'moonraker-fixture'`).
+   */
+  extraPrinters?: readonly { printerKey: string; origin: string }[]
+  /**
+   * Starts the second Connector in configuration mode alongside optional
+   * already-configured Moonraker printers so multi-Connector network and
+   * discovery journeys can run on the shared harness.
+   */
+  secondaryConnector?: {
+    initialPrinters?: readonly { printerKey: string; origin: string }[]
+    probes?: Parameters<typeof startConfigurator>[0]['probes']
+    printerNetworks?: readonly string[]
+  }
 }>
 
 export type JourneyHarness = Readonly<{
@@ -156,9 +172,10 @@ export type JourneyHarness = Readonly<{
   vendor: VendorSimulator | undefined
   /** Loopback discovery/probe responder (Creality and Anycubic only). */
   discovery: VendorDiscovery | undefined
-  /** Connector the Impressoras page searches with (`discovery: true`). */
+  /** Connector the Impressoras page searches with (`discovery: true` or `secondaryConnector`). */
   configurator:
-    Pick<Configurator, 'agentId' | 'fingerprint' | 'log'> | undefined
+    | Pick<Configurator, 'agentId' | 'fingerprint' | 'assignments' | 'log'>
+    | undefined
   /** Loopback MJPEG camera (Creality and Anycubic only). */
   camera: VendorSimulator['camera']
   /** The Kobra X mock behind the native setup (`kobraX: true`). */
@@ -512,16 +529,15 @@ export async function startJourneyHarness(
     if (
       options.discovery ||
       options.kobraX ||
-      (options.setup && simulator === 'bambu')
+      (options.setup && simulator === 'bambu') ||
+      options.secondaryConnector
     ) {
-      let probes: {
-        creality?: number
-        anycubic?: number
-        bambuPort?: number
-        kobraX?: { httpPort: number; mqttPort: number }
-      } = {}
+      let probes: Parameters<typeof startConfigurator>[0]['probes'] = {
+        ...(options.secondaryConnector?.probes ?? {}),
+      }
       if (kobraX)
         probes = {
+          ...probes,
           kobraX: {
             httpPort: kobraX.mock.httpPort,
             mqttPort: kobraX.mock.mqttPort,
@@ -536,14 +552,25 @@ export async function startJourneyHarness(
           throw new Error(
             'Page discovery needs the Creality or Anycubic simulator',
           )
-        probes =
-          simulator === 'creality' ? { creality: port } : { anycubic: port }
+        probes = {
+          ...probes,
+          ...(simulator === 'creality'
+            ? { creality: port }
+            : { anycubic: port }),
+        }
       } else if (simulator === 'bambu') {
         const bambu = vendor?.raw as
           Awaited<ReturnType<typeof startBambuSimulator>> | undefined
         if (!bambu) throw new Error('Bambu simulator missing')
-        probes = { bambuPort: bambu.port }
+        probes = { ...probes, bambuPort: bambu.port }
       }
+      const printerNetworks =
+        options.secondaryConnector?.printerNetworks ??
+        (bambuSetup
+          ? [`${BAMBU_LAN_ADDRESS}/32`]
+          : kobraX
+            ? [`${KOBRA_X_LAN_ADDRESS}/32`]
+            : undefined)
       configurator = await startConfigurator({
         origin,
         audience: AUDIENCE,
@@ -555,12 +582,12 @@ export async function startJourneyHarness(
         // Bambu set-up configures the runtime Connector itself, so the
         // browser-created assignment belongs to the agent the journey runs.
         ...(bambuSetup
-          ? {
-              paired: { dataDirectory: runtime.dataDirectory, claim },
-              printerNetworks: [`${BAMBU_LAN_ADDRESS}/32`],
-            }
+          ? { paired: { dataDirectory: runtime.dataDirectory, claim } }
           : {}),
-        ...(kobraX ? { printerNetworks: [`${KOBRA_X_LAN_ADDRESS}/32`] } : {}),
+        ...(options.secondaryConnector?.initialPrinters
+          ? { initialPrinters: options.secondaryConnector.initialPrinters }
+          : {}),
+        ...(printerNetworks ? { printerNetworks } : {}),
       })
       const started = configurator
       undo.push(() => started.close())
@@ -618,11 +645,71 @@ export async function startJourneyHarness(
       assignmentId = registration.assignmentId
     }
     const assignment = { assignmentId, agentId: claim.agent_id, printerKey }
+    const assignmentRefs = [assignment]
+    let multiMoonraker:
+      | {
+          version: 1
+          collection: Record<string, unknown>
+          assignments: readonly Record<string, unknown>[]
+        }
+      | undefined
+    if (options.extraPrinters?.length) {
+      if (!isMoonraker || !printer)
+        throw new Error(
+          'extraPrinters requires the moonraker-fixture simulator',
+        )
+      const registeredPrinters = [
+        {
+          assignmentId,
+          printerKey,
+          origin: printer.origin,
+        },
+      ]
+      for (const extra of options.extraPrinters) {
+        const extraRegistration = (await pagePost(ownerPage, path, {
+          agentId: claim.agent_id,
+          printerKey: extra.printerKey,
+          confirmedLocalConfiguration: true,
+        })) as { assignmentId?: unknown }
+        if (typeof extraRegistration.assignmentId !== 'string')
+          throw new Error('Extra printer assignment failed')
+        assignmentRefs.push({
+          assignmentId: extraRegistration.assignmentId,
+          agentId: claim.agent_id,
+          printerKey: extra.printerKey,
+        })
+        registeredPrinters.push({
+          assignmentId: extraRegistration.assignmentId,
+          printerKey: extra.printerKey,
+          origin: extra.origin,
+        })
+      }
+      multiMoonraker = {
+        version: 1,
+        collection: {
+          version: 1,
+          allowedOrigins: [...new Set(registeredPrinters.map((p) => p.origin))],
+          printers: registeredPrinters.map((p) => ({
+            printerKey: p.printerKey,
+            origin: p.origin,
+          })),
+          limits: { staleAfterMs: 5000 },
+        },
+        assignments: registeredPrinters.map((p) => ({
+          assignment_id: p.assignmentId,
+          agent_id: claim.agent_id,
+          farm_id: database.farmId,
+          printer_key: p.printerKey,
+          moonraker_origin: p.origin,
+        })),
+      }
+    }
     await runtime.start({
       origin,
       audience: AUDIENCE,
       claim,
-      assignmentRefs: [assignment],
+      assignmentRefs,
+      ...(multiMoonraker ? { runtime: multiMoonraker } : {}),
       ...(vendor
         ? {
             runtime: await vendor.runtime({

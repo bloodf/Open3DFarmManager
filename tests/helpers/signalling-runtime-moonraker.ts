@@ -112,60 +112,76 @@ export async function createRuntimeMoonrakerFixture() {
        * replace the Moonraker ones (the packaged Connector is unchanged).
        */
       runtime?: {
-        version: 2 | 3 | 4 | 5
+        version: 1 | 2 | 3 | 4 | 5
         collection: Record<string, unknown>
-        assignment: Record<string, unknown>
+        assignment?: Record<string, unknown>
+        assignments?: readonly Record<string, unknown>[]
         /** Pause between telemetry drains of an empty queue (100..5000). */
         telemetryIdleMs?: number
         /** Opt-in camera section of the runtime file (vendor MJPEG sources). */
         camera?: (assignmentId: string) => Record<string, unknown>
       }
     }) {
-      if (running || disposal || input.assignmentRefs.length !== 1)
+      if (
+        running ||
+        disposal ||
+        input.assignmentRefs.length < 1 ||
+        (input.assignmentRefs.length !== 1 && !input.runtime?.assignments)
+      )
         throw Error('Runtime fixture scope')
       const ref = input.assignmentRefs[0]!
-      if (ref.agentId !== input.claim.agent_id)
+      if (
+        input.assignmentRefs.some(
+          (item) => item.agentId !== input.claim.agent_id,
+        )
+      )
         throw Error('Runtime fixture agent')
-      const moonraker = await startMoonrakerMock({
-        initial: {
-          state: 'printing',
-          progress: 0.25,
-          extruder: 210,
-          bed: 60,
-        },
-        objects: [
-          'webhooks',
-          'print_stats',
-          'virtual_sdcard',
-          'extruder',
-          'heater_bed',
-        ],
-        maxWsConnections: farmPause ? 2 : 1,
-        maxRpcRequests: 64,
-        onClientError: () => {
-          failure = true
-        },
-      })
-      mockInstance = moonraker
-      port = moonraker.ports.http
-      closeServer = () => moonraker.close()
-      broadcast = () => {
-        // Bounded synthetic sequence: initial, after first advance, after recovery.
-        const next = ({ 0.25: 0.75, 0.75: 0.9 } as Record<number, number>)[
-          moonraker.control.model().progress
-        ]
-        if (next === undefined) throw Error('Fixture transitions exhausted')
-        moonraker.control.update({ progress: next })
+      const moonraker = input.runtime?.assignments
+        ? undefined
+        : await startMoonrakerMock({
+            initial: {
+              state: 'printing',
+              progress: 0.25,
+              extruder: 210,
+              bed: 60,
+            },
+            objects: [
+              'webhooks',
+              'print_stats',
+              'virtual_sdcard',
+              'extruder',
+              'heater_bed',
+            ],
+            maxWsConnections: farmPause ? 2 : 1,
+            maxRpcRequests: 64,
+            onClientError: () => {
+              failure = true
+            },
+          })
+      if (moonraker) {
+        mockInstance = moonraker
+        port = moonraker.ports.http
+        closeServer = () => moonraker.close()
+        broadcast = () => {
+          // Bounded synthetic sequence: initial, after first advance, after recovery.
+          const next = ({ 0.25: 0.75, 0.75: 0.9 } as Record<number, number>)[
+            moonraker.control.model().progress
+          ]
+          if (next === undefined) throw Error('Fixture transitions exhausted')
+          moonraker.control.update({ progress: next })
+        }
       }
       // Opt-in genuine simulator sources (rtc-farm-acceptance-sim-scenarios.ts).
-      const sim = await (
-        await import('./rtc-farm-acceptance-sim-scenarios.ts')
-      ).readSimulatorSources(process.env)
+      const sim = input.runtime?.assignments
+        ? undefined
+        : await (
+            await import('./rtc-farm-acceptance-sim-scenarios.ts')
+          ).readSimulatorSources(process.env)
       // The ready check above is the simulator's first request; the runtime
       // readiness wait expects requests > 0, which the synthetic server would
       // otherwise provide.
       if (sim) simRequests++
-      const moon = sim?.moonraker ?? moonraker.origin
+      const moon = sim?.moonraker ?? moonraker?.origin ?? ''
       const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),
         credentialPath = join(directory, 'credential.json')
@@ -186,15 +202,17 @@ export async function createRuntimeMoonrakerFixture() {
               },
             }),
           },
-          assignments: [
-            input.runtime?.assignment ?? {
-              assignment_id: ref.assignmentId,
-              agent_id: ref.agentId,
-              farm_id: input.claim.farm_id,
-              printer_key: ref.printerKey,
-              moonraker_origin: moon,
-            },
-          ],
+          assignments: input.runtime?.assignments
+            ? [...input.runtime.assignments]
+            : [
+                input.runtime?.assignment ?? {
+                  assignment_id: ref.assignmentId,
+                  agent_id: ref.agentId,
+                  farm_id: input.claim.farm_id,
+                  printer_key: ref.printerKey,
+                  moonraker_origin: moon,
+                },
+              ],
           ...(camera
             ? { camera: cameraRuntimeSection(camera, ref.assignmentId) }
             : {}),

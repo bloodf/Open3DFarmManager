@@ -176,6 +176,12 @@ export interface LibraryStore {
   readVerified(
     sha256: string,
   ): Promise<{ size: number; stream: AsyncIterable<Uint8Array> }>
+  /**
+   * A byte range of a stored file, for the server to read metadata from an
+   * upload it relayed. Not a print path: no re-hash (the file was hashed on
+   * write), so it must never feed a print start. Short at the end of the file.
+   */
+  readRange(sha256: string, offset: number, length: number): Promise<Uint8Array>
   /** Adds a listed version for a file already stored (dedupe: one copy, many versions). */
   link(sha256: string, meta: VersionMeta, pinned?: boolean): Promise<void>
   list(): Promise<LibraryFileEntryValue[]>
@@ -524,6 +530,33 @@ export async function createLibraryStore(
     },
     verify: verifyFile,
     openForPrint: verifyFile,
+    async readRange(sha256, offset, length) {
+      if (
+        !Number.isSafeInteger(offset) ||
+        !Number.isSafeInteger(length) ||
+        offset < 0 ||
+        length < 1
+      )
+        throw new LibraryStoreError('not-found')
+      const path = pathFor(sha256)
+      if (!(await regularFile(path))) throw new LibraryStoreError('not-found')
+      const handle = await open(path, 'r')
+      try {
+        const { size } = await handle.stat()
+        const buffer = Buffer.alloc(
+          Math.max(0, Math.min(length, size - offset)),
+        )
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          buffer.length,
+          offset,
+        )
+        return buffer.subarray(0, bytesRead)
+      } finally {
+        await handle.close()
+      }
+    },
     async readVerified(sha256) {
       const file = await verifyFile(sha256)
       return { size: file.size, stream: createReadStream(file.path) }

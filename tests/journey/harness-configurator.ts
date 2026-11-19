@@ -17,9 +17,19 @@ import {
 import { PairingProofChallenge } from '../../packages/farm-protocol/src/pairing-proof.ts'
 import { pagePost } from '../helpers/kobralink-rtc/acceptance.ts'
 
+import type { discoverPrinters } from '../../packages/connector/src/discovery/index.ts'
+
+export type ConfiguratorPrinter = Readonly<{
+  assignmentId: string
+  agentId: string
+  printerKey: string
+  origin: string
+}>
+
 export type Configurator = Readonly<{
   agentId: string
   fingerprint: string
+  assignments: readonly ConfiguratorPrinter[]
   /** Bounded child output tail for failure diagnostics. */
   log(): string
   close(): Promise<void>
@@ -84,7 +94,10 @@ export async function startConfigurator(input: {
     anycubic?: number
     bambuPort?: number
     kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
+    discovery?: Parameters<typeof discoverPrinters>[0]
   }>
+  /** Existing Moonraker printers activated immediately alongside config-v1. */
+  initialPrinters?: readonly { printerKey: string; origin: string }[]
   /** Private setup-form networks the Connector accepts (mapped to loopback). */
   printerNetworks?: readonly string[]
   /**
@@ -100,7 +113,7 @@ export async function startConfigurator(input: {
   // Provisioning custody rejects symbolic-link ancestors, and the macOS
   // temporary directory sits under one (/var -> /private/var).
   const root = await realpath(
-    await mkdtemp(join(tmpdir(), 'journey-configurator-')),
+    await mkdtemp(join(await realpath(tmpdir()), 'journey-configurator-')),
   )
   const paired = input.paired
   const dataDirectory = paired
@@ -114,6 +127,67 @@ export async function startConfigurator(input: {
 
   const credentialPath = join(root, 'credential.json')
   const provisioningPath = join(root, 'provisioning.json')
+  const runtimeConfigPath = join(root, 'runtime.json')
+  const assignments: ConfiguratorPrinter[] = []
+  if (input.initialPrinters?.length) {
+    const printersPath = `/api/farms/${input.farmId}/printers`
+    for (const printer of input.initialPrinters) {
+      const registration = (await pagePost(input.ownerPage, printersPath, {
+        agentId: claim.agent_id,
+        printerKey: printer.printerKey,
+        confirmedLocalConfiguration: true,
+      })) as { assignmentId?: unknown }
+      if (typeof registration.assignmentId !== 'string')
+        throw new Error('Configurator initial printer assignment failed')
+      assignments.push(
+        Object.freeze({
+          assignmentId: registration.assignmentId,
+          agentId: claim.agent_id,
+          printerKey: printer.printerKey,
+          origin: printer.origin,
+        }),
+      )
+    }
+    await writeFile(
+      runtimeConfigPath,
+      JSON.stringify({
+        version: 1,
+        collection: {
+          version: 1,
+          allowedOrigins: [...new Set(assignments.map((p) => p.origin))],
+          printers: assignments.map((p) => ({
+            printerKey: p.printerKey,
+            origin: p.origin,
+          })),
+          limits: { staleAfterMs: 5000 },
+        },
+        assignments: assignments.map((p) => ({
+          assignment_id: p.assignmentId,
+          agent_id: p.agentId,
+          farm_id: input.farmId,
+          printer_key: p.printerKey,
+          moonraker_origin: p.origin,
+        })),
+        telemetry: {
+          endpoint: input.origin + '/api/connector/telemetry',
+          audience: input.audience,
+          retryMinMs: 1000,
+          retryMaxMs: 1000,
+        },
+        signalling: {
+          endpoint:
+            input.origin.replace('https:', 'wss:') +
+            '/api/signalling/connector',
+          origin: input.origin,
+          audience: input.audience,
+          retryMinMs: 1000,
+          retryMaxMs: 1000,
+        },
+        rtc: { bindAddress: '127.0.0.1' },
+      }),
+      { mode: 0o600, flag: 'wx' },
+    )
+  }
   await writeFile(
     credentialPath,
     JSON.stringify({
@@ -133,7 +207,7 @@ export async function startConfigurator(input: {
       farmOrigin: input.origin,
       credentialAudience: input.audience,
       stateDirectory: join(root, 'state'),
-      runtimeConfigPath: join(root, 'runtime.json'),
+      runtimeConfigPath,
       printerNetworks: input.printerNetworks ?? ['172.30.78.0/24'],
       managedBridge: null,
       runtimeTemplate: {
@@ -156,8 +230,13 @@ export async function startConfigurator(input: {
   )
 
   let tail = ''
+  let configReady = false
+  let readonlyReady = assignments.length === 0
   const collect = (chunk: Buffer) => {
     tail = (tail + chunk.toString('utf8')).slice(-8192)
+    if (tail.includes('"configuration-signalling","state":"ready"'))
+      configReady = true
+    if (tail.includes('"kind":"readonly-listening"')) readonlyReady = true
   }
   const child: ChildProcess = spawn(
     process.execPath,
@@ -183,7 +262,7 @@ export async function startConfigurator(input: {
   child.stderr?.on('data', collect)
   // Hand it over once it has opened its signalling (a loaded host needs time).
   const deadline = Date.now() + 5 * 60_000
-  while (!tail.includes('"configuration-signalling","state":"ready"')) {
+  while (!(configReady && readonlyReady)) {
     if (child.exitCode !== null || Date.now() > deadline) {
       child.kill('SIGKILL')
       throw new Error('Configurator did not become ready: ' + tail)
@@ -194,6 +273,7 @@ export async function startConfigurator(input: {
   return Object.freeze({
     agentId: claim.agent_id,
     fingerprint: identity.fingerprint,
+    assignments: Object.freeze(assignments),
     log: () => tail,
     close: () =>
       (closed ??= (async () => {

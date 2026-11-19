@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -201,14 +201,19 @@ const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
-const actionSchema = macroActionSchema.replace(
+const extrudeActionSchema = macroActionSchema.replace(
   "'unload_filament'",
   "'unload_filament','extrude'",
+)
+const actionSchema = extrudeActionSchema.replace(
+  "'extrude'",
+  "'extrude','set_led','set_pin'",
 )
 const previousActionSchemas: Record<number, string> = {
   2: legacyActionSchema,
   3: previousActionSchema,
   4: macroActionSchema,
+  5: extrudeActionSchema,
 }
 const schema = [
   actionSchema,
@@ -355,7 +360,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, 3, 4, 5, SCHEMA_VERSION].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')

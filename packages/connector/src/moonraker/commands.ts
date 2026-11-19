@@ -1,5 +1,13 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { parseExtrude } from './control-extrusion.ts'
+import {
+  ledNames,
+  ledScript,
+  namedFanScript,
+  OutputRefused,
+  pinNames,
+  pinScript,
+} from './control-outputs.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -84,6 +92,9 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  // Named LEDs and output pins need the object list; an unknown list never widens support.
+  if (ledNames(objects).length) supported.push('set_led')
+  if (pinNames(objects).length) supported.push('set_pin')
   if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))
@@ -132,6 +143,15 @@ export function buildMoonrakerCommand(
     return {
       method: 'printer.gcode.script',
       params: { script: parseExtrude(args, objects).script },
+    }
+  }
+
+  if (action === 'set_led' || action === 'set_pin') {
+    return {
+      method: 'printer.gcode.script',
+      params: {
+        script: (action === 'set_led' ? ledScript : pinScript)(args, objects),
+      },
     }
   }
 
@@ -349,9 +369,8 @@ export function buildMoonrakerCommand(
         `fan_generic ${fanType}_fan`,
       ]
       const found = objects.find((obj) => candidates.includes(obj))
-      if (objects.length > 0 && !found) {
-        throw new Error(`Fan '${fanType}' not found in printer objects`)
-      }
+      if (objects.length > 0 && !found)
+        throw new OutputRefused('unsupported-action')
       const fanName = found ? found.slice('fan_generic '.length) : fanType
       if (!SAFE_IDENTIFIER.test(fanName)) throw new Error('Unsafe fan name')
       return {
@@ -363,18 +382,13 @@ export function buildMoonrakerCommand(
     }
 
     if (typeof fanType === 'string' && SAFE_IDENTIFIER.test(fanType)) {
-      const match = objects.find((obj) => obj === `fan_generic ${fanType}`)
-      if (match) {
-        return {
-          method: 'printer.gcode.script',
-          params: {
-            script: `SET_FAN_SPEED FAN=${fanType} SPEED=${formatFanSpeed(speed255)}`,
-          },
-        }
+      return {
+        method: 'printer.gcode.script',
+        params: { script: namedFanScript(fanType, speed255, objects) },
       }
     }
 
-    throw new Error(`Invalid or unconfigured fan '${String(fanType)}'`)
+    throw new OutputRefused('invalid-command')
   }
 
   if (action === 'set_light') {

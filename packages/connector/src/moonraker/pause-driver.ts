@@ -11,6 +11,7 @@ import {
   extrudeProbeWire,
   parseExtrude,
 } from './control-extrusion.ts'
+import { OutputRefused } from './control-outputs.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
@@ -487,6 +488,29 @@ export function openFixedMoonrakerPause(input: {
     extended = true
     return send(extendedWire('extrude', args), request, 5000)
   }
+  /**
+   * Named fans, LEDs and pins: the name is checked against the object list
+   * before the single write; a refusal sends nothing and is never retried.
+   */
+  async function output(
+    action: ExtendedControlAction,
+    args: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    if (!input.objects || request.binding !== binding || !prepared || attempted)
+      throw new OutputRefused('invalid-command')
+    try {
+      buildMoonrakerCommand(action, args, input.objects)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof OutputRefused
+        ? error
+        : new OutputRefused('invalid-command')
+    }
+    extended = true
+    return send(extendedWire(action, args), request, 5000)
+  }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
   const driver: PauseDriver = Object.freeze({
@@ -498,6 +522,8 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
       if (action === 'extrude') return extrude(args, request)
+      if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
+        return output(action, args, request)
       extended = true
       return send(extendedWire(action, args), request, 5000)
     },

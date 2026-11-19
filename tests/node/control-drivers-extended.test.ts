@@ -45,6 +45,7 @@ const MOONRAKER_ALL = [
   'set_light',
   'set_speed',
   'extrude',
+  'set_pin',
 ]
 const BAMBU_ALL = [
   ...LIFECYCLE,

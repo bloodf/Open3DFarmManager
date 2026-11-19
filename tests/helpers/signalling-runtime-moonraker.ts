@@ -295,7 +295,10 @@ export async function createRuntimeMoonrakerFixture() {
           ],
           {
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, NODE_OPTIONS: '' },
+            env: {
+              ...process.env,
+              NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
+            },
           },
         )
         packagedPid = child.pid ?? 0

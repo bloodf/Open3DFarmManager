@@ -142,11 +142,33 @@ export function createMoonrakerDetailStream(input: {
       })
     }
 
+    let metadataFile = ''
+    let metadata: Fields = {}
     function publish() {
       timer = undefined
       if (signal.aborted || !ready) return
       lastUpdate = performance.now()
-      const normalized = normalizeDetail(status)
+      const print = status.get('print_stats')
+      const file = string(print?.filename, 512)
+      if (file !== metadataFile) {
+        metadataFile = file
+        metadata = {}
+        if (file)
+          void request('server.files.metadata', { filename: file })
+            .then((result) => {
+              if (!ready || metadataFile !== file) return
+              const value = fields(result)
+              metadata = {
+                estimated_time: value.estimated_time,
+                filament_total: value.filament_total,
+              }
+              schedulePublish()
+            })
+            .catch(() => {})
+      }
+      const enriched = new Map(status)
+      if (print) enriched.set('print_stats', { ...print, ...metadata })
+      const normalized = normalizeDetail(enriched)
       const frame = PrinterDetailUpdate.safeParse({
         v: 1,
         t: 'detail.update',

@@ -27,18 +27,21 @@ import {
 } from '../../utils/printer-detail-view.ts'
 
 const route = useRoute()
+const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const initialPrinterKey = String(route.params.printerKey ?? '')
 const webcams = shallowRef<
   Parameters<WebcamDetailOptions['onUpdate']>[0] | null
 >(null)
-const powerFrame =
+const detailFrame =
   shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
-const systemFrame =
-  shallowRef<Parameters<NonNullable<WebcamDetailOptions['onDetail']>>[0]>()
+const systemFrame = computed(() =>
+  detailFrame.value?.capabilities.includes('system')
+    ? detailFrame.value
+    : undefined,
+)
 const view = useFarmView({
   onDetail(frame) {
-    powerFrame.value = frame
-    if (frame.capabilities.includes('system')) systemFrame.value = frame
+    detailFrame.value = frame
   },
   printerKey: initialPrinterKey,
   onUpdate(value) {
@@ -46,7 +49,7 @@ const view = useFarmView({
   },
   onClose() {
     webcams.value = null
-    powerFrame.value = undefined
+    detailFrame.value = undefined
   },
 })
 definePageMeta({ key: (route) => route.path })
@@ -77,7 +80,6 @@ const {
   closePause,
 } = useFarmControls(view, dialog)
 
-const printerKey = computed(() => String(route.params.printerKey ?? ''))
 const row = computed(
   () =>
     ready.value?.rows.find(
@@ -151,6 +153,7 @@ function availability(action: ExtendedControlAction) {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const excludeAvailability = computed(() => availability('exclude_object'))
 const extrudeAvailability = computed(() => availability('extrude'))
 const extrusion = computed(() => {
   const advertised = state.value?.controls?.includes('extrude') ?? false
@@ -364,6 +367,25 @@ onMounted(() => heading.value?.focus())
         (speed, flow, event) =>
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
+      :print-status="
+        detailFrame?.printerKey === printerKey ? detailFrame : undefined
+      "
+      :exclude-available="
+        live &&
+        !!state?.controls?.includes('exclude_object') &&
+        excludeAvailability.available &&
+        !commandInFlight
+      "
+      :exclude-reason="
+        !state?.controls?.includes('exclude_object')
+          ? undefined
+          : excludeAvailability.available
+            ? 'Aguarde a conexão ou o comando em andamento.'
+            : excludeAvailability.reason
+      "
+      @exclude-object="
+        (name, event) => control('exclude_object', event, { name })
+      "
       :extrusion="extrusion"
       :queue="queue"
       :macros="macros"
@@ -380,7 +402,11 @@ onMounted(() => heading.value?.focus())
       <template #sistema>
         <PowerPanel
           v-if="state?.controls?.includes('power')"
-          :devices="live ? powerFrame?.detail.powerDevices : undefined"
+          :devices="
+            live && detailFrame?.printerKey === printerKey
+              ? detailFrame.detail.powerDevices
+              : undefined
+          "
           :can-command="live && powerAvailability.available && !commandInFlight"
           :reason="
             commandInFlight

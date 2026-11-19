@@ -1,3 +1,12 @@
+import { chmodSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+import {
+  closeCommandJournal,
+  openCommandJournal,
+  readCommandAction,
+} from '../../packages/connector/src/control/command-journal.ts'
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
@@ -156,3 +165,42 @@ describe('signed power control', () => {
     },
   )
 })
+
+it.each(['power', 'exclude_object'])(
+  'upgrades the v9 %s journal and preserves its action',
+  (action) => {
+    const directory = mkdtempSync(
+      join(process.env.OPENFARM_POWER_TEST_TMP ?? tmpdir(), 'power-journal-'),
+    )
+    chmodSync(directory, 0o700)
+    closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
+    const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
+    try {
+      const row = db
+        .prepare(
+          "SELECT sql FROM sqlite_schema WHERE name='control_command_actions'",
+        )
+        .get()
+      if (typeof row?.sql !== 'string') throw new Error('Missing action table')
+      const prior = row.sql.replace(
+        "'service','exclude_object','power'",
+        `'service','${action}'`,
+      )
+      db.exec(
+        `DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=9;`,
+      )
+      db.prepare('INSERT INTO control_command_actions VALUES (?, ?)').run(
+        'retained',
+        action,
+      )
+    } finally {
+      db.close()
+    }
+    const journal = openCommandJournal({ directory, clock: Date.now })
+    try {
+      expect(readCommandAction(journal, 'retained')).toBe(action)
+    } finally {
+      closeCommandJournal(journal)
+    }
+  },
+)

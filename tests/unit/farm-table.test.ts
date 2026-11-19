@@ -80,7 +80,7 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
       },
       '/wall.js'(_request, response) {
         response.setHeader('content-type', 'text/javascript')
-        response.end(bundle.outputFiles[0].text)
+        response.end(bundle.outputFiles[0]?.text ?? '')
       },
     },
   })

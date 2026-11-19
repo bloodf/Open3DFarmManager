@@ -7,6 +7,10 @@ import {
   shallowRef,
   watch,
 } from 'vue'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
   filesAvailability,
@@ -280,12 +284,23 @@ onBeforeUnmount(() => {
         Envie um arquivo ou escolha um arquivo da impressora para iniciar a
         impressão pela conexão direta.
       </p>
-      <p v-if="state.kind === 'loading'" role="status">Carregando farms…</p>
-      <template v-else-if="!ready">
-        <p role="alert">Não foi possível carregar suas farms.</p>
-        <button type="button" @click="discover()">Tentar novamente</button>
-        <NuxtLink to="/entrar">Entrar</NuxtLink>
-      </template>
+      <div v-if="state.kind === 'loading'" aria-busy="true" class="loading">
+        <p role="status">Carregando farms…</p>
+        <Skeleton /><Skeleton /><Skeleton />
+      </div>
+      <div v-else-if="!ready" role="alert">
+        <ErrorState
+          title="Arquivos indisponíveis"
+          :description="
+            state.kind === 'sign-in-required'
+              ? 'Sua sessão não está ativa. Entre novamente para ver suas farms.'
+              : 'Não foi possível carregar suas farms. Tente novamente.'
+          "
+        >
+          <Button @click="discover()">Tentar novamente</Button>
+          <NuxtLink to="/entrar">Entrar</NuxtLink>
+        </ErrorState>
+      </div>
       <template v-else>
         <label for="files-farm">Farm</label>
         <select
@@ -303,7 +318,13 @@ onBeforeUnmount(() => {
             {{ farm.farmId }}
           </option>
         </select>
-        <p v-if="!ready.farms.length">Nenhuma farm nesta página.</p>
+        <EmptyState
+          v-if="!ready.farms.length"
+          title="Nenhuma farm nesta página"
+          description="Esta conta ainda não tem uma farm aqui. Crie uma farm ou volte à primeira página."
+        >
+          <NuxtLink to="/farm">Ir para farms</NuxtLink>
+        </EmptyState>
         <button
           v-if="ready.farmAfter"
           type="button"
@@ -361,10 +382,21 @@ onBeforeUnmount(() => {
           <p v-if="row">
             Impressora selecionada: {{ row.assignment.printerKey }}
           </p>
-          <p v-if="ready.inventory === 'loading'" role="status">
-            Carregando impressoras…
-          </p>
-          <p v-else-if="!ready.rows.length">Nenhuma impressora nesta página.</p>
+          <div
+            v-if="ready.inventory === 'loading'"
+            aria-busy="true"
+            class="loading"
+          >
+            <p role="status">Carregando impressoras…</p>
+            <Skeleton /><Skeleton />
+          </div>
+          <EmptyState
+            v-else-if="!ready.rows.length"
+            title="Nenhuma impressora nesta página"
+            description="Adicione uma impressora a esta farm para enviar arquivos."
+          >
+            <NuxtLink to="/impressoras">Ir para impressoras</NuxtLink>
+          </EmptyState>
           <button
             v-if="ready.printerAfter"
             type="button"
@@ -425,9 +457,11 @@ onBeforeUnmount(() => {
             >
               Consultar arquivos
             </button>
-            <p v-if="!files.length">
-              Consulte os arquivos da impressora ou envie um arquivo.
-            </p>
+            <EmptyState
+              v-if="!files.length"
+              title="Nenhum arquivo listado"
+              description="Consulte os arquivos da impressora ou envie um arquivo."
+            />
             <ul
               v-if="files.some((file) => file.thumbnail)"
               aria-label="Miniaturas dos arquivos"
@@ -579,6 +613,10 @@ button {
 }
 progress {
   width: 100%;
+}
+.loading {
+  display: grid;
+  gap: 0.75rem;
 }
 :is(button, select, input, a):focus-visible {
   outline: 3px solid currentColor;

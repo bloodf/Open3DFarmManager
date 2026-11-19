@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 type Farm = { farmId: string }
 const roles = [
   { value: 'viewer', label: 'Visualizador' },
@@ -11,11 +15,15 @@ const role = ref('viewer')
 const loading = ref(true)
 const pending = ref(false)
 const errorMessage = ref('')
+const loadFailed = ref(false)
 const link = ref('')
 const expiresAt = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 
-onMounted(async () => {
+async function loadFarms() {
+  loading.value = true
+  loadFailed.value = false
+  errorMessage.value = ''
   try {
     const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
       query: { limit: 50 },
@@ -25,11 +33,13 @@ onMounted(async () => {
     farms.value = page.farms
     farmId.value = page.farms[0]?.farmId ?? ''
   } catch {
+    loadFailed.value = true
     errorMessage.value = 'Entre na sua conta para criar convites.'
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(loadFarms)
 
 async function submit() {
   if (pending.value || !farmId.value) return
@@ -74,7 +84,23 @@ async function submit() {
       Gere um link de uso único, válido por 72 horas. Envie-o por um canal
       confiável: quem tiver o link poderá criar uma conta com o papel escolhido.
     </p>
-    <p v-if="loading" role="status">Carregando suas farms…</p>
+    <div v-if="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <div v-else-if="loadFailed" ref="errorSummary" role="alert" tabindex="-1">
+      <ErrorState title="Convites indisponíveis" :description="errorMessage">
+        <Button @click="loadFarms()">Tentar novamente</Button>
+        <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
+      </ErrorState>
+    </div>
+    <EmptyState
+      v-else-if="!farms.length"
+      title="Nenhuma farm disponível"
+      description="Sua conta ainda não tem uma farm para receber convites. Crie ou peça acesso a uma farm e volte a esta página."
+    >
+      <NuxtLink to="/farm">Abrir a página da farm</NuxtLink>
+    </EmptyState>
     <form
       v-else
       class="account-form"

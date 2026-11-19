@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
+import StaleNotice from '../ui/StaleNotice.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
@@ -156,12 +157,10 @@ const heaterReason = computed(
         <StatusBadge :tone="live ? stateTone : 'stale'" :label="stateLabel" />
         <span>Connector: {{ connectorLabel }}</span>
       </p>
-      <p v-if="!live" role="status">
-        Sem conexão direta: exibindo o último valor conhecido<template
-          v-if="lastKnownText"
-          >, {{ lastKnownText }}</template
-        >. Somente leitura.
-      </p>
+      <StaleNotice
+        v-if="!live"
+        :description="`Sem conexão direta: exibindo o último valor conhecido${lastKnownText ? `, ${lastKnownText}` : ''}. Somente leitura.`"
+      />
       <p>
         <Button
           class="printer-detail__stop"

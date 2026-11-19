@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import {
   capabilityLabels,
   capabilityStatusLabels,
@@ -32,7 +34,13 @@ const products = computed(() =>
       autocomplete="off"
     />
     <p role="status">{{ products.length }} resultado(s)</p>
-    <p v-if="!products.length">Nenhum modelo encontrado. Tente outra busca.</p>
+    <EmptyState
+      v-if="!products.length"
+      title="Nenhum modelo encontrado"
+      description="Nenhuma marca ou modelo combina com a busca. Tente outra busca ou veja o catálogo completo."
+    >
+      <Button v-if="search" @click="search = ''">Limpar busca</Button>
+    </EmptyState>
     <section
       v-for="product in products"
       :key="product.id"

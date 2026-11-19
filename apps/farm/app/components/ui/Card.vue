@@ -1,3 +1,8 @@
+<script setup lang="ts">
+// A script block keeps the component loadable by the SFC test renderers.
+defineOptions({ name: 'UiCard' })
+</script>
+
 <template>
   <div class="ui-card"><slot /></div>
 </template>

@@ -2,6 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FarmMap from '../components/network/FarmMap.vue'
 import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
+import { farmViewErrorText } from '../utils/farm-view-error.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
   buildEntries,
@@ -145,6 +151,8 @@ async function load() {
   controller = new AbortController()
   const { signal } = controller
   loading.value = true
+  // A retry with nothing to show starts clean; kept data keeps its notice.
+  if (!data.value) failure.value = ''
   try {
     const result = await $fetch<NetworkData>(
       `/api/farms/${encodeURIComponent(id)}/network`,
@@ -263,9 +271,10 @@ const entries = computed(() =>
 <template>
   <main id="conteudo">
     <h1 ref="heading" tabindex="-1">Rede da farm</h1>
-    <p v-if="state.kind === 'loading'" role="status" aria-busy="true">
-      Carregando suas farms…
-    </p>
+    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
@@ -273,26 +282,51 @@ const entries = computed(() =>
       <p>Entre na sua conta para consultar a rede.</p>
       <NuxtLink to="/entrar">Entrar</NuxtLink>
     </section>
-    <section v-else-if="state.kind === 'error'" aria-label="Falha na consulta">
-      <p role="alert">
-        Não foi possível confirmar seus dados. Tente novamente.
-      </p>
-      <button type="button" @click="discover()">Tentar novamente</button>
-    </section>
+    <ErrorState
+      v-else-if="state.kind === 'error'"
+      title="Não foi possível carregar suas farms"
+    >
+      <p role="alert">{{ farmViewErrorText(state.reason) }}</p>
+      <Button @click="discover()">Tentar novamente</Button>
+    </ErrorState>
     <template v-else-if="ready">
       <FarmScopeSelector
         :ready="ready"
         @select="selectFarm"
         @discover="discover"
       />
-      <p v-if="failure" role="alert">
-        {{ failure }}
-        <button type="button" @click="load()">Tentar novamente</button>
-      </p>
-      <p v-if="!ready.scope">Selecione uma farm para ver a rede.</p>
-      <p v-else-if="loading && !data" role="status" aria-busy="true">
-        Carregando a rede…
-      </p>
+      <ErrorState v-if="failure && !data" title="Rede indisponível">
+        <p role="alert">{{ failure }}</p>
+        <Button @click="load()">Tentar novamente</Button>
+      </ErrorState>
+      <StaleNotice v-else-if="failure" role="alert" :description="failure">
+        <Button @click="load()">Tentar novamente</Button>
+      </StaleNotice>
+      <EmptyState
+        v-if="!ready.scope"
+        :title="
+          ready.farms.length
+            ? 'Nenhuma farm selecionada'
+            : 'Nenhuma farm disponível'
+        "
+        :description="
+          ready.farms.length
+            ? 'Selecione uma farm para ver a rede.'
+            : 'Peça acesso a quem administra a farm ou entre com outra conta.'
+        "
+      >
+        <NuxtLink v-if="!ready.farms.length" to="/entrar"
+          >Entrar com outra conta</NuxtLink
+        >
+      </EmptyState>
+      <div
+        v-else-if="loading && !data && !failure"
+        class="loading"
+        aria-busy="true"
+      >
+        <p role="status">Carregando a rede…</p>
+        <Skeleton /><Skeleton /><Skeleton />
+      </div>
       <template v-else-if="data">
         <div v-if="approved.length">
           <label for="rede-scan-connector">Connector para a busca</label>
@@ -327,3 +361,10 @@ const entries = computed(() =>
     </template>
   </main>
 </template>
+
+<style scoped>
+.loading {
+  display: grid;
+  gap: 0.5rem;
+}
+</style>

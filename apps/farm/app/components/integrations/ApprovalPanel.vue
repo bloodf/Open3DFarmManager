@@ -21,14 +21,9 @@ function statusOf(cause: unknown) {
     ? Number(cause.statusCode)
     : 0
 }
-function problemMessage(cause: unknown) {
-  const data =
-    cause && typeof cause === 'object' && 'data' in cause
-      ? (cause.data as { message?: unknown } | undefined)
-      : undefined
-  return typeof data?.message === 'string'
-    ? data.message
-    : 'Não foi possível concluir a decisão.'
+// Never show the server message: it may carry internal details.
+function problemMessage(_cause: unknown) {
+  return 'Não foi possível concluir a decisão. Tente novamente.'
 }
 
 async function load() {

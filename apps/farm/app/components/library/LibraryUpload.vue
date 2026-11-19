@@ -75,7 +75,9 @@ async function submit() {
     emit('uploaded', result.value.version)
   } catch (cause) {
     error.value =
-      cause instanceof Error ? cause.message : 'Não foi possível enviar.'
+      cause instanceof Error && cause.message === 'Envio cancelado.'
+        ? cause.message
+        : 'Não foi possível enviar o arquivo. Tente novamente.'
   } finally {
     busy.value = false
   }

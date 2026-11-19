@@ -121,9 +121,8 @@ async function remove(id: string) {
     pendingDelete.value = ''
     emit('changed')
     await load()
-  } catch (cause) {
-    const message = (cause as { data?: { message?: string } }).data?.message
-    error.value = message ?? 'Não foi possível excluir a versão.'
+  } catch {
+    error.value = 'Não foi possível excluir a versão. Tente novamente.'
   }
 }
 async function uploaded() {

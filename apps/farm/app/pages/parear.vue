@@ -3,6 +3,10 @@ import {
   normalizePairingCode,
   PairingApprovalRequest,
 } from '@open3dfarmmanager/farm-protocol'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 const farms = ref<{ farmId: string }[]>([])
 const farmId = ref('')
 const nextFarm = ref<string | null>(null)
@@ -11,6 +15,8 @@ const fingerprint = ref('')
 const confirmed = ref(false)
 const ready = ref(false)
 const pending = ref(false)
+const loading = ref(true)
+const failed = ref(false)
 const message = ref('')
 const summary = ref<HTMLElement | null>(null)
 let generation = 0
@@ -27,7 +33,10 @@ function clear() {
   ready.value = false
   pending.value = false
 }
-onMounted(async () => {
+async function start() {
+  loading.value = true
+  failed.value = false
+  message.value = ''
   const current = generation
   controller = new AbortController()
   try {
@@ -52,10 +61,14 @@ onMounted(async () => {
   } catch {
     if (current !== generation) return
     clear()
+    failed.value = true
     message.value =
       'Pareamento indisponível. Entre na sua conta e tente novamente.'
+  } finally {
+    loading.value = false
   }
-})
+}
+onMounted(start)
 async function nextFarmPage() {
   if (!nextFarm.value || pending.value || !ready.value) return
   const current = generation
@@ -80,6 +93,7 @@ async function nextFarmPage() {
   } catch {
     if (current !== generation) return
     clear()
+    failed.value = true
     message.value =
       'Não foi possível consultar suas farms. Entre novamente antes de continuar.'
   } finally {
@@ -105,6 +119,7 @@ async function approve() {
   const current = generation
   pending.value = true
   message.value = ''
+  failed.value = false
   try {
     await $fetch('/api/connector-pairing/approve', {
       method: 'POST',
@@ -120,6 +135,7 @@ async function approve() {
   } catch {
     if (current !== generation) return
     clear()
+    failed.value = true
     message.value =
       'Não foi possível confirmar a aprovação. Consulte o inventário antes de tentar novamente. Se o prazo terminou, revogue o registro aprovado, caso exista, e inicie um novo pareamento no Connector.'
   } finally {
@@ -147,8 +163,28 @@ onBeforeRouteLeave(clear)
       a conclusão no Connector. Prepare este formulário antes de confirmar a
       identidade no Connector. Se o prazo terminar, inicie um novo pareamento.
     </p>
-    <p ref="summary" role="status" tabindex="-1">{{ message }}</p>
-    <form :aria-busy="pending" @submit.prevent="approve">
+    <div ref="summary" :role="failed ? 'alert' : 'status'" tabindex="-1">
+      <ErrorState
+        v-if="failed"
+        title="Pareamento não concluído"
+        :description="message"
+      >
+        <Button @click="start()">Recarregar formulário</Button>
+      </ErrorState>
+      <p v-else>{{ message }}</p>
+    </div>
+    <div v-if="loading" aria-busy="true">
+      <p role="status">Carregando suas farms…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <EmptyState
+      v-else-if="ready && !pending && !farms.length && !nextFarm"
+      title="Nenhuma farm disponível"
+      description="Sua conta não tem uma farm para aprovar Connectors. Entre com uma conta de proprietário ou administrador de uma farm."
+    >
+      <NuxtLink to="/entrar">Usar outra conta</NuxtLink>
+    </EmptyState>
+    <form v-else :aria-busy="pending" @submit.prevent="approve">
       <label for="pairing-farm">Farm de destino</label>
       <select
         id="pairing-farm"

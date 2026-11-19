@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 type Farm = { farmId: string }
 type App = {
   id: string
@@ -25,6 +29,7 @@ const grants = ref<Record<string, Grant[]>>({})
 const loading = ref(true)
 const pending = ref(false)
 const error = ref('')
+const loadError = ref('')
 const status = ref('')
 const appName = ref('')
 const clientId = ref('')
@@ -48,6 +53,7 @@ async function load() {
   if (!farmId.value) return
   loading.value = true
   error.value = ''
+  loadError.value = ''
   try {
     const directory = await $fetch<Directory>(
       `/api/farms/${farmId.value}/integrations/apps`,
@@ -72,7 +78,7 @@ async function load() {
       cause && typeof cause === 'object' && 'statusCode' in cause
         ? cause.statusCode
         : 0
-    error.value =
+    loadError.value =
       code === 401 || code === 403
         ? 'Entre como proprietária da farm para gerenciar integrações.'
         : 'Não foi possível carregar os aplicativos. Tente novamente.'
@@ -81,7 +87,9 @@ async function load() {
   }
 }
 
-onMounted(async () => {
+async function start() {
+  loading.value = true
+  loadError.value = ''
   try {
     const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
       query: { limit: 50 },
@@ -90,15 +98,13 @@ onMounted(async () => {
     farms.value = page.farms
     farmId.value = farms.value[0]?.farmId ?? ''
     if (farmId.value) await load()
-    else {
-      loading.value = false
-      error.value = 'Nenhuma farm disponível para gerenciar.'
-    }
+    else loading.value = false
   } catch {
     loading.value = false
-    error.value = 'Não foi possível carregar suas farms.'
+    loadError.value = 'Não foi possível carregar suas farms.'
   }
-})
+}
+onMounted(start)
 watch(farmId, () => {
   if (!loading.value) void load()
 })
@@ -282,8 +288,23 @@ function grantDraft(appId: string) {
     </select>
     <p v-if="error" role="alert" tabindex="-1">{{ error }}</p>
     <p role="status" aria-live="polite">{{ status }}</p>
-    <p v-if="loading" role="status" aria-busy="true">Carregando integrações…</p>
-    <template v-else-if="farmId">
+    <div v-if="loading" aria-busy="true">
+      <p role="status">Carregando integrações…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <div v-else-if="loadError" role="alert" tabindex="-1">
+      <ErrorState title="Integrações indisponíveis" :description="loadError">
+        <Button @click="farmId ? load() : start()">Tentar novamente</Button>
+      </ErrorState>
+    </div>
+    <EmptyState
+      v-else-if="!farmId"
+      title="Nenhuma farm disponível"
+      description="Sua conta ainda não tem uma farm para gerenciar integrações. Crie ou peça acesso a uma farm e volte a esta página."
+    >
+      <NuxtLink to="/farm">Abrir a página da farm</NuxtLink>
+    </EmptyState>
+    <template v-else>
       <section aria-labelledby="register-heading">
         <h2 id="register-heading">Cadastrar aplicativo</h2>
         <form @submit.prevent="registerApp">
@@ -303,9 +324,11 @@ function grantDraft(appId: string) {
       </section>
       <section aria-labelledby="apps-heading">
         <h2 id="apps-heading">Aplicativos cadastrados</h2>
-        <p v-if="apps.length === 0">
-          Nenhum aplicativo nesta farm. Cadastre um para começar.
-        </p>
+        <EmptyState
+          v-if="apps.length === 0"
+          title="Nenhum aplicativo nesta farm"
+          description="Cadastre um aplicativo no formulário acima para começar a conceder acessos."
+        />
         <article v-for="app in apps" :key="app.id" class="app-card">
           <h3>{{ app.name }}</h3>
           <p v-if="app.revokedAt" role="status">Aplicativo revogado.</p>

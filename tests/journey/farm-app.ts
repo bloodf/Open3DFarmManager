@@ -236,7 +236,11 @@ export async function startFarmApp(
     )
     // No renewal is configured: with telemetry flowing for the whole journey
     // the credential must outlive it.
-    const tokenTtlSeconds = liveHistory ? '3600' : '300'
+    // Control journeys too: at expiry the Connector stops opening control
+    // inboxes for good (diagnostic `credential-expired`), and each control
+    // session waits out its reconnect backoff (up to 30 s), so a signed-control
+    // journey on a slow host runs past a short lifetime.
+    const tokenTtlSeconds = '3600'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       OPEN3DFARM_CONFIGURATION: JSON.stringify({

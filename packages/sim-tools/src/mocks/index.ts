@@ -11,6 +11,7 @@ export * from './kobra-x-mock.ts'
 export * from './moonraker-mock.ts'
 export * from './spoolman-mock.ts'
 export * from './discovery.ts'
+export * from './oidc-mock.ts'
 
 import {
   startHttpMock,
@@ -42,9 +43,21 @@ import {
   type SpoolmanMockOptions,
   type SpoolmanMockInstance,
 } from './spoolman-mock.ts'
+import {
+  startOidcMock,
+  type OidcMockOptions,
+  type OidcMockInstance,
+} from './oidc-mock.ts'
 
 export type MockKind =
-  'http' | 'mqtt' | 'bambu' | 'kobra-x' | 'anycubic' | 'moonraker' | 'spoolman'
+  | 'http'
+  | 'mqtt'
+  | 'bambu'
+  | 'kobra-x'
+  | 'anycubic'
+  | 'moonraker'
+  | 'spoolman'
+  | 'oidc'
 
 export type MockOptionsMap = {
   http: HttpMockOptions
@@ -54,6 +67,7 @@ export type MockOptionsMap = {
   anycubic: KobraXMockOptions
   moonraker: MoonrakerMockOptions
   spoolman: SpoolmanMockOptions
+  oidc: OidcMockOptions
 }
 
 export type MockInstanceMap = {
@@ -64,6 +78,7 @@ export type MockInstanceMap = {
   anycubic: KobraXMockInstance
   moonraker: MoonrakerMockInstance
   spoolman: SpoolmanMockInstance
+  oidc: OidcMockInstance
 }
 
 export type AnyMockInstance =
@@ -73,6 +88,7 @@ export type AnyMockInstance =
   | KobraXMockInstance
   | MoonrakerMockInstance
   | SpoolmanMockInstance
+  | OidcMockInstance
 
 /**
  * Unified entry point to start an in-process mock.
@@ -109,7 +125,13 @@ export async function startMock<K extends MockKind>(
       return (await startSpoolmanMock(
         options as SpoolmanMockOptions,
       )) as MockInstanceMap[K]
-    default:
-      throw new Error(`Unsupported mock kind: ${String(kind)}`)
+    case 'oidc':
+      return (await startOidcMock(
+        options as OidcMockOptions,
+      )) as MockInstanceMap[K]
+    default: {
+      const _exhaustive: never = kind
+      throw new Error(`Unsupported mock kind: ${String(_exhaustive)}`)
+    }
   }
 }

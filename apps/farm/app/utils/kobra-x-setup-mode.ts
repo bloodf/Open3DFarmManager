@@ -1,33 +1,26 @@
-// New Kobra X setup must name its transport. Only the KobraLink bridge can be
-// prepared today; the native adapter is partial and has no activation path.
-export type KobraXSetupChoice = 'unselected' | 'kobralink-bridge'
+// New Kobra X setup uses the native Connector adapter by default. The KobraLink
+// bridge stays available only as an explicit legacy choice; existing bridge
+// assignments and pending bridge operations never go through this choice.
+export type KobraXSetupChoice = 'native' | 'kobralink-bridge'
 
-export type KobraXSetupRequest = KobraXSetupChoice | 'native'
+export const DEFAULT_KOBRA_X_SETUP_MODE: KobraXSetupChoice = 'native'
 
-export const KOBRA_X_BRIDGE_CHOICE_LABEL = 'Usar ponte KobraLink'
-export const KOBRA_X_NATIVE_CHOICE_LABEL = 'Conexão nativa Kobra X'
+export const KOBRA_X_NATIVE_CHOICE_LABEL = 'Conexão nativa Kobra X (padrão)'
+export const KOBRA_X_NATIVE_CHOICE_HELP =
+  'O Connector fala direto com a impressora pela LAN (HTTP 18910 e MQTT com certificado de cliente), sem Docker e sem ponte. Descobrir a impressora ou validar o certificado não comprova conexão: a atribuição só vale depois que o Connector confirmar o login na impressora.'
+export const KOBRA_X_BRIDGE_CHOICE_LABEL = 'Usar ponte KobraLink (legado)'
 export const KOBRA_X_BRIDGE_CHOICE_HELP =
-  'A ponte KobraLink do Connector é o único caminho disponível para preparar uma Kobra X. Descobrir a impressora ou validar o certificado não comprova conexão: a atribuição só vale depois da confirmação do Connector.'
-export const KOBRA_X_NATIVE_UNAVAILABLE_REASON =
-  'A ativação nativa está indisponível: o adaptador nativo ainda é parcial e não foi validado em uma impressora real. Use a ponte KobraLink.'
-export const KOBRA_X_BRIDGE_REQUIRED_MESSAGE =
-  'Escolha “Usar ponte KobraLink” para preparar a Kobra X. A conexão nativa está indisponível.'
+  'Caminho legado: exige a ponte KobraLink do Connector (Docker). Escolha somente para manter o comportamento anterior. Descobrir a impressora ou validar o certificado não comprova conexão: a atribuição só vale depois da confirmação do Connector.'
+export const KOBRA_X_MODE_INVALID_MESSAGE =
+  'Escolha a conexão nativa ou a ponte KobraLink (legado) para preparar a Kobra X.'
 
 export type KobraXSetupGate =
-  | { readonly ok: true; readonly mode: 'kobralink-bridge' }
+  | { readonly ok: true; readonly mode: KobraXSetupChoice }
   | { readonly ok: false; readonly error: string }
 
-export function gateKobraXSetup(request: KobraXSetupRequest): KobraXSetupGate {
-  switch (request) {
-    case 'kobralink-bridge':
-      return { ok: true, mode: 'kobralink-bridge' }
-    case 'native':
-      return { ok: false, error: KOBRA_X_NATIVE_UNAVAILABLE_REASON }
-    case 'unselected':
-      return { ok: false, error: KOBRA_X_BRIDGE_REQUIRED_MESSAGE }
-    default: {
-      const _exhaustive: never = request
-      return _exhaustive
-    }
-  }
+// Anything but a known choice fails closed before any validation or dispatch.
+export function gateKobraXSetup(request: unknown): KobraXSetupGate {
+  return request === 'native' || request === 'kobralink-bridge'
+    ? { ok: true, mode: request }
+    : { ok: false, error: KOBRA_X_MODE_INVALID_MESSAGE }
 }

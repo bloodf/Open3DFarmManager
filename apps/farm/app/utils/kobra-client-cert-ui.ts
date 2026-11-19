@@ -225,7 +225,7 @@ export function buildKobraCertTargetOption(input: {
 export function sanitizeTargetForClientStorage(
   target: ConfigurationTarget,
 ): ConfigurationTarget {
-  return target.backend === 'kobralink-anycubic'
+  return target.backend === 'kobralink-anycubic' || target.backend === 'kobra-x'
     ? withoutKobraClientCertificate(target)
     : target
 }

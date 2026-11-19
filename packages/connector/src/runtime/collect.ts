@@ -9,6 +9,8 @@ import {
 } from '../config/moonraker.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import { createAnycubicCollection } from './anycubic-collection.ts'
+import { createKobraXCollection } from './kobra-x-collection.ts'
+import type { KobraXBinding } from '../config/kobra-x.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
@@ -101,6 +103,16 @@ export async function collectIntoQueue(input: {
     typeof createAnycubicCollection
   >[0]['transport']
   kobraFetch?: KobraLinkFetch
+  /**
+   * Confirmed native Kobra X bindings from the private onboarding store. Read
+   * only; the caller excludes assignments still awaiting inventory
+   * confirmation. Tests may pass loopback endpoints.
+   */
+  kobraX?: {
+    bindings: readonly KobraXBinding[]
+    endpoints?: Parameters<typeof createKobraXCollection>[0]['endpoints']
+    connect?: Parameters<typeof createKobraXCollection>[0]['connect']
+  }
   config:
     LocalCollectorConfig | CrealityCollectorConfig | AnycubicCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
@@ -673,6 +685,30 @@ export async function collectIntoQueue(input: {
         })
         subscriptions.push({ done: sub.done.catch(fail) })
       }
+    }
+    for (const binding of input.kobraX?.bindings ?? []) {
+      if (signal.aborted) break
+      const sub = createKobraXCollection({
+        binding,
+        signal,
+        ...(input.kobraX?.endpoints
+          ? { endpoints: input.kobraX.endpoints }
+          : {}),
+        ...(input.kobraX?.connect ? { connect: input.kobraX.connect } : {}),
+        onObservation(value) {
+          input.onRawObservation?.(value)
+          onEvent({ kind: 'snapshot', printer: value.printer })
+        },
+        onUnavailable(epoch) {
+          input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+          onEvent({
+            kind: 'unavailable',
+            printerKey: binding.printerKey,
+            reason: 'stale',
+          })
+        },
+      })
+      subscriptions.push({ done: sub.done.catch(fail) })
     }
     await Promise.all(subscriptions.map((subscription) => subscription.done))
   } catch (error) {

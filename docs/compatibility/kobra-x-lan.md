@@ -144,6 +144,43 @@ The focused loopback test checks the supplied signature and ciphertext vectors.
 They are synthetic and establish agreement with S6. Hardware TLS interoperability,
 firmware compatibility, and browser acceptance require separate evidence.
 
+### Activation: native setup, persistence and confirmation (E16.22)
+
+New Kobra X setup in the web UI uses the native `kobra-x` configuration backend
+by default. The KobraLink bridge (`kobralink-anycubic`) stays available only as
+an explicit "Usar ponte KobraLink (legado)" choice, and existing KobraLink
+assignments and pending bridge operations are untouched.
+
+1. The browser sends an IPv4 (private, port 18910) and the operator's own client
+   certificate. The discovery panel can prefill the address from SSDP; discovery
+   proves neither identity nor connection.
+2. The Connector refuses endpoints outside its configured printer networks and
+   any port other than 18910, stages the certificate in private custody (0600),
+   reads `/info`, recovers the MQTT credentials in memory, and logs in over
+   mutual TLS. That login is the connection confirmation: without it nothing is
+   offered for commit. A refused certificate, LAN mode off, refused credentials
+   and an unreachable printer each fail with their own code and leave no staged
+   file behind.
+3. The server certificate leaf is pinned on first use (SHA-256). The
+   recovered credentials, the `/info` token and the private key are never
+   journaled, returned, or written outside the certificate files.
+4. A signed review shows the observed identity (device id derived from the model
+   and device id, firmware when reported) as unqualified. Commit writes a
+   binding (address, model id, device id, certificate path, pin) to
+   `kobra-x-bindings.json` beside the runtime file, plus the assignment. The
+   runtime file and every KobraLink row are not modified. A printer already
+   claimed by a native binding or a KobraLink row is an identity conflict.
+5. Collection reconnects with the pinned fingerprint and re-proves the device
+   identity on every connection. A changed fingerprint, a different device or a
+   missing certificate yields an offline printer, never a healthy one.
+
+Limits of this activation: the binding store follows the Bambu pattern, so the
+agent runtime does not yet load it into its assignment mapping; control commands
+for a native assignment are not routed (read-only); camera exposure is not
+enabled; certificate-refusal and LAN-off causes are inferred from adapter errors,
+not from hardware. All of it is proven only against the loopback mock and the
+synthetic vectors above.
+
 ### `POST /gcode_upload`
 
 - Multipart upload to `http://<printer-ip>:18910/gcode_upload?s=<token>`. (observed, S1)

@@ -124,6 +124,14 @@ export const KOBRA_X_DEVICE_CAPABILITIES: readonly DeviceCapabilityEntry[] =
     }),
   ])
 
+/** Native adapter: same read-only admission, no bridge or second login to hide. */
+export const KOBRA_X_NATIVE_CAPABILITIES: readonly DeviceCapabilityEntry[] =
+  Object.freeze(
+    KOBRA_X_DEVICE_CAPABILITIES.filter(
+      (capability) => capability.id !== 'external-bridge-ui',
+    ),
+  )
+
 export const ConfigurationBootstrapDto = z.strictObject({
   protocol: z.literal(CONFIGURATION_PROTOCOL),
   role: ConfigurationRole,
@@ -201,6 +209,8 @@ export function validateKobraXTargetInput(input: {
   displayLabel?: string
   expectedDeviceId?: string
   clientCertificate?: KobraClientCertificateInput
+  /** Native Connector adapter unless the legacy KobraLink bridge is chosen. */
+  mode?: 'native' | 'kobralink-bridge'
 }): ValidatedKobraXInput {
   const rawIp = input.ipv4.trim()
   if (!rawIp) {
@@ -252,18 +262,25 @@ export function validateKobraXTargetInput(input: {
     }
     expectedDeviceId = parsedDevice.data
   }
-  const target = ConfigurationTarget.parse({
+  const common = {
     v: 1,
     protocol: CONFIGURATION_PROTOCOL,
-    backend: 'kobralink-anycubic',
     model: { family: 'anycubic-kobra-x', provisional: true },
     endpoint: { ipv4: rawIp, port: KOBRA_X_PRINTER_PORT },
     ...(expectedDeviceId ? { device_id: expectedDeviceId } : {}),
-    bridge: { kind: 'connector-managed' },
     ...(input.clientCertificate
       ? { client_certificate: input.clientCertificate }
       : {}),
-  })
+  }
+  const target = ConfigurationTarget.parse(
+    input.mode === 'kobralink-bridge'
+      ? {
+          ...common,
+          backend: 'kobralink-anycubic',
+          bridge: { kind: 'connector-managed' },
+        }
+      : { ...common, backend: 'kobra-x' },
+  )
   return { ok: true, target, displayLabel, expectedDeviceId }
 }
 
@@ -301,6 +318,27 @@ export function describeConfigurationError(
       return 'O prazo da autorização de configuração expirou antes da conclusão. Consulte o estado da operação.'
     default:
       return 'Não foi possível concluir a etapa de configuração no Connector.'
+  }
+}
+
+/**
+ * Wording for the native adapter. The same protocol codes keep their meaning;
+ * only the cause named to the operator changes because there is no bridge.
+ */
+export function describeKobraXNativeError(
+  code: ConfigurationErrorCode | string,
+): string | null {
+  switch (code) {
+    case 'bridge-unavailable':
+      return 'Kobra X inacessível pelo Connector (HTTP 18910 ou MQTT 9883). Confira o IPv4, a rede do Connector e se o Modo LAN está ativo na impressora. Nenhuma atribuição foi ativada.'
+    case 'not-available':
+      return 'A Kobra X recusou o acesso LAN: Modo LAN desligado, identidade não confirmada ou credenciais recusadas. Nenhuma atribuição foi ativada.'
+    case 'client-cert-wrong-subject':
+      return 'A Kobra X recusou o certificado de cliente ou o subject não é CN=AnycubicSlicer. Importe o certificado do seu Anycubic Slicer Next.'
+    case 'identity-conflict':
+      return 'Dispositivo incorreto ou conflito de identidade: a Kobra X não corresponde ao device_id esperado, ou já está vinculada (inclusive pela ponte KobraLink).'
+    default:
+      return null
   }
 }
 

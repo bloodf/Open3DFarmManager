@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { readBrowserDeviceScope } from './browser-device-enrollment.ts'
 import { listDeviceKeys, type LocalDeviceKey } from './device-key.ts'
+import { DEFAULT_KOBRA_X_SETUP_MODE } from './kobra-x-setup-mode.ts'
 import { readConfigurationBootstrap } from './kobralink-onboarding.ts'
 import type { createFarmData } from './printer-setup-farm.ts'
 import type { createLiveStatus } from './printer-setup-live.ts'
@@ -298,7 +299,7 @@ export function createKobraContext(
     kobraPrepared.value = null
     kobraConfirmed.value = null
     kobraIp.value = ''
-    kobraSetupMode.value = 'unselected'
+    kobraSetupMode.value = DEFAULT_KOBRA_X_SETUP_MODE
     kobraLabel.value = ''
     kobraExpectedDeviceId.value = ''
   }

@@ -242,20 +242,15 @@ test('Kobra X setup form validates PEM and PKCS#12 client certificate import, sh
 
   await page.getByLabel('Endereço IPv4 da Kobra X na LAN').fill('192.168.1.50')
 
-  // 0. New setup needs the explicit bridge choice; native activation is unavailable
+  // 0. A new setup is native by default; the KobraLink bridge is an explicit legacy choice
   const prepareKobraX = page.getByRole('button', {
     name: 'Preparar Anycubic Kobra X',
   })
-  await expect(prepareKobraX).toBeDisabled()
-  await expect(page.locator('#kobra-submit-help')).toContainText(
-    'Usar ponte KobraLink',
-  )
-  await expect(page.locator('#kobra-mode-native')).toBeDisabled()
+  await expect(page.locator('#kobra-mode-native')).toBeChecked()
   await expect(page.locator('#kobra-mode-native-help')).toContainText(
-    'A ativação nativa está indisponível',
+    'sem Docker e sem ponte',
   )
   await expect(page.locator('#kobra-mode-bridge')).not.toBeChecked()
-  await page.getByLabel('Usar ponte KobraLink').check()
   await expect(prepareKobraX).toBeEnabled()
   await expect(page.locator('main')).not.toContainText(
     /conectad[ao] com sucesso/i,
@@ -345,8 +340,8 @@ test('Kobra X setup form validates PEM and PKCS#12 client certificate import, sh
   await page.getByLabel('Endereço IPv4 da Kobra X na LAN').fill('192.168.1.50')
   await expect(
     page.getByRole('button', { name: 'Preparar Anycubic Kobra X' }),
-  ).toBeDisabled()
-  await page.getByLabel('Usar ponte KobraLink').check()
+  ).toBeEnabled()
+  await expect(page.locator('#kobra-mode-native')).toBeChecked()
   await page
     .locator('#kobra-cert-file')
     .setInputFiles(join(certDir, 'valid-bundle.pem'))

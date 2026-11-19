@@ -102,11 +102,34 @@ export const KobraConfigurationTarget = z.strictObject({
   client_certificate: KobraClientCertificateInput.optional(),
 })
 export type KobraConfigurationTarget = z.infer<typeof KobraConfigurationTarget>
-export function withoutKobraClientCertificate(
-  target: KobraConfigurationTarget,
-): KobraConfigurationTarget {
+/**
+ * Native Kobra X backend: the Connector talks to the printer directly (HTTP
+ * 18910, MQTT over mutual TLS 9883). No bridge, no Docker and no GPL checkout.
+ * `client_certificate` is the operator's own Anycubic Slicer Next identity; it
+ * is transit-only to Connector private custody. The printer's recovered MQTT
+ * credentials never appear on this wire: the Connector derives and keeps them
+ * in memory only.
+ */
+export const KobraXNativeConfigurationTarget = z.strictObject({
+  v: z.literal(1),
+  protocol: z.literal(CONFIGURATION_PROTOCOL),
+  backend: z.literal('kobra-x'),
+  model: ConfigurationModelSelection,
+  endpoint: ConfigurationEndpoint,
+  device_id: configurationOpaqueId.optional(),
+  client_certificate: KobraClientCertificateInput.optional(),
+})
+export type KobraXNativeConfigurationTarget = z.infer<
+  typeof KobraXNativeConfigurationTarget
+>
+type WithoutClientCertificate<T> = T extends unknown
+  ? Omit<T, 'client_certificate'>
+  : never
+export function withoutKobraClientCertificate<
+  T extends { client_certificate?: KobraClientCertificateInput | undefined },
+>(target: T): WithoutClientCertificate<T> {
   const { client_certificate: _clientCertificate, ...safe } = target
-  return safe
+  return safe as WithoutClientCertificate<T>
 }
 /** Origin only: reject URL normalization that could hide credentials or a path. */
 export const ConfigurationMoonrakerOrigin = z
@@ -286,6 +309,7 @@ export const ConfigurationTarget = z.discriminatedUnion('backend', [
   SpoolmanConfigurationTarget,
   AnycubicConfigurationTarget,
   KobraConfigurationTarget,
+  KobraXNativeConfigurationTarget,
   MoonrakerConfigurationTarget,
   BambuConfigurationTarget,
   CrealityConfigurationTarget,

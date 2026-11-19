@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { KOBRA_X_DEVICE_CAPABILITIES } from '../../utils/kobralink-onboarding.ts'
+import {
+  KOBRA_X_DEVICE_CAPABILITIES,
+  KOBRA_X_NATIVE_CAPABILITIES,
+} from '../../utils/kobralink-onboarding.ts'
 import { BAMBU_LAN_COMMAND_NOTE } from '../../utils/bambu-onboarding.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
 import { usePrinterSetupActions } from '../../utils/printer-setup-actions.ts'
@@ -14,6 +17,7 @@ const {
   isAnycubicOnboarding,
   isCrealityOnboarding,
   isBambuOnboarding,
+  isKobraXNativeOperation,
   isMoonrakerOnboarding,
   onboardingFamilyLabel,
 } = usePrinterSetup()
@@ -53,7 +57,9 @@ const { commitKobraX, cancelKobraX } = usePrinterSetupActions()
         {{
           isMoonrakerOnboarding
             ? 'Identidade da origem no Connector'
-            : isBambuOnboarding || isAnycubicOnboarding
+            : isBambuOnboarding ||
+                isAnycubicOnboarding ||
+                isKobraXNativeOperation
               ? 'Identidade da impressora no Connector'
               : 'Instância da ponte no Connector'
         }}
@@ -118,7 +124,9 @@ const { commitKobraX, cancelKobraX } = usePrinterSetupActions()
         isBambuOnboarding ||
         isCrealityOnboarding
           ? []
-          : KOBRA_X_DEVICE_CAPABILITIES"
+          : isKobraXNativeOperation
+            ? KOBRA_X_NATIVE_CAPABILITIES
+            : KOBRA_X_DEVICE_CAPABILITIES"
         :key="cap.id"
       >
         <dt>{{ cap.label }}</dt>

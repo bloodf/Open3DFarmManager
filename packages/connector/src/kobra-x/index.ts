@@ -246,6 +246,8 @@ export async function connectKobraX(options: {
     facts: facts.get,
     cameraUrl: state.cameraUrl,
     fingerprint: () => pin,
+    /** Identity the printer proved through recovery; never the credentials. */
+    identity: Object.freeze({ deviceId, modelId: modeId, name: info.name }),
     close,
   }
 }

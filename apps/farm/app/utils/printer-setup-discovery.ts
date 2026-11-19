@@ -1,3 +1,4 @@
+import { DEFAULT_KOBRA_X_SETUP_MODE } from './kobra-x-setup-mode.ts'
 import { discoveryPrefill, discoveryStatus } from './printer-discovery-view.ts'
 import type { openPrinterDiscoverySession } from './printer-discovery-view-session.ts'
 import type {
@@ -29,6 +30,8 @@ export function createPrinterDiscovery(
     moonrakerPassword,
     crealityHost,
     anycubicHost,
+    kobraIp,
+    kobraSetupMode,
     anycubicUsername,
     anycubicPassword,
     discoveryPrinters,
@@ -100,6 +103,11 @@ export function createPrinterDiscovery(
         anycubicHost.value = prefill.host
         anycubicUsername.value = ''
         anycubicPassword.value = ''
+        break
+      case 'anycubic-kobra-x':
+        // Discovery only fills the address: it proves no connection or identity.
+        kobraIp.value = prefill.ip
+        kobraSetupMode.value = DEFAULT_KOBRA_X_SETUP_MODE
         break
       default: {
         const _exhaustive: never = prefill

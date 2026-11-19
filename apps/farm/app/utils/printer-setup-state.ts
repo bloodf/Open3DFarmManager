@@ -8,7 +8,10 @@ import type {
 import { describeAnycubicTarget } from './anycubic-onboarding.ts'
 import type { LocalDeviceKey } from './device-key.ts'
 import type { FarmObservation } from './farm-view.ts'
-import type { KobraXSetupChoice } from './kobra-x-setup-mode.ts'
+import {
+  DEFAULT_KOBRA_X_SETUP_MODE,
+  type KobraXSetupChoice,
+} from './kobra-x-setup-mode.ts'
 import type {
   KobraCertCachedFile,
   KobraCertSourceMode,
@@ -153,7 +156,7 @@ export function createPrinterSetupState() {
     kobraKeyState = shallowRef<KobraKeyState>({ kind: 'idle' }),
     kobraBootstrap = shallowRef<KobraBootstrapState>({ kind: 'idle' }),
     kobraIp = ref(''),
-    kobraSetupMode = ref<KobraXSetupChoice>('unselected'),
+    kobraSetupMode = ref<KobraXSetupChoice>(DEFAULT_KOBRA_X_SETUP_MODE),
     kobraCertSource = ref<KobraCertSourceMode>('file'),
     kobraCertPassphrase = ref(''),
     kobraCertInstallPath = ref(''),
@@ -203,6 +206,9 @@ export function createPrinterSetupState() {
         kobraOperation.value?.target.backend === backend ||
         (kobraStage.value === 'idle' && onboardingFamily.value === family),
     )
+  const isKobraXNativeOperation = computed(
+    () => kobraOperation.value?.target.backend === 'kobra-x',
+  )
   const isAnycubicOnboarding = onboarding('anycubic', 'anycubic-lan')
   const isCrealityOnboarding = onboarding('creality', 'creality-native')
   const isBambuOnboarding = onboarding('bambu', 'bambu-lan')
@@ -292,6 +298,7 @@ export function createPrinterSetupState() {
     kobraBootstrap,
     kobraIp,
     kobraSetupMode,
+    isKobraXNativeOperation,
     kobraCertSource,
     kobraCertPassphrase,
     kobraCertInstallPath,

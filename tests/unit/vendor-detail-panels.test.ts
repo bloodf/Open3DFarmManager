@@ -33,7 +33,7 @@ describe('vendor detail panels', () => {
 it('stores G-code capability under the same role rule as authorization', () => {
   const migration = readFileSync(
     new URL(
-      '../../infra/db/migrations/0071_owner_gcode_capability.up.sql',
+      '../../infra/db/migrations/0072_owner_gcode_capability.up.sql',
       import.meta.url,
     ),
     'utf8',

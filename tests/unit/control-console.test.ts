@@ -38,6 +38,8 @@ import {
 } from '../../packages/connector/src/moonraker/control-support.ts'
 import { createMoonrakerDetailStream } from '../../packages/connector/src/moonraker/detail-stream.ts'
 import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
+import { actionsForControlRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
+import { bambuControls } from '../../packages/connector/src/bambu/control-support.ts'
 import { createPrinterDetailSession } from '../../packages/connector/src/runtime/printer-detail-session.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import {
@@ -78,7 +80,7 @@ async function until<T>(read: () => T | undefined | false, ms = 3000) {
 describe('console arguments and policy', () => {
   it('is a signed action limited to administrators', () => {
     expect(ExtendedControlAction.options).toContain('gcode')
-    expect(controlRoleAllowed('owner', 'gcode')).toBe(false)
+    expect(controlRoleAllowed('owner', 'gcode')).toBe(true)
     expect(controlRoleAllowed('admin', 'gcode')).toBe(true)
     expect(controlRoleAllowed('operator', 'gcode')).toBe(false)
     expect(controlRoleAllowed('viewer', 'gcode')).toBe(false)
@@ -503,6 +505,14 @@ describe('Moonraker console on the E16 mock', () => {
     expect(await make(() => false).detect(binding)).not.toContain('gcode')
     expect(await make(() => true).detect(binding)).toContain('gcode')
     expect(moonrakerControls(undefined)).not.toContain('gcode')
+    expect(bambuControls('X1C')).not.toContain('gcode')
+    expect(bambuControls('X1C', false)).not.toContain('gcode')
+    expect(bambuControls('X1C', true)).toContain('gcode')
+    expect(bambuControls(undefined, true)).not.toContain('gcode')
+    expect(actionsForControlRole('owner', ['gcode'])).toEqual(['gcode'])
+    expect(actionsForControlRole('admin', ['gcode'])).toEqual(['gcode'])
+    expect(actionsForControlRole('operator', ['gcode'])).toEqual([])
+    expect(actionsForControlRole('viewer', ['gcode'])).toEqual([])
   })
 })
 

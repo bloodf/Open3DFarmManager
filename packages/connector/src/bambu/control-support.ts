@@ -16,12 +16,16 @@ const UNADVERTISED: readonly string[] = ['jog', 'extrude']
  */
 export function bambuControls(
   model: string | undefined,
+  gcodeConsole = false,
 ): readonly ExtendedControlAction[] {
   if (model === undefined) return MOONRAKER_CONTROLS
   const supported = supportedBambuActions(model)
   return Object.freeze(
     ExtendedControlAction.options.filter(
-      (action) => supported.includes(action) && !UNADVERTISED.includes(action),
+      (action) =>
+        supported.includes(action) &&
+        !UNADVERTISED.includes(action) &&
+        (action !== 'gcode' || gcodeConsole),
     ),
   )
 }

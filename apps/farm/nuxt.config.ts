@@ -26,6 +26,9 @@ export default defineNuxtConfig({
       '/convites',
       '/api/auth/oidc/start',
       '/api/auth/oidc/callback',
+      '/api/auth/google/start',
+      '/api/auth/google/link/start',
+      '/api/auth/google/callback',
     ].map((path) => [path, { headers: { 'Referrer-Policy': 'no-referrer' } }]),
   ),
   runtimeConfig: {

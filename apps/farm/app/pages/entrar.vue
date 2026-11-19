@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { completeAuth } from '../utils/auth-invalidation.ts'
+
 const hydrated = ref(false)
 const oidcEnabled = ref(false)
+const googleEnabled = ref(false)
+const googleUnavailableReason = ref('')
 const invite = ref('')
 const oidcUsername = ref('')
 const linking = ref(false)
@@ -17,7 +21,14 @@ onMounted(async () => {
     history.replaceState(null, '', window.location.pathname)
     await nextTick()
     errorSummary.value?.focus()
+  } else if (window.location.hash === '#erro=google') {
+    errorMessage.value =
+      'Não foi possível entrar com o Google. Tente novamente.'
+    history.replaceState(null, '', window.location.pathname)
+    await nextTick()
+    errorSummary.value?.focus()
   }
+  const offline = navigator.onLine === false
   try {
     const status = await $fetch<{ enabled?: boolean }>('/api/auth/oidc', {
       retry: 0,
@@ -27,8 +38,33 @@ onMounted(async () => {
   } catch {
     oidcEnabled.value = false
   }
+  try {
+    const status = await $fetch<{
+      enabled?: boolean
+      reason?: string
+    }>('/api/auth/google', { retry: 0, timeout: 5_000 })
+    if (offline) {
+      googleEnabled.value = false
+      googleUnavailableReason.value =
+        'Sem conexão com a internet. O Entrar com Google precisa de rede; o login por senha continua disponível.'
+    } else if (status.enabled === true) {
+      googleEnabled.value = true
+      googleUnavailableReason.value = ''
+    } else {
+      googleEnabled.value = false
+      googleUnavailableReason.value =
+        status.reason === 'offline'
+          ? 'Sem conexão com a internet. O Entrar com Google precisa de rede; o login por senha continua disponível.'
+          : ''
+    }
+  } catch {
+    googleEnabled.value = false
+    if (offline) {
+      googleUnavailableReason.value =
+        'Sem conexão com a internet. O Entrar com Google precisa de rede; o login por senha continua disponível.'
+    }
+  }
 })
-import { completeAuth } from '../utils/auth-invalidation.ts'
 
 async function linkOidc() {
   if (linking.value) return
@@ -145,6 +181,50 @@ async function login() {
       <p role="status">{{ pending ? 'Verificando seus dados.' : '' }}</p>
     </form>
     <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
+    <section
+      v-if="googleEnabled || googleUnavailableReason"
+      aria-labelledby="google-titulo"
+    >
+      <h2 id="google-titulo">Google</h2>
+      <p v-if="googleUnavailableReason" role="status">
+        {{ googleUnavailableReason }}
+      </p>
+      <p v-else>
+        <a
+          class="google-signin"
+          href="/api/auth/google/start"
+          aria-label="Entrar com Google"
+        >
+          <svg
+            class="google-mark"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 48 48"
+            width="18"
+            height="18"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path
+              fill="#EA4335"
+              d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+            />
+            <path
+              fill="#4285F4"
+              d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+            />
+            <path
+              fill="#34A853"
+              d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+            />
+          </svg>
+          <span>Entrar com Google</span>
+        </a>
+      </p>
+    </section>
     <section v-if="oidcEnabled" aria-labelledby="oidc-titulo">
       <h2 id="oidc-titulo">Provedor OpenID Connect</h2>
       <p>
@@ -237,6 +317,27 @@ a[href='/api/auth/oidc/start'] {
   display: inline-block;
   min-height: 2.75rem;
   padding: 0.65rem 0;
+}
+.google-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid #747775;
+  border-radius: 0.25rem;
+  background: #fff;
+  color: #1f1f1f;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 500;
+}
+.google-signin:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+.google-mark {
+  flex: none;
 }
 #username-help {
   font-size: 0.875rem;

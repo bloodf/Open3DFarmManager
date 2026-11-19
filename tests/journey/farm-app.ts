@@ -325,6 +325,9 @@ export async function startFarmApp(
       NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
       NUXT_JOB_HISTORY_ENABLED: 'true',
       NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
+      NUXT_LIBRARY_ENABLED: 'true',
+      NUXT_LIBRARY_DATABASE_URL: database.url('farm_library'),
+      NUXT_LIBRARY_DIRECTORY: join(directory, 'library'),
       NUXT_PRINTER_STATES_ENABLED: 'true',
       NUXT_PRINTER_STATES_DATABASE_URL: database.url(
         'farm_printer_state_reader',

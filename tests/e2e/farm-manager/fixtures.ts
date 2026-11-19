@@ -169,6 +169,8 @@ export type FarmManager = Readonly<{
   }>
   /** The signed-in owner page (device key enrolled, on the origin). */
   owner: Page
+  /** A signed-out page in its own guarded context. */
+  newGuestPage(): Promise<Page>
   /** A fresh page, in a fresh guarded context, signed in as `role`. */
   signInAs(role: FarmRole): Promise<Page>
   /** Opens /farm in `page` (default: the owner) and waits for the heading. */
@@ -840,6 +842,14 @@ async function bootFarm(
         }
       : {}),
     owner: harness.ownerPage,
+    async newGuestPage() {
+      const context = await guardedBrowser(browser, guard).newContext({
+        ignoreHTTPSErrors: true,
+        serviceWorkers: 'block',
+      })
+      onClose(() => context.close())
+      return context.newPage()
+    },
     signInAs,
     async openFarm(page: Page = harness.ownerPage) {
       const response = await page.goto(harness.origin + '/farm', {

@@ -17,9 +17,10 @@ import {
   existsSync,
   linkSync,
   symlinkSync,
+  lstatSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { availableParallelism, loadavg, tmpdir } from 'node:os'
 import { loadExistingIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { PersistentReplayStore } from '../../packages/connector/src/auth/replay.ts'
@@ -266,93 +267,138 @@ test(
   },
 )
 
-test('identity and queue readers reject FIFOs without blocking', async () => {
-  for (const kind of ['identity', 'queue']) {
-    const dir = scratch()
-    try {
-      execFileSync('mkfifo', [
-        '-m',
-        '600',
-        join(dir, kind === 'identity' ? 'identity.json' : 'telemetry.jsonl'),
-      ])
-      const module = new URL(
-        kind === 'identity'
-          ? '../../packages/connector/src/identity/store.ts'
-          : '../../packages/connector/src/cloud/queue.ts',
-        import.meta.url,
-      ).href
-      const invoke =
-        kind === 'identity'
-          ? 'mod.loadExistingIdentity(process.argv[1])'
-          : 'new mod.TelemetryQueue(process.argv[1], 1000)'
-      // The startup delay verifies the FIFO deadline begins only after imports and readiness.
-      const source = `import * as mod from ${JSON.stringify(module)}; setTimeout(() => { process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { ${invoke}; process.exitCode = 2 } catch (error) { if (!error.message.includes('private files')) process.exitCode = 3 } process.stdin.destroy() }) }, 250)`
-      const child = spawn(
-        process.execPath,
-        ['--input-type=module', '-e', source, dir],
-        {
-          stdio: ['pipe', 'pipe', 'pipe'],
-        },
-      )
-      let spawnError: Error | undefined
-      child.on('error', (error) => {
-        spawnError = error
-      })
-      child.stdin.on('error', (error) => {
-        spawnError = error
-      })
-      const exited = new Promise<number | null>((resolve) =>
-        child.once('close', resolve),
-      )
-      const ready = new Promise<void>((resolve) => {
-        let output = ''
-        child.stdout.on('data', (chunk) => {
-          output += chunk.toString()
-          if (output.includes('ready\n')) resolve()
-        })
-      })
-      async function bounded<T>(
-        promise: Promise<T>,
-        milliseconds: number,
-        label: string,
-      ): Promise<T> {
-        let timer: ReturnType<typeof setTimeout> | undefined
-        try {
-          return await Promise.race([
-            promise,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error(label)), milliseconds)
-            }),
-          ])
-        } finally {
-          if (timer) clearTimeout(timer)
-        }
-      }
-      try {
-        await bounded(
-          Promise.race([
-            ready,
-            exited.then(() => {
-              throw (
-                spawnError ?? new Error('FIFO worker exited before readiness')
-              )
-            }),
-          ]),
-          5000,
-          'FIFO worker startup timed out',
-        )
-        child.stdin.end('run\n')
-        assert.equal(await bounded(exited, 2000, 'FIFO reader blocked'), 0)
-      } finally {
+// Startup covers process boot, TypeScript stripping and the connector import
+// graph, which slows sharply under CPU contention (about 100 ms idle, about 1 s
+// at 4x oversubscription, and past 5 s on a loaded Linux host). It is bounded
+// separately and generously so a slow boot is reported as such. The FIFO
+// operation deadline starts only after readiness and stays strict: a reader that
+// opens the FIFO blocks until the deadline and fails as 'FIFO reader blocked'.
+const FIFO_WORKER_STARTUP_MS = 30_000
+const FIFO_OPERATION_MS = 2_000
+const FIFO_STDERR_LIMIT = 4096
+
+async function bounded<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  describe: () => string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(describe())), milliseconds)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+test(
+  'identity and queue readers reject FIFOs without blocking',
+  { timeout: 2 * (FIFO_WORKER_STARTUP_MS + FIFO_OPERATION_MS) + 10_000 },
+  async (t) => {
+    const spawned: ReturnType<typeof spawn>[] = []
+    // Also runs when the test times out, unlike the finally below.
+    t.after(() => {
+      for (const child of spawned)
         if (child.exitCode === null && child.signalCode === null)
           child.kill('SIGKILL')
-        await exited
+    })
+    for (const kind of ['identity', 'queue']) {
+      const dir = scratch()
+      try {
+        const fifo = join(
+          dir,
+          kind === 'identity' ? 'identity.json' : 'telemetry.jsonl',
+        )
+        execFileSync('mkfifo', ['-m', '600', fifo])
+        assert.ok(lstatSync(fifo).isFIFO(), `${kind} fixture is not a FIFO`)
+        const module = new URL(
+          kind === 'identity'
+            ? '../../packages/connector/src/identity/store.ts'
+            : '../../packages/connector/src/cloud/queue.ts',
+          import.meta.url,
+        ).href
+        const invoke =
+          kind === 'identity'
+            ? 'mod.loadExistingIdentity(process.argv[1])'
+            : 'new mod.TelemetryQueue(process.argv[1], 1000)'
+        // The startup delay verifies the FIFO deadline begins only after imports and readiness.
+        const source = `import * as mod from ${JSON.stringify(module)}; setTimeout(() => { process.stdout.write('ready ' + Math.round(process.uptime() * 1000) + '\\n'); process.stdin.once('data', () => { try { ${invoke}; process.exitCode = 2 } catch (error) { if (!error.message.includes('private files')) process.exitCode = 3 } process.stdin.destroy() }) }, 250)`
+        const started = performance.now()
+        const child = spawn(
+          process.execPath,
+          ['--input-type=module', '-e', source, dir],
+          { stdio: ['pipe', 'pipe', 'pipe'] },
+        )
+        spawned.push(child)
+        let spawnError: Error | undefined
+        child.on('error', (error) => {
+          spawnError = error
+        })
+        child.stdin.on('error', (error) => {
+          spawnError = error
+        })
+        let stdout = ''
+        let stderr = Buffer.alloc(0)
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr = Buffer.concat([
+            stderr,
+            chunk.subarray(0, FIFO_STDERR_LIMIT - stderr.length),
+          ])
+        })
+        const exited = new Promise<number | null>((resolve) =>
+          child.once('close', resolve),
+        )
+        const ready = new Promise<void>((resolve) => {
+          child.stdout.on('data', (chunk) => {
+            stdout += chunk.toString()
+            if (/^ready \d+\n/.test(stdout)) resolve()
+          })
+        })
+        const diagnose = (label: string) => () =>
+          `${label}: kind=${kind}, pid=${child.pid}, elapsedMs=${Math.round(performance.now() - started)}, exitCode=${child.exitCode}, signal=${child.signalCode}, loadavg=${loadavg()
+            .map((value) => value.toFixed(2))
+            .join(
+              '/',
+            )}, cpus=${availableParallelism()}, stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(stderr.toString('utf8'))}`
+        try {
+          await bounded(
+            Promise.race([
+              ready,
+              exited.then(() => {
+                throw (
+                  spawnError ??
+                  new Error(diagnose('FIFO worker exited before readiness')())
+                )
+              }),
+            ]),
+            FIFO_WORKER_STARTUP_MS,
+            diagnose('FIFO worker startup timed out'),
+          )
+          child.stdin.end('run\n')
+          assert.equal(
+            await bounded(
+              exited,
+              FIFO_OPERATION_MS,
+              diagnose('FIFO reader blocked'),
+            ),
+            0,
+            diagnose('FIFO reader did not reject with a private-files error')(),
+          )
+        } finally {
+          if (child.exitCode === null && child.signalCode === null)
+            child.kill('SIGKILL')
+          await exited
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
       }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
     }
-  }
-})
+  },
+)
 
 test('queue decoding errors never echo malformed telemetry contents', () => {
   const dir = scratch()

@@ -254,6 +254,9 @@ async function fixture(signalling = false) {
   const cloud = await serveWsTestServer({
     tls: { cert: readFileSync(cert), key: readFileSync(key) },
     http: async (request) => {
+      // The library relay poll (#446) is not telemetry: this fixture has no library.
+      if (new URL(request.url).pathname.startsWith('/api/connector/library/'))
+        return new Response(null, { status: 404 })
       cloudRequests++
       if (new URL(request.url).pathname === '/api/signalling/connector') {
         signallingRequests++

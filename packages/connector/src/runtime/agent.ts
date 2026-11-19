@@ -268,6 +268,7 @@ async function runConnectorAgentOnce(
     endpoint: config.telemetry.endpoint,
     credential,
     dataDirectory: input.dataDirectory,
+    library: config.library,
   }).catch((error: unknown) => {
     logger.warn('library-print-unavailable', { error })
     return undefined
@@ -801,6 +802,18 @@ async function runConnectorAgentOnce(
         },
       }).catch(fail),
     )
+    // Connector library storage (#446): answers the server's relay operations
+    // on this host's store. A failure here never stops telemetry.
+    if (library)
+      tasks.push(
+        library
+          .serveRelay(signal, (event) =>
+            logger.warn(event.kind, { reason: event.reason }),
+          )
+          .catch((error: unknown) =>
+            logger.warn('library-relay-stopped', { error }),
+          ),
+      )
     tasks.push(drainLoop().catch(fail))
     await Promise.all(tasks)
   } catch (error) {

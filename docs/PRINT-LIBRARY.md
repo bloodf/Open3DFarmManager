@@ -171,9 +171,30 @@ does not belong to answers 404 on reads and 403 on writes.
   `retentionDays`. Both answers include `locations`: how many files and bytes
   stay on the server and on each Connector. Nothing is migrated.
 
-Connector mode needs a relay between the server and the Connector; until one is
-wired the upload answers 503 while list, search and get keep working from
-server metadata.
+Connector mode goes through the Connector relay. The server cannot dial a
+Connector, so the Connector asks: it long-polls
+`POST /api/connector/library/relay/poll` with the same credential headers
+telemetry and library downloads use (`authorization`, `x-connector-agent`,
+`x-connector-farm`), is handed one operation (`put`, `read`, `discard`, `purge`
+or `sweep`; schemas in `packages/farm-protocol/src/library-relay.ts`) and runs
+it on its own store. An upload's bytes are pulled once through
+`GET .../relay/{op}/body` (capped at the operation's size limit) straight from
+the browser upload into the Connector store; ranges for parsing come back in the
+body of `POST .../relay/{op}/result`. The server keeps no file bytes and no
+Connector connection: the hub (`utils/library/connector-relay.ts`, started by
+the `library-relay-lifecycle` plugin) holds operations in memory only, so a
+server restart fails the ones in flight. `libraryRuntime()` always carries the
+relay; an upload answers 503 while the target Connector is not polling, and 507
+when the Connector reports its quota or disk full. List, search and get never
+need the Connector. Retention reaches the Connector copy through the same hub
+(`purge` and `sweep`).
+
+The Connector builds its store from the optional `library` section of its
+runtime configuration (`directory`, `quotaBytes`, `retentionDays`,
+`keepVersions`, `cacheMaxBytes`; default directory `<data dir>/library`) in
+`createConnectorLibrary`, and the agent serves the relay while it runs. Moving
+files from the Connector back to the server still needs a server-side receiver;
+until it exists those versions report that they stay.
 
 ### Quota and retention job
 

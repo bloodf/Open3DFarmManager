@@ -138,6 +138,8 @@ export function createMoonrakerSubscription(input: {
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   discoverObjects?: boolean
+  /** Request job fields and report the last job this subscription watched end. */
+  jobFields?: boolean
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -273,7 +275,9 @@ export function createMoonrakerSubscription(input: {
           )
         }
         const jobState = value.status.print_stats.state
-        if (jobState === 'printing' || jobState === 'paused') watchingJob = true
+        if (!input.jobFields) watchingJob = false
+        else if (jobState === 'printing' || jobState === 'paused')
+          watchingJob = true
         else if (watchingJob) {
           const ended = moonrakerLastJob(
             value.status,
@@ -307,6 +311,7 @@ export function createMoonrakerSubscription(input: {
           limits,
           signal,
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
+          ...(input.jobFields ? { jobFields: true } : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,

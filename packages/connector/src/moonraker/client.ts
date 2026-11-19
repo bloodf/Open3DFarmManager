@@ -97,9 +97,19 @@ const DEFAULT_CLIENT = {
   version: '1',
   url: 'https://open3dfarmmanager.local',
 }
-// Job fields feed the finished-job summary; the published snapshot keeps only state.
 const selectedObjects = {
   webhooks: ['state'],
+  print_stats: ['state'],
+  virtual_sdcard: ['progress'],
+}
+const temperatureObjects = {
+  extruder: ['temperature'],
+  heater_bed: ['temperature'],
+}
+const completeObjects = { ...selectedObjects, ...temperatureObjects }
+/** Finished-job fields; Moonraker reports only the fields a request names. */
+const jobObjects = {
+  ...selectedObjects,
   print_stats: [
     'state',
     'filename',
@@ -107,12 +117,6 @@ const selectedObjects = {
     'total_duration',
     'info',
   ],
-  virtual_sdcard: ['progress'],
-}
-const completeObjects = {
-  ...selectedObjects,
-  extruder: ['temperature'],
-  heater_bed: ['temperature'],
 }
 
 function parseIdentifyResultSafe(result: unknown): boolean {
@@ -129,6 +133,8 @@ export function openMoonrakerClient(input: {
   limits: MoonrakerLimits
   signal: AbortSignal
   discoverObjects?: boolean
+  /** Also subscribe to the print_stats fields a finished-job summary needs. */
+  jobFields?: boolean
   /** Connector identity registered with Moonraker on every connection. */
   client?: { name: string; version: string; url: string }
   onStatus: (params: unknown) => void
@@ -151,8 +157,12 @@ export function openMoonrakerClient(input: {
   let subscribed = false
   let identified = false
   let discovering = input.discoverObjects === true
-  let objects: Record<string, string[]> = { ...selectedObjects }
-  let queryObjects: Record<string, string[]> = { ...completeObjects }
+  const baseObjects = input.jobFields ? jobObjects : selectedObjects
+  const baseQueryObjects = input.jobFields
+    ? { ...jobObjects, ...temperatureObjects }
+    : completeObjects
+  let objects: Record<string, string[]> = { ...baseObjects }
+  let queryObjects: Record<string, string[]> = { ...baseQueryObjects }
   let resolveSnapshot: (value: unknown) => void = () => {}
   let rejectSnapshot: (reason: Error) => void = () => {}
   let resolveClosed: (reason: MoonrakerFailureReason) => void = () => {}
@@ -360,8 +370,8 @@ export function openMoonrakerClient(input: {
                 [name === 'output_pin caselight' ? 'value' : 'speed'],
               ]),
           )
-          objects = { ...selectedObjects, ...optional }
-          queryObjects = { ...completeObjects, ...optional }
+          objects = { ...baseObjects, ...optional }
+          queryObjects = { ...baseQueryObjects, ...optional }
           discovering = false
           if (!wasDiscovering) {
             extendSubscription = true

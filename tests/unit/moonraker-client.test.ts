@@ -256,13 +256,7 @@ test('Node client uses fixed read-only paths and subscription, merges and dedupl
         params: {
           objects: {
             webhooks: ['state'],
-            print_stats: [
-              'state',
-              'filename',
-              'print_duration',
-              'total_duration',
-              'info',
-            ],
+            print_stats: ['state'],
             virtual_sdcard: ['progress'],
           },
         },
@@ -808,13 +802,7 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
         params: {
           objects: {
             webhooks: ['state'],
-            print_stats: [
-              'state',
-              'filename',
-              'print_duration',
-              'total_duration',
-              'info',
-            ],
+            print_stats: ['state'],
             virtual_sdcard: ['progress'],
           },
         },
@@ -826,13 +814,7 @@ test('raw complete query refreshes unchanged fields before telemetry dedup; fixe
         params: {
           objects: {
             webhooks: ['state'],
-            print_stats: [
-              'state',
-              'filename',
-              'print_duration',
-              'total_duration',
-              'info',
-            ],
+            print_stats: ['state'],
             virtual_sdcard: ['progress'],
             extruder: ['temperature'],
             heater_bed: ['temperature'],

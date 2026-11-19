@@ -78,6 +78,7 @@ async function observe(
       reconnectMinMs: 100,
       reconnectMaxMs: 1000,
     },
+    jobFields: true,
     signal: controller.signal,
     onEvent(event) {
       if (event.kind === 'snapshot') printers.push(event.printer)

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PrinterGcodePath } from './control-actions.ts'
+import { ConfigFileName, PrinterGcodePath } from './control-actions.ts'
 
 export const MAX_FILE_LIST_WIRE_BYTES = 256 * 1024
 export const MAX_PRINTER_DOWNLOAD_BYTES = 128 * 1024
@@ -9,12 +9,25 @@ export const FileListRequest = z
     type: z.literal('files.list'),
     request_id: id,
     printer_key: id,
+    config: z.literal(true).optional(),
+    configPath: ConfigFileName.optional(),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .max(1024 * 1024)
+      .optional(),
     directory: z.union([z.literal(''), PrinterGcodePath]).optional(),
     download: PrinterGcodePath.optional(),
   })
-  .refine(
-    ({ directory, download }) =>
-      directory === undefined || download === undefined,
+  .refine(({ directory, download, config, configPath, offset }) =>
+    config
+      ? directory === undefined &&
+        download === undefined &&
+        (offset === undefined || configPath !== undefined)
+      : configPath === undefined &&
+        offset === undefined &&
+        (directory === undefined || download === undefined),
   )
 const DownloadBytes = z
   .base64()
@@ -65,6 +78,17 @@ export const FileListResponse = z.discriminatedUnion('ok', [
     printer_key: id,
     ok: z.literal(true),
     download: DownloadBytes.optional(),
+    config: z
+      .strictObject({
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        size: z
+          .number()
+          .int()
+          .min(0)
+          .max(1024 * 1024),
+        backups: z.array(z.string().max(224)).max(10),
+      })
+      .optional(),
     files: z
       .array(PrinterFile)
       .max(200)

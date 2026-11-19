@@ -415,8 +415,10 @@ export class PauseBrowserPeer {
     printerKey: string,
     directory?: string,
     download?: string,
+    config?: { config: true; configPath?: string; offset?: number },
   ): Promise<FileListResult> {
     const request = FileListRequest.parse({
+      ...config,
       type: 'files.list',
       directory,
       download,
@@ -464,7 +466,8 @@ export class PauseBrowserPeer {
             throw Error('Invalid file list correlation')
           if (
             result.ok &&
-            (result.download !== undefined) !== (download !== undefined)
+            (result.download !== undefined) !==
+              (download !== undefined || config?.configPath !== undefined)
           )
             throw Error('Unexpected file response')
           cleanup()

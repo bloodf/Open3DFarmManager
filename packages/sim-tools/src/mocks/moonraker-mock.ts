@@ -176,6 +176,8 @@ export interface MoonrakerMockOptions {
         system?: MoonrakerFirmwareComponent | undefined
       }
     | undefined
+  /** Seeds `configfile.settings`; the object is absent when not given. */
+  configfileSettings?: Record<string, unknown> | undefined
   spoolId?: number | null | undefined
   restartDelayMs?: number | undefined
   maxUploadBytes?: number | undefined
@@ -477,6 +479,7 @@ export async function startMoonrakerMock(
       macro.startsWith('gcode_macro ') ? macro : `gcode_macro ${macro}`,
     )
   }
+  if (options.configfileSettings) objectSet.add('configfile')
   const objectList = [...objectSet]
 
   const webcams = (options.webcams ?? DEFAULT_WEBCAMS[profile]).map((cam) => ({
@@ -991,6 +994,11 @@ export async function startMoonrakerMock(
         speed: m.fan,
       },
     }
+    if (options.configfileSettings)
+      all.configfile = {
+        settings: structuredClone(options.configfileSettings),
+        save_config_pending: false,
+      }
 
     for (const obj of objectList) {
       if (obj in all) continue

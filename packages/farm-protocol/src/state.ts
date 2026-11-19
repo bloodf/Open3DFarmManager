@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ExtendedControlAction, MacroName } from './control-actions.ts'
+import { MachineProfile } from './machine-profile.ts'
 
 export const FilamentUsage = z.strictObject({
   tool: z.string().min(1).max(32),
@@ -42,6 +43,8 @@ export const PrinterState = z
         firmware: z.string().min(1).max(1024).optional(),
       })
       .optional(),
+    /** Sent on change only; never part of the live status snapshot. */
+    machine: MachineProfile.optional(),
     firmware: z
       .strictObject({
         current: z.string().min(1).max(64).optional(),

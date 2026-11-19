@@ -145,6 +145,8 @@ export function createFarmSnapshotSource(input: {
         controls: _untrustedControls,
         macros: _untrustedMacros,
         firmware: _untrustedFirmware,
+        // Machine profiles travel by telemetry; the live frame is size-capped.
+        machine: _machine,
         lastJob: _observedLastJob,
         ...observedPrinter
       } = entry.printer

@@ -1,4 +1,5 @@
 export * from './state.ts'
+export * from './machine-profile.ts'
 export * from './status.ts'
 export * from './command.ts'
 export * from './signalling.ts'

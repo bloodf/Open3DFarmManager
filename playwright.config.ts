@@ -26,6 +26,11 @@ if (!process.env.E2E_PORT || !process.env.E2E_LEGACY_FLAG_PORT) {
   process.env.E2E_LEGACY_FLAG_PORT ||= second
 }
 const port = e2ePort('E2E_PORT', 3100)
+// Slow or emulated desktops: scale every Playwright timeout, never the assertions.
+const timeoutScale = Math.max(
+  1,
+  Number(process.env.OPENFARM_TIMEOUT_SCALE) || 1,
+)
 // Same build started with the removed farm view flag set to hide the route;
 // tests/e2e/skeleton.spec.ts checks the stale setting no longer hides /farm.
 const legacyFlagPort = e2ePort('E2E_LEGACY_FLAG_PORT', 3102)
@@ -39,6 +44,8 @@ const server = (serverPort: string, env: Record<string, string> = {}) => ({
 
 export default defineConfig({
   testDir: './tests/e2e',
+  timeout: 30_000 * timeoutScale,
+  expect: { timeout: 5_000 * timeoutScale },
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     ...browserOptions(),

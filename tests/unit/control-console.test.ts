@@ -517,45 +517,53 @@ describe('Moonraker console on the E16 mock', () => {
 })
 
 describe('command journal', () => {
-  it('migrates a v11 journal and records the gcode action', () => {
-    // Scratch directory under the OS temp area; left in place on purpose.
-    const directory = mkdtempSync(join(tmpdir(), 'console-journal-'))
-    closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
-    const path = join(directory, 'pause-commands.sqlite')
-    const db = new DatabaseSync(path)
-    try {
-      const sql = (
-        db
-          .prepare(
-            "SELECT sql FROM sqlite_schema WHERE name='control_command_actions'",
-          )
-          .get() as { sql: string }
-      ).sql
-      expect(sql).toContain("'set_pin','gcode'")
-      db.exec(
-        `DROP TABLE control_command_actions; ${sql.replace(",'gcode'", '').replace(",'file_op'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=11;`,
-      )
-    } finally {
-      db.close()
-    }
-    const journal = openCommandJournal({ directory, clock: Date.now })
-    try {
-      expect(readCommandAction(journal, 'retained')).toBe('set_pin')
-    } finally {
-      closeCommandJournal(journal)
-    }
-    const migrated = new DatabaseSync(path)
-    try {
-      migrated
-        .prepare('INSERT INTO control_command_actions VALUES (?,?)')
-        .run('console', 'gcode')
-      expect(() =>
-        migrated.exec(
-          "INSERT INTO control_command_actions VALUES ('invalid', 'invalid')",
-        ),
-      ).toThrow()
-    } finally {
-      migrated.close()
-    }
-  })
+  it.each([11, 14])(
+    'migrates a v%s journal and records the gcode action',
+    (version) => {
+      // Scratch directory under the OS temp area; left in place on purpose.
+      const directory = mkdtempSync(join(tmpdir(), 'console-journal-'))
+      closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
+      const path = join(directory, 'pause-commands.sqlite')
+      const db = new DatabaseSync(path)
+      try {
+        const sql = (
+          db
+            .prepare(
+              "SELECT sql FROM sqlite_schema WHERE name='control_command_actions'",
+            )
+            .get() as { sql: string }
+        ).sql
+        expect(sql).toContain("'set_pin','gcode'")
+        const v14 = sql.replace(",'config_write'", '')
+        const historical =
+          version === 14
+            ? v14
+            : v14.replace(",'gcode'", '').replace(",'file_op'", '')
+        db.exec(
+          `DROP TABLE control_command_actions; ${historical}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=${version};`,
+        )
+      } finally {
+        db.close()
+      }
+      const journal = openCommandJournal({ directory, clock: Date.now })
+      try {
+        expect(readCommandAction(journal, 'retained')).toBe('set_pin')
+      } finally {
+        closeCommandJournal(journal)
+      }
+      const migrated = new DatabaseSync(path)
+      try {
+        migrated
+          .prepare('INSERT INTO control_command_actions VALUES (?,?)')
+          .run('console', 'gcode')
+        expect(() =>
+          migrated.exec(
+            "INSERT INTO control_command_actions VALUES ('invalid', 'invalid')",
+          ),
+        ).toThrow()
+      } finally {
+        migrated.close()
+      }
+    },
+  )
 })

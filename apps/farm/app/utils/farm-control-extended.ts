@@ -21,6 +21,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   set_speed: 'Definir velocidade',
   power: 'Alterar energia do dispositivo',
   service: 'Reiniciar serviço',
+  timelapse: 'Gerenciar timelapse',
   firmware_restart: 'Reiniciar firmware',
   emergency_stop: 'Parada de emergência',
   run_macro: 'Executar macro',

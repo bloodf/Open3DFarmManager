@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 11
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -217,9 +217,21 @@ const serviceActionSchema = queueActionSchema.replace(
   "'queue_op'",
   "'queue_op','service'",
 )
-const actionSchema = serviceActionSchema.replace(
+const excludeActionSchema = serviceActionSchema.replace(
   "'service'",
-  "'service','exclude_object','power'",
+  "'service','exclude_object'",
+)
+const powerActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','power'",
+)
+const timelapseActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','timelapse'",
+)
+const actionSchema = timelapseActionSchema.replace(
+  "'timelapse'",
+  "'timelapse','power'",
 )
 const previousActionSchemas: Record<number, readonly string[]> = {
   2: [legacyActionSchema],
@@ -231,8 +243,9 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   8: [serviceActionSchema],
   9: [
     serviceActionSchema.replace("'service'", "'service','power'"),
-    serviceActionSchema.replace("'service'", "'service','exclude_object'"),
+    excludeActionSchema,
   ],
+  10: [powerActionSchema, timelapseActionSchema],
 }
 const schema = [
   actionSchema,
@@ -379,7 +392,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION].includes(
+      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION].includes(
         Number(initialVersion),
       ) ||
         initialApplication !== APPLICATION_ID)

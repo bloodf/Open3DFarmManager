@@ -166,9 +166,14 @@ describe('signed power control', () => {
   )
 })
 
-it.each(['power', 'exclude_object'])(
-  'upgrades the v9 %s journal and preserves its action',
-  (action) => {
+it.each([
+  { version: 9, action: 'power', actions: "'power'" },
+  { version: 9, action: 'exclude_object', actions: "'exclude_object'" },
+  { version: 10, action: 'power', actions: "'exclude_object','power'" },
+  { version: 10, action: 'timelapse', actions: "'exclude_object','timelapse'" },
+])(
+  'upgrades the v$version journal and preserves $action',
+  ({ version, action, actions }) => {
     const directory = mkdtempSync(
       join(process.env.OPENFARM_POWER_TEST_TMP ?? tmpdir(), 'power-journal-'),
     )
@@ -183,11 +188,11 @@ it.each(['power', 'exclude_object'])(
         .get()
       if (typeof row?.sql !== 'string') throw new Error('Missing action table')
       const prior = row.sql.replace(
-        "'service','exclude_object','power'",
-        `'service','${action}'`,
+        "'service','exclude_object','timelapse','power'",
+        `'service',${actions}`,
       )
       db.exec(
-        `DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=9;`,
+        `DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
       )
       db.prepare('INSERT INTO control_command_actions VALUES (?, ?)').run(
         'retained',

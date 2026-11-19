@@ -58,6 +58,8 @@ export function openFixedBambuControl(input: {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 5000)
     throw new Error('Invalid Bambu control timeout')
   let targetTemperature: number | undefined
+  let nozzleTemperature: number | undefined
+  let gcodeState: string | undefined
   let latest: ControlObservation | undefined
   let sequence = 0
   let attempted = false
@@ -122,6 +124,14 @@ export function openFixedBambuControl(input: {
           const temperature = (
             report as { print?: { nozzle_target_temper?: unknown } }
           ).print?.nozzle_target_temper
+          const nozzle = (report as { print?: { nozzle_temper?: unknown } })
+            .print?.nozzle_temper
+          if (typeof nozzle === 'number' && Number.isFinite(nozzle))
+            nozzleTemperature = nozzle
+          const reportedState = (
+            report as { print?: { gcode_state?: unknown } }
+          ).print?.gcode_state
+          if (typeof reportedState === 'string') gcodeState = reportedState
           if (
             typeof temperature === 'number' &&
             Number.isFinite(temperature) &&
@@ -225,6 +235,8 @@ export function openFixedBambuControl(input: {
         ...(['load_filament', 'unload_filament'].includes(next)
           ? { target_c: targetTemperature }
           : {}),
+        ...(next === 'extrude' ? { nozzle_c: nozzleTemperature } : {}),
+        ...((next as string) === 'gcode' ? { print_state: gcodeState } : {}),
         sequence_id: String(input.connectionGeneration),
       })
     } catch {

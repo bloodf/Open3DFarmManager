@@ -1,3 +1,9 @@
+import {
+  buildBambuConsoleLine,
+  buildBambuExtrude,
+  buildBambuJog,
+} from './printer-detail.ts'
+
 const actions = [
   'pause',
   'resume',
@@ -6,6 +12,10 @@ const actions = [
   'set_fan',
   'home',
   'set_light',
+  'jog',
+  'extrude',
+  // The signed console action (E18.1) joins the protocol enum separately.
+  'gcode',
   'set_speed',
   'start_print',
   'load_filament',
@@ -101,6 +111,22 @@ export function buildBambuCommand(
       'gcode_line',
       `G28 ${args.axes.map((axis: string) => axis.toUpperCase()).join(' ')}\n`,
     )
+  }
+  if (action === 'jog') {
+    keys(['axis', 'distance_mm', 'feed'])
+    const { sequence_id: _, ...jog } = args
+    return buildBambuJog(jog, sequence_id)
+  }
+  if (action === 'extrude') {
+    // nozzle_c is the live reading the control driver adds; never wire input.
+    keys(['tool', 'length_mm', 'feed', 'nozzle_c'])
+    const { sequence_id: _, nozzle_c, ...extrude } = args
+    return buildBambuExtrude(extrude, nozzle_c, sequence_id)
+  }
+  if (action === 'gcode') {
+    // print_state is the live gcode_state the control driver adds.
+    keys(['line', 'print_state'])
+    return buildBambuConsoleLine(args.line, args.print_state, sequence_id)
   }
   if (action === 'set_light') {
     keys(['on'])

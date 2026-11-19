@@ -14,6 +14,7 @@ export function actionsForControlRole(
         'run_macro',
         'service',
         'power',
+        'timelapse',
         'load_filament',
         'unload_filament',
         'extrude',

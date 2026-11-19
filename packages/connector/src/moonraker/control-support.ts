@@ -15,6 +15,7 @@ import { supportedMoonrakerActions } from './commands.ts'
 import { POWER_MARKER, readPowerDevices } from './control-power.ts'
 import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
+import { timelapseMarkers } from './control-timelapse.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
@@ -145,19 +146,20 @@ export function detectMoonrakerMacroParams(
 }
 
 /**
- * Read the queue component and power device catalogue independently.
+ * Read the Moonraker components and power device catalogue independently.
  * Advertise each capability only when its probe succeeds.
  */
 export async function detectMoonrakerComponents(
   input: DetectInput,
 ): Promise<readonly string[]> {
-  const [queue, power] = await Promise.all([
-    readOnlyOnce(input, { method: 'server.info' }, queueMarkers).catch(
-      () => [],
-    ),
+  const [components, power] = await Promise.all([
+    readOnlyOnce(input, { method: 'server.info' }, (result) => [
+      ...queueMarkers(result),
+      ...timelapseMarkers(result),
+    ]).catch(() => []),
     readPowerDevices((method) =>
       readOnlyOnce(input, { method }, (result) => result),
     ).catch(() => []),
   ])
-  return [...queue, ...(power.length ? [POWER_MARKER] : [])]
+  return [...components, ...(power.length ? [POWER_MARKER] : [])]
 }

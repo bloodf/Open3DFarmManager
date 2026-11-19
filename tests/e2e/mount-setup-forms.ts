@@ -20,7 +20,9 @@ const openPrinterDiscoverySession = async () => ({
     const printers = [{ vendor: 'moonraker', host: '192.168.1.20', port: 7125, name: 'Klipper' }, { vendor: 'bambu', host: '192.168.1.21', serial: 'ABC123', name: 'Bambu' }, { vendor: 'creality', host: '192.168.1.22', name: 'Creality' }, { vendor: 'anycubic', host: '192.168.1.23', name: 'Anycubic' }]
     return { ok: true, printers: host ? printers.filter(p => p.host === host) : printers }
   }, close() {},
-})`,
+})
+// Nuxt auto-import outside Nuxt: no pending network adoption.
+const useNetworkAdoption = () => ref(null)`,
     )
     .replace(
       /onMounted\(\(\) => \{[\s\S]*$/,

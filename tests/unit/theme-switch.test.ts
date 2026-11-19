@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
-import { themeScript } from '../../apps/farm/app/utils/pre-hydration'
+
+const source = readFileSync(
+  new URL('../../apps/farm/app/utils/pre-hydration.ts', import.meta.url),
+  'utf8',
+)
+const themeScript = source.match(/export const themeScript = `([\s\S]*?)`/)?.[1]
+if (!themeScript) throw new Error('Theme script not found')
 
 describe('pre-hydration theme', () => {
   it.each([

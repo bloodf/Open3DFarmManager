@@ -447,7 +447,9 @@ describe('Moonraker detail queries through the Connector session', () => {
           : real.request(method, params),
     }
     const chain = connect(stream, ['job-queue', 'timelapse'])
-    await until(() => chain.answers.length >= 2)
+    await until(
+      () => chain.state().errors['job-queue'] && chain.state().errors.timelapse,
+    )
     const errors = chain.state().errors
     expect(errors['job-queue']).toBe('unsupported')
     expect(errors.timelapse).toBeDefined()

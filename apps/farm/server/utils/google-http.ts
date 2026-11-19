@@ -84,6 +84,7 @@ export async function googleStartGet(event: AuthEvent): Promise<void> {
 
 /** Link Google to the signed-in account. */
 export async function googleLinkStartGet(event: AuthEvent): Promise<void> {
+  authResponse(event)
   const runtime = authRuntime()
   const auth = await authenticatedSession(event, runtime)
   await googleStart(event, { linkAccountId: auth.accountId })

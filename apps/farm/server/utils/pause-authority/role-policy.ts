@@ -19,6 +19,7 @@ export function actionsForControlRole(
         'motors_off',
         'z_babystep',
         'set_factor',
+        'start_library_print',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

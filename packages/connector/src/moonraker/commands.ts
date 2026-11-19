@@ -1,5 +1,10 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { buildMacroScript } from './control-macros.ts'
+import {
+  buildMotionScript,
+  isMotionAction,
+  motionSupported,
+} from './control-motion.ts'
 import { parseExtrude } from './control-extrusion.ts'
 /**
  * Moonraker extended command builder and capability inspection.
@@ -91,6 +96,9 @@ export function supportedMoonrakerActions(
     supported.push('load_filament')
   if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
     supported.push('unload_filament')
+  // Motion actions are advertised only when the printer lists a toolhead.
+  if (motionSupported(objects))
+    supported.push('jog', 'motors_off', 'z_babystep', 'set_factor')
   return Object.freeze(supported)
 }
 
@@ -136,6 +144,14 @@ export function buildMoonrakerCommand(
       throw new Error('Invalid macro parameters')
     }
     return { method: 'printer.gcode.script', params: { script } }
+  }
+
+  if (isMotionAction(action)) {
+    // Arguments only; state refusals are decided by the driver before sending.
+    return {
+      method: 'printer.gcode.script',
+      params: { script: buildMotionScript(action, args) },
+    }
   }
 
   if (action === 'extrude') {

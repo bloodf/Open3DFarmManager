@@ -14,6 +14,16 @@ import {
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
+  MotionRefusal,
+  isMotionAction,
+  motionNeedsState,
+  motionQueryWire,
+  motionSupported,
+  parseMotionState,
+  refuseMotion,
+  type MotionAction,
+} from './control-motion.ts'
+import {
   readPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
@@ -465,6 +475,41 @@ export function openFixedMoonrakerPause(input: {
     }
   }
   /**
+   * Motion: refusals are decided from one toolhead read before the single
+   * send. A refused action closes the attempt having written nothing.
+   */
+  async function executeMotion(
+    action: MotionAction,
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    try {
+      if (
+        requested.binding !== binding ||
+        !prepared ||
+        attempted ||
+        !motionSupported(input.objects)
+      )
+        throw new MotionRefusal('unsupported')
+      // Same builder as the send; it also rejects malformed arguments.
+      const wire = extendedWire(action, args)
+      if (wire === undefined) throw new MotionRefusal('invalid')
+      if (motionNeedsState(action))
+        refuseMotion(
+          action,
+          args,
+          parseMotionState(
+            await request(11, motionQueryWire(11), lifetimeDeadline),
+          ),
+        )
+      return await send(wire, requested, 5000)
+    } catch (error) {
+      stop()
+      await closed
+      throw error instanceof MotionRefusal ? error : failure()
+    }
+  }
+  /**
    * Cold-extrusion guard: one read-only query of the live tool, then the
    * single command. Every refusal happens before a write and is never retried.
    */
@@ -497,6 +542,10 @@ export function openFixedMoonrakerPause(input: {
     ) {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
+      if (isMotionAction(action)) {
+        extended = true
+        return executeMotion(action, args, request)
+      }
       if (action === 'extrude') return extrude(args, request)
       extended = true
       return send(extendedWire(action, args), request, 5000)

@@ -13,15 +13,27 @@ export const ExtendedControlAction = z.enum([
   'set_light',
   'set_speed',
   'start_print',
+  'start_library_print',
   'firmware_restart',
   'run_macro',
   'load_filament',
   'unload_filament',
+  'jog',
+  'motors_off',
+  'z_babystep',
+  'set_factor',
   'extrude',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
-export const ControlResultCode = z.enum(['bambu-authorization-required'])
+export const ControlResultCode = z.enum([
+  'bambu-authorization-required',
+  'incompatible',
+  'download-failed',
+  'checksum-mismatch',
+  'cache-full',
+  'local-file-missing',
+])
 export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
   'pause',
@@ -31,6 +43,23 @@ export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
 export function controlsForBackend(backend: string): readonly ControlAction[] {
   return backend === 'moonraker' ? MOONRAKER_CONTROLS : []
 }
+/** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
+export const LIBRARY_PRINT_API_SCOPE = 'jobs:write'
+/** One Bambu AMS slot per filament of the plate; -1 leaves a filament unmapped. */
+export const AmsMapping = z.array(z.number().int().min(-1).max(255)).max(64)
+/** `start_print` file name: a plain name, no path or control characters. */
+const PrintFileName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..'))
+const PlateNumber = z.number().int().min(1).max(1000)
+export const LibraryPrintArgs = z.strictObject({
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  plate: PlateNumber.optional(),
+  ams_mapping: AmsMapping.optional(),
+})
+export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 export const MacroName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 export const MACRO_PARAM_MAX_KEYS = 16
 export const MACRO_PARAM_MAX_VALUE_CHARS = 64
@@ -77,6 +106,9 @@ export function controlSourceState(
   if (action === 'emergency_stop') return true
   if (action === 'firmware_restart')
     return state === 'error' || state === 'idle'
+  // Jogging and releasing the motors never run during a job.
+  if (action === 'jog' || action === 'motors_off')
+    return state === 'idle' || state === 'cancelled'
   // Extrusion moves filament: only a stopped printer may do it.
   if (action === 'extrude') return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
@@ -96,6 +128,17 @@ export function controlTargetState(
       ? 'printing'
       : 'cancelled'
 }
+
+const signedStep = (min: number, max: number, step: number) =>
+  z
+    .number()
+    .finite()
+    .refine(
+      (value) =>
+        Math.abs(value) >= min - 1e-9 &&
+        Math.abs(value) <= max + 1e-9 &&
+        Math.abs(value / step - Math.round(value / step)) < 1e-6,
+    )
 
 /** Tool index, signed length (negative retracts) and feed rate in mm/min. */
 export const ExtrudeArguments = z.strictObject({
@@ -126,8 +169,29 @@ export const ControlArguments = z.discriminatedUnion('action', [
       'emergency_stop',
       'firmware_restart',
       'unload_filament',
+      'motors_off',
     ]),
     args: z.strictObject({}),
+  }),
+  z.strictObject({
+    action: z.literal('jog'),
+    args: z.strictObject({
+      axis: z.enum(['x', 'y', 'z']),
+      // Signed: the sign is the direction. Magnitude 0.01-100 mm in 0.01 steps.
+      distance_mm: signedStep(0.01, 100, 0.01),
+      feed: z.number().int().min(60).max(18000),
+    }),
+  }),
+  z.strictObject({
+    action: z.literal('z_babystep'),
+    args: z.strictObject({ delta_mm: signedStep(0.001, 0.1, 0.001) }),
+  }),
+  z.strictObject({
+    action: z.literal('set_factor'),
+    args: z.strictObject({
+      speed_pct: z.number().int().min(10).max(300),
+      flow_pct: z.number().int().min(50).max(150),
+    }),
   }),
   z.strictObject({
     action: z.literal('set_temperature'),
@@ -166,12 +230,14 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('start_print'),
     args: z.strictObject({
-      file: z
-        .string()
-        .min(1)
-        .max(255)
-        .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..')),
+      file: PrintFileName,
+      plate: PlateNumber.optional(),
+      ams_mapping: AmsMapping.optional(),
     }),
+  }),
+  z.strictObject({
+    action: z.literal('start_library_print'),
+    args: LibraryPrintArgs,
   }),
 ])
 export type ControlArgs = z.infer<typeof ControlArguments>['args']

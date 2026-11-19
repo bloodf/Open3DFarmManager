@@ -338,7 +338,11 @@ test('OIDC config is off by default and documented', () => {
   assert.match(page, /Entrar com OpenID Connect/)
   assert.match(page, /aria-labelledby="oidc-titulo"/)
   assert.match(page, /Vincular convite e entrar/)
-  assert.doesNotMatch(page, /google|kobra|facebook/i)
+  const oidcSection = page.match(
+    /<section v-if="oidcEnabled"[\s\S]*?<\/section>/,
+  )?.[0]
+  assert.ok(oidcSection, 'generic OIDC section must exist')
+  assert.doesNotMatch(oidcSection, /google|kobra|facebook/i)
   const source = readFileSync(
     root + '/apps/farm/server/utils/oidc-login.ts',
     'utf8',

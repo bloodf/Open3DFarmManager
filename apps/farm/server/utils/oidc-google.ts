@@ -11,14 +11,15 @@ import {
   type OidcIdentity,
   type OidcTransaction,
 } from './oidc-login.ts'
+import { GOOGLE_PROVIDER_PRESET } from './google-provider-preset.ts'
 
-/** Google needs the `email` scope so the verified email claim is present. */
+/** Google needs email and profile so the verified email claim is present. */
 export async function beginGoogleAuthorization(
   config: Configuration,
   redirectUri: string,
 ) {
   const begun = await beginOidcAuthorization(config, redirectUri)
-  begun.url.searchParams.set('scope', 'openid email')
+  begun.url.searchParams.set('scope', GOOGLE_PROVIDER_PRESET.scope)
   return begun
 }
 

@@ -131,6 +131,8 @@ O `desktop:check` não envia comandos a impressoras físicas. Ele registra cada 
 ## Limites conhecidos
 
 - O preflight aceita Node a partir de 22.18 (piso do type stripping), mas o `package.json` declara `^22.22.3 || >=24.22.2 <25`: Nuxt, `@nuxt/*` e cssnano exigem `^22.22.3`, e a série 24 mantém o piso 24.22.2. Node 23 fica de fora porque essas dependências também o excluem. Use 22.23.5 (`.nvmrc`) ou 24.22.x.
+- O `package-lock.json` ainda registra `>=24.22.2 <25` no campo `engines` da raiz. O npm não valida esse campo: o `npm ci --offline --engine-strict` passa no Node 22.23.5. O contrato é o do `package.json`.
+- O fixture opt-in `scripts/test-telemetry-http-postgres.ts` em modo build (`TELEMETRY_HTTP_TEST_BUILT=yes`) exige exatamente Node 24.22.3. Ele não faz parte do `desktop:check`.
 - O preflight aceita PostgreSQL 13 ou superior, mas os testes de banco exigem 17 ou superior. Use 17+.
 - O `app-smoke` não confere nomes de impressoras na página da farm.
 - `npm run dev` não é executado pelo `desktop:check`.

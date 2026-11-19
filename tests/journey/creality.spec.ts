@@ -390,6 +390,13 @@ if (journeyEnabled())
       test.setTimeout(6 * 60_000)
       const journey = started()
       const page = journey.ownerPage
+      // A start needs an idle printer. In the full journey the cancel step
+      // leaves it idle; run alone, the simulator is still on its initial
+      // print, so that print ends on its own first.
+      if ([1, 2].includes(simulator().state.state as number)) {
+        journey.controls.finishPrint()
+        await reportedState(await journey.openFarm(), 'Ociosa')
+      }
       await page.goto(journey.origin + '/arquivos', {
         waitUntil: 'domcontentloaded',
       })
@@ -465,6 +472,10 @@ if (journeyEnabled())
 
       // The print runs to the end on its own; the card names the finished job.
       const row = await journey.openFarm()
+      // The end card belongs to this file, not to an earlier job.
+      await expect(row.getByLabel('Último trabalho')).toContainText(UPLOAD, {
+        timeout: 60_000,
+      })
       await expect(row.getByText('Concluído', { exact: true })).toBeVisible({
         timeout: 60_000,
       })

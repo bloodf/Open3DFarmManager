@@ -234,13 +234,12 @@ export async function startFarmApp(
       }),
       { mode: 0o600, flag: 'wx' },
     )
-    // No renewal is configured, so the Connector credential must outlive the
-    // whole journey, history or not: at expiry the Connector stops listening
-    // for control sessions for good (diagnostic `credential-expired`), and a
-    // signed-control journey that runs past it waits for an inbox that never
-    // opens. Every control session costs up to the Connector's 30 s
-    // reconnect backoff, so a control journey runs for several minutes, more
-    // on a slow host.
+    // No renewal is configured: with telemetry flowing for the whole journey
+    // the credential must outlive it.
+    // Control journeys too: at expiry the Connector stops opening control
+    // inboxes for good (diagnostic `credential-expired`), and each control
+    // session waits out its reconnect backoff (up to 30 s), so a signed-control
+    // journey on a slow host runs past a short lifetime.
     const tokenTtlSeconds = '3600'
     const env: NodeJS.ProcessEnv = {
       ...process.env,

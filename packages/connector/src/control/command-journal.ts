@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -197,10 +197,19 @@ const previousActionSchema = legacyActionSchema.replace(
   "'pause','resume','cancel'",
   "'pause','resume','cancel','emergency_stop','firmware_restart','set_temperature','set_fan','home','set_light','set_speed','start_print'",
 )
-const actionSchema = previousActionSchema.replace(
+const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
+const actionSchema = macroActionSchema.replace(
+  "'unload_filament'",
+  "'unload_filament','jog','motors_off','z_babystep','set_factor'",
+)
+const previousActionSchemas: Record<number, string> = {
+  2: legacyActionSchema,
+  3: previousActionSchema,
+  4: macroActionSchema,
+}
 const schema = [
   actionSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
@@ -346,7 +355,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![1, 2, 3, 4, SCHEMA_VERSION].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -378,7 +387,10 @@ export function openCommandJournal(input: {
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if ((version === 2 || version === 3) && app === APPLICATION_ID) {
+      } else if (
+        Object.hasOwn(previousActionSchemas, Number(version)) &&
+        app === APPLICATION_ID
+      ) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -388,9 +400,7 @@ export function openCommandJournal(input: {
         const legacySchema = schema
           .map((sql) =>
             sql === actionSchema
-              ? version === 2
-                ? legacyActionSchema
-                : previousActionSchema
+              ? previousActionSchemas[Number(version)]!
               : sql,
           )
           .sort()

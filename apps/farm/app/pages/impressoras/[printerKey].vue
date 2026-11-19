@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import { useFarmControls } from '../../components/farm/useFarmControls.ts'
 import { useFarmView } from '../../composables/useFarmView.ts'
+import type { ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { liveControlActionAvailability } from '../../utils/farm-control.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
@@ -71,9 +72,16 @@ const live = computed(
 const heaters = computed(() =>
   state.value ? heatersFromObservation(state.value) : [],
 )
-const capabilities = computed<DetailCapability[] | undefined>(() =>
-  heaters.value.length ? ['heaters'] : undefined,
-)
+// Motion capabilities come from the controls the Connector advertises.
+const capabilities = computed<DetailCapability[] | undefined>(() => {
+  const controls = state.value?.controls
+  const found: DetailCapability[] = [
+    ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('jog') ? (['motion'] as const) : []),
+    ...(controls?.includes('set_factor') ? (['speed', 'flow'] as const) : []),
+  ]
+  return found.length ? found : undefined
+})
 const lastKnownText = computed(() =>
   age.value?.seconds == null ? undefined : `recebido há ${age.value.seconds} s`,
 )
@@ -95,7 +103,7 @@ watch(
   { immediate: true },
 )
 
-function availability(action: 'set_temperature' | 'emergency_stop') {
+function availability(action: ExtendedControlAction) {
   void now.value
   const current = ready.value
   return row.value && current
@@ -109,6 +117,29 @@ function availability(action: 'set_temperature' | 'emergency_stop') {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const motionAvailability = computed(() =>
+  Object.fromEntries(
+    (
+      [
+        ['home', 'home'],
+        ['jog', 'jog'],
+        ['motors_off', 'motors_off'],
+        ['z_babystep', 'z_babystep'],
+        ['set_factor', 'set_factor'],
+      ] as const
+    ).map(([control, action]) => {
+      const result = availability(action)
+      return [
+        control,
+        commandInFlight.value
+          ? { available: false, reason: 'Um comando já está em andamento.' }
+          : result.available
+            ? { available: true }
+            : { available: false, reason: result.reason },
+      ]
+    }),
+  ),
+)
 
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
@@ -116,6 +147,13 @@ function setTemperature(heater: string, targetC: number, event: Event) {
       heater,
       target_c: targetC,
     })
+}
+function control(
+  action: ExtendedControlAction,
+  event: Event,
+  args: Record<string, unknown> = {},
+) {
+  if (row.value) void openControl(row.value, action, event, args)
 }
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
@@ -166,7 +204,21 @@ onMounted(() => heading.value?.focus())
           : temperatureAvailability.reason
       "
       :can-emergency-stop="stopAvailability.available && !commandInFlight"
+      :motion-availability="motionAvailability"
       @set-temperature="setTemperature"
+      @home="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
+      @jog="
+        (axis, distance, feed, event) =>
+          control('jog', event, { axis, distance_mm: distance, feed })
+      "
+      @motors-off="(event) => control('motors_off', event)"
+      @z-babystep="
+        (delta, event) => control('z_babystep', event, { delta_mm: delta })
+      "
+      @set-factor="
+        (speed, flow, event) =>
+          control('set_factor', event, { speed_pct: speed, flow_pct: flow })
+      "
       @emergency-stop="emergencyStop"
     />
     <dialog

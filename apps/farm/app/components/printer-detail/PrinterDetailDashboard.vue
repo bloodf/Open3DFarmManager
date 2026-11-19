@@ -4,6 +4,8 @@ import Button from '../ui/Button.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
 import HeaterPanel from './HeaterPanel.vue'
+import MotionPanel from './MotionPanel.vue'
+import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import {
   DEFAULT_UNSUPPORTED_REASON,
   detailTabs,
@@ -30,15 +32,45 @@ const props = defineProps<{
   canCommand: boolean
   commandReason?: string
   canEmergencyStop: boolean
+  /** Motion controls; the panel shows only when the printer advertises motion. */
+  motionAvailability?: MotionAvailabilityMap
+  position?: readonly number[]
+  homedAxes?: readonly string[]
+  speedPct?: number
+  flowPct?: number
 }>()
 const emit = defineEmits<{
   (e: 'set-temperature', heater: string, targetC: number, event: Event): void
   (e: 'emergency-stop', event: Event): void
+  (e: 'home', event: Event): void
+  (
+    e: 'jog',
+    axis: JogAxis,
+    distanceMm: number,
+    feed: number,
+    event: Event,
+  ): void
+  (e: 'motors-off', event: Event): void
+  (e: 'z-babystep', deltaMm: number, event: Event): void
+  (e: 'set-factor', speedPct: number, flowPct: number, event: Event): void
 }>()
 
 const selected = ref<DetailTabId>('painel')
 const tabs = computed(() => detailTabs(props.capabilities, props.reasons))
 const hasHeaters = computed(() => props.capabilities?.includes('heaters'))
+const hasMotion = computed(() => props.capabilities?.includes('motion'))
+const hasFactors = computed(
+  () =>
+    !!props.capabilities?.includes('speed') &&
+    !!props.capabilities.includes('flow'),
+)
+const motionReason = computed(
+  () => props.reasons?.motion ?? DEFAULT_UNSUPPORTED_REASON,
+)
+const factorsReason = computed(
+  () =>
+    props.reasons?.speed ?? props.reasons?.flow ?? DEFAULT_UNSUPPORTED_REASON,
+)
 const heaterReason = computed(
   () => props.reasons?.heaters ?? DEFAULT_UNSUPPORTED_REASON,
 )
@@ -95,6 +127,30 @@ const heaterReason = computed(
         <section v-else aria-labelledby="heaters-title">
           <h2 id="heaters-title">Aquecedores</h2>
           <p>{{ heaterReason }}</p>
+        </section>
+        <MotionPanel
+          v-if="hasMotion"
+          :availability="motionAvailability ?? {}"
+          :position="position"
+          :homed-axes="homedAxes"
+          :speed-pct="speedPct"
+          :flow-pct="flowPct"
+          :factors="hasFactors"
+          :factors-reason="factorsReason"
+          @home="(event) => emit('home', event)"
+          @jog="
+            (axis, distance, feed, event) =>
+              emit('jog', axis, distance, feed, event)
+          "
+          @motors-off="(event) => emit('motors-off', event)"
+          @z-babystep="(delta, event) => emit('z-babystep', delta, event)"
+          @set-factor="
+            (speed, flow, event) => emit('set-factor', speed, flow, event)
+          "
+        />
+        <section v-else aria-labelledby="motion-title">
+          <h2 id="motion-title">Movimento</h2>
+          <p>{{ motionReason }}</p>
         </section>
       </template>
       <template

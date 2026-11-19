@@ -24,6 +24,10 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   run_macro: 'Executar macro',
   load_filament: 'Carregar filamento',
   unload_filament: 'Descarregar filamento',
+  jog: 'Mover eixo',
+  motors_off: 'Desligar motores',
+  z_babystep: 'Ajuste fino do Z',
+  set_factor: 'Definir velocidade e fluxo',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action

@@ -29,6 +29,12 @@ export interface PrinterOwnershipRequest {
   agentId: string
   printerKey: string
 }
+export interface PrinterGrouping {
+  displayName: string | null
+  groupName: string | null
+  location: string | null
+  sortOrder: number | null
+}
 export type PrinterOwnershipDecision =
   | { ok: true; assignmentId: string; status: 'active' | 'revoked' }
   | {
@@ -59,21 +65,37 @@ export class PostgresPrinterOwnership {
     return now
   }
   register(input: PrinterOwnershipRequest): Promise<PrinterOwnershipDecision> {
-    return this.change(input, false)
+    return this.change(input, 'register')
   }
   revoke(
     input: PrinterOwnershipRequest & { expectedAssignmentId: string },
   ): Promise<PrinterOwnershipDecision> {
-    return this.change(input, true, input.expectedAssignmentId)
+    return this.change(input, 'revoke', input.expectedAssignmentId)
+  }
+  editGrouping(
+    input: PrinterOwnershipRequest & {
+      expectedAssignmentId: string
+      grouping: PrinterGrouping
+    },
+  ): Promise<PrinterOwnershipDecision> {
+    return this.change(
+      input,
+      'edit',
+      input.expectedAssignmentId,
+      input.grouping,
+    )
   }
   private async change(
     input: PrinterOwnershipRequest,
-    revoke: boolean,
+    operation: 'register' | 'revoke' | 'edit',
     expectedAssignmentId?: string,
+    grouping?: PrinterGrouping,
   ): Promise<PrinterOwnershipDecision> {
+    const existingAssignment = operation !== 'register'
+    const revoke = operation === 'revoke'
     if (
       !input ||
-      (revoke &&
+      (existingAssignment &&
         !PairingApprovalRequest.shape.farm_id.safeParse(expectedAssignmentId)
           .success) ||
       !PairingApprovalRequest.shape.farm_id.safeParse(input.farmId).success ||
@@ -130,11 +152,11 @@ export class PostgresPrinterOwnership {
             await tx`SELECT status FROM farm.connector_enrollments WHERE agent_id = ${agentId}::uuid AND farm_id = ${farmId}::uuid FOR UPDATE`
           if (
             !enrollment[0] ||
-            (!revoke && enrollment[0].status !== 'approved')
+            (!existingAssignment && enrollment[0].status !== 'approved')
           )
             return { ok: false, reason: 'denied' }
           const existing =
-            await tx`SELECT id, revoked_at FROM farm.printer_assignments WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND printer_key = ${printerKey} AND ((${revoke} AND id = ${expectedAssignmentId ?? null}::uuid) OR (NOT ${revoke} AND revoked_at IS NULL)) FOR UPDATE`
+            await tx`SELECT id, revoked_at FROM farm.printer_assignments WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND printer_key = ${printerKey} AND ((${existingAssignment} AND id = ${expectedAssignmentId ?? null}::uuid) OR (NOT ${existingAssignment} AND revoked_at IS NULL)) FOR UPDATE`
           const now = this.now()
           const current = evaluateSession(
             sessionRecordId,
@@ -148,7 +170,8 @@ export class PostgresPrinterOwnership {
               await tx`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE id = ${sessionRecordId}`
             return { ok: false, reason: 'denied' }
           }
-          if (revoke && !existing[0]) return { ok: false, reason: 'denied' }
+          if (existingAssignment && !existing[0])
+            return { ok: false, reason: 'denied' }
           if (revoke && existing[0]?.revoked_at !== null) {
             await tx`UPDATE farm.account_sessions SET last_seen_at = ${current.touchAt} WHERE id = ${sessionRecordId}`
             return {
@@ -157,17 +180,24 @@ export class PostgresPrinterOwnership {
               status: 'revoked',
             }
           }
-          if (!revoke && existing[0]) return { ok: false, reason: 'conflict' }
-          if (!revoke) {
+          if (grouping && existing[0]?.revoked_at !== null)
+            return { ok: false, reason: 'denied' }
+          if (!existingAssignment && existing[0])
+            return { ok: false, reason: 'conflict' }
+          if (!existingAssignment) {
             const count =
               await tx`SELECT count(*)::int AS count FROM farm.printer_assignments WHERE agent_id = ${agentId}::uuid AND revoked_at IS NULL`
             if (Number(count[0]?.count) >= 1000)
               return { ok: false, reason: 'denied' }
           }
-          const id: string = revoke ? String(existing[0]?.id) : randomUUID()
+          const id: string = existingAssignment
+            ? String(existing[0]?.id)
+            : randomUUID()
           try {
             const touchAt = await tx.savepoint(async (save) => {
-              if (revoke)
+              if (grouping)
+                await save`UPDATE farm.printer_assignments SET display_name = ${grouping.displayName}, group_name = ${grouping.groupName}, location = ${grouping.location}, sort_order = ${grouping.sortOrder} WHERE id = ${id}::uuid`
+              else if (revoke)
                 await save`UPDATE farm.printer_assignments SET revoked_at = ${now}, revoked_by = ${current.accountId} WHERE id = ${id}::uuid`
               else
                 await save`INSERT INTO farm.printer_assignments (id, farm_id, agent_id, printer_key, created_at, created_by) VALUES (${id}::uuid, ${farmId}::uuid, ${agentId}::uuid, ${printerKey}, ${now}, ${current.accountId})`

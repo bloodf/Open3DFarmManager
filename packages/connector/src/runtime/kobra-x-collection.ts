@@ -1,3 +1,4 @@
+import { reportedModelProfile } from './machine-profile.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
@@ -107,6 +108,7 @@ export function createKobraXCollection(input: {
         offline()
         return 'identity'
       }
+      const machine = reportedModelProfile(adapter.identity.modelId)
       let lastReport = 0
       let lastSeen = performance.now()
       let withdrawn = false
@@ -136,7 +138,7 @@ export function createKobraXCollection(input: {
                     },
                   }
                 : {}),
-              printer: parsed.data,
+              printer: machine ? { ...parsed.data, machine } : parsed.data,
               receivedAtMonoMs: now,
               fieldObservedAtMonoMs: { anycubic: stamped },
             })

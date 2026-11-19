@@ -42,9 +42,11 @@ export async function startConfigurator(input: {
   /** Private host route allowed for the loopback Bambu simulator. */
   printerNetworks?: readonly string[]
 }): Promise<Configurator> {
+  // Provisioning storage refuses any symbolic link in its path; the macOS
+  // default temporary directory (/var/folders) is one, so resolve it first.
   // Connector storage rejects symlinked ancestors (macOS /var -> /private/var).
   const root = await realpath(
-    await mkdtemp(join(tmpdir(), 'journey-configurator-')),
+    await mkdtemp(join(await realpath(tmpdir()), 'journey-configurator-')),
   )
   const dataDirectory = join(root, 'identity')
   await mkdir(dataDirectory, { mode: 0o700 })

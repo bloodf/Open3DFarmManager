@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-/** Reject effective privileges outside 0015, including direct, PUBLIC and SET ROLE access. */
+/** Reject effective privileges outside the assignment runtime grants, including direct, PUBLIC and SET ROLE access. */
 export async function validatePrinterAssignmentRole(sql: Sql): Promise<void> {
   const rows = await sql<{ allowed: boolean }[]>`
     SELECT
@@ -27,7 +27,7 @@ export async function validatePrinterAssignmentRole(sql: Sql): Promise<void> {
         AND ((has_column_privilege(current_user,c.oid,a.attnum,'SELECT') AND NOT (n.nspname='farm' AND c.relname IN ('session_accounts','account_sessions','memberships','connector_enrollments','printer_assignments')))
           OR (has_column_privilege(current_user,c.oid,a.attnum,'INSERT') AND NOT (n.nspname='farm' AND c.relname='printer_assignments'))
           OR has_column_privilege(current_user,c.oid,a.attnum,'REFERENCES')
-          OR (has_column_privilege(current_user,c.oid,a.attnum,'UPDATE') AND NOT (n.nspname='farm' AND ((c.relname='session_accounts' AND a.attname='id') OR (c.relname='account_sessions' AND a.attname IN ('last_seen_at','revoked_at')) OR (c.relname='memberships' AND a.attname='farm_id') OR (c.relname='connector_enrollments' AND a.attname='agent_id') OR (c.relname='printer_assignments' AND a.attname IN ('revoked_at','revoked_by')))))))
+          OR (has_column_privilege(current_user,c.oid,a.attnum,'UPDATE') AND NOT (n.nspname='farm' AND ((c.relname='session_accounts' AND a.attname='id') OR (c.relname='account_sessions' AND a.attname IN ('last_seen_at','revoked_at')) OR (c.relname='memberships' AND a.attname='farm_id') OR (c.relname='connector_enrollments' AND a.attname='agent_id') OR (c.relname='printer_assignments' AND a.attname IN ('revoked_at','revoked_by','display_name','group_name','location','sort_order')))))))
       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND c.relkind='S'
         AND (pg_has_role(current_user,c.relowner,'MEMBER') OR has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE')))
@@ -47,7 +47,11 @@ export async function validatePrinterAssignmentRole(sql: Sql): Promise<void> {
       AND has_column_privilege(current_user,'farm.memberships','farm_id','UPDATE')
       AND has_column_privilege(current_user,'farm.connector_enrollments','agent_id','UPDATE')
       AND has_column_privilege(current_user,'farm.printer_assignments','revoked_at','UPDATE')
-      AND has_column_privilege(current_user,'farm.printer_assignments','revoked_by','UPDATE') AS allowed`
+      AND has_column_privilege(current_user,'farm.printer_assignments','revoked_by','UPDATE')
+AND has_column_privilege(current_user,'farm.printer_assignments','display_name','UPDATE')
+AND has_column_privilege(current_user,'farm.printer_assignments','group_name','UPDATE')
+AND has_column_privilege(current_user,'farm.printer_assignments','location','UPDATE')
+AND has_column_privilege(current_user,'farm.printer_assignments','sort_order','UPDATE') AS allowed`
   if (rows[0]?.allowed !== true)
     throw new Error('Invalid printer assignment database role')
 }

@@ -69,6 +69,9 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
     bundle: true,
     write: false,
   })
+  const outputFile = bundle.outputFiles?.[0]
+  expect(outputFile).toBeDefined()
+  if (!outputFile) throw new Error('esbuild produced no output file')
   const server = await startHttpMock({
     port: 0,
     routes: {
@@ -80,7 +83,7 @@ test('remembers the table, sorts by keyboard and opens printer details', async (
       },
       '/wall.js'(_request, response) {
         response.setHeader('content-type', 'text/javascript')
-        response.end(bundle.outputFiles[0]?.text ?? '')
+        response.end(outputFile.text)
       },
     },
   })

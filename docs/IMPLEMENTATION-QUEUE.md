@@ -76,3 +76,6 @@ These documents retain earlier scoped evidence and limitations. Their historical
 ## Publication and hardware gates
 
 Track work as local, tested, validated, published or merged, with the exact commit or PR head. Review the immutable publication diff for private material and license obligations. Required current-head checks, review resolution and repository protections still apply. Deployment, DNS and credential changes, and physical-printer tests remain separately authorized actions.
+
+Print-library storage modes, retention, compatibility and replay are specified
+in [PRINT-LIBRARY.md](PRINT-LIBRARY.md).

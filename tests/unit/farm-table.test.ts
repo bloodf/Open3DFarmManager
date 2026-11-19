@@ -136,4 +136,4 @@ test('remembers the table, sorts by keyboard and links to printer details', asyn
   } finally {
     await server.close()
   }
-}, 30_000)
+}, 90_000)

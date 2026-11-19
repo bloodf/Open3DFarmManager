@@ -191,10 +191,12 @@ it.each([
         )
         .get()
       if (typeof row?.sql !== 'string') throw new Error('Missing action table')
-      const prior = row.sql.replace(
-        "'service','exclude_object','timelapse','power'",
-        `'service',${actions}`,
-      )
+      const prior = row.sql
+        .replace("'set_factor','file_op'", "'set_factor'")
+        .replace(
+          "'service','exclude_object','timelapse','power'",
+          `'service',${actions}`,
+        )
       db.exec(
         `DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
       )

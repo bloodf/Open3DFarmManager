@@ -7,6 +7,12 @@ import {
 } from '../../../farm-protocol/src/control-actions.ts'
 import { executePower } from './control-power.ts'
 import {
+  FileOperationRefused,
+  fileOperationAcknowledged,
+  prepareFileOperation,
+  requireStoppedPrinter,
+} from './control-file-manager.ts'
+import {
   ExcludeObjectRefusal,
   excludeObjectProbe,
   excludeObjectWire,
@@ -102,6 +108,7 @@ const Snapshot = z.strictObject({
       state: z.enum(['ready', 'startup', 'shutdown', 'error']),
     }),
     print_stats: z.strictObject({
+      filename: z.string().optional(),
       state: z.enum([
         'standby',
         'printing',
@@ -186,8 +193,8 @@ export function openFixedMoonrakerPause(input: {
     prepared = false,
     attempted = false,
     acknowledged = false,
-    audited = false,
-    extended = false
+    audited = false
+  let extended: ExtendedControlAction | undefined
   let sequence = 0,
     sourceTime = -1,
     receivedBytes = 0,
@@ -386,13 +393,28 @@ export function openFixedMoonrakerPause(input: {
   async function query(
     index: number,
     deadline: number,
+    withFilename = false,
     excludedName?: string,
   ): Promise<ControlObservation> {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
       const wire =
-        excludedName === undefined ? QUERIES[index] : excludeObjectProbe(id)
+        excludedName !== undefined
+          ? excludeObjectProbe(id)
+          : withFilename
+            ? JSON.stringify({
+                jsonrpc: '2.0',
+                id,
+                method: 'printer.objects.query',
+                params: {
+                  objects: {
+                    webhooks: ['state'],
+                    print_stats: ['state', 'filename'],
+                  },
+                },
+              })
+            : QUERIES[index]
       if (!wire) throw failure()
       const snapshot = Snapshot.parse(await request(id, wire, deadline))
       const received = now()
@@ -417,6 +439,15 @@ export function openFixedMoonrakerPause(input: {
         readyObservedMono: started,
         printStateObservedMono: started,
         receivedMono: received,
+        ...(withFilename && snapshot.status.print_stats.filename !== undefined
+          ? {
+              effect: {
+                kind: 'file' as const,
+                filename: snapshot.status.print_stats.filename,
+                observedMono: started,
+              },
+            }
+          : {}),
         ...(excludedName &&
         snapshot.status.exclude_object?.excluded_objects.includes(excludedName)
           ? {
@@ -582,7 +613,7 @@ export function openFixedMoonrakerPause(input: {
         ? error
         : new ExtrudeRefused('state')
     }
-    extended = true
+    extended = 'extrude'
     return send(extendedWire('extrude', args), request, 5000)
   }
   /**
@@ -611,7 +642,7 @@ export function openFixedMoonrakerPause(input: {
           ? parseQueueStatus(await requestRead(11, queueStatusWire(11)))
           : undefined,
       )
-      extended = true
+      extended = 'queue_op'
       return await send(
         wire,
         requested,
@@ -650,7 +681,7 @@ export function openFixedMoonrakerPause(input: {
           await requestRead(11, timelapseStatusWire(11, op)),
         ),
       )
-      extended = true
+      extended = 'timelapse'
       return await send(wire, requested, 5000, (result) =>
         timelapseReplyAccepted(op, result),
       )
@@ -680,7 +711,7 @@ export function openFixedMoonrakerPause(input: {
         ? error
         : new OutputRefused('invalid-command')
     }
-    extended = true
+    extended = action
     return send(extendedWire(action, args), request, 5000)
   }
   let excludedName: string | undefined
@@ -719,7 +750,7 @@ export function openFixedMoonrakerPause(input: {
         ? error
         : new ExcludeObjectRefusal('Print object state unavailable')
     }
-    extended = true
+    extended = 'exclude_object'
     return send(wire, requested, 5000)
   }
   /**
@@ -748,7 +779,7 @@ export function openFixedMoonrakerPause(input: {
       const wire = extendedWire('gcode', args)
       if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
-      extended = true
+      extended = 'gcode'
       return await send(wire, requested, 5000)
     } catch (error) {
       stop()
@@ -767,14 +798,36 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
       if (isMotionAction(action)) {
-        extended = true
+        extended = action
         return executeMotion(action, args, request)
+      }
+      if (action === 'file_op' || action === 'start_print') {
+        if (!input.objects?.includes('virtual_sdcard'))
+          throw new FileOperationRefused('unsupported-action')
+        extended = action
+        const read = (method: string, params: object) =>
+          requestRead(
+            11,
+            JSON.stringify({ jsonrpc: '2.0', id: 11, method, params }),
+          )
+        if (action === 'start_print')
+          return requireStoppedPrinter(read).then(() =>
+            send(extendedWire(action, args), request, 5000),
+          )
+        return prepareFileOperation(args, read).then((call) =>
+          send(
+            JSON.stringify({ jsonrpc: '2.0', id: 2, ...call }),
+            request,
+            5000,
+            (result) => fileOperationAcknowledged(result, args),
+          ),
+        )
       }
       if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'gcode') return executeConsole(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'power') {
-        extended = true
+        extended = 'power'
         return executePower(
           args,
           input.objects ?? [],
@@ -791,7 +844,7 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'timelapse') return timelapse(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
         return output(action, args, request)
-      extended = true
+      extended = action
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
@@ -821,7 +874,12 @@ export function openFixedMoonrakerPause(input: {
           // No print-state target exists for an extended action. Report the
           // first state read after the acknowledged request and let the
           // dispatcher judge it.
-          const observation = await query(1, operationDeadline, excludedName)
+          const observation = await query(
+            1,
+            operationDeadline,
+            extended === 'start_print',
+            excludedName,
+          )
           detachCommand()
           return observation
         }

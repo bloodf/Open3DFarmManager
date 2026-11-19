@@ -6,6 +6,10 @@ import {
   isMotionAction,
   motionSupported,
 } from './control-motion.ts'
+import {
+  ControlArguments,
+  PrinterGcodePath,
+} from '../../../farm-protocol/src/control-actions.ts'
 import { POWER_MARKER, powerCommand } from './control-power.ts'
 import { serviceCommand } from './control-system-services.ts'
 import { parseTimelapseOp, timelapseSupported } from './control-timelapse.ts'
@@ -105,6 +109,8 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('virtual_sdcard'))
+    supported.push('file_op', 'start_print')
   if (objects.includes('exclude_object') && objects.includes('print_stats'))
     supported.push('exclude_object')
   // Named LEDs and output pins need the object list; an unknown list never widens support.
@@ -196,6 +202,16 @@ export function buildMoonrakerCommand(
     return {
       method: 'printer.gcode.script',
       params: { script: parseExtrude(args, objects).script },
+    }
+  }
+
+  if (action === 'start_print') {
+    const parsed = ControlArguments.parse({ action, args })
+    if (parsed.action !== 'start_print' || !objects.includes('virtual_sdcard'))
+      throw Error('File printing unavailable')
+    return {
+      method: 'printer.print.start',
+      params: { filename: PrinterGcodePath.parse(parsed.args.file) },
     }
   }
 

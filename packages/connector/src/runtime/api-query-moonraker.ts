@@ -1,3 +1,4 @@
+import { PrinterGcodePath } from '../../../farm-protocol/src/control-actions.ts'
 import {
   moonrakerAuthHeaders,
   moonrakerSession,
@@ -7,19 +8,33 @@ import {
 export function moonrakerQueryClient(
   origin: string,
   limits: MoonrakerLimits,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ) {
   return {
-    async request(method: string): Promise<unknown> {
+    async request(
+      method: string,
+      params?: object,
+      requestSignal?: AbortSignal,
+    ): Promise<unknown> {
+      const directory = params && 'path' in params ? params.path : undefined
+      const validDirectory =
+        directory === 'gcodes' ||
+        (typeof directory === 'string' &&
+          directory.startsWith('gcodes/') &&
+          PrinterGcodePath.safeParse(directory.slice('gcodes/'.length)).success)
       const path =
         method === 'server.files.list'
           ? '/server/files/list?root=gcodes'
           : method === 'printer.objects.list'
             ? '/printer/objects/list'
-            : undefined
+            : method === 'server.files.get_directory' && validDirectory
+              ? '/server/files/directory?' +
+                new URLSearchParams({ path: String(directory) })
+              : undefined
       if (!path) throw Error('Unsupported Moonraker query')
       const deadline = AbortSignal.any([
-        signal,
+        ...(signal ? [signal] : []),
+        ...(requestSignal ? [requestSignal] : []),
         AbortSignal.timeout(limits.requestTimeoutMs),
       ])
       deadline.throwIfAborted()

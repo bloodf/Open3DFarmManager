@@ -523,7 +523,7 @@ describe('command journal', () => {
       ).sql
       expect(sql).toContain("'set_pin','gcode'")
       db.exec(
-        `DROP TABLE control_command_actions; ${sql.replace(",'gcode'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=11;`,
+        `DROP TABLE control_command_actions; ${sql.replace(",'gcode'", '').replace(",'file_op'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=11;`,
       )
     } finally {
       db.close()

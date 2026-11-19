@@ -120,6 +120,66 @@ export function useFarmControls(
       )
     },
   })
+  function connectControl(
+    row: FarmRow,
+    scope: NonNullable<NonNullable<typeof ready.value>['scope']>,
+    keyId: string,
+    onState: Parameters<typeof openFarmPauseControl>[0]['onState'],
+  ) {
+    return openFarmPauseControl({
+      accountId: scope.accountId,
+      farmId: scope.farmId,
+      keyId,
+      agentId: row.assignment.agentId,
+      assignmentId: row.assignment.assignmentId,
+      async resolveKey(signal) {
+        const resolved = await pauseResolver({
+          scope,
+          browserKeyId: keyId,
+          signal,
+        })
+        return {
+          publicKey: resolved.localKey.publicKey,
+          privateKey: resolved.localKey.keyPair.privateKey,
+          origin: resolved.origin,
+          audience: resolved.audience,
+        }
+      },
+      onState,
+    })
+  }
+  async function connectFiles(row: FarmRow, signal: AbortSignal) {
+    const current = ready.value
+    if (
+      !current?.scope ||
+      current.keys.kind !== 'available' ||
+      !pauseEnabled.value
+    )
+      throw Error('File session unavailable')
+    signal.throwIfAborted()
+    const { scope, keys } = current
+    let control: ReturnType<typeof openFarmPauseControl> | undefined
+    const abort = () => control?.close()
+    signal.addEventListener('abort', abort, { once: true })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        control = connectControl(row, scope, keys.selected, (state) => {
+          if (state.kind === 'ready') resolve()
+          if (state.kind === 'failed' || state.kind === 'settled')
+            reject(Error('File session closed'))
+        })
+      })
+      signal.throwIfAborted()
+      if (!control) throw Error('File session unavailable')
+      return control
+    } catch (error) {
+      control?.close()
+      await control?.dispose()
+      throw error
+    } finally {
+      signal.removeEventListener('abort', abort)
+    }
+  }
   async function openControl(
     row: FarmRow,
     action: ExtendedControlAction,
@@ -153,45 +213,25 @@ export function useFarmControls(
       action,
       args,
     }
-    pauseControl = openFarmPauseControl({
-      accountId: scope.accountId,
-      farmId: scope.farmId,
-      keyId,
-      agentId: row.assignment.agentId,
-      assignmentId: row.assignment.assignmentId,
-      async resolveKey(signal) {
-        const resolved = await pauseResolver({
-          scope,
-          browserKeyId: keyId,
-          signal,
-        })
-        return {
-          publicKey: resolved.localKey.publicKey,
-          privateKey: resolved.localKey.keyPair.privateKey,
-          origin: resolved.origin,
-          audience: resolved.audience,
-        }
-      },
-      onState(state) {
-        pauseState.value = state
-        if (state.kind === 'settled' && pauseTarget.value) {
-          lastControlResults.value[pauseTarget.value.assignmentId] =
-            state.kind === 'settled' &&
-            !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
-              ? {
-                  applied: 'Comando confirmado pelo Connector.',
-                  rejected: 'Comando recusado.',
-                  'not-sent': 'Comando não enviado.',
-                  'outcome-unknown':
-                    'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
-                }[state.outcome]
-              : controlStatusText(
-                  pauseTarget.value.action as ControlAction,
-                  state,
-                  0,
-                )
-        }
-      },
+    pauseControl = connectControl(row, scope, keyId, (state) => {
+      pauseState.value = state
+      if (state.kind === 'settled' && pauseTarget.value) {
+        lastControlResults.value[pauseTarget.value.assignmentId] =
+          state.kind === 'settled' &&
+          !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
+            ? {
+                applied: 'Comando confirmado pelo Connector.',
+                rejected: 'Comando recusado.',
+                'not-sent': 'Comando não enviado.',
+                'outcome-unknown':
+                  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+              }[state.outcome]
+            : controlStatusText(
+                pauseTarget.value.action as ControlAction,
+                state,
+                0,
+              )
+      }
     })
     await nextTick()
     dialog.value?.show()
@@ -282,6 +322,7 @@ export function useFarmControls(
     pauseRemaining,
     pauseStatus,
     openControl,
+    connectFiles,
     confirmControl,
     closePause,
     commandInFlight,

@@ -712,9 +712,9 @@ function suite(title: string) {
       test.setTimeout(5 * 60_000)
       await step(async () => {
         const journey = started()
-        // A fresh farm page: the camera runs after every control step. The
-        // camera track rides the direct connection, so its 15 s budget starts
-        // once that connection is up, not while it is still being set up.
+        // A fresh farm page: the camera runs after every control step.
+        // The camera track rides the direct connection, so its 15 s budget
+        // starts once that connection is up, not while it is being set up.
         await journey.openFarm()
         await live(journey.ownerPage)
         await expectCameraFrames(journey)

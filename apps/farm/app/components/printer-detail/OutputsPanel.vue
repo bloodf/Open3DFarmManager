@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
+import { fieldText } from '../../utils/printer-detail-view.ts'
 
 /** Same name shape the signed commands accept; the Connector checks the list. */
 const NAME = /^[A-Za-z0-9_]{1,64}$/
@@ -41,9 +42,9 @@ const pinName = ref('')
 const pinPercent = ref('0')
 const note = ref('')
 
-function wholeNumber(text: string, min: number, max: number) {
+function wholeNumber(text: string | number, min: number, max: number) {
   const value = Number(text)
-  return text.trim() !== '' &&
+  return fieldText(text) !== '' &&
     Number.isInteger(value) &&
     value >= min &&
     value <= max
@@ -71,10 +72,10 @@ function submitLed(event: Event) {
   if (disabled.value) return
   if (!checkName(ledName.value, 'do LED')) return
   const white =
-    ledWhite.value.trim() === ''
+    fieldText(ledWhite.value) === ''
       ? undefined
       : wholeNumber(ledWhite.value, 0, 255)
-  if (ledWhite.value.trim() !== '' && white === undefined) {
+  if (fieldText(ledWhite.value) !== '' && white === undefined) {
     note.value = 'Informe o branco como inteiro entre 0 e 255.'
     return
   }

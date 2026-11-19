@@ -1,16 +1,12 @@
 <script setup lang="ts">
+import { formatPercentage } from '../../../utils/ui-format.ts'
 import { computed } from 'vue'
 
 const props = defineProps<{ label: string; value: number }>()
 const percent = computed(() =>
   Number.isFinite(props.value) ? Math.min(100, Math.max(0, props.value)) : 0,
 )
-const text = computed(() =>
-  new Intl.NumberFormat('pt-BR', {
-    style: 'percent',
-    maximumFractionDigits: 1,
-  }).format(percent.value / 100),
-)
+const text = computed(() => formatPercentage(percent.value))
 </script>
 
 <template>

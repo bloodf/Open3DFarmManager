@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../../utils/ui-format.ts'
 import type { HeldItemRow } from './approval-types.ts'
 
 defineProps<{
@@ -13,11 +14,7 @@ defineEmits<{
 
 const KIND_LABEL = { job: 'Trabalho de impressão', action: 'Ação' } as const
 function when(value: number) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    timeZone: 'UTC',
-  }).format(value)
+  return formatDateTime(value, 'short-utc') ?? 'Indisponível'
 }
 </script>
 

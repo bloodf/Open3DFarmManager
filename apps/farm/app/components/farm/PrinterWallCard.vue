@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  formatPercentage,
+  formatTemperature,
+  formatTime,
+} from '../../utils/ui-format.ts'
 import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
@@ -66,17 +71,12 @@ const finish = computed(() => {
   if (!Number.isFinite(date.getTime())) return
   return {
     datetime: date.toISOString(),
-    label: date.toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
+    label: formatTime(date),
   }
 })
 
 function temperature(value: number | undefined) {
-  return value === undefined
-    ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+  return formatTemperature(value) ?? 'Indisponível'
 }
 
 const alertLabel = (alert: string | FarmAlert) =>
@@ -120,8 +120,9 @@ function spoolLabel(spool: ActiveSpool) {
         max="100"
         aria-label="Progresso da impressão"
       />
-      {{ progress }}%
+      {{ formatPercentage(progress) }}
     </p>
+
     <dl>
       <dt>Camada</dt>
       <dd>{{ job?.layer ?? 'Indisponível' }}</dd>

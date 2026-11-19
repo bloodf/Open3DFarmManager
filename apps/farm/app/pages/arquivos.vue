@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatNumber } from '../utils/ui-format.ts'
 import {
   computed,
   onBeforeUnmount,
@@ -535,7 +536,7 @@ onBeforeUnmount(() => {
                 :value="file.name"
                 :disabled="!printableFile(file.name)"
               >
-                {{ file.name }} ({{ file.size.toLocaleString('pt-BR') }}
+                {{ file.name }} ({{ formatNumber(file.size) }}
                 bytes)
               </option>
             </select>

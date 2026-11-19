@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Sparkline from '../ui/charts/Sparkline.vue'
 import { computed, reactive } from 'vue'
 import Button from '../ui/Button.vue'
 import LineChart from '../ui/charts/LineChart.vue'
@@ -74,6 +75,10 @@ function submit(heater: HeaterReading, event: Event) {
           <dt>Potência</dt>
           <dd>{{ powerText(heater.power) }}</dd>
         </dl>
+        <Sparkline
+          :label="`Tendência de temperatura de ${heater.label}`"
+          :points="heater.points"
+        />
         <LineChart
           :label="`Temperatura de ${heater.label} nos últimos 10 minutos`"
           :series="[

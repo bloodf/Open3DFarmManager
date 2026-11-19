@@ -10,6 +10,7 @@ export * from './bambu-mock.ts'
 export * from './kobra-x-mock.ts'
 export * from './moonraker-mock.ts'
 export * from './spoolman-mock.ts'
+export * from './discovery.ts'
 
 import {
   startHttpMock,

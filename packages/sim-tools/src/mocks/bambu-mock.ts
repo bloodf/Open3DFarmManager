@@ -12,6 +12,8 @@ export interface BambuMockOptions {
   serial?: string | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   initialTargetTemperature?: number | undefined
+  /** Reported as `nozzle_diameter`; absent unless given. */
+  nozzleDiameter?: string | undefined
   printDurationMs?: number | undefined
   totalLayers?: number | undefined
   confirmCommands?: boolean | undefined
@@ -55,10 +57,14 @@ export async function startBambuMock(
   const totalLayers = options.totalLayers ?? 100
 
   let gcodeState: string | undefined = options.initialState
-  const extended: Record<string, unknown> =
-    options.initialTargetTemperature !== undefined
+  const extended: Record<string, unknown> = {
+    ...(options.initialTargetTemperature !== undefined
       ? { nozzle_target_temper: options.initialTargetTemperature }
-      : {}
+      : {}),
+    ...(options.nozzleDiameter !== undefined
+      ? { nozzle_diameter: options.nozzleDiameter }
+      : {}),
+  }
 
   const requests: Array<{
     command: string

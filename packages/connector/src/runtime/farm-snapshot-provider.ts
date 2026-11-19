@@ -1,3 +1,4 @@
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
 import { moonrakerFilamentUsage } from './job-filament-usage.ts'
@@ -66,8 +67,10 @@ const FRAME_LIMIT = 'Application frame limit'
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
+  linkHealthFor?: (printerKey: string) => PrinterState['linkHealth']
   nowMono?: () => number
   macrosFor?: (assignmentId: string) => readonly string[] | undefined
+  macroParamsFor?: (assignmentId: string) => MacroParamMap | undefined
   controlsFor?: (
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
@@ -138,17 +141,26 @@ export function createFarmSnapshotSource(input: {
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
       const macros = input.macrosFor?.(ref.assignmentId)
+      const macroParams = macros?.length
+        ? input.macroParamsFor?.(ref.assignmentId)
+        : undefined
       const controls = input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {
         controls: _untrustedControls,
         macros: _untrustedMacros,
+        macroParams: _untrustedMacroParams,
         firmware: _untrustedFirmware,
+        // Machine profiles travel by telemetry; the live frame is size-capped.
+        machine: _machine,
         lastJob: _observedLastJob,
+        linkHealth: _observedLinkHealth,
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
+      const linkHealth = input.linkHealthFor?.(ref.printerKey)
+      if (linkHealth) printer.linkHealth = linkHealth
       const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
       if (localWebUiOrigin) printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
@@ -177,6 +189,9 @@ export function createFarmSnapshotSource(input: {
           ...printer,
           ...advertisedControls,
           ...(macros !== undefined ? { macros: [...macros] } : {}),
+          ...(macroParams && Object.keys(macroParams).length
+            ? { macroParams }
+            : {}),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),
@@ -189,10 +204,22 @@ export function createFarmSnapshotSource(input: {
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
     // Fit as many spools as the frame cap allows; the total stays truthful.
-    let message = validatedStatusMessage(
-      { t: 'snapshot', seq: 1024, printers },
-      refs,
-    )
+    let message
+    try {
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    } catch (error) {
+      if (!(error instanceof Error && error.message === FRAME_LIMIT))
+        throw error
+      if (!printers.some((printer) => printer.linkHealth)) throw error
+      for (const printer of printers) delete printer.linkHealth
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    }
     if (spoolState) {
       const elapsed = now - spoolState.receivedMono
       for (let n = spoolState.value.spools.length; n >= 0; n--) {
@@ -415,7 +442,9 @@ export function createFarmSnapshotSource(input: {
     // Bambu and Creality fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
       ...(fieldStamped
-        ? (({ lastJob: _lastJob, ...rest }) => rest)(parsedPrinter.data)
+        ? (({ lastJob: _lastJob, machine: _machine, ...rest }) => rest)(
+            parsedPrinter.data,
+          )
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,

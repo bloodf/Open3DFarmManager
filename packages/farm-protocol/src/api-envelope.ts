@@ -47,7 +47,7 @@ const httpsUrl = z
     }
   })
 
-/** Actions an API app may request; emergency stop, start_print and firmware restart are never API actions. */
+/** Actions an API app may request; emergency stop, start_print and firmware restart are never API actions; start_library_print needs jobs:write. */
 export const API_ENVELOPE_ACTIONS = [
   'pause',
   'resume',
@@ -60,6 +60,7 @@ export const API_ENVELOPE_ACTIONS = [
   'run_macro',
   'load_filament',
   'unload_filament',
+  'start_library_print',
 ] as const
 export const ApiEnvelopeAction = ControlArguments.refine((value) =>
   (API_ENVELOPE_ACTIONS as readonly string[]).includes(value.action),

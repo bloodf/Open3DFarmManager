@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 import {
   jobHistoryRow,
   jobHistoryStatus,
@@ -11,7 +15,7 @@ const farmId = ref('')
 const printerKey = ref('')
 const jobs = ref<JobHistoryItem[]>([])
 const nextBefore = ref<string | null>(null)
-const pending = ref(false)
+const pending = ref(true)
 const error = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
@@ -115,8 +119,18 @@ onBeforeUnmount(cancel)
       Trabalhos finalizados registrados a partir da telemetria dos Connectors,
       do mais recente para o mais antigo.
     </p>
-    <p ref="errorSummary" role="alert" tabindex="-1">{{ error }}</p>
-    <p v-if="error"><NuxtLink to="/entrar">Entrar na conta</NuxtLink></p>
+    <div ref="errorSummary" role="alert" tabindex="-1">
+      <ErrorState
+        v-if="error"
+        title="Histórico indisponível"
+        :description="error"
+      >
+        <Button @click="farmId ? loadJobs() : loadFarms()">
+          Tentar novamente
+        </Button>
+        <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
+      </ErrorState>
+    </div>
     <section aria-labelledby="filtros-heading" :aria-busy="pending">
       <h2 id="filtros-heading">Filtros</h2>
       <label for="farm">Farm</label>
@@ -149,7 +163,30 @@ onBeforeUnmount(cancel)
         Atualizar histórico
       </button>
     </section>
-    <p role="status">{{ status }}</p>
+    <div v-if="pending && !rows.length" aria-busy="true" class="loading">
+      <p role="status">{{ status }}</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <p v-else-if="pending" role="status">{{ status }}</p>
+    <EmptyState
+      v-else-if="!error && !rows.length"
+      :title="
+        farmId
+          ? 'Nenhum trabalho finalizado'
+          : farms.length
+            ? 'Selecione uma farm'
+            : 'Nenhuma farm disponível'
+      "
+      :description="
+        farmId
+          ? 'Quando uma impressora concluir, cancelar ou falhar em um trabalho, ele aparece aqui.'
+          : farms.length
+            ? 'Escolha uma farm nos filtros para consultar o histórico de trabalhos.'
+            : 'Esta conta ainda não tem uma farm com trabalhos registrados.'
+      "
+    >
+      <NuxtLink v-if="farmId" to="/impressoras">Ver impressoras</NuxtLink>
+    </EmptyState>
     <table v-if="rows.length" aria-label="Trabalhos finalizados">
       <thead>
         <tr>
@@ -158,6 +195,7 @@ onBeforeUnmount(cancel)
           <th scope="col">Arquivo</th>
           <th scope="col">Término</th>
           <th scope="col">Duração</th>
+          <th scope="col">Biblioteca</th>
         </tr>
       </thead>
       <tbody>
@@ -167,6 +205,7 @@ onBeforeUnmount(cancel)
           <td>{{ row.filename }}</td>
           <td>{{ row.endedAt }}</td>
           <td>{{ row.duration }}</td>
+          <td>{{ row.library }}</td>
         </tr>
       </tbody>
     </table>
@@ -181,6 +220,10 @@ onBeforeUnmount(cancel)
   </main>
 </template>
 <style scoped>
+.loading {
+  display: grid;
+  gap: 0.75rem;
+}
 label {
   display: block;
   margin-top: 1rem;

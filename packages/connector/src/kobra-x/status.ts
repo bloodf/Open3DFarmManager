@@ -75,6 +75,27 @@ export function createKobraXStatus(printerKey: string, address: string) {
       }
     }
     if (type !== 'multiColorBox') {
+      if (type === 'info' || type === 'print' || type === 'fan') {
+        const percent =
+          data.fan_speed_pct ?? record(data.settings).fan_speed_pct
+        if (
+          typeof percent === 'number' &&
+          Number.isInteger(percent) &&
+          percent >= 0 &&
+          percent <= 100
+        )
+          next.fans = { part: percent }
+      }
+      const lights =
+        type === 'info' && Array.isArray(data.lights)
+          ? data.lights
+          : type === 'light'
+            ? [data]
+            : []
+      const light = lights.map(record).find((entry) => entry.type === 3)
+      if (light && (light.status === 0 || light.status === 1))
+        next.light = { chamber: light.status === 1 }
+
       const temperatures = type === 'info' ? record(data.temp) : data
       const tool = nonnegative(temperatures.curr_nozzle_temp)
       const bed = nonnegative(temperatures.curr_hotbed_temp)

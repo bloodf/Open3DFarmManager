@@ -118,13 +118,14 @@ export function oidcCallbackUrl(redirectUri: string, incoming: URL): URL {
 
 /**
  * Exchanges the code and returns the verified issuer and subject.
- * Email, role and group claims are not returned.
+ * Email claims stay internal until a provider-specific policy accepts them.
  */
-export async function finishOidcAuthorization(
+/** Provider policies that accept email claims must validate them before use. */
+export async function finishOidcClaims(
   config: Configuration,
   currentUrl: URL,
   transaction: OidcTransaction,
-): Promise<OidcIdentity> {
+): Promise<OidcIdentity & { email?: unknown; email_verified?: unknown }> {
   try {
     const tokens = await authorizationCodeGrant(config, currentUrl, {
       pkceCodeVerifier: transaction.codeVerifier,
@@ -146,14 +147,33 @@ export async function finishOidcAuthorization(
       /[\u0000-\u001f\u007f]/.test(subject)
     )
       throw new OidcProtocolError('invalid', 'rejected identity')
-    return Object.freeze({ issuer, subject })
+    return Object.freeze({
+      issuer,
+      subject,
+      email: claims.email,
+      email_verified: claims.email_verified,
+    })
   } catch (error) {
     throw classifyOidcProtocolError(error)
   }
 }
 
-const usernamePattern = /^[a-z0-9_-]{3,64}$/
-const digestPattern = /^[a-f0-9]{64}$/
+/** Generic OIDC deliberately does not expose provider email claims. */
+export async function finishOidcAuthorization(
+  config: Configuration,
+  currentUrl: URL,
+  transaction: OidcTransaction,
+): Promise<OidcIdentity> {
+  const { issuer, subject } = await finishOidcClaims(
+    config,
+    currentUrl,
+    transaction,
+  )
+  return Object.freeze({ issuer, subject })
+}
+
+export const usernamePattern = /^[a-z0-9_-]{3,64}$/
+export const digestPattern = /^[a-f0-9]{64}$/
 
 /**
  * An existing link signs in as that account.

@@ -26,6 +26,8 @@ already waiting in the outbox.
 
 The OpenAPI document below describes the separate client-facing API. Sandbox apps can be granted sandbox farms only; they cannot be attached to a non-sandbox farm.
 
+Server-side storage of print files is out of scope for the integration API: [E7, #204](https://github.com/bloodf/Open3DFarmManager/issues/204) excludes it. Print library storage, retention and replay are specified in [PRINT-LIBRARY.md](PRINT-LIBRARY.md) (E17.1, [#373](https://github.com/bloodf/Open3DFarmManager/issues/373)) and are not part of this API until that document's implementation lands.
+
 ## Authenticate
 
 Exchange the client credentials at `POST /api/integrations/v1/oauth/token`
@@ -169,3 +171,8 @@ unrecognized. Follow cursors, token lifetime and rate limit headers rather
 than assuming fixed values. Deprecation notices and the minimum notice periods
 are defined by the OpenAPI contract and release notes. Security fixes may
 change behavior within v1 when needed to protect owners or printers.
+
+## Out of scope
+
+E7 does not provide the print-library storage, retention or replay contract;
+see [PRINT-LIBRARY.md](PRINT-LIBRARY.md).

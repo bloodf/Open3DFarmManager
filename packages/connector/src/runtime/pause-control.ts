@@ -1,3 +1,4 @@
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { readPrinterBinding } from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import { PAUSE_POLICY_HARD_MAXIMUMS } from '../../../farm-protocol/src/pause-capability.ts'
@@ -110,6 +111,9 @@ type PauseControlInput = {
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
   /** Read-only capabilities from the same router used by the relay. */
+  onMacroParams?: (
+    read: (assignmentId: string) => MacroParamMap | undefined,
+  ) => void
   onMacros?: (
     read: (assignmentId: string) => readonly string[] | undefined,
   ) => void
@@ -150,6 +154,10 @@ export async function runPauseControl(input: PauseControlInput): Promise<void> {
     string,
     (id: string) => readonly ExtendedControlAction[]
   >()
+  const macroParams = new Map<
+    string,
+    (id: string) => MacroParamMap | undefined
+  >()
   const macros = new Map<
     string,
     (id: string) => readonly string[] | undefined
@@ -166,6 +174,16 @@ export async function runPauseControl(input: PauseControlInput): Promise<void> {
               ) => {
                 controls.set(assignmentId, read)
                 input.onControls?.((id) => controls.get(id)?.(id) ?? [])
+              },
+            }
+          : {}),
+        ...(input.onMacroParams
+          ? {
+              onMacroParams: (
+                read: (id: string) => MacroParamMap | undefined,
+              ) => {
+                macroParams.set(assignmentId, read)
+                input.onMacroParams?.((id) => macroParams.get(id)?.(id))
               },
             }
           : {}),
@@ -250,11 +268,18 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      gcodeConsole: (binding) =>
+        binding === printerBinding &&
+        pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,
       observe(binding, next) {
         const accepted = relay.observe(binding, next)
         observation = accepted ? next : null
         return accepted
       },
+    })
+    input.onMacroParams?.((id) => {
+      const binding = config.bindingFor(id)
+      return binding ? router.macroParams?.(binding) : undefined
     })
     input.onMacros?.((id) => {
       const binding = config.bindingFor(id)
@@ -418,6 +443,7 @@ async function runAssignmentControl(
       })
   } catch (error) {
     // Nothing reached the journal yet: release it before failing.
+    input.onMacroParams?.(() => undefined)
     input.onMacros?.(() => undefined)
     input.onControls?.(() => [])
     closeCommandJournal(journal)
@@ -555,6 +581,7 @@ async function runAssignmentControl(
     })
   } finally {
     input.apiHandlers?.delete(assignmentId)
+    input.onMacroParams?.(() => undefined)
     input.onMacros?.(() => undefined)
     input.onControls?.(() => [])
     relay.close()

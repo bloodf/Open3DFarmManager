@@ -421,14 +421,14 @@ export class PauseBrowserSignallingClient {
       return false
     }
   }
-  async listFiles(printerKey: string) {
+  async listFiles(printerKey: string, directory?: string, download?: string) {
     if (
       !this.#channel.current() ||
       !this.#proofsReady ||
       !this.#peer?.listFiles
     )
       throw Error('File list unavailable')
-    return this.#peer.listFiles(printerKey)
+    return this.#peer.listFiles(printerKey, directory, download)
   }
   async sendFile(...args: Parameters<PauseBrowserPeer['sendFile']>) {
     if (!this.#channel.current() || !this.#proofsReady || !this.#peer?.sendFile)

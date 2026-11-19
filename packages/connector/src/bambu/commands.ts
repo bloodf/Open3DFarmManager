@@ -1,3 +1,9 @@
+import {
+  buildBambuConsoleLine,
+  buildBambuExtrude,
+  buildBambuJog,
+} from './printer-detail.ts'
+
 const actions = [
   'pause',
   'resume',
@@ -6,6 +12,10 @@ const actions = [
   'set_fan',
   'home',
   'set_light',
+  'jog',
+  'extrude',
+  // The signed console action (E18.1) joins the protocol enum separately.
+  'gcode',
   'set_speed',
   'start_print',
   'load_filament',
@@ -102,6 +112,22 @@ export function buildBambuCommand(
       `G28 ${args.axes.map((axis: string) => axis.toUpperCase()).join(' ')}\n`,
     )
   }
+  if (action === 'jog') {
+    keys(['axis', 'distance_mm', 'feed'])
+    const { sequence_id: _, ...jog } = args
+    return buildBambuJog(jog, sequence_id)
+  }
+  if (action === 'extrude') {
+    // nozzle_c is the live reading the control driver adds; never wire input.
+    keys(['tool', 'length_mm', 'feed', 'nozzle_c'])
+    const { sequence_id: _, nozzle_c, ...extrude } = args
+    return buildBambuExtrude(extrude, nozzle_c, sequence_id)
+  }
+  if (action === 'gcode') {
+    // print_state is the live gcode_state the control driver adds.
+    keys(['line', 'print_state'])
+    return buildBambuConsoleLine(args.line, args.print_state, sequence_id)
+  }
   if (action === 'set_light') {
     keys(['on'])
     if (typeof args.on !== 'boolean') throw new Error('Invalid light')
@@ -124,7 +150,21 @@ export function buildBambuCommand(
     return print('print_speed', String(level))
   }
   if (action === 'start_print') {
-    keys(['file'])
+    keys(['file', 'plate', 'ams_mapping'])
+    const plate = args.plate ?? 1
+    const mapping = args.ams_mapping
+    if (
+      !Number.isInteger(plate) ||
+      (plate as number) < 1 ||
+      (plate as number) > 1000 ||
+      (mapping !== undefined &&
+        (!Array.isArray(mapping) ||
+          mapping.length > 64 ||
+          mapping.some(
+            (slot) => !Number.isInteger(slot) || slot < -1 || slot > 255,
+          )))
+    )
+      throw new Error('Invalid plate or AMS mapping')
     if (
       typeof args.file !== 'string' ||
       !args.file.length ||
@@ -136,8 +176,11 @@ export function buildBambuCommand(
     return {
       print: {
         command: 'project_file',
-        param: 'Metadata/plate_1.gcode',
+        param: `Metadata/plate_${plate}.gcode`,
         url: `file:///sdcard/${encodeURIComponent(args.file)}`,
+        ...(mapping
+          ? { ams_mapping: mapping, use_ams: mapping.some((slot) => slot >= 0) }
+          : {}),
         sequence_id,
       },
     }

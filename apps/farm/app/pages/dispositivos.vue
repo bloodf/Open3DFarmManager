@@ -8,6 +8,10 @@ import {
   listDeviceKeys,
   type LocalDeviceKey,
 } from '../utils/device-key'
+import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ErrorState from '../components/ui/ErrorState.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 import {
   readBrowserDeviceScope,
   proveBrowserDevice,
@@ -255,8 +259,20 @@ onBeforeRouteLeave(clear)
       cria chaves nem concede aprovação. Este registro não estabelece conexão
       com impressoras.
     </p>
-    <p ref="errorSummary" role="alert" tabindex="-1">{{ error }}</p>
-    <p role="status">{{ busy ? 'Aguarde…' : message }}</p>
+    <div ref="errorSummary" role="alert" tabindex="-1">
+      <ErrorState
+        v-if="error"
+        title="Operação não confirmada"
+        :description="error"
+      >
+        <Button @click="loadFarms()">Tentar novamente</Button>
+      </ErrorState>
+    </div>
+    <p role="status">{{ busy && page ? 'Aguarde…' : busy ? '' : message }}</p>
+    <div v-if="busy && !page" aria-busy="true">
+      <p role="status">Carregando farms e dispositivos…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
     <section aria-labelledby="farms-heading" :aria-busy="busy">
       <h2 id="farms-heading">Suas farms</h2>
       <label for="device-farm">Farm</label>
@@ -273,7 +289,11 @@ onBeforeRouteLeave(clear)
       <button v-if="farmId" :disabled="busy" @click="loadDevices()">
         Atualizar dispositivos
       </button>
-      <p v-if="!busy && !farms.length && !error">Nenhuma farm disponível.</p>
+      <EmptyState
+        v-if="!busy && !farms.length && !error"
+        title="Nenhuma farm disponível"
+        description="Sua conta ainda não tem acesso a uma farm. Peça um convite a uma proprietária ou a um proprietário e atualize as farms."
+      />
     </section>
     <section v-if="page" aria-labelledby="keys-heading" :aria-busy="busy">
       <h2 id="keys-heading">Chaves deste navegador</h2>
@@ -284,10 +304,11 @@ onBeforeRouteLeave(clear)
       <button :disabled="busy || keys.length >= 32" @click="enroll()">
         Criar chave e solicitar cadastro
       </button>
-      <p v-if="!keys.length">
-        Nenhuma chave local para esta conta e farm. Se você perdeu o
-        armazenamento, crie uma nova chave e solicite nova aprovação.
-      </p>
+      <EmptyState
+        v-if="!keys.length"
+        title="Sem chaves neste navegador"
+        description="Nenhuma chave local para esta conta e farm. Se você perdeu o armazenamento, crie uma nova chave e solicite nova aprovação."
+      />
       <ul>
         <li v-for="key in keys" :key="key.thumbprint">
           <p>
@@ -321,7 +342,11 @@ onBeforeRouteLeave(clear)
         </li>
       </ul>
       <h2>Registros da farm</h2>
-      <p v-if="!page.devices.length">Nenhum dispositivo nesta página.</p>
+      <EmptyState
+        v-if="!page.devices.length"
+        title="Nenhum dispositivo nesta página"
+        description="Ainda não há registros nesta farm. Crie uma chave neste navegador e solicite o cadastro para começar."
+      />
       <p v-if="admin">
         Para aprovar ou revogar, confira a impressão digital com o titular e
         digite o valor completo.

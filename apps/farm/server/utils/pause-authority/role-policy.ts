@@ -10,7 +10,27 @@ export function actionsForControlRole(
   role: string,
   actions: readonly ExtendedControlAction[] = ExtendedControlAction.options.filter(
     (action) =>
-      !['run_macro', 'load_filament', 'unload_filament'].includes(action),
+      ![
+        'run_macro',
+        'service',
+        'power',
+        'timelapse',
+        'load_filament',
+        'unload_filament',
+        'extrude',
+        'file_op',
+        'exclude_object',
+        'set_led',
+        'set_pin',
+        'bed_mesh',
+        'gcode',
+        'jog',
+        'motors_off',
+        'z_babystep',
+        'set_factor',
+        'queue_op',
+        'start_library_print',
+      ].includes(action),
   ),
 ): ExtendedControlAction[] {
   return actions.filter((action) => controlRoleAllowed(role, action))

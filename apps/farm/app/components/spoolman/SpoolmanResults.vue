@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EmptyState from '../ui/EmptyState.vue'
 import {
   describeSpoolmanResult,
   describeSpoolmanStatus,
@@ -16,6 +17,7 @@ export type SpoolmanSavedSetting = {
 defineProps<{
   settings: readonly SpoolmanSavedSetting[]
   results: readonly SpoolmanConnectorResult[]
+  canManage?: boolean
 }>()
 
 const when = (value: number) =>
@@ -43,10 +45,16 @@ const when = (value: number) =>
   </section>
   <section aria-labelledby="spoolman-saved-heading">
     <h2 id="spoolman-saved-heading">Configuração atual da farm</h2>
-    <p v-if="settings.length === 0" role="status">
-      Nenhum Spoolman configurado. Os Connectors continuam usando a configuração
-      local existente, se houver.
-    </p>
+    <EmptyState
+      :level="3"
+      v-if="settings.length === 0"
+      title="Nenhum Spoolman configurado"
+      :description="
+        canManage
+          ? 'Informe o endereço do Spoolman no formulário acima e teste a conexão. Até lá, os Connectors continuam usando a configuração local existente, se houver.'
+          : 'Peça a um proprietário ou administrador para configurar o Spoolman. Até lá, os Connectors continuam usando a configuração local existente, se houver.'
+      "
+    />
     <table v-else>
       <thead>
         <tr>

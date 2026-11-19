@@ -57,6 +57,8 @@ Simulator acceptance remains open, including the two-printer/four-tool scenarios
 
 After integrated Phase 0 acceptance, the remaining product work is owned by the open epics: Moonraker job history and file operations ([E7, #204](https://github.com/bloodf/Open3DFarmManager/issues/204)), additional adapter families and their journeys ([E10, #231](https://github.com/bloodf/Open3DFarmManager/issues/231)), the Spoolman integration per farm ([E14, #276](https://github.com/bloodf/Open3DFarmManager/issues/276)), and Bambu cloud import ([E15, #282](https://github.com/bloodf/Open3DFarmManager/issues/282)). Additional printer families need their own simulator acceptance and licensing review.
 
+Print library storage, retention and replay rules are specified before code in [PRINT-LIBRARY.md](PRINT-LIBRARY.md) ([E17.1, #373](https://github.com/bloodf/Open3DFarmManager/issues/373)). Nothing in it is implemented yet; the `start_library_print` rules are in [COMMAND-SECURITY.md](COMMAND-SECURITY.md).
+
 ## Completion and publication gates
 
 - Run `pnpm run check:all` on the final committed candidate and complete required PostgreSQL, browser/WebRTC and simulator checks for that same head. State pending local or remote checks explicitly.
@@ -76,3 +78,6 @@ These documents retain earlier scoped evidence and limitations. Their historical
 ## Publication and hardware gates
 
 Track work as local, tested, validated, published or merged, with the exact commit or PR head. Review the immutable publication diff for private material and license obligations. Required current-head checks, review resolution and repository protections still apply. Deployment, DNS and credential changes, and physical-printer tests remain separately authorized actions.
+
+Print-library storage modes, retention, compatibility and replay are specified
+in [PRINT-LIBRARY.md](PRINT-LIBRARY.md).

@@ -28,6 +28,8 @@ export interface BambuSimulatorOptions {
   initialTargetTemperature?: number | undefined
   /** Layer of a print already in progress (RUNNING or PAUSE) at start-up. */
   initialLayer?: number | undefined
+  /** Reported as `nozzle_diameter`; absent unless given. */
+  nozzleDiameter?: string | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
   confirmCommands?: boolean | undefined
   credentials?:
@@ -51,6 +53,7 @@ export async function startBambuSimulator({
   initialState,
   initialTargetTemperature,
   initialLayer,
+  nozzleDiameter,
   confirmCommands = true,
   versionModules,
   printDurationMs,
@@ -84,6 +87,9 @@ export async function startBambuSimulator({
     throw new Error('Invalid initial layer')
 
   const uploads = new Map<string, Buffer>()
+  const timelapse = new Map<string, Buffer>()
+  /** Every accepted `gcode_line` script, in arrival order. */
+  const gcodeLines: string[] = []
   let timer: ReturnType<typeof setInterval> | undefined
   // Only an uploaded print advances on its own; resume keeps that mode.
   let timed = false
@@ -111,6 +117,9 @@ export async function startBambuSimulator({
     ...(initialLayer === undefined
       ? {}
       : { layer_num: initialLayer, total_layer_num: totalLayers }),
+    ...(nozzleDiameter === undefined
+      ? {}
+      : { nozzle_diameter: nozzleDiameter }),
   }
   const requests: { command: string; sequence_id: string }[] = []
 
@@ -217,7 +226,8 @@ export async function startBambuSimulator({
       if (command === 'gcode_line') {
         const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
         const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
-        if (!match && !home) throw new Error('Invalid gcode')
+        if (!match && !home && !validScript(request.param))
+          throw new Error('Invalid gcode')
       } else if (
         command === 'ledctrl' &&
         request.led_node === 'chamber_light' &&
@@ -280,6 +290,7 @@ export async function startBambuSimulator({
         const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
         if (match) extended[match[1]!] = Number(match[2])
         else if (home) extended.homed_axes = home[1]
+        gcodeLines.push(request.param)
       } else if (command === 'ledctrl') {
         extended.light = request.led_mode
       } else if (command === 'print_speed') {
@@ -356,6 +367,7 @@ export async function startBambuSimulator({
       key: ftpsIdentity.key,
       cert: ftpsIdentity.cert,
       uploads,
+      timelapse,
     })
   } catch (error) {
     clearInterval(periodicReports)
@@ -384,6 +396,8 @@ export async function startBambuSimulator({
     reportTopic,
     requests,
     uploads,
+    timelapse,
+    gcodeLines,
     calls: broker.calls,
     control: {
       faults: broker.control.faults,
@@ -402,6 +416,11 @@ export async function startBambuSimulator({
       return gcodeState
     },
     publishReport,
+    uploadTimelapse(name: string, data: Uint8Array) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
+        throw new Error('Invalid upload')
+      timelapse.set(name, Buffer.from(data))
+    },
     uploadFile(name: string, data: Uint8Array) {
       if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '..' || !data.length)
         throw new Error('Invalid upload')
@@ -448,6 +467,18 @@ export async function startBambuSimulator({
       return closing
     },
   }
+}
+
+/** Plain motion and console scripts: one G or M command per line. */
+function validScript(param: unknown) {
+  return (
+    typeof param === 'string' &&
+    param.endsWith('\n') &&
+    param
+      .slice(0, -1)
+      .split('\n')
+      .every((line) => /^[GM]\d{1,3}(?: [A-Z]-?\d+(?:\.\d+)?)*$/.test(line))
+  )
 }
 
 function sdcardFileName(url: string) {

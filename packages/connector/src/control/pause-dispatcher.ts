@@ -12,6 +12,10 @@ import {
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
+import {
+  macroParamsAllowed,
+  type MacroParamMap,
+} from '../moonraker/control-macros.ts'
 import { z } from 'zod'
 import {
   decodeCommandV2,
@@ -78,6 +82,11 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('excluded-object'),
+        name: z.string(),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('light'),
         on: z.boolean(),
         observedMono: mono,
@@ -122,6 +131,8 @@ export function controlEffectMatches(
         typeof args.percent === 'number' &&
         Math.abs(effect.percent - args.percent) <= 1
       )
+    case 'exclude_object':
+      return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
     default:
@@ -150,6 +161,7 @@ export interface PauseDriver {
     },
   ): Promise<PauseRpcResult>
   macros?(binding: PrinterBinding): readonly string[] | undefined
+  macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   pauseOnce(input: {
     args?: Record<string, unknown>
@@ -234,6 +246,7 @@ export function createPauseDispatcher(config: {
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
+    macroParams: config.driver.macroParams?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
     closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
@@ -551,7 +564,12 @@ export function createPauseDispatcher(config: {
         if (
           command.action === 'run_macro' &&
           (typeof command.args.name !== 'string' ||
-            !driver.macros?.(printerBinding)?.includes(command.args.name))
+            !driver.macros?.(printerBinding)?.includes(command.args.name) ||
+            !macroParamsAllowed(
+              driver.macroParams?.(printerBinding),
+              command.args.name,
+              command.args.params,
+            ))
         )
           return 'unsupported-action'
         if (
@@ -878,7 +896,19 @@ export function createPauseDispatcher(config: {
             (error as { resultCode?: unknown } | null)?.resultCode,
           )
           if (carried.success) resultCode = carried.data
-          if (!terminal)
+          // A typed refusal means the driver wrote nothing and says why.
+          const refusal = (error as { refusal?: unknown } | null)?.refusal
+          if (
+            !terminal &&
+            !permitted &&
+            !guardCalled &&
+            receipt &&
+            (refusal === 'state' ||
+              refusal === 'unsupported-action' ||
+              refusal === 'invalid-command')
+          )
+            finalize('not-sent', refusal, 'guard-denied')
+          else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)
                 ? 'outcome-unknown'

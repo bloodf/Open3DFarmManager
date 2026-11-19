@@ -23,7 +23,10 @@ import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
-import { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
+import {
+  ExtendedControlAction,
+  controlRoleAllowed,
+} from '../../packages/farm-protocol/src/control-actions.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import type { ControlLimits } from '../../packages/connector/src/runtime/control-limits.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
@@ -44,6 +47,8 @@ const MOONRAKER_ALL = [
   'home',
   'set_light',
   'set_speed',
+  'extrude',
+  'set_pin',
 ]
 const BAMBU_ALL = [
   ...LIFECYCLE,
@@ -180,9 +185,10 @@ async function authorityFixture(action: Action, args: Args) {
     admission_nonce: admissionNonce,
     actions: [...ExtendedControlAction.options],
   }
-  // An operator is never granted run_macro: only owners and admins are.
-  capability.actions = capability.actions.filter(
-    (granted) => granted !== 'run_macro',
+  // An operator is never granted run_macro or service: owners (and admins
+  // for macros) only. Keep the operator role and grant what it is allowed.
+  capability.actions = capability.actions.filter((granted) =>
+    controlRoleAllowed(capability.role, granted),
   )
   const challenge = {
     v: 1 as const,
@@ -527,10 +533,10 @@ for (const c of moonrakerCases) {
         c.action === 'emergency_stop' ? 'error' : 'printing',
       )
     }
-    // One detection read at provisioning, then exactly one command.
+    // Two detection reads at provisioning (objects, components), then exactly one command.
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list', c.method],
+      ['printer.objects.list', 'server.info', c.method],
     )
     assert.deepEqual(f.moonraker?.gcodeScripts, c.script ? [c.script] : [])
   })
@@ -551,6 +557,10 @@ test('Moonraker advertises exactly the actions its detected objects support', as
     'set_fan',
     'home',
     'set_speed',
+    'jog',
+    'motors_off',
+    'z_babystep',
+    'set_factor',
   ])
   assert.deepEqual(await bare.dispatch(), {
     kind: 'rejected',
@@ -558,7 +568,7 @@ test('Moonraker advertises exactly the actions its detected objects support', as
   })
   assert.deepEqual(
     commands(bare).map((request) => request.method),
-    ['printer.objects.list'],
+    ['printer.objects.list', 'server.info'],
   )
 })
 
@@ -593,7 +603,7 @@ for (const action of ['start_print', 'firmware_restart'] as const) {
     })
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list'],
+      ['printer.objects.list', 'server.info'],
     )
   })
 }

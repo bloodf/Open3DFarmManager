@@ -1,3 +1,10 @@
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
+import { createPrinterDetailSources } from './printer-detail-session.ts'
+import {
+  discoveryBindings,
+  pause,
+  runBackgroundDiscovery,
+} from './background-discovery.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
 import type { Logger } from '../../../shared/src/log.ts'
@@ -13,6 +20,11 @@ import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
+import { connectorVersionMetadata } from '../status/version.ts'
+import {
+  createPrinterLinkHealth,
+  startLinkHealthHeartbeat,
+} from './link-health.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
 import {
   readBambuPrinterBinding,
@@ -75,18 +87,6 @@ function bootstrapNetworking() {
   process.env.WS_NO_UTF_8_VALIDATE = '1'
   bootstrapped = true
 }
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    function done() {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', done)
-      resolve()
-    }
-    const timer = setTimeout(done, ms)
-    signal.addEventListener('abort', done, { once: true })
-    if (signal.aborted) done()
-  })
-}
 function untilAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) resolve()
@@ -144,6 +144,7 @@ async function runConnectorAgentOnce(
   input: AgentInput,
   logger: Logger,
 ): Promise<boolean> {
+  const startedAt = performance.now()
   const identity = loadExistingIdentity(input.dataDirectory)
   // Config scope only needs agent/farm, which an expired envelope still binds.
   const config = readAgentRuntimeConfig(
@@ -236,10 +237,13 @@ async function runConnectorAgentOnce(
     printerKey: assignment.printer_key,
   }))
   let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
+  let macroParamsFor:
+    ((assignmentId: string) => MacroParamMap | undefined) | undefined
   let macrosFor:
     ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
+  const detailSources = createPrinterDetailSources(config)
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
     // One startup probe of the native RTC module. Without it the agent keeps
@@ -268,11 +272,46 @@ async function runConnectorAgentOnce(
       })
     }
     if (signal.aborted) return false
+    const links = new Map(
+      config.collection.printers.map(({ printerKey }) => [
+        printerKey,
+        createPrinterLinkHealth(printerKey),
+      ]),
+    )
+    startLinkHealthHeartbeat(
+      () => ({
+        connector: {
+          version: connectorVersionMetadata.connectorVersion,
+          uptimeMs: Math.floor(performance.now() - startedAt),
+          queueBacklog: queue.depth,
+          storage: queue.storageDegraded ? 'degraded' : 'healthy',
+          rtcScope:
+            !lookupId || rtcBackend.mode !== 'direct'
+              ? 'disabled'
+              : isLoopbackBindAddress(config.rtc.bindAddress)
+                ? 'loopback'
+                : 'lan',
+        },
+        printers: Array.from(links.values(), (link) => link.read()),
+      }),
+      (frames) => {
+        for (const frame of frames)
+          logger.info('link-health-heartbeat', JSON.parse(frame))
+      },
+      signal,
+    )
     snapshots = config.signalling
       ? createFarmSnapshotSource({
           assignmentRefs: refs,
+          linkHealthFor(printerKey) {
+            const health = links.get(printerKey)
+            if (!health) return
+            const { printerKey: _printerKey, ...status } = health.read()
+            return status
+          },
           controlsFor: (id) => controlsFor?.(id),
           macrosFor: (id) => macrosFor?.(id),
+          macroParamsFor: (id) => macroParamsFor?.(id),
           localWebUiOriginFor: (id) => {
             const assignment = config.assignments.find(
               (item) => item.assignment_id === id,
@@ -367,6 +406,7 @@ async function runConnectorAgentOnce(
             assignmentRefs: refs,
           })
         : undefined
+      const detailSourceFor = detailSources.sourceFor
       tasks.push(
         runSignallingLifecycle({
           signal,
@@ -390,7 +430,7 @@ async function runConnectorAgentOnce(
                 identity,
               },
               {
-                genuineStatus: { assignmentRefs: refs },
+                genuineStatus: { assignmentRefs: refs, detailSourceFor },
                 ...(cameraMedia ? { cameraMedia } : {}),
                 onInboxReady() {
                   onAdmitted()
@@ -542,6 +582,9 @@ async function runConnectorAgentOnce(
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
+          onMacroParams(read) {
+            macroParamsFor = read
+          },
           onMacros(read) {
             macrosFor = read
           },
@@ -676,6 +719,7 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        linkHealthFor: (printerKey) => links.get(printerKey),
         discoverMoonrakerObjects: true,
         importMoonrakerHistory: true,
         onLoss: (value) => logger.warn('queue-loss', { ...value }),
@@ -692,10 +736,31 @@ async function runConnectorAgentOnce(
         onDiagnostic: diagnostic,
         ...(snapshots
           ? {
-              onRawObservation: snapshots.observe,
-              onRawUnavailable: snapshots.invalidate,
+              onRawObservation: (observation) => {
+                if (!snapshots) return
+                snapshots.observe(observation)
+                detailSources.observe(observation.printer)
+              },
+              onRawUnavailable: (event) => {
+                if (!snapshots) return
+                snapshots.invalidate(event)
+                detailSources.invalidate(event.printerKey)
+              },
             }
           : {}),
+      }).catch(fail),
+    )
+    tasks.push(
+      runBackgroundDiscovery({
+        ...config.discovery,
+        signal,
+        bindings: discoveryBindings(config.collection),
+        now: () => clock.now(),
+        report(results, now) {
+          const { loss } = queue.enqueueDiscovery(results, now)
+          if (loss.expired || loss.capacity)
+            logger.warn('queue-loss', { ...loss })
+        },
       }).catch(fail),
     )
     tasks.push(drainLoop().catch(fail))

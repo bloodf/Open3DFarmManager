@@ -98,7 +98,7 @@ async function replayFromDialog(
     })
     const text = await dialog.innerText()
     if (!text.includes(NOT_SENT)) return text
-    if (attempt >= 6) throw new Error('A sessão de comando falhou 6 vezes')
+    if (attempt >= 2) throw new Error('A sessão de comando falhou 2 vezes')
     await dialog.getByRole('button', { name: /^(Cancelar|Fechar)$/ }).click()
     await expect(dialog).toBeHidden()
     // Gives the Connector time to listen for a new session.

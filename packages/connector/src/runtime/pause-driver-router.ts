@@ -19,6 +19,7 @@ import {
   moonrakerControls,
 } from '../moonraker/control-support.ts'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
+import { consoleSupported } from '../moonraker/control-console.ts'
 import { openFixedMoonrakerPause } from '../moonraker/pause-driver.ts'
 import {
   readPrinterBinding,
@@ -65,6 +66,8 @@ export function createPauseDriverRouter(config: {
    * extended actions its model supports; nothing from the wire can.
    */
   bambuModel?(binding: PrinterBinding): string | undefined
+  /** Local per-printer admin switch of the G-code console; absent means off. */
+  gcodeConsole?(binding: PrinterBinding): boolean
   observe(
     binding: PrinterBinding,
     observation: ControlObservation | null,
@@ -92,7 +95,11 @@ export function createPauseDriverRouter(config: {
     const bambu = readBambuPrinterBinding(binding)
     if (bambu)
       return bambu.control ? bambuControls(config.bambuModel?.(binding)) : []
-    return moonrakerControls(moonrakerObjects.get(binding))
+    const objects = moonrakerObjects.get(binding)
+    const found = moonrakerControls(objects)
+    return config.gcodeConsole?.(binding) && consoleSupported(objects)
+      ? Object.freeze([...found, 'gcode' as const])
+      : found
   }
   return Object.freeze({
     controls,
@@ -186,6 +193,7 @@ export function createPauseDriverRouter(config: {
           limits: config.limits,
           connectionGeneration: generation,
           objects: moonrakerObjects.get(binding),
+          gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
           signal: owner.signal,
           publish(observation) {

@@ -268,6 +268,9 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      gcodeConsole: (binding) =>
+        binding === printerBinding &&
+        pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,
       observe(binding, next) {
         const accepted = relay.observe(binding, next)
         observation = accepted ? next : null

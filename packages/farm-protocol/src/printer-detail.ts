@@ -203,6 +203,7 @@ const queryResults = {
     state: name,
     jobs: z.array(z.strictObject({ id: name, file: path })).max(256),
   }),
+  'gcode-help': z.array(name).max(512),
   'power-devices': named({ on: z.boolean() }),
   timelapse: z.strictObject({
     enabled: z.boolean(),

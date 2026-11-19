@@ -36,8 +36,13 @@ export default defineNitroPlugin((nitro) => {
       // Server-mode purge needs the library directory; Connector-mode purge goes through the relay hub when it is running (otherwise those blobs are reported as deferred).
       const directory = process.env.OPENFARM_LIBRARY_DIR
       const blobs = directory ? await createBlobStore(directory) : undefined
+      const connectors = activeConnectorLibraryRelay()
       const result = await runLibraryRetention(
-        { sql, blobs, connectors: activeConnectorLibraryRelay() },
+        {
+          sql,
+          ...(blobs ? { blobs } : {}),
+          ...(connectors ? { connectors } : {}),
+        },
         config,
       )
       if (Object.values(result).some(Boolean))

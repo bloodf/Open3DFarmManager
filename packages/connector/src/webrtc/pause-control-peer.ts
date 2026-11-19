@@ -216,13 +216,15 @@ export class PauseConnectorPeer {
           if (this.current() && !this.#list?.receive(raw))
             this.#upload?.receive(raw)
         })
+        // The browser closes the file channel when its transfer is done; a
+        // staged config must survive until the signed write that uses it.
         channel.onClosed(() => {
           this.#list?.close()
-          this.#uploadClose = this.#upload?.close()
+          this.#uploadClose = this.#upload?.close({ keepStaged: true })
         })
         channel.onError(() => {
           this.#list?.close()
-          this.#uploadClose = this.#upload?.close()
+          this.#uploadClose = this.#upload?.close({ keepStaged: true })
         })
       }
       this.#channel = this.#peer.createDataChannel('pause-control-v1', {

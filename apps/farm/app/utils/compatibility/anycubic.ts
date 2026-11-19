@@ -145,7 +145,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
       'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
     ],
     limitations: [
-      'O adaptador nativo tem testes simulados. O agente ainda não encaminha comandos assinados para a atribuição nativa.',
+      'O adaptador nativo tem testes simulados; não comprovado em hardware. O agente ainda não encaminha comandos assinados para a atribuição nativa.',
       'Os slots ACE aparecem quando a impressora os informa. A câmera nativa ainda não está ligada à sessão de mídia.',
     ],
   },

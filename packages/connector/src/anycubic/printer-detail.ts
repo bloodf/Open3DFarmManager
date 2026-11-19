@@ -11,10 +11,9 @@ export function anycubicPrinterDetail(
     { name: 'extruder', temperature: printer.toolTemperatureCelsius },
     { name: 'heater_bed', temperature: printer.bedTemperatureCelsius },
   ].filter(({ temperature }) => temperature !== undefined)
-  const fans = Object.entries(printer.fans ?? {}).map(([name, percent]) => ({
-    name,
-    speed: percent / 100,
-  }))
+  const fans = Object.entries(printer.fans ?? {}).flatMap(([name, percent]) =>
+    percent === undefined ? [] : [{ name, speed: percent / 100 }],
+  )
   const light = printer.light?.chamber
   const detail = {
     print: {

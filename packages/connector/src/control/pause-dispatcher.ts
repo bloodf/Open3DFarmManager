@@ -878,7 +878,19 @@ export function createPauseDispatcher(config: {
             (error as { resultCode?: unknown } | null)?.resultCode,
           )
           if (carried.success) resultCode = carried.data
-          if (!terminal)
+          // A typed refusal means the driver wrote nothing and says why.
+          const refusal = (error as { refusal?: unknown } | null)?.refusal
+          if (
+            !terminal &&
+            !permitted &&
+            !guardCalled &&
+            receipt &&
+            (refusal === 'state' ||
+              refusal === 'unsupported-action' ||
+              refusal === 'invalid-command')
+          )
+            finalize('not-sent', refusal, 'guard-denied')
+          else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)
                 ? 'outcome-unknown'

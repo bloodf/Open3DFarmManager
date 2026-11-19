@@ -1,4 +1,5 @@
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { parseExtrude } from './control-extrusion.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -83,6 +84,7 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))
     supported.push('load_filament')
@@ -124,6 +126,13 @@ export function buildMoonrakerCommand(
     )
       throw new Error('Macro unavailable')
     return { method: 'printer.gcode.script', params: { script: name } }
+  }
+
+  if (action === 'extrude') {
+    return {
+      method: 'printer.gcode.script',
+      params: { script: parseExtrude(args, objects).script },
+    }
   }
 
   if (action === 'pause') {

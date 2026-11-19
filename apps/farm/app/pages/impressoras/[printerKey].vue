@@ -95,7 +95,9 @@ watch(
   { immediate: true },
 )
 
-function availability(action: 'set_temperature' | 'emergency_stop') {
+function availability(
+  action: 'set_temperature' | 'emergency_stop' | 'extrude',
+) {
   void now.value
   const current = ready.value
   return row.value && current
@@ -109,12 +111,35 @@ function availability(action: 'set_temperature' | 'emergency_stop') {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const extrudeAvailability = computed(() => availability('extrude'))
+const extrusion = computed(() => {
+  const advertised = state.value?.controls?.includes('extrude') ?? false
+  return {
+    advertised,
+    // Tool 0 is the reported extruder; only listed heaters are offered.
+    tools: heaters.value.some(({ name }) => name === 'extruder') ? [0] : [],
+    canCommand: extrudeAvailability.value.available && !commandInFlight.value,
+    reason: extrudeAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? extrudeAvailability.value.reason
+        : undefined,
+  }
+})
 
 function setTemperature(heater: string, targetC: number, event: Event) {
   if (row.value)
     void openControl(row.value, 'set_temperature', event, {
       heater,
       target_c: targetC,
+    })
+}
+function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
+  if (row.value)
+    void openControl(row.value, 'extrude', event, {
+      tool,
+      length_mm: lengthMm,
+      feed,
     })
 }
 function emergencyStop(event: Event) {
@@ -166,7 +191,9 @@ onMounted(() => heading.value?.focus())
           : temperatureAvailability.reason
       "
       :can-emergency-stop="stopAvailability.available && !commandInFlight"
+      :extrusion="extrusion"
       @set-temperature="setTemperature"
+      @extrude="extrude"
       @emergency-stop="emergencyStop"
     />
     <dialog

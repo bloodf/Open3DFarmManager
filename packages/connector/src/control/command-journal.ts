@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 11
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -221,19 +221,31 @@ const excludeActionSchema = serviceActionSchema.replace(
   "'service'",
   "'service','exclude_object'",
 )
-const actionSchema = excludeActionSchema.replace(
+const powerActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','power'",
+)
+const timelapseActionSchema = excludeActionSchema.replace(
   "'exclude_object'",
   "'exclude_object','timelapse'",
 )
-const previousActionSchemas: Record<number, string> = {
-  2: legacyActionSchema,
-  3: previousActionSchema,
-  4: macroActionSchema,
-  5: motionActionSchema,
-  6: outputActionSchema,
-  7: queueActionSchema,
-  8: serviceActionSchema,
-  9: excludeActionSchema,
+const actionSchema = timelapseActionSchema.replace(
+  "'timelapse'",
+  "'timelapse','power'",
+)
+const previousActionSchemas: Record<number, readonly string[]> = {
+  2: [legacyActionSchema],
+  3: [previousActionSchema],
+  4: [macroActionSchema],
+  5: [motionActionSchema],
+  6: [outputActionSchema],
+  7: [queueActionSchema],
+  8: [serviceActionSchema],
+  9: [
+    serviceActionSchema.replace("'service'", "'service','power'"),
+    excludeActionSchema,
+  ],
+  10: [powerActionSchema, timelapseActionSchema],
 }
 const schema = [
   actionSchema,
@@ -380,7 +392,7 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION].includes(
+      (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION].includes(
         Number(initialVersion),
       ) ||
         initialApplication !== APPLICATION_ID)
@@ -424,18 +436,18 @@ export function openCommandJournal(input: {
           )
           .all()
           .map((row) => row.sql)
-        const legacySchema = schema
-          .map((sql) =>
-            sql === actionSchema
-              ? previousActionSchemas[Number(version)]!
-              : sql,
-          )
-          .sort()
-        if (
-          definitions.length !== legacySchema.length ||
-          definitions.some((sql, index) => sql !== legacySchema[index])
+        const matchesLegacy = previousActionSchemas[Number(version)]?.some(
+          (previous) => {
+            const expected = schema
+              .map((sql) => (sql === actionSchema ? previous : sql))
+              .sort()
+            return (
+              definitions.length === expected.length &&
+              definitions.every((sql, index) => sql === expected[index])
+            )
+          },
         )
-          throw new Error('Invalid command journal schema')
+        if (!matchesLegacy) throw new Error('Invalid command journal schema')
         database.exec(
           'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
         )

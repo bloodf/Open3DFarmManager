@@ -4,6 +4,10 @@ import { z } from 'zod'
 export const ControlAction = z.enum(['pause', 'resume', 'cancel'])
 export type ControlAction = z.infer<typeof ControlAction>
 /** Every action a signed 'printer-control' command may carry. */
+export const PowerArguments = z.strictObject({
+  device: z.string().min(1).max(128),
+  on: z.boolean(),
+})
 export const ExtendedControlAction = z.enum([
   ...ControlAction.options,
   'emergency_stop',
@@ -16,6 +20,7 @@ export const ExtendedControlAction = z.enum([
   'start_library_print',
   'firmware_restart',
   'service',
+  'power',
   'timelapse',
   'run_macro',
   'load_filament',
@@ -137,6 +142,7 @@ export function controlRoleAllowed(
   action?: ExtendedControlAction,
 ): boolean {
   if (action === 'service') return role === 'owner'
+  if (action === 'power') return role === 'owner' || role === 'admin'
   if (action === 'run_macro') return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
@@ -242,6 +248,7 @@ export const QueueOpArguments = z.discriminatedUnion('op', [
 ])
 export type QueueOpArguments = z.infer<typeof QueueOpArguments>
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('power'), args: PowerArguments }),
   z.strictObject({ action: z.literal('service'), args: ServiceArguments }),
   z.strictObject({ action: z.literal('timelapse'), args: TimelapseArguments }),
   z.strictObject({ action: z.literal('queue_op'), args: QueueOpArguments }),

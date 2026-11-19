@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
@@ -115,6 +116,7 @@ const capabilities = computed<DetailCapability[] | undefined>(() => {
       ? (['system'] as const)
       : []),
     ...(heaters.value.length ? (['heaters'] as const) : []),
+    ...(controls?.includes('power') ? (['power'] as const) : []),
     ...(controls?.includes('queue_op') ? (['job-queue'] as const) : []),
     ...(controls?.includes('timelapse') ? (['timelapse'] as const) : []),
     ...(controls?.includes('jog') ? (['motion'] as const) : []),
@@ -201,6 +203,7 @@ const outputs = computed(() => {
         : undefined,
   }
 })
+const powerAvailability = computed(() => availability('power'))
 const serviceAvailability = computed(() => availability('service'))
 const timelapseAvailability = computed(() => availability('timelapse'))
 const timelapse = computed(() => {
@@ -425,6 +428,21 @@ onMounted(() => heading.value?.focus())
       @emergency-stop="emergencyStop"
     >
       <template #sistema>
+        <PowerPanel
+          v-if="state?.controls?.includes('power')"
+          :devices="
+            live && detailFrame?.printerKey === printerKey
+              ? detailFrame.detail.powerDevices
+              : undefined
+          "
+          :can-command="live && powerAvailability.available && !commandInFlight"
+          :reason="
+            commandInFlight
+              ? 'Um comando já está em andamento.'
+              : powerAvailability.reason
+          "
+          @toggle="(args, event) => control('power', event, args)"
+        />
         <SystemServicesPanel
           :firmware="systemFrame?.detail.firmware"
           :host="systemFrame?.detail.host"
@@ -549,8 +567,13 @@ onMounted(() => heading.value?.focus())
           {{ extendedLabel(pauseTarget.action) }} — {{ pauseTarget.printerKey }}
         </h2>
         <p id="pause-dialog-description">
-          Confirme o comando para esta impressora. Ele será enviado diretamente
-          ao Connector e não será repetido automaticamente.
+          <template v-if="pauseTarget.action === 'power'">
+            Confirme se deseja {{ pauseTarget.args.on ? 'ligar' : 'desligar' }}
+            {{ pauseTarget.args.device }} nesta impressora.
+          </template>
+          <template v-else>Confirme o comando para esta impressora.</template>
+          Ele será enviado diretamente ao Connector e não será repetido
+          automaticamente.
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
         <div class="actions">

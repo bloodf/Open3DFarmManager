@@ -12,6 +12,7 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import { POWER_MARKER, readPowerDevices } from './control-power.ts'
 import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
 import { timelapseMarkers } from './control-timelapse.ts'
@@ -145,15 +146,20 @@ export function detectMoonrakerMacroParams(
 }
 
 /**
- * One read-only server.info: a marker for each Moonraker component the
- * Connector drives (the job queue). A failure rejects; the caller advertises
- * nothing for those components rather than guessing.
+ * Read the Moonraker components and power device catalogue independently.
+ * Advertise each capability only when its probe succeeds.
  */
-export function detectMoonrakerComponents(
+export async function detectMoonrakerComponents(
   input: DetectInput,
 ): Promise<readonly string[]> {
-  return readOnlyOnce(input, { method: 'server.info' }, (result) => [
-    ...queueMarkers(result),
-    ...timelapseMarkers(result),
+  const [components, power] = await Promise.all([
+    readOnlyOnce(input, { method: 'server.info' }, (result) => [
+      ...queueMarkers(result),
+      ...timelapseMarkers(result),
+    ]).catch(() => []),
+    readPowerDevices((method) =>
+      readOnlyOnce(input, { method }, (result) => result),
+    ).catch(() => []),
   ])
+  return [...components, ...(power.length ? [POWER_MARKER] : [])]
 }

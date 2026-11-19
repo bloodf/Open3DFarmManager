@@ -24,6 +24,9 @@ async function mountPrinter(page: Page, printer: object) {
     route.fulfill({ json: { accountId: 'synthetic-ui-account' } }),
   )
   await page.goto('/farm')
+  // Let the page settle (no farm data loads here) so its re-render does not
+  // drop the mount target appended below.
+  await expect(page.getByRole('alert')).toBeVisible()
   await page.evaluate((value) => {
     ;(window as any).farmControlsPrinters = [value]
     const target = document.createElement('div')

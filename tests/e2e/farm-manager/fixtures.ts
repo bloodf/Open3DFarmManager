@@ -121,6 +121,8 @@ export type BootOptions = Readonly<{
   signedControl?: boolean
   /** Starts an unadopted Moonraker mock + loopback mDNS discovery responder on Connector 2. */
   discoveredMoonraker?: Readonly<{ name?: string }>
+  /** Opt the Bambu mock into local commands. */
+  control?: boolean
 }>
 
 export type FarmManager = Readonly<{
@@ -248,6 +250,7 @@ async function bootFarm(
     browser: guardedBrowser(browser, guard),
     simulator: HARNESS_SIMULATOR[first.family],
     printerKey: keys[0]!,
+    ...(options.control === undefined ? {} : { control: options.control }),
     ...(options.history === undefined ? {} : { history: options.history }),
     ...(options.signedControl === undefined
       ? {}

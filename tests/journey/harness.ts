@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Locator, type Page } from '@playwright/test'
@@ -213,6 +214,8 @@ export type JourneyHarness = Readonly<{
    * connection is needed (for example to read the job history).
    */
   setTelemetryUpload(open: boolean): void
+  /** Directory of the server-mode library blobs (`<sha256>` files). */
+  libraryDirectory: string
   /** Bounded Nitro output tail for failure diagnostics. */
   appLog(): string
   close(): Promise<void>
@@ -851,6 +854,7 @@ export async function startJourneyHarness(
       simulatorObservation: () => runtime.observe(),
       disconnectSignalling: () => app.disconnectUpgrades(),
       setTelemetryUpload: (open: boolean) => app.setTelemetryUpload(open),
+      libraryDirectory: join(app.directory, 'library'),
       appLog: () => app.log(),
       close,
     })

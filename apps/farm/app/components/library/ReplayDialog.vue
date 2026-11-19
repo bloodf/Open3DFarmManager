@@ -75,14 +75,14 @@ function reset() {
   )
 }
 watch(
-  () => [open.value, props.source.sha256] as const,
+  [() => open.value, () => props.source.sha256],
   ([isOpen]) => {
     if (isOpen) reset()
   },
   { immediate: true },
 )
 watch(
-  () => [selectedKey.value, props.source.sha256] as const,
+  [() => selectedKey.value, () => props.source.sha256],
   () => {
     bedClear.value = false
     mapping.value = selected.value

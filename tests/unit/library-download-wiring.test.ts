@@ -420,4 +420,11 @@ describe('printer profile for a library start', () => {
     })
     expect(profiles.read('other')).toBeUndefined()
   })
+
+  test('takes the nozzles of a printer that names no model, with an empty model', () => {
+    const profiles = createPrinterProfiles()
+    profiles.observe(printer({ machine: { nozzleDiametersMm: [0.4] } }))
+    // Moonraker reports no model: a file that names one cannot match it.
+    expect(profiles.read('p1')).toEqual({ model: '', nozzleDiameters: [0.4] })
+  })
 })

@@ -175,7 +175,7 @@ export function createLibraryPrintStarter(config: {
   cache: LibraryCache
   download: LibraryDownloader
   /** Connector-mode library on this host. Its index tells where a hash lives. */
-  local?: Pick<LibraryStore, 'list' | 'openForPrint'>
+  local?: Pick<LibraryStore, 'has' | 'list' | 'openForPrint'>
   /** This printer's own observed profile; never taken from the action. */
   profile(): Promise<CompatibilityProfile | undefined>
   materials?(): readonly (LoadedMaterial | undefined)[]
@@ -188,8 +188,13 @@ export function createLibraryPrintStarter(config: {
   async function resolveLocal(sha256: string) {
     const entries = (await config.local?.list()) ?? []
     const known = entries.filter((entry) => entry.sha256 === sha256)
-    if (!known.length) return null
-    return known.find((entry) => entry.state === 'stored') ?? known[0]!
+    if (known.length)
+      return known.find((entry) => entry.state === 'stored') ?? known[0]!
+    // A Connector-mode upload relayed by the server stores the bytes before
+    // any version is linked: the verified file alone makes the hash local.
+    return (await config.local?.has(sha256))
+      ? { state: 'stored' as const, kind: undefined, name: undefined }
+      : null
   }
 
   return {
@@ -229,8 +234,9 @@ export function createLibraryPrintStarter(config: {
             throw error
           }
           source = 'local'
-          kind = local.kind
+          kind = local.kind ?? (await sniffKind(path))
           name =
+            local.name !== undefined &&
             plainName(local.name) &&
             local.name.toLowerCase().endsWith(`.${kind}`)
               ? local.name

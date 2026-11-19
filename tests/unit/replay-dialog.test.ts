@@ -181,6 +181,19 @@ describe('replay grouping and mapping', () => {
     expect(replayOutcomeText({ outcome: 'rejected', code: 'novo' })).toMatch(
       /O Connector recusou o comando/,
     )
+    // A refusal the Connector reports before anything reaches the printer
+    // arrives as "not sent" with its code: the reason is shown, not hidden.
+    expect(
+      replayOutcomeText({ outcome: 'not-sent', code: 'incompatible' }),
+    ).toBe(
+      `${REFUSAL_TEXT.incompatible} A impressão não foi iniciada e nada será repetido automaticamente.`,
+    )
+    expect(replayOutcomeText({ outcome: 'not-sent', code: 'novo' })).toMatch(
+      /não foi enviado ao Connector/,
+    )
+    expect(replayOutcomeText({ outcome: 'not-sent' })).toMatch(
+      /não foi enviado ao Connector/,
+    )
     expect(replayOutcomeText({ outcome: 'outcome-unknown' })).toMatch(
       /Verifique a impressora/,
     )
@@ -203,6 +216,8 @@ describe('replay dialog in a browser', () => {
           import ReplayAction from './apps/farm/app/components/history/ReplayAction.vue'
           window.mountReplay = (kind, props) => {
             const open = ref(true)
+        const current = ref(props)
+        window.refreshReplay = () => { current.value = { ...current.value, source: { ...current.value.source } } }
             window.__sent = []
             const send = async (key, args) => {
               window.__sent.push({ key, args })
@@ -212,7 +227,7 @@ describe('replay dialog in a browser', () => {
             createApp({
               render: () =>
                 kind === 'dialog'
-                  ? h(ReplayDialog, { ...props, send, modelValue: open.value, 'onUpdate:modelValue': (v) => (open.value = v) })
+                  ? h(ReplayDialog, { ...current.value, send, modelValue: open.value, 'onUpdate:modelValue': (v) => (open.value = v) })
                   : h(ReplayAction, { ...props, send }),
             }).mount('#app')
           }
@@ -332,6 +347,30 @@ describe('replay dialog in a browser', () => {
       )
       // Settled: the command cannot be sent a second time from this dialog.
       expect(await go.isDisabled()).toBe(true)
+    } finally {
+      await close()
+    }
+  })
+
+  it('keeps a settled command locked when the source is refreshed', async () => {
+    const { page, sent, close } = await mount('dialog', {
+      ...base,
+      preferredPrinter: 'voron',
+    })
+    try {
+      await page.getByLabel('Confirmo que a mesa está limpa').check()
+      await page.getByRole('button', { name: 'Imprimir de novo' }).click()
+      await page.getByText('Impressão iniciada').waitFor()
+      await page.evaluate(() =>
+        (window as unknown as { refreshReplay(): void }).refreshReplay(),
+      )
+      expect(await page.getByText('Impressão iniciada').isVisible()).toBe(true)
+      expect(
+        await page
+          .getByRole('button', { name: 'Imprimir de novo' })
+          .isDisabled(),
+      ).toBe(true)
+      expect(await sent()).toHaveLength(1)
     } finally {
       await close()
     }

@@ -117,6 +117,21 @@ function availability(action: ExtendedControlAction) {
 }
 const temperatureAvailability = computed(() => availability('set_temperature'))
 const stopAvailability = computed(() => availability('emergency_stop'))
+const extrudeAvailability = computed(() => availability('extrude'))
+const extrusion = computed(() => {
+  const advertised = state.value?.controls?.includes('extrude') ?? false
+  return {
+    advertised,
+    // Tool 0 is the reported extruder; only listed heaters are offered.
+    tools: heaters.value.some(({ name }) => name === 'extruder') ? [0] : [],
+    canCommand: extrudeAvailability.value.available && !commandInFlight.value,
+    reason: extrudeAvailability.value.available
+      ? 'Um comando já está em andamento.'
+      : advertised
+        ? extrudeAvailability.value.reason
+        : undefined,
+  }
+})
 const motionAvailability = computed(() =>
   Object.fromEntries(
     (
@@ -154,6 +169,14 @@ function control(
   args: Record<string, unknown> = {},
 ) {
   if (row.value) void openControl(row.value, action, event, args)
+}
+function extrude(tool: number, lengthMm: number, feed: number, event: Event) {
+  if (row.value)
+    void openControl(row.value, 'extrude', event, {
+      tool,
+      length_mm: lengthMm,
+      feed,
+    })
 }
 function emergencyStop(event: Event) {
   if (row.value) void openControl(row.value, 'emergency_stop', event)
@@ -205,7 +228,6 @@ onMounted(() => heading.value?.focus())
       "
       :can-emergency-stop="stopAvailability.available && !commandInFlight"
       :motion-availability="motionAvailability"
-      @set-temperature="setTemperature"
       @home="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
       @jog="
         (axis, distance, feed, event) =>
@@ -219,6 +241,9 @@ onMounted(() => heading.value?.focus())
         (speed, flow, event) =>
           control('set_factor', event, { speed_pct: speed, flow_pct: flow })
       "
+      :extrusion="extrusion"
+      @set-temperature="setTemperature"
+      @extrude="extrude"
       @emergency-stop="emergencyStop"
     />
     <dialog

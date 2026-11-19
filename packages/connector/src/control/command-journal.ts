@@ -203,7 +203,7 @@ const macroActionSchema = previousActionSchema.replace(
 )
 const actionSchema = macroActionSchema.replace(
   "'unload_filament'",
-  "'unload_filament','jog','motors_off','z_babystep','set_factor'",
+  "'unload_filament','extrude','jog','motors_off','z_babystep','set_factor'",
 )
 const previousActionSchemas: Record<number, string> = {
   2: legacyActionSchema,

@@ -21,6 +21,7 @@ export const ExtendedControlAction = z.enum([
   'motors_off',
   'z_babystep',
   'set_factor',
+  'extrude',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -52,6 +53,8 @@ export function controlSourceState(
   // Jogging and releasing the motors never run during a job.
   if (action === 'jog' || action === 'motors_off')
     return state === 'idle' || state === 'cancelled'
+  // Extrusion moves filament: only a stopped printer may do it.
+  if (action === 'extrude') return state === 'idle' || state === 'cancelled'
   if (!['pause', 'resume', 'cancel'].includes(action))
     return state !== 'unknown' && state !== 'error'
   return action === 'resume'
@@ -81,7 +84,19 @@ const signedStep = (min: number, max: number, step: number) =>
         Math.abs(value / step - Math.round(value / step)) < 1e-6,
     )
 
+/** Tool index, signed length (negative retracts) and feed rate in mm/min. */
+export const ExtrudeArguments = z.strictObject({
+  tool: z.number().int().min(0).max(15),
+  length_mm: z
+    .number()
+    .finite()
+    .min(-50)
+    .max(100)
+    .refine((value) => value !== 0),
+  feed: z.number().finite().min(1).max(6000),
+})
 export const ControlArguments = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
     args: z.strictObject({ name: MacroName }),

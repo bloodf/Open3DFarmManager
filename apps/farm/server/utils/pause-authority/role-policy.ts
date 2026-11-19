@@ -14,6 +14,7 @@ export function actionsForControlRole(
         'run_macro',
         'load_filament',
         'unload_filament',
+        'extrude',
         'jog',
         'motors_off',
         'z_babystep',

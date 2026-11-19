@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import Tabs from '../ui/Tabs.vue'
+import ExtrusionPanel from './ExtrusionPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
 import MotionPanel from './MotionPanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
@@ -31,6 +32,13 @@ const props = defineProps<{
   history: HeaterHistory
   canCommand: boolean
   commandReason?: string
+  /** Extrusion control: shown with its reason when not advertised. */
+  extrusion?: {
+    advertised: boolean
+    tools: readonly number[]
+    canCommand: boolean
+    reason?: string
+  }
   canEmergencyStop: boolean
   /** Motion controls; the panel shows only when the printer advertises motion. */
   motionAvailability?: MotionAvailabilityMap
@@ -41,6 +49,13 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'set-temperature', heater: string, targetC: number, event: Event): void
+  (
+    e: 'extrude',
+    tool: number,
+    lengthMm: number,
+    feed: number,
+    event: Event,
+  ): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -152,6 +167,17 @@ const heaterReason = computed(
           <h2 id="motion-title">Movimento</h2>
           <p>{{ motionReason }}</p>
         </section>
+        <ExtrusionPanel
+          v-if="extrusion"
+          :advertised="extrusion.advertised"
+          :tools="extrusion.tools"
+          :can-command="extrusion.canCommand"
+          :disabled-reason="extrusion.reason"
+          @extrude="
+            (tool, lengthMm, feed, event) =>
+              emit('extrude', tool, lengthMm, feed, event)
+          "
+        />
       </template>
       <template
         v-for="tab in tabs.available.filter(({ id }) => id !== 'painel')"

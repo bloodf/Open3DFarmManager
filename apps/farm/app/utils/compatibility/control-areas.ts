@@ -1,4 +1,4 @@
-import type { CatalogCapability } from './anycubic'
+import type { CatalogCapability } from './anycubic.ts'
 
 /**
  * Áreas de controle do painel (E18). Cada família do catálogo declara todas as

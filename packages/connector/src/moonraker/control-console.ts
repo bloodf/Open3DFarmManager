@@ -15,12 +15,28 @@ export type ConsoleRefusalCode =
   | 'unknown-state'
   | 'not-allowed'
   | 'rate'
+/**
+ * The dispatcher reads `refusal` and reports a not-sent result with that
+ * reason: a refusal wrote nothing, so it must never read as an unknown outcome.
+ */
+const DISPATCH_REASON: Readonly<
+  Record<ConsoleRefusalCode, 'state' | 'unsupported-action' | 'invalid-command'>
+> = {
+  invalid: 'invalid-command',
+  'not-allowed': 'invalid-command',
+  disabled: 'unsupported-action',
+  unsupported: 'unsupported-action',
+  'unknown-state': 'state',
+  rate: 'state',
+}
 export class ConsoleRefusal extends Error {
   readonly code: ConsoleRefusalCode
+  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
   constructor(code: ConsoleRefusalCode) {
     super(`Console refused: ${code}`)
     this.name = 'ConsoleRefusal'
     this.code = code
+    this.refusal = DISPATCH_REASON[code]
   }
 }
 

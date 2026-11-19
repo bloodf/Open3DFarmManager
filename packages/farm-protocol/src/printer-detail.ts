@@ -167,6 +167,7 @@ const queryResults = {
     jobs: count,
     printSeconds: number.nonnegative(),
     filamentMm: number.nonnegative(),
+    longestJobSeconds: number.nonnegative().optional(),
   }),
   'config-files': z.array(path).max(256),
   'config-read': z.strictObject({ path, text: string(65_536) }),

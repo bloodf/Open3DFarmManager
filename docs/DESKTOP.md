@@ -6,14 +6,14 @@ Os detalhes de cada etapa do check estão em [desktop-check.md](desktop-check.md
 
 ## Pré-requisitos
 
-| Item          | Requisito                                                          | Observação                                                                                                         |
-| ------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| Node.js       | 24.22.x (`package.json` declara `>=24.22.2 <25`; a CI usa 24.22.3) | O preflight do `desktop:check` aceita de 22.18 até 24.x. Use 24.22.x para a versão validada pela CI.               |
-| npm           | Incluído no Node.js                                                | Não use pnpm: o lockfile é do npm.                                                                                 |
-| Google Chrome | Instalado no sistema                                               | Defina `OPENFARM_CHROME_PATH` se ele não estiver em um caminho padrão. O Playwright não baixa navegadores offline. |
-| PostgreSQL    | 17 ou superior (`initdb`, `pg_ctl`, `postgres`)                    | Os testes de banco exigem 17+.                                                                                     |
-| Go            | 1.26+, opcional                                                    | Só para o helper RTSP (`npm run build:rtsp-ingest`). Sem Go, esse passo é pulado e o resumo informa o motivo.      |
-| Docker        | Não necessário                                                     | Recusado por padrão. Veja [Chaves de ambiente](#chaves-de-ambiente).                                               |
+| Item          | Requisito                                                                                            | Observação                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js       | 22.22.3+ ou 24.22.2+ (`package.json` declara `^22.22.3 \|\| >=24.22.2 <25`; o `.nvmrc` fixa 22.23.5) | O preflight do `desktop:check` aceita de 22.18 até 24.x, mas Nuxt e cssnano exigem 22.22.3+ na série 22. A aceitação desktop usa 22.23.5. |
+| npm           | Incluído no Node.js                                                                                  | Não use pnpm: o lockfile é do npm.                                                                                                        |
+| Google Chrome | Instalado no sistema                                                                                 | Defina `OPENFARM_CHROME_PATH` se ele não estiver em um caminho padrão. O Playwright não baixa navegadores offline.                        |
+| PostgreSQL    | 17 ou superior (`initdb`, `pg_ctl`, `postgres`)                                                      | Os testes de banco exigem 17+.                                                                                                            |
+| Go            | 1.26+, opcional                                                                                      | Só para o helper RTSP (`npm run build:rtsp-ingest`). Sem Go, esse passo é pulado e o resumo informa o motivo.                             |
+| Docker        | Não necessário                                                                                       | Recusado por padrão. Veja [Chaves de ambiente](#chaves-de-ambiente).                                                                      |
 
 ## 1. Instalar as dependências
 
@@ -130,7 +130,7 @@ O `desktop:check` não envia comandos a impressoras físicas. Ele registra cada 
 
 ## Limites conhecidos
 
-- O preflight aceita Node a partir de 22.18, mas o `package.json` declara `>=24.22.2 <25`. Use Node 24.22.x.
+- O preflight aceita Node a partir de 22.18 (piso do type stripping), mas o `package.json` declara `^22.22.3 || >=24.22.2 <25`: Nuxt, `@nuxt/*` e cssnano exigem `^22.22.3`, e a série 24 mantém o piso 24.22.2. Node 23 fica de fora porque essas dependências também o excluem. Use 22.23.5 (`.nvmrc`) ou 24.22.x.
 - O preflight aceita PostgreSQL 13 ou superior, mas os testes de banco exigem 17 ou superior. Use 17+.
 - O `app-smoke` não confere nomes de impressoras na página da farm.
 - `npm run dev` não é executado pelo `desktop:check`.

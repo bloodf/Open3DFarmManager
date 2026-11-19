@@ -7,6 +7,10 @@ import { request as requestHttp } from 'node:http'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { join, resolve } from 'node:path'
+import {
+  MIN_SUPPORTED_NODE_VERSION,
+  isSupportedNodeVersion,
+} from './node-version.ts'
 
 export async function startBuiltTelemetryFixture(input: {
   directory: string
@@ -31,11 +35,12 @@ export async function startBuiltTelemetryFixture(input: {
     !nodeIdentity ||
     typeof nodeIdentity !== 'object' ||
     !('version' in nodeIdentity) ||
-    nodeIdentity.version !== 'v24.22.3' ||
+    typeof nodeIdentity.version !== 'string' ||
+    !isSupportedNodeVersion(nodeIdentity.version) ||
     !('execPath' in nodeIdentity) ||
     typeof nodeIdentity.execPath !== 'string'
   )
-    throw new Error('Node 24.22.3 is required')
+    throw new Error(`Node >=${MIN_SUPPORTED_NODE_VERSION} <25 is required`)
   const nodePath = nodeIdentity.execPath
   await appendFile(
     input.ledgerPath,

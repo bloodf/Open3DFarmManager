@@ -67,7 +67,7 @@ export const PrinterDetailStreamUpdate = z.strictObject({
   ...base,
   t: z.literal('detail.update'),
   seq: count,
-  vendor: z.enum(['anycubic', 'kobra-x', 'creality']).optional(),
+  vendor: z.enum(['anycubic', 'kobra-x', 'creality', 'bambu']).optional(),
   capabilities,
   detail: z
     .strictObject({

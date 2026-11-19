@@ -37,6 +37,12 @@ export const DETAIL_TABS: readonly DetailTab[] = [
 export const DEFAULT_UNSUPPORTED_REASON =
   'Esta impressora não anuncia este recurso.'
 
+export type VendorPanelCatalog = Readonly<{
+  reason: string
+  hardwareNote: string
+  panelReasons?: Readonly<Partial<Record<DetailTabId, string>>>
+}>
+
 export type UnavailableTab = DetailTab & { reason: string }
 
 /**
@@ -48,19 +54,23 @@ export type UnavailableTab = DetailTab & { reason: string }
 export function detailTabs(
   capabilities: readonly DetailCapability[] | undefined,
   reasons: Readonly<Partial<Record<DetailCapability, string>>> = {},
+  vendorCatalog?: VendorPanelCatalog,
 ) {
   const available: DetailTab[] = []
   const unavailable: UnavailableTab[] = []
   for (const tab of DETAIL_TABS) {
     if (
       !tab.needs.length ||
-      tab.needs.some((need) => capabilities?.includes(need))
+      (tab.needs.some((need) => capabilities?.includes(need)) &&
+        !(vendorCatalog && tab.id === 'configuracao'))
     ) {
       available.push(tab)
       continue
     }
     const reason =
       tab.needs.map((need) => reasons[need]).find(Boolean) ??
+      vendorCatalog?.panelReasons?.[tab.id] ??
+      vendorCatalog?.reason ??
       DEFAULT_UNSUPPORTED_REASON
     unavailable.push({ ...tab, reason })
   }

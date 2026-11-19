@@ -142,6 +142,7 @@ export function createBambuDetailState(printerKey: string) {
         t: 'detail.update',
         printerKey,
         seq: seq++,
+        vendor: 'bambu',
         capabilities: [...BAMBU_DETAIL_CAPABILITIES],
         detail: {
           heaters: [

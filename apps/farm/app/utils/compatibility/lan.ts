@@ -1,8 +1,10 @@
 import type { AnycubicCatalogProduct } from './anycubic'
+import { unknownControlAreas } from './control-areas'
 
 export const lanCatalog: readonly AnycubicCatalogProduct[] = [
   {
     id: 'anycubic-kobra-3-lan',
+    controlAreas: unknownControlAreas,
     brand: 'Anycubic',
     model: 'Kobra 3 (LAN, modelo 20024)',
     releaseStatus: 'Data de lançamento não verificada neste catálogo',
@@ -42,6 +44,7 @@ export const lanCatalog: readonly AnycubicCatalogProduct[] = [
   },
   {
     id: 'creality-k1-stock-lan',
+    controlAreas: unknownControlAreas,
     brand: 'Creality',
     model: 'K1 (LAN de fábrica)',
     releaseStatus: 'Data de lançamento não verificada neste catálogo',

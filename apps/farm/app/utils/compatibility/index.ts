@@ -3,6 +3,8 @@ import { bambuCatalog } from './bambu'
 import { crealityCatalog } from './creality'
 import { lanCatalog } from './lan'
 import { klipperCatalog, klipperFamilyIds } from './klipper'
+export { controlAreaKeys, controlAreaLabels } from './control-areas'
+export type { ControlArea } from './control-areas'
 import type { CatalogCapability, AnycubicCatalogProduct } from './anycubic'
 
 export const compatibilityCatalog: readonly AnycubicCatalogProduct[] = [

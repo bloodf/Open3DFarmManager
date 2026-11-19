@@ -6,3 +6,5 @@ export const projectVersion = '0.0.1'
 
 export { createLogger, redact } from './log.ts'
 export type { Logger, LogLevel } from './log.ts'
+
+export { checkCompatibility } from './print-file/compatibility.ts'

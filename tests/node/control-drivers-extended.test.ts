@@ -750,6 +750,11 @@ for (const c of bambuCases) {
         assert.equal(readCommandAction(f.journal, f.signed.cmd_id), c.action)
         assert.equal((await f.dispatch()).kind, 'rejected')
       } else await assertExecuted(f)
+      // The first report after the send settles the dispatch, and baseline
+      // reports can arrive while the QoS 0 publish is still in flight inside
+      // the broker; wait (bounded) until the simulator has recorded it.
+      for (let i = 0; i < 100 && !f.bambu?.requests.length; i++)
+        await new Promise((resolve) => setTimeout(resolve, 20))
       assert.deepEqual(f.bambu?.requests, [
         { command: c.command, sequence_id: '1' },
       ])

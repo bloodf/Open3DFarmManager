@@ -6,6 +6,8 @@ import Tabs from '../ui/Tabs.vue'
 import ExtrusionPanel from './ExtrusionPanel.vue'
 import MacrosPanel from './MacrosPanel.vue'
 import HeaterPanel from './HeaterPanel.vue'
+import PrintStatusPanel from './PrintStatusPanel.vue'
+import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
 import JobQueuePanel, { type QueueJob } from './JobQueuePanel.vue'
 import OutputsPanel from './OutputsPanel.vue'
 import MotionPanel from './MotionPanel.vue'
@@ -88,6 +90,9 @@ const props = defineProps<{
   homedAxes?: readonly string[]
   speedPct?: number
   flowPct?: number
+  printStatus?: Parameters<WebcamDetailOptions['onUpdate']>[1] | undefined
+  excludeAvailable?: boolean
+  excludeReason?: string | undefined
 }>()
 const emit = defineEmits<{
   (e: 'set-temperature', heater: string, targetC: number, event: Event): void
@@ -98,6 +103,7 @@ const emit = defineEmits<{
     feed: number,
     event: Event,
   ): void
+  (e: 'exclude-object', name: string, event: Event): void
   (
     e: 'run-macro',
     name: string,
@@ -186,6 +192,14 @@ const heaterReason = computed(
     >
       <template #sistema><slot name="sistema" /></template>
       <template #painel>
+        <PrintStatusPanel
+          v-if="printStatus?.capabilities.includes('job')"
+          :frame="printStatus"
+          :can-exclude="!!excludeAvailable"
+          :exclude-reason="excludeReason"
+          :object-reason="reasons?.['exclude-object']"
+          @exclude="(name, event) => emit('exclude-object', name, event)"
+        />
         <HeaterPanel
           v-if="hasHeaters"
           :heaters="heaters"

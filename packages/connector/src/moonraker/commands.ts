@@ -102,6 +102,8 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('exclude_object') && objects.includes('print_stats'))
+    supported.push('exclude_object')
   // Named LEDs and output pins need the object list; an unknown list never widens support.
   if (ledNames(objects).length) supported.push('set_led')
   if (pinNames(objects).length) supported.push('set_pin')

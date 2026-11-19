@@ -4,6 +4,7 @@
 // assignment) for the paired agent, and exposes scripted controls plus a
 // loopback discovery probe. Nothing here touches a physical printer.
 import { X509Certificate, createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -171,6 +172,30 @@ function closing(server: Server) {
     })
 }
 
+/** One real JPEG frame (320x240 test pattern) from the local ffmpeg. */
+function testFrame(ffmpeg: string): Buffer {
+  return execFileSync(
+    ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=320x240:rate=10',
+      '-frames:v',
+      '1',
+      '-f',
+      'image2pipe',
+      '-c:v',
+      'mjpeg',
+      'pipe:1',
+    ],
+    { maxBuffer: 4 * 1024 * 1024, timeout: 30_000 },
+  )
+}
+
 /**
  * Starts the paced loopback camera and builds the Connector's camera section.
  * The encoder is the pinned offline stand-in unless the real FFmpeg
@@ -184,7 +209,9 @@ async function startCamera(
   undo.push(() => encoder.dispose())
   const { path: ffmpeg, sha256 } = encoder
   const sim = await startAnycubicCameraSim({
-    jpeg: encoder.frame,
+    // The qualification keeps the 320x240 frame from the real encoder; the
+    // stand-in ignores pixels and reads the pre-encoded frame.
+    jpeg: encoder.kind === 'ffmpeg' ? testFrame(ffmpeg) : encoder.frame,
     frameIntervalMs: 100,
   })
   undo.push(() => sim.close())

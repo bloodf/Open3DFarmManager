@@ -411,11 +411,22 @@ for (const action of ['load_filament', 'unload_filament'] as const) {
       action,
       action === 'load_filament' ? { tray: 15 } : {},
     )
+    // The simulator always reports baseline telemetry (temperatures, AMS);
+    // the command must change exactly the expected fields on top of it.
+    const baseline = f.bambu?.extendedState
     const result = await f.dispatch()
     assert.equal(result.kind, 'outcome-unknown')
     assert.equal(result.reason, 'state-unconfirmed')
-    assert.deepEqual(f.bambu?.extendedState.ams, {
-      tray_now: action === 'load_filament' ? '15' : '255',
+    // Any later baseline report settles the dispatch, so the QoS 0 publish
+    // can still be in flight inside the broker; wait until it lands.
+    for (let i = 0; i < 100 && !f.bambu?.requests.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(f.bambu?.requests, [
+      { command: 'ams_change_filament', sequence_id: '1' },
+    ])
+    assert.deepEqual(f.bambu?.extendedState, {
+      ...baseline,
+      ams: { tray_now: action === 'load_filament' ? '15' : '255' },
     })
   })
 }

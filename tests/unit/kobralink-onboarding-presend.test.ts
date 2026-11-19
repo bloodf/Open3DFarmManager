@@ -3,6 +3,10 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { transformSync } from 'esbuild'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  KOBRA_X_BRIDGE_REQUIRED_MESSAGE,
+  gateKobraXSetup,
+} from '../../apps/farm/app/utils/kobra-x-setup-mode.ts'
 
 // Execute the production setup functions with controlled async boundaries.
 const require = createRequire(resolve('apps/farm/package.json'))
@@ -35,6 +39,8 @@ function harness() {
     kobraError: ref(''),
     kobraStatus: ref(''),
     kobraIp: ref('192.168.1.2'),
+    kobraSetupMode: ref('kobralink-bridge'),
+    gateKobraXSetup,
     kobraLabel: ref('Kobra'),
     kobraExpectedDeviceId: ref(''),
     kobraGeneration: 1,
@@ -109,6 +115,17 @@ describe('Kobra prepare dispatch recovery', () => {
       expect(context.kobraOperation.value).not.toBeNull()
     },
   )
+
+  it('refuses a new setup without the explicit bridge choice before any session', async () => {
+    const { context, prepare } = harness()
+    context.kobraSetupMode.value = 'unselected'
+    await prepare()
+    expect(context.kobraError.value).toBe(KOBRA_X_BRIDGE_REQUIRED_MESSAGE)
+    expect(context.kobraStage.value).toBe('idle')
+    expect(context.configurationTargetHash).not.toHaveBeenCalled()
+    expect(context.ensureKobraSession).not.toHaveBeenCalled()
+    expect(context.persistPendingOperation).not.toHaveBeenCalled()
+  })
 
   it('refuses a stale account generation before dispatch', async () => {
     const { context, prepare } = harness()

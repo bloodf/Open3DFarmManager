@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { KOBRA_X_BRIDGE_REQUIRED_MESSAGE } from '../../utils/kobra-x-setup-mode.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
 import { usePrinterSetupActions } from '../../utils/printer-setup-actions.ts'
 import AnycubicFields from './AnycubicFields.vue'
@@ -13,9 +15,22 @@ const {
   kobraStage,
   kobraLabel,
   kobraExpectedDeviceId,
+  kobraSetupMode,
   onboardingFamily,
 } = usePrinterSetup()
 const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
+
+const bridgeRequired = computed(
+  () =>
+    onboardingFamily.value === 'anycubic-kobra-x' &&
+    kobraSetupMode.value !== 'kobralink-bridge',
+)
+
+// A new setup must name its transport again after any family change.
+function onFamilyChanged() {
+  kobraSetupMode.value = 'unselected'
+  closeKobraSession()
+}
 </script>
 
 <template>
@@ -29,7 +44,7 @@ const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
       <select
         id="onboarding-family"
         v-model="onboardingFamily"
-        @change="closeKobraSession"
+        @change="onFamilyChanged"
       >
         <option value="anycubic-lan">Anycubic (LAN)</option>
         <option value="anycubic-kobra-x">Anycubic Kobra X</option>
@@ -74,7 +89,10 @@ const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
       <div class="kobra-actions">
         <button
           type="submit"
-          :disabled="kobraBusy || kobraBootstrap.kind !== 'ready'"
+          :disabled="
+            kobraBusy || kobraBootstrap.kind !== 'ready' || bridgeRequired
+          "
+          :aria-describedby="bridgeRequired ? 'kobra-submit-help' : undefined"
         >
           {{
             kobraBusy && kobraStage === 'preparing'
@@ -91,6 +109,9 @@ const { prepareSelected, closeKobraSession } = usePrinterSetupActions()
           }}
         </button>
       </div>
+      <p v-if="bridgeRequired" id="kobra-submit-help">
+        {{ KOBRA_X_BRIDGE_REQUIRED_MESSAGE }}
+      </p>
     </fieldset>
   </form>
 </template>

@@ -227,11 +227,11 @@ describe('printer grouping', () => {
   test('migration adds nullable fields and rolls back its grants, index and fields', () => {
     const migrations = new URL('../../infra/db/migrations/', import.meta.url)
     const up = readFileSync(
-      new URL('0055_printer_grouping.up.sql', migrations),
+      new URL('0070_printer_grouping.up.sql', migrations),
       'utf8',
     )
     const down = readFileSync(
-      new URL('0055_printer_grouping.down.sql', migrations),
+      new URL('0070_printer_grouping.down.sql', migrations),
       'utf8',
     )
     const previous = readFileSync(

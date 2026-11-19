@@ -50,9 +50,9 @@ const detectedState = {
   observedAt: 5,
   machine: {
     model: 'Detectada X1',
-    nozzleDiameterMm: { '0': 0.4 },
+    nozzleDiametersMm: [0.4],
     bedSizeMm: { x: 220, y: 220, z: 250 },
-    maxHotendTemperatureCelsius: { '0': 260 },
+    maxHotendCelsius: 260,
   },
 }
 const editBody = {

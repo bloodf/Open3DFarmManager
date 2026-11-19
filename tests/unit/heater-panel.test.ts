@@ -51,7 +51,7 @@ describe('heater temperature rules', () => {
       heatersFromObservation({
         toolTemperatureCelsius: 0,
         bedTemperatureCelsius: 55,
-        machine: { maxHotendTemperatureCelsius: { '0': 285 } },
+        machine: { maxHotendCelsius: 285 },
       }),
     ).toEqual([
       { name: 'extruder', temperature: 0, maxTemp: 285 },

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import { PostgresRegistration } from '../../apps/farm/server/storage/postgres-registration.ts'
+import { PostgresOidc } from '../../apps/farm/server/storage/postgres-oidc.ts'
+import { PostgresSignInRules } from '../../apps/farm/server/storage/sign-in-rules.ts'
 
 const hash = 'synthetic-registration-password-hash-00000'
 const digest = (c: string) => c.repeat(64)
@@ -38,6 +40,149 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     ['owner'],
   )
   assert.equal(await store.bootstrap('another_' + suffix, hash), false)
+
+  // Google sign-in never consumes an admin or mismatched bound invitation.
+  const google = new PostgresOidc(runtime)
+  const rules = new PostgresSignInRules(runtime)
+  const googleBase = {
+    issuer: 'https://accounts.google.com',
+    email: 'member@example.test',
+    passwordHash: hash,
+  }
+  assert.deepEqual(await rules.access(ownerRow.id, ownerRow.farm), {
+    mode: 'invite-only',
+    allowedDomains: [],
+  })
+  assert.equal(await rules.access('nobody', ownerRow.farm), null)
+  await store.createInvite(
+    ownerRow.id,
+    ownerRow.farm,
+    'admin',
+    digest('8'),
+    60_000,
+    googleBase.email,
+  )
+  assert.equal(
+    await google.signInGoogle({
+      ...googleBase,
+      subject: 'admin-' + suffix,
+      username: 'admin_' + suffix,
+      inviteDigest: digest('8'),
+    }),
+    null,
+  )
+  await store.createInvite(
+    ownerRow.id,
+    ownerRow.farm,
+    'viewer',
+    digest('9'),
+    60_000,
+    'other@example.test',
+  )
+  assert.equal(
+    await google.signInGoogle({
+      ...googleBase,
+      subject: 'wrong-' + suffix,
+      username: 'wrong_' + suffix,
+      inviteDigest: digest('9'),
+    }),
+    null,
+  )
+  assert.equal(
+    await store.register(digest('9'), 'bound_' + suffix, hash),
+    false,
+  )
+  await store.createInvite(
+    ownerRow.id,
+    ownerRow.farm,
+    'operator',
+    digest('0'),
+    60_000,
+    googleBase.email,
+  )
+  const joined = await google.signInGoogle({
+    ...googleBase,
+    subject: 'google-' + suffix,
+    username: 'google_' + suffix,
+    inviteDigest: digest('0'),
+  })
+  assert.ok(joined?.created)
+  const invited =
+    await admin`SELECT role FROM farm.memberships WHERE account_id = ${joined.accountId} AND farm_id = ${ownerRow.farm}`
+  assert.equal(invited[0]?.role, 'operator')
+  assert.equal(
+    await google.signInGoogle({
+      ...googleBase,
+      subject: 'replay-' + suffix,
+      username: 'replay_' + suffix,
+      inviteDigest: digest('0'),
+    }),
+    null,
+  )
+  await rules.access(ownerRow.id, ownerRow.farm, {
+    mode: 'allowed-domains',
+    allowedDomains: ['example.test'],
+  })
+  const domainUser = await google.signInGoogle({
+    ...googleBase,
+    subject: 'domain-' + suffix,
+    username: 'domain_' + suffix,
+  })
+  assert.ok(domainUser?.created)
+  const domainMember =
+    await admin`SELECT role FROM farm.memberships WHERE account_id = ${domainUser.accountId} AND farm_id = ${ownerRow.farm}`
+  assert.equal(domainMember[0]?.role, 'viewer')
+  const secondFarm = randomUUID()
+  await admin`INSERT INTO farm.farms (id) VALUES (${secondFarm})`
+  await admin`INSERT INTO farm.memberships (farm_id, account_id, role) VALUES (${secondFarm}, ${ownerRow.id}, 'owner')`
+  await rules.access(ownerRow.id, secondFarm, {
+    mode: 'allowed-domains',
+    allowedDomains: ['example.test'],
+  })
+  const returned = await google.signInGoogle({
+    ...googleBase,
+    subject: 'domain-' + suffix,
+  })
+  assert.deepEqual(returned, {
+    accountId: domainUser.accountId,
+    created: false,
+  })
+  const memberships =
+    await admin`SELECT role FROM farm.memberships WHERE account_id = ${domainUser.accountId} ORDER BY farm_id`
+  assert.deepEqual(
+    memberships.map((row) => row.role),
+    ['viewer', 'viewer'],
+  )
+  await rules.access(ownerRow.id, ownerRow.farm, {
+    mode: 'link-only',
+    allowedDomains: [],
+  })
+  await store.createInvite(
+    ownerRow.id,
+    ownerRow.farm,
+    'viewer',
+    digest('4'),
+    60_000,
+    googleBase.email,
+  )
+  assert.equal(
+    await google.signInGoogle({
+      ...googleBase,
+      subject: 'link-only-' + suffix,
+      username: 'linkonly_' + suffix,
+      inviteDigest: digest('4'),
+    }),
+    null,
+  )
+  assert.equal(
+    await google.signInGoogle({
+      ...googleBase,
+      email: 'outsider@other.test',
+      subject: 'outside-' + suffix,
+      username: 'outside_' + suffix,
+    }),
+    null,
+  )
 
   // Invites: only an active owner may create; the role cannot be owner (DB CHECK).
   const farm = ownerRow.farm as string

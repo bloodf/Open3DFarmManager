@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import ReplayAction from '../components/history/ReplayAction.vue'
+import { useReplayLive } from '../composables/useReplayLive.ts'
+import {
+  libraryReplayPrinters,
+  libraryReplaySource,
+  type LibraryReplayAssignment,
+} from '../utils/library-replay.ts'
+import type { LibraryVersion, PrinterProfile } from '../utils/library-view.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
@@ -21,7 +29,46 @@ const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
 let controller: AbortController | undefined
 
-const rows = computed(() => jobs.value.map(jobHistoryRow))
+const rows = computed(() =>
+  jobs.value.map((job) => ({ ...jobHistoryRow(job), job })),
+)
+// Replay: printers and the live signed session are read when a row is opened.
+const live = useReplayLive()
+const assignments = ref<LibraryReplayAssignment[]>([])
+const profiles = ref<PrinterProfile[]>([])
+const replayPrinters = computed(() =>
+  libraryReplayPrinters(assignments.value, profiles.value, live.liveFor),
+)
+const replayRequest = { retry: 0, timeout: 15_000 }
+async function loadReplaySource(sha256: string) {
+  const selected = farmId.value
+  const base = `/api/farms/${selected}`
+  const [found, printers, printerProfiles] = await Promise.all([
+    $fetch<{ version: LibraryVersion }>(`${base}/library/replay-source`, {
+      ...replayRequest,
+      query: { sha256 },
+    }),
+    $fetch<{ printers: LibraryReplayAssignment[] }>(`${base}/printers`, {
+      ...replayRequest,
+      query: { limit: 50 },
+    }),
+    // Profiles only refine the compatibility check: replay works without them.
+    $fetch<{ profiles: PrinterProfile[] }>(`${base}/printer-profiles`, {
+      ...replayRequest,
+      query: { limit: 50 },
+    }).catch(() => ({ profiles: [] as PrinterProfile[] })),
+  ])
+  if (selected !== farmId.value || found.version.sha256 !== sha256)
+    throw Error('Replay source changed')
+  assignments.value = printers.printers
+  profiles.value = printerProfiles.profiles
+  return libraryReplaySource(found.version)
+}
+function changeFarm() {
+  assignments.value = []
+  profiles.value = []
+  void loadJobs()
+}
 const status = computed(() =>
   jobHistoryStatus({
     pending: pending.value,
@@ -138,7 +185,7 @@ onBeforeUnmount(cancel)
         id="farm"
         v-model="farmId"
         :disabled="pending || !farms.length"
-        @change="loadJobs()"
+        @change="changeFarm"
       >
         <option value="">Selecione</option>
         <option
@@ -205,7 +252,17 @@ onBeforeUnmount(cancel)
           <td>{{ row.filename }}</td>
           <td>{{ row.endedAt }}</td>
           <td>{{ row.duration }}</td>
-          <td>{{ row.library }}</td>
+          <td>
+            {{ row.library }}
+            <ReplayAction
+              v-if="row.job.librarySha256"
+              :key="`${farmId}:${row.id}`"
+              :job="row.job"
+              :load-source="() => loadReplaySource(row.job.librarySha256!)"
+              :printers="replayPrinters"
+              :send="live.send"
+            />
+          </td>
         </tr>
       </tbody>
     </table>

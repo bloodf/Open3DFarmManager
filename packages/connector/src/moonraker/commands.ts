@@ -9,6 +9,7 @@ import {
   ControlArguments,
   PrinterGcodePath,
 } from '../../../farm-protocol/src/control-actions.ts'
+import { serviceCommand } from './control-system-services.ts'
 import { parseExtrude } from './control-extrusion.ts'
 import {
   ledNames,
@@ -65,6 +66,8 @@ export function supportedMoonrakerActions(
 
   // Home is always available if kinematics are configured (toolhead / gcode)
   supported.push('home')
+  if (objects.includes('print_stats') && objects.includes('webhooks'))
+    supported.push('service')
 
   // Speed factor (M220) is supported by default in Klipper gcode
   supported.push('set_speed')
@@ -205,6 +208,11 @@ export function buildMoonrakerCommand(
     }
   }
 
+  if (action === 'service') {
+    if (!supportedMoonrakerActions(objects).includes(action))
+      throw new Error('Service control unavailable')
+    return serviceCommand(args)
+  }
   if (action === 'pause') {
     keys([])
     return { method: 'printer.print.pause' }

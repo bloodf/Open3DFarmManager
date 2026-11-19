@@ -38,12 +38,13 @@ export const PrinterDetailCapability = z.enum([
   'power',
   'timelapse',
   'updates',
+  'system',
   'console',
   'webcams',
 ])
 const capabilities = z
   .array(PrinterDetailCapability)
-  .max(18)
+  .max(19)
   .refine((items) => new Set(items).size === items.length)
 
 export const PrinterDetailSubscribe = z.strictObject({
@@ -129,7 +130,9 @@ export const PrinterDetailUpdate = z.strictObject({
         printingSeconds: number.nonnegative(),
       }),
       firmware: z.strictObject({ state: name, message }),
+      updates: named({ installed: string(128), available: string(128) }),
       host: z.strictObject({
+        temperatureC: number.optional(),
         cpuLoad: number.nonnegative().optional(),
         memoryBytes: count.optional(),
         cpuSeconds: number.nonnegative().optional(),
@@ -164,6 +167,7 @@ const queryResults = {
     jobs: count,
     printSeconds: number.nonnegative(),
     filamentMm: number.nonnegative(),
+    longestJobSeconds: number.nonnegative().optional(),
   }),
   'config-files': z.array(path).max(256),
   'config-read': z.strictObject({ path, text: string(65_536) }),

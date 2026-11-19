@@ -248,11 +248,11 @@ describe('migration 0061 round trip', () => {
 
   test('up is expand-only and nullable; down removes exactly what up added', async () => {
     const up = await readFile(
-      join(dir, '0061_job_library_version.up.sql'),
+      join(dir, '0064_job_library_version.up.sql'),
       'utf8',
     )
     const down = await readFile(
-      join(dir, '0061_job_library_version.down.sql'),
+      join(dir, '0064_job_library_version.down.sql'),
       'utf8',
     )
     expect(findDestructiveOperations(stripSqlCommentsAndStrings(up))).toEqual(

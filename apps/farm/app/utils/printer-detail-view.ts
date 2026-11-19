@@ -28,7 +28,7 @@ export const DETAIL_TABS: readonly DetailTab[] = [
   { id: 'malha', label: 'Malha', needs: ['bed-mesh'] },
   // Configuration files are read through the file capability.
   { id: 'configuracao', label: 'Configuração', needs: ['files'] },
-  { id: 'sistema', label: 'Sistema', needs: ['updates', 'power'] },
+  { id: 'sistema', label: 'Sistema', needs: ['system', 'updates', 'power'] },
   { id: 'historico', label: 'Histórico', needs: ['job'] },
 ]
 

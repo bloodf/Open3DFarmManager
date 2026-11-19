@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
-import { expect, type Browser, type Page } from '@playwright/test'
+import { expect, type Browser, type Locator, type Page } from '@playwright/test'
 import { browserBundle } from '../helpers/browser-bundle.ts'
 import { browserLogin, pagePost } from '../helpers/kobralink-rtc/acceptance.ts'
 import { createRuntimeMoonrakerFixture } from '../helpers/signalling-runtime-moonraker.ts'
@@ -214,6 +214,17 @@ const ENV_KEYS = [
   'SIGNALLING_HTTPS_FARM_PAUSE',
   'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
 ] as const
+
+/**
+ * The farm card's reported-progress bar (0..1), named by its visible label.
+ * The row also holds the status-wall bar (0..100), so an unnamed
+ * `getByRole('progressbar')` is ambiguous.
+ */
+export function reportedProgress(row: Locator): Locator {
+  return row.getByRole('progressbar', {
+    name: /^Progresso informado da impressão:/,
+  })
+}
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
   return env.OPENFARM_JOURNEY === '1'
@@ -785,14 +796,11 @@ export async function startJourneyHarness(
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 60_000 })
-        await expect(row.getByRole('progressbar')).toHaveAttribute(
-          'value',
-          '0.25',
-        )
+        await expect(reportedProgress(row)).toHaveAttribute('value', '0.25')
       },
       farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
-        await expect(farmRow(page).getByRole('progressbar')).toHaveAttribute(
+        await expect(reportedProgress(farmRow(page))).toHaveAttribute(
           'value',
           String(fraction),
           { timeout: 15_000 },

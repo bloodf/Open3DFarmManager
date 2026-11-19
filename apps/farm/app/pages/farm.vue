@@ -14,6 +14,7 @@ import ApprovalPanel from '../components/integrations/ApprovalPanel.vue'
 import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import FarmFilters from '../components/farm/FarmFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
+import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
@@ -278,43 +279,51 @@ function cancelPause(event: Event) {
               :total="ready.rows.length"
               :visible="renderedRows.length"
             />
-            <ul class="printers">
-              <FarmPrinterCard
-                v-for="row in renderedRows"
-                :key="row.assignment.assignmentId"
-                :row="row"
-                :farm-id="ready.scope.farmId"
-                :camera-for="cameraFor"
-                :live-now="liveNow"
-                @setup="setupLink(row.assignment.assignmentId)"
-                @save="saveLink(row.assignment.assignmentId)"
-                @cancel="delete drafts[row.assignment.assignmentId]"
-              >
-                <template #local-link>
-                  <a
-                    :href="displayLocalOrigin(row) ?? undefined"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    referrerpolicy="no-referrer"
-                    :aria-describedby="`local-help-${row.assignment.assignmentId}`"
-                    >Abrir interface local de
-                    <span class="opaque">{{
-                      row.assignment.printerKey
-                    }}</span></a
-                  >
-                </template>
-                <FarmCardControls
+            <PrinterWallTable
+              v-slot="{ rows }"
+              :rows="renderedRows"
+              :live-now="liveNow"
+            >
+              <ul class="printers">
+                <FarmPrinterCard
+                  v-for="row in rows"
+                  :key="row.assignment.assignmentId"
                   :row="row"
-                  :keys="ready.keys"
-                  :control-enabled="pauseEnabled"
-                  :command-in-flight="commandInFlight"
+                  :farm-id="ready.scope.farmId"
+                  :camera-for="cameraFor"
                   :live-now="liveNow"
-                  :last-result="lastControlResults[row.assignment.assignmentId]"
-                  :availability="availability"
-                  :open-control="openControl"
-                />
-              </FarmPrinterCard>
-            </ul>
+                  @setup="setupLink(row.assignment.assignmentId)"
+                  @save="saveLink(row.assignment.assignmentId)"
+                  @cancel="delete drafts[row.assignment.assignmentId]"
+                >
+                  <template #local-link>
+                    <a
+                      :href="displayLocalOrigin(row) ?? undefined"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      referrerpolicy="no-referrer"
+                      :aria-describedby="`local-help-${row.assignment.assignmentId}`"
+                      >Abrir interface local de
+                      <span class="opaque">{{
+                        row.assignment.printerKey
+                      }}</span></a
+                    >
+                  </template>
+                  <FarmCardControls
+                    :row="row"
+                    :keys="ready.keys"
+                    :control-enabled="pauseEnabled"
+                    :command-in-flight="commandInFlight"
+                    :live-now="liveNow"
+                    :last-result="
+                      lastControlResults[row.assignment.assignmentId]
+                    "
+                    :availability="availability"
+                    :open-control="openControl"
+                  />
+                </FarmPrinterCard>
+              </ul>
+            </PrinterWallTable>
           </template>
         </section>
         <section

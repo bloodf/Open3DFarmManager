@@ -15,6 +15,7 @@ import HistoryPanel from './HistoryPanel.vue'
 import TimelapsePanel from './TimelapsePanel.vue'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 import type { PrinterHistoryJob, PrinterHistoryTotals } from './history-view.ts'
+import ConsolePanel from './ConsolePanel.vue'
 import type { JogAxis, MotionAvailabilityMap } from './motion-view.ts'
 import type {
   QueueOpArguments,
@@ -75,6 +76,16 @@ const props = defineProps<{
     jobs?: readonly QueueJob[]
     canCommand: boolean
     reason?: string
+  }
+  /** G-code console tab; the Connector enforces role, state and rate. */
+  gcodeConsole?: {
+    advertised: boolean
+    canCommand: boolean
+    reason?: string
+    printerKey: string
+    printing?: boolean
+    commands?: readonly string[]
+    responses?: readonly { seq: number; lines: readonly string[] }[]
   }
   canEmergencyStop: boolean
   /** Timelapse: the panel shows the catalog reason when not advertised. */
@@ -140,6 +151,7 @@ const emit = defineEmits<{
     file: string,
     event: Event,
   ): void
+  (e: 'send-gcode', line: string, event: Event): void
   (e: 'emergency-stop', event: Event): void
   (e: 'home', event: Event): void
   (
@@ -295,9 +307,24 @@ const heaterReason = computed(
           @set-pin="(name, value, event) => emit('set-pin', name, value, event)"
         />
       </template>
+      <template v-if="gcodeConsole" #console>
+        <ConsolePanel
+          :advertised="gcodeConsole.advertised"
+          :can-command="gcodeConsole.canCommand"
+          :disabled-reason="gcodeConsole.reason"
+          :printer-key="gcodeConsole.printerKey"
+          :printing="gcodeConsole.printing"
+          :commands="gcodeConsole.commands"
+          :responses="gcodeConsole.responses"
+          @send-line="(line, event) => emit('send-gcode', line, event)"
+        />
+      </template>
       <template
         v-for="tab in tabs.available.filter(
-          ({ id }) => id !== 'painel' && id !== 'sistema',
+          ({ id }) =>
+            id !== 'painel' &&
+            id !== 'sistema' &&
+            !(id === 'console' && gcodeConsole),
         )"
         :key="tab.id"
         #[tab.id]

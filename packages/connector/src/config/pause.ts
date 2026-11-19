@@ -49,6 +49,18 @@ export const PauseRuntimeConfigSchema = z.strictObject({
           (ids) => new Set(ids).size === ids.length,
           'Duplicate control assignment',
         ),
+      /**
+       * Per-printer admin switch of the G-code console. Absent or not listed
+       * means off.
+       */
+      consoleAssignmentIds: z
+        .array(BrowserDeviceUuid)
+        .max(16)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          'Duplicate console assignment',
+        )
+        .optional(),
     })
     .optional(),
   signalling: z
@@ -78,7 +90,12 @@ export type PauseIssuerEntry = Readonly<{
 export type PauseRuntimeConfig = Readonly<{
   version: 1
   issuers: readonly PauseIssuerEntry[]
-  control?: Readonly<{ assignmentIds: readonly string[] }> | undefined
+  control?:
+    | Readonly<{
+        assignmentIds: readonly string[]
+        consoleAssignmentIds?: readonly string[] | undefined
+      }>
+    | undefined
   signalling: Readonly<z.infer<typeof PauseRuntimeConfigSchema>['signalling']>
 }>
 

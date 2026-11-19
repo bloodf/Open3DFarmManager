@@ -4,10 +4,9 @@
 // 2. Existing superuser database URL (OPENFARM_TEST_DATABASE_URL).
 // 3. Digest-pinned PostgreSQL 17 Docker container (opt-in via OPENFARM_PG=docker).
 //
-// Supported PostgreSQL range: PostgreSQL >= 13.
-// The OpenFarm migration catalog relies on no features newer than PostgreSQL 13
-// (e.g. gen_random_uuid / uuid-ossp, generated columns, standard identity columns,
-// and transactional DDL).
+// Supported PostgreSQL range: PostgreSQL >= 17 (MIN_POSTGRES_MAJOR).
+// The migration SQL itself needs only PostgreSQL 13 features, but the runtime
+// and the suites set transaction_timeout, which first shipped in PostgreSQL 17.
 import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -43,9 +42,17 @@ export interface PostgresBinaries {
 let cachedBinaries: PostgresBinaries | undefined
 
 /**
+ * Lowest supported server major. Runtime and suites set transaction_timeout,
+ * which PostgreSQL 16 rejects (find_option: unrecognized configuration
+ * parameter); the pinned container image is PostgreSQL 17 too.
+ */
+export const MIN_POSTGRES_MAJOR = 17
+
+/**
  * Searches for PostgreSQL binaries (initdb, pg_ctl, postgres) on PATH, under
  * /usr/lib/postgresql/<version>/bin, or standard macOS Homebrew locations.
- * Fails with a clear message if missing.
+ * Installations older than MIN_POSTGRES_MAJOR are skipped so a newer one
+ * later in the search wins. Fails with a clear message if none qualifies.
  */
 export function findPostgresBin(forceRefresh = false): PostgresBinaries {
   if (cachedBinaries && !forceRefresh) return cachedBinaries
@@ -73,31 +80,42 @@ export function findPostgresBin(forceRefresh = false): PostgresBinaries {
     }
   } catch {}
 
+  const tooOld: string[] = []
   for (const dir of candidates) {
     const initdb = join(dir, 'initdb')
     const pg_ctl = join(dir, 'pg_ctl')
     const pg = join(dir, 'postgres')
     if (existsSync(initdb) && existsSync(pg_ctl) && existsSync(pg)) {
+      let out: string
       try {
-        const out = execFileSync(pg_ctl, ['--version'], {
+        out = execFileSync(pg_ctl, ['--version'], {
           encoding: 'utf8',
         }).trim()
-        const match = /(\d+)(?:\.\d+)?/.exec(out)
-        const majorVersion = match ? Number(match[1]) : 0
-        cachedBinaries = {
-          initdb,
-          pg_ctl,
-          postgres: pg,
-          version: out,
-          majorVersion,
-        }
-        return cachedBinaries
-      } catch {}
+      } catch {
+        continue
+      }
+      const match = /(\d+)(?:\.\d+)?/.exec(out)
+      const majorVersion = match ? Number(match[1]) : 0
+      if (majorVersion < MIN_POSTGRES_MAJOR) {
+        tooOld.push(`${pg_ctl}: ${out}`)
+        continue
+      }
+      cachedBinaries = {
+        initdb,
+        pg_ctl,
+        postgres: pg,
+        version: out,
+        majorVersion,
+      }
+      return cachedBinaries
     }
   }
 
   throw new Error(
-    'PostgreSQL initdb/pg_ctl not found on PATH or under /usr/lib/postgresql/*/bin. A local PostgreSQL installation (version >= 13) is required to run database suites.',
+    `PostgreSQL initdb/pg_ctl not found on PATH or under /usr/lib/postgresql/*/bin. A local PostgreSQL installation (version >= ${MIN_POSTGRES_MAJOR}) is required to run database suites.` +
+      (tooOld.length
+        ? ` Skipped older installations: ${[...new Set(tooOld)].join('; ')}.`
+        : ''),
   )
 }
 
@@ -422,8 +440,8 @@ log_timezone = 'UTC'
         const serverVersion = String(versionRow[0]?.server_version ?? '')
         const majorVersion = parseInt(serverVersion, 10)
         assert.ok(
-          !Number.isNaN(majorVersion) && majorVersion >= 13,
-          `PostgreSQL version ${serverVersion} is not supported; migrations require PostgreSQL >= 13`,
+          !Number.isNaN(majorVersion) && majorVersion >= MIN_POSTGRES_MAJOR,
+          `PostgreSQL version ${serverVersion} is not supported; database suites require PostgreSQL >= ${MIN_POSTGRES_MAJOR}`,
         )
 
         const sysIdRow =

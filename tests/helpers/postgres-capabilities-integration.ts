@@ -47,6 +47,10 @@ export async function testDatabaseCapabilities(
   if (!afterRestart) {
     await admin.begin(async (tx) => {
       await tx.unsafe(migration('up')).simple()
+      // testTelemetryPersistence created farm.printer_latest_state from 0033;
+      // mirror that migration's writer grant so the store's same-transaction
+      // upsert runs with production privileges, no more.
+      await tx`GRANT SELECT, INSERT, UPDATE ON farm.printer_latest_state TO farm_telemetry_writer`
     })
     await admin`CREATE ROLE fixture_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`
     await admin`CREATE ROLE fixture_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`
@@ -152,6 +156,7 @@ export async function testDatabaseCapabilities(
   }
   if (afterRestart) {
     await admin.begin(async (tx) => {
+      await tx`REVOKE SELECT, INSERT, UPDATE ON farm.printer_latest_state FROM farm_telemetry_writer`
       await tx.unsafe(migration('down')).simple()
     })
     await admin`DROP ROLE fixture_reader`

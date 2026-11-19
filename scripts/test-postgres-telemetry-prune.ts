@@ -34,13 +34,9 @@ try {
   const journal =
     await sql`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
-  // Migrations keep being added: the integration migrations must stay in order.
-  const position = (id: string) => catalog.findIndex((entry) => entry.id === id)
-  assert.ok(position('0046_integration_approvals') >= 0)
-  assert.ok(
-    position('0046_integration_approvals') <
-      position('0048_integration_webhooks'),
-  )
+  // The fixture carries the whole catalog; later migrations must not be pinned
+  // here, only the prune migration this suite exercises.
+  assert.equal(journal.at(-1)?.id, catalog.at(-1)?.id)
   assert.equal(
     catalog.find((entry) => entry.id === '0036_telemetry_prune')?.id,
     '0036_telemetry_prune',

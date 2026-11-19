@@ -82,8 +82,12 @@ test.describe('Kobra X on the farm page', () => {
   }) => {
     await mountPrinter(page, printer())
     const card = page.getByRole('article', { name: 'Kobra X' })
-    // An idle printer has nothing to pause: the control is shown but disabled.
-    await expect(card.getByRole('button', { name: 'Pausar' })).toBeDisabled()
+    // The adapter advertises pause; while idle the page keeps it disabled and says why.
+    const pause = card.getByRole('button', { name: 'Pausar', exact: true })
+    await expect(pause).toBeDisabled()
+    await expect(
+      card.getByText('Pausa indisponível. A impressora não está imprimindo.'),
+    ).toBeVisible()
     await expect(
       card.getByRole('button', { name: 'Referenciar eixos' }),
     ).toBeVisible()

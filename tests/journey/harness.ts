@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Page } from '@playwright/test'
 import { browserBundle } from '../helpers/browser-bundle.ts'
@@ -136,6 +137,11 @@ export type JourneyHarness = Readonly<{
   signInAs(role: 'admin' | 'viewer'): Promise<Page>
   /** Opens the farm view and returns the printer's article. */
   openFarm(page?: Page): Promise<ReturnType<Page['locator']>>
+  /**
+   * The printer's article on the farm view already open, without reloading:
+   * a reload drops the live direct connection and must negotiate a new one.
+   */
+  farmRow(page?: Page): ReturnType<Page['locator']>
   /** Waits for the authenticated direct connection and a state on the row. */
   expectLiveTelemetry(page?: Page): Promise<void>
   /** Waits until the row's progress bar shows `fraction` (0..1). */
@@ -347,6 +353,17 @@ export async function startJourneyHarness(
     const machinePost = machinePoster(
       origin,
       await readFile(app.certificatePath),
+    )
+    // The runtime fixture runs the packaged Connector CLI, so build dist/
+    // from this checkout first; a fresh checkout has no build output.
+    execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL('../../packages/connector/build.mjs', import.meta.url),
+        ),
+      ],
+      { timeout: 120_000, stdio: 'pipe' },
     )
     Object.assign(process.env, {
       SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',
@@ -638,6 +655,10 @@ export async function startJourneyHarness(
         : {}),
     })
 
+    const farmRow = (page: Page = ownerPage) =>
+      page.getByRole('article').filter({
+        has: page.getByRole('heading', { name: printerKey, exact: true }),
+      })
     const openFarm = async (page: Page = ownerPage) => {
       const response = await page.goto(origin + '/farm', {
         waitUntil: 'domcontentloaded',
@@ -646,9 +667,7 @@ export async function startJourneyHarness(
       await expect(
         page.getByRole('heading', { name: 'Minha farm', exact: true }),
       ).toBeVisible()
-      return page.getByRole('article').filter({
-        has: page.getByRole('heading', { name: printerKey, exact: true }),
-      })
+      return farmRow(page)
     }
     const asRole = async (role: 'admin' | 'viewer') => {
       const context = await options.browser.newContext({
@@ -704,11 +723,9 @@ export async function startJourneyHarness(
           '0.25',
         )
       },
+      farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
-        const row = page.getByRole('article').filter({
-          has: page.getByRole('heading', { name: printerKey, exact: true }),
-        })
-        await expect(row.getByRole('progressbar')).toHaveAttribute(
+        await expect(farmRow(page).getByRole('progressbar')).toHaveAttribute(
           'value',
           String(fraction),
           { timeout: 15_000 },

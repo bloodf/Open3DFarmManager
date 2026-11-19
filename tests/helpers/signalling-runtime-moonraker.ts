@@ -15,6 +15,10 @@ import {
   cameraFixtureFromEnv,
   cameraRuntimeSection,
 } from './signalling-snapshot-camera-fixture.ts'
+import {
+  assertPackagedBytes,
+  assertPackagedListing,
+} from './packaged-connector-bounds.ts'
 
 export { startMoonrakerMock }
 
@@ -257,15 +261,13 @@ export async function createRuntimeMoonrakerFixture() {
         const files = (await readdir(dist, { withFileTypes: true })).sort(
           (a, b) => a.name.localeCompare(b.name, 'en'),
         )
-        if (files.length > 128 || files.some((file) => !file.isFile()))
-          throw Error('Packaged file bound')
+        assertPackagedListing(files)
         let totalBytes = 0
         const manifest = []
         for (const file of files) {
           const bytes = await readFile(new URL(file.name, dist))
           totalBytes += bytes.length
-          if (bytes.length > 2 * 1024 * 1024 || totalBytes > 16 * 1024 * 1024)
-            throw Error('Packaged byte bound')
+          assertPackagedBytes(bytes.length, totalBytes)
           manifest.push({
             name: file.name,
             bytes: bytes.length,

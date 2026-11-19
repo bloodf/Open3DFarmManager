@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createConnection } from 'node:net'
 import {
@@ -17,8 +25,8 @@ test('findPostgresBin discovers local PostgreSQL binaries and reports version', 
   assert.ok(bins.postgres, 'postgres binary path should be resolved')
   assert.ok(bins.version, 'version string should be reported')
   assert.ok(
-    bins.majorVersion >= 13,
-    `PostgreSQL major version must be >= 13 (supported range), got ${bins.majorVersion}`,
+    bins.majorVersion >= 17,
+    `PostgreSQL major version must be >= 17 (transaction_timeout), got ${bins.majorVersion}`,
   )
 })
 
@@ -30,7 +38,7 @@ test('findPostgresBin fails with clear error message when binaries are missing',
     process.env.OPENFARM_PG_BIN = '/nonexistent'
     assert.throws(
       () => findPostgresBin(true),
-      /PostgreSQL initdb\/pg_ctl not found on PATH or under \/usr\/lib\/postgresql\/\*\/bin\. A local PostgreSQL installation \(version >= 13\) is required to run database suites\./,
+      /PostgreSQL initdb\/pg_ctl not found on PATH or under \/usr\/lib\/postgresql\/\*\/bin\. A local PostgreSQL installation \(version >= 17\) is required to run database suites\./,
     )
   } finally {
     process.env.PATH = origPath
@@ -39,6 +47,66 @@ test('findPostgresBin fails with clear error message when binaries are missing',
     } else {
       delete process.env.OPENFARM_PG_BIN
     }
+  }
+})
+
+/** Fake bin dir whose pg_ctl reports the given version; never starts a server. */
+function fakePostgresBin(version) {
+  const dir = mkdtempSync(join(tmpdir(), 'o3dfm-fake-pg-'))
+  for (const name of ['initdb', 'postgres'])
+    writeFileSync(join(dir, name), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+  writeFileSync(
+    join(dir, 'pg_ctl'),
+    `#!/bin/sh\necho "pg_ctl (PostgreSQL) ${version}"\n`,
+    { mode: 0o700 },
+  )
+  chmodSync(join(dir, 'pg_ctl'), 0o700)
+  return dir
+}
+
+function withPgEnv(pgBin, path, run) {
+  const origPath = process.env.PATH
+  const origPgBin = process.env.OPENFARM_PG_BIN
+  try {
+    process.env.PATH = path
+    process.env.OPENFARM_PG_BIN = pgBin
+    return run()
+  } finally {
+    process.env.PATH = origPath
+    if (origPgBin !== undefined) process.env.OPENFARM_PG_BIN = origPgBin
+    else delete process.env.OPENFARM_PG_BIN
+    findPostgresBin(true)
+  }
+}
+
+test('findPostgresBin skips PostgreSQL older than 17 and keeps searching', () => {
+  const real = findPostgresBin(true)
+  const old = fakePostgresBin('16.4')
+  try {
+    const bins = withPgEnv(old, process.env.PATH, () => findPostgresBin(true))
+    assert.equal(bins.pg_ctl, real.pg_ctl)
+    assert.ok(bins.majorVersion >= 17)
+  } finally {
+    rmSync(old, { recursive: true, force: true })
+  }
+})
+
+test('findPostgresBin names too-old clusters when nothing >= 17 is found', () => {
+  const old = fakePostgresBin('16.4')
+  try {
+    withPgEnv(old, '/nonexistent', () =>
+      assert.throws(
+        () => findPostgresBin(true),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes('(version >= 17)') &&
+          error.message.includes(
+            `${join(old, 'pg_ctl')}: pg_ctl (PostgreSQL) 16.4`,
+          ),
+      ),
+    )
+  } finally {
+    rmSync(old, { recursive: true, force: true })
   }
 })
 
@@ -72,13 +140,13 @@ test('disposablePostgres starts local throwaway cluster, executes queries, and i
     assert.equal(identity.db, 'fixture')
     assert.equal(identity.u, 'fixture')
 
-    // Confirm server version >= 13
+    // Confirm server version >= 17
     const versionRow = (await sql`SHOW server_version`)[0]
     const match = /(\d+)(?:\.\d+)?/.exec(versionRow.server_version)
     const versionNum = match ? Number(match[1]) : 0
     assert.ok(
-      versionNum >= 13,
-      `server_version must be >= 13, got ${versionRow.server_version}`,
+      versionNum >= 17,
+      `server_version must be >= 17, got ${versionRow.server_version}`,
     )
 
     // Confirm fresh task-owned cluster with no prior schema

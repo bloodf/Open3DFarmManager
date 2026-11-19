@@ -68,9 +68,11 @@ if (journeyEnabled())
         mimeType: 'application/x-pem-file',
         buffer: Buffer.concat([mock.tls.clientCert, mock.tls.clientKey]),
       })
-      await expect(
-        page.locator('dl').filter({ hasText: 'AnycubicSlicer' }),
-      ).toBeVisible()
+      // Other setup summaries also render a <dl>; target the certificate one.
+      const certificate = page
+        .locator('dl')
+        .filter({ has: page.getByText('Formato validado', { exact: true }) })
+      await expect(certificate).toContainText('AnycubicSlicer')
       await page
         .getByRole('button', { name: 'Preparar Anycubic Kobra X' })
         .click()

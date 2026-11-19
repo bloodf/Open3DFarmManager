@@ -39,6 +39,7 @@ const props = defineProps<{
   live: boolean
   /** Age of the last known data, shown while not live. */
   lastKnownText?: string
+  supportedOnly?: boolean
   capabilities?: readonly DetailCapability[]
   /** Catalog reasons per capability the printer does not advertise. */
   reasons?: Readonly<Partial<Record<DetailCapability, string>>>
@@ -201,7 +202,7 @@ const heaterReason = computed(
           >, {{ lastKnownText }}</template
         >. Somente leitura.
       </p>
-      <p>
+      <p v-if="!supportedOnly || canEmergencyStop">
         <Button
           class="printer-detail__stop"
           :disabled="!canEmergencyStop"
@@ -210,7 +211,7 @@ const heaterReason = computed(
           >Parada de emergência</Button
         >
       </p>
-      <p id="stop-help">
+      <p v-if="!supportedOnly || canEmergencyStop" id="stop-help">
         {{
           canEmergencyStop
             ? 'Abre uma confirmação. Nada é enviado antes de você confirmar.'
@@ -244,7 +245,7 @@ const heaterReason = computed(
               emit('set-temperature', heater, target, event)
           "
         />
-        <section v-else aria-labelledby="heaters-title">
+        <section v-else-if="!supportedOnly" aria-labelledby="heaters-title">
           <h2 id="heaters-title">Aquecedores</h2>
           <p>{{ heaterReason }}</p>
         </section>
@@ -268,7 +269,7 @@ const heaterReason = computed(
             (speed, flow, event) => emit('set-factor', speed, flow, event)
           "
         />
-        <section v-else aria-labelledby="motion-title">
+        <section v-else-if="!supportedOnly" aria-labelledby="motion-title">
           <h2 id="motion-title">Movimento</h2>
           <p>{{ motionReason }}</p>
         </section>
@@ -293,6 +294,7 @@ const heaterReason = computed(
             (name, params, event) => emit('run-macro', name, params, event)
           "
         />
+        <slot name="painel" />
         <OutputsPanel
           v-if="outputs"
           :advertised="outputs.advertised"
@@ -365,7 +367,10 @@ const heaterReason = computed(
         <p v-else>Sem dados de {{ tab.label }} neste momento.</p>
       </template>
     </Tabs>
-    <section v-if="tabs.unavailable.length" aria-labelledby="unavailable-title">
+    <section
+      v-if="!supportedOnly && tabs.unavailable.length"
+      aria-labelledby="unavailable-title"
+    >
       <h2 id="unavailable-title">Recursos indisponíveis</h2>
       <ul>
         <li v-for="tab in tabs.unavailable" :key="tab.id">

@@ -221,7 +221,7 @@ describe('accessibility', () => {
     )
       .flat()
       .join('\n')
-    return `${await read('../../apps/farm/app/assets/main.css')}\n${styles}`
+    return `${await read('../../apps/farm/app/assets/tokens/tokens.css')}\n${await read('../../apps/farm/app/assets/css/main.css')}\n${styles}`
   }
 
   it.each([2, 30])(

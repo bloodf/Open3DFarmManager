@@ -150,5 +150,5 @@ export default defineNuxtConfig({
     },
   },
   typescript: { strict: true },
-  css: ['~/assets/main.css'],
+  css: ['~/assets/css/main.css'],
 })

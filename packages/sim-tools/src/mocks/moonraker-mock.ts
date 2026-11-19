@@ -94,18 +94,86 @@ export interface MoonrakerFirmwareComponent {
   update_available?: boolean | undefined
 }
 
+export type MoonrakerFileRoot = 'gcodes' | 'config' | 'timelapse'
+
+export interface MoonrakerHistoryJobSeed {
+  job_id?: string | undefined
+  filename: string
+  status?: string | undefined
+  start_time?: number | undefined
+  end_time?: number | undefined
+  print_duration?: number | undefined
+  total_duration?: number | undefined
+  filament_used?: number | undefined
+  exists?: boolean | undefined
+  metadata?: Record<string, unknown> | undefined
+}
+
+export interface MoonrakerPowerDeviceSeed {
+  device: string
+  status?: 'on' | 'off' | 'init' | 'error' | undefined
+  locked_while_printing?: boolean | undefined
+  type?: string | undefined
+}
+
+export interface MoonrakerExcludeObjectSeed {
+  name: string
+  center?: readonly [number, number] | undefined
+  polygon?: readonly (readonly [number, number])[] | undefined
+}
+
+export interface MoonrakerBedMeshProfileSeed {
+  name: string
+  points: number[][]
+  min_x?: number | undefined
+  max_x?: number | undefined
+  min_y?: number | undefined
+  max_y?: number | undefined
+  x_count?: number | undefined
+  y_count?: number | undefined
+  mesh_x_pps?: number | undefined
+  mesh_y_pps?: number | undefined
+  algo?: string | undefined
+  tension?: number | undefined
+}
+
+export interface MoonrakerDirectorySeed {
+  root?: MoonrakerFileRoot | undefined
+  path: string
+}
+
+export interface MoonrakerTimelapseOptions {
+  enabled?: boolean | undefined
+  files?: readonly MoonrakerFileEntry[] | undefined
+  settings?: Record<string, unknown> | undefined
+  framecount?: number | undefined
+  lastframefile?: string | null | undefined
+}
+
 export interface MoonrakerMockOptions {
   profile?: MoonrakerProfile | undefined
   initial?: Partial<MoonrakerModel> | undefined
   scenario?: ScenarioStep<MoonrakerModel>[] | undefined
   objects?: readonly string[] | undefined
-  /** Moonraker components server.info lists; defaults to the mock's own. */
-  components?: readonly string[] | undefined
   macros?: readonly string[] | undefined
   webcams?: readonly MoonrakerWebcamEntry[] | undefined
   files?: readonly MoonrakerFileEntry[] | undefined
-  /** Rendered videos in the `timelapse` file root. */
+  directories?: readonly MoonrakerDirectorySeed[] | undefined
+  configFiles?: readonly MoonrakerFileEntry[] | undefined
+  history?: readonly MoonrakerHistoryJobSeed[] | undefined
+  powerDevices?: readonly MoonrakerPowerDeviceSeed[] | undefined
+  excludeObjects?: readonly MoonrakerExcludeObjectSeed[] | undefined
+  bedMeshProfiles?: readonly MoonrakerBedMeshProfileSeed[] | undefined
+  activeMesh?: string | null | undefined
+  timelapse?: false | MoonrakerTimelapseOptions | undefined
+  /** Rendered videos seeded into the `timelapse` file root. */
   timelapseFiles?: readonly MoonrakerFileEntry[] | undefined
+  /** Components server.info lists; defaults to the mock's own list. */
+  components?: readonly string[] | undefined
+  /** Axes homed at start, such as `xyz` or `` for none. Defaults to `xyz`. */
+  homedAxes?: string | undefined
+  gcodeHelp?: Record<string, string> | undefined
+  temperatureStoreLength?: number | undefined
   auth?: MoonrakerAuthConfig | undefined
   firmware?:
     | {
@@ -125,11 +193,19 @@ export interface MoonrakerMockOptions {
 
 export interface StoredMoonrakerFile {
   path: string
+  root: MoonrakerFileRoot
   size: number
   modified: number
   estimatedTime?: number | undefined
   content: Buffer
   thumbnails: Map<string, MoonrakerThumbnailEntry>
+}
+
+export interface MoonrakerQueuedJob {
+  filename: string
+  job_id: string
+  time_added: number
+  time_in_queue: number
 }
 
 export interface MoonrakerMockInstance {
@@ -144,6 +220,18 @@ export interface MoonrakerMockInstance {
     macroCalls: readonly { script: string; timestamp: number }[]
     gcodeScripts: readonly string[]
     files: Map<string, StoredMoonrakerFile>
+    directories: Set<string>
+    historyJobs: MoonrakerHistoryJobSeed[]
+    jobQueue: { state: string; jobs: MoonrakerQueuedJob[] }
+    powerDevices: Map<
+      string,
+      {
+        device: string
+        status: 'on' | 'off' | 'init' | 'error'
+        locked_while_printing: boolean
+        type: string
+      }
+    >
     setKlippyState: (
       state: KlippyState,
       opts?: { connected?: boolean | undefined; message?: string | undefined },
@@ -151,6 +239,7 @@ export interface MoonrakerMockInstance {
     disconnectClients: () => void
     completePrint: () => void
     failPrint: (message?: string) => void
+    broadcastGcodeResponse: (message: string) => void
   }
   calls: {
     (): Readonly<Record<string, number>>
@@ -169,10 +258,6 @@ const SV06_BASE_OBJECTS = [
   'exclude_object',
   'bed_mesh',
   'probe',
-  'output_pin caselight',
-  'fan_generic auxiliary',
-  'heater_generic chamber',
-  'led chamber',
   'save_variables',
   'extruder',
   'heater_bed',
@@ -354,12 +439,7 @@ function parseMultipartUpload(
 }
 
 function safeFilePath(raw: string): string | null {
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(raw)
-  } catch {
-    return null
-  }
+  const decoded = decodeURIComponent(raw)
   if (
     !decoded ||
     decoded.includes('\\') ||
@@ -388,11 +468,7 @@ export async function startMoonrakerMock(
   const rawSockets = new Set<Duplex>()
   const wsClients = new Set<WsClient>()
   const activeTimers = new Set<ReturnType<typeof setTimeout>>()
-  const recordedCalls: {
-    method: string
-    params?: unknown
-    timestamp: number
-  }[] = []
+  const rpcCalls: { method: string; params?: unknown; timestamp: number }[] = []
   const macroCalls: { script: string; timestamp: number }[] = []
   const gcodeScripts: string[] = []
   const callCounts: Record<string, number> = {}
@@ -422,51 +498,16 @@ export async function startMoonrakerMock(
     flip_vertical: cam.flip_vertical ?? false,
   }))
 
-  const position = [0, 0, 0, 0]
-  const axisMinimum = [0, 0, 0, 0]
-  const axisMaximum = [220, 220, 250, 0]
-  const homed = new Set<string>()
-  let absolute = true
-  const pins = new Map<string, number>()
-  const leds = new Map<string, number[]>()
-  const excluded = new Set<string>()
-  const printObjects = new Set<string>()
-  let currentObject: string | null = null
-  const meshProfiles = new Map<string, number[][]>()
-  let mesh: number[][] = []
-  let meshProfile = ''
-  let probeResult: number | null = null
-  const consoleStore: { message: string; time: number; type: string }[] = []
-  const gcodeHelp = {
-    G28: 'Home axes',
-    G1: 'Move to a position',
-    PROBE: 'Probe Z',
-    BED_MESH_CALIBRATE: 'Calibrate bed mesh',
-    BED_MESH_PROFILE: 'Manage mesh profiles',
-    EXCLUDE_OBJECT: 'Exclude an object',
-    SET_LED: 'Set LED color',
-    SET_PIN: 'Set output pin',
-    SET_HEATER_TEMPERATURE: 'Set heater target',
-    SET_FAN_SPEED: 'Set fan speed',
-    M118: 'Emit a console message',
-  }
-  function gcodeResponse(message: string, type = 'response') {
-    consoleStore.push({ message, type, time: Date.now() / 1000 })
-    if (consoleStore.length > 100) consoleStore.shift()
-    if (type === 'command') return
-    const notification = JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'notify_gcode_response',
-      params: [message],
-    })
-    for (const client of wsClients) client.send(notification)
-  }
-
   const genericFans = new Map<string, number>()
+  const controllerFans = new Map<string, number>()
   const genericHeaters = new Map<string, MoonrakerExtruderState>()
+  const outputPins = new Map<string, number>()
+  const ledColors = new Map<string, [number, number, number, number]>()
   for (const obj of objectList) {
     if (obj.startsWith('fan_generic ')) {
       genericFans.set(obj.slice('fan_generic '.length), 0)
+    } else if (obj.startsWith('controller_fan ')) {
+      controllerFans.set(obj.slice('controller_fan '.length), 0)
     } else if (obj.startsWith('heater_generic ')) {
       genericHeaters.set(obj.slice('heater_generic '.length), {
         temperature: 20,
@@ -477,6 +518,21 @@ export async function startMoonrakerMock(
         temperature: 20,
         target: 0,
       })
+    } else if (obj.startsWith('output_pin ')) {
+      const name = obj.slice('output_pin '.length)
+      outputPins.set(
+        name,
+        name === 'caselight' ? (options.initial?.caselight ?? 0) : 0,
+      )
+    } else if (
+      obj.startsWith('led ') ||
+      obj.startsWith('neopixel ') ||
+      obj.startsWith('dotstar ') ||
+      obj.startsWith('pca9533 ') ||
+      obj.startsWith('pca9632 ')
+    ) {
+      const name = obj.slice(obj.indexOf(' ') + 1)
+      ledColors.set(name, [0, 0, 0, 0])
     }
   }
 
@@ -523,11 +579,14 @@ export async function startMoonrakerMock(
     extruders: initialExtruders,
   }
 
-  const filesMap = new Map<string, StoredMoonrakerFile>()
-  for (const entry of options.files ?? []) {
+  function storeFileEntry(
+    entry: MoonrakerFileEntry,
+    root: MoonrakerFileRoot,
+    map: Map<string, StoredMoonrakerFile>,
+  ) {
     const buf =
       entry.content === undefined
-        ? Buffer.from('; mock gcode\n')
+        ? Buffer.from(root === 'gcodes' ? '; mock gcode\n' : '# mock config\n')
         : typeof entry.content === 'string'
           ? Buffer.from(entry.content, 'utf8')
           : Buffer.from(entry.content)
@@ -538,14 +597,250 @@ export async function startMoonrakerMock(
         content: Buffer.from(thumb.content),
       })
     }
-    filesMap.set(entry.path, {
+    const key = `${root}:${entry.path}`
+    map.set(key, {
       path: entry.path,
+      root,
       size: entry.size ?? buf.length,
       modified: entry.modified ?? Math.floor(Date.now() / 1000),
       estimatedTime: entry.estimatedTime,
       content: buf,
       thumbnails: thumbs,
     })
+  }
+
+  const filesMap = new Map<string, StoredMoonrakerFile>()
+  for (const entry of options.files ?? []) {
+    storeFileEntry(entry, 'gcodes', filesMap)
+  }
+  for (const entry of options.configFiles ?? []) {
+    storeFileEntry(entry, 'config', filesMap)
+  }
+
+  const directories = new Set<string>()
+  for (const dir of options.directories ?? []) {
+    const root = dir.root ?? 'gcodes'
+    const safe = safeFilePath(dir.path)
+    if (safe) directories.add(`${root}:${safe}`)
+  }
+
+  const historyJobs: MoonrakerHistoryJobSeed[] = (options.history ?? []).map(
+    (job, index) => ({
+      job_id: job.job_id ?? String(index + 1).padStart(6, '0'),
+      filename: job.filename,
+      status: job.status ?? 'completed',
+      start_time: job.start_time ?? Math.floor(Date.now() / 1000) - 3600,
+      end_time: job.end_time ?? Math.floor(Date.now() / 1000) - 1800,
+      print_duration: job.print_duration ?? 600,
+      total_duration: job.total_duration ?? 700,
+      filament_used: job.filament_used ?? 100,
+      exists: job.exists ?? true,
+      metadata: job.metadata ?? {},
+    }),
+  )
+
+  const jobQueue: { state: string; jobs: MoonrakerQueuedJob[] } = {
+    state: 'ready',
+    jobs: [],
+  }
+  let nextJobId = 1
+
+  const powerDevices = new Map<
+    string,
+    {
+      device: string
+      status: 'on' | 'off' | 'init' | 'error'
+      locked_while_printing: boolean
+      type: string
+    }
+  >()
+  for (const device of options.powerDevices ?? [
+    {
+      device: 'printer',
+      status: 'on' as const,
+      locked_while_printing: true,
+      type: 'gpio',
+    },
+  ]) {
+    powerDevices.set(device.device, {
+      device: device.device,
+      status: device.status ?? 'off',
+      locked_while_printing: device.locked_while_printing ?? false,
+      type: device.type ?? 'gpio',
+    })
+  }
+
+  type ExcludeObjectState = {
+    name: string
+    center: [number, number]
+    polygon: [number, number][]
+    excluded: boolean
+  }
+  const excludeObjects: ExcludeObjectState[] = (
+    options.excludeObjects ?? [
+      {
+        name: 'object_0',
+        center: [50, 50] as const,
+        polygon: [
+          [40, 40],
+          [60, 40],
+          [60, 60],
+          [40, 60],
+        ] as const,
+      },
+    ]
+  ).map((obj) => ({
+    name: obj.name,
+    center: [...(obj.center ?? [0, 0])] as [number, number],
+    polygon: (obj.polygon ?? []).map((p) => [...p] as [number, number]),
+    excluded: false,
+  }))
+  let currentExcludeObject: string | null = excludeObjects[0]?.name ?? null
+
+  type BedMeshProfile = MoonrakerBedMeshProfileSeed
+  const bedMeshProfiles = new Map<string, BedMeshProfile>()
+  const defaultMesh: BedMeshProfile = {
+    name: 'default',
+    points: [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ],
+    min_x: 0,
+    max_x: 220,
+    min_y: 0,
+    max_y: 220,
+    x_count: 3,
+    y_count: 3,
+    mesh_x_pps: 2,
+    mesh_y_pps: 2,
+    algo: 'bicubic',
+    tension: 0.2,
+  }
+  for (const profile of options.bedMeshProfiles ?? [defaultMesh]) {
+    bedMeshProfiles.set(profile.name, {
+      ...profile,
+      points: profile.points.map((row) => [...row]),
+    })
+  }
+  let activeMeshName: string | null =
+    options.activeMesh === undefined
+      ? (bedMeshProfiles.keys().next().value ?? null)
+      : options.activeMesh
+
+  let toolheadPosition: [number, number, number, number] = [0, 0, 0, 0]
+  let homedAxes = options.homedAxes ?? 'xyz'
+  let absoluteMoves = true
+  const axisMinimum: [number, number, number] = [0, 0, 0]
+  const axisMaximum: [number, number, number] = [220, 220, 250]
+  let probeZ = 0
+
+  const tempStoreLength = Math.max(1, options.temperatureStoreLength ?? 5)
+  const temperatureStore: Record<
+    string,
+    {
+      temperatures: number[]
+      targets?: number[]
+      powers?: number[]
+      speeds?: number[]
+    }
+  > = {
+    extruder: {
+      temperatures: Array.from(
+        { length: tempStoreLength },
+        () => model.extruder,
+      ),
+      targets: Array.from(
+        { length: tempStoreLength },
+        () => model.extruderTarget,
+      ),
+      powers: Array.from({ length: tempStoreLength }, () =>
+        model.extruderTarget > 0 ? 0.5 : 0,
+      ),
+    },
+    heater_bed: {
+      temperatures: Array.from({ length: tempStoreLength }, () => model.bed),
+      targets: Array.from({ length: tempStoreLength }, () => model.bedTarget),
+      powers: Array.from({ length: tempStoreLength }, () =>
+        model.bedTarget > 0 ? 0.5 : 0,
+      ),
+    },
+  }
+
+  const timelapseEnabled = options.timelapse !== false
+  const timelapseSettings: Record<string, unknown> = {
+    enabled: true,
+    mode: 'layermacro',
+    camera: 'default',
+    ...(typeof options.timelapse === 'object'
+      ? options.timelapse.settings
+      : {}),
+  }
+  let timelapseFramecount =
+    typeof options.timelapse === 'object'
+      ? (options.timelapse.framecount ?? 0)
+      : 0
+  let timelapseLastFrame: string | null =
+    typeof options.timelapse === 'object'
+      ? (options.timelapse.lastframefile ?? null)
+      : null
+  if (typeof options.timelapse === 'object') {
+    for (const entry of options.timelapse.files ?? []) {
+      storeFileEntry(entry, 'timelapse', filesMap)
+    }
+  }
+  for (const entry of options.timelapseFiles ?? []) {
+    storeFileEntry(entry, 'timelapse', filesMap)
+  }
+  // The Connector's timelapse control speaks the `server.timelapse.*`
+  // methods; they share the plugin state above.
+  function serverTimelapse(
+    method: string,
+    params: Record<string, unknown>,
+  ): { result: unknown } | null {
+    switch (method) {
+      case 'server.timelapse.get_settings':
+        return { result: { ...timelapseSettings } }
+      case 'server.timelapse.post_settings':
+        Object.assign(timelapseSettings, params)
+        return { result: { ...timelapseSettings } }
+      case 'server.timelapse.lastframe':
+        return { result: { frame: timelapseFramecount } }
+      case 'server.timelapse.takeframe':
+        timelapseFramecount += 1
+        return { result: { frame: timelapseFramecount } }
+      case 'server.timelapse.render':
+        return { result: { status: 'success', frames: timelapseFramecount } }
+      case 'server.timelapse.saveframes':
+        return { result: { frames: timelapseFramecount } }
+      default:
+        return null
+    }
+  }
+  const serverTimelapseHttp: Record<string, string> = {
+    'GET /server/timelapse/settings': 'server.timelapse.get_settings',
+    'POST /server/timelapse/settings': 'server.timelapse.post_settings',
+    'GET /server/timelapse/lastframe': 'server.timelapse.lastframe',
+    'POST /server/timelapse/takeframe': 'server.timelapse.takeframe',
+    'POST /server/timelapse/render': 'server.timelapse.render',
+    'POST /server/timelapse/saveframes': 'server.timelapse.saveframes',
+  }
+
+  const gcodeHelp: Record<string, string> = {
+    G28: 'Home axes',
+    M104: 'Set extruder temperature',
+    M140: 'Set bed temperature',
+    EXCLUDE_OBJECT: 'Exclude an object by name',
+    BED_MESH_PROFILE: 'Load or save a bed mesh profile',
+    G1: 'Move to a position',
+    PROBE: 'Probe Z',
+    BED_MESH_CALIBRATE: 'Calibrate bed mesh',
+    SET_LED: 'Set LED color',
+    SET_PIN: 'Set output pin',
+    SET_HEATER_TEMPERATURE: 'Set heater target',
+    SET_FAN_SPEED: 'Set fan speed',
+    M118: 'Emit a console message',
+    ...(options.gcodeHelp ?? {}),
   }
 
   const jwtSecret = randomBytes(32)
@@ -624,7 +919,6 @@ export async function startMoonrakerMock(
 
   let eventtime = 1
   let nextConnectionId = 0
-  let rpcRequestCount = 0
   const maxUploadBytes = options.maxUploadBytes ?? 16 * 1024 * 1024
   const restartDelayMs = options.restartDelayMs ?? 30
 
@@ -642,342 +936,6 @@ export async function startMoonrakerMock(
 
   const isKlippyReady = () =>
     model.klippyConnected && model.klippyState === 'ready'
-
-  const history = new Map<
-    string,
-    {
-      job_id: string
-      filename: string
-      status: string
-      start_time: number
-      end_time: number
-      print_duration: number
-      total_duration: number
-    }
-  >()
-  let nextJob = 0
-  let printStarted = Date.now() / 1000
-  const queue = new Map<
-    string,
-    { job_id: string; filename: string; time_added: number }
-  >()
-  let nextQueued = 0
-  let queueState = 'ready'
-  let power = 'off'
-  let timelapseSettings: Record<string, unknown> = {
-    enabled: false,
-    mode: 'layermacro',
-  }
-  let lastFrame = 0
-  const configFiles = new Map<string, StoredMoonrakerFile>()
-  const timelapseFiles = new Map<string, StoredMoonrakerFile>()
-  for (const entry of options.timelapseFiles ?? []) {
-    const content = Buffer.from(entry.content ?? '; mock timelapse\n')
-    timelapseFiles.set(entry.path, {
-      path: entry.path,
-      size: entry.size ?? content.length,
-      modified: entry.modified ?? Math.floor(Date.now() / 1000),
-      content,
-      thumbnails: new Map(),
-    })
-  }
-  const directories = new Set<string>(['gcodes', 'config'])
-  const fileRoot = (root: string) =>
-    root === 'config'
-      ? configFiles
-      : root === 'timelapse'
-        ? timelapseFiles
-        : filesMap
-  const fileLocation = (value: unknown) => {
-    const path = typeof value === 'string' ? safeFilePath(value) : null
-    const slash = path?.indexOf('/') ?? -1
-    const root = path?.slice(0, slash)
-    if (
-      !path ||
-      slash < 0 ||
-      (root !== 'gcodes' && root !== 'config' && root !== 'timelapse')
-    ) {
-      throw new Error('Invalid file path')
-    }
-    return { root, path: path.slice(slash + 1) }
-  }
-  const queueResult = () => ({
-    queued_jobs: [...queue.values()],
-    queue_state: queueState,
-  })
-  const powerDevice = (device: unknown = 'printer') => {
-    if (device !== 'printer') throw new Error('Unknown power device')
-    return { device, status: power }
-  }
-  function bulkPower(params: Record<string, unknown>, action?: 'on' | 'off') {
-    const devices = Array.isArray(params.devices)
-      ? params.devices
-      : Object.keys(params)
-    for (const device of devices) powerDevice(device)
-    if (devices.length > 0 && action) power = action
-    return Object.fromEntries(devices.map((device) => [device, power]))
-  }
-  const endpoints: Record<
-    string,
-    (params: Record<string, unknown>) => unknown
-  > = {
-    'printer.gcode.help': () => gcodeHelp,
-    'server.gcode_store': ({ count }) => ({
-      gcode_store: consoleStore.slice(
-        Math.max(0, consoleStore.length - Number(count ?? 100)),
-      ),
-    }),
-    'server.temperature_store': () => Object.fromEntries(temperatureStore),
-    'server.files.roots': () =>
-      ['gcodes', 'config'].map((name) => ({
-        name,
-        path: '/' + name,
-        permissions: 'rw',
-      })),
-    'server.files.get_directory': ({ path = 'gcodes' }) => {
-      const [root, ...parts] = String(path).split('/')
-      const prefix = parts.length ? parts.join('/') + '/' : ''
-      if (
-        (root !== 'gcodes' && root !== 'config') ||
-        !safeFilePath(String(path))
-      )
-        throw new Error('Invalid directory')
-      const files = [...fileRoot(root).values()].filter((file) =>
-        file.path.startsWith(prefix),
-      )
-      const children = new Set(
-        [...directories, ...files.map((file) => root + '/' + file.path)]
-          .filter((entry) => entry.startsWith(root + '/' + prefix))
-          .map((entry) => entry.slice(root.length + 1 + prefix.length))
-          .filter(
-            (entry) =>
-              entry.includes('/') ||
-              directories.has(root + '/' + prefix + entry),
-          )
-          .map((entry) => entry.split('/')[0]),
-      )
-      return {
-        dirs: [...children].map((dirname) => ({
-          dirname,
-          modified: 0,
-          size: 0,
-          permissions: 'rw',
-        })),
-        files: files
-          .filter((file) => !file.path.slice(prefix.length).includes('/'))
-          .map((file) => ({
-            filename: file.path.slice(prefix.length),
-            size: file.size,
-            modified: file.modified,
-            permissions: 'rw',
-          })),
-        root_info: { name: root, permissions: 'rw' },
-      }
-    },
-    'server.files.post_directory': ({ path }) => {
-      const item = fileLocation(path)
-      directories.add(item.root + '/' + item.path)
-      return { item, action: 'create_dir' }
-    },
-    'server.files.delete_directory': ({ path, force }) => {
-      const item = fileLocation(path)
-      const fullPath = item.root + '/' + item.path
-      const prefix = item.path + '/'
-      const files = fileRoot(item.root)
-      const children = [...files.keys()].filter((name) =>
-        name.startsWith(prefix),
-      )
-      const nested = [...directories].filter((name) =>
-        name.startsWith(fullPath + '/'),
-      )
-      if (!directories.has(fullPath) && !children.length && !nested.length) {
-        throw new Error('Directory not found')
-      }
-      if (
-        (children.length || nested.length) &&
-        force !== true &&
-        force !== 'true'
-      ) {
-        throw new Error('Directory is not empty')
-      }
-      for (const name of children) files.delete(name)
-      for (const name of nested) directories.delete(name)
-      directories.delete(fullPath)
-      return { item, action: 'delete_dir' }
-    },
-    'server.files.move': ({ source, dest }) => {
-      const from = fileLocation(source)
-      const to = fileLocation(dest)
-      const file = fileRoot(from.root).get(from.path)
-      if (!file) throw new Error('File not found')
-      fileRoot(from.root).delete(from.path)
-      fileRoot(to.root).set(to.path, { ...file, path: to.path })
-      return { item: to, source_item: from, action: 'move_file' }
-    },
-    'server.files.delete_file': ({ path }) => {
-      const item = fileLocation(path)
-      if (!fileRoot(item.root).delete(item.path))
-        throw new Error('File not found')
-      return { item, action: 'delete_file' }
-    },
-    'server.history.list': ({
-      limit = 50,
-      start = 0,
-      order = 'desc',
-      since = 0,
-      before = Infinity,
-    }) => {
-      const jobs = [...history.values()].filter(
-        (job) =>
-          job.start_time >= Number(since) && job.start_time <= Number(before),
-      )
-      if (order !== 'asc') jobs.reverse()
-      return {
-        count: jobs.length,
-        jobs: jobs.slice(Number(start), Number(start) + Number(limit)),
-      }
-    },
-    'server.history.get_job': ({ uid }) => {
-      const job = history.get(String(uid))
-      if (!job) throw new Error('Unknown history job')
-      return { job }
-    },
-    'server.history.delete_job': ({ uid, all }) => {
-      const deleted_jobs =
-        all === true || all === 'true'
-          ? [...history.keys()]
-          : [String(uid)].filter((id) => history.has(id))
-      for (const id of deleted_jobs) history.delete(id)
-      return { deleted_jobs }
-    },
-    'server.history.totals': () => ({
-      job_totals: {
-        total_jobs: history.size,
-        total_time: [...history.values()].reduce(
-          (sum, job) => sum + job.total_duration,
-          0,
-        ),
-        total_print_time: [...history.values()].reduce(
-          (sum, job) => sum + job.print_duration,
-          0,
-        ),
-      },
-      auxiliary_totals: [],
-    }),
-    'server.job_queue.status': queueResult,
-    'server.job_queue.post_job': ({ filenames, reset }) => {
-      if (
-        !Array.isArray(filenames) ||
-        filenames.some((name) => typeof name !== 'string')
-      )
-        throw new Error('Invalid filenames')
-      if (reset === true) queue.clear()
-      for (const filename of filenames) {
-        const job_id = String(++nextQueued)
-        queue.set(job_id, { job_id, filename, time_added: Date.now() / 1000 })
-      }
-      return queueResult()
-    },
-    'server.job_queue.delete_job': ({ job_ids, all }) => {
-      if (all === true || all === 'true') queue.clear()
-      else
-        for (const id of Array.isArray(job_ids)
-          ? job_ids
-          : String(job_ids ?? '').split(','))
-          queue.delete(String(id))
-      return queueResult()
-    },
-    'server.job_queue.jump': ({ job_id }) => {
-      const job = queue.get(String(job_id))
-      if (!job) throw new Error('Unknown queued job')
-      const remaining = [...queue.values()].filter((entry) => entry !== job)
-      queue.clear()
-      for (const entry of [job, ...remaining]) queue.set(entry.job_id, entry)
-      return queueResult()
-    },
-    'server.job_queue.pause': () => {
-      queueState = 'paused'
-      return queueResult()
-    },
-    'server.job_queue.start': () => {
-      queueState = 'ready'
-      return queueResult()
-    },
-    'machine.device_power.devices': () => ({
-      devices: [
-        { ...powerDevice(), type: 'gpio', locked_while_printing: false },
-      ],
-    }),
-    'machine.device_power.get_device': ({ device }) => powerDevice(device),
-    'machine.device_power.post_device': ({ device, action }) => {
-      powerDevice(device)
-      if (action === 'on' || action === 'off') power = action
-      else if (action === 'toggle') power = power === 'on' ? 'off' : 'on'
-      else throw new Error('Invalid power action')
-      return powerDevice(device)
-    },
-    'machine.device_power.status': (params) => bulkPower(params),
-    'machine.device_power.on': (params) => bulkPower(params, 'on'),
-    'machine.device_power.off': (params) => bulkPower(params, 'off'),
-    'machine.services.restart': ({ service }) => {
-      if (typeof service !== 'string' || !service)
-        throw new Error('Missing service')
-      if (service === 'klipper') triggerRestart()
-      return 'ok'
-    },
-    'machine.proc_stats': () => ({
-      moonraker_stats: [
-        { time: Date.now() / 1000, cpu_usage: 0, memory: 0, mem_units: 'kB' },
-      ],
-      system_cpu_usage: { cpu: 0 },
-      system_memory: { total: 1024, available: 1024, used: 0 },
-      websocket_connections: wsClients.size,
-    }),
-    'server.timelapse.get_settings': () => timelapseSettings,
-    'server.timelapse.post_settings': (params) => {
-      timelapseSettings = { ...timelapseSettings, ...params }
-      return timelapseSettings
-    },
-    'server.timelapse.lastframe': () => ({ frame: lastFrame }),
-    'server.timelapse.takeframe': () => ({ frame: ++lastFrame }),
-    'server.timelapse.render': () => ({ status: 'success', frames: lastFrame }),
-    'server.timelapse.saveframes': () => ({ frames: lastFrame }),
-  }
-
-  const httpEndpoints: Record<string, string> = {
-    'GET /printer/gcode/help': 'printer.gcode.help',
-    'GET /server/gcode_store': 'server.gcode_store',
-    'GET /server/temperature_store': 'server.temperature_store',
-    'GET /server/files/roots': 'server.files.roots',
-    'GET /server/files/directory': 'server.files.get_directory',
-    'POST /server/files/directory': 'server.files.post_directory',
-    'DELETE /server/files/directory': 'server.files.delete_directory',
-    'POST /server/files/move': 'server.files.move',
-    'GET /server/history/list': 'server.history.list',
-    'GET /server/history/job': 'server.history.get_job',
-    'DELETE /server/history/job': 'server.history.delete_job',
-    'GET /server/history/totals': 'server.history.totals',
-    'GET /server/job_queue/status': 'server.job_queue.status',
-    'POST /server/job_queue/job': 'server.job_queue.post_job',
-    'DELETE /server/job_queue/job': 'server.job_queue.delete_job',
-    'POST /server/job_queue/jump': 'server.job_queue.jump',
-    'POST /server/job_queue/pause': 'server.job_queue.pause',
-    'POST /server/job_queue/start': 'server.job_queue.start',
-    'GET /machine/device_power/devices': 'machine.device_power.devices',
-    'GET /machine/device_power/device': 'machine.device_power.get_device',
-    'POST /machine/device_power/device': 'machine.device_power.post_device',
-    'GET /machine/device_power/status': 'machine.device_power.status',
-    'POST /machine/device_power/on': 'machine.device_power.on',
-    'POST /machine/device_power/off': 'machine.device_power.off',
-    'POST /machine/services/restart': 'machine.services.restart',
-    'GET /machine/proc_stats': 'machine.proc_stats',
-    'GET /server/timelapse/settings': 'server.timelapse.get_settings',
-    'POST /server/timelapse/settings': 'server.timelapse.post_settings',
-    'GET /server/timelapse/lastframe': 'server.timelapse.lastframe',
-    'POST /server/timelapse/takeframe': 'server.timelapse.takeframe',
-    'POST /server/timelapse/render': 'server.timelapse.render',
-    'POST /server/timelapse/saveframes': 'server.timelapse.saveframes',
-  }
 
   function statusOf(m: MoonrakerModel): Record<string, object> {
     const all: Record<string, object> = {
@@ -1011,32 +969,61 @@ export async function startMoonrakerMock(
       },
       toolhead: {
         extruder: m.activeExtruder,
-        position,
-        homed_axes: 'xyz'
-          .split('')
-          .filter((axis) => homed.has(axis))
-          .join(''),
-        axis_minimum: axisMinimum,
-        axis_maximum: axisMaximum,
+        position: [...toolheadPosition],
+        homed_axes: homedAxes,
+        axis_minimum: [...axisMinimum],
+        axis_maximum: [...axisMaximum],
         max_velocity: 300,
         max_accel: 3000,
+        estimated_print_time: m.printDuration,
+        print_time: m.printDuration,
       },
       exclude_object: {
-        objects: [...printObjects].map((name) => ({ name })),
-        excluded_objects: [...excluded],
-        current_object: currentObject,
+        objects: excludeObjects.map(({ name, center, polygon }) => ({
+          name,
+          center,
+          polygon,
+        })),
+        excluded_objects: excludeObjects
+          .filter((o) => o.excluded)
+          .map((o) => o.name),
+        current_object: currentExcludeObject,
       },
-      bed_mesh: {
-        profile_name: meshProfile,
-        mesh_min: [0, 0],
-        mesh_max: [220, 220],
-        probed_matrix: mesh,
-        mesh_matrix: mesh,
-        profiles: Object.fromEntries(
-          [...meshProfiles].map(([name, points]) => [name, { points }]),
-        ),
+      bed_mesh: (() => {
+        const profile =
+          (activeMeshName && bedMeshProfiles.get(activeMeshName)) || defaultMesh
+        return {
+          profile_name: activeMeshName ?? '',
+          mesh_min: [profile.min_x ?? 0, profile.min_y ?? 0],
+          mesh_max: [profile.max_x ?? 220, profile.max_y ?? 220],
+          probed_matrix: profile.points,
+          mesh_matrix: profile.points,
+          profiles: Object.fromEntries(
+            [...bedMeshProfiles.entries()].map(([name, p]) => [
+              name,
+              {
+                points: p.points,
+                mesh_params: {
+                  min_x: p.min_x ?? 0,
+                  max_x: p.max_x ?? 220,
+                  min_y: p.min_y ?? 0,
+                  max_y: p.max_y ?? 220,
+                  x_count: p.x_count ?? p.points[0]?.length ?? 3,
+                  y_count: p.y_count ?? p.points.length,
+                  mesh_x_pps: p.mesh_x_pps ?? 2,
+                  mesh_y_pps: p.mesh_y_pps ?? 2,
+                  algo: p.algo ?? 'bicubic',
+                  tension: p.tension ?? 0.2,
+                },
+              },
+            ]),
+          ),
+        }
+      })(),
+      probe: {
+        last_query: true,
+        last_z_result: probeZ,
       },
-      probe: { last_z_result: probeResult },
       save_variables: {
         variables:
           m.activeTool !== undefined ? { active_tool: m.activeTool } : {},
@@ -1068,11 +1055,15 @@ export async function startMoonrakerMock(
       } else if (obj.startsWith('output_pin ')) {
         const name = obj.slice('output_pin '.length)
         all[obj] = {
-          value: name === 'caselight' ? m.caselight : (pins.get(name) ?? 0),
+          value:
+            name === 'caselight' ? m.caselight : (outputPins.get(name) ?? 0),
         }
       } else if (obj.startsWith('fan_generic ')) {
         const name = obj.slice('fan_generic '.length)
         all[obj] = { speed: genericFans.get(name) ?? 0 }
+      } else if (obj.startsWith('controller_fan ')) {
+        const name = obj.slice('controller_fan '.length)
+        all[obj] = { speed: controllerFans.get(name) ?? 0 }
       } else if (
         obj.startsWith('heater_generic ') ||
         obj.startsWith('temperature_fan ')
@@ -1090,67 +1081,53 @@ export async function startMoonrakerMock(
         obj.startsWith('pca9533 ') ||
         obj.startsWith('pca9632 ')
       ) {
-        all[obj] = {
-          color_data: [
-            leds.get(obj.slice(obj.indexOf(' ') + 1)) ?? [
-              m.caselight,
-              m.caselight,
-              m.caselight,
-              0,
-            ],
-          ],
-        }
+        const name = obj.slice(obj.indexOf(' ') + 1)
+        const color = ledColors.get(name) ?? [
+          m.caselight,
+          m.caselight,
+          m.caselight,
+          0,
+        ]
+        all[obj] = { color_data: [color] }
       }
     }
 
     return all
   }
 
-  const temperatureStore = new Map<
-    string,
-    {
-      temperatures: number[]
-      targets: number[]
-      powers: number[]
-    }
-  >()
-
-  function sampleTemperature(current: Record<string, object>) {
-    for (const [name, status] of Object.entries(current)) {
-      if (
-        !('temperature' in status) ||
-        typeof status.temperature !== 'number' ||
-        !('target' in status) ||
-        typeof status.target !== 'number'
-      )
-        continue
-      const series = temperatureStore.get(name) ?? {
-        temperatures: [],
-        targets: [],
-        powers: [],
+  /** Rolls each heater's temperature window forward by one sample. */
+  function sampleTemperatures(current: Record<string, object>) {
+    for (const [name, series] of Object.entries(temperatureStore)) {
+      const status = current[name] as
+        { temperature?: unknown; target?: unknown; power?: unknown } | undefined
+      if (typeof status?.temperature !== 'number') continue
+      const roll = (values: number[], value: number) => [
+        ...values.slice(1),
+        value,
+      ]
+      temperatureStore[name] = {
+        ...series,
+        temperatures: roll(series.temperatures, status.temperature),
+        ...(series.targets && {
+          targets: roll(
+            series.targets,
+            typeof status.target === 'number' ? status.target : 0,
+          ),
+        }),
+        ...(series.powers && {
+          powers: roll(
+            series.powers,
+            typeof status.power === 'number' ? status.power : 0,
+          ),
+        }),
       }
-      series.temperatures.push(status.temperature)
-      series.targets.push(status.target)
-      series.powers.push(
-        'power' in status && typeof status.power === 'number'
-          ? status.power
-          : 0,
-      )
-      if (series.temperatures.length > 1200) {
-        series.temperatures.shift()
-        series.targets.shift()
-        series.powers.shift()
-      }
-      temperatureStore.set(name, series)
     }
   }
-
-  sampleTemperature(statusOf(model))
 
   function broadcastStatus() {
     eventtime++
     const current = statusOf(model)
-    sampleTemperature(current)
+    sampleTemperatures(current)
     for (const client of wsClients) {
       if (!client.hasSubscribed) continue
       const delta = pickStatus(current, client.subscribedObjects)
@@ -1175,34 +1152,19 @@ export async function startMoonrakerMock(
     }
   }
 
+  function broadcastGcodeResponse(message: string) {
+    const msg = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notify_gcode_response',
+      params: [message],
+    })
+    for (const client of wsClients) {
+      client.send(msg)
+    }
+  }
+
   function updateModel(patch: Partial<MoonrakerModel>) {
-    if (
-      patch.state === 'printing' &&
-      model.state !== 'printing' &&
-      model.state !== 'paused'
-    ) {
-      printStarted = Date.now() / 1000
-      excluded.clear()
-      printObjects.clear()
-      currentObject = null
-    }
-    if (
-      (model.state === 'printing' || model.state === 'paused') &&
-      (patch.state === 'complete' ||
-        patch.state === 'cancelled' ||
-        patch.state === 'error')
-    ) {
-      const job_id = (++nextJob).toString(16).padStart(6, '0')
-      history.set(job_id, {
-        job_id,
-        filename: model.filename,
-        status: patch.state === 'complete' ? 'completed' : patch.state,
-        start_time: printStarted,
-        end_time: Date.now() / 1000,
-        print_duration: patch.printDuration ?? model.printDuration,
-        total_duration: patch.totalDuration ?? model.totalDuration,
-      })
-    }
+    recordPrintTransition(patch)
     const nextExtruders = {
       ...model.extruders,
       ...(patch.extruders ?? {}),
@@ -1269,108 +1231,16 @@ export async function startMoonrakerMock(
     gcodeScripts.push(script)
     options.onMacroCall?.(script)
 
-    gcodeResponse(script, 'command')
     const patch: Partial<MoonrakerModel> = {}
     let touchedExtruder = false
+    let statusDirty = false
     const nextExtruders = { ...model.extruders }
+    const responses: string[] = []
 
     for (const rawLine of script.split(/\r?\n/)) {
       const line = rawLine.trim()
       if (!line) continue
       const upper = line.toUpperCase()
-      const command = upper.split(/\s+/, 1)[0]
-      const args = Object.fromEntries(
-        [...line.matchAll(/\b(\w+)=([^\s;]+)/g)].map((match) => [
-          match[1]!.toUpperCase(),
-          match[2]!,
-        ]),
-      )
-      switch (command) {
-        case 'G28': {
-          const axes = upper.slice(3).match(/[XYZ]/g) ?? ['X', 'Y', 'Z']
-          for (const axis of axes) {
-            homed.add(axis.toLowerCase())
-            position['XYZ'.indexOf(axis)] = 0
-          }
-          continue
-        }
-        case 'G90':
-        case 'G91':
-          absolute = command === 'G90'
-          continue
-        case 'G0':
-        case 'G1': {
-          const next = [...position]
-          for (const match of upper
-            .slice(command.length)
-            .matchAll(/([XYZE])\s*(-?\d+(?:\.\d+)?)/g)) {
-            const axis = 'XYZE'.indexOf(match[1]!)
-            next[axis] = Number(match[2]) + (absolute ? 0 : position[axis]!)
-          }
-          if (
-            next
-              .slice(0, 3)
-              .some(
-                (value, axis) =>
-                  value < axisMinimum[axis]! || value > axisMaximum[axis]!,
-              )
-          ) {
-            gcodeResponse('!! Move out of range')
-          } else {
-            position.splice(0, position.length, ...next)
-          }
-          continue
-        }
-        case 'PROBE':
-          probeResult = 0.125
-          gcodeResponse('probe at 0.000,0.000 is z=0.125000')
-          continue
-        case 'BED_MESH_CALIBRATE':
-          mesh = [
-            [0, 0.125],
-            [0.125, 0],
-          ]
-          meshProfile = args.PROFILE ?? 'default'
-          meshProfiles.set(meshProfile, mesh)
-          continue
-        case 'BED_MESH_CLEAR':
-          mesh = []
-          meshProfile = ''
-          continue
-        case 'BED_MESH_PROFILE':
-          if (args.SAVE && mesh.length) meshProfiles.set(args.SAVE, mesh)
-          if (args.LOAD) {
-            const saved = meshProfiles.get(args.LOAD)
-            if (saved) {
-              mesh = saved
-              meshProfile = args.LOAD
-            } else gcodeResponse('!! Unknown mesh profile')
-          }
-          if (args.REMOVE) meshProfiles.delete(args.REMOVE)
-          continue
-        case 'EXCLUDE_OBJECT_DEFINE':
-          if (args.RESET === '1') {
-            printObjects.clear()
-            excluded.clear()
-            currentObject = null
-          }
-          if (args.NAME) printObjects.add(args.NAME)
-          continue
-        case 'EXCLUDE_OBJECT_START':
-          currentObject = args.NAME ?? null
-          continue
-        case 'EXCLUDE_OBJECT_END':
-          currentObject = null
-          continue
-        case 'EXCLUDE_OBJECT':
-          if (args.RESET === '1') excluded.clear()
-          else if (args.NAME ?? currentObject)
-            excluded.add((args.NAME ?? currentObject)!)
-          continue
-        case 'M118':
-          gcodeResponse(line.slice(4).trim())
-          continue
-      }
 
       const toolMatch = /^T([0-9]+)$/.exec(upper)
       if (toolMatch) {
@@ -1477,10 +1347,11 @@ export async function startMoonrakerMock(
         const fanMatch = /FAN=([A-Za-z0-9_]+)/i.exec(line)
         const speedMatch = /SPEED=(\d+(?:\.\d+)?)/i.exec(line)
         if (fanMatch && speedMatch) {
-          genericFans.set(
-            fanMatch[1]!,
-            Math.min(1, Math.max(0, Number(speedMatch[1]))),
-          )
+          const name = fanMatch[1]!
+          const speed = Math.min(1, Math.max(0, Number(speedMatch[1])))
+          if (controllerFans.has(name)) controllerFans.set(name, speed)
+          else genericFans.set(name, speed)
+          statusDirty = true
         }
         continue
       }
@@ -1490,27 +1361,157 @@ export async function startMoonrakerMock(
         const valMatch = /VALUE=(\d+(?:\.\d+)?)/i.exec(line)
         if (pinMatch && valMatch) {
           const name = pinMatch[1]!
-          if (name.toLowerCase() === 'caselight')
-            patch.caselight = Number(valMatch[1])
-          else pins.set(name, Number(valMatch[1]))
+          const value = Number(valMatch[1])
+          outputPins.set(name, value)
+          if (name.toLowerCase() === 'caselight') patch.caselight = value
+          statusDirty = true
         }
         continue
       }
 
       if (upper.startsWith('SET_LED ')) {
-        const whiteMatch = /WHITE=(\d+(?:\.\d+)?)/i.exec(line)
-        if (whiteMatch) patch.caselight = Number(whiteMatch[1])
-        if (args.LED) {
-          const previous = leds.get(args.LED) ?? [0, 0, 0, 0]
-          leds.set(
-            args.LED,
-            ['RED', 'GREEN', 'BLUE', 'WHITE'].map((channel, index) =>
-              args[channel] === undefined
-                ? previous[index]!
-                : Number(args[channel]),
-            ),
-          )
+        const ledMatch = /LED=([A-Za-z0-9_]+)/i.exec(line)
+        const r = Number(/RED=(\d+(?:\.\d+)?)/i.exec(line)?.[1] ?? 0)
+        const g = Number(/GREEN=(\d+(?:\.\d+)?)/i.exec(line)?.[1] ?? 0)
+        const b = Number(/BLUE=(\d+(?:\.\d+)?)/i.exec(line)?.[1] ?? 0)
+        const w = Number(/WHITE=(\d+(?:\.\d+)?)/i.exec(line)?.[1] ?? 0)
+        if (ledMatch) {
+          ledColors.set(ledMatch[1]!, [r, g, b, w])
+          statusDirty = true
         }
+        if (/WHITE=(\d+(?:\.\d+)?)/i.test(line) && !ledMatch) {
+          patch.caselight = w
+        }
+        continue
+      }
+
+      if (upper === 'G90' || upper === 'G91') {
+        absoluteMoves = upper === 'G90'
+        continue
+      }
+
+      const moveMatch = /^G[01](?:\s|$)/.exec(upper)
+      if (moveMatch) {
+        const next: [number, number, number, number] = [...toolheadPosition]
+        for (const match of upper
+          .slice(2)
+          .matchAll(/([XYZE])\s*(-?\d+(?:\.\d+)?)/g)) {
+          const axis = 'XYZE'.indexOf(match[1]!)
+          next[axis] =
+            Number(match[2]) + (absoluteMoves ? 0 : toolheadPosition[axis]!)
+        }
+        const outOfRange = next
+          .slice(0, 3)
+          .some(
+            (value, axis) =>
+              value < axisMinimum[axis]! || value > axisMaximum[axis]!,
+          )
+        if (outOfRange) responses.push('!! Move out of range')
+        else toolheadPosition = next
+        statusDirty = true
+        continue
+      }
+
+      if (upper === 'M84' || upper === 'M18') {
+        homedAxes = ''
+        statusDirty = true
+        continue
+      }
+
+      if (upper === 'G28' || upper.startsWith('G28 ')) {
+        const axes = upper.slice(3).replace(/\s+/g, '')
+        if (!axes) homedAxes = 'xyz'
+        else {
+          const parts: string[] = []
+          if (axes.includes('X')) parts.push('x')
+          if (axes.includes('Y')) parts.push('y')
+          if (axes.includes('Z')) parts.push('z')
+          homedAxes = parts.join('') || 'xyz'
+        }
+        if (homedAxes.includes('x')) toolheadPosition[0] = axisMinimum[0]
+        if (homedAxes.includes('y')) toolheadPosition[1] = axisMinimum[1]
+        if (homedAxes.includes('z')) toolheadPosition[2] = axisMinimum[2]
+        responses.push('// Homed ' + (homedAxes || 'xyz'))
+        statusDirty = true
+        continue
+      }
+
+      const defineMatch =
+        /^EXCLUDE_OBJECT_(DEFINE|START|END)(?:\s+NAME=([A-Za-z0-9_-]+))?/i.exec(
+          line,
+        )
+      if (defineMatch) {
+        const kind = defineMatch[1]!.toUpperCase()
+        const name = defineMatch[2]
+        if (kind === 'DEFINE' && name) {
+          if (!excludeObjects.some((o) => o.name === name)) {
+            excludeObjects.push({
+              name,
+              center: [0, 0],
+              polygon: [],
+              excluded: false,
+            })
+          }
+        } else if (kind === 'START') {
+          currentExcludeObject = name ?? null
+        } else if (kind === 'END') {
+          currentExcludeObject = null
+        }
+        statusDirty = true
+        continue
+      }
+
+      const excludeMatch = /^EXCLUDE_OBJECT(?:\s+NAME=([A-Za-z0-9_-]+))?/i.exec(
+        line,
+      )
+      if (excludeMatch) {
+        const name = excludeMatch[1]
+        if (name) {
+          const target = excludeObjects.find((o) => o.name === name)
+          if (target) {
+            target.excluded = true
+            responses.push(`// Excluded object ${name}`)
+            statusDirty = true
+          } else {
+            responses.push(`!! Unknown exclude object ${name}`)
+          }
+        }
+        continue
+      }
+
+      if (upper.startsWith('BED_MESH_PROFILE ')) {
+        const loadMatch = /LOAD=([A-Za-z0-9_-]+)/i.exec(line)
+        const saveMatch = /SAVE=([A-Za-z0-9_-]+)/i.exec(line)
+        if (loadMatch) {
+          const name = loadMatch[1]!
+          if (bedMeshProfiles.has(name)) {
+            activeMeshName = name
+            responses.push(`// Loaded bed mesh '${name}'`)
+            statusDirty = true
+          } else {
+            responses.push(`!! Unknown bed mesh profile ${name}`)
+          }
+        } else if (saveMatch) {
+          const name = saveMatch[1]!
+          const current =
+            (activeMeshName && bedMeshProfiles.get(activeMeshName)) ||
+            defaultMesh
+          bedMeshProfiles.set(name, {
+            ...current,
+            name,
+            points: current.points.map((row) => [...row]),
+          })
+          activeMeshName = name
+          responses.push(`// Saved bed mesh '${name}'`)
+          statusDirty = true
+        }
+        continue
+      }
+
+      if (upper.startsWith('BED_MESH_CALIBRATE')) {
+        probeZ = 0.01
+        responses.push('// Bed mesh calibrate complete')
+        statusDirty = true
         continue
       }
 
@@ -1525,14 +1526,22 @@ export async function startMoonrakerMock(
       else if (upper === 'CANCEL_PRINT') {
         patch.state = 'cancelled'
         patch.progress = 0
+      } else {
+        responses.push(`// echo: ${line}`)
       }
     }
 
     if (touchedExtruder) patch.extruders = nextExtruders
     if (Object.keys(patch).length > 0) {
       updateModel(patch)
-    } else {
+    } else if (statusDirty) {
       broadcastStatus()
+    }
+    for (const response of responses) {
+      broadcastGcodeResponse(response)
+    }
+    if (responses.length === 0 && script.trim()) {
+      broadcastGcodeResponse('ok')
     }
   }
 
@@ -1568,9 +1577,11 @@ export async function startMoonrakerMock(
         'history',
         'job_queue',
         'power',
+        'proc_stats',
         'spoolman',
         'update_manager',
         'webcam',
+        ...(timelapseEnabled ? ['timelapse'] : []),
         ...(authConfig ? ['authorization'] : []),
       ],
       websockets: wsClients.size,
@@ -1578,19 +1589,64 @@ export async function startMoonrakerMock(
     }
   }
 
-  function fileListResult(root = 'gcodes') {
-    if (root !== 'gcodes' && root !== 'config' && root !== 'timelapse')
-      return []
-    return [...fileRoot(root).values()].map((f) => ({
-      path: f.path,
-      size: f.size,
-      modified: f.modified,
-      permissions: 'rw',
-    }))
+  function fileKey(root: MoonrakerFileRoot, path: string) {
+    return `${root}:${path}`
+  }
+
+  function splitRootPath(
+    raw: string,
+    fallbackRoot: MoonrakerFileRoot = 'gcodes',
+  ): { root: MoonrakerFileRoot; path: string } | null {
+    const trimmed = raw.replace(/^\/+/, '')
+    const slash = trimmed.indexOf('/')
+    if (slash === -1) {
+      if (
+        trimmed === 'gcodes' ||
+        trimmed === 'config' ||
+        trimmed === 'timelapse'
+      ) {
+        return { root: trimmed, path: '' }
+      }
+      const safe = safeFilePath(trimmed)
+      return safe ? { root: fallbackRoot, path: safe } : null
+    }
+    const maybeRoot = trimmed.slice(0, slash)
+    const rest = trimmed.slice(slash + 1)
+    if (
+      maybeRoot === 'gcodes' ||
+      maybeRoot === 'config' ||
+      maybeRoot === 'timelapse'
+    ) {
+      if (!rest) return { root: maybeRoot, path: '' }
+      const safe = safeFilePath(rest)
+      return safe ? { root: maybeRoot, path: safe } : null
+    }
+    const safe = safeFilePath(trimmed)
+    return safe ? { root: fallbackRoot, path: safe } : null
+  }
+
+  function findGcodeFile(filename: string): StoredMoonrakerFile | undefined {
+    const direct = filesMap.get(fileKey('gcodes', filename))
+    if (direct) return direct
+    for (const file of filesMap.values()) {
+      if (file.root === 'gcodes' && file.path === filename) return file
+    }
+    return undefined
+  }
+
+  function fileListResult(root: MoonrakerFileRoot = 'gcodes') {
+    return [...filesMap.values()]
+      .filter((f) => f.root === root)
+      .map((f) => ({
+        path: f.path,
+        size: f.size,
+        modified: f.modified,
+        permissions: 'rw',
+      }))
   }
 
   function fileMetadataResult(filename: string) {
-    const file = filesMap.get(filename)
+    const file = findGcodeFile(filename)
     if (!file) return null
     return {
       filename: file.path,
@@ -1612,6 +1668,421 @@ export async function startMoonrakerMock(
     }
   }
 
+  function refreshJobQueueTimes() {
+    const now = Date.now() / 1000
+    for (const job of jobQueue.jobs) {
+      job.time_in_queue = Math.max(0, now - job.time_added)
+    }
+  }
+
+  function jobQueueStatus() {
+    refreshJobQueueTimes()
+    return {
+      queued_jobs: jobQueue.jobs.map((j) => ({ ...j })),
+      queue_state: jobQueue.state,
+    }
+  }
+
+  // A print that ends is recorded in history, as Moonraker does. End times
+  // strictly increase so newest-first ordering stays stable.
+  let printStartedAt = Date.now() / 1000
+  let lastHistoryEnd = 0
+  function recordPrintTransition(patch: Partial<MoonrakerModel>) {
+    const active = model.state === 'printing' || model.state === 'paused'
+    if (patch.state === 'printing' && !active) {
+      printStartedAt = Date.now() / 1000
+      return
+    }
+    if (
+      !active ||
+      (patch.state !== 'complete' &&
+        patch.state !== 'cancelled' &&
+        patch.state !== 'error')
+    )
+      return
+    const end = Math.max(Date.now() / 1000, lastHistoryEnd + 0.001)
+    lastHistoryEnd = end
+    historyJobs.push({
+      job_id: (historyJobs.length + 1).toString(16).padStart(6, '0'),
+      filename: patch.filename ?? model.filename,
+      status: patch.state === 'complete' ? 'completed' : patch.state,
+      start_time: printStartedAt,
+      end_time: end,
+      print_duration: patch.printDuration ?? model.printDuration,
+      total_duration: patch.totalDuration ?? model.totalDuration,
+      filament_used: 0,
+      exists: true,
+      metadata: {},
+    })
+  }
+
+  function historyListResult(params: Record<string, unknown> = {}) {
+    const limit =
+      typeof params.limit === 'number' && params.limit > 0
+        ? Math.min(params.limit, 100)
+        : 50
+    const start =
+      typeof params.start === 'number' && params.start >= 0 ? params.start : 0
+    const since =
+      typeof params.since === 'number' ? params.since : Number.NEGATIVE_INFINITY
+    const before =
+      typeof params.before === 'number'
+        ? params.before
+        : Number.POSITIVE_INFINITY
+    const order = params.order === 'asc' ? 'asc' : 'desc'
+    const filtered = historyJobs
+      .filter((job) => {
+        const end = job.end_time ?? 0
+        return end >= since && end <= before
+      })
+      .sort((a, b) => {
+        const ae = a.end_time ?? 0
+        const be = b.end_time ?? 0
+        return order === 'asc' ? ae - be : be - ae
+      })
+    const page = filtered.slice(start, start + limit)
+    // Moonraker reports the total matching jobs, not the page size.
+    return { count: filtered.length, jobs: page }
+  }
+
+  function historyTotalsResult() {
+    let totalJobs = 0
+    let totalTime = 0
+    let totalPrintTime = 0
+    let totalFilament = 0
+    let longestJob = 0
+    let longestPrint = 0
+    for (const job of historyJobs) {
+      if (!job.end_time) continue
+      totalJobs++
+      const total = job.total_duration ?? 0
+      const print = job.print_duration ?? 0
+      totalTime += total
+      totalPrintTime += print
+      totalFilament += job.filament_used ?? 0
+      longestJob = Math.max(longestJob, total)
+      longestPrint = Math.max(longestPrint, print)
+    }
+    return {
+      job_totals: {
+        total_jobs: totalJobs,
+        total_time: totalTime,
+        total_print_time: totalPrintTime,
+        total_filament_used: totalFilament,
+        longest_job: longestJob,
+        longest_print: longestPrint,
+      },
+      auxiliary_totals: [],
+    }
+  }
+
+  function temperatureStoreResult() {
+    return { ...temperatureStore }
+  }
+
+  function procStatsResult() {
+    const now = Date.now() / 1000
+    return {
+      moonraker_stats: [
+        { time: now - 1, cpu_usage: 2.5, memory: 24000, mem_units: 'kB' },
+        { time: now, cpu_usage: 2.6, memory: 24100, mem_units: 'kB' },
+      ],
+      throttled_state: { bits: 0, flags: [] },
+      cpu_temp: 42.5,
+      network: {
+        lo: { rx_bytes: 1000, tx_bytes: 1000, bandwidth: 10 },
+      },
+      system_cpu_usage: { cpu: 3.1, cpu0: 3.1 },
+      system_memory: {
+        total: 8_000_000,
+        available: 4_000_000,
+        used: 4_000_000,
+      },
+      system_uptime: 12_345,
+      websocket_connections: wsClients.size,
+    }
+  }
+
+  function powerDevicesResult() {
+    return {
+      devices: [...powerDevices.values()].map((d) => ({ ...d })),
+    }
+  }
+
+  function setPowerDevices(
+    names: string[],
+    state: 'on' | 'off',
+  ): Record<string, string> | { error: string } {
+    const out: Record<string, string> = {}
+    for (const name of names) {
+      const device = powerDevices.get(name)
+      if (!device) return { error: `Unknown device ${name}` }
+      if (
+        device.locked_while_printing &&
+        (model.state === 'printing' || model.state === 'paused') &&
+        state === 'off'
+      ) {
+        return { error: `Device ${name} locked while printing` }
+      }
+      device.status = state
+      out[name] = state
+    }
+    return out
+  }
+
+  /** Single-device power API (`machine.device_power.{get,post}_device`). */
+  function devicePowerRpc(
+    method: string,
+    params: Record<string, unknown>,
+  ): { result: unknown } | { error: string } | null {
+    if (
+      method !== 'machine.device_power.get_device' &&
+      method !== 'machine.device_power.post_device'
+    )
+      return null
+    const name = typeof params.device === 'string' ? params.device : ''
+    const device = powerDevices.get(name)
+    if (!device) return { error: `Unknown device ${name}` }
+    if (method === 'machine.device_power.get_device')
+      return { result: { device: name, status: device.status } }
+    const action = params.action
+    const next =
+      action === 'toggle'
+        ? device.status === 'on'
+          ? 'off'
+          : 'on'
+        : action === 'on' || action === 'off'
+          ? action
+          : null
+    if (!next) return { error: `Invalid power action ${String(action)}` }
+    const result = setPowerDevices([name], next)
+    if (typeof result.error === 'string' && !(name in result))
+      return { error: result.error }
+    return { result: { device: name, status: device.status } }
+  }
+
+  function getDirectoryResult(rawPath: string) {
+    const parsed = splitRootPath(rawPath || 'gcodes')
+    if (!parsed) return null
+    const { root, path: dirPath } = parsed
+    const prefix = dirPath ? `${dirPath}/` : ''
+    const dirs = [...directories]
+      .filter((key) => key.startsWith(`${root}:`))
+      .map((key) => key.slice(root.length + 1))
+      .filter((p) => {
+        if (!dirPath) return !p.includes('/')
+        if (!p.startsWith(prefix)) return false
+        const rest = p.slice(prefix.length)
+        return rest.length > 0 && !rest.includes('/')
+      })
+      .map((p) => ({
+        modified: Math.floor(Date.now() / 1000),
+        size: 4096,
+        permissions: 'rw',
+        dirname: dirPath ? p.slice(prefix.length) : p,
+      }))
+    const files = [...filesMap.values()]
+      .filter((f) => f.root === root)
+      .filter((f) => {
+        if (!dirPath) return !f.path.includes('/')
+        if (!f.path.startsWith(prefix)) return false
+        const rest = f.path.slice(prefix.length)
+        return rest.length > 0 && !rest.includes('/')
+      })
+      .map((f) => ({
+        modified: f.modified,
+        size: f.size,
+        permissions: 'rw',
+        filename: dirPath ? f.path.slice(prefix.length) : f.path,
+      }))
+    return {
+      dirs,
+      files,
+      disk_usage: {
+        total: 64 * 1024 * 1024,
+        used: 8 * 1024 * 1024,
+        free: 56 * 1024 * 1024,
+      },
+      root_info: { name: root, permissions: 'rw' },
+    }
+  }
+
+  function createDirectory(rawPath: string) {
+    const parsed = splitRootPath(rawPath)
+    if (!parsed || !parsed.path) return { error: 'Invalid path' as const }
+    directories.add(fileKey(parsed.root, parsed.path))
+    return {
+      item: {
+        path: parsed.path,
+        root: parsed.root,
+        modified: Math.floor(Date.now() / 1000),
+        size: 4096,
+        permissions: 'rw',
+      },
+      action: 'create_dir' as const,
+    }
+  }
+
+  function deleteFileOrDir(rawPath: string) {
+    const parsed = splitRootPath(rawPath)
+    if (!parsed || !parsed.path) return { error: 'Invalid path' as const }
+    if (
+      parsed.root === 'gcodes' &&
+      model.filename === parsed.path &&
+      (model.state === 'printing' || model.state === 'paused')
+    ) {
+      return { error: 'File is in use' as const }
+    }
+    const key = fileKey(parsed.root, parsed.path)
+    if (filesMap.delete(key)) {
+      return {
+        item: {
+          path: parsed.path,
+          root: parsed.root,
+          size: 0,
+          modified: 0,
+          permissions: '',
+        },
+        action: 'delete_file' as const,
+      }
+    }
+    if (directories.delete(key)) {
+      for (const fileKeyName of [...filesMap.keys()]) {
+        if (
+          fileKeyName.startsWith(`${parsed.root}:`) &&
+          fileKeyName
+            .slice(parsed.root.length + 1)
+            .startsWith(`${parsed.path}/`)
+        ) {
+          filesMap.delete(fileKeyName)
+        }
+      }
+      for (const dirKey of [...directories]) {
+        if (
+          dirKey.startsWith(`${parsed.root}:`) &&
+          dirKey.slice(parsed.root.length + 1).startsWith(`${parsed.path}/`)
+        ) {
+          directories.delete(dirKey)
+        }
+      }
+      return {
+        item: {
+          path: parsed.path,
+          root: parsed.root,
+          size: 0,
+          modified: 0,
+          permissions: '',
+        },
+        action: 'delete_dir' as const,
+      }
+    }
+    return { error: 'Not found' as const }
+  }
+
+  function moveFileOrDir(sourceRaw: string, destRaw: string) {
+    const source = splitRootPath(sourceRaw)
+    const dest = splitRootPath(destRaw)
+    if (!source?.path || !dest?.path) return { error: 'Invalid path' as const }
+    if (source.root !== dest.root)
+      return { error: 'Cross-root move refused' as const }
+    if (
+      source.root === 'gcodes' &&
+      model.filename === source.path &&
+      (model.state === 'printing' || model.state === 'paused')
+    ) {
+      return { error: 'File is in use' as const }
+    }
+    const sourceKey = fileKey(source.root, source.path)
+    const destKey = fileKey(dest.root, dest.path)
+    const file = filesMap.get(sourceKey)
+    if (file) {
+      filesMap.delete(sourceKey)
+      const moved = {
+        ...file,
+        path: dest.path,
+        modified: Math.floor(Date.now() / 1000),
+      }
+      filesMap.set(destKey, moved)
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified: moved.modified,
+          size: moved.size,
+          permissions: 'rw',
+        },
+        source_item: { root: source.root, path: source.path },
+        action: 'move_file' as const,
+      }
+    }
+    if (directories.has(sourceKey)) {
+      directories.delete(sourceKey)
+      directories.add(destKey)
+      for (const [key, value] of [...filesMap.entries()]) {
+        if (!key.startsWith(`${source.root}:`)) continue
+        const rel = key.slice(source.root.length + 1)
+        if (rel === source.path || !rel.startsWith(`${source.path}/`)) continue
+        filesMap.delete(key)
+        const nextPath = dest.path + rel.slice(source.path.length)
+        filesMap.set(fileKey(dest.root, nextPath), { ...value, path: nextPath })
+      }
+      return {
+        item: {
+          root: dest.root,
+          path: dest.path,
+          modified: Math.floor(Date.now() / 1000),
+          size: 4096,
+          permissions: 'rw',
+        },
+        source_item: { root: source.root, path: source.path },
+        action: 'move_dir' as const,
+      }
+    }
+    return { error: 'Not found' as const }
+  }
+
+  function readBodyJson(body: Buffer): Record<string, unknown> | null {
+    if (body.length === 0) return {}
+    try {
+      const parsed = JSON.parse(body.toString('utf8')) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  function parsePowerDeviceNames(url: URL, body: Buffer): string[] {
+    const names = [...url.searchParams.keys()].filter((k) => k !== '')
+    if (names.length > 0) return names
+    const json = readBodyJson(body)
+    if (!json) return []
+    if (typeof json.device === 'string') return [json.device]
+    if (Array.isArray(json.devices)) {
+      return json.devices.filter((d): d is string => typeof d === 'string')
+    }
+    return Object.keys(json)
+  }
+
+  function postJobQueue(filenames: string[], reset = false) {
+    if (reset) jobQueue.jobs = []
+    const now = Date.now() / 1000
+    for (const filename of filenames) {
+      if (!findGcodeFile(filename)) {
+        return { error: `File not found: ${filename}` as const }
+      }
+      jobQueue.jobs.push({
+        filename,
+        job_id: String(nextJobId++).padStart(16, '0'),
+        time_added: now,
+        time_in_queue: 0,
+      })
+    }
+    return jobQueueStatus()
+  }
+
   const scenario = new ScenarioController<MoonrakerModel>({
     steps: options.scenario,
     applyState: (patch) => updateModel(patch),
@@ -1623,15 +2094,7 @@ export async function startMoonrakerMock(
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const path = url.pathname
     const method = (req.method ?? 'GET').toUpperCase()
-    const call = `HTTP ${method} ${path}`
-    recordCall(call)
-    if (method !== 'GET' && method !== 'HEAD') {
-      recordedCalls.push({
-        method: call,
-        params: Object.fromEntries(url.searchParams),
-        timestamp: Date.now(),
-      })
-    }
+    recordCall(`HTTP ${method} ${path}`)
 
     const chunks: Buffer[] = []
     let receivedBytes = 0
@@ -1816,27 +2279,14 @@ export async function startMoonrakerMock(
       return
     }
 
-    const endpoint = httpEndpoints[method + ' ' + path]
-    if (endpoint) {
-      try {
-        const params = {
-          ...Object.fromEntries(url.searchParams),
-          ...(body.length ? JSON.parse(body.toString('utf8')) : {}),
-        }
-        sendJson(res, 200, { result: endpoints[endpoint]!(params) })
-      } catch (error) {
-        sendJson(res, 400, {
-          error: { code: 400, message: (error as Error).message },
-        })
-      }
-      return
-    }
-
     // Files
     if (path === '/server/files/list' && method === 'GET') {
-      sendJson(res, 200, {
-        result: fileListResult(url.searchParams.get('root') ?? undefined),
-      })
+      const rootParam = url.searchParams.get('root')
+      const root: MoonrakerFileRoot =
+        rootParam === 'config' || rootParam === 'timelapse'
+          ? rootParam
+          : 'gcodes'
+      sendJson(res, 200, { result: fileListResult(root) })
       return
     }
 
@@ -1848,6 +2298,90 @@ export async function startMoonrakerMock(
         return
       }
       sendJson(res, 200, { result: meta })
+      return
+    }
+
+    if (path === '/server/files/directory' && method === 'GET') {
+      const dirPath = url.searchParams.get('path') ?? 'gcodes'
+      const result = getDirectoryResult(dirPath)
+      if (!result) {
+        sendJson(res, 400, { error: { code: 400, message: 'Invalid path' } })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/server/files/directory' && method === 'POST') {
+      const json = readBodyJson(body) ?? {}
+      const dirPath =
+        (typeof json.path === 'string' ? json.path : null) ??
+        url.searchParams.get('path')
+      if (!dirPath) {
+        sendJson(res, 400, { error: { code: 400, message: 'Missing path' } })
+        return
+      }
+      const result = createDirectory(dirPath)
+      if ('error' in result) {
+        sendJson(res, 400, { error: { code: 400, message: result.error } })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/server/files/directory' && method === 'DELETE') {
+      const dirPath = url.searchParams.get('path') ?? ''
+      const result = deleteFileOrDir(dirPath)
+      if ('error' in result) {
+        sendJson(res, result.error === 'Not found' ? 404 : 400, {
+          error: {
+            code: result.error === 'Not found' ? 404 : 400,
+            message: result.error,
+          },
+        })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/server/files/move' && method === 'POST') {
+      const json = readBodyJson(body) ?? {}
+      const source =
+        (typeof json.source === 'string' ? json.source : null) ??
+        url.searchParams.get('source')
+      const dest =
+        (typeof json.dest === 'string' ? json.dest : null) ??
+        url.searchParams.get('dest')
+      if (!source || !dest) {
+        sendJson(res, 400, {
+          error: { code: 400, message: 'Missing source or dest' },
+        })
+        return
+      }
+      const result = moveFileOrDir(source, dest)
+      if ('error' in result) {
+        sendJson(res, 400, { error: { code: 400, message: result.error } })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/server/files/delete' && method === 'DELETE') {
+      const filePath = url.searchParams.get('path') ?? ''
+      const result = deleteFileOrDir(filePath)
+      if ('error' in result) {
+        sendJson(res, result.error === 'Not found' ? 404 : 400, {
+          error: {
+            code: result.error === 'Not found' ? 404 : 400,
+            message: result.error,
+          },
+        })
+        return
+      }
+      sendJson(res, 200, { result })
       return
     }
 
@@ -1886,19 +2420,20 @@ export async function startMoonrakerMock(
           })
           return
         }
+        const root: MoonrakerFileRoot =
+          parsed.root === 'config' || parsed.root === 'timelapse'
+            ? parsed.root
+            : 'gcodes'
         const entry: StoredMoonrakerFile = {
           path: safe,
+          root,
           size: parsed.content.length,
           modified: Math.floor(Date.now() / 1000),
           content: parsed.content,
           thumbnails: new Map(),
         }
-        if (parsed.root !== 'gcodes' && parsed.root !== 'config') {
-          sendJson(res, 400, { error: { code: 400, message: 'Invalid root' } })
-          return
-        }
-        fileRoot(parsed.root).set(safe, entry)
-        if (parsed.root === 'gcodes' && parsed.startPrint && isKlippyReady()) {
+        filesMap.set(fileKey(root, safe), entry)
+        if (parsed.startPrint && isKlippyReady() && root === 'gcodes') {
           updateModel({
             state: 'printing',
             filename: safe,
@@ -1908,7 +2443,7 @@ export async function startMoonrakerMock(
         }
         sendJson(res, 201, {
           result: {
-            item: { path: safe, root: parsed.root },
+            item: { path: safe, root },
             action: 'create_file',
           },
         })
@@ -1920,31 +2455,30 @@ export async function startMoonrakerMock(
       return
     }
 
-    const download = /^\/server\/files\/(gcodes|config)\/(.+)$/.exec(path)
-    if (download) {
-      const root = download[1]!
-      const files = fileRoot(root)
-      const rel = safeFilePath(download[2]!)
+    for (const rootName of ['gcodes', 'config', 'timelapse'] as const) {
+      const prefix = `/server/files/${rootName}/`
+      if (!path.startsWith(prefix)) continue
+      const rel = safeFilePath(path.slice(prefix.length))
       if (!rel) {
         sendJson(res, 400, { error: { code: 400, message: 'Invalid path' } })
         return
       }
       if (method === 'DELETE') {
-        const existed = files.delete(rel)
-        if (!existed) {
-          sendJson(res, 404, { error: { code: 404, message: 'Not found' } })
+        const result = deleteFileOrDir(`${rootName}/${rel}`)
+        if ('error' in result) {
+          sendJson(res, result.error === 'Not found' ? 404 : 400, {
+            error: {
+              code: result.error === 'Not found' ? 404 : 400,
+              message: result.error,
+            },
+          })
           return
         }
-        sendJson(res, 200, {
-          result: {
-            item: { path: rel, root },
-            action: 'delete_file',
-          },
-        })
+        sendJson(res, 200, { result })
         return
       }
       if (method === 'GET') {
-        const direct = files.get(rel)
+        const direct = filesMap.get(fileKey(rootName, rel))
         if (direct) {
           res.writeHead(200, {
             'Content-Type': 'application/octet-stream',
@@ -1953,7 +2487,8 @@ export async function startMoonrakerMock(
           res.end(direct.content)
           return
         }
-        for (const file of files.values()) {
+        for (const file of filesMap.values()) {
+          if (file.root !== rootName) continue
           const dir = file.path.includes('/')
             ? file.path.slice(0, file.path.lastIndexOf('/') + 1)
             : ''
@@ -1970,6 +2505,244 @@ export async function startMoonrakerMock(
           }
         }
         sendJson(res, 404, { error: { code: 404, message: 'File not found' } })
+        return
+      }
+    }
+
+    if (path === '/server/temperature_store' && method === 'GET') {
+      sendJson(res, 200, { result: temperatureStoreResult() })
+      return
+    }
+
+    if (path === '/server/history/list' && method === 'GET') {
+      const params: Record<string, unknown> = {}
+      const limit = url.searchParams.get('limit')
+      const start = url.searchParams.get('start')
+      const since = url.searchParams.get('since')
+      const before = url.searchParams.get('before')
+      const order = url.searchParams.get('order')
+      if (limit) params.limit = Number(limit)
+      if (start) params.start = Number(start)
+      if (since) params.since = Number(since)
+      if (before) params.before = Number(before)
+      if (order) params.order = order
+      sendJson(res, 200, { result: historyListResult(params) })
+      return
+    }
+
+    if (path === '/server/history/totals' && method === 'GET') {
+      sendJson(res, 200, { result: historyTotalsResult() })
+      return
+    }
+
+    if (path === '/server/job_queue/status' && method === 'GET') {
+      sendJson(res, 200, { result: jobQueueStatus() })
+      return
+    }
+
+    if (path === '/server/job_queue/job' && method === 'POST') {
+      const json = readBodyJson(body) ?? {}
+      const filenames = Array.isArray(json.filenames)
+        ? json.filenames.filter((f): f is string => typeof f === 'string')
+        : typeof json.filename === 'string'
+          ? [json.filename]
+          : []
+      const result = postJobQueue(filenames, json.reset === true)
+      if ('error' in result) {
+        sendJson(res, 400, { error: { code: 400, message: result.error } })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/server/job_queue/job' && method === 'DELETE') {
+      const ids = url.searchParams.getAll('job_ids')
+      jobQueue.jobs = jobQueue.jobs.filter((j) => !ids.includes(j.job_id))
+      sendJson(res, 200, { result: jobQueueStatus() })
+      return
+    }
+
+    if (path === '/server/job_queue/pause' && method === 'POST') {
+      jobQueue.state = 'paused'
+      sendJson(res, 200, { result: jobQueueStatus() })
+      return
+    }
+
+    if (path === '/server/job_queue/start' && method === 'POST') {
+      jobQueue.state = 'ready'
+      if (
+        jobQueue.jobs.length > 0 &&
+        model.state === 'standby' &&
+        isKlippyReady()
+      ) {
+        const next = jobQueue.jobs.shift()!
+        updateModel({
+          state: 'printing',
+          filename: next.filename,
+          progress: 0,
+          errorMessage: '',
+        })
+        jobQueue.state = 'loading'
+      }
+      sendJson(res, 200, { result: jobQueueStatus() })
+      return
+    }
+
+    if (path === '/server/job_queue/jump' && method === 'POST') {
+      const json = readBodyJson(body) ?? {}
+      const jobId =
+        (typeof json.job_id === 'string' ? json.job_id : null) ??
+        url.searchParams.get('job_id')
+      if (!jobId) {
+        sendJson(res, 400, { error: { code: 400, message: 'Missing job_id' } })
+        return
+      }
+      const idx = jobQueue.jobs.findIndex((j) => j.job_id === jobId)
+      if (idx > 0) {
+        const [job] = jobQueue.jobs.splice(idx, 1)
+        jobQueue.jobs.unshift(job!)
+      }
+      sendJson(res, 200, { result: jobQueueStatus() })
+      return
+    }
+
+    if (path === '/machine/device_power/device') {
+      const devicePower = devicePowerRpc(
+        method === 'GET'
+          ? 'machine.device_power.get_device'
+          : method === 'POST'
+            ? 'machine.device_power.post_device'
+            : '',
+        {
+          ...(readBodyJson(body) ?? {}),
+          ...Object.fromEntries(url.searchParams.entries()),
+        },
+      )
+      if (devicePower) {
+        if ('error' in devicePower)
+          sendJson(res, 400, {
+            error: { code: 400, message: devicePower.error },
+          })
+        else sendJson(res, 200, devicePower)
+        return
+      }
+    }
+
+    if (path === '/machine/device_power/devices' && method === 'GET') {
+      sendJson(res, 200, { result: powerDevicesResult() })
+      return
+    }
+
+    if (
+      (path === '/machine/device_power/on' ||
+        path === '/machine/device_power/off' ||
+        path === '/machine/device_power/status') &&
+      (method === 'GET' || method === 'POST')
+    ) {
+      const names = parsePowerDeviceNames(url, body)
+      if (path.endsWith('/status')) {
+        const out: Record<string, string> = {}
+        for (const name of names) {
+          const device = powerDevices.get(name)
+          if (!device) {
+            sendJson(res, 404, {
+              error: { code: 404, message: `Unknown device ${name}` },
+            })
+            return
+          }
+          out[name] = device.status
+        }
+        sendJson(res, 200, { result: out })
+        return
+      }
+      const state = path.endsWith('/on') ? 'on' : 'off'
+      const result = setPowerDevices(names, state)
+      if ('error' in result) {
+        sendJson(res, 400, { error: { code: 400, message: result.error } })
+        return
+      }
+      sendJson(res, 200, { result })
+      return
+    }
+
+    if (path === '/machine/proc_stats' && method === 'GET') {
+      sendJson(res, 200, { result: procStatsResult() })
+      return
+    }
+
+    if (path === '/machine/services/restart' && method === 'POST') {
+      const json = readBodyJson(body) ?? {}
+      const service =
+        (typeof json.service === 'string' ? json.service : null) ??
+        url.searchParams.get('service') ??
+        'klipper'
+      if (service === 'klipper' || service === 'moonraker') {
+        if (service === 'klipper') triggerRestart()
+        sendJson(res, 200, { result: 'ok' })
+        return
+      }
+      sendJson(res, 400, {
+        error: { code: 400, message: `Service ${service} not allowed` },
+      })
+      return
+    }
+
+    if (timelapseEnabled) {
+      const aliased = serverTimelapseHttp[`${method} ${path}`]
+      if (aliased) {
+        const params: Record<string, unknown> = {
+          ...(readBodyJson(body) ?? {}),
+          ...Object.fromEntries(url.searchParams.entries()),
+        }
+        const handled = serverTimelapse(aliased, params)
+        if (handled) {
+          sendJson(res, 200, handled)
+          return
+        }
+      }
+      if (path === '/machine/timelapse/settings') {
+        if (method === 'GET') {
+          sendJson(res, 200, { result: { ...timelapseSettings } })
+          return
+        }
+        if (method === 'POST') {
+          const json = readBodyJson(body) ?? {}
+          for (const [key, value] of Object.entries(json)) {
+            timelapseSettings[key] = value
+          }
+          for (const [key, value] of url.searchParams.entries()) {
+            timelapseSettings[key] = value
+          }
+          sendJson(res, 200, { result: { ...timelapseSettings } })
+          return
+        }
+      }
+      if (path === '/machine/timelapse/lastframeinfo' && method === 'GET') {
+        sendJson(res, 200, {
+          result: {
+            framecount: timelapseFramecount,
+            lastframefile: timelapseLastFrame,
+          },
+        })
+        return
+      }
+      if (path === '/machine/timelapse/render' && method === 'POST') {
+        const filename = `timelapse-${Date.now()}.mp4`
+        storeFileEntry(
+          { path: filename, content: Buffer.from('mock-timelapse') },
+          'timelapse',
+          filesMap,
+        )
+        timelapseLastFrame = filename
+        timelapseFramecount = 0
+        sendJson(res, 200, {
+          result: { status: 'success', filename },
+        })
+        return
+      }
+      if (path === '/machine/timelapse/saveframes' && method === 'POST') {
+        sendJson(res, 200, { result: { status: 'success' } })
         return
       }
     }
@@ -2044,6 +2817,16 @@ export async function startMoonrakerMock(
       }
       if (script) executeGcode(script)
       sendJson(res, 200, { result: 'ok' })
+      return
+    }
+
+    if (path === '/printer/gcode/help' && method === 'GET') {
+      sendJson(res, 200, { result: { ...gcodeHelp } })
+      return
+    }
+
+    if (path === '/printer/gcode/help' && method === 'GET') {
+      sendJson(res, 200, { result: { ...gcodeHelp } })
       return
     }
 
@@ -2217,16 +3000,15 @@ export async function startMoonrakerMock(
 
       if (
         options.maxRpcRequests !== undefined &&
-        rpcRequestCount >= options.maxRpcRequests
+        rpcCalls.length >= options.maxRpcRequests
       ) {
         options.onClientError?.(new Error('Fixture request cap'))
         socket.destroy()
         return
       }
 
-      rpcRequestCount++
       recordCall(method)
-      recordedCalls.push({
+      rpcCalls.push({
         method,
         params: reqObj.params,
         timestamp: Date.now(),
@@ -2302,19 +3084,6 @@ export async function startMoonrakerMock(
         }
       }
 
-      if (Object.hasOwn(endpoints, method)) {
-        try {
-          reply(
-            endpoints[method]!(
-              (reqObj.params ?? {}) as Record<string, unknown>,
-            ),
-          )
-        } catch (error) {
-          replyError(-32602, (error as Error).message)
-        }
-        return
-      }
-
       if (method === 'server.connection.identify') {
         reply({ connection_id: client.connectionId })
         return
@@ -2358,11 +3127,13 @@ export async function startMoonrakerMock(
       }
 
       if (method === 'server.files.list') {
-        reply(
-          fileListResult(
-            (reqObj.params as { root?: string } | undefined)?.root,
-          ),
-        )
+        const rootParam = (reqObj.params as { root?: unknown } | undefined)
+          ?.root
+        const root: MoonrakerFileRoot =
+          rootParam === 'config' || rootParam === 'timelapse'
+            ? rootParam
+            : 'gcodes'
+        reply(fileListResult(root))
         return
       }
 
@@ -2380,6 +3151,290 @@ export async function startMoonrakerMock(
         }
         reply(meta)
         return
+      }
+
+      if (method === 'server.files.get_directory') {
+        const dirPath =
+          (reqObj.params as { path?: unknown } | undefined)?.path ?? 'gcodes'
+        if (typeof dirPath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = getDirectoryResult(dirPath)
+        if (!result) {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.create_directory') {
+        const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
+        if (typeof dirPath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = createDirectory(dirPath)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.delete_file') {
+        const filePath = (reqObj.params as { path?: unknown } | undefined)?.path
+        if (typeof filePath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = deleteFileOrDir(filePath)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.delete_directory') {
+        const dirPath = (reqObj.params as { path?: unknown } | undefined)?.path
+        if (typeof dirPath !== 'string') {
+          replyError(-32602, 'Invalid path')
+          return
+        }
+        const result = deleteFileOrDir(dirPath)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.files.move') {
+        const params = reqObj.params as
+          { source?: unknown; dest?: unknown } | undefined
+        if (
+          typeof params?.source !== 'string' ||
+          typeof params?.dest !== 'string'
+        ) {
+          replyError(-32602, 'Invalid source or dest')
+          return
+        }
+        const result = moveFileOrDir(params.source, params.dest)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.temperature_store') {
+        reply(temperatureStoreResult())
+        return
+      }
+
+      if (method === 'server.history.list') {
+        reply(
+          historyListResult(
+            (reqObj.params as Record<string, unknown> | undefined) ?? {},
+          ),
+        )
+        return
+      }
+
+      if (method === 'server.history.totals') {
+        reply(historyTotalsResult())
+        return
+      }
+
+      if (method === 'server.job_queue.status') {
+        reply(jobQueueStatus())
+        return
+      }
+
+      if (method === 'server.job_queue.post_job') {
+        const params = reqObj.params as
+          { filenames?: unknown; reset?: unknown } | undefined
+        const filenames = Array.isArray(params?.filenames)
+          ? params.filenames.filter((f): f is string => typeof f === 'string')
+          : []
+        const result = postJobQueue(filenames, params?.reset === true)
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'server.job_queue.delete_job') {
+        const params = reqObj.params as { job_ids?: unknown } | undefined
+        const ids = Array.isArray(params?.job_ids)
+          ? params.job_ids.filter((id): id is string => typeof id === 'string')
+          : []
+        jobQueue.jobs = jobQueue.jobs.filter((j) => !ids.includes(j.job_id))
+        reply(jobQueueStatus())
+        return
+      }
+
+      if (method === 'server.job_queue.pause') {
+        jobQueue.state = 'paused'
+        reply(jobQueueStatus())
+        return
+      }
+
+      if (method === 'server.job_queue.start') {
+        jobQueue.state = 'ready'
+        if (
+          jobQueue.jobs.length > 0 &&
+          model.state === 'standby' &&
+          isKlippyReady()
+        ) {
+          const next = jobQueue.jobs.shift()!
+          updateModel({
+            state: 'printing',
+            filename: next.filename,
+            progress: 0,
+            errorMessage: '',
+          })
+          jobQueue.state = 'loading'
+        }
+        reply(jobQueueStatus())
+        return
+      }
+
+      if (method === 'server.job_queue.jump') {
+        const jobId = (reqObj.params as { job_id?: unknown } | undefined)
+          ?.job_id
+        if (typeof jobId !== 'string') {
+          replyError(-32602, 'Invalid job_id')
+          return
+        }
+        const idx = jobQueue.jobs.findIndex((j) => j.job_id === jobId)
+        if (idx > 0) {
+          const [job] = jobQueue.jobs.splice(idx, 1)
+          jobQueue.jobs.unshift(job!)
+        }
+        reply(jobQueueStatus())
+        return
+      }
+
+      if (method === 'machine.device_power.devices') {
+        reply(powerDevicesResult())
+        return
+      }
+
+      const devicePower = devicePowerRpc(
+        method,
+        (reqObj.params as Record<string, unknown> | undefined) ?? {},
+      )
+      if (devicePower) {
+        if ('error' in devicePower) replyError(-32602, devicePower.error)
+        else reply(devicePower.result)
+        return
+      }
+
+      if (
+        method === 'machine.device_power.on' ||
+        method === 'machine.device_power.off' ||
+        method === 'machine.device_power.status'
+      ) {
+        const params =
+          (reqObj.params as Record<string, unknown> | undefined) ?? {}
+        const names =
+          typeof params.device === 'string'
+            ? [params.device]
+            : Array.isArray(params.devices)
+              ? params.devices.filter((d): d is string => typeof d === 'string')
+              : Object.keys(params)
+        if (method === 'machine.device_power.status') {
+          const out: Record<string, string> = {}
+          for (const name of names) {
+            const device = powerDevices.get(name)
+            if (!device) {
+              replyError(-32602, `Unknown device ${name}`)
+              return
+            }
+            out[name] = device.status
+          }
+          reply(out)
+          return
+        }
+        const result = setPowerDevices(
+          names,
+          method === 'machine.device_power.on' ? 'on' : 'off',
+        )
+        if ('error' in result) {
+          replyError(-32602, result.error)
+          return
+        }
+        reply(result)
+        return
+      }
+
+      if (method === 'machine.proc_stats') {
+        reply(procStatsResult())
+        return
+      }
+
+      if (method === 'machine.services.restart') {
+        const service = (reqObj.params as { service?: unknown } | undefined)
+          ?.service
+        if (service !== 'klipper' && service !== 'moonraker') {
+          replyError(-32602, `Service ${String(service)} not allowed`)
+          return
+        }
+        if (service === 'klipper') triggerRestart()
+        reply('ok')
+        return
+      }
+
+      if (timelapseEnabled) {
+        const handled = serverTimelapse(
+          method,
+          (reqObj.params as Record<string, unknown> | undefined) ?? {},
+        )
+        if (handled) {
+          reply(handled.result)
+          return
+        }
+        if (method === 'machine.timelapse.settings') {
+          const params =
+            (reqObj.params as Record<string, unknown> | undefined) ?? {}
+          for (const [key, value] of Object.entries(params)) {
+            timelapseSettings[key] = value
+          }
+          reply({ ...timelapseSettings })
+          return
+        }
+        if (method === 'machine.timelapse.lastframeinfo') {
+          reply({
+            framecount: timelapseFramecount,
+            lastframefile: timelapseLastFrame,
+          })
+          return
+        }
+        if (method === 'machine.timelapse.render') {
+          const filename = `timelapse-${Date.now()}.mp4`
+          storeFileEntry(
+            { path: filename, content: Buffer.from('mock-timelapse') },
+            'timelapse',
+            filesMap,
+          )
+          timelapseLastFrame = filename
+          timelapseFramecount = 0
+          reply({ status: 'success', filename })
+          return
+        }
+        if (method === 'machine.timelapse.saveframes') {
+          reply({ status: 'success' })
+          return
+        }
       }
 
       if (
@@ -2429,6 +3484,11 @@ export async function startMoonrakerMock(
         }
         executeGcode(script)
         reply('ok')
+        return
+      }
+
+      if (method === 'printer.gcode.help') {
+        reply({ ...gcodeHelp })
         return
       }
 
@@ -2597,7 +3657,7 @@ export async function startMoonrakerMock(
 
   const callsFn = () => ({ ...callCounts })
   Object.defineProperty(callsFn, 'all', {
-    get: () => recordedCalls,
+    get: () => rpcCalls,
   })
 
   const close = async () => {
@@ -2618,6 +3678,46 @@ export async function startMoonrakerMock(
     })
   }
 
+  const filesView = new Proxy(filesMap, {
+    get(target, prop, receiver) {
+      if (prop === 'get') {
+        return (key: string) =>
+          target.get(key) ??
+          target.get(fileKey('gcodes', key)) ??
+          target.get(fileKey('config', key)) ??
+          target.get(fileKey('timelapse', key))
+      }
+      if (prop === 'has') {
+        return (key: string) =>
+          target.has(key) ||
+          target.has(fileKey('gcodes', key)) ||
+          target.has(fileKey('config', key)) ||
+          target.has(fileKey('timelapse', key))
+      }
+      if (prop === 'delete') {
+        return (key: string) => {
+          if (target.delete(key)) return true
+          if (target.delete(fileKey('gcodes', key))) return true
+          if (target.delete(fileKey('config', key))) return true
+          return target.delete(fileKey('timelapse', key))
+        }
+      }
+      if (prop === 'set') {
+        return (key: string, value: StoredMoonrakerFile) => {
+          const root = value.root ?? 'gcodes'
+          const pathKey = key.includes(':') ? key : fileKey(root, key)
+          return target.set(pathKey, {
+            ...value,
+            root,
+            path: value.path || key,
+          })
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  }) as Map<string, StoredMoonrakerFile>
+
   return {
     origin,
     ports,
@@ -2632,7 +3732,11 @@ export async function startMoonrakerMock(
       sockets: rawSockets,
       macroCalls,
       gcodeScripts,
-      files: filesMap,
+      files: filesView,
+      directories,
+      historyJobs,
+      jobQueue,
+      powerDevices,
       setKlippyState,
       disconnectClients: () => {
         for (const client of [...wsClients]) {
@@ -2642,6 +3746,7 @@ export async function startMoonrakerMock(
       completePrint: () => updateModel({ state: 'complete', progress: 1 }),
       failPrint: (message = 'Print failed') =>
         updateModel({ state: 'error', errorMessage: message }),
+      broadcastGcodeResponse,
     },
     calls: callsFn as MoonrakerMockInstance['calls'],
     close,

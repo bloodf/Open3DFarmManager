@@ -43,7 +43,7 @@ describe('UI component gallery', () => {
         contents: `
           import { createApp } from 'vue'
           import Gallery from './apps/farm/app/pages/ui-gallery.vue'
-          import './apps/farm/app/assets/main.css'
+          import './apps/farm/app/assets/css/main.css'
           createApp(Gallery).mount('#app')
         `,
         resolveDir: process.cwd(),

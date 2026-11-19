@@ -33,59 +33,59 @@ const lifecycleMock = 'tests/node/e16-352.test.mjs'
 export const klipperControlAreaEvidence = {
   temperatures: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   motion: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   fans: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   leds: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   console: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'serves temperature_store, gcode help and notify_gcode_response',
   },
   excludeObject: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   bedMesh: {
     file: fullMock,
-    test: 'updates objects and emits a G-code console response across transports',
+    test: 'exposes toolhead homing/limits, heaters, fans, leds, pins, exclude_object and bed_mesh',
   },
   fileManager: {
     file: fullMock,
-    test: 'creates directories, moves between roots, downloads and deletes files',
+    test: 'supports file delete/move/mkdir/download and config root',
   },
   history: {
     file: fullMock,
-    test: 'records print history and manages the queue',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   jobQueue: {
     file: fullMock,
-    test: 'records print history and manages the queue',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   power: {
     file: fullMock,
-    test: 'controls power, timelapse and restarts and reports fixture stats',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   timelapse: {
     file: fullMock,
-    test: 'controls power, timelapse and restarts and reports fixture stats',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   services: {
     file: fullMock,
-    test: 'controls power, timelapse and restarts and reports fixture stats',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   updates: {
     file: fullMock,
-    test: 'controls power, timelapse and restarts and reports fixture stats',
+    test: 'covers history, job queue, power, timelapse, update, services, restarts and proc_stats',
   },
   printStatus: {
     file: lifecycleMock,

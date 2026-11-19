@@ -63,6 +63,8 @@ export default defineNuxtConfig({
     connectorInventory: { enabled: false, databaseUrl: '' },
     browserDevices: { enabled: false, databaseUrl: '' },
     printerAssignments: { enabled: false, databaseUrl: '' },
+    /** A login that is a member of farm_spoolman_settings. */
+    spoolmanSettings: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
     telemetryPrune: {

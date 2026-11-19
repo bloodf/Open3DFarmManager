@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 import { SpoolmanConfig } from '../spoolman/config.ts'
 import { createBoundedSpoolmanReader } from '../spoolman/bounded-read.ts'
+import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
 
 // Same approved ws addon policy as the Moonraker client: set before ws loads.
 process.env.WS_NO_BUFFER_UTIL = '1'
@@ -37,8 +38,13 @@ export function createSpoolmanProvider(input: {
 }) {
   const config = SpoolmanConfig.parse(input.config)
   const now = input.transport?.now ?? (() => performance.now())
+  const authorization = readSpoolmanAuthorization(
+    config.credentialFile,
+    config.origin,
+  )
   const reader = createBoundedSpoolmanReader({
     origin: config.origin,
+    ...(authorization ? { authorization } : {}),
     context: {
       farmId: config.farmId,
       serviceId: config.serviceId,
@@ -175,6 +181,7 @@ export function createSpoolmanProvider(input: {
           handshakeTimeout: 5000,
           maxPayload: 256 * 1024,
           perMessageDeflate: false,
+          ...(authorization ? { headers: { authorization } } : {}),
         })
       socket.on('error', disconnected)
       socket.on('close', disconnected)

@@ -1,5 +1,6 @@
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { getSpoolmanMaterials } from './spoolman-materials.ts'
+import { parseMoonrakerActiveSpoolId } from '../moonraker/active-spool.ts'
 import { inventoryAt, summarizeSpoolman } from './spool-inventory.ts'
 import {
   validateMoonrakerInput,
@@ -374,9 +375,7 @@ export async function collectIntoQueue(input: {
               await reader.cancel()
             }
             const body = JSON.parse(Buffer.concat(chunks).toString())
-            return typeof body?.result?.spool_id === 'number'
-              ? body.result.spool_id
-              : null
+            return parseMoonrakerActiveSpoolId(body)
           }, snapshot)
             .then((materials) => {
               if (

@@ -8,11 +8,6 @@ import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
 import type { ThrowawayTlsMaterial } from './mocks/tls.ts'
 import { startBambuFtpsSim } from './bambu-ftps-sim.ts'
 
-export {
-  syntheticBambuCertificate,
-  syntheticBambuTls,
-} from './bambu-synthetic-identity.ts'
-
 export { encodePacket as packet }
 
 export interface BambuSimulatorState {

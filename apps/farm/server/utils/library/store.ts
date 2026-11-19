@@ -7,8 +7,21 @@ import {
   type SessionPolicy,
   type SessionRecord,
 } from '../auth/session-contract.ts'
+import {
+  checkQuota,
+  connectorReports,
+  defaultQuotaBytes,
+  quotaBasis,
+  serverUsedBytes,
+  summarizeUsage,
+  type StorageMode,
+  type StorageUsage,
+} from './quota.ts'
+import { DEFAULT_RETENTION_DAYS } from './retention.ts'
 
-export type StorageMode = 'server' | 'connector'
+export { DEFAULT_QUOTA_BYTES } from './quota.ts'
+export { DEFAULT_RETENTION_DAYS }
+export type { StorageMode }
 export type LibraryFailure = {
   ok: false
   reason:
@@ -20,6 +33,8 @@ export type LibraryFailure = {
     | 'mode-mismatch'
     | 'quota-exceeded'
     | 'storage-unavailable'
+  /** Accessible pt-BR text for the user, when the refusal needs one (quota). */
+  message?: string
 }
 type Authority = {
   sessionRecordId: string
@@ -27,13 +42,12 @@ type Authority = {
   farmId: string
 }
 
-export const DEFAULT_QUOTA_BYTES = 21_474_836_480 // 20 GiB, per #378
-export const DEFAULT_RETENTION_DAYS = 30
-
 export interface LibrarySettings {
   storageMode: StorageMode
   quotaBytes: number
   retentionDays: number
+  /** Newest live versions kept per item; null keeps all. */
+  keepVersions: number | null
 }
 export interface LibraryVersion {
   id: string
@@ -52,6 +66,8 @@ export interface LibraryVersion {
   uploadedBy: string
   createdAt: number
   deletedAt: number | null
+  /** Set once retention removed the stored file; replays show "arquivo removido". */
+  purgedAt: number | null
 }
 export interface LibraryItem {
   id: string
@@ -98,7 +114,7 @@ const VERSION_COLUMNS = (tx: Sql) =>
   tx`v.id, v.item_id AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes",
      v.storage_location AS "storageLocation", b.agent_id AS "agentId", v.original_name AS "originalName", v.kind,
      v.plate_count AS "plateCount", v.metadata, v.notes, v.uploaded_by AS "uploadedBy",
-     v.created_at::float8 AS "createdAt", v.deleted_at::float8 AS "deletedAt"`
+     v.created_at::float8 AS "createdAt", v.deleted_at::float8 AS "deletedAt", b.purged_at::float8 AS "purgedAt"`
 
 /**
  * Library metadata. Server mode keeps the file in the blob store; Connector mode
@@ -186,13 +202,14 @@ export class PostgresLibrary {
   private async settingsOf(tx: Sql, farmId: string): Promise<LibrarySettings> {
     const rows = await tx<
       LibrarySettings[]
-    >`SELECT storage_mode AS "storageMode", quota_bytes::float8 AS "quotaBytes", retention_days AS "retentionDays" FROM farm.library_settings WHERE farm_id=${farmId}::uuid`
+    >`SELECT storage_mode AS "storageMode", quota_bytes::float8 AS "quotaBytes", retention_days AS "retentionDays", keep_versions AS "keepVersions" FROM farm.library_settings WHERE farm_id=${farmId}::uuid`
     // No row yet: farm defaults (Connector mode).
     return (
       rows[0] ?? {
         storageMode: 'connector',
-        quotaBytes: DEFAULT_QUOTA_BYTES,
+        quotaBytes: defaultQuotaBytes(),
         retentionDays: DEFAULT_RETENTION_DAYS,
+        keepVersions: null,
       }
     )
   }
@@ -211,7 +228,7 @@ export class PostgresLibrary {
 
   /** Owner/admin only. Affects future uploads; existing versions keep their recorded location. */
   setSettings(input: Authority & Partial<LibrarySettings>) {
-    const { storageMode, quotaBytes, retentionDays } = input
+    const { storageMode, quotaBytes, retentionDays, keepVersions } = input
     if (
       (storageMode !== undefined &&
         storageMode !== 'server' &&
@@ -223,6 +240,13 @@ export class PostgresLibrary {
           Number.isInteger(retentionDays) &&
           retentionDays >= 1 &&
           retentionDays <= 3650
+        )) ||
+      (keepVersions !== undefined &&
+        keepVersions !== null &&
+        !(
+          Number.isInteger(keepVersions) &&
+          keepVersions >= 1 &&
+          keepVersions <= 1000
         ))
     )
       return Promise.resolve({ ok: false, reason: 'invalid-input' } as const)
@@ -235,10 +259,11 @@ export class PostgresLibrary {
         if (storageMode !== undefined) next.storageMode = storageMode
         if (quotaBytes !== undefined) next.quotaBytes = quotaBytes
         if (retentionDays !== undefined) next.retentionDays = retentionDays
-        await tx`INSERT INTO farm.library_settings (farm_id, storage_mode, quota_bytes, retention_days, updated_by, updated_at)
-        VALUES (${input.farmId}::uuid, ${next.storageMode}, ${next.quotaBytes}, ${next.retentionDays}, ${accountId}, ${now})
+        if (keepVersions !== undefined) next.keepVersions = keepVersions
+        await tx`INSERT INTO farm.library_settings (farm_id, storage_mode, quota_bytes, retention_days, keep_versions, updated_by, updated_at)
+        VALUES (${input.farmId}::uuid, ${next.storageMode}, ${next.quotaBytes}, ${next.retentionDays}, ${next.keepVersions}, ${accountId}, ${now})
         ON CONFLICT (farm_id) DO UPDATE SET storage_mode=EXCLUDED.storage_mode, quota_bytes=EXCLUDED.quota_bytes,
-          retention_days=EXCLUDED.retention_days, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`
+          retention_days=EXCLUDED.retention_days, keep_versions=EXCLUDED.keep_versions, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`
         return { ok: true as const, settings: next }
       },
     )
@@ -304,23 +329,41 @@ export class PostgresLibrary {
         // One blob per (farm, sha256): a repeat adds a version reference only.
         const existing = (
           await tx<
-            { storageLocation: StorageMode; sizeBytes: number }[]
-          >`SELECT storage_location AS "storageLocation", size_bytes::float8 AS "sizeBytes" FROM farm.library_blobs WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}`
+            {
+              storageLocation: StorageMode
+              sizeBytes: number
+              purgedAt: number | null
+            }[]
+          >`SELECT storage_location AS "storageLocation", size_bytes::float8 AS "sizeBytes", purged_at::float8 AS "purgedAt" FROM farm.library_blobs WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}`
         )[0]
         if (existing && existing.sizeBytes !== v.sizeBytes)
           return { ok: false as const, reason: 'invalid-input' as const }
-        if (!existing) {
-          if (v.location === 'server') {
-            const used =
-              (
-                await tx<
-                  { used: number }[]
-                >`SELECT COALESCE(sum(size_bytes), 0)::float8 AS used FROM farm.library_blobs WHERE farm_id=${farm}::uuid AND storage_location='server'`
-              )[0]?.used ?? 0
-            if (used + v.sizeBytes > settings.quotaBytes)
-              return { ok: false as const, reason: 'quota-exceeded' as const }
-          }
-          await tx`INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
+        // Retention removed the file but kept the row: the same bytes uploaded again restore it in place.
+        const restoring = existing?.purgedAt != null
+        // ponytail: a purged file can only come back where its row says; after a mode switch the user re-uploads under the old mode.
+        if (restoring && existing!.storageLocation !== v.location)
+          return { ok: false as const, reason: 'mode-mismatch' as const }
+        if (!existing || restoring) {
+          const basis = await quotaBasis(
+            tx,
+            farm,
+            v.location,
+            v.agentId,
+            settings.quotaBytes,
+          )
+          const decision = basis
+            ? checkQuota(v.location, basis, v.sizeBytes)
+            : { ok: true as const }
+          if (!decision.ok)
+            return {
+              ok: false as const,
+              reason: 'quota-exceeded' as const,
+              message: decision.message,
+            }
+          if (restoring)
+            await tx`UPDATE farm.library_blobs SET purged_at=NULL WHERE farm_id=${farm}::uuid AND sha256=${v.sha256}`
+          else
+            await tx`INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
           VALUES (${farm}::uuid, ${v.sha256}, ${v.sizeBytes}, ${v.location}, ${v.agentId ?? null}, ${now})`
         }
         // Refusals above return before this point, so a rejected upload creates no item.
@@ -355,8 +398,9 @@ export class PostgresLibrary {
           ok: true as const,
           item,
           version: stored,
-          deduplicated: existing !== undefined,
+          deduplicated: existing !== undefined && !restoring,
           orphanedServerCopy:
+            !restoring &&
             existing?.storageLocation === 'connector' &&
             v.location === 'server',
         }
@@ -396,9 +440,27 @@ export class PostgresLibrary {
     )
   }
 
+  /** Used and available space for the farm's active mode (server disk, or what its Connectors report). */
+  getUsage(input: Authority) {
+    return this.scoped<{ ok: true; usage: StorageUsage }>(input, async (tx) => {
+      const settings = await this.settingsOf(tx, input.farmId)
+      return {
+        ok: true as const,
+        usage: summarizeUsage(
+          settings.storageMode,
+          {
+            usedBytes: await serverUsedBytes(tx, input.farmId),
+            quotaBytes: settings.quotaBytes,
+          },
+          await connectorReports(tx, input.farmId),
+        ),
+      }
+    })
+  }
+
   /**
-   * Soft delete; the blob stays for the retention window. Purging after
-   * `retentionDays` is tracked by #378 (needs a DELETE-capable role).
+   * Soft delete; the blob stays for the retention window, then the retention
+   * job (retention.ts, its own database role) purges it.
    */
   softDeleteVersion(input: Authority & { versionId: string }) {
     if (!uuid.test(input.versionId))

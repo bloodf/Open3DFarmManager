@@ -88,6 +88,10 @@ export interface BlobStore {
   read(sha256: string, range?: BlobRange | null): Promise<BlobRead>
   /** Removes temp files older than `olderThanMs` (leftovers of a crash before the rename). */
   sweepTemp(olderThanMs: number, now?: number): Promise<number>
+  /** Removes one stored file. False when it was already absent. */
+  remove(sha256: string): Promise<boolean>
+  /** Stored files (temp files excluded) with size and last write time. */
+  list(): Promise<{ sha256: string; size: number; mtimeMs: number }[]>
 }
 
 /**
@@ -184,6 +188,24 @@ export async function createBlobStore(
           range ? { start: range.start, end: range.end } : {},
         ),
       }
+    },
+
+    async remove(sha256) {
+      const path = pathFor(sha256)
+      if (!(await regularFile(path))) return false
+      await unlink(path)
+      return true
+    },
+
+    async list() {
+      const found: { sha256: string; size: number; mtimeMs: number }[] = []
+      for (const name of await readdir(root)) {
+        if (!SHA256.test(name)) continue
+        const info = await regularFile(join(root, name))
+        if (info)
+          found.push({ sha256: name, size: info.size, mtimeMs: info.mtimeMs })
+      }
+      return found
     },
 
     async sweepTemp(olderThanMs, now = Date.now()) {

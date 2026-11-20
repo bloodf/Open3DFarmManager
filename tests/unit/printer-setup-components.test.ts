@@ -53,8 +53,8 @@ import { createSSRApp, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { createPrinterSetupState, printerSetupKey } from '${join(app, 'app/utils/printer-setup-state.ts')}'
 import { printerSetupActionsKey } from '${join(app, 'app/utils/printer-setup-actions.ts')}'
-${names.map((name) => `import ${name} from '${join(dir, name)}.vue'`).join('\n')}
-const components = { ${names.join(', ')} }
+${names.map((name, index) => `import component${index} from ${JSON.stringify(join(dir, `${name}.vue`))}`).join('\n')}
+const components = { ${names.map((name, index) => `${JSON.stringify(name)}: component${index}`).join(', ')} }
 export async function render(name, configure, provideState = true) {
   const state = createPrinterSetupState()
   configure?.(state)

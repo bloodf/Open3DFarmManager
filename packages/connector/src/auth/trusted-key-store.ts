@@ -71,6 +71,39 @@ export async function openTrustedKeyStore(options: {
     }
     throw new Error('Trusted key storage unavailable')
   }
+  // The restore marker lives outside the checkpoint. Restarting after a restore
+  // starts with no browser grants and no version floor from the previous server.
+  let checkpoint = options.path
+  try {
+    const marker = await open(
+      join(dirname(options.path), 'trusted-keys.epoch'),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )
+    try {
+      const stat = await marker.stat()
+      if (
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        (stat.mode & 0o777) !== 0o600 ||
+        stat.uid !== process.getuid?.() ||
+        stat.size !== 36
+      )
+        fail()
+      const epoch = await marker.readFile('utf8')
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          epoch,
+        )
+      )
+        fail()
+      checkpoint = options.path + '.' + epoch
+    } finally {
+      await marker.close()
+    }
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+      fail()
+  }
   const lookup = (keys: readonly PauseIssuer[], issuer: string, kid: string) =>
     keys.find((key) => key.issuer === issuer && key.kid === kid)?.publicKey
   async function decode(wire: string) {
@@ -85,7 +118,7 @@ export async function openTrustedKeyStore(options: {
   }
   try {
     const file = await open(
-      options.path,
+      checkpoint,
       constants.O_RDONLY | constants.O_NOFOLLOW,
     )
     try {
@@ -170,7 +203,7 @@ export async function openTrustedKeyStore(options: {
           } finally {
             await file.close()
           }
-          await rename(temporary, options.path)
+          await rename(temporary, checkpoint)
           const directory = await open(
             dirname(options.path),
             constants.O_RDONLY | constants.O_DIRECTORY,

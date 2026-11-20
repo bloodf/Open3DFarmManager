@@ -269,7 +269,7 @@ export async function startFarmApp(
       NUXT_AUTH_ENABLED: 'true',
       NUXT_AUTH_ORIGIN: origin,
       NUXT_AUTH_SESSION_SECRET: randomBytes(32).toString('hex'),
-      NUXT_AUTH_DATABASE_URL: url(0),
+      NUXT_AUTH_DATABASE_URL: database.url('farm_account_registration'),
       NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
       NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: url(8),
       NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
@@ -357,6 +357,23 @@ export async function startFarmApp(
       }
       if (Date.now() >= deadline)
         throw new Error('Farm app startup timed out\n' + output)
+      await pause(100)
+    }
+    // The sign-in page reads provider status on every visit and hides a
+    // failure: check it answers from the database with Google off and no
+    // identity provider contacted.
+    // 503 means the database gate is still preparing; anything else is final.
+    for (;;) {
+      const google = await fetch(
+        `http://127.0.0.1:${appPort}/api/auth/google`,
+        { signal: AbortSignal.timeout(5000) },
+      )
+      const body = await google.text()
+      if (google.status === 200 && JSON.parse(body)?.enabled === false) break
+      if (google.status !== 503 || Date.now() >= deadline)
+        throw new Error(
+          `Sign-in provider status failed: ${google.status} ${body.slice(0, 200)}\n${output}`,
+        )
       await pause(100)
     }
     const owned = app

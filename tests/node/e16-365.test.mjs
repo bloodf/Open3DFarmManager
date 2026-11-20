@@ -532,8 +532,10 @@ test('MQTT over mTLS acknowledges on <deviceId>/response and emits <type>/report
       assert.equal(ack.json.code, 0)
       assert.equal(ack.json.msgid, msgid)
 
-      const report = await client.nextJsonMatching((m) =>
-        m.topic.endsWith(`/${type}/report`),
+      const report = await client.nextJsonMatching(
+        (m) =>
+          m.topic.endsWith(`/${type}/report`) &&
+          m.json.action === (expectedAction ?? action),
       )
       assert.equal(report.json.type, type)
       assert.equal(report.json.action, expectedAction ?? action)

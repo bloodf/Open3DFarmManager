@@ -22,7 +22,7 @@ describe('farm job outcome', () => {
     expect(farmJobOutcome(state)).toEqual({
       label,
       filename: 'part.gcode',
-      endedAt: new Date(0).toLocaleString('pt-BR'),
+      endedAt: '31/12/1969, 21:00:00',
       duration: '0 h 2 min',
     })
     expect(farmJobOutcome({ ...state, state: 'printing' })).toBeUndefined()

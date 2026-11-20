@@ -33,6 +33,8 @@ test('home keyboard navigation exposes account routes and unavailable read-only 
     'Aprovar Connector',
     'Dispositivos do navegador',
     'Entrar',
+    // Static quick link; the settings page itself refuses non-admins.
+    'Contas · Provedores de entrada',
     'Convidar pessoa',
     'Sair da conta',
   ]) {

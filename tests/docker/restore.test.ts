@@ -113,7 +113,9 @@ test(
       }
     }
     const catalog = await loadMigrationCatalog()
-    await runMigrations(source, catalog, { kind: 'up' })
+    // Model a backup from the first release with the browser trust schema.
+    const backupCatalog = catalog.slice(0, 13)
+    await runMigrations(source, backupCatalog, { kind: 'up' })
     const farm = randomUUID()
     const agent = randomUUID()
     const browser = randomUUID()
@@ -248,14 +250,20 @@ test(
     }
     writeFileSync(config, JSON.stringify(settings), { mode: 0o600 })
     const marker = join(directory, 'trusted-keys.epoch')
-    await restore(
-      container,
-      'restored',
-      archive,
-      'provisioning',
-      config,
-      target,
-      [directory],
+    execFileSync(
+      process.execPath,
+      [
+        'scripts/self-host/restore.ts',
+        'restore',
+        container,
+        'restored',
+        archive,
+        'provisioning',
+        config,
+        target,
+        directory,
+      ],
+      { timeout: 45_000 },
     )
     const restored = connect('restored')
     pools.push(restored)
@@ -285,6 +293,11 @@ test(
     assert.equal(restartedStore.version, undefined)
     const epoch = readFileSync(marker, 'utf8')
 
+    // Simulate a dump from a newer release without applying unrelated migrations.
+    for (const [index, migration] of catalog.entries()) {
+      if (index < backupCatalog.length) continue
+      await source`INSERT INTO public.open3dfarm_migrations VALUES (${index + 1}, ${migration.id}, ${migration.checksum})`
+    }
     await source`INSERT INTO public.open3dfarm_migrations VALUES (${catalog.length + 1}, 'future', ${'a'.repeat(64)})`
     await source`CREATE TABLE farm.future_schema (id integer)`
     const newer = join(directory, 'newer.dump')

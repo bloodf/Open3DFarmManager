@@ -207,7 +207,7 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/[^/]+\/status)?$/,
+    path: /^\/printers(?:\/status|\/[^/]+\/status)?$/,
     scopes: ['printers:read'],
   },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
@@ -223,6 +223,19 @@ const policies: RoutePolicy[] = [
     scopes: ['control:basic', 'control:extended'],
   },
   { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
+  { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
+  { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },
+  {
+    method: 'GET',
+    path: /^\/library\/settings$/,
+    scopes: ['library:read'],
+  },
+  {
+    method: 'PATCH',
+    path: /^\/library\/settings$/,
+    scopes: ['library:write'],
+  },
+  { method: 'GET', path: /^\/library\/[^/]+$/, scopes: ['library:read'] },
   { method: 'GET', path: /^\/jobs$/, scopes: ['jobs:read'] },
   {
     method: 'GET',
@@ -259,6 +272,26 @@ export function integrationPolicy(path: string, method: string) {
   return policies.find(
     (policy) => policy.method === method && policy.path.test(path),
   )
+}
+
+/** True when the body asks to replay a library version. Malformed JSON is left to the handler. */
+async function libraryReplayBody(request: Request) {
+  const mediaType = request.headers
+    .get('content-type')
+    ?.split(';')[0]
+    ?.trim()
+    .toLowerCase()
+  if (mediaType !== 'application/json') return false
+  try {
+    const body: unknown = JSON.parse(await readText(request.clone(), 16 * 1024))
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+    const keys = Object.keys(body)
+    return (
+      keys.includes('libraryVersionId') || keys.includes('library_version_id')
+    )
+  } catch {
+    return false
+  }
 }
 
 async function readActionScope(request: Request) {
@@ -367,6 +400,12 @@ export async function authorizeIntegrationRequest(
     )
     if (policy.scopes.length && !scopes.length)
       return integrationProblem('insufficient-scope', headers)
+    if (method === 'POST' && /^\/printers\/[^/]+\/jobs$/.test(path)) {
+      const replay = await libraryReplayBody(request)
+      if (replay && !principal.scopes.includes('jobs:write'))
+        return integrationProblem('insufficient-scope', headers)
+      if (replay) scopes = [...scopes, 'jobs:write']
+    }
     if (method === 'POST' && path.endsWith('/actions')) {
       const scope = await readActionScope(request)
       if (
@@ -381,7 +420,14 @@ export async function authorizeIntegrationRequest(
     }
 
     const url = new URL(request.url)
-    const farms = ['/printers', '/inventory', '/jobs'].includes(path)
+    const farms = [
+      '/printers',
+      '/printers/status',
+      '/inventory',
+      '/jobs',
+      '/library',
+      '/library/settings',
+    ].includes(path)
       ? url.searchParams.getAll('farmId')
       : []
     const printers =

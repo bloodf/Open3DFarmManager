@@ -10,6 +10,9 @@ export const INTEGRATION_SCOPES = [
   'control:basic',
   'control:extended',
   'events:subscribe',
+  'jobs:write',
+  'library:read',
+  'library:write',
 ] as const
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]
 

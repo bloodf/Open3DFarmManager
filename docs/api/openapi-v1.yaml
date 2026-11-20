@@ -34,7 +34,7 @@ info:
     **Rate limits.** Each app has separate read (GET) and write (POST, DELETE)
     token buckets. Every authenticated response carries `RateLimit-Limit`,
     `RateLimit-Remaining` and `RateLimit-Reset` for the bucket the request
-    consumed; a 429 also carries `Retry-After`.
+    consumed; a 429 or 503 also carries `Retry-After`.
 
     **Idempotency.** Creating a job or action requires an `Idempotency-Key`
     header. Retrying with the same key and the same body returns the original
@@ -155,6 +155,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
+            Retry-After:
+              $ref: '#/components/headers/Retry-After'
           content:
             application/json:
               schema:
@@ -197,8 +199,51 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/status:
+    get:
+      operationId: listPrinterStatus
+      tags: [Printers]
+      summary: Latest status of every granted printer
+      description: |
+        One page of the latest observed state for every printer covered by a
+        `printers:read` grant, including display name, group, location, ETA and
+        the active farm alerts derived with the same rules as the farm wall
+        (E20.6). Out-of-grant printers are omitted. When nothing publishable has
+        been observed, `state` is `unknown` and optional readings are absent.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printer status snapshots.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterStatusPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/status:
@@ -229,8 +274,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PrinterStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -241,8 +284,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/files:
@@ -292,8 +333,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
@@ -345,8 +384,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
@@ -358,10 +395,15 @@ paths:
       summary: Submit a print job
       description: |
         Stores the job and either delivers it to the Connector or, when the
-        grant requires operator approval, holds it (`held`). The server never
-        downloads or stores the file: the Connector fetches `fileUrl` over
-        HTTPS, verifies `sha256` and `sizeBytes`, uploads and starts. A
-        retry with the same `Idempotency-Key` and body returns the same job.
+        grant requires operator approval, holds it (`held`). A URL job names
+        an HTTPS `fileUrl`: the server never downloads or stores that file,
+        and the Connector fetches it, verifies `sha256` and `sizeBytes`,
+        uploads and starts. A library replay names `libraryVersionId` instead
+        of a URL (optional `plate`) and needs `jobs:write` on the same grant.
+        The farm's library storage mode, server or connector, is recorded on
+        the job; the Connector prints the stored file and refuses an
+        incompatible printer. A retry with the same `Idempotency-Key` and body
+        returns the same job. A library replay also needs `jobs:write` on that grant.
       security:
         - clientCredentials: ['jobs:start']
       parameters:
@@ -409,8 +451,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/actions:
@@ -472,8 +512,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /inventory:
@@ -523,8 +561,229 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library:
+    get:
+      operationId: listLibrary
+      tags: [Library]
+      summary: List library items
+      description: |
+        Newest library item per page for one farm covered by a farm-wide
+        `library:read` grant. `storageMode` is the farm's current mode
+        (`server` keeps the file, `connector` keeps it on the Connector).
+        A version's `storageLocation` is where that file actually is.
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of library items.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: uploadLibrary
+      tags: [Library]
+      summary: Upload a library file
+      description: |
+        Stores the file according to the farm's current storage mode. Server
+        mode keeps the bytes. Connector mode keeps the hash and metadata and
+        leaves the bytes on the farm's Connector. Requires a farm-wide
+        `library:write` grant. A new version emits `library.version.created`.
+      security:
+        - clientCredentials: ['library:write']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryUpload'
+      responses:
+        '201':
+          description: File stored.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryUploadResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library/settings:
+    get:
+      operationId: readLibrarySettings
+      tags: [Library]
+      summary: Read the library storage mode
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+      responses:
+        '200':
+          description: The farm's library settings.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibrarySettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateLibrarySettings
+      tags: [Library]
+      summary: Set the library storage mode
+      description: Requires a farm-wide `library:write` grant.
+      security:
+        - clientCredentials: ['library:write']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibrarySettingsPatch'
+      responses:
+        '200':
+          description: Updated settings.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibrarySettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library/{itemId}:
+    get:
+      operationId: getLibraryItem
+      tags: [Library]
+      summary: Read one library item
+      description: Includes the farm's current storage mode.
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The item and its newest version.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /jobs:
@@ -586,8 +845,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /jobs/{jobId}:
@@ -622,8 +879,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Job'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -634,8 +889,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /actions/{actionId}:
@@ -669,8 +922,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Action'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -681,8 +932,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks:
@@ -719,8 +968,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -776,8 +1023,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks/{webhookId}:
@@ -812,8 +1057,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks/{webhookId}/test:
@@ -854,8 +1097,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 webhooks:
@@ -875,6 +1116,29 @@ webhooks:
           application/json:
             schema:
               $ref: '#/components/schemas/PrinterStateChangedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
+  printer.alert.raised:
+    post:
+      operationId: onPrinterAlertRaised
+      summary: A farm alert became active on a granted printer
+      description: |
+        Sent when an E20.6 farm alert appears for a printer covered by the
+        subscription's grants. The payload uses the same alert kinds, labels
+        and messages as the farm wall. Deliveries are HMAC-signed with the
+        subscription secret (`OpenFarm-Signature`).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterAlertRaisedEvent'
       responses:
         '200':
           $ref: '#/components/responses/WebhookAccepted'
@@ -952,6 +1216,25 @@ webhooks:
       responses:
         '200':
           $ref: '#/components/responses/WebhookAccepted'
+  library.version.created:
+    post:
+      operationId: onLibraryVersionCreated
+      summary: A library version was stored
+      description: Sent when an integration upload creates a library version.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryVersionCreatedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
   webhook.test:
     post:
       operationId: onWebhookTest
@@ -986,9 +1269,12 @@ components:
             inventory:read: Read Spoolman inventory snapshots.
             jobs:read: Read job history and API-submitted jobs.
             jobs:start: Submit print jobs.
+            jobs:write: Start a library replay on a granted printer.
             control:basic: Pause, resume and cancel.
             control:extended: Temperatures, fans, lights, speed, homing, filament and macros; list macros.
             events:subscribe: Manage webhook subscriptions and receive events.
+            library:read: Read library files and the storage mode.
+            library:write: Upload library files and set the storage mode.
   parameters:
     PrinterId:
       name: printerId
@@ -1222,12 +1508,6 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    InternalError:
-      description: Unexpected server error (`internal-error`).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
     ServiceUnavailable:
       description: |
         Storage unavailable (`service-unavailable`) or the printer's Connector
@@ -1284,7 +1564,6 @@ components:
         - intent-expired
         - intent-too-long
         - rate-limited
-        - internal-error
         - service-unavailable
         - connector-unavailable
         - connector-timeout
@@ -1447,6 +1726,15 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayName:
+          type: [string, 'null']
+          maxLength: 128
+        groupName:
+          type: [string, 'null']
+          maxLength: 128
+        location:
+          type: [string, 'null']
+          maxLength: 128
         vendor:
           type: string
           maxLength: 255
@@ -1484,6 +1772,55 @@ components:
             $ref: '#/components/schemas/ActiveSpool'
         observedAt:
           $ref: '#/components/schemas/TimestampMs'
+        alerts:
+          type: array
+          description: Active farm alerts for this printer (E20.6 rules).
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/PrinterAlert'
+    BulkPrinterStatus:
+      allOf:
+        - $ref: '#/components/schemas/PrinterStatus'
+        - type: object
+          required: [alerts]
+    PrinterStatusPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/BulkPrinterStatus'
+    PrinterAlert:
+      type: object
+      required: [id, kind, label, message]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        kind:
+          type: string
+          enum:
+            - error
+            - connector-storage-degraded
+            - offline-or-stale
+            - paused
+            - finished-bed-clear
+            - low-slot
+            - firmware-update
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1024
     ActiveSpool:
       type: object
       description: Spool assigned to one printer tool or AMS slot.
@@ -1688,10 +2025,150 @@ components:
               maxItems: 100
               items:
                 $ref: '#/components/schemas/JobHistoryEntry'
-    JobRequest:
+    StorageMode:
+      type: string
+      enum: [server, connector]
+      description: |
+        `server` keeps the file on the farm server. `connector` keeps it on
+        the Connector and the server stores the hash and metadata only.
+    LibraryVersion:
       type: object
-      required: [fileUrl, sha256, sizeBytes, displayName]
       additionalProperties: false
+      required:
+        [
+          id,
+          itemId,
+          versionNumber,
+          sha256,
+          sizeBytes,
+          storageLocation,
+          originalName,
+          kind,
+          plateCount,
+          createdAt,
+        ]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        itemId:
+          $ref: '#/components/schemas/Uuid'
+        versionNumber:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        sizeBytes:
+          type: integer
+          minimum: 1
+        storageLocation:
+          $ref: '#/components/schemas/StorageMode'
+        originalName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          enum: [gcode, 3mf]
+        plateCount:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+    LibraryItem:
+      type: object
+      additionalProperties: false
+      required: [id, farmId, title, storageMode, latest]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+        latest:
+          $ref: '#/components/schemas/LibraryVersion'
+    LibraryPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data, storageMode]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/LibraryItem'
+            storageMode:
+              $ref: '#/components/schemas/StorageMode'
+    LibrarySettings:
+      type: object
+      additionalProperties: false
+      required: [farmId, storageMode]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+    LibrarySettingsPatch:
+      type: object
+      additionalProperties: false
+      required: [farmId, storageMode]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+    LibraryUpload:
+      type: object
+      additionalProperties: false
+      required: [farmId, name, contentBase64]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contentBase64:
+          type: string
+          minLength: 4
+          maxLength: 70000000
+    LibraryUploadResult:
+      type: object
+      additionalProperties: false
+      required: [item, version, storageMode, deduplicated]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [id, farmId, title, storageMode]
+          properties:
+            id:
+              $ref: '#/components/schemas/Uuid'
+            farmId:
+              $ref: '#/components/schemas/Uuid'
+            title:
+              type: string
+              minLength: 1
+              maxLength: 200
+            storageMode:
+              $ref: '#/components/schemas/StorageMode'
+        version:
+          $ref: '#/components/schemas/LibraryVersion'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+        deduplicated:
+          type: boolean
+    JobRequest:
+      description: |
+        Either an HTTPS file reference or a library replay (`libraryVersionId`,
+        optional `plate`). `library_version_id` is accepted as an alias.
       properties:
         fileUrl:
           type: string
@@ -1711,6 +2188,41 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+      oneOf:
+        - type: object
+          required: [fileUrl, sha256, sizeBytes, displayName]
+          additionalProperties: false
+          properties:
+            fileUrl:
+              type: string
+              format: uri
+              maxLength: 2048
+              pattern: '^https://'
+              description: HTTPS URL the Connector downloads; redirects to non-HTTPS are refused.
+            sha256:
+              type: string
+              pattern: '^[0-9a-f]{64}$'
+              description: Lowercase hex SHA-256 of the file.
+            sizeBytes:
+              type: integer
+              minimum: 1
+              description: Exact file size; the server enforces a configured maximum.
+            displayName:
+              type: string
+              minLength: 1
+              maxLength: 255
+        - type: object
+          required: [libraryVersionId]
+          additionalProperties: false
+          description: Replay a library version. `library_version_id` is accepted as an alias of `libraryVersionId`.
+          properties:
+            libraryVersionId:
+              $ref: '#/components/schemas/Uuid'
+            plate:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              description: Plate of a 3MF project. Omitted for G-code and for the first plate.
     RefusalCode:
       type: string
       description: |
@@ -1794,6 +2306,16 @@ components:
         sizeBytes:
           type: integer
           minimum: 1
+        libraryVersionId:
+          $ref: '#/components/schemas/Uuid'
+          description: Set when the job replays a library version.
+        plate:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+          description: Where the replayed file is stored.
         historyEntryId:
           type: string
           pattern: '^[0-9]{1,19}$'
@@ -1988,10 +2510,12 @@ components:
       type: string
       enum:
         - printer.state_changed
+        - printer.alert.raised
         - job.status_changed
         - action.status_changed
         - job.ended
         - inventory.changed
+        - library.version.created
         - webhook.test
     WebhookRequest:
       type: object
@@ -2091,6 +2615,37 @@ components:
               const: printer.state_changed
             data:
               $ref: '#/components/schemas/PrinterStatus'
+    PrinterAlertRaisedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: printer.alert.raised
+            data:
+              type: object
+              additionalProperties: false
+              required: [farmId, printerId, printerKey, alert]
+              properties:
+                farmId:
+                  $ref: '#/components/schemas/Uuid'
+                printerId:
+                  $ref: '#/components/schemas/Uuid'
+                printerKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                displayName:
+                  type: [string, 'null']
+                  maxLength: 128
+                groupName:
+                  type: [string, 'null']
+                  maxLength: 128
+                location:
+                  type: [string, 'null']
+                  maxLength: 128
+                alert:
+                  $ref: '#/components/schemas/PrinterAlert'
     JobStatusChangedEvent:
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'
@@ -2127,6 +2682,29 @@ components:
               const: inventory.changed
             data:
               $ref: '#/components/schemas/InventorySnapshot'
+    LibraryVersionCreatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: library.version.created
+            data:
+              type: object
+              additionalProperties: false
+              required: [farmId, itemId, versionId, storageMode, sha256]
+              properties:
+                farmId:
+                  $ref: '#/components/schemas/Uuid'
+                itemId:
+                  $ref: '#/components/schemas/Uuid'
+                versionId:
+                  $ref: '#/components/schemas/Uuid'
+                storageMode:
+                  $ref: '#/components/schemas/StorageMode'
+                sha256:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
     WebhookTestEvent:
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'

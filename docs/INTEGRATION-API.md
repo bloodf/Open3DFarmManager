@@ -76,6 +76,13 @@ file. A grant may hold the job for operator approval. Track it with the
 returned job ID at `GET /jobs/{jobId}`; status can be `held`, `queued`,
 `delivered`, `refused`, `started`, a final result, or `outcome-unknown`.
 
+A library replay uses the same endpoint with `libraryVersionId` (and an
+optional `plate`) instead of a URL. The grant needs `jobs:start` and
+`jobs:write`. `GET /library` and `GET /library/{itemId}` (`library:read`)
+return the farm's storage mode. `POST /library` stores the file in that mode,
+and `PATCH /library/settings` (`library:write`) changes it. The Connector
+prints the stored file and refuses a printer the file does not fit.
+
 ## Request actions
 
 `POST /printers/{printerId}/actions` also requires an `Idempotency-Key`.

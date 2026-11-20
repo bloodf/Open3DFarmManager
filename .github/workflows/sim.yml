@@ -13,26 +13,44 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.3'
+          node-version: '22.22.3'
       - run: npm ci --ignore-scripts
       - run: node --test tests/node/e16-358.test.mjs
   klipper:
     if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.3'
+          node-version: '22.22.3'
       - run: npm ci --ignore-scripts
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
-      - run: npm run sim:smoke
+      - name: Verify Klipper simulator
+        run: npm run sim:smoke
       - if: failure()
-        run: node scripts/klipper-diagnostics.mjs
+        run: |
+          mkdir -p sim-diagnostics
+          node scripts/klipper-diagnostics.mjs > sim-diagnostics/klipper-${{ matrix.arch }}.json
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sim-klipper-${{ matrix.arch }}
+          path: sim-diagnostics/klipper-${{ matrix.arch }}.json
+          retention-days: 7
+          if-no-files-found: ignore
       - if: always()
         run: docker compose -f infra/sim/docker-compose.yml --profile klipper down
   spoolman:
@@ -53,7 +71,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.3'
+          node-version: '22.22.3'
       - run: npm ci --ignore-scripts
       - run: docker compose -f infra/sim/docker-compose.yml --profile spoolman config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile spoolman up -d
@@ -91,7 +109,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.3'
+          node-version: '22.22.3'
       - run: npm ci --ignore-scripts
       - run: docker compose -f infra/sim/docker-compose.yml --profile cams config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile cams up -d --build
@@ -128,7 +146,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24.22.3'
+          node-version: '22.22.3'
       - run: npm ci --ignore-scripts
       - run: docker compose -f infra/sim/docker-compose.yml --profile rtsp config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile rtsp up -d

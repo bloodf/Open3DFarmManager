@@ -369,6 +369,7 @@ test('desktop:bundle produces a clean secret-free cache archive that installs of
         version: '0.0.1',
         type: 'module',
         scripts: {
+          prepare: 'node --check build.mjs',
           build: 'node build.mjs',
         },
         dependencies: {

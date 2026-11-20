@@ -49,7 +49,7 @@ Veja a [origem e as instruções para atualizar as capturas](docs/images/README.
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Contas e acesso           | Login, sessões próprias, convites, redefinição de senha e autorização por farm implementados; serviços dependem de configuração explícita.                                                                                            |
 | Connectors e dispositivos | Pareamento, aprovação, inventário, revogação, provas de identidade e renovação de credenciais implementados. CLI com pareamento e status disponível.                                                                                  |
-| Visão da farm             | Página `/farm` atrás da feature flag `farmView`, desligada por padrão: inventário, estado ao vivo por WebRTC direto, idade dos dados e reconexão com recuo. Aceitação integrada com simuladores ainda incompleta.                     |
+| Visão da farm             | Página `/farm` disponível sem feature flag: inventário, estado ao vivo por WebRTC direto, idade dos dados e reconexão com recuo. Aceitação mock em loopback é separada da aceitação em hardware, que permanece aberta.                |
 | Câmera                    | Vídeo RTSP levado ao navegador pelo canal WebRTC autorizado, exibido na visão da farm. Medição de memória nativa e aceitação de ponta a ponta com MediaMTX pendentes.                                                                 |
 | Pausa assinada            | Pausa confirmada e assinada pela página da farm, enviada somente por WebRTC ao Connector e liberada apenas quando todas as condições de disponibilidade são atendidas. Sinal de prontidão do Connector após reconexão ainda pendente. |
 | Impressoras e simuladores | Identificação Moonraker, várias ferramentas e webcams. Simuladores Klipper com cenários de falha de rede; aceitação do SV06 e do cenário de quatro ferramentas pendente.                                                              |
@@ -74,7 +74,7 @@ npm ci --ignore-scripts
 npm run dev
 ```
 
-Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse comando não cria contas, configura banco de dados ou conecta impressoras. Autenticação e integrações começam desabilitadas e exigem configuração própria. A rota `/farm` também depende da feature flag `farmView`.
+Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse comando não cria contas, configura banco de dados ou conecta impressoras. Autenticação e integrações começam desabilitadas e exigem configuração própria. A rota `/farm` está disponível sem feature flag. Aceitação em hardware permanece aberta.
 
 Para entender a configuração, comece pelos contratos de [sessão](docs/SESSION-PERSISTENCE-CONTRACT.md), [pareamento](docs/PAIRING-CONTRACTS.md) e [autorização da farm](docs/FARM-AUTHORIZATION-CHECKPOINT.md). Mantenha credenciais e configuração privada fora do Git.
 

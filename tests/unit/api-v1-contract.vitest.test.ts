@@ -51,7 +51,7 @@ import {
   type Schema,
 } from '../helpers/api-v1-contract/spec.ts'
 import { freshWorld, ids } from '../helpers/api-v1-contract/world.ts'
-import { jobBody } from '../helpers/api-v1-contract/world.ts'
+import { openJourney } from '../helpers/api-v1-contract/journey.ts'
 
 const ops = operations()
 const scenarios = allScenarios()
@@ -255,62 +255,84 @@ describe('responses match the spec', () => {
   }
 })
 
-it('routes reference-client start, pause and cancel requests through v1', async () => {
+it('executes a sandbox print journey through the reference client over loopback', async ({
+  onTestFinished,
+}) => {
   const world = freshWorld()
+  world.authStore.printers = world.authStore.printers.map((printer) =>
+    printer.id === ids.printerA1 ? { ...printer, sandbox: true } : printer,
+  )
   const scopes = ['jobs:start', 'control:basic'] as const
-  const app = world.addApp([{ printerId: ids.printerA1, scopes: [...scopes] }])
-  const operationsSeen: string[] = []
+  const app = world.addApp(
+    [{ printerId: ids.printerA1, scopes: [...scopes] }],
+    { sandbox: true },
+  )
+  const cleanups: (() => void | Promise<void>)[] = []
+  onTestFinished(async () => {
+    for (const cleanup of cleanups.reverse()) await cleanup()
+  })
+  const journey = await openJourney(world, (cleanup) => cleanups.push(cleanup))
+  const exchanges: Outcome[] = []
   const client = new IntegrationClient(
-    'http://127.0.0.1',
+    journey.apiOrigin,
     app.clientId,
     app.secret,
     async (url, init) => {
       const request = new Request(url, init)
-      const path = new URL(request.url).pathname.slice(apiBase.length)
       const input = {
         method: request.method,
-        path,
+        path: new URL(request.url).pathname.slice(apiBase.length),
         headers: Object.fromEntries(request.headers),
-        body: await request.text(),
+        body: await request.clone().text(),
       }
-      const result = await call(input)
-      const key = `POST ${path.replace(ids.printerA1, '{printerId}')}`
-      const op = ops.find((entry) => entry.key === key)!
-      const status = path === '/oauth/token' ? '200' : '202'
-      const scenario = scenarios.find(
-        (entry) => entry.op === key && entry.status === status,
-      )!
-      expect(violationsOf(op, scenario, { input, result })).toEqual([])
-      operationsSeen.push(key)
-      return new Response(result.text, result)
+      const response = await fetch(request)
+      const text = await response.clone().text()
+      exchanges.push({
+        input,
+        result: {
+          status: response.status,
+          headers: response.headers,
+          text,
+          json: JSON.parse(text),
+          unrouted: false,
+        },
+      })
+      return response
     },
   )
 
   await client.authenticate([...scopes])
-  await client.submitJob(ids.printerA1, jobBody, 'reference-start')
+  await client.submitJob(ids.printerA1, journey.job, 'reference-start')
+  expect(journey.printer.printState).toBe('printing')
   await client.submitAction(ids.printerA1, 'pause', {}, 'reference-pause')
+  expect(journey.printer.printState).toBe('paused')
   await client.submitAction(ids.printerA1, 'cancel', {}, 'reference-cancel')
+  expect(journey.printer.printState).toBe('idle')
 
-  expect(operationsSeen).toEqual([
-    'POST /oauth/token',
-    'POST /printers/{printerId}/jobs',
-    'POST /printers/{printerId}/actions',
-    'POST /printers/{printerId}/actions',
+  expect(journey.uploaded).toHaveLength(1)
+  expect(journey.executed).toEqual(['start_print', 'pause', 'cancel'])
+  expect(
+    journey.reports
+      .map(({ outcome }) => outcome)
+      .filter((outcome) => outcome !== 'delivered'),
+  ).toEqual(['started', 'completed', 'completed'])
+  expect(exchanges.map(({ input }) => input.path)).toEqual([
+    '/oauth/token',
+    `/printers/${ids.printerA1}/jobs`,
+    `/printers/${ids.printerA1}/actions`,
+    `/printers/${ids.printerA1}/actions`,
   ])
-  expect([...world.envelopes.commands.values()]).toEqual([
-    {
-      kind: 'job',
-      job: {
-        file_url: jobBody.fileUrl,
-        sha256: jobBody.sha256,
-        size_bytes: jobBody.sizeBytes,
-        display_name: jobBody.displayName,
-      },
-    },
-    { kind: 'action', action: { action: 'pause', args: {} } },
-    { kind: 'action', action: { action: 'cancel', args: {} } },
-  ])
-})
+  for (const exchange of exchanges) {
+    const { input } = exchange
+    const key = `POST ${input.path.replace(ids.printerA1, '{printerId}')}`
+    const op = ops.find((entry) => entry.key === key)!
+    const status = input.path === '/oauth/token' ? '200' : '202'
+    const scenario = scenarios.find(
+      (entry) => entry.op === key && entry.status === status,
+    )!
+    expect(violationsOf(op, scenario, exchange)).toEqual([])
+  }
+}, 15_000)
 
 describe('documented headers no handler sends yet', () => {
   it('503 answers still carry no Retry-After', async () => {

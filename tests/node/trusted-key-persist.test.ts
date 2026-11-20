@@ -373,3 +373,35 @@ test('checkpoint permissions and signature corruption fail closed', async (t) =>
   await writeFile(f.path, encodeTrustedKeySetFrame(frame), { mode: 0o600 })
   await assert.rejects(openTrustedKeyStore(f.options), /storage unavailable/)
 })
+
+test('restore epoch ignores persisted authorization and accepts a newly confirmed key set', async (t) => {
+  const { fenceConnector } = await import('../../scripts/self-host/restore.ts')
+  const f = await setup(t)
+  assert.equal(await f.store.confirm(await f.wire(500)), true)
+  assert.equal(f.store.authority.allowsBrowser(f.f.capability), true)
+  fenceConnector(f.dir)
+  const restored = await openTrustedKeyStore(f.options)
+  assert.equal(restored.version, undefined)
+  assert.equal(restored.authority.allowsBrowser(f.f.capability), false)
+  assert.equal(await restored.confirm(await f.wire(1, true)), true)
+  assert.equal(
+    (await openTrustedKeyStore(f.options)).authority.allowsBrowser(
+      f.f.capability,
+    ),
+    false,
+  )
+  assert.equal(await restored.confirm(await f.wire(2)), true)
+  assert.equal(
+    (await openTrustedKeyStore(f.options)).authority.allowsBrowser(
+      f.f.capability,
+    ),
+    true,
+  )
+  fenceConnector(f.dir)
+  assert.equal(
+    (await openTrustedKeyStore(f.options)).authority.allowsBrowser(
+      f.f.capability,
+    ),
+    false,
+  )
+})

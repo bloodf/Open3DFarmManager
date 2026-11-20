@@ -1,3 +1,4 @@
+import { projectVersion } from '@open3dfarmmanager/shared'
 import { expect, test } from '@playwright/test'
 
 // The farmView feature flag was removed (see tests/node/no-farmview-flag.test.ts):
@@ -30,6 +31,7 @@ for (const mode of modes) {
       expect((await request.get('/farm')).status()).toBe(200)
       expect(await (await request.get('/healthz')).json()).toEqual({
         status: 'ok',
+        version: projectVersion,
         checks: { process: 'ok' },
       })
     } finally {

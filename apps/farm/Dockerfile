@@ -1,4 +1,4 @@
-FROM node:24.22.3-alpine AS build
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS build
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 COPY apps/farm/package.json apps/farm/package.json
@@ -12,7 +12,7 @@ RUN npm ci --ignore-scripts
 COPY . .
 RUN npm run build -w @open3dfarmmanager/farm
 
-FROM node:24.22.3-alpine AS runtime
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NITRO_HOST=0.0.0.0 NITRO_PORT=3000 NUXT_DATABASE_MIGRATIONS_DIR=/app/migrations
 COPY --from=build --chown=10001:10001 /app/apps/farm/.output ./

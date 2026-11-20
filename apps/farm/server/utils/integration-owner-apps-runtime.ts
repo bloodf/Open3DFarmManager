@@ -1,26 +1,16 @@
-import postgres from 'postgres'
-import {
-  getRouterParam,
-  useRuntimeConfig,
-  type RequestEvent,
-} from 'nuxt/server'
+import { getRouterParam, type RequestEvent } from 'nuxt/server'
 import { authenticatedSession } from '../services/authenticated-session.ts'
 import { IntegrationAppsService } from '../services/integration-apps.ts'
 import { PostgresIntegrationApps } from '../storage/integration-apps-postgres.ts'
 import { IntegrationAuditService } from '../services/integration-audit.ts'
 import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
 import { authRuntime } from './auth/runtime.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import type { OwnerAppsDeps } from '../services/integration-owner-apps-http.ts'
 
 export async function ownerAppsRuntime(event: RequestEvent) {
   const { accountId } = await authenticatedSession(event, authRuntime())
-  const config = useRuntimeConfig()
-  const sql = postgres(config.auth.databaseUrl, {
-    max: 1,
-    connect_timeout: 3,
-    idle_timeout: 20,
-    connection: { statement_timeout: 2000, lock_timeout: 1000 },
-  })
+  const sql = integrationAuthPool()
   const store = new PostgresIntegrationApps(sql)
   const deps: OwnerAppsDeps = {
     apps: new IntegrationAppsService(store),
@@ -48,6 +38,6 @@ export async function ownerAppsRuntime(event: RequestEvent) {
     grantId: getRouterParam(event, 'grantId') ?? '',
     credentialId: getRouterParam(event, 'credentialId') ?? '',
     deps,
-    close: () => sql.end({ timeout: 3 }),
+    close: async () => {},
   }
 }

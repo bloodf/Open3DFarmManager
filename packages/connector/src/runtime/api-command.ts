@@ -353,6 +353,7 @@ export function createApiCommandRunner(config: {
     let sentMono = 0
     let confirmed = true
     let threw = false
+    let prepared = false
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
@@ -390,7 +391,10 @@ export function createApiCommandRunner(config: {
     const executeDriver = async (
       driverRequest: NonNullable<ApiEnvelopeV1['action']> = request,
     ) => {
-      await config.driver.prepare?.({ binding, signal })
+      if (!prepared) {
+        await config.driver.prepare?.({ binding, signal })
+        prepared = true
+      }
       lastRefusal =
         authorityRefusal(envelope, sample()) ?? stateRefusal(action, binding)
       if (!lastRefusal && !signal.aborted) {
@@ -467,6 +471,10 @@ export function createApiCommandRunner(config: {
         const mapping = readPrinterBinding(binding)
         const target = jobTarget(binding)
         if (!target || !config.jobFiles) throw new JobFileError('unsupported')
+        // The file fetch is authorized against a fresh local observation.
+        // Open the control attempt first; executeDriver reuses it.
+        await config.driver.prepare?.({ binding, signal })
+        prepared = true
         const authorize = () => {
           lastRefusal =
             config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey

@@ -164,9 +164,12 @@ Use a sandbox app and sandbox farm for development. Sandbox credentials can
 never authorize a non-sandbox farm. Keep sandbox and production credentials,
 data and base URLs separate. The reference client in
 [`../examples/integration-client/`](../examples/integration-client/) has
-offline tests and an explicitly opt-in sandbox test. The latter needs a
-sandbox URL, client credentials and a printer ID; it reads printer state and
-inventory without sending a physical command.
+offline tests and an explicitly opt-in sandbox journey. `startPrint`,
+`pausePrint` and `cancelPrint` send the published job and action operations;
+authenticate with `jobs:start` and `control:basic` before calling them.
+`tests/e2e/epic-204.spec.ts` runs that client against a loopback sandbox, a
+simulated Moonraker printer and the Connector, which accepts only a signed
+envelope. The run does not contact a physical printer.
 
 ## Versioning and compatibility
 

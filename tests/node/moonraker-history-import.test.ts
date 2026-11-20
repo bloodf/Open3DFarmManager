@@ -285,7 +285,8 @@ test('a reconnect during an import schedules another import after a live state',
   let release: (() => void) | undefined
   const server = createServer((_request, response) => {
     requests++
-    const send = () => response.end(JSON.stringify({ result: { jobs: [job(0)] } }))
+    const send = () =>
+      response.end(JSON.stringify({ result: { jobs: [job(0)] } }))
     if (requests === 1) release = send
     else send()
   })

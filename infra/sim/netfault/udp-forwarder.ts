@@ -154,8 +154,6 @@ export async function startUdpForwarder(input: {
   })
   listener.bind(input.listenPort ?? 0, '127.0.0.1')
   await once(listener, 'listening')
-  // Default rmem holds about 221 skbs. A larger burst becomes an uncounted kernel drop.
-  listener.setRecvBufferSize(1024 * 1024)
   return {
     port: listener.address().port,
     stats,

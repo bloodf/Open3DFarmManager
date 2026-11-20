@@ -62,7 +62,7 @@ test('RTSP acceptance helper uses the in-process mock under OPENFARM_SIM=mock wi
     new URL('../helpers/rtc-farm-rtsp-camera.ts', import.meta.url),
     'utf8',
   )
-  const mockAt = source.indexOf('if (isMockSim())')
+  const mockAt = source.indexOf("OPENFARM_SIM?.trim().toLowerCase() === 'mock'")
   const overrideAt = source.indexOf('const override = join(')
   assert.ok(
     mockAt > 0 && overrideAt > mockAt,

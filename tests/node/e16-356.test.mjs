@@ -261,8 +261,6 @@ test('UDP loss rate tracks the configured probability and is reproducible', asyn
   sink.on('message', () => received++)
   sink.bind(0, '127.0.0.1')
   await once(sink, 'listening')
-  // Match the forwarder: the default queue drops a 400-datagram burst before the test can count it.
-  sink.setRecvBufferSize(1024 * 1024)
   const dropped = []
   for (let run = 0; run < 2; run++) {
     received = 0

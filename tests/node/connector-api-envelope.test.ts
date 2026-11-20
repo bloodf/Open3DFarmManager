@@ -1,4 +1,5 @@
 import { once } from 'node:events'
+import { IntegrationClient } from '../../examples/integration-client/client.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -493,7 +494,7 @@ test('the authenticated inbox claim binds scope and its own offline lifetime', a
   assert.equal(f.sent.length, 1)
 })
 
-test('signed jobs verify HTTPS files before upload and start once', async (t) => {
+test('signed jobs verify HTTPS files before upload and the reference client starts, pauses and cancels', async (t) => {
   const { createServer: httpsServer } = await import('node:https')
   const { createServer: httpServer } = await import('node:http')
   const { readFile } = await import('node:fs/promises')
@@ -592,4 +593,57 @@ test('signed jobs verify HTTPS files before upload and start once', async (t) =>
   assert.equal((await runner.run(await envelope())).kind, 'refused')
   assert.equal(f.reports.at(-1)?.refusal_code, 'printer-busy')
   assert.equal(uploads, 3)
+
+  f.state.observation = { ready: true, printState: 'idle' }
+  const client = new IntegrationClient(
+    'http://127.0.0.1',
+    APP,
+    'loopback-secret',
+    async (url, init) => {
+      const path = new URL(String(url)).pathname
+      if (path.endsWith('/oauth/token'))
+        return Response.json({ access_token: 'loopback-token' })
+      assert.equal(
+        new Headers(init?.headers).get('authorization'),
+        'Bearer loopback-token',
+      )
+      const request = JSON.parse(String(init?.body))
+      const isJob = path.endsWith(`/printers/${ASSIGNMENT}/jobs`)
+      if (!isJob) assert.ok(path.endsWith(`/printers/${ASSIGNMENT}/actions`))
+      const wire = isJob
+        ? await f.envelope(undefined, {
+            kind: 'job',
+            action: undefined,
+            job: {
+              file_url: request.fileUrl,
+              sha256: request.sha256,
+              size_bytes: request.sizeBytes,
+              display_name: request.displayName,
+            },
+          })
+        : await f.envelope(request)
+      assert.deepEqual(await runner.run(wire), { kind: 'completed' })
+      const report = f.reports.at(-1)!
+      assert.equal(report.outcome, isJob ? 'started' : 'completed')
+      return Response.json({ status: report.outcome }, { status: 202 })
+    },
+  )
+  await client.authenticate(['jobs:start', 'control:basic'])
+  const before = f.sent.length
+  await client.submitJob(ASSIGNMENT, {
+    fileUrl: job.file_url,
+    sha256: job.sha256,
+    sizeBytes: job.size_bytes,
+    displayName: job.display_name,
+  })
+  f.state.observation = { ready: true, printState: 'printing' }
+  await client.submitAction(ASSIGNMENT, 'pause')
+  f.state.observation = { ready: true, printState: 'paused' }
+  await client.submitAction(ASSIGNMENT, 'cancel')
+  assert.equal(uploads, 4)
+  assert.deepEqual(f.sent.slice(before), [
+    { action: 'start_print', args: { file: 'part.gcode' } },
+    { action: 'pause', args: {} },
+    { action: 'cancel', args: {} },
+  ])
 })

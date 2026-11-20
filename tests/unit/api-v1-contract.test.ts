@@ -5,6 +5,7 @@
 // treated as errors. The spec walk is data-driven: an operation or status
 // added to the spec has no scenario until one is written, and fails here.
 import { describe, expect, it, vi } from 'vitest'
+import { IntegrationClient } from '../../examples/integration-client/client.ts'
 
 vi.mock('nuxt/server', async () =>
   (await import('../helpers/api-v1-contract/mocks.ts')).nuxtServer(),
@@ -49,7 +50,7 @@ import {
   type ResponseSpec,
   type Schema,
 } from '../helpers/api-v1-contract/spec.ts'
-import { freshWorld, ids } from '../helpers/api-v1-contract/world.ts'
+import { freshWorld, ids, jobBody } from '../helpers/api-v1-contract/world.ts'
 
 const ops = operations()
 const scenarios = allScenarios()
@@ -251,6 +252,63 @@ describe('responses match the spec', () => {
       }
     })
   }
+})
+
+it('routes reference-client start, pause and cancel requests through v1', async () => {
+  const world = freshWorld()
+  const scopes = ['jobs:start', 'control:basic'] as const
+  const app = world.addApp([{ printerId: ids.printerA1, scopes: [...scopes] }])
+  const operationsSeen: string[] = []
+  const client = new IntegrationClient(
+    'http://127.0.0.1',
+    app.clientId,
+    app.secret,
+    async (url, init) => {
+      const request = new Request(url, init)
+      const path = new URL(request.url).pathname.slice(apiBase.length)
+      const input = {
+        method: request.method,
+        path,
+        headers: Object.fromEntries(request.headers),
+        body: await request.text(),
+      }
+      const result = await call(input)
+      const key = `POST ${path.replace(ids.printerA1, '{printerId}')}`
+      const op = ops.find((entry) => entry.key === key)!
+      const status = path === '/oauth/token' ? '200' : '202'
+      const scenario = scenarios.find(
+        (entry) => entry.op === key && entry.status === status,
+      )!
+      expect(violationsOf(op, scenario, { input, result })).toEqual([])
+      operationsSeen.push(key)
+      return new Response(result.text, result)
+    },
+  )
+
+  await client.authenticate([...scopes])
+  await client.submitJob(ids.printerA1, jobBody, 'reference-start')
+  await client.submitAction(ids.printerA1, 'pause', {}, 'reference-pause')
+  await client.submitAction(ids.printerA1, 'cancel', {}, 'reference-cancel')
+
+  expect(operationsSeen).toEqual([
+    'POST /oauth/token',
+    'POST /printers/{printerId}/jobs',
+    'POST /printers/{printerId}/actions',
+    'POST /printers/{printerId}/actions',
+  ])
+  expect([...world.envelopes.commands.values()]).toEqual([
+    {
+      kind: 'job',
+      job: {
+        file_url: jobBody.fileUrl,
+        sha256: jobBody.sha256,
+        size_bytes: jobBody.sizeBytes,
+        display_name: jobBody.displayName,
+      },
+    },
+    { kind: 'action', action: { action: 'pause', args: {} } },
+    { kind: 'action', action: { action: 'cancel', args: {} } },
+  ])
 })
 
 describe('documented headers no handler sends yet', () => {

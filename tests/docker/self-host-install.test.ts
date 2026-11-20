@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   execFileSync,
+  spawnSync,
   type ExecFileSyncOptionsWithStringEncoding,
 } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -45,16 +46,21 @@ test(
     timeout: 360_000,
   },
   async (t) => {
-    assert.equal(process.versions.node.split('.')[0], '22')
-    const image = process.env.OPENFARM_INSTALL_IMAGE
-    const ledger = process.env.OPENFARM_INSTALL_LEDGER
-    assert.ok(
-      image && ledger,
-      'Set OPENFARM_INSTALL_IMAGE and OPENFARM_INSTALL_LEDGER',
-    )
     const project = 'openfarm-install-' + randomBytes(6).toString('hex')
     const dir = mkdtempSync(join(tmpdir(), project + '-'))
     const deployment = join(dir, 'deployment')
+    const ledger =
+      process.env.OPENFARM_INSTALL_LEDGER || join(dir, 'ownership.log')
+    const suppliedImage = process.env.OPENFARM_INSTALL_IMAGE
+    const image = suppliedImage || `${project}:local`
+    const composeSource = 'infra/app/docker-compose.yml'
+    const postgresImage = readFileSync(composeSource, 'utf8').match(
+      /^    image: (postgres:[^\s]+)$/m,
+    )?.[1]
+    assert.ok(postgresImage, 'Expected the pinned Compose PostgreSQL image')
+    const imageExists = (ref: string) =>
+      spawnSync('docker', ['image', 'inspect', ref], { stdio: 'ignore' })
+        .status === 0
     const run = (
       command: string,
       args: string[],
@@ -91,28 +97,110 @@ test(
         },
       )
     let configured = false
-    t.after(() => {
-      try {
-        if (configured) {
-          compose('down', '--volumes', '--remove-orphans')
-          for (const kind of ['container', 'network', 'volume']) {
-            assert.equal(
-              run('docker', [
-                kind,
-                'ls',
-                ...(kind === 'container' ? ['-a'] : []),
-                '-q',
-                '--filter',
-                `label=com.docker.compose.project=${project}`,
-              ]).trim(),
-              '',
-            )
-          }
-        }
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
+    let builderCreated = false
+    let postgresWasPresent = true
+    const cleanupProject = () => {
+      if (!configured) return
+      compose('down', '--volumes', '--remove-orphans')
+      for (const kind of ['container', 'network', 'volume']) {
+        assert.equal(
+          run('docker', [
+            kind,
+            'ls',
+            ...(kind === 'container' ? ['-a'] : []),
+            '-q',
+            '--filter',
+            `label=com.docker.compose.project=${project}`,
+          ]).trim(),
+          '',
+        )
       }
+    }
+    t.after(() => {
+      const errors: unknown[] = []
+      for (const clean of [
+        cleanupProject,
+        () => {
+          if (builderCreated) run('docker', ['buildx', 'rm', project])
+        },
+        () => {
+          if (!suppliedImage && imageExists(image))
+            run('docker', ['image', 'rm', image])
+        },
+        () => {
+          if (
+            !postgresWasPresent &&
+            imageExists(postgresImage) &&
+            !run('docker', [
+              'ps',
+              '-aq',
+              '--filter',
+              `ancestor=${postgresImage}`,
+            ]).trim()
+          ) {
+            run('docker', ['image', 'rm', postgresImage])
+          }
+        },
+        () => rmSync(dir, { recursive: true, force: true }),
+      ]) {
+        try {
+          clean()
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      if (errors.length)
+        throw new AggregateError(errors, 'Rehearsal cleanup failed')
+      t.diagnostic(
+        `Cleaned rehearsal project ${project}; ${run('df', ['-h', '.']).trim().split('\n').at(-1)}`,
+      )
     })
+    // Record ownership and the pre-run state outside the checkout.
+    writeFileSync(
+      ledger,
+      [
+        `Project ${project}; scratch ${dir}; volumes ${project}-data and ${project}_keys; network ${project}-net`,
+        suppliedImage
+          ? `Existing app image ${image}`
+          : `Owned builder ${project} and app image ${image}`,
+        run('df', ['-h', '.']),
+        run('git', ['status', '--short']),
+        run('git', ['worktree', 'list']),
+        run('docker', ['ps', '-a']),
+        run('docker', ['image', 'ls', '--digests']),
+        run('docker', ['volume', 'ls']),
+        run('docker', ['network', 'ls']),
+      ].join('\n'),
+      { flag: 'a', mode: 0o600 },
+    )
+    postgresWasPresent = imageExists(postgresImage)
+    if (!suppliedImage) {
+      run('docker', [
+        'buildx',
+        'create',
+        '--driver',
+        'docker-container',
+        '--name',
+        project,
+      ])
+      builderCreated = true
+      run(
+        'docker',
+        [
+          'buildx',
+          'build',
+          '--builder',
+          project,
+          '--load',
+          '-f',
+          'apps/farm/Dockerfile',
+          '-t',
+          image,
+          '.',
+        ],
+        { timeout: 240_000 },
+      )
+    }
     const imageId = run('docker', [
       'image',
       'inspect',
@@ -120,11 +208,6 @@ test(
       '--format',
       '{{.Id}}',
     ]).trim()
-    writeFileSync(
-      ledger,
-      `${project} ${dir} ${project}-net ${project}-data ${project}_keys\n`,
-      { flag: 'a' },
-    )
     const { pairConnector } =
       await import('../../packages/connector/src/cloud/pairing-client.ts')
     const { loadOrCreateIdentity } =
@@ -190,7 +273,7 @@ test(
     const database = 'rehearsal'
     const admin = 'bootstrap_admin'
     const migratorPassword = randomBytes(24).toString('hex')
-    copyFileSync('infra/app/docker-compose.yml', join(dir, 'compose.yml'))
+    copyFileSync(composeSource, join(dir, 'compose.yml'))
     writeFileSync(join(dir, 'app.env'), '', { mode: 0o600 })
     writeFileSync(
       join(dir, 'keys.yml'),

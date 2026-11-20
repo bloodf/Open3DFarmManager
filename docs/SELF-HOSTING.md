@@ -6,22 +6,13 @@ This guide deploys one Open3D Farm Manager application and its dedicated Postgre
 
 Obtain a trusted immutable application release image. Create a private directory on the host, accessible only to the deployment operator, and copy `infra/app/docker-compose.yml` there as `compose.yml`. The Compose file binds app and database ports to loopback and uses a persistent database volume. The initial PostgreSQL account is a superuser used only for provisioning; follow `docs/DATABASE-MIGRATIONS.md` to create the restricted migration and application roles. Never give the app the bootstrap superuser credential.
 
-Create an empty `app.env` (mode 0600) next to `compose.yml` so Compose can load the service definition during provisioning. Set `O3DFM_APP_IMAGE` to the immutable release image, set a strong `O3DFM_DB_PASSWORD`, and set `NUXT_DATABASE_MIGRATIONS=verify` in the private Compose `.env`. Compose reads the migration mode from `.env` and overrides the value in `app.env`. Optional Compose variables are `COMPOSE_PROJECT_NAME`, `O3DFM_DB_NAME`, `O3DFM_DB_USER`, `O3DFM_DB_PORT`, and `O3DFM_APP_PORT`. Keep both environment files private and outside the checkout.
+Create `app.env` (mode 0600) with `NUXT_AUTH_ENABLED=true`; the initializer writes the remaining required auth and database settings. Set `O3DFM_APP_IMAGE` to the immutable release image and a strong `O3DFM_DB_PASSWORD` in a private `.env` next to `compose.yml`. Optional Compose variables are `COMPOSE_PROJECT_NAME`, `O3DFM_DB_NAME`, `O3DFM_DB_USER`, `O3DFM_DB_PORT`, and `O3DFM_APP_PORT`; their defaults are in the Compose file. Do not commit these files.
 
 ## 2. Initialize secrets and database
 
-Start PostgreSQL with `docker compose --env-file .env -f compose.yml up -d --wait postgres`. Create the restricted migration owner with the grants in [Database migrations](DATABASE-MIGRATIONS.md#roles). Set `NUXT_DATABASE_DATABASE_URL` privately in the shell to the migration owner's URL using `postgres:5432`. From the deployment directory, run the release image once with that identity:
+From the repository checkout matching the deployed release, run `node scripts/self-host/init.ts --help` and follow its provisioning options. It generates private signing keys, a random session secret and one-time bootstrap token, configures database URLs and role grants, and writes the runtime environment with restrictive permissions. Keep its output files outside the checkout, back them up securely, and never paste tokens or keys into logs or support requests. The migration-owner and runtime database URLs must use the restricted roles described by the migration guide. Start PostgreSQL and apply migrations using the initializer's documented sequence before starting the app. Do not use `NUXT_DATABASE_MIGRATIONS=apply` with the runtime role in production; provision migrations as the migration owner, then use `verify` at app startup.
 
-```sh
-docker compose --env-file .env -f compose.yml run --rm --no-deps --name openfarm-migrate \
-  -e NUXT_DATABASE_MIGRATIONS=apply -e NUXT_DATABASE_DATABASE_URL app
-```
-
-This is a foreground app process without published ports. Once its internal `/readyz` returns HTTP 200, stop it with Ctrl-C and unset the migration URL. You can probe it with `docker exec openfarm-migrate node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1))"` from another terminal.
-
-Install the PostgreSQL client (`psql`) on the host. From the release checkout, set `OPENFARM_INIT_DATABASE_URL` privately to the provisioning account URL at the loopback-published PostgreSQL port. Run `node scripts/self-host/init.ts <new-private-directory> <https-origin>`, then unset the provisioning URL. The initializer creates the directory, generates keys and secrets, and grants restricted runtime logins. Back up the generated files securely. Keep the token, URLs, and keys out of logs and support requests.
-
-Copy the generated `app.env` to the Compose deployment directory, keeping mode 0600. In this runtime copy, change the host and port of each database URL to `postgres:5432`, preserving its restricted login and database name. The generated file enables several optional subsystems. For a first owner only, keep `NUXT_DATABASE_ENABLED=true` and `NUXT_AUTH_ENABLED=true` and remove the other generated `NUXT_*_ENABLED` entries. The application uses the restricted schema-reader role with `verify` at startup. Start the application with `docker compose --env-file .env -f compose.yml up -d --wait app` and check its loopback `/readyz` before continuing.
+Start with `docker compose --env-file .env -f compose.yml up -d postgres`, complete database provisioning, then start the application with the same Compose project and files. Wait for `/readyz` to return HTTP 200 before continuing. The health check reports readiness, not public TLS or owner sign-in.
 
 ## 3. Configure reverse proxy
 
@@ -35,8 +26,6 @@ Open the public HTTPS origin and follow the first-owner bootstrap page using the
 
 The first installation needs only authentication and database access. Keep every optional subsystem disabled until its dedicated database role, migrations, key material, and operational need are ready. For each subsystem, configure its documented `NUXT_*_ENABLED` flag and dedicated database URL; never reuse the schema-owner credential. See `.env.example`, `docs/ACCOUNT-CREATION.md`, `docs/SPOOLMAN-FARM-CONFIG.md`, and subsystem-specific docs for exact variables and grants. Connector pairing, telemetry, browser devices, printer assignments/states, integration APIs, pause authority, OIDC, password reset, library storage, and Bambu cloud are opt-in. Bambu cloud remains offline unless explicitly enabled and configured.
 
-For initial Connector pairing, enable `NUXT_CONNECTOR_PAIRING_ENABLED` and `NUXT_CONNECTOR_INVENTORY_ENABLED` in the runtime file. Retain the initializer's corresponding URLs and pairing settings. Mount the generated `pairing.pem` read-only at a container path and update `NUXT_CONNECTOR_PAIRING_SIGNING_KEY_PATH` to match. The file inside the container must be owned by the image's app user (UID 10001) with mode 0600. Apply the mount through a Compose override and use the same Compose files on subsequent commands. With a simulator or an unassigned Connector, run `pair --server <https-origin> --audience <pairing-audience> --data-dir <private-dir> --credential-file <private-file>` on the Connector. Approve the code as the signed-in owner after checking the fingerprint. Verify the Connector is approved in the farm inventory and keep its credential file private.
-
 Set telemetry and job-history retention only after enabling their maintenance configuration. Defaults are 30 days for telemetry and 365 days for job history; configure retention days and batch size according to storage and policy needs. Library retention/quota settings apply only when library storage is enabled. Back up PostgreSQL and Connector private configuration separately, test restoration, and review `docs/SELF-HOSTING-UPGRADE.md` before upgrades.
 
 ## Environment variables
@@ -44,13 +33,3 @@ Set telemetry and job-history retention only after enabling their maintenance co
 The app's required first-install values are `NUXT_DATABASE_ENABLED`, `NUXT_DATABASE_DATABASE_URL`, `NUXT_DATABASE_MIGRATIONS`, `NUXT_DATABASE_MIGRATIONS_DIR`, `NUXT_AUTH_ENABLED`, `NUXT_AUTH_ORIGIN`, `NUXT_AUTH_SESSION_SECRET`, `NUXT_AUTH_BOOTSTRAP_TOKEN`, and `NUXT_AUTH_DATABASE_URL`. The initializer generates secret/key values and creates URLs; operators provide the public origin and database credentials. Every optional feature variable is documented in `.env.example`; variables absent from the environment use the defaults in `apps/farm/nuxt.config.ts`. `O3DFM_*` and `COMPOSE_PROJECT_NAME` are Compose interpolation settings, documented above and in `infra/app/docker-compose.yml`, not application settings. `NODE_ENV`, `NITRO_HOST`, and `NITRO_PORT` are image defaults.
 
 Keep API-originated printer commands, cloud integrations, public signup, and any subsystem without its dedicated credentials disabled. Browser commands remain WebRTC-only. Automated tests must never command physical printers.
-
-## Opt-in local Docker rehearsal
-
-Use Node.js 22 and npm, Docker Compose, OpenSSL, and a local PostgreSQL client. Build the release candidate with `docker build -f apps/farm/Dockerfile -t openfarm-install-local .` or supply an existing local candidate image. After `npm ci --ignore-scripts`, set `OPENFARM_INSTALL_IMAGE` to that image and `OPENFARM_INSTALL_LEDGER` to an ownership ledger outside the checkout. Record free space, worktrees, Docker resources, and task ownership in the ledger before builds or Docker tests.
-
-```sh
-OPENFARM_INSTALL_REHEARSAL=1 node --test tests/docker/self-host-install.test.ts
-```
-
-The test uses a fresh Compose project, database volume, loopback TLS proxy, and a Moonraker mock. It tears down its project and temporary files. Review the ledger and remove rehearsal images or build resources only if they were created for the rehearsal and are no longer in use. This rehearsal covers the owner and pairing HTTP flows. A clean Linux VM, public DNS/TLS, browser interaction, and a running Connector's WebRTC session require separate verification.

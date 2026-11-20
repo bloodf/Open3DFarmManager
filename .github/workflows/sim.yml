@@ -36,32 +36,7 @@ jobs:
           path: sim-diagnostics/
           retention-days: 7
           if-no-files-found: ignore
-  klipper-image:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Build Klipper image on amd64
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p sim-diagnostics
-          docker build -t openfarm-klipper:sim infra/sim/klipper 2>&1 | tail -c 200000 | tee sim-diagnostics/build.log
-      - run: docker save openfarm-klipper:sim -o klipper-image.tar
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: klipper-image
-          path: klipper-image.tar
-          retention-days: 1
-      - if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: sim-klipper-build
-          path: sim-diagnostics/
-          retention-days: 7
-          if-no-files-found: ignore
   klipper:
-    needs: klipper-image
     if: github.event_name == 'workflow_dispatch'
     env:
       OPENFARM_SIM: docker
@@ -81,15 +56,13 @@ jobs:
         with:
           node-version: '22.23.5'
       - run: npm ci --ignore-scripts
-      - if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
-        with:
-          platforms: amd64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: klipper-image
-      - run: docker load -i klipper-image.tar
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper config --quiet
+      - name: Build native Klipper image
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p sim-diagnostics
+          docker build --platform linux/${{ matrix.arch }} -t openfarm-klipper:sim infra/sim/klipper 2>&1 | tail -c 200000 | tee sim-diagnostics/build.log
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d --no-build
       - name: Verify Klipper simulator
         run: npm run sim:smoke

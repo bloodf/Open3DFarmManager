@@ -5,7 +5,6 @@ x-printer: &printer
   image: openfarm-klipper:sim
   build:
     context: ./klipper
-  platform: linux/amd64
   profiles: [klipper]
   tmpfs:
     - /tmp:noexec

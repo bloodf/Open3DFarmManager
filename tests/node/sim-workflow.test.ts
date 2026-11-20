@@ -249,36 +249,27 @@ test('Spoolman selects its pinned multi-platform image natively', () => {
   assert.doesNotMatch(spoolman, /platform:/)
 })
 
-test('Klipper uses the image built on native amd64 without rebuilding', () => {
-  const build = jobs['klipper-image']
-  assert.ok(build)
-  assert.equal(build['runs-on'], 'ubuntu-24.04')
-  assert.ok(
-    stepsOf(build).some((step) =>
-      /docker build -t openfarm-klipper:sim/.test(runText(step)),
-    ),
-  )
-  assert.ok(
-    stepsOf(build).some((step) =>
-      /docker save openfarm-klipper:sim/.test(runText(step)),
-    ),
-  )
+test('Klipper builds and runs a native image on each matrix runner', () => {
   const job = jobs.klipper
   assert.ok(job)
-  assert.equal(job.needs, 'klipper-image')
-  assert.ok(
-    stepsOf(job).some((step) =>
-      /docker load -i klipper-image.tar/.test(runText(step)),
+  const steps = stepsOf(job)
+  const build = steps.findIndex((step) =>
+    runText(step).includes(
+      'docker build --platform linux/${{ matrix.arch }} -t openfarm-klipper:sim',
     ),
   )
+  const up = steps.findIndex((step) =>
+    /--profile klipper up -d --no-build/.test(runText(step)),
+  )
+  assert.ok(build >= 0 && up > build)
+  assert.match(runText(steps[build]!), /tail -c 200000/)
   assert.ok(
-    stepsOf(job).some((step) =>
-      /--profile klipper up -d --no-build/.test(runText(step)),
-    ),
+    steps.every((step) => !String(step.uses).includes('setup-qemu-action')),
   )
   const compose = readFileSync(
     new URL('../../infra/sim/docker-compose.yml', import.meta.url),
     'utf8',
   )
   assert.match(compose, /image: openfarm-klipper:sim/)
+  assert.doesNotMatch(compose, /^\s*platform:/m)
 })

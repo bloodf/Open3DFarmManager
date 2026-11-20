@@ -392,6 +392,22 @@ if (journeyEnabled())
       const page = journey().ownerPage
       await journey().openFarm()
       await expect(stateOf()).toHaveText('Imprimindo', { timeout: 45_000 })
+      // A filtered run skips the earlier cancel and file-start tests.
+      if (bridge().state.filename === 'journey.gcode') {
+        bridge().setState({
+          ...bridge().state,
+          printState: 'standby',
+          kobraState: 'canceled',
+        })
+        await expect(
+          row().getByText('Cancelado', { exact: true }),
+        ).toBeVisible()
+        bridge().setState({
+          printState: 'printing',
+          progress: 0,
+          filename: UPLOAD,
+        })
+      }
       journey().controls.setProgress(60)
       await journey().expectProgress(0.6)
       journey().controls.finishPrint()
@@ -408,7 +424,7 @@ if (journeyEnabled())
       const endedAt = await ended.innerText()
       await page.waitForTimeout(3000)
       await expect(ended).toHaveText(endedAt)
-      await expect(row().getByRole('progressbar')).toHaveCount(0)
+      await expect(reportedProgress(row())).toHaveCount(0)
 
       await page.goto(journey().origin + '/historico', {
         waitUntil: 'domcontentloaded',
@@ -431,6 +447,7 @@ if (journeyEnabled())
         UPLOAD,
         /^\d{2}\/\d{2}\/\d{4}/,
         '0 h 30 min',
+        'Fora da biblioteca',
       ])
       await expect(rows.nth(1).locator('td')).toHaveText([
         PRINTER_KEY,
@@ -438,11 +455,12 @@ if (journeyEnabled())
         'journey.gcode',
         /^\d{2}\/\d{2}\/\d{4}/,
         'Não informada',
+        'Fora da biblioteca',
       ])
       await page.getByLabel('Impressora (opcional)').fill('another-printer')
       await page.getByRole('button', { name: 'Atualizar histórico' }).click()
       await expect(
-        page.getByText('Nenhum trabalho finalizado registrado.'),
+        page.getByText('Nenhum trabalho finalizado', { exact: true }),
       ).toBeVisible()
       expect(journey().simulatorObservation()).toMatchObject({ failure: false })
     })

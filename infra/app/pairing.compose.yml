@@ -1,0 +1,14 @@
+# Read the initializer's mode-0600 key using its unprivileged owner UID.
+services:
+  app:
+    user: '${O3DFM_OPERATOR_UID:?set the non-root initializer UID}:${O3DFM_OPERATOR_GID:?set the initializer GID}'
+    environment:
+      NUXT_CONNECTOR_PAIRING_ENABLED: 'true'
+      NUXT_CONNECTOR_INVENTORY_ENABLED: 'true'
+    volumes:
+      - type: bind
+        source: ./state/pairing.pem
+        target: /run/openfarm-keys/pairing.pem
+        read_only: true
+        bind:
+          create_host_path: false

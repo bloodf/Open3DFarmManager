@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   execFileSync,
+  spawn,
   spawnSync,
   type ExecFileSyncOptionsWithStringEncoding,
 } from 'node:child_process'
@@ -13,11 +14,13 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { once } from 'node:events'
 import { request as upstream } from 'node:http'
 import { createServer, request } from 'node:https'
 import { createServer as createSocket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseEnv } from 'node:util'
 import { test } from 'node:test'
@@ -48,7 +51,7 @@ test(
   async (t) => {
     const project = 'openfarm-install-' + randomBytes(6).toString('hex')
     const dir = mkdtempSync(join(tmpdir(), project + '-'))
-    const deployment = join(dir, 'deployment')
+    const deployment = join(dir, 'state')
     const ledger =
       process.env.OPENFARM_INSTALL_LEDGER || join(dir, 'ownership.log')
     const suppliedImage = process.env.OPENFARM_INSTALL_IMAGE
@@ -77,7 +80,7 @@ test(
         ([key]) => !/^(COMPOSE_|O3DFM_|NUXT_)/.test(key),
       ),
     )
-    const compose = (...args: string[]) =>
+    const composeWith = (files: string[], ...args: string[]) =>
       run(
         'docker',
         [
@@ -86,21 +89,22 @@ test(
           join(dir, '.env'),
           '-p',
           project,
-          '-f',
-          join(dir, 'compose.yml'),
-          '-f',
-          join(dir, 'keys.yml'),
+          ...files.flatMap((file) => ['-f', join(dir, file)]),
           ...args,
         ],
         {
           env: composeEnv,
         },
       )
+    const compose = (...args: string[]) => composeWith(['compose.yml'], ...args)
+    const pairedCompose = (...args: string[]) =>
+      composeWith(['compose.yml', 'pairing.compose.yml'], ...args)
     let configured = false
     let builderCreated = false
     let postgresWasPresent = true
     const cleanupProject = () => {
       if (!configured) return
+      composeEnv.O3DFM_APP_ENV_FILE = '/dev/null'
       compose('down', '--volumes', '--remove-orphans')
       for (const kind of ['container', 'network', 'volume']) {
         assert.equal(
@@ -159,7 +163,7 @@ test(
     writeFileSync(
       ledger,
       [
-        `Project ${project}; scratch ${dir}; volumes ${project}-data and ${project}_keys; network ${project}-net`,
+        `Project ${project}; scratch ${dir}; volumes ${project}-data; network ${project}-net`,
         suppliedImage
           ? `Existing app image ${image}`
           : `Owned builder ${project} and app image ${image}`,
@@ -208,10 +212,6 @@ test(
       '--format',
       '{{.Id}}',
     ]).trim()
-    const { pairConnector } =
-      await import('../../packages/connector/src/cloud/pairing-client.ts')
-    const { loadOrCreateIdentity } =
-      await import('../../packages/connector/src/identity/store.ts')
     const appSocket = createSocket()
     const dbSocket = createSocket()
     const appPort = await listen(appSocket)
@@ -249,6 +249,7 @@ test(
           res.writeHead(404).end()
           return
         }
+        const { connection: _connection, ...headers } = req.headers
         const forwarded = upstream(
           {
             agent: false,
@@ -256,10 +257,16 @@ test(
             port: appPort,
             method: req.method,
             path: req.url,
-            headers: { ...req.headers, 'x-forwarded-proto': 'https' },
+            headers: { ...headers, 'x-forwarded-proto': 'https' },
           },
           (response) => {
-            res.writeHead(response.statusCode ?? 502, response.headers)
+            const headers = { ...response.headers }
+            delete headers.connection
+            delete headers['keep-alive']
+            delete headers['transfer-encoding']
+            if (req.url?.startsWith('/api/connector-pairing/'))
+              t.diagnostic(`${req.url} returned HTTP ${response.statusCode}`)
+            res.writeHead(response.statusCode ?? 502, headers)
             response.pipe(res)
           },
         )
@@ -274,10 +281,9 @@ test(
     const admin = 'bootstrap_admin'
     const migratorPassword = randomBytes(24).toString('hex')
     copyFileSync(composeSource, join(dir, 'compose.yml'))
-    writeFileSync(join(dir, 'app.env'), '', { mode: 0o600 })
-    writeFileSync(
-      join(dir, 'keys.yml'),
-      'services:\n  app:\n    pull_policy: never\n    volumes:\n      - keys:/keys:ro\nvolumes:\n  keys: {}\n',
+    copyFileSync(
+      'infra/app/pairing.compose.yml',
+      join(dir, 'pairing.compose.yml'),
     )
     writeFileSync(
       join(dir, '.env'),
@@ -289,10 +295,14 @@ test(
         `O3DFM_APP_PORT=${appPort}`,
         `O3DFM_DB_PORT=${dbPort}`,
         'NUXT_DATABASE_MIGRATIONS=verify',
+        'O3DFM_APP_ENV_FILE=./state/app.env',
+        `O3DFM_OPERATOR_UID=${process.getuid?.()}`,
+        `O3DFM_OPERATOR_GID=${process.getgid?.()}`,
       ].join('\n'),
       { mode: 0o600 },
     )
     configured = true
+    composeEnv.O3DFM_APP_ENV_FILE = '/dev/null'
     compose('up', '-d', '--wait', 'postgres')
     const psql = (sql: string) =>
       run(
@@ -325,6 +335,8 @@ test(
         '--name',
         migrate,
         '--no-deps',
+        '--pull',
+        'never',
         '-e',
         'NUXT_DATABASE_MIGRATIONS=apply',
         '-e',
@@ -359,14 +371,19 @@ test(
       assert.ok(ready, 'migration owner did not reach readiness')
     } finally {
       delete composeEnv.NUXT_DATABASE_DATABASE_URL
+      delete composeEnv.O3DFM_APP_ENV_FILE
       run('docker', ['rm', '-f', migrate])
     }
-    run(process.execPath, ['scripts/self-host/init.ts', deployment, origin], {
-      env: {
-        ...process.env,
-        OPENFARM_INIT_DATABASE_URL: `postgres://${admin}:${password}@127.0.0.1:${dbPort}/${database}`,
+    run(
+      process.execPath,
+      ['scripts/self-host/init.ts', deployment, origin, '--compose'],
+      {
+        env: {
+          ...process.env,
+          OPENFARM_INIT_DATABASE_URL: `postgres://${admin}:${password}@127.0.0.1:${dbPort}/${database}`,
+        },
       },
-    })
+    )
     const generated = join(deployment, 'app.env')
     const env = parseEnv(readFileSync(generated, 'utf8'))
     assert.equal(statSync(deployment).mode & 0o777, 0o700)
@@ -392,61 +409,20 @@ test(
     assert.ok(bootstrapToken.length >= 32)
     assert.equal(env.NUXT_AUTH_ENABLED, 'true')
     assert.equal(env.NUXT_DATABASE_ENABLED, 'true')
-    const runtime = Object.entries(env).filter(
-      ([name]) =>
-        !name.endsWith('_ENABLED') ||
-        ['NUXT_DATABASE_ENABLED', 'NUXT_AUTH_ENABLED'].includes(name),
-    )
-    for (const [name] of runtime) {
-      if (!name.endsWith('_DATABASE_URL')) continue
+    for (const name of Object.keys(env).filter((name) =>
+      name.endsWith('_DATABASE_URL'),
+    )) {
       const url = new URL(required(name))
-      assert.ok(
-        url.username.startsWith('o3dfm_') && url.username !== 'o3dfm_migrator',
-      )
-      assert.equal(url.hostname, '127.0.0.1')
-      assert.equal(url.port, String(dbPort))
+      assert.match(url.username, /^o3dfm_[a-f0-9]{16}_/)
+      assert.equal(url.host, 'postgres:5432')
     }
-    writeFileSync(
-      join(dir, 'app.env'),
-      runtime
-        .map(
-          ([name]) =>
-            `${name}=${required(name)
-              .replaceAll(deployment + '/', '/keys/')
-              .replace(/@127\.0\.0\.1:\d+\//, '@postgres:5432/')}\n`,
-        )
-        .join(''),
-      { mode: 0o600 },
+    assert.deepEqual(
+      Object.keys(env)
+        .filter((name) => name.endsWith('_ENABLED'))
+        .sort(),
+      ['NUXT_AUTH_ENABLED', 'NUXT_DATABASE_ENABLED'],
     )
-    const archive = execFileSync('tar', [
-      '-C',
-      deployment,
-      '-cf',
-      '-',
-      'pairing.pem',
-    ])
-    run(
-      'docker',
-      [
-        'run',
-        '--rm',
-        '-i',
-        '--network',
-        'none',
-        '--user',
-        '0',
-        '--label',
-        `com.docker.compose.project=${project}`,
-        '-v',
-        `${project}_keys:/keys`,
-        imageId,
-        'sh',
-        '-ec',
-        'tar -xf - -C /keys && chown 10001:10001 /keys/pairing.pem',
-      ],
-      { input: archive },
-    )
-    compose('up', '-d', '--wait', 'app')
+    compose('up', '-d', '--wait', '--pull', 'never', 'app')
     assert.equal(
       (await fetch(`http://127.0.0.1:${appPort}/readyz`)).status,
       200,
@@ -533,13 +509,7 @@ test(
       JSON.parse(me.body).accountId,
       JSON.parse(bootstrap.body).accountId,
     )
-    const runtimePath = join(dir, 'app.env')
-    writeFileSync(
-      runtimePath,
-      readFileSync(runtimePath, 'utf8') +
-        'NUXT_CONNECTOR_PAIRING_ENABLED=true\nNUXT_CONNECTOR_INVENTORY_ENABLED=true\n',
-    )
-    compose('up', '-d', '--wait', 'app')
+    pairedCompose('up', '-d', '--wait', '--pull', 'never', 'app')
     const farms = await https('/api/farms', { headers })
     assert.equal(farms.status, 200)
     const [farm] = JSON.parse(farms.body).farms
@@ -566,41 +536,65 @@ test(
       },
       signal: AbortSignal.timeout(3000),
     })
-    const identity = loadOrCreateIdentity(join(dir, 'simulator-connector'))
-    const credentialPath = join(dir, 'simulator-connector', 'credential.json')
-    let approval: Promise<void> | undefined
-    await pairConnector({
-      serverOrigin: origin,
-      audience: required('NUXT_CONNECTOR_PAIRING_AUDIENCE'),
-      identity,
-      credentialPath,
-      signal: AbortSignal.timeout(30_000),
-      fetch: async (url, init) => {
-        const target = new URL(url)
-        assert.equal(target.origin, origin)
-        const result = await https(target.pathname, init)
-        if (result.status !== 200)
-          t.diagnostic(`${target.pathname} returned HTTP ${result.status}`)
-        return { status: result.status, text: async () => result.body }
+    const dataDir = join(dir, 'simulator-connector')
+    const credentialPath = join(dataDir, 'credential.json')
+    const cli = 'packages/connector/src/cli.ts'
+    run(process.execPath, [cli, 'init-identity', '--data-dir', dataDir])
+    const identity = JSON.parse(
+      run(process.execPath, [cli, 'identity', '--data-dir', dataDir]),
+    )
+    const connector = spawn(
+      process.execPath,
+      [
+        cli,
+        'pair',
+        '--server',
+        origin,
+        '--audience',
+        required('NUXT_CONNECTOR_PAIRING_AUDIENCE'),
+        '--data-dir',
+        dataDir,
+        '--credential-file',
+        credentialPath,
+      ],
+      {
+        env: { ...process.env, NODE_EXTRA_CA_CERTS: cert },
+        signal: AbortSignal.timeout(30_000),
+        stdio: ['ignore', 'pipe', 'inherit'],
       },
-      onCode: ({ userCode, fingerprint }) => {
-        approval = post(
-          '/api/connector-pairing/approve',
-          {
-            user_code: normalizePairingCode(userCode),
-            farm_id: farmId,
-            expected_fingerprint: fingerprint,
-          },
-          headers,
-        ).then((result) => {
-          assert.equal(result.status, 200, 'owner pairing approval')
-        })
-      },
-      sleep: async (ms, signal) => {
-        await approval
-        await delay(ms, undefined, { signal })
-      },
-    })
+    )
+    const lines = createInterface({ input: connector.stdout })
+    try {
+      await Promise.all([
+        once(connector, 'close').then(([exitCode]) => {
+          assert.equal(exitCode, 0, 'Connector pairing CLI exit code')
+        }),
+        (async () => {
+          let code: string | undefined
+          for await (const line of lines) {
+            code ??= /^\s+Código: (.+)$/.exec(line)?.[1]
+            const fingerprint = /^\s+Impressão digital: (.+)$/.exec(line)?.[1]
+            if (!fingerprint) continue
+            assert.ok(code, 'Connector printed a pairing code')
+            assert.equal(fingerprint, identity.fingerprint)
+            const result = await post(
+              '/api/connector-pairing/approve',
+              {
+                user_code: normalizePairingCode(code),
+                farm_id: farmId,
+                expected_fingerprint: fingerprint,
+              },
+              headers,
+            )
+            assert.equal(result.status, 200, 'owner pairing approval')
+          }
+        })(),
+      ])
+    } finally {
+      lines.close()
+      if (connector.exitCode === null && connector.signalCode === null)
+        connector.kill()
+    }
     const credential = JSON.parse(readFileSync(credentialPath, 'utf8'))
     assert.equal(statSync(credentialPath).mode & 0o777, 0o600)
     assert.equal(credential.approval.farm_id, farmId)

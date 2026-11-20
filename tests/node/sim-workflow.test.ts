@@ -248,3 +248,37 @@ test('Spoolman selects its pinned multi-platform image natively', () => {
   )
   assert.doesNotMatch(spoolman, /platform:/)
 })
+
+test('Klipper uses the image built on native amd64 without rebuilding', () => {
+  const build = jobs['klipper-image']
+  assert.ok(build)
+  assert.equal(build['runs-on'], 'ubuntu-24.04')
+  assert.ok(
+    stepsOf(build).some((step) =>
+      /docker build -t openfarm-klipper:sim/.test(runText(step)),
+    ),
+  )
+  assert.ok(
+    stepsOf(build).some((step) =>
+      /docker save openfarm-klipper:sim/.test(runText(step)),
+    ),
+  )
+  const job = jobs.klipper
+  assert.ok(job)
+  assert.equal(job.needs, 'klipper-image')
+  assert.ok(
+    stepsOf(job).some((step) =>
+      /docker load -i klipper-image.tar/.test(runText(step)),
+    ),
+  )
+  assert.ok(
+    stepsOf(job).some((step) =>
+      /--profile klipper up -d --no-build/.test(runText(step)),
+    ),
+  )
+  const compose = readFileSync(
+    new URL('../../infra/sim/docker-compose.yml', import.meta.url),
+    'utf8',
+  )
+  assert.match(compose, /image: openfarm-klipper:sim/)
+})

@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { useRuntimeConfig } from 'nuxt/server'
+import { z } from 'zod'
 import {
   IntegrationDeliveryService,
   type EnvelopeInbox,
@@ -23,6 +24,15 @@ import { PostgresIntegrationLibrary } from '../storage/integration-library-postg
 /** Until the Connector inbox registers itself, envelopes stay queued for `deliverPending`. */
 const noInbox: EnvelopeInbox = { sendToAgentInbox: () => 'no-inbox' }
 let inbox: EnvelopeInbox = noInbox
+
+const integrationJobsConfig = z.object({
+  enabled: z.literal(true),
+  databaseUrl: z.unknown().optional(),
+  envelopeSigningKey: z.unknown().optional(),
+  envelopeKid: z.unknown().optional(),
+  maxFileBytes: z.unknown().optional(),
+  envelopeTtlMs: z.unknown().optional(),
+})
 
 /** The Connector inbox hook (E7.22): replaces the default that never delivers. */
 export function setIntegrationEnvelopeInbox(next: EnvelopeInbox | null) {
@@ -67,9 +77,14 @@ async function importSigningKey(encoded: string) {
 
 export async function integrationJobsRuntime() {
   if (active) return active
-  const config = useRuntimeConfig().integrationJobs
-  if (config.enabled !== true)
+  const parsed = integrationJobsConfig.safeParse(
+    useRuntimeConfig().integrationJobs,
+  )
+  if (!parsed.success)
     throw new Error('Envio de trabalhos de integrações indisponível.')
+  const config = parsed.data
+  if (typeof config.databaseUrl !== 'string')
+    throw new Error('Configuração de trabalhos de integrações inválida.')
   const url = new URL(config.databaseUrl)
   if (
     !['postgres:', 'postgresql:'].includes(url.protocol) ||

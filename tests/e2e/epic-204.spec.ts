@@ -54,15 +54,16 @@ test('reference client starts, pauses and cancels a simulated print', async ({
   test.setTimeout(15 * 60_000)
   process.env.OPENFARM_JOURNEY = '1'
   process.env.OPENFARM_JOURNEY_INTEGRATION_API = '1'
-  let journey: Awaited<ReturnType<typeof startJourneyHarness>> | undefined
+  let startedJourney: Awaited<ReturnType<typeof startJourneyHarness>> | undefined
   let files: Awaited<ReturnType<typeof startPrintFileServer>> | undefined
   try {
-    journey = await startJourneyHarness({
+    const journey = await startJourneyHarness({
       browser,
       simulator: 'moonraker-fixture',
       signedControl: true,
       moonraker: { initial: { state: 'standby', progress: 0 } },
     })
+    startedJourney = journey
     await expect
       .poll(() => journey.simulatorObservation().pauseInboxReady, {
         timeout: 60_000,
@@ -179,15 +180,15 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       contentType: 'application/json',
     })
   } catch (error) {
-    if (journey)
+    if (startedJourney)
       console.error(
-        JSON.stringify(journey.simulatorObservation()),
-        journey.appLog(),
+        JSON.stringify(startedJourney.simulatorObservation()),
+        startedJourney.appLog(),
       )
     throw error
   } finally {
     await files?.close()
-    await journey?.close()
+    await startedJourney?.close()
     delete process.env.OPENFARM_JOURNEY
     delete process.env.OPENFARM_JOURNEY_INTEGRATION_API
     delete process.env.OPENFARM_JOURNEY_STATE_URL

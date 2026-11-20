@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
-import type { Browser, Page } from '@playwright/test'
+import type { Browser, BrowserContext, Page } from '@playwright/test'
 import { build } from 'esbuild'
 import {
   compileScript,
@@ -12,11 +12,11 @@ import {
 import type { Sql } from 'postgres'
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
   expect,
-  onTestFinished,
   test,
   vi,
 } from 'vitest'
@@ -525,6 +525,7 @@ describe('wiring', () => {
 
 describe('machine profile panel', () => {
   let browser: Browser | undefined
+  let context: BrowserContext | undefined
   let server: Awaited<ReturnType<typeof startHttpMock>> | undefined
   let page: Page
   let route: ReturnType<typeof fixture>
@@ -673,17 +674,14 @@ describe('machine profile panel', () => {
     }
   })
 
-  beforeEach(() => {
+  // The first context starts Chrome's renderer. Give harness setup its own
+  // deadline so a cold browser does not consume the interaction test budget.
+  beforeEach(async () => {
     apiCalls = []
-  })
-
-  async function open(role: string) {
     if (!browser || !server) throw new Error('Panel fixture unavailable')
-    route = fixture(role)
-    const context = await browser.newContext({
+    context = await browser.newContext({
       viewport: { width: 375, height: 800 },
     })
-    onTestFinished(() => context.close())
     const base = server.origin
     await context.route('**/*', (request) =>
       new URL(request.request().url()).origin === base
@@ -691,8 +689,18 @@ describe('machine profile panel', () => {
         : request.abort(),
     )
     page = await context.newPage()
+  }, 15_000)
+
+  afterEach(async () => {
+    await context?.close()
+    context = undefined
+  })
+
+  async function open(role: string) {
+    if (!server) throw new Error('Panel fixture unavailable')
+    route = fixture(role)
     const manage = role === 'owner' || role === 'admin' ? '1' : '0'
-    await page.goto(`${base}/panel?manage=${manage}`)
+    await page.goto(`${server.origin}/panel?manage=${manage}`)
     await page
       .getByRole('heading', { name: 'Perfil da máquina de Mesa 1' })
       .waitFor()

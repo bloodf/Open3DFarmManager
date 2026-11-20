@@ -267,11 +267,39 @@ test('startJourneyDatabase creates migrated cluster with capabilities and cleans
     assert.ok(db.owner.id, 'owner account should be created')
     assert.ok(db.admin.id, 'admin account should be created')
     assert.ok(db.viewer.id, 'viewer account should be created')
-    const authUrl = db.url('farm_password_auth')
+    const authUrl = db.url('farm_account_registration')
     assert.match(
       authUrl,
       /^postgres:\/\/jr[a-f0-9]+_[0-9]+:[a-f0-9]+@127\.0\.0\.1:[0-9]+\/fixture$/,
     )
+    // The auth runtime serves /api/auth/google from this one login: it must
+    // read the sign-in provider row (migration 0076) without any bypass.
+    const { default: postgres } = await import('postgres')
+    const auth = postgres(authUrl, { max: 1, onnotice: () => {} })
+    try {
+      const [role] = await auth`
+        SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+        FROM pg_roles WHERE rolname = current_user`
+      assert.deepEqual(
+        { ...role },
+        {
+          rolsuper: false,
+          rolbypassrls: false,
+          rolcreaterole: false,
+          rolcreatedb: false,
+        },
+      )
+      const [provider] =
+        await auth`SELECT enabled FROM farm.sign_in_providers WHERE id = 'google'`
+      assert.equal(provider?.enabled, false)
+      await assert.rejects(
+        auth`DELETE FROM farm.sign_in_providers`,
+        (error) => error.code === '42501',
+        'auth login must not delete provider settings',
+      )
+    } finally {
+      await auth.end({ timeout: 3 })
+    }
   } finally {
     await db.close()
   }

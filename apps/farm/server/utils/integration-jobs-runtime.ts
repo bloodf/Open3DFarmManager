@@ -26,7 +26,10 @@ let inbox: EnvelopeInbox = noInbox
 
 /** The Connector inbox hook (E7.22): replaces the default that never delivers. */
 export function setIntegrationEnvelopeInbox(next: EnvelopeInbox | null) {
+  const previous = inbox
   inbox = next ?? noInbox
+  const delivery = active?.delivery
+  if (next && next !== previous && delivery) next.bindApiDelivery?.(delivery)
 }
 
 let active:
@@ -100,6 +103,7 @@ export async function integrationJobsRuntime() {
         store: deliveryStore,
         inbox: {
           sendToAgentInbox: (...args) => inbox.sendToAgentInbox(...args),
+          bindApiDelivery: (delivery) => inbox.bindApiDelivery?.(delivery),
         },
         audit: new IntegrationAuditService(new PostgresIntegrationAudit(pool)),
         signer,

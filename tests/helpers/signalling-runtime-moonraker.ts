@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
+import { API_ENVELOPE_ISSUER } from '../../packages/farm-protocol/src/api-envelope.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import type { PairingPollResponse } from '../../packages/farm-protocol/src/pairing.ts'
 import {
@@ -41,7 +42,28 @@ export async function createRuntimeMoonrakerFixture() {
   // Farm-page pause row: pause control is configured and a second socket allowed.
   const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
   const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
+  const apiEnvelopeKey = process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
+  const apiEnvelopeKid = process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID
   if (farmPause && !pauseKey) throw Error('Farm pause issuer key required')
+  if (Boolean(apiEnvelopeKey) !== Boolean(apiEnvelopeKid))
+    throw Error('API envelope issuer key and id must be configured together')
+  if (apiEnvelopeKey && !farmPause)
+    throw Error('API envelope verification requires signed Connector control')
+  const apiEnvelopeIssuers =
+    apiEnvelopeKey && apiEnvelopeKid
+      ? [
+          {
+            issuer: API_ENVELOPE_ISSUER,
+            kid: apiEnvelopeKid,
+            publicKeySpki: apiEnvelopeKey,
+          },
+        ]
+      : []
+  if (apiEnvelopeKey)
+    await writeFile(join(data, 'trusted-keys.epoch'), randomUUID(), {
+      mode: 0o600,
+      flag: 'wx',
+    })
   // The Connector's pause inbox is admitted and waiting for a browser.
   let pauseInboxReady = false
   // How many times that inbox started listening (one per control session).
@@ -245,6 +267,7 @@ export async function createRuntimeMoonrakerFixture() {
                       kid: 'pause-fixture',
                       publicKeySpki: pauseKey,
                     },
+                    ...apiEnvelopeIssuers,
                   ],
                   signalling: {
                     endpoint:

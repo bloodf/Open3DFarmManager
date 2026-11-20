@@ -33,6 +33,8 @@ export const CAPABILITIES = [
   'farm_printer_state_reader',
   // Print library (server storage mode), for the library and replay journeys.
   'farm_library',
+  'farm_integration_apps',
+  'farm_integration_jobs',
 ] as const
 
 export type Account = Readonly<{ id: string; username: string }>
@@ -139,6 +141,10 @@ export async function startJourneyDatabase(
       await sql.unsafe(
         `CREATE ROLE ${login(capability)} LOGIN PASSWORD '${secrets.get(capability)}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${capability}`,
       )
+    if (process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1')
+      await sql.unsafe(
+        `GRANT farm_integration_delivery, farm_integration_approvals TO "${login('farm_integration_jobs')}"`,
+      )
     // Fail here, not as a swallowed 500 on the sign-in page, if the auth
     // login loses the grants the auth runtime reads on every visit.
     const authLogin = login('farm_account_registration')
@@ -168,9 +174,13 @@ export async function startJourneyDatabase(
       await sql`INSERT INTO farm.password_credentials(account_id,username,password_hash) VALUES(${id},${username},${hash})`
     }
     await sql`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
+    if (process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1')
+      await sql`UPDATE farm.farms SET sandbox = true WHERE id = ${farmId}::uuid`
     await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${owner.id},'owner'),(${farmId}::uuid,${admin.id},'admin'),(${farmId}::uuid,${viewer.id},'viewer'),(${farmId}::uuid,${operator.id},'operator')`
     await sql.end({ timeout: 3 })
     sql = undefined
+    if (process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1')
+      process.env.OPENFARM_JOURNEY_STATE_URL = `postgres://${login('farm_connector_telemetry_writer')}:${secrets.get('farm_connector_telemetry_writer')}@127.0.0.1:${port}/fixture`
 
     return Object.freeze({
       url: (capability) =>

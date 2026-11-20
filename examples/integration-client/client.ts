@@ -142,6 +142,56 @@ export class IntegrationClient {
       body: JSON.stringify({ action, args }),
     })
   }
+
+  startPrint(
+    printerId: string,
+    job: {
+      fileUrl: string
+      sha256: string
+      sizeBytes: number
+      displayName: string
+    },
+    idempotencyKey?: string,
+  ): Promise<{ id: string; status: string }> {
+    return this.submitJob(printerId, job, idempotencyKey) as Promise<{
+      id: string
+      status: string
+    }>
+  }
+
+  pausePrint(
+    printerId: string,
+    idempotencyKey?: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.submitAction(
+      printerId,
+      'pause',
+      {},
+      idempotencyKey,
+    ) as Promise<{ id: string; action: string; status: string }>
+  }
+
+  cancelPrint(
+    printerId: string,
+    idempotencyKey?: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.submitAction(
+      printerId,
+      'cancel',
+      {},
+      idempotencyKey,
+    ) as Promise<{ id: string; action: string; status: string }>
+  }
+
+  getJob(jobId: string): Promise<{ id: string; status: string }> {
+    return this.request(`jobs/${encodeURIComponent(jobId)}`)
+  }
+
+  getAction(
+    actionId: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.request(`actions/${encodeURIComponent(actionId)}`)
+  }
 }
 
 export function verifyWebhook(

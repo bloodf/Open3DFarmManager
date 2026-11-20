@@ -234,6 +234,42 @@ export async function startFarmApp(
       }),
       { mode: 0o600, flag: 'wx' },
     )
+    const apiEnvelopeKeys =
+      process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1'
+        ? generateKeyPairSync('ed25519')
+        : undefined
+    if (apiEnvelopeKeys) {
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY =
+        apiEnvelopeKeys.publicKey
+          .export({ format: 'der', type: 'spki' })
+          .toString('base64url')
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID = 'integration-journey'
+      process.env.OPENFARM_JOURNEY_CERT = cert
+      process.env.OPENFARM_JOURNEY_CERT_KEY = tlsKey
+    } else {
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID
+      delete process.env.OPENFARM_JOURNEY_CERT
+      delete process.env.OPENFARM_JOURNEY_CERT_KEY
+    }
+    const integrationNuxtEnv: NodeJS.ProcessEnv = apiEnvelopeKeys
+      ? {
+          NUXT_INTEGRATION_AUTH_ENABLED: 'true',
+          NUXT_INTEGRATION_AUTH_DATABASE_URL: database.url(
+            'farm_integration_apps',
+          ),
+          NUXT_INTEGRATION_AUTH_SIGNING_KEY:
+            randomBytes(32).toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENABLED: 'true',
+          NUXT_INTEGRATION_JOBS_DATABASE_URL: database.url(
+            'farm_integration_jobs',
+          ),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY: apiEnvelopeKeys.privateKey
+            .export({ format: 'der', type: 'pkcs8' })
+            .toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_KID: 'integration-journey',
+        }
+      : {}
     // No renewal is configured: with telemetry flowing for the whole journey
     // the credential must outlive it.
     // Control journeys too: at expiry the Connector stops opening control
@@ -332,6 +368,7 @@ export async function startFarmApp(
       NUXT_PRINTER_STATES_DATABASE_URL: database.url(
         'farm_printer_state_reader',
       ),
+      ...integrationNuxtEnv,
     }
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {

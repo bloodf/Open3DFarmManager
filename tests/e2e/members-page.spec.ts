@@ -3,7 +3,13 @@ import { expect, test } from '@playwright/test'
 import { membersPageBundle } from './mount-members-page.ts'
 
 async function mount(page: import('@playwright/test').Page) {
-  await page.goto('/healthz')
+  await page.route('**/account-fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<div id="fixture"></div>',
+    }),
+  )
+  await page.goto('/account-fixture')
   await page.evaluate(() => {
     document.body.innerHTML = '<div id="fixture"></div>'
   })

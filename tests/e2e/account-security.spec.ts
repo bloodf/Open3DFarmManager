@@ -2,7 +2,13 @@ import { expect, test } from '@playwright/test'
 import { contaPageBundle, sairPageBundle } from './mount-account-security.ts'
 
 async function mountConta(page: import('@playwright/test').Page) {
-  await page.goto('/healthz')
+  await page.route('**/account-fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<div id="fixture"></div>',
+    }),
+  )
+  await page.goto('/account-fixture')
   await page.evaluate(() => {
     document.body.innerHTML = '<div id="fixture"></div>'
     ;(window as any).__passwordChangeMode = 'success'
@@ -15,7 +21,13 @@ async function mountConta(page: import('@playwright/test').Page) {
 }
 
 async function mountSair(page: import('@playwright/test').Page) {
-  await page.goto('/healthz')
+  await page.route('**/account-fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<div id="fixture"></div>',
+    }),
+  )
+  await page.goto('/account-fixture')
   await page.evaluate(() => {
     document.body.innerHTML = '<div id="fixture"></div>'
     ;(window as any).__accountSecurityFetchCalls = []

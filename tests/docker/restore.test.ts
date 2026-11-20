@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -28,6 +29,12 @@ test(
     const { loadMigrationCatalog, runMigrations } =
       await import('../../scripts/db/migrations.ts')
     const { restore } = await import('../../scripts/self-host/restore.ts')
+    const { openTrustedKeyStore } =
+      await import('../../packages/connector/src/auth/trusted-key-store.ts')
+    const { encodeTrustedKeySetFrame, signTrustedKeySet } =
+      await import('../../packages/farm-protocol/src/trusted-keys.ts')
+    const { validateBrowserDevicePublicKey } =
+      await import('../../packages/farm-protocol/src/browser-device-proof.ts')
     const image =
       'postgres@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b'
     const container = 'openfarm-249-' + randomUUID()
@@ -76,6 +83,7 @@ test(
         `Container ${id}; volumes ${volumes}`,
       )
     }
+    docker(['start', id])
     const port = Number(
       docker(['port', container, '5432/tcp'])
         .toString()
@@ -113,10 +121,89 @@ test(
     await source`INSERT INTO farm.session_accounts (id) VALUES ('owner')`
     await source`INSERT INTO farm.account_sessions VALUES ('old', 'owner', 0, ${now}, ${now}, ${now + 600000}, NULL)`
     await source`INSERT INTO farm.farms VALUES (${farm})`
-    const coordinate = 'A'.repeat(43)
+    const device = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify'],
+    )
+    const { kty, crv, x, y } = await crypto.subtle.exportKey(
+      'jwk',
+      device.publicKey,
+    )
+    const { publicKey, thumbprint } = await validateBrowserDevicePublicKey({
+      kty,
+      crv,
+      x,
+      y,
+    })
     await source`INSERT INTO farm.browser_device_keys (key_id, farm_id, account_id, public_key, thumbprint, created_at)
-    VALUES (${browser}, ${farm}, 'owner', ${source.json({ kty: 'EC', crv: 'P-256', x: coordinate, y: coordinate })},
-      ${coordinate}, ${now})`
+      VALUES (${browser}, ${farm}, 'owner', ${source.json(publicKey)}, ${thumbprint}, ${now})`
+    const issuer = await crypto.subtle.generateKey('Ed25519', false, [
+      'sign',
+      'verify',
+    ])
+    const anchor = {
+      issuer: 'farm:issuer',
+      kid: 'issuer-1',
+      publicKey: issuer.publicKey,
+    }
+    const storeOptions = {
+      path: join(directory, 'keys.json'),
+      farmId: farm,
+      issuers: [anchor],
+    }
+    const browserGrant = {
+      farm_id: farm,
+      account_id: 'owner',
+      key_id: browser,
+      browser_thumbprint: thumbprint,
+    }
+    const store = await openTrustedKeyStore(storeOptions)
+    const keySet = await signTrustedKeySet(
+      {
+        v: 1,
+        purpose: 'trusted-key-set',
+        farm_id: farm,
+        version: 500,
+        issued_at: now,
+        issuer: anchor.issuer,
+        kid: anchor.kid,
+        issuer_keys: [
+          {
+            issuer: anchor.issuer,
+            kid: anchor.kid,
+            public_key_spki: Buffer.from(
+              await crypto.subtle.exportKey('spki', issuer.publicKey),
+            ).toString('base64url'),
+          },
+        ],
+        browser_keys: [
+          {
+            key_id: browser,
+            account_id: 'owner',
+            thumbprint,
+            public_key: publicKey,
+          },
+        ],
+      },
+      issuer.privateKey,
+    )
+    assert.equal(
+      await store.confirm(
+        encodeTrustedKeySetFrame({
+          v: 1,
+          t: 'trusted-keys.set',
+          key_set: keySet,
+        }),
+      ),
+      true,
+    )
+    assert.equal(
+      (await openTrustedKeyStore(storeOptions)).authority.allowsBrowser(
+        browserGrant,
+      ),
+      true,
+    )
     await source`UPDATE farm.browser_device_keys SET status = 'approved', proof_at = ${now},
     proof_session_id = 'old', approved_at = ${now}, approved_by = 'owner' WHERE key_id = ${browser}`
     const dump = (file: string) =>
@@ -193,25 +280,24 @@ test(
       'revoked',
     )
     assert.deepEqual(JSON.parse(readFileSync(target, 'utf8')), settings)
+    const restartedStore = await openTrustedKeyStore(storeOptions)
+    assert.equal(restartedStore.authority.allowsBrowser(browserGrant), false)
+    assert.equal(restartedStore.version, undefined)
     const epoch = readFileSync(marker, 'utf8')
 
     await source`INSERT INTO public.open3dfarm_migrations VALUES (${catalog.length + 1}, 'future', ${'a'.repeat(64)})`
     await source`CREATE TABLE farm.future_schema (id integer)`
     const newer = join(directory, 'newer.dump')
     dump(newer)
+    const newerTarget = join(directory, 'newer.json')
     await assert.rejects(
-      restore(
-        container,
-        'newer',
-        newer,
-        'provisioning',
-        config,
-        join(directory, 'newer.json'),
-        [directory],
-      ),
+      restore(container, 'newer', newer, 'provisioning', config, newerTarget, [
+        directory,
+      ]),
       /schema is newer/,
     )
     assert.equal(readFileSync(marker, 'utf8'), epoch)
+    assert.equal(existsSync(newerTarget), false)
     assert.equal(
       (await source`SELECT 1 FROM pg_database WHERE datname = 'newer'`).length,
       0,

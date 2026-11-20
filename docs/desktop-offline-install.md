@@ -47,7 +47,7 @@ npm run build
 
 Existing protections stay unchanged:
 
-- `.npmrc` keeps `ignore-scripts=true` (`npm ci` runs no package lifecycle scripts).
+- `.npmrc` keeps `ignore-scripts=true`. npm may still run local workspace `prepare` scripts; this project runs `nuxt prepare` in `apps/farm`.
 - System Chrome/Chromium, Go `>= 1.26` (`build:rtsp-ingest`), and Docker container workflows remain separate opt-in prerequisites with no implicit downloads.
 
 ## 4. Documented fallback per Linux x64 platform package
@@ -62,3 +62,28 @@ Every Linux x64 platform package in `package-lock.json` is an `optional` depende
 | `@rollup/rollup-linux-x64-gnu@4.68.7` / `@rollup/rollup-linux-x64-musl@4.68.7`       | `rollup`           | Nitro production server bundle (`npm run build -w @open3dfarmmanager/farm`)                    | Supply `@rollup/wasm-node` matching Rollup in a supplemental offline cache, or run `npm run build` on a connected/capable build host and deploy `apps/farm/.output/` (runtime `node .output/server/index.mjs` does not load Rollup; Connector builds with `esbuild`).                                                                                                                                                                                   |
 | `@rolldown/binding-linux-x64-gnu@1.2.19` / `@rolldown/binding-linux-x64-musl@1.2.19` | `rolldown`         | Vite 8 client/SSR bundling in `apps/farm` build and Vitest                                     | Use `@rolldown/binding-wasm32-wasi@1.2.19` (pinned in `package-lock.json`; force with `NAPI_RS_FORCE_WASI=true`) or point `NAPI_RS_NATIVE_LIBRARY_PATH` at a local `.node` binding, or deploy prebuilt `apps/farm/.output/`.                                                                                                                                                                                                                            |
 | `lightningcss-linux-x64-gnu@1.33.0` / `lightningcss-linux-x64-musl@1.33.0`           | `lightningcss`     | Vite 8 CSS transform/minification in `apps/farm` build                                         | Supply `lightningcss-wasm@1.33.0` offline, or build `apps/farm/.output/` on a host with the native binding (runtime serves prebuilt CSS under `.output/public` without loading `lightningcss`).                                                                                                                                                                                                                                                         |
+
+## Candidate verification (issue #370)
+
+On candidate `75196365dc11a27f47d056e50065366e84161134`, an isolated
+Linux x64 QEMU guest with Node 22.23.5 and npm 10.9.9 generated the default
+archive with `node scripts/desktop-bundle.mjs`: 605 blobs and 605 index
+entries, for glibc and musl. The documented `--out` variant also produced
+605 blobs and 605 index entries. The documented `mkdir` and `tar -xzf`
+commands prepared the cache. `npm ci --offline --ignore-scripts --cache`
+succeeded in a network namespace with only loopback enabled (628 packages
+installed). In that same namespace, `npm run build` succeeded, and
+`node --test tests/node/e16-370-dev.test.mjs` started the README's
+`npm run dev` and received HTTP 200 from `/farm`. The first test attempt saw
+Nuxt's startup 503; the test now waits for readiness. npm's log also showed
+`nuxt prepare` running during installation.
+
+README command coverage: the install and build are exercised by
+`tests/node/e16-370.test.mjs` on a clean tree; the dev command is exercised
+by `tests/node/e16-370-dev.test.mjs`; the same README test runs
+`desktop:check -- --only app-smoke` and `desktop:check -- --list`. The
+work order supplies earlier clean isolated ARM64 evidence for install, build,
+local PostgreSQL, dev and built `/farm`, `sim:verify`, Chrome app-smoke and a
+mock printer card. That earlier evidence was not rerun here. The x64 guest did
+not run Chrome, so its results establish archive consumption and build, not
+browser or printer-card acceptance. No combined suite was run in this check.

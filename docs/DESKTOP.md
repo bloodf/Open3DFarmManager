@@ -42,7 +42,7 @@ Para listar as lacunas do mirror e os pacotes de plataforma Linux x64 presentes 
 node scripts/desktop-deps-report.mjs
 ```
 
-O `.npmrc` mantém `ignore-scripts=true`. A instalação não executa scripts de pacotes.
+O `.npmrc` mantém `ignore-scripts=true`. O npm ainda pode executar o `prepare` dos workspaces locais; neste projeto, ele executa `nuxt prepare` em `apps/farm`.
 
 ## 2. Compilar
 

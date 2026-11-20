@@ -1,7 +1,6 @@
-import { access } from 'node:fs/promises'
-import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { access } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -14,49 +13,43 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1)
 }
 
-function startStub() {
-  const server = createServer((request, response) => {
-    const path = request.url?.split('?')[0] ?? ''
-    if (path === '/healthz') {
-      response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ status: 'ok', checks: { process: 'ok' } }))
-      return
-    }
-    response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-    response.end('not found')
-  })
-  server.listen(port, host, () => {
-    console.error(
-      `[e2e-web-server] stub listening on http://${host}:${port} (farm build absent)`,
-    )
-  })
-  const shutdown = () => {
-    server.close(() => process.exit(0))
-  }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
-}
-
-let usingBuilt = false
+let built = true
 try {
   await access(builtEntry)
-  usingBuilt = true
 } catch {
-  startStub()
+  built = false
 }
 
-if (usingBuilt) {
-  const child = spawn(process.execPath, [builtEntry], {
-    env: { ...process.env, NITRO_HOST: host, NITRO_PORT: String(port) },
-    stdio: 'inherit',
+if (!built) {
+  const build = spawn(
+    process.execPath,
+    [
+      join(root, 'node_modules/nuxt/bin/nuxt.mjs'),
+      'build',
+      join(root, 'apps/farm'),
+    ],
+    { cwd: root, env: process.env, stdio: 'inherit' },
+  )
+  const code = await new Promise((resolve, reject) => {
+    build.once('error', reject)
+    build.once('exit', (status) => resolve(status))
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      process.once(signal, () => build.kill(signal))
+    }
   })
-  child.on('exit', (code, signal) => {
-    if (signal) process.kill(process.pid, signal)
-    process.exit(code ?? 1)
-  })
-  const forward = (signal) => {
-    if (!child.killed) child.kill(signal)
-  }
-  process.on('SIGINT', () => forward('SIGINT'))
-  process.on('SIGTERM', () => forward('SIGTERM'))
+  if (code !== 0) process.exit(code ?? 1)
 }
+
+const child = spawn(process.execPath, [builtEntry], {
+  env: { ...process.env, NITRO_HOST: host, NITRO_PORT: String(port) },
+  stdio: 'inherit',
+})
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal)
+  process.exit(code ?? 1)
+})
+const forward = (signal) => {
+  if (!child.killed) child.kill(signal)
+}
+process.on('SIGINT', () => forward('SIGINT'))
+process.on('SIGTERM', () => forward('SIGTERM'))

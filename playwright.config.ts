@@ -40,6 +40,7 @@ const server = (serverPort: string, env: Record<string, string> = {}) => ({
   url: `http://127.0.0.1:${serverPort}/healthz`,
   env: { NITRO_HOST: '127.0.0.1', NITRO_PORT: serverPort, ...env },
   reuseExistingServer: false,
+  timeout: 180_000 * timeoutScale,
 })
 
 export default defineConfig({

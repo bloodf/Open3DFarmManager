@@ -224,14 +224,14 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
   }
 })
 
-test('evidence summary leaves architecture links pending owner dispatch', () => {
+test('evidence summary links successful architecture runs', () => {
   assert.match(
     evidenceSource,
-    /amd64 \(`ubuntu-24\.04`\): pending: owner dispatch/,
+    /amd64 \(`ubuntu-24\.04`\): \[run 44744359687\]\(https:\/\/github\.com\/bloodf\/Open3DFarmManager\/actions\/runs\/44744359687\)/,
   )
   assert.match(
     evidenceSource,
-    /arm64 \(`ubuntu-24\.04-arm`\): pending: owner dispatch/,
+    /arm64 \(`ubuntu-24\.04-arm`\): \[run 44744359687\]\(https:\/\/github\.com\/bloodf\/Open3DFarmManager\/actions\/runs\/44744359687\)/,
   )
 })
 

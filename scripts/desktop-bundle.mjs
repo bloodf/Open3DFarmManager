@@ -161,6 +161,14 @@ export function scrubCacacheToCleanDir(sourceCacheDir, destCacheDir) {
   return { contentFileCount, indexFileCount }
 }
 
+function stageManifest(source, destination) {
+  const manifest = JSON.parse(readFileSync(source, 'utf8'))
+  // npm can run workspace prepare hooks even with --ignore-scripts.
+  // The staged dependencies target another platform and must not be loaded.
+  delete manifest.scripts
+  writeFileSync(destination, JSON.stringify(manifest))
+}
+
 function stageProjectManifests(repoRoot, lockfilePath, stageProjDir) {
   const lockRaw = readFileSync(lockfilePath, 'utf8')
   const lock = JSON.parse(lockRaw)
@@ -175,7 +183,7 @@ function stageProjectManifests(repoRoot, lockfilePath, stageProjDir) {
   }
 
   mkdirSync(stageProjDir, { recursive: true })
-  copyFileSync(
+  stageManifest(
     join(repoRoot, 'package.json'),
     join(stageProjDir, 'package.json'),
   )
@@ -192,7 +200,7 @@ function stageProjectManifests(repoRoot, lockfilePath, stageProjDir) {
     if (!existsSync(workspacePkg)) continue
     const destDir = join(stageProjDir, key)
     mkdirSync(destDir, { recursive: true })
-    copyFileSync(workspacePkg, join(destDir, 'package.json'))
+    stageManifest(workspacePkg, join(destDir, 'package.json'))
   }
 
   return lock

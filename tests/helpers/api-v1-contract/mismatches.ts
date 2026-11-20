@@ -77,6 +77,7 @@ Object.entries = ((value: object) => {
       headers: new Headers(),
       text: '',
       json: undefined,
+      unrouted: false,
     }),
   }
   return [['placeholder 0', placeholder]] as [string, Mismatch][]

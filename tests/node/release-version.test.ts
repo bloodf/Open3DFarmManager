@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -45,9 +46,20 @@ test('dry-run build creates three verifiable archives without publication', (t) 
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const artifacts = join(directory, 'artifacts')
   writeFileSync(
+    join(directory, 'node'),
+    `#!/usr/bin/env bash
+set -eu
+[[ "$OPENFARM_DOCKER_REHEARSAL" == 1 ]]
+[[ "$*" == "--test tests/docker/upgrade-rehearsal.test.ts" ]]
+exit "$TEST_REHEARSAL_STATUS"
+`,
+    { mode: 0o755 },
+  )
+  writeFileSync(
     join(directory, 'docker'),
     `#!/usr/bin/env bash
 set -eu
+touch "$TEST_DOCKER_MARKER"
 case "$1" in
   build|exec|rm) ;;
   run)
@@ -64,13 +76,22 @@ esac
 `,
     { mode: 0o755 },
   )
-  execFileSync('bash', ['scripts/build-release.sh', version, artifacts], {
-    env: {
-      ...process.env,
-      PATH: `${directory}:${process.env.PATH}`,
-      TEST_RELEASE_VERSION: version,
-    },
+  const args = ['scripts/build-release.sh', version, artifacts]
+  const dockerMarker = join(directory, 'docker-called')
+  const env = {
+    ...process.env,
+    PATH: `${directory}:${process.env.PATH}`,
+    TEST_RELEASE_VERSION: version,
+    TEST_DOCKER_MARKER: dockerMarker,
+  }
+  const failure = spawnSync('bash', args, {
+    env: { ...env, TEST_REHEARSAL_STATUS: '42' },
   })
+  assert.equal(failure.status, 42, failure.stderr?.toString())
+  assert.equal(existsSync(artifacts), false)
+  assert.equal(existsSync(dockerMarker), false)
+
+  execFileSync('bash', args, { env: { ...env, TEST_REHEARSAL_STATUS: '0' } })
   const archives = [
     `connector-v${version}-image.tar.gz`,
     `connector-v${version}-linux-amd64.tar.gz`,

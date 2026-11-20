@@ -6,6 +6,7 @@ artifacts=$2
 tag="v$version"
 farm="openfarm-farm:$tag"
 connector="openfarm-connector:$tag"
+OPENFARM_DOCKER_REHEARSAL=1 node --test tests/docker/upgrade-rehearsal.test.ts
 mkdir -p "$artifacts"
 
 runtime=$(mktemp -d)

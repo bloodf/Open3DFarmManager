@@ -127,7 +127,7 @@ function parseYamlSubset(source: string): Record<string, Yaml> {
 const workflow = parseYamlSubset(simSource)
 const jobs = workflow.jobs as Record<string, Record<string, Yaml>>
 
-const PROFILE_JOBS = ['spoolman', 'cams', 'rtsp'] as const
+const PROFILE_JOBS = ['mock', 'klipper', 'spoolman', 'cams', 'rtsp'] as const
 
 function matrixInclude(job: Record<string, Yaml>) {
   const strategy = job.strategy as Record<string, Yaml>
@@ -155,7 +155,7 @@ test('Simulator workflow is dispatch-only', () => {
   assert.doesNotMatch(simSource, /\bpush:\s/)
 })
 
-test('spoolman, cams and rtsp jobs matrix amd64 and arm64 runners', () => {
+test('all simulator jobs matrix amd64 and arm64 runners', () => {
   for (const name of PROFILE_JOBS) {
     const job = jobs[name] ?? assert.fail(`sim.yml must define ${name}`)
     assert.equal(job['runs-on'], '${{ matrix.runner }}')
@@ -177,6 +177,8 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
   assert.equal(packageJson.scripts['sim:verify:cams'], undefined)
 
   const expectedVerify: Record<(typeof PROFILE_JOBS)[number], RegExp> = {
+    mock: /node --test tests\/node\/e16-358\.test\.mjs/,
+    klipper: /npm run sim:smoke/,
     spoolman:
       /npm run sim:seed[\s\S]*node packages\/sim-tools\/src\/spoolman-cli\.ts/,
     cams: /node packages\/sim-tools\/src\/camera-cli\.ts/,
@@ -190,21 +192,23 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
       expectedVerify[name].test(runText(step)),
     )
     assert.ok(verify, `${name} must have a pass/fail verify step`)
-    assert.match(runText(verify), /tail -c 200000/)
+    if (name !== 'klipper') assert.match(runText(verify), /tail -c 200000/)
+    if (name === 'spoolman' || name === 'cams' || name === 'rtsp') {
 
-    const diagnostic = steps.find(
-      (step) =>
-        step.if === 'failure()' &&
-        /sim-profile-diagnostics\.mjs/.test(runText(step)),
-    )
-    assert.ok(diagnostic, `${name} must collect diagnostics on failure`)
-    assert.match(
-      runText(diagnostic),
-      new RegExp(
-        `sim-profile-diagnostics\\.mjs ${name} sim-diagnostics/${name}-`,
-      ),
-    )
+      const diagnostic = steps.find(
+        (step) =>
+          step.if === 'failure()' &&
+          /sim-profile-diagnostics\.mjs/.test(runText(step)),
+      )
+      assert.ok(diagnostic, `${name} must collect diagnostics on failure`)
+      assert.match(
+        runText(diagnostic),
+        new RegExp(
+          `sim-profile-diagnostics\\.mjs ${name} sim-diagnostics/${name}-`,
+        ),
+      )
 
+    }
     const upload = steps.find(
       (step) =>
         step.if === 'failure()' &&

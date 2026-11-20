@@ -31,6 +31,11 @@ tar -xzf open3dfarmmanager-npm-cache-linux-x64.tar.gz -C "$HOME/openfarm-npm-cac
 npm ci --offline --ignore-scripts --cache "$HOME/openfarm-npm-cache"
 ```
 
+Em Linux ARM64, prepare o cache no próprio alvo enquanto houver rede com
+`npm ci --ignore-scripts --cache "$HOME/openfarm-npm-cache"`. Em um checkout
+limpo com a rede bloqueada, rode o mesmo comando de instalação offline
+acima com o cache já preparado.
+
 Para listar as lacunas do mirror e os pacotes de plataforma Linux x64 presentes no lockfile, sem rede:
 
 ```sh
@@ -54,8 +59,8 @@ O banco roda no próprio computador, escuta só em `127.0.0.1` e não usa Docker
 ```sh
 export OPENFARM_DB_DIR="$HOME/openfarm-pg"
 export OPENFARM_SOCKET_DIR="$OPENFARM_DB_DIR/socket"
-mkdir -p "$OPENFARM_SOCKET_DIR"
 initdb -D "$OPENFARM_DB_DIR" -U openfarm --auth=trust
+mkdir -p "$OPENFARM_SOCKET_DIR"
 pg_ctl -D "$OPENFARM_DB_DIR" -o "-k $OPENFARM_SOCKET_DIR -h 127.0.0.1 -p 5433" -l "$OPENFARM_DB_DIR/server.log" start
 createdb -h 127.0.0.1 -p 5433 -U openfarm openfarm
 ```
@@ -66,6 +71,7 @@ Para o servidor aplicar as migrações ao iniciar:
 export NUXT_DATABASE_ENABLED=true
 export NUXT_DATABASE_DATABASE_URL=postgres://openfarm@127.0.0.1:5433/openfarm
 export NUXT_DATABASE_MIGRATIONS=apply
+export NUXT_DATABASE_MIGRATIONS_DIR="$PWD/infra/db/migrations"
 ```
 
 O socket Unix fica no diretório criado pelo usuário, sem depender de `/var/run/postgresql`. As conexões do app e do `createdb` continuam usando TCP em `127.0.0.1:5433`. Para parar o banco e remover o cluster depois: `pg_ctl -D "$OPENFARM_DB_DIR" stop` e, quando não precisar mais dos dados, `rm -rf "$OPENFARM_DB_DIR"`.
@@ -92,6 +98,7 @@ Os simuladores (Moonraker sv06 e u1, Spoolman e câmera) são processos de teste
 
 - `npm run sim:verify` sobe os mocks, verifica as quatro ferramentas, a troca de extrusora, as webcams e o Spoolman, e encerra os mocks ao final.
 - `npm run desktop:check -- --only app-smoke` sobe o banco descartável, os mocks, o Connector real e o app compilado; então carrega a rota **/farm** em uma porta livre de loopback no Chrome com todo host não local bloqueado no navegador. Exige `npm run build` antes.
+- `OPENFARM_BROWSER=chrome npm run test:journey -- tests/journey/harness-smoke.spec.ts` abre **/farm** no Chrome e verifica o cartão e o progresso da impressora Moonraker simulada. Em Linux isolado, configure `dummy0` sem rota padrão conforme o [guia do guard](desktop-check.md#network-guard). O simulador escuta em loopback.
 
 Para abrir a página da farm no seu próprio Chrome, use o endereço do servidor da etapa 4 e acrescente `/farm`. As impressoras aparecem nessa página somente após o pareamento do Connector, que o `app-smoke` faz sozinho. O `app-smoke` verifica que a página carrega, renderiza texto e não contata hosts externos; ele não confere os nomes das impressoras na tela.
 

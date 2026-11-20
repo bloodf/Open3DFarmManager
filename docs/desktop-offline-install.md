@@ -2,30 +2,28 @@
 
 The desktop installs with `npm ci --ignore-scripts` (`.npmrc` pins `ignore-scripts=true`) from a mirror that may lack recently published packages (`nuxt@4.6.4`, `vitest@5.1.0`, `typescript@7.0.2` installed as `typescript7`, `vue-tsc@3.3.14`, `@playwright/test@1.65.0`) or Linux x64 platform packages (`@node-datachannel/linux-x64-gnu`, `@esbuild/linux-x64`, `@rollup/rollup-linux-x64-gnu`, `@rolldown/binding-linux-x64-gnu`, `lightningcss-linux-x64-gnu`, `@typescript/typescript-linux-x64`, plus their `-musl` variants). A single missing tarball stops `npm ci`.
 
-## 1. Report lockfile packages and mirror gaps (`desktop:deps-report`)
+## 1. Report lockfile packages and mirror gaps
 
 Run without network to list every `name@version` in `package-lock.json` and highlight platform packages:
 
 ```sh
-npm run desktop:deps-report
-# or directly before root package.json scripts are wired:
 node scripts/desktop-deps-report.mjs
 ```
 
 Pass `--registry <url>` to check which pinned tarballs that mirror lacks:
 
 ```sh
-npm run desktop:deps-report -- --registry https://mirror.example.invalid/npm
+node scripts/desktop-deps-report.mjs --registry https://mirror.example.invalid/npm
 ```
 
 The report reads `package-lock.json` (`lockfileVersion` 3), maps aliased entries (such as `typescript7` -> `typescript@7.0.2`) to their real npm package name, marks platform packages (`os`, `cpu`, `libc`), marks bundled entries (`inBundle`), and lists every missing tarball without sending secrets.
 
-## 2. Build the offline cache bundle on a connected machine (`desktop:bundle`)
+## 2. Build the offline cache bundle on a connected machine
 
 This is a manual workflow run on a connected machine. It stages the workspace manifests (`package.json`, `package-lock.json`, `.npmrc`, and workspace `package.json` manifests), runs `npm ci --ignore-scripts` for `linux-x64` (`glibc` and, when present in the lockfile, `musl`), verifies the cache, strips logs and request headers, and writes one `.tar.gz` archive containing only `_cacache/`:
 
 ```sh
-npm run desktop:bundle
+node scripts/desktop-bundle.mjs
 # or with an explicit output path / registry:
 node scripts/desktop-bundle.mjs --out /tmp/open3dfarmmanager-npm-cache-linux-x64.tar.gz
 ```
@@ -64,12 +62,3 @@ Every Linux x64 platform package in `package-lock.json` is an `optional` depende
 | `@rollup/rollup-linux-x64-gnu@4.68.7` / `@rollup/rollup-linux-x64-musl@4.68.7`       | `rollup`           | Nitro production server bundle (`npm run build -w @open3dfarmmanager/farm`)                    | Supply `@rollup/wasm-node` matching Rollup in a supplemental offline cache, or run `npm run build` on a connected/capable build host and deploy `apps/farm/.output/` (runtime `node .output/server/index.mjs` does not load Rollup; Connector builds with `esbuild`).                                                                                                                                                                                   |
 | `@rolldown/binding-linux-x64-gnu@1.2.19` / `@rolldown/binding-linux-x64-musl@1.2.19` | `rolldown`         | Vite 8 client/SSR bundling in `apps/farm` build and Vitest                                     | Use `@rolldown/binding-wasm32-wasi@1.2.19` (pinned in `package-lock.json`; force with `NAPI_RS_FORCE_WASI=true`) or point `NAPI_RS_NATIVE_LIBRARY_PATH` at a local `.node` binding, or deploy prebuilt `apps/farm/.output/`.                                                                                                                                                                                                                            |
 | `lightningcss-linux-x64-gnu@1.33.0` / `lightningcss-linux-x64-musl@1.33.0`           | `lightningcss`     | Vite 8 CSS transform/minification in `apps/farm` build                                         | Supply `lightningcss-wasm@1.33.0` offline, or build `apps/farm/.output/` on a host with the native binding (runtime serves prebuilt CSS under `.output/public` without loading `lightningcss`).                                                                                                                                                                                                                                                         |
-
-## 5. Root `package.json` script wiring
-
-When integrating root `package.json`, wire:
-
-```json
-"desktop:deps-report": "node scripts/desktop-deps-report.mjs",
-"desktop:bundle": "node scripts/desktop-bundle.mjs"
-```

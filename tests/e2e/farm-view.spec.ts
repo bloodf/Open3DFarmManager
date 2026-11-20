@@ -151,7 +151,9 @@ test('unauthenticated and failed requests never render a false empty inventory',
   )
   await page.goto('/farm')
   await expect(
-    page.getByRole('link', { name: 'Entrar', exact: true }),
+    page
+      .getByRole('region', { name: 'Acesso à farm' })
+      .getByRole('link', { name: 'Entrar', exact: true }),
   ).toBeVisible()
   await expect(page.getByRole('article')).toHaveCount(0)
   await expect(
@@ -237,7 +239,9 @@ test('axe finds no WCAG A/AA violations in the sign-in and service-error states'
   )
   await page.goto('/farm')
   await expect(
-    page.getByRole('link', { name: 'Entrar', exact: true }),
+    page
+      .getByRole('region', { name: 'Acesso à farm' })
+      .getByRole('link', { name: 'Entrar', exact: true }),
   ).toBeVisible()
   expect(await violations(page)).toEqual([])
   await page.unroute('**/api/auth/me')

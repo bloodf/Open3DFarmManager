@@ -7,68 +7,21 @@ CREATE OR REPLACE FUNCTION farm.integration_scopes_valid(scopes text[]) RETURNS 
     AND cardinality(scopes) = (SELECT count(DISTINCT s) FROM unnest(scopes) AS s)
 $$;
 
-DO $$
-DECLARE
-  name text;
-BEGIN
-  SELECT c.conname INTO name
-  FROM pg_constraint c
-  JOIN pg_class t ON t.oid = c.conrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'farm' AND t.relname = 'integration_envelopes' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%required_scope IN%';
-  IF name IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE farm.integration_envelopes DROP CONSTRAINT %I', name);
-  END IF;
-END $$;
 ALTER TABLE farm.integration_envelopes
+  DROP CONSTRAINT integration_envelopes_required_scope_check,
   ADD CONSTRAINT integration_envelopes_required_scope_check
   CHECK (required_scope IN ('jobs:start', 'jobs:write', 'control:basic', 'control:extended'));
 
-DO $$
-DECLARE
-  name text;
-BEGIN
-  SELECT c.conname INTO name
-  FROM pg_constraint c
-  JOIN pg_class t ON t.oid = c.conrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'farm' AND t.relname = 'integration_audit' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%action IN%';
-  IF name IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE farm.integration_audit DROP CONSTRAINT %I', name);
-  END IF;
-  SELECT c.conname INTO name
-  FROM pg_constraint c
-  JOIN pg_class t ON t.oid = c.conrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'farm' AND t.relname = 'integration_audit' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%resource_type IN%';
-  IF name IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE farm.integration_audit DROP CONSTRAINT %I', name);
-  END IF;
-END $$;
 ALTER TABLE farm.integration_audit
+  DROP CONSTRAINT integration_audit_action_check,
+  DROP CONSTRAINT integration_audit_resource_type_check,
   ADD CONSTRAINT integration_audit_action_check
     CHECK (action IN ('job.submitted', 'printer.action', 'approval.decided', 'connector.result', 'subscription.changed', 'credential.event', 'library.changed')),
   ADD CONSTRAINT integration_audit_resource_type_check
     CHECK (resource_type IN ('job', 'action', 'approval', 'connector', 'subscription', 'credential', 'library'));
 
-DO $$
-DECLARE
-  name text;
-BEGIN
-  SELECT c.conname INTO name
-  FROM pg_constraint c
-  JOIN pg_class t ON t.oid = c.conrelid
-  JOIN pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'farm' AND t.relname = 'integration_webhooks' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%cardinality(events)%';
-  IF name IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE farm.integration_webhooks DROP CONSTRAINT %I', name);
-  END IF;
-END $$;
 ALTER TABLE farm.integration_webhooks
+  DROP CONSTRAINT integration_webhooks_events_check,
   ADD CONSTRAINT integration_webhooks_events_check
   CHECK (cardinality(events) BETWEEN 1 AND 7);
 

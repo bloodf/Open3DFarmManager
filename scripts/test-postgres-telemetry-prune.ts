@@ -80,6 +80,15 @@ try {
     ON CONFLICT (farm_id,agent_id,printer_key) DO UPDATE SET observed_at=excluded.observed_at,state=excluded.state`
 
   await assert.rejects(
+    sql`DELETE FROM farm.job_history WHERE farm_id=${farmId}::uuid AND printer_key='prune-old-1'`,
+    /Job history rows are immutable/,
+  )
+  await assert.rejects(
+    sql`UPDATE farm.job_history SET outcome='failed' WHERE farm_id=${farmId}::uuid AND printer_key='prune-old-1'`,
+    /Job history rows are immutable/,
+  )
+
+  await assert.rejects(
     sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE farm_telemetry_pruner`
       await tx`DELETE FROM farm.telemetry_events WHERE event_id=${oldEventId}::uuid`

@@ -267,10 +267,10 @@ test(
                   ['get_version'],
                 )
             } else if (vendor === 'creality') {
-              const remote = await createCrealitySimulator({
-                state: 1,
-                printProgress: 25,
-              })
+              const remote = await createCrealitySimulator(
+                { state: 1, printProgress: 25 },
+                { heartbeatMs: 50 },
+              )
               cleanup.push(remote.close)
               collection = {
                 version: 4,

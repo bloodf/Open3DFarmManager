@@ -62,23 +62,3 @@ for (const op of operations()) {
     },
   }
 }
-
-// Vitest rejects a describe whose only tests come from `it.each([])`. When the
-// table is empty, present one placeholder entry to Object.entries only; the
-// real table stays empty for `in` / Object.keys (coverage + stale checks).
-const reflectEntries = Object.entries
-Object.entries = ((value: object) => {
-  const entries = reflectEntries(value as Record<string, unknown>)
-  if (value !== mismatches || entries.length > 0) return entries
-  const placeholder: Mismatch = {
-    reason: 'mismatch table is empty; placeholder keeps the vitest suite alive',
-    probe: async () => ({
-      status: 503,
-      headers: new Headers(),
-      text: '',
-      json: undefined,
-      unrouted: false,
-    }),
-  }
-  return [['placeholder 0', placeholder]] as [string, Mismatch][]
-}) as typeof Object.entries

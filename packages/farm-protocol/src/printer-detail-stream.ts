@@ -270,7 +270,16 @@ const payload = z.union([
   PrinterDetailStreamQueryResponse,
 ])
 const maxPayloadBytes = 1_048_576
-const chunkChars = 1024
+/**
+ * The RTC application-frame cap both ends enforce (the Connector's
+ * `MAX_RTC_APPLICATION_BYTES`): a longer frame closes the session. Every wire
+ * this module encodes, whole or chunked, must fit it.
+ */
+export const MAX_PRINTER_DETAIL_APPLICATION_BYTES = 2048
+// A chunk's text is JSON-escaped again inside the chunk frame and may hold
+// three-byte characters, so 512 characters plus the identity fields stay
+// under the application cap in the worst case.
+const chunkChars = 512
 const maxChunks = Math.ceil(maxPayloadBytes / (chunkChars - 1))
 export const MAX_PRINTER_DETAIL_WIRE_BYTES = MAX_RTC_PROOF_WIRE_BYTES
 const chunk = z
@@ -310,7 +319,7 @@ export function encodePrinterDetailFrames(
 ): string[] {
   const frame = PrinterDetailStreamFrame.parse(input)
   const wire = JSON.stringify(frame)
-  if (byteLength(wire) <= MAX_PRINTER_DETAIL_WIRE_BYTES) return [wire]
+  if (byteLength(wire) <= MAX_PRINTER_DETAIL_APPLICATION_BYTES) return [wire]
   const { printerKey } = payload.parse(frame)
   if (byteLength(wire) > maxPayloadBytes)
     throw new RangeError('Printer detail payload too large')

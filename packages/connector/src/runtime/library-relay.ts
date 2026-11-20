@@ -2,6 +2,7 @@ import { request, type RequestOptions } from 'node:https'
 import type { IncomingMessage } from 'node:http'
 import {
   LIBRARY_RELAY_POLL_PATH,
+  LIBRARY_RELAY_STORAGE_PATH,
   LibraryRelayPoll,
   libraryRelayBodyPath,
   libraryRelayResultPath,
@@ -22,12 +23,14 @@ import { LibraryStoreError, type LibraryStore } from './library-store.ts'
 export interface LibraryRelayConfig {
   baseUrl: string
   headers(): Record<string, string>
-  store: Pick<LibraryStore, 'put' | 'readRange' | 'purge' | 'sweep'>
+  store: Pick<LibraryStore, 'put' | 'readRange' | 'purge' | 'sweep' | 'report'>
   signal: AbortSignal
   /** Trust anchor for a private server certificate. */
   ca?: string | Buffer
   /** Operations run at once; the server hands out the next one as soon as one starts. */
   concurrency?: number
+  /** How often the host's library usage is reported to the farm. */
+  storageReportMs?: number
   retryMinMs?: number
   retryMaxMs?: number
   onDiagnostic?(event: { kind: 'library-relay-error'; reason: string }): void
@@ -36,6 +39,7 @@ export interface LibraryRelayConfig {
 const MAX_JSON = 1_048_576
 const POLL_TIMEOUT_MS = 40_000
 const REQUEST_TIMEOUT_MS = 120_000
+const STORAGE_REPORT_MS = 300_000
 
 const FAILURE: Partial<Record<string, LibraryRelayFailureReasonValue>> = {
   'too-large': 'too-large',
@@ -149,6 +153,27 @@ export function createLibraryRelay(config: LibraryRelayConfig) {
     }
   }
 
+  /** Tells the farm this host's library usage. Best effort: the next tick or operation repeats it. */
+  async function reportStorage(): Promise<void> {
+    try {
+      const response = await call('POST', LIBRARY_RELAY_STORAGE_PATH, {
+        body: Buffer.from(JSON.stringify(await store.report())),
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      })
+      response.resume()
+      await new Promise((resolve) => response.once('close', resolve))
+      if (response.statusCode !== 204)
+        throw new Error(`storage report answered ${response.statusCode}`)
+    } catch (error) {
+      if (signal.aborted) return
+      config.onDiagnostic?.({
+        kind: 'library-relay-error',
+        reason:
+          error instanceof Error ? error.message : 'storage report failed',
+      })
+    }
+  }
+
   async function execute(op: LibraryRelayOpValue): Promise<void> {
     try {
       if (op.type === 'read') {
@@ -174,6 +199,8 @@ export function createLibraryRelay(config: LibraryRelayConfig) {
           removed: await store.sweep(op.referenced),
         }
       await report(op.op_id, result)
+      // Reads returned earlier; every other operation may change usage: tell the farm now instead of waiting for the next tick.
+      void reportStorage()
     } catch (error) {
       if (signal.aborted) return
       // Never leaves the server waiting for a reason: tell it, then move on.
@@ -205,6 +232,15 @@ export function createLibraryRelay(config: LibraryRelayConfig) {
     const maxMs = config.retryMaxMs ?? 30_000
     const running = new Set<Promise<void>>()
     let backoff = minMs
+    void reportStorage()
+    const ticker = setInterval(
+      () => void reportStorage(),
+      config.storageReportMs ?? STORAGE_REPORT_MS,
+    )
+    ticker.unref()
+    signal.addEventListener('abort', () => clearInterval(ticker), {
+      once: true,
+    })
     while (!signal.aborted) {
       if (running.size >= limit) {
         await Promise.race(running)

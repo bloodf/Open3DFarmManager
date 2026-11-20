@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, watch, type Ref } from 'vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
 import { useFarmView } from './useFarmView.ts'
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
@@ -13,11 +13,20 @@ import type { ReplayResult } from '../utils/replay-view.ts'
  * The live, signed session replay needs: which printers can be picked right
  * now and the one signed `start_library_print`. Client-only, like the farm view.
  */
-export function useReplayLive() {
+export function useReplayLive(farmId: Ref<string>) {
   const view = useFarmView()
+  watch(
+    [farmId, view.ready],
+    ([selected, current]) => {
+      if (current && (current.scope?.farmId ?? '') !== selected)
+        void view.selectFarm(selected)
+    },
+    { immediate: true },
+  )
   const controls = useFarmControls(view, { value: null })
   const index = computed<ReadonlyMap<string, LiveReplayInfo>>(() => {
-    const current = view.ready.value
+    const current =
+      view.ready.value?.scope?.farmId === farmId.value ? view.ready.value : null
     return current
       ? liveReplayIndex(
           current.rows,

@@ -1020,6 +1020,10 @@ export function openFixedMoonrakerPause(input: {
       } catch {
         stop()
         await closed
+        // A restart drops the state read-back. The acknowledged restart
+        // request stands, reported as unconfirmed, which does not lock the
+        // printer; throwing here would hold every later command as busy.
+        if (extended === 'service') return null
         throw failure()
       }
     },

@@ -4,6 +4,7 @@ import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
 import {
   journeyEnabled,
   reportedProgress,
+  reportedProgressValue,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
@@ -480,8 +481,8 @@ function suite(title: string) {
           expect(async () => {
             await live(page)
             await expect(reportedProgress(row)).toHaveAttribute(
-              'value',
-              fraction,
+              'aria-valuenow',
+              reportedProgressValue(fraction),
               { timeout: 10_000 },
             )
           }).toPass({ timeout: 300_000 })

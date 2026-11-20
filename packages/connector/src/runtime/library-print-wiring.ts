@@ -51,7 +51,9 @@ export type LibraryPrintStarter = ReturnType<typeof createLibraryPrintStarter>
 /**
  * The profile a library start is checked against: only what the printer itself
  * reported (identity model, nozzle diameters, bed). Never taken from the action;
- * undefined until the printer has reported both a model and its nozzles.
+ * undefined until the printer has reported its nozzles. A printer that names
+ * no model (Moonraker never does) gets an empty one, so a file that names a
+ * model is refused and a file that names none is checked on the rest.
  */
 export function createPrinterProfiles() {
   const seen = new Map<string, PrinterState>()
@@ -68,10 +70,10 @@ export function createPrinterProfiles() {
       const printer = seen.get(printerKey)
       const model = printer?.identity?.model ?? printer?.machine?.model
       const nozzles = printer?.machine?.nozzleDiametersMm
-      if (!model || !nozzles?.length) return undefined
+      if (!nozzles?.length) return undefined
       const bed = printer?.machine?.bedSizeMm
       return {
-        model,
+        model: model ?? '',
         nozzleDiameters: nozzles,
         ...(bed ? { bedSize: { x: bed.x, y: bed.y, z: bed.z } } : {}),
       }

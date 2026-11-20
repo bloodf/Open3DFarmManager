@@ -225,7 +225,11 @@ export function replayOutcomeText(result: ReplayResult): string {
       return `${why} A impressão não foi iniciada e nada será repetido automaticamente.`
     }
     case 'not-sent':
-      return 'O comando não foi enviado ao Connector. A impressão não foi iniciada.'
+      // The Connector refuses a library start before anything reaches the
+      // printer and says why; the dialog repeats that reason.
+      return result.code && REFUSAL_TEXT[result.code]
+        ? `${REFUSAL_TEXT[result.code]} A impressão não foi iniciada e nada será repetido automaticamente.`
+        : 'O comando não foi enviado ao Connector. A impressão não foi iniciada.'
     case 'outcome-unknown':
       return 'Não foi possível confirmar se a impressão começou. Verifique a impressora antes de tentar novamente; nada será repetido automaticamente.'
   }

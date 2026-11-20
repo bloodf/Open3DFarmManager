@@ -75,14 +75,14 @@ function reset() {
   )
 }
 watch(
-  () => [open.value, props.source.sha256] as const,
+  [() => open.value, () => props.source.sha256],
   ([isOpen]) => {
     if (isOpen) reset()
   },
   { immediate: true },
 )
 watch(
-  () => [selectedKey.value, props.source.sha256] as const,
+  [() => selectedKey.value, () => props.source.sha256],
   () => {
     bedClear.value = false
     mapping.value = selected.value
@@ -232,7 +232,9 @@ async function confirm() {
     </fieldset>
 
     <p v-if="problem && !result" role="note">{{ problem }}</p>
-    <p v-if="sending" role="status">Enviando o comando ao Connector…</p>
+    <p v-if="sending" role="status">
+      Conectando ao Connector e enviando o comando…
+    </p>
     <div
       v-if="result"
       :role="result.outcome === 'applied' ? 'status' : 'alert'"

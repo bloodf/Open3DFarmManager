@@ -1,3 +1,4 @@
+import { formatPercentage } from './ui-format.ts'
 import {
   observationAge,
   type FarmRow,
@@ -135,7 +136,7 @@ function formatSlotName(slot: string): string {
 }
 
 function formatPercentPtBr(value: number): string {
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+  return formatPercentage(value) ?? 'Indisponível'
 }
 
 function derivePrinterAlerts(row: FarmRow, now: Clock): FarmAlert[] {

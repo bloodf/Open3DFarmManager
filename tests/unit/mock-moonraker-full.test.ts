@@ -533,3 +533,27 @@ describe('moonraker mock full control', () => {
     expect(count('Timeout')).toBeLessThanOrEqual(beforeTimeout + 2)
   })
 })
+
+describe('Moonraker mock: configfile config and can_extrude', () => {
+  it('reports raw macro sections and extrusion readiness from the temperature', async () => {
+    const mock = await start({
+      macros: ['PURGE'],
+      configfileConfig: {
+        'gcode_macro PURGE': { gcode: 'G1 E{params.LENGTH}' },
+      },
+      initial: { extruder: 210 },
+    })
+    const query = await httpJson(
+      mock.origin,
+      '/printer/objects/query?configfile&extruder',
+    )
+    const status = query.body.result.status
+    expect(status.configfile.config['gcode_macro PURGE'].gcode).toContain(
+      'params.LENGTH',
+    )
+    expect(status.extruder.can_extrude).toBe(true)
+    mock.control.update({ extruder: 25 })
+    const cold = await httpJson(mock.origin, '/printer/objects/query?extruder')
+    expect(cold.body.result.status.extruder.can_extrude).toBe(false)
+  })
+})

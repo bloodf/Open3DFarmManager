@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { formatTemperature } from './ui-format.ts'
 import type { z } from 'zod'
 import type { PrinterDetailStreamCapability } from '../../../../packages/farm-protocol/src/printer-detail.ts'
 
@@ -136,6 +137,14 @@ export function mergeSamples(
 }
 
 /** Clamps a requested target to 0..maxTemp and rounds it; undefined when unusable. */
+/**
+ * The trimmed text of a form field. `v-model` on `type="number"` stores a
+ * number once the person types, so `.trim()` on the raw model value crashes.
+ */
+export function fieldText(value: string | number | null | undefined): string {
+  return value == null ? '' : String(value).trim()
+}
+
 export function clampTarget(
   input: string | number,
   maxTemp: number | undefined,
@@ -149,9 +158,7 @@ export function clampTarget(
 }
 
 export function temperatureText(value: number | undefined): string {
-  return value === undefined || !Number.isFinite(value)
-    ? 'Indisponível'
-    : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} °C`
+  return formatTemperature(value) ?? 'Indisponível'
 }
 export function powerText(power: number | undefined): string {
   return power === undefined || !Number.isFinite(power)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime, formatNumber } from '../../../utils/ui-format.ts'
 import { computed, ref } from 'vue'
 import { scale, sortedPoints, type ChartPoint } from './points.ts'
 
@@ -61,15 +62,11 @@ const index = ref(0)
 const selected = computed(
   () => times.value[Math.min(index.value, times.value.length - 1)],
 )
-const date = new Intl.DateTimeFormat('pt-BR', {
-  dateStyle: 'short',
-  timeStyle: 'medium',
-  timeZone: 'UTC',
-})
-const number = new Intl.NumberFormat('pt-BR', { maximumSignificantDigits: 15 })
-const formatTime = (time: number) => date.format(time)
-const formatValue = (value: number) =>
-  props.unit ? `${number.format(value)} ${props.unit}` : number.format(value)
+const formatTime = (time: number) => formatDateTime(time, 'utc')
+const formatValue = (value: number) => {
+  const number = formatNumber(value, { maximumSignificantDigits: 15 })
+  return props.unit ? `${number} ${props.unit}` : number
+}
 const readout = computed(() => {
   const time = selected.value
   if (time === undefined) return ''
@@ -116,7 +113,7 @@ function pointAtPointer(event: PointerEvent) {
           :y="y(limit)"
           text-anchor="end"
         >
-          {{ number.format(limit) }}
+          {{ formatNumber(limit, { maximumSignificantDigits: 15 }) }}
         </text>
         <line
           v-for="(target, i) in targets"

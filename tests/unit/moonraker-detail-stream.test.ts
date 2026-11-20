@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  assemblePrinterDetailFrames,
   decodePrinterDetailFrame,
   PrinterDetailStreamUpdate,
 } from '../../packages/farm-protocol/src/printer-detail.ts'
@@ -196,8 +197,13 @@ function session(
     (key) => (key === KEY ? (stream as MoonrakerDetailStream) : undefined),
     (key) => key === KEY,
     (batch) => {
-      for (const wire of batch)
-        wires.push(decodePrinterDetailFrame(wire) as Frame)
+      // A message over the 2048-byte application cap arrives as one batch of
+      // ordered chunks; the browser assembles it before use.
+      if (batch.length > 1)
+        wires.push(assemblePrinterDetailFrames(batch) as Frame)
+      else
+        for (const wire of batch)
+          wires.push(decodePrinterDetailFrame(wire) as Frame)
     },
   )
   cleanups.push(() => detail.close())

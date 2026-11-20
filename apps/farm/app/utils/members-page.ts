@@ -1,3 +1,4 @@
+import { formatDateTime } from './ui-format.ts'
 /** Display and mutation helpers for the members management page (issue #218). */
 
 export type MemberRole = 'owner' | 'admin' | 'operator' | 'viewer'
@@ -61,11 +62,7 @@ export function memberDisplayName(member: FarmMember): string {
 export function formatInviteExpiry(expiresAt: string): string {
   const at = Date.parse(expiresAt)
   if (!Number.isFinite(at)) return 'data desconhecida'
-  return new Date(at).toLocaleString('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    timeZone: 'America/Sao_Paulo',
-  })
+  return formatDateTime(at, 'short') ?? 'data desconhecida'
 }
 
 export function membersLoadError(status: number | undefined): string {

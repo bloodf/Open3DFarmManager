@@ -118,6 +118,13 @@ export function controlEffectMatches(
         (observation.printState === 'printing' ||
           observation.printState === 'paused')
       )
+    // The driver wrapper only returns an effect naming the file it uploaded.
+    case 'start_library_print':
+      return (
+        effect.kind === 'file' &&
+        (observation.printState === 'printing' ||
+          observation.printState === 'paused')
+      )
     case 'set_temperature':
       return (
         effect.kind === 'temperature' &&

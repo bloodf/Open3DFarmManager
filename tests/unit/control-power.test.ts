@@ -192,6 +192,7 @@ it.each([
         .get()
       if (typeof row?.sql !== 'string') throw new Error('Missing action table')
       const prior = row.sql
+        .replace(",'start_library_print'", '')
         .replace(",'config_write'", '')
         .replace("'set_factor','file_op'", "'set_factor'")
         .replace(

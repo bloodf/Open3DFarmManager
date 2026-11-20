@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import {
   journeyEnabled,
+  reportedPrintProgressBar,
+  reportedProgressValue,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
@@ -41,9 +43,9 @@ if (journeyEnabled())
         // expectLiveTelemetry opened /farm; keep its live connection.
         const row = journey.farmRow()
         await expect(row).toContainText('Conexão direta autenticada')
-        await expect(row.getByRole('progressbar')).toHaveAttribute(
-          'value',
-          '0.25',
+        await expect(reportedPrintProgressBar(row)).toHaveAttribute(
+          'aria-valuenow',
+          reportedProgressValue(0.25),
         )
         await expect(row.getByLabel('Temperaturas observadas')).toContainText(
           '210 °C',

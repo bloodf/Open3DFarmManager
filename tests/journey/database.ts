@@ -13,7 +13,10 @@ import {
 
 /** One restricted login per capability, in the order the farm app consumes. */
 export const CAPABILITIES = [
-  'farm_password_auth',
+  // The auth connection role (docs/ACCOUNT-CREATION.md): password sign-in via
+  // its farm_password_auth membership, plus sign-in provider status, rules and
+  // invites, which migrations grant only to farm_account_registration.
+  'farm_account_registration',
   'farm_connector_inventory',
   'farm_browser_device_runtime',
   'farm_pairing_runtime',
@@ -41,6 +44,8 @@ export type JourneyDatabase = Readonly<{
   owner: Account
   admin: Account
   viewer: Account
+  /** A fourth member with the operator role, for role-refusal journeys. */
+  operator: Account
   close(): Promise<void>
 }>
 
@@ -134,24 +139,36 @@ export async function startJourneyDatabase(
       await sql.unsafe(
         `CREATE ROLE ${login(capability)} LOGIN PASSWORD '${secrets.get(capability)}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${capability}`,
       )
+    // Fail here, not as a swallowed 500 on the sign-in page, if the auth
+    // login loses the grants the auth runtime reads on every visit.
+    const authLogin = login('farm_account_registration')
+    const [grants] = await sql<{ password: boolean; providers: boolean }[]>`
+      SELECT
+        has_table_privilege(${authLogin}, 'farm.password_credentials', 'SELECT') AS password,
+        has_table_privilege(${authLogin}, 'farm.sign_in_providers', 'SELECT') AS providers`
+    if (!grants?.password || !grants.providers)
+      throw new Error(
+        'Journey auth login lacks the farm_account_registration grants the auth runtime needs',
+      )
     const password = randomBytes(24).toString('hex')
     const hash = await hashPassword(password)
     const account = (kind: string): Account => ({
       id: randomUUID(),
       username: `${kind}_${randomBytes(8).toString('hex')}`,
     })
-    const [owner, admin, viewer] = [
+    const [owner, admin, viewer, operator] = [
       account('owner'),
       account('admin'),
       account('viewer'),
-    ] as [Account, Account, Account]
+      account('operator'),
+    ] as [Account, Account, Account, Account]
     const farmId = randomUUID()
-    for (const { id, username } of [owner, admin, viewer]) {
+    for (const { id, username } of [owner, admin, viewer, operator]) {
       await sql`INSERT INTO farm.session_accounts(id) VALUES(${id})`
       await sql`INSERT INTO farm.password_credentials(account_id,username,password_hash) VALUES(${id},${username},${hash})`
     }
     await sql`INSERT INTO farm.farms(id) VALUES(${farmId}::uuid)`
-    await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${owner.id},'owner'),(${farmId}::uuid,${admin.id},'admin'),(${farmId}::uuid,${viewer.id},'viewer')`
+    await sql`INSERT INTO farm.memberships(farm_id,account_id,role) VALUES(${farmId}::uuid,${owner.id},'owner'),(${farmId}::uuid,${admin.id},'admin'),(${farmId}::uuid,${viewer.id},'viewer'),(${farmId}::uuid,${operator.id},'operator')`
     await sql.end({ timeout: 3 })
     sql = undefined
 
@@ -163,6 +180,7 @@ export async function startJourneyDatabase(
       owner,
       admin,
       viewer,
+      operator,
       async close() {
         await fixture.stop()
       },

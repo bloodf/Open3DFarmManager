@@ -47,7 +47,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 15
+const SCHEMA_VERSION = 16
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -261,9 +261,13 @@ const bedMeshActionSchema = fileOpActionSchema.replace(
   "'file_op'",
   "'file_op','bed_mesh'",
 )
-const actionSchema = bedMeshActionSchema.replace(
+const configWriteActionSchema = bedMeshActionSchema.replace(
   "'bed_mesh'",
   "'bed_mesh','config_write'",
+)
+const actionSchema = configWriteActionSchema.replace(
+  "'config_write'",
+  "'config_write','start_library_print'",
 )
 /**
  * Journals from the power, timelapse and console units were rebuilt from the
@@ -304,6 +308,7 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   12: [gcodeActionSchema],
   13: [fileOpActionSchema],
   14: [bedMeshActionSchema],
+  15: [configWriteActionSchema],
 }
 const schema = [
   actionSchema,
@@ -465,6 +470,7 @@ export function openCommandJournal(input: {
         12,
         13,
         14,
+        15,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)

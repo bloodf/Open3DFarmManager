@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Locator, type Page } from '@playwright/test'
@@ -24,7 +25,9 @@ import {
 } from '../../packages/farm-protocol/src/browser-device-http.ts'
 import {
   startMoonrakerSimulator,
+  type MoonrakerMockOptions,
   type MoonrakerSimulator,
+  type PrinterModel,
 } from './moonraker-simulator.ts'
 import {
   startKobraXMock,
@@ -76,6 +79,20 @@ export type JourneyOptions = Readonly<{
    * Off by default: the read-only journey stays unchanged.
    */
   signedControl?: boolean
+  /**
+   * Moonraker fixture only: the admin's per-printer G-code console switch in
+   * the Connector configuration (`consoleAssignmentIds`). Off by default, as
+   * the product ships it; needs `signedControl`.
+   */
+  consoleEnabled?: boolean
+  /**
+   * Moonraker fixture only: the initial printer model and the seeded mock
+   * (macros, files, queue, power devices, mesh profiles, config files...).
+   */
+  moonraker?: Readonly<{
+    initial?: Partial<PrinterModel>
+    mock?: Omit<MoonrakerMockOptions, 'initial'>
+  }>
   /**
    * Stores Connector telemetry on the server for the whole journey (the
    * upload path is open from the start), so finished jobs reach the history
@@ -142,6 +159,7 @@ export type JourneyHarness = Readonly<{
     owner: string
     admin: string
     viewer: string
+    operator: string
     password: string
   }>
   /** The owner page: signed in, device key stored, on the origin. */
@@ -196,6 +214,8 @@ export type JourneyHarness = Readonly<{
    * connection is needed (for example to read the job history).
    */
   setTelemetryUpload(open: boolean): void
+  /** Directory of the server-mode library blobs (`<sha256>` files). */
+  libraryDirectory: string
   /** Bounded Nitro output tail for failure diagnostics. */
   appLog(): string
   close(): Promise<void>
@@ -213,18 +233,31 @@ const ENV_KEYS = [
   'SIGNALLING_HTTPS_SIM_SPOOLMAN',
   'SIGNALLING_HTTPS_FARM_PAUSE',
   'SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY',
+  'SIGNALLING_HTTPS_CONSOLE',
 ] as const
 
 /**
- * The farm card's reported-progress bar (0..1), named by its visible label.
- * The row also holds the status-wall bar (0..100), so an unnamed
+ * The farm card's reported-progress ring, named by its label. The row also
+ * holds the status-wall bar ("Progresso da impressão"), so an unnamed
  * `getByRole('progressbar')` is ambiguous.
  */
 export function reportedProgress(row: Locator): Locator {
   return row.getByRole('progressbar', {
-    name: /^Progresso informado da impressão:/,
+    name: 'Progresso informado da impressão',
+    exact: true,
   })
 }
+
+/**
+ * The ring's `aria-valuenow` for a reported fraction (0..1): the card renders
+ * the fraction as points (0..100), the same way the page computes it.
+ */
+export function reportedProgressValue(fraction: number | string): string {
+  return String(Number(fraction) * 100)
+}
+
+/** Same reported-progress bar; the name the journey specs import. */
+export const reportedPrintProgressBar = reportedProgress
 
 export function journeyEnabled(env: NodeJS.ProcessEnv = process.env) {
   return env.OPENFARM_JOURNEY === '1'
@@ -374,7 +407,10 @@ export async function startJourneyHarness(
     let printer: MoonrakerSimulator | undefined
     let vendor: VendorSimulator | undefined
     if (isMoonraker) {
-      printer = await startMoonrakerSimulator()
+      printer = await startMoonrakerSimulator(
+        options.moonraker?.initial,
+        options.moonraker?.mock,
+      )
       const moonraker = printer
       undo.push(() => moonraker.close())
       Object.assign(process.env, {
@@ -399,6 +435,9 @@ export async function startJourneyHarness(
       delete process.env.SIGNALLING_HTTPS_FARM_PAUSE
       delete process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
     }
+    if (options.consoleEnabled && options.signedControl)
+      process.env.SIGNALLING_HTTPS_CONSOLE = 'yes'
+    else delete process.env.SIGNALLING_HTTPS_CONSOLE
     const runtime = await createRuntimeMoonrakerFixture()
     undo.push(async () => {
       const pid = runtime.observe().packagedPid
@@ -785,6 +824,7 @@ export async function startJourneyHarness(
         owner: database.owner.username,
         admin: database.admin.username,
         viewer: database.viewer.username,
+        operator: database.operator.username,
         password: database.password,
       }),
       ownerPage,
@@ -796,13 +836,16 @@ export async function startJourneyHarness(
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 60_000 })
-        await expect(reportedProgress(row)).toHaveAttribute('value', '0.25')
+        await expect(reportedProgress(row)).toHaveAttribute(
+          'aria-valuenow',
+          reportedProgressValue(0.25),
+        )
       },
       farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
         await expect(reportedProgress(farmRow(page))).toHaveAttribute(
-          'value',
-          String(fraction),
+          'aria-valuenow',
+          reportedProgressValue(fraction),
           { timeout: 15_000 },
         )
       },
@@ -823,6 +866,7 @@ export async function startJourneyHarness(
       simulatorObservation: () => runtime.observe(),
       disconnectSignalling: () => app.disconnectUpgrades(),
       setTelemetryUpload: (open: boolean) => app.setTelemetryUpload(open),
+      libraryDirectory: join(app.directory, 'library'),
       appLog: () => app.log(),
       close,
     })

@@ -494,7 +494,7 @@ test('the authenticated inbox claim binds scope and its own offline lifetime', a
   assert.equal(f.sent.length, 1)
 })
 
-test('signed jobs verify HTTPS files before upload and the reference client starts, pauses and cancels', async (t) => {
+test('signed jobs verify HTTPS files before upload and start once', async (t) => {
   const { createServer: httpsServer } = await import('node:https')
   const { createServer: httpServer } = await import('node:http')
   const { readFile } = await import('node:fs/promises')

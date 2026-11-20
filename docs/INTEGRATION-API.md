@@ -171,7 +171,7 @@ inventory without sending a physical command.
 With Node 22 and workspace dependencies installed, run the offline command checks:
 
 ```sh
-npm test -- tests/unit/api-v1-contract.test.ts
+node --test tests/unit/api-v1-contract.test.ts
 node --test tests/node/connector-api-envelope.test.ts tests/node/integration-client-example.test.ts
 ```
 
@@ -187,8 +187,8 @@ the observed printer states between commands.
 
 These checks cover the v1 contract and Connector command execution using
 separate test boundaries. The API-to-Connector inbox, hosted sandbox and
-physical printer behavior remain outside this proof. The contract file
-uses Vitest module mocks and requires the Vitest runner.
+physical printer behavior remain outside this proof. The Node contract
+entry point runs the full Vitest suite and propagates failures.
 
 ## Versioning and compatibility
 

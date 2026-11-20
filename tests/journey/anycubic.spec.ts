@@ -139,9 +139,11 @@ function suite(title: string) {
     async function expectState(row: Locator, label: string) {
       await expect(async () => {
         await live(row.page())
-        await expect(row.getByText(label, { exact: true })).toBeVisible({
-          timeout: 10_000,
-        })
+        const reportedState = row
+          .getByText('Último estado informado', { exact: true })
+          .locator('xpath=following-sibling::dd[1]')
+        await expect(reportedState).toHaveText(label, { timeout: 10_000 })
+        await expect(reportedState).toBeVisible()
       }).toPass({ timeout: 300_000 })
     }
     /**

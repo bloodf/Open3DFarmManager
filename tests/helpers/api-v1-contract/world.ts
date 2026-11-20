@@ -469,19 +469,39 @@ export class World {
       farmId: string,
       agentId: string,
       key: string,
+      grouping: {
+        displayName: string
+        groupName: string
+        location: string
+      },
     ): IntegrationPrinterRow => ({
       id,
       farmId,
       agentId,
       printerKey: key,
+      displayName: grouping.displayName,
+      groupName: grouping.groupName,
+      location: grouping.location,
       sandbox: false,
       state: { ...printerState, printerKey: key },
       observedAt: 1_700_000_000_000,
     })
     this.authStore.printers = [
-      row(ids.printerA1, ids.farmA, ids.agentA, 'printer-a1'),
-      row(ids.printerA2, ids.farmA, ids.agentA, 'printer-a2'),
-      row(ids.printerB1, ids.farmB, ids.agentB, 'printer-b1'),
+      row(ids.printerA1, ids.farmA, ids.agentA, 'printer-a1', {
+        displayName: 'Alpha',
+        groupName: 'Linha A',
+        location: 'Sala 1',
+      }),
+      row(ids.printerA2, ids.farmA, ids.agentA, 'printer-a2', {
+        displayName: 'Beta',
+        groupName: 'Linha A',
+        location: 'Sala 1',
+      }),
+      row(ids.printerB1, ids.farmB, ids.agentB, 'printer-b1', {
+        displayName: 'Gamma',
+        groupName: 'Linha B',
+        location: 'Sala 2',
+      }),
     ]
     for (const printer of this.authStore.printers) {
       this.jobsStore.targets.set(printer.id, {

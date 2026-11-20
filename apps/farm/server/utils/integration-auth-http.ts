@@ -207,7 +207,7 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/[^/]+\/status)?$/,
+    path: /^\/printers(?:\/status|\/[^/]+\/status)?$/,
     scopes: ['printers:read'],
   },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
@@ -422,6 +422,7 @@ export async function authorizeIntegrationRequest(
     const url = new URL(request.url)
     const farms = [
       '/printers',
+      '/printers/status',
       '/inventory',
       '/jobs',
       '/library',

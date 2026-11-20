@@ -144,6 +144,46 @@ export const fixtures: Record<string, Fixture> = {
     missing: () => ({ method: 'GET', path: `/printers?farmId=${ids.unknown}` }),
     fault: 'printers',
   },
+  'GET /printers/status': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/printers/status?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['printers:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/printers/status?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/printers/status?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+      {
+        name: 'printer-scoped grant lists only its printer',
+        run: (world) =>
+          asApp(world, [{ scopes: ['printers:read'], printerId: P }], () => ({
+            method: 'GET',
+            path: '/printers/status',
+          })),
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/printers/status?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/printers/status?farmId=${ids.unknown}`,
+    }),
+    fault: 'printers',
+  },
   'GET /printers/{printerId}/status': {
     scopes: ['printers:read'],
     success: '200',

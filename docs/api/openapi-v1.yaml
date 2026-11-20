@@ -201,6 +201,53 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /printers/status:
+    get:
+      operationId: listPrinterStatus
+      tags: [Printers]
+      summary: Latest status of every granted printer
+      description: |
+        One page of the latest observed state for every printer covered by a
+        `printers:read` grant, including display name, group, location, ETA and
+        the active farm alerts derived with the same rules as the farm wall
+        (E20.6). Out-of-grant printers are omitted. When nothing publishable has
+        been observed, `state` is `unknown` and optional readings are absent.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printer status snapshots.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterStatusPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/status:
     get:
       operationId: getPrinterStatus
@@ -1116,6 +1163,29 @@ webhooks:
       responses:
         '200':
           $ref: '#/components/responses/WebhookAccepted'
+  printer.alert.raised:
+    post:
+      operationId: onPrinterAlertRaised
+      summary: A farm alert became active on a granted printer
+      description: |
+        Sent when an E20.6 farm alert appears for a printer covered by the
+        subscription's grants. The payload uses the same alert kinds, labels
+        and messages as the farm wall. Deliveries are HMAC-signed with the
+        subscription secret (`OpenFarm-Signature`).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterAlertRaisedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
   job.status_changed:
     post:
       operationId: onJobStatusChanged
@@ -1707,6 +1777,15 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayName:
+          type: [string, 'null']
+          maxLength: 128
+        groupName:
+          type: [string, 'null']
+          maxLength: 128
+        location:
+          type: [string, 'null']
+          maxLength: 128
         vendor:
           type: string
           maxLength: 255
@@ -1744,6 +1823,55 @@ components:
             $ref: '#/components/schemas/ActiveSpool'
         observedAt:
           $ref: '#/components/schemas/TimestampMs'
+        alerts:
+          type: array
+          description: Active farm alerts for this printer (E20.6 rules).
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/PrinterAlert'
+    BulkPrinterStatus:
+      allOf:
+        - $ref: '#/components/schemas/PrinterStatus'
+        - type: object
+          required: [alerts]
+    PrinterStatusPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/BulkPrinterStatus'
+    PrinterAlert:
+      type: object
+      required: [id, kind, label, message]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        kind:
+          type: string
+          enum:
+            - error
+            - connector-storage-degraded
+            - offline-or-stale
+            - paused
+            - finished-bed-clear
+            - low-slot
+            - firmware-update
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1024
     ActiveSpool:
       type: object
       description: Spool assigned to one printer tool or AMS slot.
@@ -2433,6 +2561,7 @@ components:
       type: string
       enum:
         - printer.state_changed
+        - printer.alert.raised
         - job.status_changed
         - action.status_changed
         - job.ended
@@ -2537,6 +2666,37 @@ components:
               const: printer.state_changed
             data:
               $ref: '#/components/schemas/PrinterStatus'
+    PrinterAlertRaisedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: printer.alert.raised
+            data:
+              type: object
+              additionalProperties: false
+              required: [farmId, printerId, printerKey, alert]
+              properties:
+                farmId:
+                  $ref: '#/components/schemas/Uuid'
+                printerId:
+                  $ref: '#/components/schemas/Uuid'
+                printerKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                displayName:
+                  type: [string, 'null']
+                  maxLength: 128
+                groupName:
+                  type: [string, 'null']
+                  maxLength: 128
+                location:
+                  type: [string, 'null']
+                  maxLength: 128
+                alert:
+                  $ref: '#/components/schemas/PrinterAlert'
     JobStatusChangedEvent:
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'

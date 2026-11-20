@@ -71,6 +71,23 @@ RTC rows above keep Phase 0 incomplete. The [implementation queue](IMPLEMENTATIO
 lists the remaining work in dependency order. Historical counts and
 prepared-but-unrun tests are not current acceptance.
 
+## Loopback mock candidate
+
+Issue #9 mock acceptance is `npm run test:farm-mock`
+(`scripts/test-farm-mock-acceptance.ts`). The runner refuses
+`OPENFARM_SIM=docker`. It drives one in-process Moonraker mock on
+`127.0.0.1` and writes one JSON ledger outside the repository, bound to
+`git rev-parse HEAD`. Covered rows are signed pause while printing,
+rejection of a tampered signature, replay, expiry, wrong farm, wrong
+assignment and a revoked capability, printer UI origin links, the tablet
+two-column rule at `48rem`, and removal of the farm-page feature-flag
+gate from application code and the README. The tablet check is that CSS
+source contract; the Playwright farm-view render was not run. Owner
+hardware acceptance and GitHub Actions remain open. This section does not
+mark Phase 0 or issue #9 complete. Historical Docker and PostgreSQL
+evidence, including candidate `1e3a029` and the printing-pause rows at
+`147b9bf`, stays as recorded.
+
 The separate pause transport subsequently passed five actual native cases at
 `579f377`, recorded in [the control RTC checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
 Those cases use synthetic authority and execute no printer commands. They do

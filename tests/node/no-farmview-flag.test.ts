@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 const app = fileURLToPath(new URL('../../apps/farm/app/', import.meta.url))
+const readme = fileURLToPath(new URL('../../README.md', import.meta.url))
 
 async function sourceFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true })
@@ -17,8 +18,8 @@ async function sourceFiles(directory: string): Promise<string[]> {
   return files.flat()
 }
 
-test('farmView flag name is absent from app code', async () => {
-  const files = await sourceFiles(app)
+test('farmView flag name is absent from app code and the README', async () => {
+  const files = [...(await sourceFiles(app)), readme]
   const matches = await Promise.all(
     files.map(async (file) =>
       /\bfarmView\b/.test(await readFile(file, 'utf8')) ? file : null,

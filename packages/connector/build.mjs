@@ -1,11 +1,14 @@
 // Node build for the Connector CLI. Replaces the former Bun bundler with the
 // esbuild API: ESM output, platform node, code splitting and the same external
 // native boundary. esbuild carries the entry hashbang over to dist/cli.js.
-import { copyFileSync, rmSync } from 'node:fs'
+import { copyFileSync, cpSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
+import { verifyInstalledNative } from './verify-native.mjs'
+
+verifyInstalledNative()
 
 const packageDirectory = dirname(fileURLToPath(import.meta.url))
 const outputDirectory = join(packageDirectory, 'dist')
@@ -49,9 +52,16 @@ await esbuild.build({
 const licenseCopies = [
   ['../../LICENSE', 'LICENSE'],
   ['../../THIRD_PARTY.md', 'THIRD_PARTY.md'],
+  ['./THIRD_PARTY.md', 'NATIVE-PROVENANCE.md'],
   [licenseOf('zod'), 'ZOD-LICENSE'],
   [licenseOf('ws'), 'WS-LICENSE'],
 ]
 for (const [from, to] of licenseCopies) {
   copyFileSync(resolve(packageDirectory, from), join(outputDirectory, to))
 }
+
+cpSync(
+  join(packageDirectory, 'notices/node-datachannel'),
+  join(outputDirectory, 'notices/node-datachannel'),
+  { recursive: true },
+)

@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
@@ -375,11 +376,14 @@ test('checkpoint permissions and signature corruption fail closed', async (t) =>
 })
 
 test('restore epoch ignores persisted authorization and accepts a newly confirmed key set', async (t) => {
-  const { fenceConnector } = await import('../../scripts/self-host/restore.ts')
   const f = await setup(t)
   assert.equal(await f.store.confirm(await f.wire(500)), true)
   assert.equal(f.store.authority.allowsBrowser(f.f.capability), true)
-  fenceConnector(f.dir)
+  execFileSync(process.execPath, [
+    'scripts/self-host/restore.ts',
+    'fence',
+    f.dir,
+  ])
   const restored = await openTrustedKeyStore(f.options)
   assert.equal(restored.version, undefined)
   assert.equal(restored.authority.allowsBrowser(f.f.capability), false)
@@ -397,7 +401,11 @@ test('restore epoch ignores persisted authorization and accepts a newly confirme
     ),
     true,
   )
-  fenceConnector(f.dir)
+  execFileSync(process.execPath, [
+    'scripts/self-host/restore.ts',
+    'fence',
+    f.dir,
+  ])
   assert.equal(
     (await openTrustedKeyStore(f.options)).authority.allowsBrowser(
       f.f.capability,

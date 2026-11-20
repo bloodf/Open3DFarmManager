@@ -21,8 +21,14 @@ test('self-hosting upgrade guide gives one canonical entry point per procedure s
   assert.ok(rollback)
   assert.match(rollback, /Stop all application processes and Connectors/)
   assert.match(rollback, /restore\.ts fence \/private\/connector\/state/)
-  assert.match(rollback, /restore\.ts restore postgres rollback_v1 \/private\/backups\/pre-v2\.dump provisioning \/private\/backups\/connector\.json \/private\/connector\/restored\.json \/private\/connector\/state/)
-  assert.match(rollback, /revokes sessions and browser keys[\s\S]*fences[\s\S]*before allowing database connections/)
+  assert.match(
+    rollback,
+    /restore\.ts restore postgres rollback_v1 \/private\/backups\/pre-v2\.dump provisioning \/private\/backups\/connector\.json \/private\/connector\/restored\.json \/private\/connector\/state/,
+  )
+  assert.match(
+    rollback,
+    /revokes sessions and browser keys[\s\S]*fences[\s\S]*before allowing ordinary database connections/,
+  )
   assert.match(rollback, /If any step fails, keep access closed/)
   assert.match(rollback, /Reopen access only after every check succeeds/)
   assert.match(rollback, /discards writes made after the backup/)

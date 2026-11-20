@@ -108,11 +108,11 @@ async function generate(directory: string, origin: string, admin: URL) {
   const pauseKid = 'pause-v1'
   await write(
     'pairing.pem',
-    pairing.privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    pairing.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   )
   await write(
     'renewal.pem',
-    renewal.privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    renewal.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   )
   await write(
     'pause.json',
@@ -220,7 +220,7 @@ function psql(admin: URL, sql: string) {
     )
 }
 
-function roleSql(env: Record<string, string>, admin: URL) {
+function roleSql(env: ReturnType<typeof parseEnv>, admin: URL) {
   const statements = Object.entries(roles).map(([key, role]) => {
     const url = databaseTarget(env['NUXT_' + key] ?? '')
     const login = url.username

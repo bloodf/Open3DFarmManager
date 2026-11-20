@@ -47,7 +47,7 @@ async function fixture(t: TestContext) {
   return join(parent, 'install')
 }
 
-function config(env: Record<string, string>, section: string) {
+function config(env: ReturnType<typeof parseEnv>, section: string) {
   const prefix = `NUXT_${section}_`
   return Object.fromEntries(
     Object.entries(env)
@@ -157,7 +157,10 @@ test('generated environment passes startup parsers and issuer key loaders', asyn
   )
   const urls = Object.entries(env)
     .filter(([key]) => key.endsWith('_DATABASE_URL'))
-    .map(([, value]) => new URL(value))
+    .map(([, value]) => {
+      assert.ok(value)
+      return new URL(value)
+    })
   assert.equal(new Set(urls.map((url) => url.password)).size, grants.length)
   assert.deepEqual(
     urls.map((url) => url.username).sort(),

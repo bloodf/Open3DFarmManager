@@ -283,6 +283,24 @@ export const fixtures: Record<string, Fixture> = {
           })),
       },
       {
+        name: 'library replay in connector storage mode',
+        run: (world) =>
+          asApp(world, farm(['jobs:start', 'jobs:write']), () => ({
+            method: 'POST',
+            path: `/printers/${P}/jobs`,
+            ...json({ libraryVersionId: ids.versionA }),
+          })),
+      },
+      {
+        name: 'library replay in server storage mode',
+        run: (world) =>
+          asApp(world, farm(['jobs:start', 'jobs:write']), () => ({
+            method: 'POST',
+            path: `/printers/${P}/jobs`,
+            ...json({ libraryVersionId: ids.versionServer, plate: 1 }),
+          })),
+      },
+      {
         name: 'replay of the same key and body returns the job again',
         run: async (world) => {
           const app = world.addApp(farm(['jobs:start']))
@@ -824,6 +842,225 @@ export const fixtures: Record<string, Fixture> = {
     missing: () => ({ method: 'POST', path: `/webhooks/${ids.unknown}/test` }),
     fault: 'webhooks',
   },
+  'GET /library': {
+    scopes: ['library:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: `/library?farmId=${ids.farmA}&limit=1`,
+    }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['library:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: `/library?farmId=${ids.farmA}&limit=1`,
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/library?farmId=${ids.farmA}&limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({
+      method: 'GET',
+      path: `/library?farmId=${ids.farmA}&limit=0`,
+    }),
+    missing: () => ({
+      method: 'GET',
+      path: `/library?farmId=${ids.farmB}`,
+    }),
+    fault: 'library-runtime',
+  },
+  'POST /library': {
+    scopes: ['library:write'],
+    success: '201',
+    valid: () => ({
+      method: 'POST',
+      path: '/library',
+      body: libraryUpload(ids.farmA),
+    }),
+    more: [
+      {
+        name: 'server storage mode keeps the upload',
+        run: async (world) => {
+          world.libraryStore.modes.set(ids.farmA, 'server')
+          return asApp(world, farm(['library:write']), () => ({
+            method: 'POST',
+            path: '/library',
+            body: libraryUpload(ids.farmA, 'server-part.gcode'),
+          }))
+        },
+      },
+    ],
+    bad: () => ({
+      method: 'POST',
+      path: '/library',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    }),
+    missing: () => ({
+      method: 'POST',
+      path: '/library',
+      body: libraryUpload(ids.farmB),
+    }),
+    fault: 'library-runtime',
+    extra: {
+      '413': [
+        {
+          name: 'file over the configured limit',
+          run: (world) => {
+            world.config.library = { maxUploadBytes: 8 }
+            return asApp(world, farm(['library:write']), () => ({
+              method: 'POST',
+              path: '/library',
+              body: libraryUpload(ids.farmA),
+            }))
+          },
+        },
+      ],
+      '415': [
+        {
+          name: 'not JSON',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'POST',
+              path: '/library',
+              headers: { 'content-type': 'text/plain' },
+              body: '{}',
+            })),
+        },
+        {
+          name: 'file is not gcode or 3mf',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'POST',
+              path: '/library',
+              body: { ...libraryUpload(ids.farmA), name: 'notes.txt' },
+            })),
+        },
+      ],
+      '422': [
+        {
+          name: '3mf project cannot be read',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'POST',
+              path: '/library',
+              body: {
+                farmId: ids.farmA,
+                name: 'bad.3mf',
+                contentBase64: Buffer.from('not a 3mf').toString('base64'),
+              },
+            })),
+        },
+      ],
+    },
+  },
+  'GET /library/settings': {
+    scopes: ['library:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: `/library/settings?farmId=${ids.farmA}`,
+    }),
+    bad: () => ({ method: 'GET', path: '/library/settings' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/library/settings?farmId=${ids.farmB}`,
+    }),
+    fault: 'library-runtime',
+  },
+  'PATCH /library/settings': {
+    scopes: ['library:write'],
+    success: '200',
+    valid: () => ({
+      method: 'PATCH',
+      path: '/library/settings',
+      body: { farmId: ids.farmA, storageMode: 'server' },
+    }),
+    bad: () => ({
+      method: 'PATCH',
+      path: '/library/settings',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    }),
+    missing: () => ({
+      method: 'PATCH',
+      path: '/library/settings',
+      body: { farmId: ids.farmB, storageMode: 'server' },
+    }),
+    fault: 'library-runtime',
+    extra: {
+      '413': [
+        {
+          name: 'body over 16 KiB',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'PATCH',
+              path: '/library/settings',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ x: 'a'.repeat(17 * 1024) }),
+            })),
+        },
+      ],
+      '415': [
+        {
+          name: 'not JSON',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'PATCH',
+              path: '/library/settings',
+              headers: { 'content-type': 'text/plain' },
+              body: '{}',
+            })),
+        },
+      ],
+      '422': [
+        {
+          name: 'unknown storage mode',
+          run: (world) =>
+            asApp(world, farm(['library:write']), () => ({
+              method: 'PATCH',
+              path: '/library/settings',
+              body: { farmId: ids.farmA, storageMode: 'cloud' },
+            })),
+        },
+      ],
+    },
+  },
+  'GET /library/{itemId}': {
+    scopes: ['library:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/library/${ids.itemB}` }),
+    bad: () => ({ method: 'GET', path: '/library/not-a-uuid' }),
+    missing: () => ({ method: 'GET', path: `/library/${ids.unknown}` }),
+    fault: 'library-runtime',
+  },
+}
+
+const GCODE = `; generated by OrcaSlicer 2.1
+; printer_model = Ender 3
+; nozzle_diameter = 0.4
+; filament_type = PLA
+; filament used [g] = 2
+; layer_height = 0.2
+G1 X1
+`
+function libraryUpload(farmId: string, name = 'part.gcode') {
+  return {
+    farmId,
+    name,
+    contentBase64: Buffer.from(`${GCODE}; ${name}\n`).toString('base64'),
+  }
 }
 
 const wrongScope = (scopes: IntegrationScope[]): IntegrationScope =>

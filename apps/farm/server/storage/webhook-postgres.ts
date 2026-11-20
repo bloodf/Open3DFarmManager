@@ -11,6 +11,7 @@ export const webhookEvents = [
   'action.status_changed',
   'job.ended',
   'inventory.changed',
+  'library.version.created',
   'webhook.test',
 ] as const
 

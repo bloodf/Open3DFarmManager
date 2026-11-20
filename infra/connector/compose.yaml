@@ -1,0 +1,25 @@
+services:
+  connector:
+    build:
+      context: ../..
+      dockerfile: packages/connector/Dockerfile
+    # Linux host networking exposes ICE candidates directly; Docker Desktop has
+    # different host-network support and must be validated on the target host.
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - connector-data:/data
+      - connector-config:/config
+    command:
+      [
+        'run',
+        '--config',
+        '/config/runtime.json',
+        '--credential-file',
+        '/config/credential.json',
+        '--data-dir',
+        '/data',
+      ]
+volumes:
+  connector-data:
+  connector-config:

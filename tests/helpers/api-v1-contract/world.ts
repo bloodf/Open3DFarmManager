@@ -18,7 +18,6 @@ import {
 } from '../../../apps/farm/server/services/integration-actions.ts'
 import {
   requiredScopeFor,
-  type DeliveryResult,
   type EnvelopeRecord,
   type IssueEnvelope,
   type IssueResult,
@@ -224,8 +223,8 @@ class MemoryEnvelopes {
     return { ok: true, record, created: true }
   }
   // No Connector socket in-process: the envelope stays queued.
-  async deliver(_cmdId: string): Promise<DeliveryResult> {
-    return 'no-inbox'
+  async deliver() {
+    return 'no-inbox' as const
   }
   async get(cmdId: string) {
     return this.rows.get(cmdId) ?? null
@@ -443,7 +442,7 @@ export class World {
     )
     const envelopes = {
       issue: (input: IssueEnvelope) => this.envelopes.issue(input),
-      deliver: (cmdId: string) => this.envelopes.deliver(cmdId),
+      deliver: () => this.envelopes.deliver(),
       get: (cmdId: string) => this.envelopes.get(cmdId),
     }
     this.jobs = new IntegrationJobsService({

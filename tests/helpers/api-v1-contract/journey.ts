@@ -188,10 +188,11 @@ export async function openJourney(
     (await listen(
       createServer(async (req, res) => {
         try {
-          assert(req.url?.startsWith(apiBase + '/'))
+          const url = req.url
+          assert(url && url.startsWith(apiBase + '/'))
           const input = {
             method: req.method ?? '',
-            path: req.url.slice(apiBase.length),
+            path: url.slice(apiBase.length),
             headers: Object.fromEntries(
               new Headers(
                 req.rawHeaders.flatMap((name, index, entries) =>
@@ -211,9 +212,15 @@ export async function openJourney(
       }),
     ))
 
-  world.envelopes.deliver = async (cmdId) => {
-    const record = await world.envelopes.get(cmdId)
+  const dispatched = new Set<string>()
+  async function deliver() {
+    const pending = [...world.envelopes.rows.values()].filter(
+      ({ cmdId }) => !dispatched.has(cmdId),
+    )
+    assert.equal(pending.length, 1)
+    const [record] = pending
     assert(record)
+    dispatched.add(record.cmdId)
     const command = world.envelopes.commands.get(record.cmdId)
     assert(command)
     const envelope = await signApiEnvelope(
@@ -253,11 +260,12 @@ export async function openJourney(
     })
     assert.equal(reply.status, 200)
     assert.deepEqual(await reply.json(), { kind: 'completed' })
-    return 'sent'
+    return 'no-inbox' as const
   }
 
   return {
     apiOrigin,
+    deliver,
     job: {
       fileUrl: `https://${source}/journey.gcode`,
       sha256: createHash('sha256').update(file).digest('hex'),

@@ -16,7 +16,7 @@ BEGIN
   JOIN pg_class t ON t.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = 'farm' AND t.relname = 'integration_envelopes' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%required_scope = ANY%';
+    AND pg_get_constraintdef(c.oid) LIKE '%required_scope IN%';
   IF name IS NOT NULL THEN
     EXECUTE format('ALTER TABLE farm.integration_envelopes DROP CONSTRAINT %I', name);
   END IF;
@@ -34,7 +34,7 @@ BEGIN
   JOIN pg_class t ON t.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = 'farm' AND t.relname = 'integration_audit' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%action = ANY%';
+    AND pg_get_constraintdef(c.oid) LIKE '%action IN%';
   IF name IS NOT NULL THEN
     EXECUTE format('ALTER TABLE farm.integration_audit DROP CONSTRAINT %I', name);
   END IF;
@@ -43,7 +43,7 @@ BEGIN
   JOIN pg_class t ON t.oid = c.conrelid
   JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = 'farm' AND t.relname = 'integration_audit' AND c.contype = 'c'
-    AND pg_get_constraintdef(c.oid) LIKE '%resource_type = ANY%';
+    AND pg_get_constraintdef(c.oid) LIKE '%resource_type IN%';
   IF name IS NOT NULL THEN
     EXECUTE format('ALTER TABLE farm.integration_audit DROP CONSTRAINT %I', name);
   END IF;

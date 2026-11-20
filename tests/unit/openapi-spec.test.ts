@@ -90,6 +90,7 @@ describe('integration API v1 OpenAPI spec', () => {
         '/openapi.json',
         '/oauth/token',
         '/printers',
+        '/printers/status',
         '/printers/{printerId}/status',
         '/printers/{printerId}/files',
         '/printers/{printerId}/macros',
@@ -125,7 +126,11 @@ describe('integration API v1 OpenAPI spec', () => {
       ]),
     )
     expect(Object.keys(committed.webhooks)).toEqual(
-      expect.arrayContaining(['job.ended', 'inventory.changed']),
+      expect.arrayContaining([
+        'job.ended',
+        'inventory.changed',
+        'printer.alert.raised',
+      ]),
     )
   })
 

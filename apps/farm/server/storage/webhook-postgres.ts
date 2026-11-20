@@ -7,6 +7,7 @@ import {
 
 export const webhookEvents = [
   'printer.state_changed',
+  'printer.alert.raised',
   'job.status_changed',
   'action.status_changed',
   'job.ended',

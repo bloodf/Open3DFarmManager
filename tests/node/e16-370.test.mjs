@@ -159,6 +159,8 @@ test(
   async () => {
     const dir = mkdtempSync(join(tmpdir(), 'e16-370-pg-'))
     const pgdata = join(dir, 'pgdata')
+    const socketDir = join(dir, 'socket')
+    mkdirSync(socketDir)
     const port = await freePort()
     let started = false
     try {
@@ -174,7 +176,7 @@ test(
           '-D',
           pgdata,
           '-o',
-          `-h 127.0.0.1 -p ${port}`,
+          `-k ${socketDir} -h 127.0.0.1 -p ${port}`,
           '-l',
           join(pgdata, 'server.log'),
           'start',

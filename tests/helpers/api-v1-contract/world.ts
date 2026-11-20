@@ -16,10 +16,11 @@ import {
   type IntegrationActionsStore,
   type NewAction,
 } from '../../../apps/farm/server/services/integration-actions.ts'
-import type {
-  EnvelopeRecord,
-  IssueEnvelope,
-  IssueResult,
+import {
+  requiredScopeFor,
+  type EnvelopeRecord,
+  type IssueEnvelope,
+  type IssueResult,
 } from '../../../apps/farm/server/services/integration-delivery.ts'
 import {
   IntegrationJobsService,
@@ -29,6 +30,11 @@ import {
   type NewJob,
 } from '../../../apps/farm/server/services/integration-jobs.ts'
 import {
+  IntegrationLibraryService,
+  MemoryLibraryStore,
+  type NewLibraryVersion,
+} from '../../../apps/farm/server/services/integration-library.ts'
+import {
   IntegrationAuth,
   parseIntegrationTokenConfig,
   type IntegrationAuthStore,
@@ -37,7 +43,12 @@ import {
 
 /** Switches that make one dependency throw, for the 503 cases. */
 export type Fault =
-  'auth-store' | 'printers' | 'pool' | 'jobs-runtime' | 'webhooks'
+  | 'auth-store'
+  | 'printers'
+  | 'pool'
+  | 'jobs-runtime'
+  | 'webhooks'
+  | 'library-runtime'
 
 export const ids = {
   farmA: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -48,6 +59,11 @@ export const ids = {
   agentA: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
   agentB: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
   unknown: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+  itemA: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa1',
+  itemB: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa2',
+  versionA: 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaa1',
+  versionB: 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaa2',
+  versionServer: 'aaaaaaaa-3333-4333-8333-aaaaaaaaaaa3',
 } as const
 
 export const ALL_CONTROLS = [
@@ -176,6 +192,7 @@ class MemoryAuthStore implements IntegrationAuthStore {
 
 class MemoryEnvelopes {
   rows = new Map<string, EnvelopeRecord>()
+  readonly commands = new Map<string, IssueEnvelope['command']>()
   async issue(input: IssueEnvelope): Promise<IssueResult> {
     const existing = this.byResource(input.resourceId)
     if (existing) return { ok: true, record: existing, created: false }
@@ -189,8 +206,7 @@ class MemoryEnvelopes {
       printerAssignmentId: input.printerAssignmentId,
       kind: input.command.kind,
       resourceId: input.resourceId,
-      requiredScope:
-        input.command.kind === 'job' ? 'jobs:start' : 'control:basic',
+      requiredScope: requiredScopeFor(input.command),
       nonce: randomBytes(16).toString('base64url'),
       wire: 'wire',
       issuedAt: now,
@@ -203,6 +219,7 @@ class MemoryEnvelopes {
       updatedAt: now,
     }
     this.rows.set(record.cmdId, record)
+    this.commands.set(record.cmdId, input.command)
     return { ok: true, record, created: true }
   }
   // No Connector socket in-process: the envelope stays queued.
@@ -387,7 +404,10 @@ export class MemoryWebhooks {
 export class World {
   clock = 1_700_000_000_000
   readonly faults = new Set<Fault>()
-  readonly config = {
+  readonly config: {
+    integrationAuth: { readLimit: number; writeLimit: number }
+    library?: { maxUploadBytes?: number }
+  } = {
     integrationAuth: { readLimit: 1_000_000, writeLimit: 1_000_000 },
   }
   readonly apps = new Map<string, App>()
@@ -397,6 +417,8 @@ export class World {
   readonly jobsStore = new MemoryJobs(this.envelopes)
   readonly actionsStore = new MemoryActions(this.envelopes)
   readonly webhooks = new MemoryWebhooks(this)
+  readonly libraryStore = new MemoryLibraryStore()
+  readonly library: IntegrationLibraryService
   readonly jobs: IntegrationJobsService
   readonly actions: IntegrationActionsService
   inventory: InventoryRow[] = []
@@ -414,6 +436,10 @@ export class World {
       }),
       () => this.clock,
     )
+    this.library = new IntegrationLibraryService(
+      this.libraryStore,
+      () => this.clock,
+    )
     const envelopes = {
       issue: (input: IssueEnvelope) => this.envelopes.issue(input),
       deliver: () => this.envelopes.deliver(),
@@ -421,6 +447,10 @@ export class World {
     }
     this.jobs = new IntegrationJobsService({
       store: this.jobsStore,
+      library: {
+        version: (id) => this.library.version(id),
+        recordReplay: (entry) => this.library.recordReplay(entry),
+      },
       envelopes,
       now: () => this.clock,
     })
@@ -502,6 +532,51 @@ export class World {
       filamentUsage: [{ tool: 'T0', grams: 12.5 * n, millimetres: 4000 * n }],
       endedAt: this.clock - n * 1000,
     }))
+    this.libraryStore.agents.set(ids.farmA, ids.agentA)
+    this.libraryStore.agents.set(ids.farmB, ids.agentB)
+    const seed = (
+      itemId: string,
+      versionId: string,
+      name: string,
+      createdAt: number,
+      storageLocation: NewLibraryVersion['storageLocation'],
+    ) =>
+      this.libraryStore.seed({
+        id: versionId,
+        itemId,
+        farmId: ids.farmA,
+        title: name.replace(/\.gcode$/u, ''),
+        originalName: name,
+        kind: 'gcode',
+        sha256: createHash('sha256').update(name).digest('hex'),
+        sizeBytes: 128,
+        plateCount: 1,
+        storageLocation,
+        agentId: storageLocation === 'connector' ? ids.agentA : null,
+        createdAt,
+        versionNumber: 1,
+      })
+    seed(
+      ids.itemA,
+      ids.versionA,
+      'older.gcode',
+      this.clock - 2_000,
+      'connector',
+    )
+    seed(
+      ids.itemB,
+      ids.versionB,
+      'newer.gcode',
+      this.clock - 1_000,
+      'connector',
+    )
+    seed(
+      'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa3',
+      ids.versionServer,
+      'server.gcode',
+      this.clock - 3_000,
+      'server',
+    )
   }
 
   private makeSql() {

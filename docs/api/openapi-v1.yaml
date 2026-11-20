@@ -358,10 +358,15 @@ paths:
       summary: Submit a print job
       description: |
         Stores the job and either delivers it to the Connector or, when the
-        grant requires operator approval, holds it (`held`). The server never
-        downloads or stores the file: the Connector fetches `fileUrl` over
-        HTTPS, verifies `sha256` and `sizeBytes`, uploads and starts. A
-        retry with the same `Idempotency-Key` and body returns the same job.
+        grant requires operator approval, holds it (`held`). A URL job names
+        an HTTPS `fileUrl`: the server never downloads or stores that file,
+        and the Connector fetches it, verifies `sha256` and `sizeBytes`,
+        uploads and starts. A library replay names `libraryVersionId` instead
+        of a URL (optional `plate`) and needs `jobs:write` on the same grant.
+        The farm's library storage mode, server or connector, is recorded on
+        the job; the Connector prints the stored file and refuses an
+        incompatible printer. A retry with the same `Idempotency-Key` and body
+        returns the same job. A library replay also needs `jobs:write` on that grant.
       security:
         - clientCredentials: ['jobs:start']
       parameters:
@@ -511,6 +516,239 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InventoryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library:
+    get:
+      operationId: listLibrary
+      tags: [Library]
+      summary: List library items
+      description: |
+        Newest library item per page for one farm covered by a farm-wide
+        `library:read` grant. `storageMode` is the farm's current mode
+        (`server` keeps the file, `connector` keeps it on the Connector).
+        A version's `storageLocation` is where that file actually is.
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of library items.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: uploadLibrary
+      tags: [Library]
+      summary: Upload a library file
+      description: |
+        Stores the file according to the farm's current storage mode. Server
+        mode keeps the bytes. Connector mode keeps the hash and metadata and
+        leaves the bytes on the farm's Connector. Requires a farm-wide
+        `library:write` grant. A new version emits `library.version.created`.
+      security:
+        - clientCredentials: ['library:write']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryUpload'
+      responses:
+        '201':
+          description: File stored.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryUploadResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library/settings:
+    get:
+      operationId: readLibrarySettings
+      tags: [Library]
+      summary: Read the library storage mode
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+      responses:
+        '200':
+          description: The farm's library settings.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibrarySettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateLibrarySettings
+      tags: [Library]
+      summary: Set the library storage mode
+      description: Requires a farm-wide `library:write` grant.
+      security:
+        - clientCredentials: ['library:write']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibrarySettingsPatch'
+      responses:
+        '200':
+          description: Updated settings.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibrarySettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /library/{itemId}:
+    get:
+      operationId: getLibraryItem
+      tags: [Library]
+      summary: Read one library item
+      description: Includes the farm's current storage mode.
+      security:
+        - clientCredentials: ['library:read']
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The item and its newest version.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryItem'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -952,6 +1190,25 @@ webhooks:
       responses:
         '200':
           $ref: '#/components/responses/WebhookAccepted'
+  library.version.created:
+    post:
+      operationId: onLibraryVersionCreated
+      summary: A library version was stored
+      description: Sent when an integration upload creates a library version.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookEventId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryVersionCreatedEvent'
+      responses:
+        '200':
+          $ref: '#/components/responses/WebhookAccepted'
   webhook.test:
     post:
       operationId: onWebhookTest
@@ -986,9 +1243,12 @@ components:
             inventory:read: Read Spoolman inventory snapshots.
             jobs:read: Read job history and API-submitted jobs.
             jobs:start: Submit print jobs.
+            jobs:write: Start a library replay on a granted printer.
             control:basic: Pause, resume and cancel.
             control:extended: Temperatures, fans, lights, speed, homing, filament and macros; list macros.
             events:subscribe: Manage webhook subscriptions and receive events.
+            library:read: Read library files and the storage mode.
+            library:write: Upload library files and set the storage mode.
   parameters:
     PrinterId:
       name: printerId
@@ -1688,10 +1948,150 @@ components:
               maxItems: 100
               items:
                 $ref: '#/components/schemas/JobHistoryEntry'
-    JobRequest:
+    StorageMode:
+      type: string
+      enum: [server, connector]
+      description: |
+        `server` keeps the file on the farm server. `connector` keeps it on
+        the Connector and the server stores the hash and metadata only.
+    LibraryVersion:
       type: object
-      required: [fileUrl, sha256, sizeBytes, displayName]
       additionalProperties: false
+      required:
+        [
+          id,
+          itemId,
+          versionNumber,
+          sha256,
+          sizeBytes,
+          storageLocation,
+          originalName,
+          kind,
+          plateCount,
+          createdAt,
+        ]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        itemId:
+          $ref: '#/components/schemas/Uuid'
+        versionNumber:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        sizeBytes:
+          type: integer
+          minimum: 1
+        storageLocation:
+          $ref: '#/components/schemas/StorageMode'
+        originalName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          enum: [gcode, 3mf]
+        plateCount:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+    LibraryItem:
+      type: object
+      additionalProperties: false
+      required: [id, farmId, title, storageMode, latest]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+        latest:
+          $ref: '#/components/schemas/LibraryVersion'
+    LibraryPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data, storageMode]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/LibraryItem'
+            storageMode:
+              $ref: '#/components/schemas/StorageMode'
+    LibrarySettings:
+      type: object
+      additionalProperties: false
+      required: [farmId, storageMode]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+    LibrarySettingsPatch:
+      type: object
+      additionalProperties: false
+      required: [farmId, storageMode]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+    LibraryUpload:
+      type: object
+      additionalProperties: false
+      required: [farmId, name, contentBase64]
+      properties:
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contentBase64:
+          type: string
+          minLength: 4
+          maxLength: 70000000
+    LibraryUploadResult:
+      type: object
+      additionalProperties: false
+      required: [item, version, storageMode, deduplicated]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [id, farmId, title, storageMode]
+          properties:
+            id:
+              $ref: '#/components/schemas/Uuid'
+            farmId:
+              $ref: '#/components/schemas/Uuid'
+            title:
+              type: string
+              minLength: 1
+              maxLength: 200
+            storageMode:
+              $ref: '#/components/schemas/StorageMode'
+        version:
+          $ref: '#/components/schemas/LibraryVersion'
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+        deduplicated:
+          type: boolean
+    JobRequest:
+      description: |
+        Either an HTTPS file reference or a library replay (`libraryVersionId`,
+        optional `plate`). `library_version_id` is accepted as an alias.
       properties:
         fileUrl:
           type: string
@@ -1711,6 +2111,41 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+      oneOf:
+        - type: object
+          required: [fileUrl, sha256, sizeBytes, displayName]
+          additionalProperties: false
+          properties:
+            fileUrl:
+              type: string
+              format: uri
+              maxLength: 2048
+              pattern: '^https://'
+              description: HTTPS URL the Connector downloads; redirects to non-HTTPS are refused.
+            sha256:
+              type: string
+              pattern: '^[0-9a-f]{64}$'
+              description: Lowercase hex SHA-256 of the file.
+            sizeBytes:
+              type: integer
+              minimum: 1
+              description: Exact file size; the server enforces a configured maximum.
+            displayName:
+              type: string
+              minLength: 1
+              maxLength: 255
+        - type: object
+          required: [libraryVersionId]
+          additionalProperties: false
+          description: Replay a library version. `library_version_id` is accepted as an alias of `libraryVersionId`.
+          properties:
+            libraryVersionId:
+              $ref: '#/components/schemas/Uuid'
+            plate:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              description: Plate of a 3MF project. Omitted for G-code and for the first plate.
     RefusalCode:
       type: string
       description: |
@@ -1794,6 +2229,16 @@ components:
         sizeBytes:
           type: integer
           minimum: 1
+        libraryVersionId:
+          $ref: '#/components/schemas/Uuid'
+          description: Set when the job replays a library version.
+        plate:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        storageMode:
+          $ref: '#/components/schemas/StorageMode'
+          description: Where the replayed file is stored.
         historyEntryId:
           type: string
           pattern: '^[0-9]{1,19}$'
@@ -1992,6 +2437,7 @@ components:
         - action.status_changed
         - job.ended
         - inventory.changed
+        - library.version.created
         - webhook.test
     WebhookRequest:
       type: object
@@ -2127,6 +2573,29 @@ components:
               const: inventory.changed
             data:
               $ref: '#/components/schemas/InventorySnapshot'
+    LibraryVersionCreatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: library.version.created
+            data:
+              type: object
+              additionalProperties: false
+              required: [farmId, itemId, versionId, storageMode, sha256]
+              properties:
+                farmId:
+                  $ref: '#/components/schemas/Uuid'
+                itemId:
+                  $ref: '#/components/schemas/Uuid'
+                versionId:
+                  $ref: '#/components/schemas/Uuid'
+                storageMode:
+                  $ref: '#/components/schemas/StorageMode'
+                sha256:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
     WebhookTestEvent:
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'

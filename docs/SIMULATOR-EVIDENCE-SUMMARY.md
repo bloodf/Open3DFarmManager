@@ -61,7 +61,8 @@ and `rtsp` on a matrix of `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm`
 (arm64). Each profile job has a pass/fail verification step and uploads a
 bounded diagnostics artifact on failure. Pull requests do not start these jobs.
 
-Successful run links per architecture (owner must dispatch; agents must not):
+Successful run links per architecture (run conclusion: success; head:
+`ecef5cbf3b9bc1554ffc55a83edabed423ac5609`):
 
-- amd64 (`ubuntu-24.04`): pending: owner dispatch
-- arm64 (`ubuntu-24.04-arm`): pending: owner dispatch
+- amd64 (`ubuntu-24.04`): [run 44744359687](https://github.com/bloodf/Open3DFarmManager/actions/runs/44744359687)
+- arm64 (`ubuntu-24.04-arm`): [run 44744359687](https://github.com/bloodf/Open3DFarmManager/actions/runs/44744359687)

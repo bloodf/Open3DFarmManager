@@ -2,9 +2,9 @@ name: open3dfarmmanager-sim
 x-printer: &printer
   # Derived from the pinned upstream digest in klipper/Dockerfile: optimised
   # simulavr build plus real-time pacing (docs/SIMULATOR-READINESS-RESULT.md).
+  image: openfarm-klipper:sim
   build:
     context: ./klipper
-  platform: linux/amd64
   profiles: [klipper]
   tmpfs:
     - /tmp:noexec
@@ -37,8 +37,7 @@ services:
       - ./u1/moonraker.conf:/home/printer/example-configs/moonraker.conf:ro
   spoolman:
     user: '1000:1000'
-    image: ghcr.io/donkie/spoolman@sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa
-    platform: linux/amd64
+    image: ghcr.io/donkie/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1
     profiles: [spoolman]
     ports:
       - '127.0.0.1:${SIM_SPOOLMAN_PORT:-7912}:8000'
@@ -67,8 +66,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
   rtsp:
-    image: bluenviron/mediamtx@sha256:c730bccdbc8739f8f0c13cefe9bea8b61926f599b88fa4d0d229baa91846c7bc
-    platform: linux/amd64
+    image: bluenviron/mediamtx:1.21.4-ffmpeg@sha256:1fa0abbefb6f181bf0da075c65a75505ee43bb9996e4a4b5fd30a4ab7dea01e6
     profiles: [rtsp]
     user: '10001:10001'
     command: ['/mediamtx.yml']

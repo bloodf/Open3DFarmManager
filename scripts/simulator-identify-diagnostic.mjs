@@ -33,6 +33,8 @@ import { fileURLToPath } from 'node:url'
 export const OPT_IN_TOKEN = 'synthetic-identification-diagnostic'
 export const PINNED_IMAGE_REFERENCE =
   'ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47'
+export const PINNED_COMPOSE_BASE =
+  'ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf'
 export const PINNED_AMD64_DIGEST =
   'sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47'
 export const PINNED_PLATFORM = 'linux/amd64'
@@ -1113,11 +1115,11 @@ function yamlBlock(lines, key, indent) {
   return block
 }
 
-function buildsFromKlipper(block) {
+function buildsFromKlipper(block, allowedImage) {
   return (
     block.includes('build:') &&
     block.includes('context: ./klipper') &&
-    !block.some((line) => line.startsWith('image:'))
+    !block.some((line) => line.startsWith('image:') && line !== allowedImage)
   )
 }
 
@@ -1135,9 +1137,9 @@ export function verifyComposePin(composeFile) {
         (match) => match[1],
       )
     : []
-  if (bases.at(-1) !== PINNED_IMAGE_REFERENCE)
+  if (bases.length !== 2 || bases.some((base) => base !== PINNED_COMPOSE_BASE))
     throw diagnostic(
-      'compose file does not pin the reviewed amd64 image digest',
+      'compose file does not pin the reviewed multi-platform image digest',
       'preflight',
     )
   const lines = text.split(/\r?\n/)
@@ -1148,7 +1150,7 @@ export function verifyComposePin(composeFile) {
     const inherited =
       block !== null &&
       anchor !== null &&
-      buildsFromKlipper(anchor) &&
+      buildsFromKlipper(anchor, 'image: openfarm-klipper:sim') &&
       block.includes('<<: *printer') &&
       !block.some((line) => /^(image|build):/.test(line))
     if (!ownBuild && !inherited)
@@ -1157,12 +1159,9 @@ export function verifyComposePin(composeFile) {
         'preflight',
       )
   }
-  const platforms = [
-    ...text.matchAll(/^[ \t]*platform:[ \t]*(\S+)[ \t]*$/gm),
-  ].map((match) => match[1])
-  if (!platforms.includes(PINNED_PLATFORM))
+  if (/^[ \t]*platform:/m.test(text))
     throw diagnostic(
-      'compose file does not pin the reviewed amd64 platform',
+      'compose file overrides native platform selection',
       'preflight',
     )
   return sha256(text)

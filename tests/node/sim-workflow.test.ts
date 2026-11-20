@@ -127,7 +127,7 @@ function parseYamlSubset(source: string): Record<string, Yaml> {
 const workflow = parseYamlSubset(simSource)
 const jobs = workflow.jobs as Record<string, Record<string, Yaml>>
 
-const PROFILE_JOBS = ['spoolman', 'cams', 'rtsp'] as const
+const PROFILE_JOBS = ['mock', 'klipper', 'spoolman', 'cams', 'rtsp'] as const
 
 function matrixInclude(job: Record<string, Yaml>) {
   const strategy = job.strategy as Record<string, Yaml>
@@ -155,7 +155,7 @@ test('Simulator workflow is dispatch-only', () => {
   assert.doesNotMatch(simSource, /\bpush:\s/)
 })
 
-test('spoolman, cams and rtsp jobs matrix amd64 and arm64 runners', () => {
+test('all simulator jobs matrix amd64 and arm64 runners', () => {
   for (const name of PROFILE_JOBS) {
     const job = jobs[name] ?? assert.fail(`sim.yml must define ${name}`)
     assert.equal(job['runs-on'], '${{ matrix.runner }}')
@@ -177,6 +177,8 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
   assert.equal(packageJson.scripts['sim:verify:cams'], undefined)
 
   const expectedVerify: Record<(typeof PROFILE_JOBS)[number], RegExp> = {
+    mock: /node --test tests\/node\/e16-358\.test\.mjs/,
+    klipper: /npm run sim:smoke/,
     spoolman:
       /npm run sim:seed[\s\S]*node packages\/sim-tools\/src\/spoolman-cli\.ts/,
     cams: /node packages\/sim-tools\/src\/camera-cli\.ts/,
@@ -190,21 +192,21 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
       expectedVerify[name].test(runText(step)),
     )
     assert.ok(verify, `${name} must have a pass/fail verify step`)
-    assert.match(runText(verify), /tail -c 200000/)
-
-    const diagnostic = steps.find(
-      (step) =>
-        step.if === 'failure()' &&
-        /sim-profile-diagnostics\.mjs/.test(runText(step)),
-    )
-    assert.ok(diagnostic, `${name} must collect diagnostics on failure`)
-    assert.match(
-      runText(diagnostic),
-      new RegExp(
-        `sim-profile-diagnostics\\.mjs ${name} sim-diagnostics/${name}-`,
-      ),
-    )
-
+    if (name !== 'klipper') assert.match(runText(verify), /tail -c 200000/)
+    if (name === 'spoolman' || name === 'cams' || name === 'rtsp') {
+      const diagnostic = steps.find(
+        (step) =>
+          step.if === 'failure()' &&
+          /sim-profile-diagnostics\.mjs/.test(runText(step)),
+      )
+      assert.ok(diagnostic, `${name} must collect diagnostics on failure`)
+      assert.match(
+        runText(diagnostic),
+        new RegExp(
+          `sim-profile-diagnostics\\.mjs ${name} sim-diagnostics/${name}-`,
+        ),
+      )
+    }
     const upload = steps.find(
       (step) =>
         step.if === 'failure()' &&
@@ -222,13 +224,52 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
   }
 })
 
-test('evidence summary leaves architecture links pending owner dispatch', () => {
+test('evidence summary links successful architecture runs', () => {
   assert.match(
     evidenceSource,
-    /amd64 \(`ubuntu-24\.04`\): pending: owner dispatch/,
+    /amd64 \(`ubuntu-24\.04`\): \[run 44744359687\]\(https:\/\/github\.com\/bloodf\/Open3DFarmManager\/actions\/runs\/44744359687\)/,
   )
   assert.match(
     evidenceSource,
-    /arm64 \(`ubuntu-24\.04-arm`\): pending: owner dispatch/,
+    /arm64 \(`ubuntu-24\.04-arm`\): \[run 44744359687\]\(https:\/\/github\.com\/bloodf\/Open3DFarmManager\/actions\/runs\/44744359687\)/,
   )
+})
+
+test('Spoolman selects its pinned multi-platform image natively', () => {
+  const compose = readFileSync(
+    new URL('../../infra/sim/docker-compose.yml', import.meta.url),
+    'utf8',
+  )
+  const spoolman =
+    compose.split('  spoolman:\n')[1]?.split('  camera:\n')[0] ?? ''
+  assert.match(
+    spoolman,
+    /image: ghcr\.io\/donkie\/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1/,
+  )
+  assert.doesNotMatch(spoolman, /platform:/)
+})
+
+test('Klipper builds and runs a native image on each matrix runner', () => {
+  const job = jobs.klipper
+  assert.ok(job)
+  const steps = stepsOf(job)
+  const build = steps.findIndex((step) =>
+    runText(step).includes(
+      'docker build --platform linux/${{ matrix.arch }} -t openfarm-klipper:sim',
+    ),
+  )
+  const up = steps.findIndex((step) =>
+    /--profile klipper up -d --no-build/.test(runText(step)),
+  )
+  assert.ok(build >= 0 && up > build)
+  assert.match(runText(steps[build]!), /tail -c 200000/)
+  assert.ok(
+    steps.every((step) => !String(step.uses).includes('setup-qemu-action')),
+  )
+  const compose = readFileSync(
+    new URL('../../infra/sim/docker-compose.yml', import.meta.url),
+    'utf8',
+  )
+  assert.match(compose, /image: openfarm-klipper:sim/)
+  assert.doesNotMatch(compose, /^\s*platform:/m)
 })

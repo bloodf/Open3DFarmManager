@@ -54,6 +54,12 @@ their distinct scopes.
 | Simulators and camera        | Historical pinned Spoolman service runs passed the read-only adapter. The latest ARM64 pacing diagnostic observed 542 consecutive ready samples over about 71 s, but rejected its pacing summary. RTSP parser/helper and finite native moving-video results remain separate checkpoints.                                                                                 | SV06 and four-tool scenarios, genuine Connector data, restart/network faults, actual bounded RTSP helper execution, MediaMTX and authenticated camera must be connected and validated. A ready sample or finite fixture is insufficient. |
 | Full Phase 0                 | At candidate `1e3a029`, `pnpm run test:rtc-farm:all` wrote a commit-pinned summary: app build passed; 6/9 runnable RTC rows passed; all 10 outage rows and all 3 network-fault profiles passed. Three browser status/pause rows failed; the camera and two simulator rows were unavailable because their opt-in fixtures were not supplied. Hardware rows were excluded. | Incomplete until every required simulator and browser row passes on one candidate.                                                                                                                                                       |
 
+The dispatch-only simulator profile matrix has one complete successful run on
+both native amd64 and arm64 runners at
+[`ecef5cb`](https://github.com/bloodf/Open3DFarmManager/actions/runs/44744359687).
+This records the matrix evidence required by epic #184; it does not supersede
+the remaining browser and full Phase 0 acceptance gates above.
+
 Detailed artifacts, limitations and historical failures remain in the
 [rendered farm checkpoint](FARM-VIEW-CHECKPOINT.md),
 [Connector runtime checkpoint](CONNECTOR-RTC-RUNTIME-CHECKPOINT.md),

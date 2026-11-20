@@ -194,7 +194,6 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
     assert.ok(verify, `${name} must have a pass/fail verify step`)
     if (name !== 'klipper') assert.match(runText(verify), /tail -c 200000/)
     if (name === 'spoolman' || name === 'cams' || name === 'rtsp') {
-
       const diagnostic = steps.find(
         (step) =>
           step.if === 'failure()' &&
@@ -207,7 +206,6 @@ test('each profile has a pass/fail verify step and bounded failure artifact', ()
           `sim-profile-diagnostics\\.mjs ${name} sim-diagnostics/${name}-`,
         ),
       )
-
     }
     const upload = steps.find(
       (step) =>

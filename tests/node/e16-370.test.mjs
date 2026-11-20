@@ -6,7 +6,7 @@
 // Never sends printer commands; no network is used except loopback.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -159,6 +159,8 @@ test(
   async () => {
     const dir = mkdtempSync(join(tmpdir(), 'e16-370-pg-'))
     const pgdata = join(dir, 'pgdata')
+    const socketDir = join(dir, 'socket')
+    mkdirSync(socketDir)
     const port = await freePort()
     let started = false
     try {
@@ -174,7 +176,7 @@ test(
           '-D',
           pgdata,
           '-o',
-          `-h 127.0.0.1 -p ${port}`,
+          `-k ${socketDir} -h 127.0.0.1 -p ${port}`,
           '-l',
           join(pgdata, 'server.log'),
           'start',

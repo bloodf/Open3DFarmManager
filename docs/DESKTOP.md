@@ -53,8 +53,10 @@ O banco roda no próprio computador, escuta só em `127.0.0.1` e não usa Docker
 
 ```sh
 export OPENFARM_DB_DIR="$HOME/openfarm-pg"
+export OPENFARM_SOCKET_DIR="$OPENFARM_DB_DIR/socket"
+mkdir -p "$OPENFARM_SOCKET_DIR"
 initdb -D "$OPENFARM_DB_DIR" -U openfarm --auth=trust
-pg_ctl -D "$OPENFARM_DB_DIR" -o "-h 127.0.0.1 -p 5433" -l "$OPENFARM_DB_DIR/server.log" start
+pg_ctl -D "$OPENFARM_DB_DIR" -o "-k $OPENFARM_SOCKET_DIR -h 127.0.0.1 -p 5433" -l "$OPENFARM_DB_DIR/server.log" start
 createdb -h 127.0.0.1 -p 5433 -U openfarm openfarm
 ```
 
@@ -66,7 +68,7 @@ export NUXT_DATABASE_DATABASE_URL=postgres://openfarm@127.0.0.1:5433/openfarm
 export NUXT_DATABASE_MIGRATIONS=apply
 ```
 
-Para parar o banco depois: `pg_ctl -D "$OPENFARM_DB_DIR" stop`.
+O socket Unix fica no diretório criado pelo usuário, sem depender de `/var/run/postgresql`. As conexões do app e do `createdb` continuam usando TCP em `127.0.0.1:5433`. Para parar o banco e remover o cluster depois: `pg_ctl -D "$OPENFARM_DB_DIR" stop` e, quando não precisar mais dos dados, `rm -rf "$OPENFARM_DB_DIR"`.
 
 ## 4. Subir o servidor
 

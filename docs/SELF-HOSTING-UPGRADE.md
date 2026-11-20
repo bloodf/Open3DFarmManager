@@ -46,4 +46,22 @@ Confirm the application and Connector services are healthy, `/readyz` reports da
 
 ## 6. Roll back
 
-If the upgrade, Connector migration, or verification fails, keep all backups and volumes. Stop application writers. Restore the pre-upgrade PostgreSQL dump into the dedicated database using the database administrator procedure, restore the Connector configuration backup, and select the previous immutable application release. Start the previous release and verify `/readyz` and Connector configuration before reopening access. Restoring data can discard writes made after the backup; retain forensic copies and coordinate downtime first. Never treat a partial or failed dump as a valid backup.
+Keep all backups and volumes. Restoring the dump discards writes made after the backup. Coordinate downtime and retain forensic copies. Never use a partial or failed dump as a backup.
+
+1. Stop all application processes and Connectors. Keep access closed throughout the restore. Prepare the PostgreSQL roles referenced by the dump, a new dedicated database name, and an absent path for the restored configuration. Use the previous release's scripts and a trusted custom-format dump.
+2. On each remote Connector host, run the fence command as the Connector service user against its actual state directory. Preserve the marker, identity, credentials, and command journals.
+
+```sh
+node scripts/self-host/restore.ts fence /private/connector/state
+```
+
+3. Run the restore on the database host. Include every local Connector state directory. Use `collector` instead of `provisioning` for a collector v1 backup.
+
+```sh
+node scripts/self-host/restore.ts restore postgres rollback_v1 /private/backups/pre-v2.dump provisioning /private/backups/connector.json /private/connector/restored.json /private/connector/state
+```
+
+The command restores into a new isolated database, validates migration history, revokes sessions and browser keys, increments session versions, fences the listed Connector directories, and copies validated configuration before allowing database connections. If any step fails, keep access closed. The command attempts to drop the new database; if cleanup fails, remove it manually before retrying. Already written fence markers remain in place, and a copied configuration may need a new target path on retry.
+
+4. Select the previous immutable application release and apply its pending migrations. Reconcile accounts, memberships, Connector and integration credentials, and revocations changed since the backup. Check separately managed files referenced by the restored configuration.
+5. Point the application at the restored database and configuration. Verify `/readyz`, expected data, and configuration loading. Restart only Connectors that support the restore marker. Confirm browser control remains blocked until an authenticated current key set is confirmed. Users must sign in again and register new browser keys for approval. Reopen access only after every check succeeds; on any failure, keep access closed and investigate.

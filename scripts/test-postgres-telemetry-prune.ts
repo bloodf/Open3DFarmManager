@@ -1,30 +1,49 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
+import { disposablePostgres } from '../tests/helpers/disposable-postgres.ts'
 import {
   loadMigrationCatalog,
   validateMigrationHistory,
 } from './db/migrations.ts'
 
 const portText = process.env.TELEMETRY_PRUNE_SYNTHETIC_TEST_PORT
+const admitted = process.env.TELEMETRY_PRUNE_SYNTHETIC_TEST_DISPOSABLE
+const useOwnedFixture = portText === undefined && admitted === undefined
 const port = Number(portText)
 if (
-  process.env.TELEMETRY_PRUNE_SYNTHETIC_TEST_DISPOSABLE !== 'yes' ||
-  !portText ||
-  !/^\d{4,5}$/.test(portText) ||
-  port < 1024 ||
-  port > 65535
+  !useOwnedFixture &&
+  (admitted !== 'yes' ||
+    !portText ||
+    !/^\d{4,5}$/.test(portText) ||
+    port < 1024 ||
+    port > 65535)
 )
   throw new Error('Explicit disposable loopback PostgreSQL fixture required')
 
-const sql = postgres({
-  host: '127.0.0.1',
-  port,
-  database: 'fixture',
-  username: 'fixture',
-  ssl: false,
-  max: 4,
-  connect_timeout: 3,
-})
+const fixture = useOwnedFixture
+  ? disposablePostgres({
+      name: `o3dfm-telemetry-prune-${randomUUID()}`,
+      isolated: true,
+    })
+  : undefined
+let sql: ReturnType<typeof postgres>
+try {
+  sql = fixture
+    ? await fixture.start()
+    : postgres({
+        host: '127.0.0.1',
+        port,
+        database: 'fixture',
+        username: 'fixture',
+        ssl: false,
+        max: 4,
+        connect_timeout: 3,
+      })
+} catch (error) {
+  await fixture?.stop()
+  throw error
+}
 try {
   const identity = (
     await sql`SELECT current_database() AS database, current_user AS username`
@@ -123,5 +142,6 @@ try {
     await sql`SELECT count(*)::int AS count FROM farm.telemetry_events WHERE farm_id=${farmId}::uuid AND event_id=${newEventId}::uuid`
   assert.equal(final[0]?.count, 1)
 } finally {
-  await sql.end({ timeout: 3 })
+  if (fixture) await fixture.stop()
+  else await sql.end({ timeout: 3 })
 }

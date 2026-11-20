@@ -1,0 +1,20 @@
+[Unit]
+Description=Open3DFarmManager Connector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=openfarm-connector
+Group=openfarm-connector
+ExecStart=/usr/bin/node /opt/openfarm-connector/dist/cli.js run --config /var/lib/openfarm-connector/runtime.json --credential-file /var/lib/openfarm-connector/credential.json --data-dir /var/lib/openfarm-connector
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/openfarm-connector
+
+[Install]
+WantedBy=multi-user.target

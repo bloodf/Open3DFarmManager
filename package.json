@@ -33,6 +33,7 @@
     "test:node": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit tests/node/*.test.ts tests/unit/pause-authority-tooling.test.ts tests/unit/pause-authority-timeout.test.ts tests/helpers/kobralink-rtc/cdp-body.test.ts",
     "test:postgres": "node scripts/test-postgres.ts",
     "build:rtsp-ingest": "node scripts/build-rtsp-ingest.mjs",
+    "desktop:bundle": "node scripts/desktop-bundle.mjs",
     "desktop:check": "node scripts/desktop-check.ts",
     "test:rtsp-supervisor": "node --test --test-concurrency=1 tools/rtsp-ingest/supervisor/*.test.ts",
     "test:rtsp-framing": "node --test tools/rtsp-ingest/integration/moving-fixture-input.test.ts",

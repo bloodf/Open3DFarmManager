@@ -21,7 +21,6 @@ import {
   DEFAULT_LOCKFILE_PATH,
   parseLockfilePackages,
 } from '../../scripts/desktop-deps-report.mjs'
-import { buildDesktopBundle } from '../../scripts/desktop-bundle.mjs'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -67,8 +66,14 @@ function walkFiles(dir) {
   return out
 }
 
-function runNodeScriptOrNpm(scriptName, scriptPath, args = [], extraEnv = {}) {
-  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
+function runNodeScriptOrNpm(
+  scriptName,
+  scriptPath,
+  args = [],
+  extraEnv = {},
+  cwd = REPO_ROOT,
+) {
+  const pkg = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'))
   const hasNpmScript = Boolean(pkg?.scripts?.[scriptName])
   const cmd = hasNpmScript ? 'npm' : process.execPath
   const cmdArgs = hasNpmScript
@@ -77,7 +82,7 @@ function runNodeScriptOrNpm(scriptName, scriptPath, args = [], extraEnv = {}) {
 
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(cmd, cmdArgs, {
-      cwd: REPO_ROOT,
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -226,6 +231,11 @@ test('desktop:deps-report --registry reports missing packages including platform
 })
 
 test('desktop:bundle produces a clean secret-free cache archive that installs offline and passes build', async (t) => {
+  const scriptPath = 'scripts/desktop-bundle.mjs'
+  const rootManifest = JSON.parse(
+    readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'),
+  )
+  assert.equal(rootManifest.scripts['desktop:bundle'], `node ${scriptPath}`)
   const tempRoot = makeTempDir('e16-350-bundle-')
   t.after(() => {
     rmSync(tempRoot, { recursive: true, force: true })
@@ -328,6 +338,7 @@ test('desktop:bundle produces a clean secret-free cache archive that installs of
         type: 'module',
         workspaces: ['apps/*', 'packages/*'],
         scripts: {
+          'desktop:bundle': rootManifest.scripts['desktop:bundle'],
           build: 'npm run build -w @synthetic/app',
         },
         dependencies: {
@@ -369,6 +380,7 @@ test('desktop:bundle produces a clean secret-free cache archive that installs of
         version: '0.0.1',
         type: 'module',
         scripts: {
+          prepare: 'node --check build.mjs',
           build: 'node build.mjs',
         },
         dependencies: {
@@ -480,18 +492,18 @@ writeFileSync('built-marker.txt', sharedMsg + ':' + target)
     server.close()
   })
 
+  mkdirSync(join(repoDir, 'scripts'))
+  cpSync(join(REPO_ROOT, scriptPath), join(repoDir, scriptPath))
   const archivePath = join(tempRoot, 'desktop-bundle.tar.gz')
-  const bundleResult = await buildDesktopBundle({
-    repoRoot: repoDir,
-    outPath: archivePath,
-    registryUrl,
-    env: {
-      ...process.env,
-      [`npm_config_//127.0.0.1:${port}/:_authToken`]: secretAuthToken,
-    },
-    log: () => {},
-  })
-  assert.deepEqual(bundleResult.targets, ['glibc', 'musl'])
+  const bundleResult = await runNodeScriptOrNpm(
+    'desktop:bundle',
+    scriptPath,
+    ['--out', archivePath, '--registry', registryUrl],
+    { [`npm_config_//127.0.0.1:${port}/:_authToken`]: secretAuthToken },
+    repoDir,
+  )
+  assert.equal(bundleResult.status, 0, bundleResult.stderr)
+  assert.match(bundleResult.stdout, /targets: linux-x64-glibc, linux-x64-musl/)
   assert.ok(existsSync(archivePath))
 
   // Close the fake registry completely to enforce network-blocked offline install.

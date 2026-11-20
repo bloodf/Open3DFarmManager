@@ -407,3 +407,67 @@ empty-filter assertion. The page rendered the heading
 `Runtime fixture cleanup/failure` with a Connector exit by `SIGKILL`.
 These findings belong to the separate KobraLink correction. This report
 does not change the journey test or replace the combined receipt.
+
+## Accepted Linux receipt for #367
+
+Candidate `75196365dc11a27f47d056e50065366e84161134` includes the KobraLink
+and guide fixes. The clean Ubuntu ARM64 VM used Node 22.23.5, npm 10.9.9,
+system Chrome 158.0.8127.36, local PostgreSQL 17.12, and Go 1.27.4.
+Docker was absent from PATH. The default desktop check does not require
+FFmpeg.
+
+Stage the npm cache and tools before isolation. Use the namespace procedure
+under [Network guard](#network-guard) with loopback and `dummy0` at
+`10.77.0.2/24`, no IPv4 or IPv6 default route, and external-service fakes
+on loopback. As the checkout owner inside that namespace, run:
+
+```sh
+npm ci --offline --ignore-scripts --cache "$HOME/openfarm-npm-cache"
+node --test tests/node/e16-367.test.mjs
+npm run desktop:check -- --list
+npm run desktop:check -- --require-isolated-network \
+  --log-dir ./desktop-check-logs --receipt ./desktop-check-logs/receipt.json
+ip -s link show dev dummy0
+npm run desktop:check -- --guard-probe --only network-guard-probe \
+  --require-isolated-network --log-dir ./desktop-probe-logs
+ip -s link show dev dummy0
+```
+
+The offline install succeeded. The runner and guard contract passed 12
+tests. The combined run exited 0 in 27 min 49 s with zero network violations.
+All 14 steps passed, so the summary had no skipped steps requiring a reason.
+
+| Step                | Status | Duration (ms) |
+| ------------------- | ------ | ------------: |
+| `preflight`         | passed |           123 |
+| `lint`              | passed |        38,366 |
+| `typecheck`         | passed |        38,790 |
+| `vitest`            | passed |       196,170 |
+| `test-node`         | passed |       289,743 |
+| `rtsp-supervisor`   | passed |         3,224 |
+| `rtsp-framing`      | passed |           431 |
+| `build`             | passed |        23,043 |
+| `build-rtsp-ingest` | passed |         1,373 |
+| `test-postgres`     | passed |       152,018 |
+| `test-e2e`          | passed |        38,793 |
+| `test-journey`      | passed |       878,597 |
+| `test-sim-farm`     | passed |         3,928 |
+| `app-smoke`         | passed |         3,966 |
+
+All 37 journeys passed. Node passed 1,967 tests and skipped eight: two
+opt-in real-FFmpeg cases, one opt-in sandbox smoke, one opt-in
+pause-control RTC case, two opt-in HTTPS/RTC cases requiring parent-owned
+fixtures, and two cases requiring parent-supplied external artifacts.
+Playwright E2E passed 67 tests and skipped 27 fixture-dependent cases:
+23 authentication lockout and session cases, one browser device case,
+two pairing cases, and one printer assignment case. Those cases require
+the disposable HTTPS and PostgreSQL fixture configuration, including
+the separate pairing phase.
+
+The deliberate guard probe exited 1 in 51 ms and recorded exactly one
+blocked `fetch` to `example.com`. The guard rejected the request before
+network I/O. With no external interface or default route, the dummy
+interface's TX counters remained at 70 bytes and one packet before and
+after the probe. The receipt, per-step logs, probe record, and counter
+snapshots were retained for audit. The disposable checkouts and guide
+PostgreSQL directory were removed.

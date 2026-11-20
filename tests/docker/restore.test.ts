@@ -57,8 +57,7 @@ async function checkRestore(t: TestContext, schema: 'current' | 'older') {
     )
   t.after(() => rmSync(directory, { recursive: true }))
   const id = docker([
-    'run',
-    '-d',
+    'create',
     '--pull=never',
     '--name',
     container,
@@ -120,6 +119,26 @@ async function checkRestore(t: TestContext, schema: 'current' | 'older') {
   const catalog = await loadMigrationCatalog()
   // Migration 0013 introduced the browser device registry.
   const backupCatalog = schema === 'current' ? catalog : catalog.slice(0, 13)
+  if (schema === 'current') {
+    const libraryApi = catalog.findIndex(
+      (migration) => migration.id === '0080_integration_library_api',
+    )
+    assert.ok(libraryApi > 0)
+    await runMigrations(source, catalog.slice(0, libraryApi), { kind: 'up' })
+
+    // PostgreSQL renders these IN checks as ANY in pg_get_constraintdef.
+    // Give 0080 room to add its named checks while keeping the fixture's
+    // existing checks enforced. This backup exercises restore, not API writes.
+    await source`ALTER TABLE farm.integration_envelopes
+      RENAME CONSTRAINT integration_envelopes_required_scope_check
+      TO restore_fixture_required_scope_check`
+    await source`ALTER TABLE farm.integration_audit
+      RENAME CONSTRAINT integration_audit_action_check
+      TO restore_fixture_action_check`
+    await source`ALTER TABLE farm.integration_audit
+      RENAME CONSTRAINT integration_audit_resource_type_check
+      TO restore_fixture_resource_type_check`
+  }
   await runMigrations(source, backupCatalog, { kind: 'up' })
   const farm = randomUUID()
   const agent = randomUUID()

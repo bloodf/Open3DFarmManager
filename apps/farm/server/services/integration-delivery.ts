@@ -40,7 +40,8 @@ export type EnvelopeStatus =
   | 'rejected'
   | 'outcome-unknown'
 export type EnvelopeKind = 'job' | 'action'
-export type RequiredScope = 'jobs:start' | 'control:basic' | 'control:extended'
+export type RequiredScope =
+  'jobs:start' | 'jobs:write' | 'control:basic' | 'control:extended'
 /** What the Connector can report, in the order a command can progress. */
 export type ConnectorOutcome =
   'delivered' | 'refused' | 'started' | 'completed' | 'cancelled' | 'failed'
@@ -189,6 +190,7 @@ export function requiredScopeFor(
   command: IssueEnvelope['command'],
 ): RequiredScope {
   if (command.kind === 'job') return 'jobs:start'
+  if (command.action.action === 'start_library_print') return 'jobs:write'
   return CONTROL_BASIC.has(command.action.action)
     ? 'control:basic'
     : 'control:extended'

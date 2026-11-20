@@ -320,6 +320,22 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     'linked',
   )
   assert.equal(await identities.unlink(passwordOnly, googleIssuer), 'unlinked')
+  // Issuer contract: "https://" plus 1-500 non-space characters.
+  const issuerOf = (n: number) => 'https://' + 'a'.repeat(n)
+  for (const bad of [issuerOf(0), issuerOf(501), 'https://a b', 'http://a']) {
+    assert.equal(
+      await identities.link(passwordOnly, bad, 'bound-' + suffix),
+      'rejected',
+    )
+    assert.equal(await identities.unlink(passwordOnly, bad), 'rejected')
+  }
+  for (const good of [issuerOf(1), issuerOf(500)]) {
+    assert.equal(
+      await identities.link(passwordOnly, good, 'bound-' + suffix),
+      'linked',
+    )
+    assert.equal(await identities.unlink(passwordOnly, good), 'unlinked')
+  }
 
   return [
     'bootstrap single winner and closed afterwards',
@@ -329,5 +345,6 @@ export async function testPostgresRegistration(admin: Sql, runtime: Sql) {
     'expired and unknown invites rejected, consumed invites immutable',
     'revoked or disabled owner cannot invite and their invites are dead',
     'members link and unlink Google only with another sign-in method',
+    'link and unlink accept issuers of 1 and 500 characters after https:// only',
   ]
 }

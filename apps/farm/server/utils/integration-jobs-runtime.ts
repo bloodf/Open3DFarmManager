@@ -17,6 +17,8 @@ import { PostgresIntegrationDelivery } from '../storage/integration-delivery-pos
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
 import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
 import { PostgresIntegrationApprovals } from '../storage/integration-approval-postgres.ts'
+import { IntegrationLibraryService } from '../services/integration-library.ts'
+import { PostgresIntegrationLibrary } from '../storage/integration-library-postgres.ts'
 
 /** Until the Connector inbox registers itself, envelopes stay queued for `deliverPending`. */
 const noInbox: EnvelopeInbox = { sendToAgentInbox: () => 'no-inbox' }
@@ -34,6 +36,7 @@ let active:
       actions: IntegrationActionsService
       approvals: IntegrationApprovalService
       delivery: IntegrationDeliveryService | undefined
+      library: IntegrationLibraryService
     }
   | undefined
 
@@ -102,8 +105,14 @@ export async function integrationJobsRuntime() {
         signer,
       })
     : undefined
+  const libraryStore = new PostgresIntegrationLibrary(pool)
+  const library = new IntegrationLibraryService(libraryStore)
   const service = new IntegrationJobsService({
     store: new PostgresIntegrationJobs(pool),
+    library: {
+      version: (id) => library.version(id),
+      recordReplay: (entry) => library.recordReplay(entry),
+    },
     ...(delivery
       ? {
           envelopes: {
@@ -142,8 +151,13 @@ export async function integrationJobsRuntime() {
       : {}),
     envelopeTtlMs: positive(config.envelopeTtlMs, DEFAULT_JOB_ENVELOPE_TTL_MS),
   })
-  active = { pool, service, actions, approvals, delivery }
+  active = { pool, service, actions, approvals, delivery, library }
   return active
+}
+
+export async function integrationLibraryRuntime() {
+  const runtime = await integrationJobsRuntime()
+  return { service: runtime.library }
 }
 
 export async function closeIntegrationJobsRuntime() {

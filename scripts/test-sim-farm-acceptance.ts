@@ -8,9 +8,9 @@ import { mkdtemp } from 'node:fs/promises'
 // the real Connector CLI. Read-only: never sends a printer command and never
 // contacts a physical printer. Needs a built app: npm run build -w @open3dfarmmanager/farm
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import { access, mkdir, rm, statfs, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { isAbsolute, join, relative } from 'node:path'
@@ -53,7 +53,16 @@ if (
   throw new Error(
     'SIM_ACCEPT_ADMITTED=yes, a locally available digest-pinned PostgreSQL 17 SIM_ACCEPT_IMAGE, SIM_ACCEPT_PORT_BASE (uses base..base+8), an absolute SIM_ACCEPT_WORK_ROOT outside the repository and an optional o3dfm-* SIM_ACCEPT_PROJECT are required',
   )
-await access(new URL('../apps/farm/.output/server/index.mjs', import.meta.url))
+const serverBuild = new URL(
+  '../apps/farm/.output/server/index.mjs',
+  import.meta.url,
+)
+if (!existsSync(serverBuild))
+  execFileSync('npm', ['run', 'build', '-w', '@open3dfarmmanager/farm'], {
+    stdio: 'inherit',
+    timeout: 900_000,
+  })
+await access(serverBuild)
 const ports = simPorts(base)
 if (!base) {
   const allocated = new Set<number>()

@@ -277,7 +277,13 @@ describe('documented headers no handler sends yet', () => {
 })
 
 describe('documented responses no handler produces yet', () => {
-  it.each(Object.entries(mismatches))('%s', async (key, mismatch) => {
+  const entries = Object.entries(mismatches)
+  if (entries.length === 0) {
+    it('has no documented mismatches', () => {
+      expect(mismatches).toEqual({})
+    })
+  }
+  it.each(entries)('%s', async (key, mismatch) => {
     const documented = key.slice(key.lastIndexOf(' ') + 1)
     const result = await mismatch.probe(freshWorld())
     expect(

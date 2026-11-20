@@ -12,6 +12,7 @@ export * from './moonraker-mock.ts'
 export * from './spoolman-mock.ts'
 export * from './discovery.ts'
 export * from './oidc-mock.ts'
+export * from './bambu-cloud-mock.ts'
 
 import {
   startHttpMock,
@@ -48,6 +49,11 @@ import {
   type OidcMockOptions,
   type OidcMockInstance,
 } from './oidc-mock.ts'
+import {
+  startBambuCloudMock,
+  type BambuCloudMockOptions,
+  type BambuCloudMockInstance,
+} from './bambu-cloud-mock.ts'
 
 export type MockKind =
   | 'http'
@@ -58,6 +64,7 @@ export type MockKind =
   | 'moonraker'
   | 'spoolman'
   | 'oidc'
+  | 'bambu-cloud'
 
 export type MockOptionsMap = {
   http: HttpMockOptions
@@ -68,6 +75,7 @@ export type MockOptionsMap = {
   moonraker: MoonrakerMockOptions
   spoolman: SpoolmanMockOptions
   oidc: OidcMockOptions
+  'bambu-cloud': BambuCloudMockOptions
 }
 
 export type MockInstanceMap = {
@@ -79,6 +87,7 @@ export type MockInstanceMap = {
   moonraker: MoonrakerMockInstance
   spoolman: SpoolmanMockInstance
   oidc: OidcMockInstance
+  'bambu-cloud': BambuCloudMockInstance
 }
 
 export type AnyMockInstance =
@@ -89,6 +98,7 @@ export type AnyMockInstance =
   | MoonrakerMockInstance
   | SpoolmanMockInstance
   | OidcMockInstance
+  | BambuCloudMockInstance
 
 /**
  * Unified entry point to start an in-process mock.
@@ -128,6 +138,10 @@ export async function startMock<K extends MockKind>(
     case 'oidc':
       return (await startOidcMock(
         options as OidcMockOptions,
+      )) as MockInstanceMap[K]
+    case 'bambu-cloud':
+      return (await startBambuCloudMock(
+        options as BambuCloudMockOptions,
       )) as MockInstanceMap[K]
     default: {
       const _exhaustive: never = kind

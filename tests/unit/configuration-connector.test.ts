@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   existsSync,
   mkdtempSync,
@@ -76,6 +76,9 @@ import {
  * runtime, session, authority, engine, journal and runtime reader.
  * No network, no printer, no shared engine.
  */
+// These acceptance tests exercise durable journal writes, including fsync.
+vi.setConfig({ testTimeout: 30_000 })
+
 const FARM_ORIGIN = 'https://farm.example.com'
 const AUDIENCE = 'open3dfarm/connector'
 const BRIDGE = 'http://127.0.0.1:7100'

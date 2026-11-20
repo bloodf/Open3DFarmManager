@@ -20,6 +20,12 @@ export const jobsRuntime = async () => ({
     if (world.faults.has('jobs-runtime')) throw new Error('jobs runtime down')
     return { service: world.jobs, actions: world.actions }
   },
+  integrationLibraryRuntime: async () => {
+    const world = currentWorld()
+    if (world.faults.has('library-runtime'))
+      throw new Error('library runtime down')
+    return { service: world.library }
+  },
 })
 
 export const signalling = () => ({

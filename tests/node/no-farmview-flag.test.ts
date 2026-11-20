@@ -26,3 +26,8 @@ test('farmView flag name is absent from app code', async () => {
   )
   assert.deepEqual(matches.filter(Boolean), [])
 })
+
+test('farmView flag name is absent from the README', async () => {
+  const readme = fileURLToPath(new URL('../../README.md', import.meta.url))
+  assert.equal(/\bfarmView\b/.test(await readFile(readme, 'utf8')), false)
+})

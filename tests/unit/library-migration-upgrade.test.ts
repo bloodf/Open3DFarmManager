@@ -1,6 +1,12 @@
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import type { Sql } from 'postgres'
@@ -114,6 +120,42 @@ function def(rows: readonly CheckRow[], name: string): string {
   return row?.def ?? ''
 }
 
+async function cleanupCluster(stop: () => Promise<void>, ledgerPath: string) {
+  try {
+    await stop()
+  } catch (cause) {
+    throw new Error(
+      `Database cleanup failed. Resource ledger retained at ${ledgerPath}`,
+      {
+        cause,
+      },
+    )
+  }
+  rmSync(dirname(ledgerPath), { recursive: true, force: true })
+}
+
+test('retains and reports the resource ledger when database cleanup fails', async () => {
+  const ledgerDir = mkdtempSync(join(tmpdir(), 'o3dfm-migration-ledger-check-'))
+  const ledgerPath = join(ledgerDir, 'resources.log')
+  const record = '{"resource":"cluster","name":"fixture"}\n'
+  const failure = new Error('simulated stop failure')
+
+  try {
+    writeFileSync(ledgerPath, record, { mode: 0o600 })
+    await expect(
+      cleanupCluster(async () => {
+        throw failure
+      }, ledgerPath),
+    ).rejects.toMatchObject({
+      message: `Database cleanup failed. Resource ledger retained at ${ledgerPath}`,
+      cause: failure,
+    })
+    expect(readFileSync(ledgerPath, 'utf8')).toBe(record)
+  } finally {
+    rmSync(ledgerDir, { recursive: true, force: true })
+  }
+})
+
 async function withCluster(
   name: string,
   through: string | false,
@@ -135,11 +177,7 @@ async function withCluster(
   try {
     await body(await database.start())
   } finally {
-    try {
-      await database.stop()
-    } finally {
-      rmSync(ledgerDir, { recursive: true, force: true })
-    }
+    await cleanupCluster(() => database.stop(), ledgerPath)
   }
 }
 

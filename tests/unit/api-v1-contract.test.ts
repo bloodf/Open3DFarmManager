@@ -73,8 +73,12 @@ function responseSpecFor(op: OperationSpec, actual: number) {
 const mediaType = (value: string | null) =>
   value?.split(';')[0]?.trim().toLowerCase()
 
-/** Documented headers no handler sends yet. Empty when the walk and handlers agree. */
-const unsentHeaders = new Set<string>()
+/**
+ * Documented headers no handler sends yet. The 503 response documents
+ * Retry-After but every 503 is produced without one; a test below asserts the
+ * header is still absent so the exception cannot outlive a fix.
+ */
+const unsentHeaders = new Set(['503 Retry-After'])
 
 function headerViolations(response: ResponseSpec, headers: Headers) {
   const out: string[] = []
@@ -249,22 +253,38 @@ describe('responses match the spec', () => {
   }
 })
 
+describe('documented headers no handler sends yet', () => {
+  it('503 answers still carry no Retry-After', async () => {
+    const withHeader: string[] = []
+    for (const scenario of scenarios.filter(
+      (entry) => entry.status === '503',
+    )) {
+      const { result } = await scenario.run(freshWorld())
+      if (
+        responseSpecFor(
+          ops.find((op) => op.key === scenario.op)!,
+          503,
+        )?.headers.some((header) => header.name === 'Retry-After') &&
+        result.headers.has('retry-after')
+      )
+        withHeader.push(`${scenario.op}: ${scenario.name}`)
+    }
+    expect(
+      withHeader,
+      'Retry-After is now sent on 503: remove it from unsentHeaders',
+    ).toEqual([])
+  })
+})
+
 describe('documented responses no handler produces yet', () => {
-  const entries = Object.entries(mismatches)
-  if (entries.length === 0) {
-    it('has none when the walk and handlers agree', () => {
-      expect(entries).toEqual([])
-    })
-  } else {
-    it.each(entries)('%s', async (key, mismatch) => {
-      const documented = key.slice(key.lastIndexOf(' ') + 1)
-      const result = await mismatch.probe(freshWorld())
-      expect(
-        result.status,
-        `${key} is now produced (${mismatch.reason}): remove it from mismatches.ts and add a scenario`,
-      ).not.toBe(Number(documented))
-    })
-  }
+  it.each(Object.entries(mismatches))('%s', async (key, mismatch) => {
+    const documented = key.slice(key.lastIndexOf(' ') + 1)
+    const result = await mismatch.probe(freshWorld())
+    expect(
+      result.status,
+      `${key} is now produced (${mismatch.reason}): remove it from mismatches.ts and add a scenario`,
+    ).not.toBe(Number(documented))
+  })
 })
 
 describe('a handler response with an undocumented field fails the contract', () => {

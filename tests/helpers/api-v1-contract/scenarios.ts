@@ -191,6 +191,18 @@ export const fixtures: Record<string, Fixture> = {
     valid: () => ({ method: 'GET', path: `/printers/${P}/status` }),
     missing: () => ({ method: 'GET', path: `/printers/${ids.unknown}/status` }),
     fault: 'printers',
+    extra: {
+      '404': [
+        {
+          name: 'malformed printer id (unknown query params ignored)',
+          run: (world) =>
+            asApp(world, farm(['printers:read']), () => ({
+              method: 'GET',
+              path: '/printers/not-a-uuid/status?bogus=1',
+            })),
+        },
+      ],
+    },
   },
   'GET /printers/{printerId}/files': {
     scopes: ['files:read'],
@@ -695,6 +707,18 @@ export const fixtures: Record<string, Fixture> = {
     ],
     missing: () => ({ method: 'GET', path: `/jobs/${ids.unknown}` }),
     fault: 'jobs-runtime',
+    extra: {
+      '404': [
+        {
+          name: 'malformed job id',
+          run: (world) =>
+            asApp(world, farm(['jobs:read']), () => ({
+              method: 'GET',
+              path: '/jobs/not-a-uuid',
+            })),
+        },
+      ],
+    },
   },
   'GET /actions/{actionId}': {
     scopes: ['control:basic'],
@@ -745,6 +769,18 @@ export const fixtures: Record<string, Fixture> = {
     ],
     missing: () => ({ method: 'GET', path: `/actions/${ids.unknown}` }),
     fault: 'jobs-runtime',
+    extra: {
+      '404': [
+        {
+          name: 'malformed action id',
+          run: (world) =>
+            asApp(world, farm(['control:basic']), () => ({
+              method: 'GET',
+              path: '/actions/not-a-uuid',
+            })),
+        },
+      ],
+    },
   },
   'GET /webhooks': {
     scopes: ['events:subscribe'],

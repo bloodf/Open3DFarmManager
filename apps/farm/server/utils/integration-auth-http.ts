@@ -17,18 +17,22 @@ const noStore = { 'cache-control': 'no-store' }
 const tokenLimits = new IntegrationLimits()
 const resourceLimits = new IntegrationLimits()
 
+/** Default wait (seconds) advertised on every 503 from this mapping. */
+const serviceRetryAfterSeconds = '5'
+
 export function oauthError(error: string, status = 400, headers?: HeadersInit) {
-  return Response.json(
-    { error },
-    {
-      status,
-      headers: {
-        ...noStore,
-        ...(status === 401 ? { 'www-authenticate': 'Basic ' + realm } : {}),
-        ...headers,
-      },
-    },
-  )
+  const responseHeaders = new Headers({
+    ...noStore,
+    ...(status === 401 ? { 'www-authenticate': 'Basic ' + realm } : {}),
+  })
+  if (headers) {
+    new Headers(headers).forEach((value, key) => {
+      responseHeaders.set(key, value)
+    })
+  }
+  if (status === 503 && !responseHeaders.has('retry-after'))
+    responseHeaders.set('retry-after', serviceRetryAfterSeconds)
+  return Response.json({ error }, { status, headers: responseHeaders })
 }
 
 export class PayloadTooLarge extends Error {}
@@ -184,6 +188,8 @@ export function integrationProblem(
   const responseHeaders = new Headers(headers)
   responseHeaders.set('content-type', 'application/problem+json')
   responseHeaders.set('cache-control', 'no-store')
+  if (status === 503 && !responseHeaders.has('retry-after'))
+    responseHeaders.set('retry-after', serviceRetryAfterSeconds)
   return Response.json(
     { type: 'https://openfarm.dev/problems/' + code, title, status, code },
     {

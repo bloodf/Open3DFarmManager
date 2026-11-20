@@ -34,7 +34,7 @@ info:
     **Rate limits.** Each app has separate read (GET) and write (POST, DELETE)
     token buckets. Every authenticated response carries `RateLimit-Limit`,
     `RateLimit-Remaining` and `RateLimit-Reset` for the bucket the request
-    consumed; a 429 also carries `Retry-After`.
+    consumed; a 429 or 503 also carries `Retry-After`.
 
     **Idempotency.** Creating a job or action requires an `Idempotency-Key`
     header. Retrying with the same key and the same body returns the original
@@ -155,6 +155,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
+            Retry-After:
+              $ref: '#/components/headers/Retry-After'
           content:
             application/json:
               schema:
@@ -197,8 +199,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/status:
@@ -244,8 +244,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/status:
@@ -276,8 +274,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PrinterStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -288,8 +284,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/files:
@@ -339,8 +333,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
@@ -392,8 +384,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
@@ -461,8 +451,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /printers/{printerId}/actions:
@@ -524,8 +512,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /inventory:
@@ -575,8 +561,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /library:
@@ -621,8 +605,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -676,8 +658,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /library/settings:
@@ -715,8 +695,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     patch:
@@ -764,8 +742,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /library/{itemId}:
@@ -808,8 +784,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /jobs:
@@ -871,8 +845,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /jobs/{jobId}:
@@ -907,8 +879,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Job'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -919,8 +889,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /actions/{actionId}:
@@ -954,8 +922,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Action'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -966,8 +932,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks:
@@ -1004,8 +968,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -1061,8 +1023,6 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks/{webhookId}:
@@ -1097,8 +1057,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /webhooks/{webhookId}/test:
@@ -1139,8 +1097,6 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 webhooks:
@@ -1552,12 +1508,6 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    InternalError:
-      description: Unexpected server error (`internal-error`).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
     ServiceUnavailable:
       description: |
         Storage unavailable (`service-unavailable`) or the printer's Connector
@@ -1614,7 +1564,6 @@ components:
         - intent-expired
         - intent-too-long
         - rate-limited
-        - internal-error
         - service-unavailable
         - connector-unavailable
         - connector-timeout

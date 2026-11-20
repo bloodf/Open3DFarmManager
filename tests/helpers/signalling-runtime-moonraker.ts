@@ -1,5 +1,6 @@
-import { mkdtemp, writeFile, rm, readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -15,10 +16,7 @@ import {
   cameraFixtureFromEnv,
   cameraRuntimeSection,
 } from './signalling-snapshot-camera-fixture.ts'
-import {
-  assertPackagedBytes,
-  assertPackagedListing,
-} from './packaged-connector-bounds.ts'
+import { readPackagedConnectorManifest } from './packaged-connector-bounds.ts'
 
 export { startMoonrakerMock }
 
@@ -283,30 +281,16 @@ export async function createRuntimeMoonrakerFixture() {
           '../../packages/connector/dist/cli.js',
           import.meta.url,
         )
-        const dist = new URL('.', entry)
-        const files = (await readdir(dist, { withFileTypes: true })).sort(
-          (a, b) => a.name.localeCompare(b.name, 'en'),
+        const manifest = await readPackagedConnectorManifest(
+          fileURLToPath(new URL('.', entry)),
         )
-        assertPackagedListing(files)
-        let totalBytes = 0
-        const manifest = []
-        for (const file of files) {
-          const bytes = await readFile(new URL(file.name, dist))
-          totalBytes += bytes.length
-          assertPackagedBytes(bytes.length, totalBytes)
-          manifest.push({
-            name: file.name,
-            bytes: bytes.length,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-          })
-        }
+        const cli = manifest.find((file) => file.name === 'cli.js')
+        if (!cli) throw Error('Packaged Connector entry missing')
         packagedFiles = manifest.length
         packagedManifestSha256 = createHash('sha256')
           .update(JSON.stringify(manifest))
           .digest('hex')
-        packagedSha256 = createHash('sha256')
-          .update(await readFile(entry))
-          .digest('hex')
+        packagedSha256 = cli.sha256
         const child = spawn(
           process.execPath,
           [

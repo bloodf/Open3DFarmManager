@@ -523,7 +523,7 @@ describe('wiring', () => {
   })
 })
 
-describe('machine profile panel', () => {
+describe('machine profile panel', { timeout: 30_000 }, () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
   let server: Awaited<ReturnType<typeof startHttpMock>> | undefined
@@ -660,8 +660,13 @@ describe('machine profile panel', () => {
         }
       },
     })
-    browser = await launchBrowser({ args: ['--disable-background-networking'] })
-  }, 30_000)
+    // Playwright's own launch cap is 30s and matches this hook, so a cold
+    // Chrome on a busy Node 22 runner fails the hook before the panel renders.
+    browser = await launchBrowser({
+      timeout: 90_000,
+      args: ['--disable-background-networking', '--disable-dev-shm-usage'],
+    })
+  }, 120_000)
 
   afterAll(async () => {
     try {
@@ -689,7 +694,7 @@ describe('machine profile panel', () => {
         : request.abort(),
     )
     page = await context.newPage()
-  }, 15_000)
+  }, 30_000)
 
   afterEach(async () => {
     await context?.close()
@@ -803,7 +808,7 @@ describe('machine profile panel', () => {
     await page.getByRole('button', { name: 'Salvar perfil da máquina' }).click()
     await page.getByRole('alert').waitFor()
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-  }, 20_000)
+  }, 60_000)
 
   test('can be driven by keyboard alone', async () => {
     await open('owner')

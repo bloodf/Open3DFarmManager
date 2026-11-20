@@ -23,7 +23,6 @@
     "test:rtc-farm:all": "node scripts/test-rtc-farm-acceptance.ts --all",
     "test:connector-outage": "node scripts/test-connector-outage-recovery.ts",
     "test:sim-farm": "node scripts/test-sim-farm-acceptance.ts",
-    "test:farm-mock": "node scripts/test-farm-mock-acceptance.ts",
     "check:all": "npm run lint && npm run typecheck && npm run test && npm run test:node && npm run test:rtsp-supervisor && npm run test:rtsp-framing && npm run build",
     "sim:smoke": "node packages/sim-tools/src/cli.ts",
     "lint": "prettier --check .",

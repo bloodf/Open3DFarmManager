@@ -73,8 +73,8 @@ prepared-but-unrun tests are not current acceptance.
 
 ## Loopback mock candidate
 
-Issue #9 mock acceptance is `npm run test:farm-mock`
-(`scripts/test-farm-mock-acceptance.ts`). The runner refuses
+Issue #9 mock acceptance is `node scripts/test-farm-mock-acceptance.ts`.
+The runner refuses
 `OPENFARM_SIM=docker`. It drives one in-process Moonraker mock on
 `127.0.0.1` and writes one JSON ledger outside the repository, bound to
 `git rev-parse HEAD`. Covered rows are signed pause while printing,

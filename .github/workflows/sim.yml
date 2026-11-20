@@ -26,8 +26,9 @@ jobs:
       - name: Verify loopback mocks
         shell: bash
         run: |
+          set -o pipefail
           mkdir -p sim-diagnostics
-          node --test tests/node/e16-358.test.mjs 2>&1 | tail -c 200000 > sim-diagnostics/mock.log
+          node --test tests/node/e16-358.test.mjs 2>&1 | tail -c 200000 | tee sim-diagnostics/mock.log
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -61,7 +62,8 @@ jobs:
           platforms: amd64
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper config --quiet
       - run: docker compose -f infra/sim/docker-compose.yml --profile klipper up -d
-      - run: npm run sim:smoke
+      - name: Verify Klipper simulator
+        run: npm run sim:smoke
       - if: failure()
         run: |
           mkdir -p sim-diagnostics

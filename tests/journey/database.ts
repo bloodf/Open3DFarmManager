@@ -13,7 +13,10 @@ import {
 
 /** One restricted login per capability, in the order the farm app consumes. */
 export const CAPABILITIES = [
-  'farm_password_auth',
+  // The auth connection role (docs/ACCOUNT-CREATION.md): password sign-in via
+  // its farm_password_auth membership, plus sign-in provider status, rules and
+  // invites, which migrations grant only to farm_account_registration.
+  'farm_account_registration',
   'farm_connector_inventory',
   'farm_browser_device_runtime',
   'farm_pairing_runtime',
@@ -135,6 +138,17 @@ export async function startJourneyDatabase(
     for (const capability of CAPABILITIES)
       await sql.unsafe(
         `CREATE ROLE ${login(capability)} LOGIN PASSWORD '${secrets.get(capability)}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${capability}`,
+      )
+    // Fail here, not as a swallowed 500 on the sign-in page, if the auth
+    // login loses the grants the auth runtime reads on every visit.
+    const authLogin = login('farm_account_registration')
+    const [grants] = await sql<{ password: boolean; providers: boolean }[]>`
+      SELECT
+        has_table_privilege(${authLogin}, 'farm.password_credentials', 'SELECT') AS password,
+        has_table_privilege(${authLogin}, 'farm.sign_in_providers', 'SELECT') AS providers`
+    if (!grants?.password || !grants.providers)
+      throw new Error(
+        'Journey auth login lacks the farm_account_registration grants the auth runtime needs',
       )
     const password = randomBytes(24).toString('hex')
     const hash = await hashPassword(password)

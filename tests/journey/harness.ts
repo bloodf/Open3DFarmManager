@@ -237,14 +237,23 @@ const ENV_KEYS = [
 ] as const
 
 /**
- * The farm card's reported-progress bar (0..1), named by its visible label.
- * The row also holds the status-wall bar (0..100), so an unnamed
+ * The farm card's reported-progress ring, named by its label. The row also
+ * holds the status-wall bar ("Progresso da impressão"), so an unnamed
  * `getByRole('progressbar')` is ambiguous.
  */
 export function reportedProgress(row: Locator): Locator {
   return row.getByRole('progressbar', {
-    name: /^Progresso informado da impressão:/,
+    name: 'Progresso informado da impressão',
+    exact: true,
   })
+}
+
+/**
+ * The ring's `aria-valuenow` for a reported fraction (0..1): the card renders
+ * the fraction as points (0..100), the same way the page computes it.
+ */
+export function reportedProgressValue(fraction: number | string): string {
+  return String(Number(fraction) * 100)
 }
 
 /** Same reported-progress bar; the name the journey specs import. */
@@ -827,13 +836,16 @@ export async function startJourneyHarness(
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 60_000 })
-        await expect(reportedProgress(row)).toHaveAttribute('value', '0.25')
+        await expect(reportedProgress(row)).toHaveAttribute(
+          'aria-valuenow',
+          reportedProgressValue(0.25),
+        )
       },
       farmRow,
       async expectProgress(fraction: number, page: Page = ownerPage) {
         await expect(reportedProgress(farmRow(page))).toHaveAttribute(
-          'value',
-          String(fraction),
+          'aria-valuenow',
+          reportedProgressValue(fraction),
           { timeout: 15_000 },
         )
       },

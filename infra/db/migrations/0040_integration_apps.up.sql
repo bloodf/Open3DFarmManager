@@ -27,8 +27,8 @@ CREATE INDEX integration_app_credentials_app ON farm.integration_app_credentials
 
 -- Scopes exactly as in docs/api/openapi-v1.yaml: a non-empty set of known scopes without duplicates.
 CREATE FUNCTION farm.integration_scopes_valid(scopes text[]) RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-  SELECT scopes IS NOT NULL AND cardinality(scopes) BETWEEN 1 AND 8
-    AND scopes <@ ARRAY['printers:read','files:read','inventory:read','jobs:read','jobs:start','control:basic','control:extended','events:subscribe']::text[]
+  SELECT scopes IS NOT NULL AND cardinality(scopes) BETWEEN 1 AND 11
+    AND scopes <@ ARRAY['printers:read','files:read','inventory:read','jobs:read','jobs:start','control:basic','control:extended','events:subscribe','jobs:write','library:read','library:write']::text[]
     AND cardinality(scopes) = (SELECT count(DISTINCT s) FROM unnest(scopes) AS s)
 $$;
 

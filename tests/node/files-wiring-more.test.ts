@@ -380,6 +380,7 @@ async function connect(
   const offer = await connector.offer()
   const answer = await browser.answer(offer)
   connector.answer(answer)
+  const bindingIssuedAt = Date.now()
   const binding: ControlSessionBinding = {
     v: 1,
     purpose: 'pause-rtc',
@@ -398,8 +399,8 @@ async function connect(
     credential_jti: randomUUID(),
     browser_nonce: nonce(),
     connector_nonce: nonce(),
-    issued_at: Date.now(),
-    expires_at: Date.now() + 30000,
+    issued_at: bindingIssuedAt,
+    expires_at: bindingIssuedAt + 30000,
     offer_sha256: await controlSdpHash(offer),
     answer_sha256: await controlSdpHash(answer),
     browser_dtls: controlDtlsFingerprint(answer),

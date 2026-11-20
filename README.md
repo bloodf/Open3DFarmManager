@@ -49,7 +49,7 @@ Veja a [origem e as instruções para atualizar as capturas](docs/images/README.
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Contas e acesso           | Login, sessões próprias, convites, redefinição de senha e autorização por farm implementados; serviços dependem de configuração explícita.                                                                                            |
 | Connectors e dispositivos | Pareamento, aprovação, inventário, revogação, provas de identidade e renovação de credenciais implementados. CLI com pareamento e status disponível.                                                                                  |
-| Visão da farm             | Página `/farm` atrás da feature flag `farmView`, desligada por padrão: inventário, estado ao vivo por WebRTC direto, idade dos dados e reconexão com recuo. Aceitação integrada com simuladores ainda incompleta.                     |
+| Visão da farm             | Página `/farm` disponível sem feature flag: inventário, estado ao vivo por WebRTC direto, idade dos dados e reconexão com recuo. Aceitação mock em loopback é separada da aceitação em hardware, que permanece aberta.                |
 | Câmera                    | Vídeo RTSP levado ao navegador pelo canal WebRTC autorizado, exibido na visão da farm. Medição de memória nativa e aceitação de ponta a ponta com MediaMTX pendentes.                                                                 |
 | Pausa assinada            | Pausa confirmada e assinada pela página da farm, enviada somente por WebRTC ao Connector e liberada apenas quando todas as condições de disponibilidade são atendidas. Sinal de prontidão do Connector após reconexão ainda pendente. |
 | Impressoras e simuladores | Identificação Moonraker, várias ferramentas e webcams. Simuladores Klipper com cenários de falha de rede; aceitação do SV06 e do cenário de quatro ferramentas pendente.                                                              |
@@ -65,7 +65,7 @@ Testes locais, integração com fixtures e aceitação com simuladores são evid
 
 ## Execute localmente
 
-Você precisa de **Node.js 24.22.3 na série 24.x** e **npm (incluído no Node.js)**. Os fluxos de CI usam Node 24.22.3. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
+Você precisa de **Node.js 22.22.3+ na série 22.x ou 24.22.2+ na série 24.x** (`package.json` declara `^22.22.3 || >=24.22.2 <25`) e **npm (incluído no Node.js)**. O `.nvmrc` fixa Node 22.23.5; a CI roda Node 24.22.3 e Node 22.23.5. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
 
 ```sh
 git clone https://github.com/bloodf/Open3DFarmManager.git
@@ -74,7 +74,7 @@ npm ci --ignore-scripts
 npm run dev
 ```
 
-Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse comando não cria contas, configura banco de dados ou conecta impressoras. Autenticação e integrações começam desabilitadas e exigem configuração própria. A rota `/farm` também depende da feature flag `farmView`.
+Abra **http://127.0.0.1:3000**. Você verá a interface de desenvolvimento; esse comando não cria contas, configura banco de dados ou conecta impressoras. Autenticação e integrações começam desabilitadas e exigem configuração própria. A rota `/farm` está disponível sem feature flag. Aceitação em hardware permanece aberta.
 
 Para entender a configuração, comece pelos contratos de [sessão](docs/SESSION-PERSISTENCE-CONTRACT.md), [pareamento](docs/PAIRING-CONTRACTS.md) e [autorização da farm](docs/FARM-AUTHORIZATION-CHECKPOINT.md). Mantenha credenciais e configuração privada fora do Git.
 
@@ -93,7 +93,7 @@ O segundo fluxo requer o build produzido pelo primeiro. Para reproduzir os jobs 
 
 ## Rodar no desktop
 
-Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 24.22.x**, npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
+Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 22.22.3+ ou 24.22.2+** (o `.nvmrc` fixa 22.23.5), npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
 
 ```sh
 npm ci --ignore-scripts          # sem rede: bundle offline, veja docs/desktop-offline-install.md

@@ -5,6 +5,37 @@
 # Usage: set O3DFM_DB_PASSWORD (and optionally the others) then `docker compose up -d`.
 name: ${COMPOSE_PROJECT_NAME:-open3dfarmmanager-app}
 services:
+  app:
+    image: ${O3DFM_APP_IMAGE:?set O3DFM_APP_IMAGE to an immutable release image}
+    restart: unless-stopped
+    env_file: ${O3DFM_APP_ENV_FILE:-./app.env}
+    environment:
+      NUXT_DATABASE_ENABLED: 'true'
+      NUXT_DATABASE_MIGRATIONS: ${NUXT_DATABASE_MIGRATIONS:-apply}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    ports:
+      - '127.0.0.1:${O3DFM_APP_PORT:-3000}:3000'
+    networks: [app]
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 256
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
   postgres:
     image: postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     restart: unless-stopped

@@ -78,21 +78,28 @@ describe('integration API v1 OpenAPI spec', () => {
       'inventory:read',
       'jobs:read',
       'jobs:start',
+      'jobs:write',
       'control:basic',
       'control:extended',
       'events:subscribe',
+      'library:read',
+      'library:write',
     ])
     expect(Object.keys(committed.paths).sort()).toEqual(
       [
         '/openapi.json',
         '/oauth/token',
         '/printers',
+        '/printers/status',
         '/printers/{printerId}/status',
         '/printers/{printerId}/files',
         '/printers/{printerId}/macros',
         '/printers/{printerId}/jobs',
         '/printers/{printerId}/actions',
         '/inventory',
+        '/library',
+        '/library/settings',
+        '/library/{itemId}',
         '/jobs',
         '/jobs/{jobId}',
         '/actions/{actionId}',
@@ -119,7 +126,11 @@ describe('integration API v1 OpenAPI spec', () => {
       ]),
     )
     expect(Object.keys(committed.webhooks)).toEqual(
-      expect.arrayContaining(['job.ended', 'inventory.changed']),
+      expect.arrayContaining([
+        'job.ended',
+        'inventory.changed',
+        'printer.alert.raised',
+      ]),
     )
   })
 

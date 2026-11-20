@@ -11,7 +11,7 @@ import {
   openTrustedKeyStore,
   type TrustedKeyAuthority,
 } from '../auth/trusted-key-store.ts'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { readBambuCredentials } from '../bambu/credentials.ts'
 import {
   moonrakerAuthHeaders,
@@ -238,7 +238,8 @@ async function runAssignmentControl(
   const trustedPath = join(input.dataDirectory, 'trusted-keys.json')
   const trustedKeys =
     input.trustedKeys ??
-    (existsSync(trustedPath)
+    (existsSync(trustedPath) ||
+    readdirSync(input.dataDirectory).includes('trusted-keys.epoch')
       ? (
           await openTrustedKeyStore({
             path: trustedPath,

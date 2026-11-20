@@ -84,6 +84,7 @@ const links = computed(() => [
         { to: '/membros', label: 'Membros' },
 
         { to: '/integracoes', label: 'Integrações' },
+        { to: '/bambu-cloud', label: 'Conta Bambu Cloud' },
         { to: '/convites', label: 'Convidar pessoa' },
       ]
     : []),

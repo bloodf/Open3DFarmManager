@@ -37,6 +37,9 @@ import {
  * management contract (setup/status, sign-up/sign-in cookies, printers list,
  * create, detail, delete). No upstream code, no network, no printer.
  */
+// These acceptance tests exercise durable journal writes, including fsync.
+vi.setConfig({ testTimeout: 30_000 })
+
 const BRIDGE = 'http://127.0.0.1:7100'
 const ids = {
   farm: '22222222-2222-4222-8222-222222222222',

@@ -5,6 +5,7 @@ export const AUDIT_ACTIONS = [
   'connector.result',
   'subscription.changed',
   'credential.event',
+  'library.changed',
 ] as const
 export type IntegrationAuditAction = (typeof AUDIT_ACTIONS)[number]
 export type IntegrationAuditOutcome =
@@ -27,7 +28,13 @@ export interface IntegrationAuditEntry {
   actorId: string | null
   action: IntegrationAuditAction
   resourceType:
-    'job' | 'action' | 'approval' | 'connector' | 'subscription' | 'credential'
+    | 'job'
+    | 'action'
+    | 'approval'
+    | 'connector'
+    | 'subscription'
+    | 'credential'
+    | 'library'
   resourceId: string | null
   outcome: IntegrationAuditOutcome
   occurredAt: number
@@ -59,6 +66,7 @@ const safeDetailKeys = new Set([
   'jobStatus',
   'subscriptionEvent',
   'credentialEvent',
+  'storageMode',
 ])
 export function safeAuditDetails(
   value: unknown,

@@ -29,6 +29,9 @@ export interface IntegrationPrinterRow {
   id: string
   farmId: string
   printerKey: string
+  displayName?: string | null
+  groupName?: string | null
+  location?: string | null
   sandbox: boolean
   state: unknown
   observedAt: number | null

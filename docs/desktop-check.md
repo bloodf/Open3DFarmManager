@@ -65,83 +65,116 @@ removed from `PATH` and the network namespace unshared.
 
 ## Local Linux reproduction
 
-Tested on candidate `0750dc36c09ad140c177b4425d587976a39aa8e2` in a disposable
+Tested on candidate `c08c1fa8c4b2d2d14b45bdfe15d29f44dc7944c4` in a disposable
 Ubuntu 24.04 ARM64 virtual machine (9 CPUs, 15 GB) with Node 22.23.5, npm 10.9.9,
 Chrome 158.0.8127.36 installed at `/opt/google/chrome/chrome`, PostgreSQL 17.12
-and Go 1.27.4. Nothing in the machine used Docker.
+(PGDG packages) and Go 1.27.4. Nothing in the machine used Docker. The virtual
+machine was created for this run and is the only resource it owns; delete it
+when the run is accepted.
 
 Stage everything while the network is still up, then run offline:
 
-1. Install the system packages: the libraries Chrome links against, `ffmpeg`
-   (the camera tests in `test:node` and the journeys call `which ffmpeg` and
-   fail without it), `iproute2`, `util-linux` and PostgreSQL 13 or newer
-   (`initdb`, `pg_ctl` and `postgres` come with the server package; disable the
-   packaged service, the tests start their own cluster).
+1. Install the system packages: the libraries Chrome links against,
+   `iproute2`, `util-linux`, PostgreSQL 13 or newer (`initdb`, `pg_ctl` and
+   `postgres` come with the server package; disable the packaged service, the
+   tests start their own cluster) and `ffmpeg`. `ffmpeg` is not a prerequisite
+   of the default desktop run, but it is installed on the reproduction machine
+   so that its FFmpeg-dependent camera tests do not skip.
 2. Install Node 22, Chrome (`/opt/google/chrome/chrome`) and, for the optional
    `build-rtsp-ingest` step, Go. Go builds with `GOPROXY=off`, so warm its
    module cache first with `go mod download` in `tools/rtsp-ingest`.
 3. Check out the candidate as a real git checkout. Several tests run
    `git status`, so an exported tree without `.git` fails them.
-4. `npm ci` in the checkout.
-5. Run the focused gate, then the isolated check with the command in
-   [Network guard](#network-guard):
+4. Warm the npm cache and remove `node_modules`. `npm run desktop:bundle`
+   builds the documented bundle for `linux-x64` only; on an ARM64 machine it
+   stops in `nuxt prepare`, so the reproduction used a native cache instead:
+   `npm ci --ignore-scripts --cache "$HOME/openfarm-npm-cache"`, then
+   `rm -rf node_modules apps/*/node_modules packages/*/node_modules`. On an
+   x64 machine, unpack the bundle as described in
+   [desktop-offline-install.md](desktop-offline-install.md).
+5. Inside the isolated namespace, install from the cache with
+   `npm ci --offline --ignore-scripts --cache "$HOME/openfarm-npm-cache"`, run
+   the focused gate, then the check:
 
 ```sh
-node --test tests/node/e16-367.test.mjs
-sudo unshare --net -- bash -ec '
+sudo HOME="$HOME" unshare --net -- bash -ec '
   ip link set lo up
   ip link add dummy0 type dummy && ip addr add 10.77.0.2/24 dev dummy0 && ip link set dummy0 up
   exec setpriv --reuid="$SUDO_UID" --regid="$SUDO_GID" --init-groups \
-    env HOME="$HOME" npm run desktop:check -- --require-isolated-network \
-      --log-dir ./desktop-check-logs --receipt ./desktop-check-logs/receipt.json'
+    env HOME="$HOME" bash -ec "
+      npm ci --offline --ignore-scripts --cache \"\$HOME/openfarm-npm-cache\"
+      node --test tests/node/e16-367.test.mjs
+      npm run desktop:check -- --list
+      npm run desktop:check -- --require-isolated-network \
+        --log-dir ./desktop-check-logs --receipt ./desktop-check-logs/receipt.json"'
 ```
 
-Inside that namespace `curl https://example.com` fails to resolve and `ping`
-reports the network is unreachable, which confirms the isolation. The focused
-gate passes 12 of 12 in about 1.6 seconds and, by design, does not run
-Playwright.
+Pass `HOME` through `sudo` explicitly: on Ubuntu `sudo` resets it to `/root`,
+which makes npm, the PostgreSQL runner and the log directory fail with
+permission errors. Inside the namespace `curl https://example.com` fails and
+`ping` reports the network is unreachable, which confirms the isolation. The
+focused gate passes 12 of 12 in under a second and, by design, does not run
+Playwright. Offline `npm ci` installed 628 packages in 5.4 seconds, and
+`desktop:check -- --list` printed the 14 steps.
 
 ### Result (not accepted)
 
-`desktop:check` reported 9 passed, 5 failed and 0 skipped in 38 min 26 s.
+`desktop:check` reported 11 passed, 3 failed and 0 skipped in 25 min 52 s. The
+network guard logged no attempt and the receipt lists no external interface.
 
 | Step                                                    | Result | Duration              |
 | ------------------------------------------------------- | ------ | --------------------- |
-| preflight, lint, typecheck                              | passed | 0.1, 38, 48 s         |
-| vitest                                                  | failed | 3 min 0 s             |
-| test-node                                               | failed | 5 min 5 s             |
-| rtsp-supervisor, rtsp-framing, build, build-rtsp-ingest | passed | 3.2, 0.2, 17.9, 0.3 s |
-| test-postgres                                           | failed | 2 min 26 s            |
-| test-e2e                                                | failed | 6 min 27 s            |
-| test-journey                                            | failed | 19 min 31 s           |
-| test-sim-farm, app-smoke                                | passed | 4.1, 5.1 s            |
+| preflight, lint, typecheck                              | passed | 0.1, 28.1, 28.1 s     |
+| vitest                                                  | passed | 3 min 0 s             |
+| test-node                                               | passed | 4 min 41 s            |
+| rtsp-supervisor, rtsp-framing, build, build-rtsp-ingest | passed | 3.0, 0.2, 18.0, 5.7 s |
+| test-postgres                                           | failed | 2 min 18 s            |
+| test-e2e                                                | failed | 57.2 s                |
+| test-journey                                            | failed | 13 min 24 s           |
+| test-sim-farm, app-smoke                                | passed | 3.8, 4.3 s            |
 
-Failures on this candidate, none of them an environment gap once `ffmpeg` and
-the git checkout were in place:
+Failures on this candidate:
 
-- **vitest** (2600 of 2601 tests pass): `tests/unit/network-map.test.ts`, "passes
-  axe, fits and is keyboard reachable at 320, 768 and 1280 px with 2 Connectors".
-  The first Tab stops do not start with the `Mapa` view button. It fails alone too.
-- **test-node** (1966 pass, 0 fail, 6 skipped): every test passes, but the guard
-  recorded two `https.request` attempts to `farm.example` from
-  `tests/node/connector-credential-renewal.test.ts` (through
-  `packages/connector/src/runtime/library-relay.ts`), so the step fails.
-- **test-postgres** (31 of 33 jobs pass): `test-postgres-connector-inventory.ts`
-  and `test-postgres-registration.ts` fail to load
-  `apps/farm/server/storage/sign-in-rules.ts`, whose `constructor(private readonly
-sql: Sql)` is a TypeScript parameter property that Node's type stripping does
-  not accept.
-- **test-e2e** (52 passed, 27 skipped, 15 failed): `connector-inventory`,
-  `farm-view` camera region, `files-page` (esbuild has no loader for `.vue`),
-  three `frontend-accessibility` cases, two `kobra-x-controls` cases, four
-  `printer-setup-forms` cases and two `skeleton` cases. Several are strict-mode
-  violations because a link such as "Início" or "Minha farm" now matches more
-  than one landmark.
-- **test-journey** (31 passed, 3 failed): the Anycubic pause/resume/cancel
-  journey, the Bambu Lab journey and the KobraLink "finished job" journey. The
-  Anycubic and Bambu Lab journeys passed in an earlier run on the same
-  candidate (that run lacked `ffmpeg`, which failed four other journeys), so
-  those two are timing dependent.
+- **test-postgres** (31 of 33 jobs pass):
+  - `test-postgres-connector-inventory.ts` fails to load
+    `apps/farm/server/storage/sign-in-provider.ts`, whose constructor uses
+    TypeScript parameter properties (`private readonly master`,
+    `private readonly issuer`) that Node's type stripping does not accept
+    (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`).
+  - `test-postgres-registration.ts` fails in `link_oidc_identity` with
+    `invalid regular expression: invalid repetition count(s)`.
+    `infra/db/migrations/0077_oidc_identity_management.up.sql` repeats
+    `{1,500}`, above the 255 PostgreSQL allows; migration 0075 fixed the same
+    pattern in the table check but not in this function.
+- **test-e2e** (64 passed, 27 skipped, 3 failed):
+  `farm-view.spec.ts:280` "populated spool table is accessible and fits at
+  320px" and "at 1280px" (the table shows 3 of 12 spools and never contains
+  `-12 g`), and `frontend-accessibility.spec.ts:14` "home keyboard navigation
+  exposes account routes and unavailable read-only state" (the "Convidar
+  pessoa" quick link does not take focus on the expected Tab stop).
+- **test-journey** (4 passed, 10 failed, 23 did not run): the Anycubic, Bambu
+  Lab, Creality, KobraLink and Moonraker journeys and the four vendor harness
+  smoke cases (`harness-smoke`, `harness-vendors`) never see live telemetry.
+  The farm server logged `permission denied for table sign_in_providers` (SQL
+  state `42501`) from `/api/auth/google`; migration `0076_sign_in_providers`
+  grants the table only to `farm_account_registration`.
+
+  Diagnosis from the retained logs and a focused local rerun
+  (`harness-smoke.spec.ts`, local PostgreSQL 17, system Chrome): two separate
+  defects.
+  - The journey wired `NUXT_AUTH_DATABASE_URL` to a `farm_password_auth`
+    login, but the auth connection role must be `farm_account_registration`
+    (see [Account creation](ACCOUNT-CREATION.md)). The sign-in page swallows
+    the failed `/api/auth/google` call, so sign-in still worked and the 42501
+    was not what stopped telemetry. The journey now uses a
+    `farm_account_registration` login (no superuser, `BYPASSRLS` or new
+    grants), checks its grants at fixture start and requires
+    `/api/auth/google` to answer `enabled: false` before a journey starts.
+  - Every failure stops at the same assertion: the reported-progress bar was
+    "not found". Commit `54f0b9cf` replaced the card's `<progress value>` and
+    its "Progresso informado da impressão: N%" label with `ProgressRing`
+    (`aria-label` without the colon, `aria-valuenow` in points). The journey
+    locators now match that contract and assert the same fractions.
 
 Issue #367 stays open until every step passes on one candidate. The
 `test-sim-farm`, `app-smoke` and RTSP steps ran offline with no blocked attempt.

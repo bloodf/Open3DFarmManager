@@ -65,7 +65,7 @@ Testes locais, integração com fixtures e aceitação com simuladores são evid
 
 ## Execute localmente
 
-Você precisa de **Node.js 24.22.3 na série 24.x** e **npm (incluído no Node.js)**. Os fluxos de CI usam Node 24.22.3. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
+Você precisa de **Node.js 22.22.3+ na série 22.x ou 24.22.2+ na série 24.x** (`package.json` declara `^22.22.3 || >=24.22.2 <25`) e **npm (incluído no Node.js)**. O `.nvmrc` fixa Node 22.23.5; a CI roda Node 24.22.3 e Node 22.23.5. Docker Compose é necessário para a integração com simuladores, não para abrir a interface inicial.
 
 ```sh
 git clone https://github.com/bloodf/Open3DFarmManager.git
@@ -93,7 +93,7 @@ O segundo fluxo requer o build produzido pelo primeiro. Para reproduzir os jobs 
 
 ## Rodar no desktop
 
-Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 24.22.x**, npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
+Para uma máquina sem Docker e sem rede externa, siga o guia completo em [docs/DESKTOP.md](docs/DESKTOP.md). Pré-requisitos: **Node.js 22.22.3+ ou 24.22.2+** (o `.nvmrc` fixa 22.23.5), npm, **Google Chrome** instalado e **PostgreSQL 17+** (`initdb`, `pg_ctl`). Go 1.26+ é opcional e só serve para o helper RTSP.
 
 ```sh
 npm ci --ignore-scripts          # sem rede: bundle offline, veja docs/desktop-offline-install.md

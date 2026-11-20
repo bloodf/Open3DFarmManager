@@ -178,3 +178,232 @@ Failures on this candidate:
 
 Issue #367 stays open until every step passes on one candidate. The
 `test-sim-farm`, `app-smoke` and RTSP steps ran offline with no blocked attempt.
+
+## Integrated Linux reproduction for #367 and #370
+
+Candidate `66899d982ce3953050a6726c8cb7e50ce9cdbc94` was checked from clean
+Git checkouts on Ubuntu 24.04.5 ARM64 with Node 22.23.5, npm 10.9.9, system
+Chrome 158.0.8127.36, PostgreSQL 17.12 and Go 1.27.4. Docker was absent from
+`PATH`. FFmpeg was disabled inside the acceptance namespace. The packaged
+PostgreSQL services stayed off and the test runner owned its local clusters.
+
+Stage the dependencies in an npm cache, enter an empty network namespace, and
+bring up only `lo`. Run the commands as the checkout owner so that PostgreSQL
+can initialize its disposable cluster. The ARM64 run reused a staged native
+npm cache.
+
+```sh
+sudo unshare --net -- bash -ec '
+  ip link set lo up
+  exec setpriv --reuid="$SUDO_UID" --regid="$SUDO_GID" --init-groups \
+    env HOME="$1" PATH="$2" bash -s
+' _ "$HOME" "$PATH" <<'OFFLINE'
+set -eu
+ip -br link
+ip route
+npm ci --offline --ignore-scripts --cache "$HOME/openfarm-npm-cache"
+node --test tests/node/e16-367.test.mjs
+npm run desktop:check -- --list
+npm run desktop:check -- --require-isolated-network \
+  --log-dir ./desktop-check-logs --receipt ./desktop-check-logs/receipt.json
+OFFLINE
+```
+
+Make the PostgreSQL 17 binaries available on `PATH` before running the check.
+The block above reproduces the loopback-only run. For a LAN journey
+qualification, add the isolated dummy interface shown under Network guard
+before dropping privileges. The focused Anycubic discovery case that failed
+on loopback alone passed with `dummy0` and no default route (1.3 s for the
+case, 40.2 s for Playwright). The focused Bambu browser journey and
+Creality discovery case also passed with `dummy0` (2.1 min and 3.4 s,
+respectively). The focused runs recorded zero non-loopback attempts. The
+combined receipt still belongs to the original namespace.
+The runner and guard contract gate passed 12 tests in 1.20 s. It does not run
+Playwright. A separate `--guard-probe --only network-guard-probe` run in the
+namespace exited 1 in 59 ms and recorded one blocked `fetch` to
+`example.com`. Interface counters were unchanged, and only loopback existed
+with no external route. A separate run with Go absent from `PATH` listed
+`build-rtsp-ingest` as skipped in 0 ms and explained that Go 1.26 or later
+was required. The Node suite passed 1,966 cases and skipped eight opt-in
+cases. Two real-FFmpeg qualifications require
+`OPENFARM_CAMERA_FFMPEG_QUALIFY=1`. The sandbox smoke requires
+`OPENFARM_INTEGRATION_E2E=1`. The pause-control RTC case requires
+`PAUSE_CONTROL_RTC=yes`. The two authenticated HTTPS/RTC cases require
+`SIGNALLING_HTTPS_RTC_FIXTURE=yes` and parent-owned fixtures. The two external
+GPL artifact cases require artifacts supplied by their parent.
+
+### README desktop reproduction
+
+On a separate clean ARM64 checkout inside an equivalent network namespace,
+`npm ci --ignore-scripts` with npm offline mode and the staged native cache
+passed in 9.69 s. The offline dependency report and `npm run build` passed.
+The build took 27.38 s.
+
+The documented `initdb` succeeded. The next command, `pg_ctl start`, failed
+because the packaged PostgreSQL tried to create its socket lock in
+`/var/run/postgresql` and received `Permission denied`. For diagnosis,
+adding `-k $OPENFARM_DB_DIR` to the server options let the cluster start and
+`createdb` pass. The documented database environment then left `npm run dev`
+serving HTTP 500 for `/farm` with `invalid-config`. With
+`NUXT_DATABASE_MIGRATIONS_DIR="$PWD/infra/db/migrations"` added, `/farm`
+returned HTTP 200 in dev and in the compiled server. The disposable cluster
+stopped with `pg_ctl stop`.
+
+`npm run sim:verify` passed in 0.94 s, and
+`npm run desktop:check -- --only app-smoke` passed in 5.74 s. The smoke
+opened `/farm` in Chrome and recorded telemetry for both `sv06` and `u1`.
+Its page assertions cover loading, rendered text and loopback requests.
+They do not establish that the printer names appear in the page.
+`npm run desktop:check -- --list` listed all 14 steps.
+
+On a separate Ubuntu amd64 guest with Node 22.23.5 x64, the documented
+`desktop:bundle` glibc staging pass succeeded. Its musl staging pass
+failed during `nuxt prepare` while loading Rolldown. The error reported
+missing `@rolldown/binding-wasm32-wasi` and the glibc native binding.
+No archive was emitted, so archive extraction, archive-backed offline install
+and the per-package fallbacks remain unverified. A separate glibc-native
+cache did support `npm ci --offline --ignore-scripts` and `npm run build`
+on a clean x64 checkout in a loopback-only namespace. The x64 install took
+17.40 s and the build took 57.55 s. This cache run used no generated bundle.
+
+### Combined gate result on ARM64
+
+**BLOCKED.** The loopback-only run exited 1 after 36 min 27 s with
+13 passed, one failed and zero skipped steps. The guard logged zero
+non-loopback attempts. Every step had a duration in the console summary
+and receipt.
+
+| Step                | Status          | Duration (ms) |
+| ------------------- | --------------- | ------------: |
+| `preflight`         | passed          |            82 |
+| `lint`              | passed          |        43,567 |
+| `typecheck`         | passed          |        43,692 |
+| `vitest`            | passed          |       239,680 |
+| `test-node`         | passed          |       326,468 |
+| `rtsp-supervisor`   | passed          |         2,983 |
+| `rtsp-framing`      | passed          |           197 |
+| `build`             | passed          |        18,301 |
+| `build-rtsp-ingest` | passed          |         1,760 |
+| `test-postgres`     | passed          |       194,802 |
+| `test-e2e`          | passed          |        26,920 |
+| `test-journey`      | failed (exit 1) |     1,275,916 |
+| `test-sim-farm`     | passed          |         7,161 |
+| `app-smoke`         | passed          |         5,788 |
+
+Playwright E2E passed 67 cases and skipped 27. The skipped cases were the
+23 authentication lockout and session cases, one browser device case,
+two pairing cases and one printer assignment case. Their configurations
+require explicitly provisioned disposable HTTPS and PostgreSQL fixtures,
+including the separate remaining-cases pairing phase.
+
+The journey suite passed the KobraLink bridge discovery case and failed the
+following 11 cases. Its serial groups left 25 later cases unrun.
+
+| Case                                                          | Failure                                                   |
+| ------------------------------------------------------------- | --------------------------------------------------------- |
+| `anycubic.spec.ts:443:5`, discovery and assignment            | `Não foi possível procurar impressoras. Tente novamente.` |
+| `bambu.spec.ts:295:5`, browser journey                        | `#kobra-prepared-heading` absent after 60 s               |
+| `creality.spec.ts:251:5`, discovery and farm listing          | `Não foi possível procurar impressoras. Tente novamente.` |
+| `harness-smoke.spec.ts:32:5`, Moonraker fixture telemetry     | `Conexão direta autenticada` absent after 60 s            |
+| `harness-vendors.spec.ts:70:7`, Bambu simulator telemetry     | `Conexão direta autenticada` absent after 60 s            |
+| `harness-vendors.spec.ts:70:7`, Creality simulator telemetry  | `Conexão direta autenticada` absent after 60 s            |
+| `harness-vendors.spec.ts:70:7`, Anycubic simulator telemetry  | `Conexão direta autenticada` absent after 60 s            |
+| `harness-vendors.spec.ts:70:7`, KobraLink simulator telemetry | `Conexão direta autenticada` absent after 60 s            |
+| `kobra-x-native.spec.ts:33:5`, native setup and confirmation  | `#kobra-prepared-heading` absent after 60 s               |
+| `kobralink.spec.ts:204:5`, bridge telemetry on the farm page  | `Conexão direta autenticada` absent after 60 s            |
+| `moonraker.spec.ts:37:5`, journey and job completion          | `Conexão direta autenticada` absent after 60 s            |
+
+The three focused `dummy0` cases provide evidence for that topology. The
+remaining eight failed cases have no result on `dummy0`. Both issues remain
+open pending a fresh combined run on the integrated candidate and the
+README acceptance.
+
+## Integrated candidate with an isolated LAN interface
+
+Candidate `10cb8318623f9cea64bae41a09b1a286eae464e9` incorporates the
+bundle staging fix. The ARM64 combined run used Ubuntu 24.04.5, Node
+22.23.5, npm 10.9.9, system Chrome 158.0.8127.36, local PostgreSQL 17.12
+and Go 1.27.4. Docker was absent from `PATH`, and FFmpeg was disabled in
+the combined run. The namespace had loopback and the documented
+`dummy0` address. IPv4 and IPv6 had no default route; the simulated
+services listened on loopback.
+
+The standalone guard probe exited 1 in 41 ms and recorded one blocked
+attempt. The dummy interface's transmit counters did not change during the
+probe. The focused runner
+and guard contract passed all 12 cases. The Node suite passed 1,967 cases
+and skipped the same eight opt-in cases described in the loopback-only
+receipt. Playwright E2E and the separate PostgreSQL gate both passed.
+
+### README and bundle verification
+
+On a separate clean ARM64 checkout, the corrected guide's complete sequence
+used the staged native npm cache. Install took 7.62 s and build took
+24.48 s. The documented PostgreSQL commands passed after ordering
+`initdb` before creation of the socket directory and giving Nuxt the
+migration directory. The dev server and built server both returned HTTP 200
+for `/farm`. The simulator check and Chrome app-smoke passed. The focused
+Moonraker journey passed in 45.5 s and verified the printer card and
+reported progress in the browser. The guard logged zero attempts. The
+README contract suite passed all 13 cases with the revised guide.
+
+On Ubuntu amd64 with Node 22.23.5 x64, the documented direct bundle command
+staged both glibc and musl and emitted a 605-entry archive in 65.66 s.
+After extraction into an empty cache, an isolated clean glibc checkout
+installed from the archive in 26.21 s and built in 90.58 s. This verifies
+the archive-backed install on the declared x64 target. The musl runtime
+and individual native-package replacement recipes were outside this run.
+
+The amd64 guest also passed PostgreSQL setup, dev and compiled `/farm`
+HTTP checks, the simulator check and app-smoke using Chrome 158.0.8127.36.
+The focused visible-printer journey failed twice in that guest at
+`tests/helpers/kobralink-rtc/acceptance.ts:49`. The browser waited 10 s
+for Vue to mount on `/entrar` and timed out before the farm assertion.
+The guarded diagnostic rerun recorded zero attempted outbound connections.
+The successful ARM64 browser run and the successful amd64 archive install
+each apply to their respective targets.
+
+### Combined result on the documented topology
+
+**BLOCKED.** The combined run took 35 min 5 s, with 13 steps passed,
+one failed and zero skipped. The guard logged zero attempts. E2E
+passed 67 cases and skipped the same 27 fixture-dependent cases as
+the loopback-only run. PostgreSQL passed all 34 jobs.
+
+| Step                | Status          | Duration (ms) |
+| ------------------- | --------------- | ------------: |
+| `preflight`         | passed          |           148 |
+| `lint`              | passed          |        45,635 |
+| `typecheck`         | passed          |        42,112 |
+| `vitest`            | passed          |       281,447 |
+| `test-node`         | passed          |       398,582 |
+| `rtsp-supervisor`   | passed          |         2,967 |
+| `rtsp-framing`      | passed          |           226 |
+| `build`             | passed          |        21,230 |
+| `build-rtsp-ingest` | passed          |         1,998 |
+| `test-postgres`     | passed          |       177,837 |
+| `test-e2e`          | passed          |        25,224 |
+| `test-journey`      | failed (exit 1) |     1,087,641 |
+| `test-sim-farm`     | passed          |         7,419 |
+| `app-smoke`         | passed          |        12,972 |
+
+The journey suite passed 36 of 37 cases. The sole failure was
+`tests/journey/kobralink.spec.ts:390:5`, “the finished job shows its end card
+and history entry.” At line 411 the unnamed progressbar locator expected
+zero elements and still found one after 15 s. The card's reported-progress
+ring and the status-wall progressbar share that role. The focused fix uses
+the existing `reportedProgress` locator and keeps the zero-count assertion
+for the reported ring alongside all end-card and history assertions.
+
+The first focused rerun reached the history assertions and failed at line 428. Both history rows include a sixth cell for library provenance. The
+test now asserts `Fora da biblioteca` for the bridge-uploaded and
+cancelled jobs, along with the existing printer, outcome, filename,
+timestamp and duration checks.
+
+The second focused rerun verified both six-cell rows and reached the
+empty-filter assertion. The page rendered the heading
+`Nenhum trabalho finalizado`; the old assertion looked for
+`Nenhum trabalho finalizado registrado.`. That run also logged
+`Runtime fixture cleanup/failure` with a Connector exit by `SIGKILL`.
+These findings belong to the separate KobraLink correction. This report
+does not change the journey test or replace the combined receipt.

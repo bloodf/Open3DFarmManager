@@ -20,6 +20,8 @@ test('release upload and publication require a successful rehearsed build', () =
   )
   assert.ok(jobs)
   const [, build, publish] = jobs
+  assert.ok(build)
+  assert.ok(publish)
   assert.match(
     build,
     /- uses: actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 0\n/,
@@ -129,7 +131,12 @@ fi
 
     const commands = readFileSync(trace, 'utf8').trim().split('\n')
     const compose = commands.filter((command) => command.startsWith('compose '))
-    const manifest = compose[0].split(' ')[4]
+    const [startup] = compose
+    assert.ok(startup)
+    const manifest = /^compose --project-name \S+ -f (.+) up /.exec(
+      startup,
+    )?.[1]
+    assert.ok(manifest)
     assert.ok(dirname(manifest).startsWith(join(directory, project + '-')))
     const prefix = `compose --project-name ${project} -f ${manifest}`
     assert.deepEqual(compose, [

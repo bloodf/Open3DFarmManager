@@ -27,9 +27,9 @@ export default defineConfig({
   plugins: [rawImports],
   test: {
     include: ['tests/unit/**/*.test.ts'],
-    // These two stay on node:test (retained Node-native tests) and run under
-    // the node --test suite; Vitest must not discover them here.
+    // Node entry points run separately from Vitest discovery.
     exclude: [
+      'tests/unit/api-v1-contract.test.ts',
       'tests/unit/pause-authority-tooling.test.ts',
       'tests/unit/pause-authority-timeout.test.ts',
     ],

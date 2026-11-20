@@ -171,6 +171,27 @@ authenticate with `jobs:start` and `control:basic` before calling them.
 simulated Moonraker printer and the Connector, which accepts only a signed
 envelope. The run does not contact a physical printer.
 
+With Node 22 and workspace dependencies installed, run the offline command checks:
+
+```sh
+node --test tests/unit/api-v1-contract.test.ts
+node --test tests/node/connector-api-envelope.test.ts tests/node/integration-client-example.test.ts
+```
+
+The contract suite starts an isolated sandbox fixture on loopback. The
+reference client authenticates and submits a job, pause and cancel through
+the v1 middleware and route handlers. The fixture signs each queued
+command and delivers it over HTTP to the Connector envelope runner.
+The runner verifies the envelope and authority, downloads and checks the
+HTTPS fixture, uploads it to synthetic Moonraker and sends the commands
+in order. The test checks each observed printer state, the Connector
+outcomes and the client exchanges against the published OpenAPI source.
+
+The fixture uses in-memory stores and a test inbox. The Compose sandbox,
+production WebSocket inbox and physical printers require separate
+validation. The Node contract entry point runs the Vitest suite and
+propagates failures.
+
 ## Versioning and compatibility
 
 The major version is in the path (`/api/integrations/v1`). Compatible additions

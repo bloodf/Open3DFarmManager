@@ -68,6 +68,16 @@ test('rejects a Dockerfile whose final stage is not the pinned digest', () => {
 })
 
 test('rejects printer services that do not build from ./klipper', () => {
+  const anchorImageOverride = repoCompose.replace(
+    'image: openfarm-klipper:sim',
+    'image: busybox',
+  )
+  assert.notEqual(anchorImageOverride, repoCompose)
+  assert.throws(
+    () => check(anchorImageOverride, repoDockerfile),
+    /do not build from \.\/klipper/,
+  )
+
   const imageOverride = repoCompose.replace(
     '  sv06:\n    <<: *printer\n',
     '  sv06:\n    <<: *printer\n    image: busybox\n',

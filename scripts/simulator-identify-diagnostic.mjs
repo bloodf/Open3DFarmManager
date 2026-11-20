@@ -1113,11 +1113,11 @@ function yamlBlock(lines, key, indent) {
   return block
 }
 
-function buildsFromKlipper(block) {
+function buildsFromKlipper(block, allowedImage) {
   return (
     block.includes('build:') &&
     block.includes('context: ./klipper') &&
-    !block.some((line) => line.startsWith('image:'))
+    !block.some((line) => line.startsWith('image:') && line !== allowedImage)
   )
 }
 
@@ -1148,7 +1148,7 @@ export function verifyComposePin(composeFile) {
     const inherited =
       block !== null &&
       anchor !== null &&
-      buildsFromKlipper(anchor) &&
+      buildsFromKlipper(anchor, 'image: openfarm-klipper:sim') &&
       block.includes('<<: *printer') &&
       !block.some((line) => /^(image|build):/.test(line))
     if (!ownBuild && !inherited)

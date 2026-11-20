@@ -168,6 +168,28 @@ offline tests and an explicitly opt-in sandbox test. The latter needs a
 sandbox URL, client credentials and a printer ID; it reads printer state and
 inventory without sending a physical command.
 
+With Node 22 and workspace dependencies installed, run the offline command checks:
+
+```sh
+node --test tests/unit/api-v1-contract.test.ts
+node --test tests/node/connector-api-envelope.test.ts tests/node/integration-client-example.test.ts
+```
+
+The contract suite sends the reference client's token, start-job, pause and
+cancel requests through the v1 middleware and route handlers. It validates
+the requests and responses against the published OpenAPI source and checks
+the commands queued for delivery. The Connector suite sends the same client
+sequence through a mock API that issues signed envelopes. The real Connector
+runner verifies those envelopes and the grant, downloads and verifies the
+HTTPS fixture, uploads it to a loopback Moonraker mock, and dispatches
+`start_print`, `pause` and `cancel` to a mock driver. The fixture supplies
+the observed printer states between commands.
+
+These checks cover the v1 contract and Connector command execution using
+separate test boundaries. The API-to-Connector inbox, hosted sandbox and
+physical printer behavior remain outside this proof. The Node contract
+entry point runs the full Vitest suite and propagates failures.
+
 ## Versioning and compatibility
 
 The major version is in the path (`/api/integrations/v1`). Compatible additions

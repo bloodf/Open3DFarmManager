@@ -97,7 +97,13 @@ async function exists(path: string) {
   }
 }
 
-async function generate(directory: string, origin: string, admin: URL) {
+async function generate(
+  directory: string,
+  origin: string,
+  database: URL,
+  compose: boolean,
+) {
+  const keyDirectory = compose ? '/run/openfarm-keys' : directory
   const write = (name: string, body: string) =>
     writeFile(join(directory, name), body, { flag: 'wx', mode: 0o600 })
   const pairing = generateKeyPairSync('ed25519')
@@ -140,16 +146,16 @@ async function generate(directory: string, origin: string, admin: URL) {
     AUTH_SESSION_SECRET: randomSecret(),
     AUTH_BOOTSTRAP_TOKEN: randomSecret(),
     CONNECTOR_PAIRING_SIGNING_KEY_ID: 'pairing-v1',
-    CONNECTOR_PAIRING_SIGNING_KEY_PATH: join(directory, 'pairing.pem'),
+    CONNECTOR_PAIRING_SIGNING_KEY_PATH: join(keyDirectory, 'pairing.pem'),
     CONNECTOR_RENEWAL_SIGNING_KEY_ID: 'renewal-v1',
-    CONNECTOR_RENEWAL_SIGNING_KEY_PATH: join(directory, 'renewal.pem'),
+    CONNECTOR_RENEWAL_SIGNING_KEY_PATH: join(keyDirectory, 'renewal.pem'),
     CONNECTOR_RENEWAL_PROOF_AUDIENCE: 'open3dfarmmanager:renewal',
     PAUSE_AUTHORITY_ISSUER: issuer,
     PAUSE_AUTHORITY_KID: pauseKid,
     PAUSE_AUTHORITY_AUDIENCE: 'open3dfarmmanager:pause',
     PAUSE_AUTHORITY_CREDENTIAL_ISSUER: issuer,
     PAUSE_AUTHORITY_CREDENTIAL_AUDIENCE: audience,
-    PAUSE_AUTHORITY_ISSUER_KEY_PATH: join(directory, 'pause.json'),
+    PAUSE_AUTHORITY_ISSUER_KEY_PATH: join(keyDirectory, 'pause.json'),
     PAUSE_AUTHORITY_ISSUER_PUBLIC_KEY_SPKI: pause.publicKey
       .export({ type: 'spki', format: 'der' })
       .toString('base64url'),
@@ -166,7 +172,7 @@ async function generate(directory: string, origin: string, admin: URL) {
   }
   for (const feature of ['CONNECTOR_TELEMETRY', 'CONNECTOR_RENEWAL']) {
     values[feature + '_PUBLIC_KEY_REGISTRY_PATH'] = join(
-      directory,
+      keyDirectory,
       'verification-keys.json',
     )
     values[feature + '_PROOF_TTL_MS'] = '30000'
@@ -174,7 +180,7 @@ async function generate(directory: string, origin: string, admin: URL) {
   }
   const installation = randomBytes(8).toString('hex')
   for (const [name, role] of Object.entries(roles)) {
-    const url = new URL(admin)
+    const url = new URL(database)
     url.username = `o3dfm_${installation}_${role.slice(5)}`
     url.password = randomSecret()
     values[name] = url.href
@@ -182,7 +188,10 @@ async function generate(directory: string, origin: string, admin: URL) {
       ![
         'CONNECTOR_PAIRING_PROOF_DATABASE_URL',
         'CONNECTOR_PAIRING_REVOCATION_DATABASE_URL',
-      ].includes(name)
+      ].includes(name) &&
+      (!compose ||
+        name === 'DATABASE_DATABASE_URL' ||
+        name === 'AUTH_DATABASE_URL')
     )
       values[name.replace(/_DATABASE_URL$/, '_ENABLED')] = 'true'
   }
@@ -264,6 +273,7 @@ export async function initialize(
   origin: string,
   databaseUrl: string,
   provision: Provision = psql,
+  compose = false,
 ) {
   directory = resolve(directory)
   if (!/^[/a-zA-Z0-9._ -]+$/.test(directory) || directory.length > 1950)
@@ -276,11 +286,16 @@ export async function initialize(
   )
     throw new Error('Expected a canonical HTTPS origin')
   const admin = databaseTarget(databaseUrl)
+  const database = new URL(admin)
+  if (compose) {
+    database.hostname = 'postgres'
+    database.port = '5432'
+  }
   const pending = join(directory, '.init-pending')
   const output = join(directory, 'app.env')
   if (!(await exists(directory))) {
     await mkdir(directory, { mode: 0o700 })
-    const contents = await generate(directory, origin, admin)
+    const contents = await generate(directory, origin, database, compose)
     await writeFile(pending, contents, { flag: 'wx', mode: 0o600 })
   }
   const stat = await lstat(directory)
@@ -295,7 +310,7 @@ export async function initialize(
     const env = parseEnv(await readPrivate(output, pending))
     if (env.NUXT_AUTH_ORIGIN !== origin)
       throw new Error('Existing initialization does not match the HTTPS origin')
-    roleSql(env, admin)
+    roleSql(env, database)
     if (await exists(pending)) {
       const [published, staged] = await Promise.all([
         lstat(output),
@@ -320,7 +335,7 @@ export async function initialize(
     'verification-keys.json',
   ])
     await readPrivate(join(directory, name))
-  provision(admin, roleSql(env, admin))
+  provision(admin, roleSql(env, database))
   // The hard link provides an exclusive, atomic publish within the private directory.
   await link(pending, output)
   await unlink(pending)
@@ -330,16 +345,28 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const [directory, origin, ...extra] = process.argv.slice(2)
+  const [directory, origin, mode, ...extra] = process.argv.slice(2)
   const databaseUrl = process.env.OPENFARM_INIT_DATABASE_URL
-  if (!directory || !origin || !databaseUrl || extra.length) {
+  if (
+    !directory ||
+    !origin ||
+    !databaseUrl ||
+    (mode !== undefined && mode !== '--compose') ||
+    extra.length
+  ) {
     console.error(
-      'Usage: set OPENFARM_INIT_DATABASE_URL privately, then run node scripts/self-host/init.ts <new-private-directory> <https-origin>. Apply database migrations first.',
+      'Usage: set OPENFARM_INIT_DATABASE_URL privately, then run node scripts/self-host/init.ts <new-private-directory> <https-origin> [--compose]. Apply database migrations first.',
     )
     process.exitCode = 1
   } else {
     try {
-      await initialize(directory, origin, databaseUrl)
+      await initialize(
+        directory,
+        origin,
+        databaseUrl,
+        psql,
+        mode === '--compose',
+      )
       console.log(
         'Initialization ready. Load app.env and give the server read access to the key files at their configured paths.',
       )

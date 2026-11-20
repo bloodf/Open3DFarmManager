@@ -1,4 +1,12 @@
-import { appendFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import type { Sql } from 'postgres'
@@ -20,8 +28,6 @@ const PREVIOUS_ID = '0079_bambu_cloud_accounts'
 // editing 0080; restore the released file instead.
 const SHIPPED_CHECKSUM =
   '1a25ad93f647fb32163daae2726c7716608cb01c65321b6756d4b0ef2d338d5e'
-const LEDGER =
-  '/home/cortexos/.local/share/t3-cortexos/task-ledgers/387-library-migration-upgrade.txt'
 
 describe('shipped 0080 library migration', () => {
   test('keeps the released file and checksum, and matches both constraint renderings at execution', async () => {
@@ -114,24 +120,64 @@ function def(rows: readonly CheckRow[], name: string): string {
   return row?.def ?? ''
 }
 
+async function cleanupCluster(stop: () => Promise<void>, ledgerPath: string) {
+  try {
+    await stop()
+  } catch (cause) {
+    throw new Error(
+      `Database cleanup failed. Resource ledger retained at ${ledgerPath}`,
+      {
+        cause,
+      },
+    )
+  }
+  rmSync(dirname(ledgerPath), { recursive: true, force: true })
+}
+
+test('retains and reports the resource ledger when database cleanup fails', async () => {
+  const ledgerDir = mkdtempSync(join(tmpdir(), 'o3dfm-migration-ledger-check-'))
+  const ledgerPath = join(ledgerDir, 'resources.log')
+  const record = '{"resource":"cluster","name":"fixture"}\n'
+  const failure = new Error('simulated stop failure')
+
+  try {
+    writeFileSync(ledgerPath, record, { mode: 0o600 })
+    await expect(
+      cleanupCluster(async () => {
+        throw failure
+      }, ledgerPath),
+    ).rejects.toMatchObject({
+      message: `Database cleanup failed. Resource ledger retained at ${ledgerPath}`,
+      cause: failure,
+    })
+    expect(readFileSync(ledgerPath, 'utf8')).toBe(record)
+  } finally {
+    rmSync(ledgerDir, { recursive: true, force: true })
+  }
+})
+
 async function withCluster(
   name: string,
   through: string | false,
   body: (sql: Sql) => Promise<void>,
 ) {
   delete process.env.OPENFARM_PG
+  const ledgerDir = mkdtempSync(join(tmpdir(), 'o3dfm-migration-ledger-'))
+  const ledgerPath = join(ledgerDir, 'resources.log')
   const database = disposablePostgres({
     name,
     isolated: true,
     through,
     ledger: (value) => {
-      appendFileSync(LEDGER, `${name} ${JSON.stringify(value)}\n`)
+      appendFileSync(ledgerPath, `${name} ${JSON.stringify(value)}\n`, {
+        mode: 0o600,
+      })
     },
   })
   try {
     await body(await database.start())
   } finally {
-    await database.stop()
+    await cleanupCluster(() => database.stop(), ledgerPath)
   }
 }
 

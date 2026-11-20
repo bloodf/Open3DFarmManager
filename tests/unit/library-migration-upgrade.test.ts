@@ -1,4 +1,6 @@
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import type { Sql } from 'postgres'
@@ -20,8 +22,6 @@ const PREVIOUS_ID = '0079_bambu_cloud_accounts'
 // editing 0080; restore the released file instead.
 const SHIPPED_CHECKSUM =
   '1a25ad93f647fb32163daae2726c7716608cb01c65321b6756d4b0ef2d338d5e'
-const LEDGER =
-  '/home/cortexos/.local/share/t3-cortexos/task-ledgers/387-library-migration-upgrade.txt'
 
 describe('shipped 0080 library migration', () => {
   test('keeps the released file and checksum, and matches both constraint renderings at execution', async () => {
@@ -120,18 +120,26 @@ async function withCluster(
   body: (sql: Sql) => Promise<void>,
 ) {
   delete process.env.OPENFARM_PG
+  const ledgerDir = mkdtempSync(join(tmpdir(), 'o3dfm-migration-ledger-'))
+  const ledgerPath = join(ledgerDir, 'resources.log')
   const database = disposablePostgres({
     name,
     isolated: true,
     through,
     ledger: (value) => {
-      appendFileSync(LEDGER, `${name} ${JSON.stringify(value)}\n`)
+      appendFileSync(ledgerPath, `${name} ${JSON.stringify(value)}\n`, {
+        mode: 0o600,
+      })
     },
   })
   try {
     await body(await database.start())
   } finally {
-    await database.stop()
+    try {
+      await database.stop()
+    } finally {
+      rmSync(ledgerDir, { recursive: true, force: true })
+    }
   }
 }
 

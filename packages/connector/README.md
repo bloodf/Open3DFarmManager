@@ -59,3 +59,48 @@ impressoras nem fallback de estado ao vivo da fazenda por HTTP.
 O listener acompanha o `run`: falha ao ocupar a porta encerra o processo pelo fluxo
 normal de limpeza; SIGINT/SIGTERM e falhas do agente fecham conexões e liberam o
 listener antes de fechar a fila. `collect` não aceita a opção.
+
+## Serviço systemd no Raspberry Pi
+
+Use Raspberry Pi OS com systemd, Node.js 22.18 ou superior da série 22 e npm. Instale uma versão de Node compatível com a arquitetura do host em `/usr/bin/node`. Os comandos abaixo pressupõem um checkout desta versão do projeto e acesso administrativo. Consulte a documentação da fazenda para obter a URL HTTPS e o audience de pareamento.
+
+1. No checkout, instale as dependências com `npm ci` e execute `npm run build -w @open3dfarmmanager/connector`. Crie a conta e instale o pacote completo, incluindo os avisos de licença:
+
+   ```sh
+   sudo useradd --system --home-dir /var/lib/openfarm-connector --shell /usr/sbin/nologin openfarm-connector
+   sudo install -d -o openfarm-connector -g openfarm-connector -m 700 /var/lib/openfarm-connector
+   sudo install -d -m 755 /opt/openfarm-connector
+   sudo cp -R packages/connector/dist /opt/openfarm-connector/
+   ```
+
+2. Inicialize e pareie usando a conta do serviço. Substitua a URL e o audience pelos valores da sua fazenda; confira o fingerprint no navegador antes de aprovar o código.
+
+   ```sh
+   sudo -u openfarm-connector /usr/bin/node /opt/openfarm-connector/dist/cli.js init-identity --data-dir /var/lib/openfarm-connector
+   sudo -u openfarm-connector /usr/bin/node /opt/openfarm-connector/dist/cli.js pair --server https://farm.example --audience AUDIENCE --data-dir /var/lib/openfarm-connector --credential-file /var/lib/openfarm-connector/credential.json
+   sudo -u openfarm-connector /usr/bin/node /opt/openfarm-connector/dist/cli.js status --data-dir /var/lib/openfarm-connector --credential-file /var/lib/openfarm-connector/credential.json
+   ```
+
+3. Crie `/var/lib/openfarm-connector/runtime.json` com proprietário `openfarm-connector` e modo `600`. Configure os IDs retornados pelo pareamento e as atribuições da fazenda conforme [configuração de runtime](../../docs/CONNECTOR-AGENT-RUNTIME-CHECKPOINT.md) e o [exemplo de configuração](../../docs/HARDWARE-ACCEPTANCE-CHECKLIST.md#appendix-a-redacted-configuration-samples). Não publique esse arquivo nem a credencial.
+
+4. Instale e inicie a unidade:
+
+   ```sh
+   sudo install -m 644 infra/systemd/open3dfarm-connector.service /etc/systemd/system/
+   sudo systemd-analyze verify /etc/systemd/system/open3dfarm-connector.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now open3dfarm-connector.service
+   systemctl status open3dfarm-connector.service
+   journalctl -u open3dfarm-connector.service -e
+   ```
+
+   `active (running)` indica o processo ativo; confira também os logs e o estado da fazenda. Em caso de falha, corrija a configuração ou o pareamento antes de reiniciar.
+
+5. Para atualizar, pare o serviço e preserve um backup privado da identidade, credencial e configuração. No checkout da nova versão, execute `npm ci` e o build acima. Execute a migração com a conta do serviço a partir do checkout atualizado:
+
+   ```sh
+   sudo systemctl stop open3dfarm-connector.service
+   sudo -u openfarm-connector /usr/bin/node scripts/connector-config-migrate.ts /var/lib/openfarm-connector/runtime.json
+   ```
+
+   Se a migração falhar, mantenha o serviço parado e examine o erro e o backup. Após sucesso, substitua `/opt/openfarm-connector/dist` pelo novo diretório completo, instale a unidade atualizada se necessário, execute `sudo systemctl daemon-reload` e `sudo systemctl start open3dfarm-connector.service`. Confira o status e os logs como acima. A migração exige o código-fonte e as dependências da versão nova no checkout.

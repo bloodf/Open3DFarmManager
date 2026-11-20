@@ -17,7 +17,11 @@ const keys: FarmKeyState = {
 }
 const row = (
   printerKey: string,
-  over: { state?: string; connection?: FarmRow['connection'] } = {},
+  over: {
+    state?: string
+    connection?: FarmRow['connection']
+    controls?: string[]
+  } = {},
 ): FarmRow =>
   ({
     assignment: {
@@ -33,6 +37,7 @@ const row = (
       state: {
         printerKey,
         state: over.state ?? 'idle',
+        ...(over.controls ? { controls: over.controls } : {}),
         identity: { vendor: 'bambu' },
         materials: [{ slot: '0', materialType: 'PLA', colorHex: 'FF0000FF' }],
       },
@@ -61,6 +66,16 @@ describe('liveReplayInfo', () => {
     expect(liveReplayInfo(row('a'), { kind: 'loading' }, true, NOW).live).toBe(
       false,
     )
+  })
+
+  it('requires the advertised start print capability for library replay', () => {
+    expect(
+      liveReplayInfo(row('a', { controls: ['start_print'] }), keys, true, NOW)
+        .live,
+    ).toBe(true)
+    expect(
+      liveReplayInfo(row('a', { controls: ['pause'] }), keys, true, NOW).live,
+    ).toBe(false)
   })
 
   it('marks an offline printer so the dialog says the Connector is offline', () => {

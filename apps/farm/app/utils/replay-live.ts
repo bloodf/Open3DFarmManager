@@ -1,5 +1,5 @@
 // Live side of replay: what the signed session knows about each printer and
-// the single signed `start_library_print` it sends. Nothing here retries.
+// signed `start_library_print` sessions used by replay.
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import { controlActionAvailability, type Clock } from './farm-control.ts'
 import type { FarmKeyState, FarmRow } from './farm-view.ts'
@@ -27,13 +27,8 @@ export function liveReplayInfo(
     connectorOnline: online,
     live:
       online &&
-      controlActionAvailability(
-        'start_library_print',
-        row,
-        keys,
-        controlEnabled,
-        now,
-      ).available,
+      controlActionAvailability('start_print', row, keys, controlEnabled, now)
+        .available,
     ...(state ? { state: state.state } : {}),
     ...(vendor ? { backend: vendor } : {}),
     materials: (state?.materials ?? []).map((m) => ({
@@ -71,39 +66,41 @@ export type ReplayControl = {
   dispose(): Promise<void>
 }
 
-/**
- * Opens a session, sends one signed `start_library_print` and closes it. A
- * session that never gets ready sends nothing; an uncertain outcome is
- * reported as such and never resent.
- */
+/** Retry only a command that was not sent and has no refusal reason. */
 export async function sendLibraryReplay(
   connect: (
     onState: (state: FarmPauseControlState) => void,
   ) => Promise<ReplayControl>,
   args: LibraryPrintArgs,
 ): Promise<ReplayResult> {
-  let code: string | undefined
-  let control: ReplayControl
-  try {
-    control = await connect((state) => {
-      if (state.kind === 'settled' && state.code) code = state.code
-    })
-  } catch {
-    return { outcome: 'not-sent' }
-  }
-  try {
-    const outcome = await control.issueControlCommand(
-      'start_library_print',
-      args,
-    )
-    return {
-      outcome: outcome ?? 'not-sent',
-      ...(code ? { code } : {}),
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let code: string | undefined
+    let result: ReplayResult = { outcome: 'not-sent' }
+    let control: ReplayControl | undefined
+    try {
+      control = await connect((state) => {
+        if (state.kind === 'settled' && state.code) code = state.code
+      })
+    } catch {
+      result = { outcome: 'not-sent', ...(code ? { code } : {}) }
     }
-  } catch {
-    return { outcome: 'outcome-unknown' }
-  } finally {
-    control.close()
-    await control.dispose()
+    if (control) {
+      try {
+        const outcome = await control.issueControlCommand(
+          'start_library_print',
+          args,
+        )
+        result = { outcome: outcome ?? 'not-sent', ...(code ? { code } : {}) }
+      } catch {
+        result = { outcome: 'outcome-unknown' }
+      } finally {
+        control.close()
+        await control.dispose()
+      }
+    }
+    if (result.outcome !== 'not-sent' || result.code || attempt === 2)
+      return result
+    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
   }
+  return { outcome: 'not-sent' }
 }

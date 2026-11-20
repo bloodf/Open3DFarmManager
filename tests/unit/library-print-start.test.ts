@@ -429,6 +429,40 @@ describe('Connector mode (local library)', () => {
     }
   })
 
+  test('prints a file the relay stored before any version was linked', async () => {
+    const store = await createLibraryStore({
+      directory: await directory('library-print-relayed-'),
+      freeBytes: async () => 1e12,
+    })
+    const body = gcode()
+    const hash = sha(body)
+    // The server's relay stores the bytes only: no version metadata is linked.
+    await store.put(
+      (async function* () {
+        yield body
+      })(),
+    )
+    expect(await store.list()).toEqual([])
+    const mock = await startMoonrakerMock()
+    try {
+      const { run, starts, calls } = await setup({}, { local: store })
+      expect(
+        await run(
+          { backend: 'moonraker', origin: mock.origin },
+          { sha256: hash },
+        ),
+      ).toMatchObject({
+        ok: true,
+        source: 'local',
+        name: `${hash.slice(0, 16)}.gcode`,
+      })
+      expect(calls).toEqual([])
+      expect(starts).toHaveLength(1)
+    } finally {
+      await mock.close()
+    }
+  })
+
   test('refuses an altered local file and never falls back to the server', async () => {
     const { store, hash } = await local()
     await writeFile(

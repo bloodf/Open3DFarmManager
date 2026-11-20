@@ -118,6 +118,17 @@ export type PrinterSeed = Readonly<{
    * when seeding multiple Moonraker printers or a second Connector.
    */
   live?: boolean
+  /**
+   * Moonraker only, for printers after the first: the mock's initial model and
+   * seeded settings (the first printer takes `BootOptions.moonraker`).
+   */
+  moonraker?: JourneyOptions['moonraker']
+  /**
+   * `connectAll` only: the printer gets its own Connector with signed control
+   * (needs `signedControl`), so a browser can send it commands. The first
+   * printer always has it.
+   */
+  control?: boolean
 }>
 
 export type SeededPrinter = Readonly<{
@@ -202,8 +213,10 @@ async function startSeedMock(
   family: PrinterFamily,
   printerKey: string,
   deviceId?: string,
+  moonraker?: PrinterSeed['moonraker'],
 ): Promise<SeededPrinter['mock']> {
-  if (family === 'moonraker') return startMoonrakerSimulator()
+  if (family === 'moonraker')
+    return startMoonrakerSimulator(moonraker?.initial, moonraker?.mock)
   if (family === 'kobra-x') return startKobraXMock({ reportIntervalMs: 0 })
   return startVendorSimulator(family as VendorName, {
     printerKey,
@@ -332,6 +345,27 @@ function mergeVendorBatchConfig(
   }
 }
 
+/** The `pause` runtime section that lets a browser send signed commands. */
+function signedControlSection(origin: string, assignmentId: string) {
+  const publicKeySpki = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
+  if (process.env.SIGNALLING_HTTPS_FARM_PAUSE !== 'yes' || !publicKeySpki)
+    throw new Error('A printer with control needs signedControl')
+  return {
+    pause: {
+      version: 1,
+      issuers: [{ issuer: origin, kid: 'pause-fixture', publicKeySpki }],
+      signalling: {
+        endpoint:
+          origin.replace('https:', 'wss:') + '/api/signalling/pause-connector',
+        origin,
+        audience: 'open3dfarmmanager:pause',
+        credentialAudience: AUDIENCE,
+      },
+      control: { assignmentId },
+    },
+  }
+}
+
 async function bootFarm(
   browser: Browser,
   guard: NetworkGuard,
@@ -361,7 +395,10 @@ async function bootFarm(
     if (seed.connector === 2 && seed.live !== false) {
       if (seed.family !== 'moonraker')
         throw new Error('Connector 2 live printers currently require moonraker')
-      const sim = await startMoonrakerSimulator()
+      const sim = await startMoonrakerSimulator(
+        seed.moonraker?.initial,
+        seed.moonraker?.mock,
+      )
       onClose(() => sim.close())
       liveExtras.set(printerKey, sim)
       c2LivePrinters.push({ printerKey, origin: sim.origin })
@@ -374,7 +411,10 @@ async function bootFarm(
         throw new Error(
           'Multi-printer live Connector 1 requires moonraker as the first printer',
         )
-      const sim = await startMoonrakerSimulator()
+      const sim = await startMoonrakerSimulator(
+        seed.moonraker?.initial,
+        seed.moonraker?.mock,
+      )
       onClose(() => sim.close())
       liveExtras.set(printerKey, sim)
       c1LivePrinters.push({ printerKey, origin: sim.origin })
@@ -513,7 +553,12 @@ async function bootFarm(
             : harness.agentId
         if (!targetAgentId)
           throw new Error('Secondary Connector is not running for assignment')
-        const mock = await startSeedMock(seed.family, printerKey)
+        const mock = await startSeedMock(
+          seed.family,
+          printerKey,
+          undefined,
+          seed.moonraker,
+        )
         onClose(() => closeMock(mock))
         const created = (await pagePost(
           harness.ownerPage,
@@ -572,8 +617,12 @@ async function bootFarm(
         items: { index: number; seed: PrinterSeed; printerKey: string }[]
       }[] = []
       for (const [family, items] of byFamily) {
-        for (let i = 0; i < items.length; i += 4)
-          batches.push({ family, items: items.slice(i, i + 4) })
+        // Signed control addresses one assignment: that printer is alone.
+        const shared = items.filter((item) => !item.seed.control)
+        for (const item of items.filter((entry) => entry.seed.control))
+          batches.push({ family, items: [item] })
+        for (let i = 0; i < shared.length; i += 4)
+          batches.push({ family, items: shared.slice(i, i + 4) })
       }
       for (const batch of batches) {
         const dir = await mkdtemp(join(tmpdir(), 'o3dfm-extra-conn-'))
@@ -627,6 +676,7 @@ async function bootFarm(
             batch.family,
             item.printerKey,
             `p${item.index + 1}`,
+            item.seed.moonraker,
           )
           onClose(() => closeMock(mock))
           const registered = (await pagePost(
@@ -709,6 +759,12 @@ async function bootFarm(
           configPath,
           JSON.stringify({
             ...runtimeBody,
+            ...(batch.items[0]!.seed.control
+              ? signedControlSection(
+                  harness.origin,
+                  startedItems[0]!.assignmentId,
+                )
+              : {}),
             telemetry: {
               endpoint: harness.origin + '/api/connector/telemetry',
               audience: AUDIENCE,

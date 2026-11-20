@@ -6,10 +6,6 @@ const ciSource = readFileSync(
   new URL('../../.github/workflows/ci.yml', import.meta.url),
   'utf8',
 )
-const composeSource = readFileSync(
-  new URL('../../infra/app/docker-compose.yml', import.meta.url),
-  'utf8',
-)
 const packageJson = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as {
@@ -128,9 +124,6 @@ const workflow = parseYamlSubset(ciSource)
 const jobs = workflow.jobs as Record<string, Record<string, Yaml>>
 const postgresJob =
   jobs.postgres ?? assert.fail('ci.yml must define a postgres job')
-const postgresService =
-  (postgresJob.services as Record<string, Record<string, string>>).postgres ??
-  assert.fail('postgres service must be defined')
 const steps = postgresJob.steps as Array<Record<string, Yaml>>
 
 test('Checks workflow is dispatch-only', () => {
@@ -138,7 +131,7 @@ test('Checks workflow is dispatch-only', () => {
 })
 
 test('postgres job exists and keeps the existing checkout and setup pattern', () => {
-  assert.equal(postgresJob['runs-on'], 'ubuntu-latest')
+  assert.equal(postgresJob['runs-on'], 'ubuntu-24.04')
   const uses = steps.map((step) => step.uses).filter(Boolean)
   assert.deepEqual(uses, [
     'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
@@ -146,13 +139,16 @@ test('postgres job exists and keeps the existing checkout and setup pattern', ()
   ])
 })
 
-test('postgres service image is pinned by digest and matches infra/app/docker-compose.yml', () => {
-  const composeImage = /image:\s*(postgres:17@sha256:[a-f0-9]{64})/.exec(
-    composeSource,
-  )?.[1]
-  assert.ok(composeImage, 'compose file must pin postgres:17 by digest')
-  assert.equal(postgresService.image, composeImage)
-  assert.match(postgresService.image, /^postgres:17@sha256:[a-f0-9]{64}$/)
+test('postgres job installs and selects local PostgreSQL 17 binaries', () => {
+  assert.equal(postgresJob.services, undefined)
+  const install = steps.find((step) =>
+    String(step.run ?? '').includes('apt-get install'),
+  )
+  assert.match(String(install?.run), /apt-get install -y -qq postgresql-17/)
+  const run = steps.find((step) =>
+    String(step.run ?? '').includes('npm run test:postgres'),
+  )
+  assert.deepEqual(run?.env, { OPENFARM_PG_BIN: '/usr/lib/postgresql/17/bin' })
 })
 
 test('postgres job runs test:postgres with bounded output and pipefail', () => {

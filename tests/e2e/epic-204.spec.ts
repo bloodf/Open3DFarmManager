@@ -54,7 +54,8 @@ test('reference client starts, pauses and cancels a simulated print', async ({
   test.setTimeout(15 * 60_000)
   process.env.OPENFARM_JOURNEY = '1'
   process.env.OPENFARM_JOURNEY_INTEGRATION_API = '1'
-  let startedJourney: Awaited<ReturnType<typeof startJourneyHarness>> | undefined
+  let startedJourney:
+    Awaited<ReturnType<typeof startJourneyHarness>> | undefined
   let files: Awaited<ReturnType<typeof startPrintFileServer>> | undefined
   try {
     const journey = await startJourneyHarness({

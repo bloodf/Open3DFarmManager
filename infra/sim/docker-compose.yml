@@ -2,6 +2,7 @@ name: open3dfarmmanager-sim
 x-printer: &printer
   # Derived from the pinned upstream digest in klipper/Dockerfile: optimised
   # simulavr build plus real-time pacing (docs/SIMULATOR-READINESS-RESULT.md).
+  image: openfarm-klipper:sim
   build:
     context: ./klipper
   platform: linux/amd64

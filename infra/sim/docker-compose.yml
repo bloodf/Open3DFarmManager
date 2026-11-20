@@ -37,8 +37,7 @@ services:
       - ./u1/moonraker.conf:/home/printer/example-configs/moonraker.conf:ro
   spoolman:
     user: '1000:1000'
-    image: ghcr.io/donkie/spoolman@sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa
-    platform: linux/amd64
+    image: ghcr.io/donkie/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1
     profiles: [spoolman]
     ports:
       - '127.0.0.1:${SIM_SPOOLMAN_PORT:-7912}:8000'

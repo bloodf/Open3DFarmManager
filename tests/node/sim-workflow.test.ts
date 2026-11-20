@@ -232,3 +232,10 @@ test('evidence summary leaves architecture links pending owner dispatch', () => 
     /arm64 \(`ubuntu-24\.04-arm`\): pending: owner dispatch/,
   )
 })
+
+test('Spoolman selects its pinned multi-platform image natively', () => {
+  const compose = readFileSync(new URL('../../infra/sim/docker-compose.yml', import.meta.url), 'utf8')
+  const spoolman = compose.split('  spoolman:\n')[1]?.split('  camera:\n')[0] ?? ''
+  assert.match(spoolman, /image: ghcr\.io\/donkie\/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1/)
+  assert.doesNotMatch(spoolman, /platform:/)
+})

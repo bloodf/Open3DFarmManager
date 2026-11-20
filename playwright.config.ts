@@ -36,7 +36,7 @@ const timeoutScale = Math.max(
 const legacyFlagPort = e2ePort('E2E_LEGACY_FLAG_PORT', 3102)
 
 const server = (serverPort: string, env: Record<string, string> = {}) => ({
-  command: 'node apps/farm/.output/server/index.mjs',
+  command: 'node tests/e2e/e2e-web-server.mjs',
   url: `http://127.0.0.1:${serverPort}/healthz`,
   env: { NITRO_HOST: '127.0.0.1', NITRO_PORT: serverPort, ...env },
   reuseExistingServer: false,

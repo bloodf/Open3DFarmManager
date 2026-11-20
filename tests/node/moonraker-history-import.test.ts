@@ -3,10 +3,12 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import { serveWsTestServer, type WsTestSocket } from '../unit/ws-serve.ts'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
+import { createMoonrakerHistoryImport } from '../../packages/connector/src/moonraker/history-import.ts'
 import {
   HISTORY_MAX_PAGES,
   HISTORY_PAGE_SIZE,
@@ -276,6 +278,53 @@ test('imports missing finished jobs once and again after a reconnect', async () 
     await new Promise((resolve) => setTimeout(resolve, 200))
     assert.equal(jobs().length, 2)
   })
+})
+
+test('a reconnect during an import schedules another import after a live state', async () => {
+  let requests = 0
+  let release: (() => void) | undefined
+  const server = createServer((_request, response) => {
+    requests++
+    const send = () => response.end(JSON.stringify({ result: { jobs: [job(0)] } }))
+    if (requests === 1) release = send
+    else send()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw Error('Fixture address')
+  const controller = new AbortController()
+  const recorded: PrinterState[] = []
+  const history = createMoonrakerHistoryImport({
+    printerKey: 'printer',
+    selected: {
+      printerKey: 'printer',
+      origin: `http://127.0.0.1:${address.port}`,
+      limits: {
+        maxMessageBytes: 4096,
+        connectTimeoutMs: 1000,
+        requestTimeoutMs: 1000,
+        staleAfterMs: 30000,
+        reconnectMinMs: 100,
+        reconnectMaxMs: 200,
+      },
+    },
+    signal: controller.signal,
+    record: (state) => recorded.push(state),
+  })
+  try {
+    history.observe('idle')
+    await waitFor(() => release !== undefined)
+    history.reconnecting()
+    history.observe('idle')
+    release!()
+    await history.settled()
+    assert.equal(requests, 2)
+    assert.equal(recorded.length, 1)
+  } finally {
+    controller.abort()
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('history import reads at most the bounded number of pages', async () => {

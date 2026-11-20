@@ -437,22 +437,22 @@ The offline install succeeded. The runner and guard contract passed 12
 tests. The combined run exited 0 in 27 min 49 s with zero network violations.
 All 14 steps passed, so the summary had no skipped steps requiring a reason.
 
-| Step | Status | Duration (ms) |
-| --- | --- | ---: |
-| `preflight` | passed | 123 |
-| `lint` | passed | 38,366 |
-| `typecheck` | passed | 38,790 |
-| `vitest` | passed | 196,170 |
-| `test-node` | passed | 289,743 |
-| `rtsp-supervisor` | passed | 3,224 |
-| `rtsp-framing` | passed | 431 |
-| `build` | passed | 23,043 |
-| `build-rtsp-ingest` | passed | 1,373 |
-| `test-postgres` | passed | 152,018 |
-| `test-e2e` | passed | 38,793 |
-| `test-journey` | passed | 878,597 |
-| `test-sim-farm` | passed | 3,928 |
-| `app-smoke` | passed | 3,966 |
+| Step                | Status | Duration (ms) |
+| ------------------- | ------ | ------------: |
+| `preflight`         | passed |           123 |
+| `lint`              | passed |        38,366 |
+| `typecheck`         | passed |        38,790 |
+| `vitest`            | passed |       196,170 |
+| `test-node`         | passed |       289,743 |
+| `rtsp-supervisor`   | passed |         3,224 |
+| `rtsp-framing`      | passed |           431 |
+| `build`             | passed |        23,043 |
+| `build-rtsp-ingest` | passed |         1,373 |
+| `test-postgres`     | passed |       152,018 |
+| `test-e2e`          | passed |        38,793 |
+| `test-journey`      | passed |       878,597 |
+| `test-sim-farm`     | passed |         3,928 |
+| `app-smoke`         | passed |         3,966 |
 
 All 37 journeys passed. Node passed 1,967 tests and skipped eight: two
 opt-in real-FFmpeg cases, one opt-in sandbox smoke, one opt-in

@@ -64,6 +64,7 @@ const links = computed(() => [
   { to: '/impressoras', label: 'Impressoras' },
   { to: '/arquivos', label: 'Arquivos' },
   { to: '/biblioteca', label: 'Biblioteca' },
+  { to: '/bobinas', label: 'Bobinas' },
   { to: '/historico', label: 'Histórico' },
   { to: '/painel', label: 'Painel (TV)' },
   { to: '/connectors', label: 'Connectors' },

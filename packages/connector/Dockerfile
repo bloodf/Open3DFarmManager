@@ -1,4 +1,4 @@
-FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS build
+FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS build
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 COPY apps/farm/package.json apps/farm/package.json
@@ -12,7 +12,7 @@ RUN npm ci --ignore-scripts && npm rebuild node-datachannel
 COPY . .
 RUN npm run build -w @open3dfarmmanager/connector
 
-FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/packages/connector/dist ./dist

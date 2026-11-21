@@ -87,7 +87,9 @@ async function poll() {
     if (run.signal.aborted) return
     if (!parsed.ok) throw new Error('invalid-response')
     states.value = parsed.summary.states
-    fetchedAt.value = Date.now()
+    // Move the wall clock with the fetch so the first age is never negative,
+    // which would flash "Dados desatualizados" until the next tick.
+    now.value = fetchedAt.value = Date.now()
     failed.value = false
     noFarm.value = false
     problem.value = ''

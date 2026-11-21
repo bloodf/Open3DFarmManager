@@ -215,7 +215,7 @@ async function open(
   await page.getByRole('heading', { level: 1, name: entry.heading }).waitFor()
   // The baseline capture runs this spec against the pre-polish build, where
   // some of the waited-for text does not exist yet: it still takes the shot.
-  if (process.env.POLISH_CAPTURE) {
+  if (process.env.POLISH_CAPTURE === '1') {
     await settle(page, scenario).catch(() => undefined)
     return
   }
@@ -451,7 +451,7 @@ test('printers: farm selector sits in a labelled region and the list shows exact
   page,
 }) => {
   await open(page, 'printers-populated', viewports[0], 'light')
-  const region = page.getByRole('region', { name: 'Farm' })
+  const region = page.getByRole('region', { name: 'Escolher farm' })
   await expect(region.getByLabel('Farm')).toHaveValue(farm)
   await expect(
     page.getByRole('heading', { level: 1, name: 'Impressoras da farm' }),

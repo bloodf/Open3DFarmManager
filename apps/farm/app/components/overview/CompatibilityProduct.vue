@@ -106,7 +106,7 @@ dd {
 }
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.5rem), 1fr));
   gap: var(--space-2) var(--space-4);
   margin: 0;
 }
@@ -120,6 +120,11 @@ dt {
 dd {
   margin: 0;
   font-weight: var(--font-weight-semibold);
+}
+li a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
 }
 a:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);

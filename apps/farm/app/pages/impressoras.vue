@@ -558,7 +558,7 @@ onBeforeRouteLeave(setup.clear)
     </OverviewHeader>
     <PrintersPageStatus :started="started" />
     <section class="panel farm-panel" aria-labelledby="farm-heading">
-      <h2 id="farm-heading">Farm</h2>
+      <h2 id="farm-heading">Escolher farm</h2>
       <PrintersFarmSelector />
     </section>
     <AssignmentList />
@@ -678,6 +678,28 @@ onBeforeRouteLeave(setup.clear)
   background: var(--color-surface-raised);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);
+}
+.printers-page :deep(button),
+.printers-page :deep(select),
+.printers-page :deep(input:not([type='checkbox']):not([type='radio'])) {
+  min-height: 2.75rem;
+  font: inherit;
+  max-width: 100%;
+}
+.printers-page :deep(select),
+.printers-page :deep(input:not([type='checkbox']):not([type='radio'])) {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+}
+.printers-page :deep(button) {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.printers-page :deep(p:has(> button)) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
 }
 .printers-page :deep(button:disabled),
 .printers-page :deep(input:disabled),

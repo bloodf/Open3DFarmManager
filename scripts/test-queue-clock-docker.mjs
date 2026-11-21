@@ -3,9 +3,16 @@
 // test-timeout failures seen in the final gate. It runs only the focused files
 // below, with no network and no physical printer, and writes one JSON summary.
 //
-//   node scripts/test-queue-clock-docker.mjs [--install] [--profile quiet|loaded|overlay|disk|stress|all]
-//        [--cpus N] [--load N] [--test-timeout MS] [--file path]... [--evidence-dir DIR]
+//   node scripts/test-queue-clock-docker.mjs [--install] [--profile gate|quiet|loaded|isolation|overlay|disk|stress|all]
+//        [--cpus N] [--load N] [--test-timeout MS] [--file path]... [--evidence-dir DIR] [--profile-timeout MS]
 //
+// Default profile `gate` runs quiet, loaded and isolation: all deterministic, exit 0
+// when they pass. overlay, disk and stress are diagnostics whose outcome depends
+// on the host disk, so they run only when named (or with `all`).
+//
+// isolation: mixed-telemetry-runtime with a forced 150 ms test timeout. Timeouts
+//           are expected; the profile passes only if none leaks into a later
+//           test as `Queue clock regressed`.
 // quiet   : the container owns --cpus CPUs alone; /tmp is tmpfs.
 // loaded  : the same container is starved by --load busy-loop processes, which
 //           reproduces shared-host CPU contention deterministically; /tmp is tmpfs.
@@ -31,12 +38,14 @@ const DEFAULT_FILES = [
   'tests/unit/telemetry-scope-handover.test.ts',
   'tests/unit/heartbeat-coalesce.test.ts',
 ]
+const ISOLATION_FILES = ['tests/unit/mixed-telemetry-runtime.test.ts']
 const DURABLE_FILES = ['tests/unit/heartbeat-coalesce.test.ts']
 
 function parse(argv) {
   const options = {
     install: false,
-    profile: 'all',
+    profile: 'gate',
+    profileTimeout: 900000,
     cpus: 4,
     load: 8,
     files: [],
@@ -55,17 +64,26 @@ function parse(argv) {
     else if (flag === '--cpus') options.cpus = Number(value())
     else if (flag === '--load') options.load = Number(value())
     else if (flag === '--file') options.files.push(value())
+    else if (flag === '--profile-timeout')
+      options.profileTimeout = Number(value())
     else if (flag === '--test-timeout') options.testTimeout = Number(value())
     else if (flag === '--evidence-dir') options.evidenceDir = resolve(value())
     else throw new Error(`unknown argument ${flag}`)
   }
   if (
-    !['quiet', 'loaded', 'overlay', 'disk', 'stress', 'all'].includes(
-      options.profile,
-    )
+    ![
+      'gate',
+      'quiet',
+      'loaded',
+      'isolation',
+      'overlay',
+      'disk',
+      'stress',
+      'all',
+    ].includes(options.profile)
   )
     throw new Error(
-      '--profile must be quiet, loaded, overlay, disk, stress or all',
+      '--profile must be gate, quiet, loaded, isolation, overlay, disk, stress or all',
     )
   if (
     !(options.cpus > 0) ||
@@ -86,8 +104,13 @@ const ids =
     ? ['--user', `${process.getuid()}:${process.getgid()}`]
     : []
 
-function docker(args, input) {
-  return spawnSync('docker', args, { encoding: 'utf8', input })
+function docker(args, input, options = {}) {
+  return spawnSync('docker', args, {
+    encoding: 'utf8',
+    input,
+    timeout: options.profileTimeout,
+    maxBuffer: 64 * 1024 * 1024,
+  })
 }
 
 function base(name, cpus, tmpfs, evidence) {
@@ -169,30 +192,39 @@ function runProfile(profile, options, evidence) {
       : profile === 'disk'
         ? `for i in $(seq 1 ${load}); do node -e '${WRITER}' /tmp/spin-$i & done`
         : `for i in $(seq 1 ${load}); do node -e '${BUSY}' & done`
-  const files =
-    profile === 'overlay' && !options.explicitFiles
+  const files = options.explicitFiles
+    ? options.files
+    : profile === 'overlay'
       ? DURABLE_FILES
-      : options.files
+      : profile === 'isolation'
+        ? ISOLATION_FILES
+        : options.files
+  const testTimeout =
+    profile === 'isolation' ? (options.testTimeout ?? 150) : options.testTimeout
   const reportPath = `/evidence/${profile}.report.json`
   const script = [
     spawnLoad,
-    `node node_modules/vitest/vitest.mjs run --maxWorkers=1 ${options.testTimeout ? `--testTimeout=${options.testTimeout} ` : ''}--reporter=default --reporter=json --outputFile=${reportPath} ${files.join(' ')}`,
+    `node node_modules/vitest/vitest.mjs run --maxWorkers=1 ${testTimeout ? `--testTimeout=${testTimeout} ` : ''}--reporter=default --reporter=json --outputFile=${reportPath} ${files.join(' ')}`,
     'code=$?',
     'kill $(jobs -p) 2>/dev/null',
     'exit $code',
   ].join('; ')
   const started = Date.now()
-  const result = docker([
-    ...base(
-      name,
-      profile === 'loaded' ? 2 : profile === 'stress' ? 1 : options.cpus,
-      profile !== 'overlay' && profile !== 'disk' && profile !== 'stress',
-      evidence,
-    ),
-    'bash',
-    '-c',
-    script,
-  ])
+  const result = docker(
+    [
+      ...base(
+        name,
+        profile === 'loaded' ? 2 : profile === 'stress' ? 1 : options.cpus,
+        profile !== 'overlay' && profile !== 'disk' && profile !== 'stress',
+        evidence,
+      ),
+      'bash',
+      '-c',
+      script,
+    ],
+    undefined,
+    options,
+  )
   docker(['rm', '-f', name])
   const wallMs = Date.now() - started
   const reportFile = join(evidence, `${profile}.report.json`)
@@ -229,7 +261,13 @@ function runProfile(profile, options, evidence) {
         ? 'overlay'
         : 'tmpfs',
     busyLoops: load,
-    exitCode: result.status,
+    exitCode:
+      profile === 'isolation'
+        ? report && unhandled === 0
+          ? 0
+          : 1
+        : result.status,
+    timedOut: result.error?.code === 'ETIMEDOUT',
     wallMs,
     passed: tests.filter((t) => t.status === 'passed').length,
     failed: tests.filter((t) => t.status === 'failed').length,
@@ -257,8 +295,10 @@ function main() {
   }
   const profiles =
     options.profile === 'all'
-      ? ['quiet', 'loaded', 'overlay']
-      : [options.profile]
+      ? ['quiet', 'loaded', 'isolation', 'overlay', 'disk', 'stress']
+      : options.profile === 'gate'
+        ? ['quiet', 'loaded', 'isolation']
+        : [options.profile]
   const results = profiles.map((profile) =>
     runProfile(profile, options, evidence),
   )

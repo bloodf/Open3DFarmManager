@@ -16,11 +16,21 @@ summary per profile to a bounded evidence directory.
 
 ## Evidence runner profiles
 
-`quiet` and `loaded` put `/tmp` on tmpfs. `overlay` keeps it on the overlay
-filesystem. `disk` adds background fsync writers, `stress` adds them together
-with CPU spinners on one CPU. `--test-timeout MS` forces a timeout without load
-to show the isolation fix deterministically: before it, one timeout produced
-`Queue clock regressed`; after it, the timeout is reported alone.
+`loaded` is the focused gate command: `node scripts/test-queue-clock-docker.mjs --profile loaded`.
+It puts `/tmp` on tmpfs and starves the container with CPU spinners, then runs
+the focused files with their normal timeouts. `quiet` is the same without load.
+`isolation` forces a short test timeout (`--test-timeout MS`, default 150) and
+passes only if no timeout leaks into a later test as `Queue clock regressed`.
+`gate` runs these three.
+
+`overlay`, `disk` and `stress` are diagnostics, run only when named or with
+`all`. `overlay` keeps `/tmp` on the overlay filesystem so each fsync reaches the
+shared host disk; `disk` adds background fsync writers; `stress` adds them with
+CPU spinners on one CPU. Their outcome depends on the host disk, so they are not
+a gate. Each profile has a wall-clock limit (`--profile-timeout`).
+
+The isolation fix is in the test: when a test times out, an `afterEach` stops
+its collector and restores timers, and its body stops advancing the clock.
 
 ## Gate guidance
 

@@ -30,7 +30,8 @@ import { handleLegacyRequest } from '../apps/farm/server/utils/spool-library/leg
 import { sanitizeUnhandledErrorPath } from '../apps/farm/server/utils/spool-library/legacy-path.ts'
 
 const exec = promisify(execFile)
-const MIGRATION = '0085_spool_library_storage'
+// The repository reads the vendor/filament columns added by 0087.
+const MIGRATION = '0087_spoolman_vendor_filament'
 const TASK_LABEL = 'farm-legacy-541'
 const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 

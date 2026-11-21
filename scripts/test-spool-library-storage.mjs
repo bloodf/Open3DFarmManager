@@ -30,6 +30,7 @@ import { splitLegacyPath } from '../apps/farm/server/utils/spool-library/legacy-
 
 const exec = promisify(execFile)
 const MIGRATION = '0085_spool_library_storage'
+const LIBRARY_MIGRATION = '0087_spoolman_vendor_filament'
 const TASK_LABEL = 'farm-storage-541'
 const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 
@@ -144,6 +145,16 @@ try {
   await runMigrations(admin, catalog, { kind: 'up' })
   assert.equal(await hasTables(), 5)
   check('migration-0085-down-up-round-trip')
+  // The repository reads the vendor/filament columns added by 0087.
+  const libraryCatalog = await loadMigrationCatalog()
+  await runMigrations(
+    admin,
+    libraryCatalog.slice(
+      0,
+      libraryCatalog.findIndex((m) => m.id === LIBRARY_MIGRATION) + 1,
+    ),
+    { kind: 'up' },
+  )
 
   // --- least-privilege runtime role -----------------------------------------
   const role = 'spool_library_' + randomUUID().replaceAll('-', '')

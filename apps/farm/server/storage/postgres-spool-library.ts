@@ -12,6 +12,8 @@ import type {
   Spool,
   SpoolFilament,
   SpoolFilamentInput,
+  SpoolEntityType,
+  SpoolExtraFieldDefinition,
   SpoolInput,
   SpoolLibraryAccess,
   SpoolLibraryAuthority,
@@ -35,6 +37,14 @@ const sessionId = /^[A-Za-z0-9_-]{1,128}$/
 const MAX_INFLIGHT = { session: 32, legacy: 16 } as const
 const MAX_PAGE = 500
 const MAX_ACTIVE_CREDENTIALS = 16
+/** Upstream: 128 extra fields per entity, 65535 characters each (migration 0087 bound). */
+const MAX_EXTRA_JSON = 9_000_000
+const optInt = (v: unknown) =>
+  v === undefined ||
+  v === null ||
+  (Number.isSafeInteger(v) && (v as number) >= 0)
+const COLOR = '[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?'
+const MULTI_COLOR = new RegExp(`^${COLOR}(,${COLOR})+$`)
 /** Credential last-use stamps are throttled so reads do not become writes. */
 const LAST_USED_GRANULARITY_MS = 60_000
 
@@ -74,7 +84,7 @@ function mapDatabaseError(error: unknown): SpoolLibraryFailure {
 }
 
 const isText = (v: unknown, max: number): v is string =>
-  typeof v === 'string' && v.length >= 1 && v.length <= max
+  typeof v === 'string' && v.length <= max
 const optText = (v: unknown, max: number) =>
   v === undefined || v === null || (typeof v === 'string' && v.length <= max)
 const isNum = (v: unknown, min: number): v is number =>
@@ -90,17 +100,23 @@ const validExtra = (v: unknown) =>
   (typeof v === 'object' &&
     v !== null &&
     !Array.isArray(v) &&
-    JSON.stringify(v).length <= 60_000)
+    JSON.stringify(v).length <= MAX_EXTRA_JSON)
 const validId = (v: unknown): v is number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= 1
 
-const VENDOR = `id::float8 AS id, name, comment, external_id AS "externalId", extra, registered_at::float8 AS "registeredAt"`
-const FILAMENT = `id::float8 AS id, vendor_id::float8 AS "vendorId", name, material, color_hex AS "colorHex", density, diameter, weight, spool_weight AS "spoolWeight", price, comment, external_id AS "externalId", extra, registered_at::float8 AS "registeredAt"`
+const VENDOR = `id::float8 AS id, name, comment, empty_spool_weight AS "emptySpoolWeight", external_id AS "externalId", extra, registered_at::float8 AS "registeredAt"`
+const FILAMENT = `id::float8 AS id, vendor_id::float8 AS "vendorId", name, material, color_hex AS "colorHex", multi_color_hexes AS "multiColorHexes", multi_color_direction AS "multiColorDirection", article_number AS "articleNumber", settings_extruder_temp::float8 AS "settingsExtruderTemp", settings_bed_temp::float8 AS "settingsBedTemp", density, diameter, weight, spool_weight AS "spoolWeight", price, comment, external_id AS "externalId", extra, registered_at::float8 AS "registeredAt"`
 const SPOOL = `id::float8 AS id, filament_id::float8 AS "filamentId", initial_weight AS "initialWeight", spool_weight AS "spoolWeight", used_weight AS "usedWeight", price, location, lot_nr AS "lotNr", comment, archived, extra, registered_at::float8 AS "registeredAt", first_used_at::float8 AS "firstUsedAt", last_used_at::float8 AS "lastUsedAt"`
 
 type Row = Record<string, unknown>
 const SNAKE: Record<string, string> = {
   externalId: 'external_id',
+  emptySpoolWeight: 'empty_spool_weight',
+  multiColorHexes: 'multi_color_hexes',
+  multiColorDirection: 'multi_color_direction',
+  articleNumber: 'article_number',
+  settingsExtruderTemp: 'settings_extruder_temp',
+  settingsBedTemp: 'settings_bed_temp',
   vendorId: 'vendor_id',
   colorHex: 'color_hex',
   spoolWeight: 'spool_weight',
@@ -185,6 +201,19 @@ class ScopedRepository implements SpoolLibraryRepository {
     return { limit: page.limit, after: page.afterId ?? 0 }
   }
 
+  readonly extraFields = {
+    list: (entity: SpoolEntityType) =>
+      this.guarded(false, async (sp) => {
+        if (!['vendor', 'filament', 'spool'].includes(entity))
+          return fail('invalid-input')
+        return ok(
+          await sp<
+            SpoolExtraFieldDefinition[]
+          >`SELECT entity_type AS "entityType", key, name, field_type AS "fieldType", sort_order AS "order", unit, default_value AS "defaultValue", choices, multi_choice AS "multiChoice" FROM farm.spool_library_fields WHERE farm_id=${this.farmId}::uuid AND entity_type=${entity} ORDER BY key LIMIT 256`,
+        )
+      }),
+  }
+
   readonly vendors = {
     list: (page: PageInput) => {
       const p = this.page(page)
@@ -210,14 +239,15 @@ class ScopedRepository implements SpoolLibraryRepository {
         if (
           !isText(input.name, 256) ||
           !optText(input.comment, 1024) ||
+          !optNum(input.emptySpoolWeight, 0) ||
           !optText(input.externalId, 256) ||
           !validExtra(input.extra)
         )
           return fail('invalid-input')
         const id = await this.nextId(sp, 'vendor')
         const rows = await sp<SpoolVendor[]>`
-          INSERT INTO farm.spool_vendors (farm_id, id, name, comment, external_id, extra, registered_at)
-          VALUES (${this.farmId}::uuid, ${id}, ${input.name}, ${input.comment ?? null}, ${input.externalId ?? null}, ${sp.json((input.extra ?? {}) as never)}, ${this.now})
+          INSERT INTO farm.spool_vendors (farm_id, id, name, comment, empty_spool_weight, external_id, extra, registered_at)
+          VALUES (${this.farmId}::uuid, ${id}, ${input.name}, ${input.comment ?? null}, ${input.emptySpoolWeight ?? null}, ${input.externalId ?? null}, ${sp.json((input.extra ?? {}) as never)}, ${this.now})
           RETURNING ${sp.unsafe(VENDOR)}`
         return rows[0] ? ok(rows[0]) : fail('storage-unavailable')
       }),
@@ -227,13 +257,14 @@ class ScopedRepository implements SpoolLibraryRepository {
           !validId(id) ||
           (patch.name !== undefined && !isText(patch.name, 256)) ||
           !optText(patch.comment, 1024) ||
+          !optNum(patch.emptySpoolWeight, 0) ||
           !optText(patch.externalId, 256) ||
           !validExtra(patch.extra)
         )
           return fail('invalid-input')
         const set = columns(
           patch,
-          ['name', 'comment', 'externalId', 'extra'],
+          ['name', 'comment', 'emptySpoolWeight', 'externalId', 'extra'],
           sp,
         )
         const rows = Object.keys(set).length
@@ -248,6 +279,8 @@ class ScopedRepository implements SpoolLibraryRepository {
     delete: (id: SpoolRecordId) =>
       this.guarded(true, async (sp) => {
         if (!validId(id)) return fail('not-found')
+        // Upstream clears the vendor of every filament that referred to it.
+        await sp`UPDATE farm.spool_filaments SET vendor_id=NULL WHERE farm_id=${this.farmId}::uuid AND vendor_id=${id}`
         const rows =
           await sp`DELETE FROM farm.spool_vendors WHERE farm_id=${this.farmId}::uuid AND id=${id} RETURNING id`
         return rows[0] ? ok(true as const) : fail('not-found')
@@ -273,7 +306,20 @@ class ScopedRepository implements SpoolLibraryRepository {
       (input.colorHex === undefined ||
         input.colorHex === null ||
         /^[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/.test(input.colorHex)) &&
-      optNum(input.weight, 0) &&
+      (input.multiColorHexes === undefined ||
+        input.multiColorHexes === null ||
+        (input.multiColorHexes.length <= 4096 &&
+          MULTI_COLOR.test(input.multiColorHexes))) &&
+      (input.multiColorDirection === undefined ||
+        input.multiColorDirection === null ||
+        input.multiColorDirection === 'coaxial' ||
+        input.multiColorDirection === 'longitudinal') &&
+      optText(input.articleNumber, 256) &&
+      optInt(input.settingsExtruderTemp) &&
+      optInt(input.settingsBedTemp) &&
+      (input.weight === undefined ||
+        input.weight === null ||
+        (isNum(input.weight, 0) && input.weight > 0)) &&
       optNum(input.spoolWeight, 0) &&
       optNum(input.price, 0) &&
       optText(input.comment, 1024) &&
@@ -307,8 +353,8 @@ class ScopedRepository implements SpoolLibraryRepository {
         if (!this.filamentValid(input, true)) return fail('invalid-input')
         const id = await this.nextId(sp, 'filament')
         const rows = await sp<SpoolFilament[]>`
-          INSERT INTO farm.spool_filaments (farm_id, id, vendor_id, name, material, color_hex, density, diameter, weight, spool_weight, price, comment, external_id, extra, registered_at)
-          VALUES (${this.farmId}::uuid, ${id}, ${input.vendorId ?? null}, ${input.name ?? null}, ${input.material ?? null}, ${input.colorHex ?? null}, ${input.density}, ${input.diameter}, ${input.weight ?? null}, ${input.spoolWeight ?? null}, ${input.price ?? null}, ${input.comment ?? null}, ${input.externalId ?? null}, ${sp.json((input.extra ?? {}) as never)}, ${this.now})
+          INSERT INTO farm.spool_filaments (farm_id, id, vendor_id, name, material, color_hex, multi_color_hexes, multi_color_direction, article_number, settings_extruder_temp, settings_bed_temp, density, diameter, weight, spool_weight, price, comment, external_id, extra, registered_at)
+          VALUES (${this.farmId}::uuid, ${id}, ${input.vendorId ?? null}, ${input.name ?? null}, ${input.material ?? null}, ${input.colorHex ?? null}, ${input.multiColorHexes ?? null}, ${input.multiColorDirection ?? null}, ${input.articleNumber ?? null}, ${input.settingsExtruderTemp ?? null}, ${input.settingsBedTemp ?? null}, ${input.density}, ${input.diameter}, ${input.weight ?? null}, ${input.spoolWeight ?? null}, ${input.price ?? null}, ${input.comment ?? null}, ${input.externalId ?? null}, ${sp.json((input.extra ?? {}) as never)}, ${this.now})
           RETURNING ${sp.unsafe(FILAMENT)}`
         return rows[0] ? ok(rows[0]) : fail('storage-unavailable')
       }),
@@ -323,6 +369,11 @@ class ScopedRepository implements SpoolLibraryRepository {
             'name',
             'material',
             'colorHex',
+            'multiColorHexes',
+            'multiColorDirection',
+            'articleNumber',
+            'settingsExtruderTemp',
+            'settingsBedTemp',
             'density',
             'diameter',
             'weight',

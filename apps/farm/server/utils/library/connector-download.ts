@@ -1,8 +1,17 @@
+import { createHash, createPublicKey, verify } from 'node:crypto'
 import type { Readable } from 'node:stream'
 import type { Sql } from 'postgres'
 import { verifyConnectorCredential } from '../connector-credentials.ts'
 import { IntegrationLimits } from '../integration-auth-limits.ts'
 import { BlobStoreError, parseRange, type BlobRange } from './blob-store.ts'
+import {
+  CONNECTOR_LIBRARY_PROOF_HEADER,
+  CONNECTOR_LIBRARY_PROOF_TTL_MS,
+  CONNECTOR_LIBRARY_SIGNATURE,
+  CONNECTOR_LIBRARY_SIGNATURE_HEADER,
+  ConnectorLibraryProof,
+  connectorLibraryProofPayload,
+} from '../../../../../packages/farm-protocol/src/connector-library-proof.ts'
 
 /**
  * `GET /api/connector/library/{sha256}`: a Connector downloads a server-mode
@@ -227,13 +236,82 @@ export interface ConnectorEnrollmentReader {
 }
 
 const BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/
+/** Tolerated clock difference between the Connector and the server. */
+const PROOF_SKEW_MS = 30_000
+const MAX_SEEN_PROOFS = 16_384
+
+/**
+ * Nonces of accepted proofs, kept until they expire, so a captured proof is
+ * never accepted twice (shared by download and relay in this process).
+ */
+const seenProofs = new Map<string, number>()
+function rememberProof(nonce: string, expiresAt: number, at: number): boolean {
+  if (seenProofs.has(nonce)) return false
+  if (seenProofs.size >= MAX_SEEN_PROOFS)
+    for (const [key, until] of seenProofs)
+      if (until + PROOF_SKEW_MS <= at) seenProofs.delete(key)
+  if (seenProofs.size >= MAX_SEEN_PROOFS) return false
+  seenProofs.set(nonce, expiresAt)
+  return true
+}
+
+/** Verifies the per-request proof of possession signed by the enrolled key. */
+function verifyLibraryProof(input: {
+  headers: Headers
+  token: string
+  agentId: string
+  farmId: string
+  publicKeySpki: string
+  at: number
+}): boolean {
+  const encoded = input.headers.get(CONNECTOR_LIBRARY_PROOF_HEADER) ?? ''
+  const signature = input.headers.get(CONNECTOR_LIBRARY_SIGNATURE_HEADER) ?? ''
+  if (
+    !encoded ||
+    encoded.length > 1024 ||
+    !/^[A-Za-z0-9_-]+$/.test(encoded) ||
+    !CONNECTOR_LIBRARY_SIGNATURE.test(signature)
+  )
+    return false
+  const raw = Buffer.from(encoded, 'base64url')
+  if (raw.toString('base64url') !== encoded) return false
+  const parsed = ConnectorLibraryProof.safeParse(
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)),
+  )
+  if (!parsed.success) return false
+  const proof = parsed.data
+  if (
+    proof.agent_id !== input.agentId ||
+    proof.farm_id !== input.farmId ||
+    proof.token_hash !==
+      createHash('sha256').update(input.token).digest('base64url') ||
+    proof.issued_at > input.at + PROOF_SKEW_MS ||
+    proof.expires_at <= input.at ||
+    proof.expires_at > input.at + CONNECTOR_LIBRARY_PROOF_TTL_MS + PROOF_SKEW_MS
+  )
+    return false
+  const valid = verify(
+    null,
+    connectorLibraryProofPayload(proof),
+    createPublicKey({
+      key: Buffer.from(input.publicKeySpki, 'base64url'),
+      format: 'der',
+      type: 'spki',
+    }),
+    Buffer.from(signature, 'base64url'),
+  )
+  return valid && rememberProof(proof.nonce, proof.expires_at, input.at)
+}
 
 /**
  * Authenticates a download from the Connector credential (`Authorization:
- * Bearer`, `x-connector-agent`, `x-connector-farm`, the headers telemetry uses).
- * The signature, claims and key binding are verified, and the enrollment must
- * be approved right now, so a revoked Connector is refused at once. Anything
- * else is null; a storage failure throws and answers 503.
+ * Bearer`, `x-connector-agent`, `x-connector-farm`, the headers telemetry uses)
+ * plus a fresh proof of possession (`x-connector-proof` and
+ * `x-connector-proof-signature`) signed by the enrolled Connector key, so a
+ * leaked bearer token alone is refused (#580). The signature, claims and key
+ * binding are verified, and the enrollment must be approved right now, so a
+ * revoked Connector is refused at once. Anything else is null; a storage
+ * failure throws and answers 503.
  */
 export function createConnectorLibraryAuthenticator(input: {
   credentials: ConnectorCredentialPolicy
@@ -250,20 +328,34 @@ export function createConnectorLibraryAuthenticator(input: {
       !token ||
       authorization.length > 8199 ||
       !UUID.test(agentId) ||
-      !UUID.test(farmId)
+      !UUID.test(farmId) ||
+      !headers.get(CONNECTOR_LIBRARY_PROOF_HEADER) ||
+      !headers.get(CONNECTOR_LIBRARY_SIGNATURE_HEADER)
     )
       return null
     const enrollment = await input.enrollments.find(farmId, agentId)
     if (!enrollment || enrollment.status !== 'approved') return null
     try {
+      const at = now()
       await verifyConnectorCredential({
         ...input.credentials,
         token,
         agentId,
         farmId,
         publicKeySpki: enrollment.publicKeySpki,
-        nowSeconds: Math.floor(now() / 1000),
+        nowSeconds: Math.floor(at / 1000),
       })
+      if (
+        !verifyLibraryProof({
+          headers,
+          token,
+          agentId,
+          farmId,
+          publicKeySpki: enrollment.publicKeySpki,
+          at,
+        })
+      )
+        return null
     } catch {
       return null
     }

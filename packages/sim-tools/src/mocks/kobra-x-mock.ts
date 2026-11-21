@@ -818,27 +818,20 @@ export async function startKobraXMock(
   }
 
   function emitWithLegacySuffixDelivery(
-    clientKind: KobraXClientKind,
     suffix: string,
     payload: unknown,
     faultMethod: 'ACK' | 'REPORT',
   ) {
     if (!brokerRef) return
-    const canonicalTopic = `anycubic/anycubicCloud/v1/${clientKind}/printer/public/${modeId}/${deviceId}/${suffix}`
-    const emitted = brokerRef.control.publish(
-      canonicalTopic,
-      payload,
-      0,
-      faultMethod,
-    )
+    // Real Kobra X reports and acks use `printer/public` with no `slicer/` or
+    // `web/` segment. A subscription on the query prefix must not receive them.
+    const topic = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/${suffix}`
+    const emitted = brokerRef.control.publish(topic, payload, 0, faultMethod)
     if (!emitted) return
 
-    // Deliver to subscribers using unprefixed or bare `<deviceId>/response` / `<type>/report` filters
-    // ONLY when those sockets would not already receive `canonicalTopic`.
-    const altTopics = [
-      `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/${suffix}`,
-      suffix === 'response' ? `${deviceId}/response` : suffix,
-    ]
+    // Bare `<deviceId>/response` and `<type>/report` filters do not match the
+    // printer topic. Deliver that alias only when the socket missed `topic`.
+    const altTopic = suffix === 'response' ? `${deviceId}/response` : suffix
     const rawBuf = Buffer.from(
       typeof payload === 'string' ? payload : JSON.stringify(payload),
     )
@@ -847,35 +840,29 @@ export async function startKobraXMock(
       if (!sock.writable) continue
       let alreadyMatched = false
       for (const filter of topics) {
-        if (matchMqttTopic(filter, canonicalTopic)) {
+        if (matchMqttTopic(filter, topic)) {
           alreadyMatched = true
           break
         }
       }
       if (alreadyMatched) continue
-
-      for (const altTopic of altTopics) {
-        let matchedAlt = false
-        for (const filter of topics) {
-          if (matchMqttTopic(filter, altTopic)) {
-            matchedAlt = true
-            break
-          }
-        }
-        if (matchedAlt) {
-          const tBuf = Buffer.from(altTopic)
-          const lBuf = Buffer.alloc(2)
-          lBuf.writeUInt16BE(tBuf.length)
-          sock.write(encodePacket(0x30, Buffer.concat([lBuf, tBuf, rawBuf])))
+      let matchedAlt = false
+      for (const filter of topics) {
+        if (matchMqttTopic(filter, altTopic)) {
+          matchedAlt = true
           break
         }
       }
+      if (!matchedAlt) continue
+      const tBuf = Buffer.from(altTopic)
+      const lBuf = Buffer.alloc(2)
+      lBuf.writeUInt16BE(tBuf.length)
+      sock.write(encodePacket(0x30, Buffer.concat([lBuf, tBuf, rawBuf])))
     }
   }
 
-  function publishAck(msgid: string, clientKind: KobraXClientKind = 'slicer') {
+  function publishAck(msgid: string, _clientKind: KobraXClientKind = 'slicer') {
     emitWithLegacySuffixDelivery(
-      clientKind,
       'response',
       {
         type: '',
@@ -912,12 +899,7 @@ export async function startKobraXMock(
       msg: reportOptions.msg ?? 'success',
       data,
     }
-    emitWithLegacySuffixDelivery(
-      reportOptions.clientKind ?? 'slicer',
-      `${type}/report`,
-      body,
-      'REPORT',
-    )
+    emitWithLegacySuffixDelivery(`${type}/report`, body, 'REPORT')
   }
 
   function startAdvancingPrint(durationMs?: number) {
@@ -1050,10 +1032,6 @@ export async function startKobraXMock(
     authorizeSubscribe: (topic) =>
       topic === '#' ||
       topic === 'anycubic/anycubicCloud/v1/#' ||
-      topic ===
-        `anycubic/anycubicCloud/v1/slicer/printer/public/${modeId}/${deviceId}/#` ||
-      topic ===
-        `anycubic/anycubicCloud/v1/web/printer/public/${modeId}/${deviceId}/#` ||
       topic ===
         `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/#` ||
       topic === `${deviceId}/response` ||

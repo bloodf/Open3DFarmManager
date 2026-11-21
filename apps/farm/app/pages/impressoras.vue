@@ -2,17 +2,13 @@
 import { nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { configurationTargetHash } from '../../../../packages/farm-protocol/src/configuration-target.ts'
+import OverviewHeader from '../components/overview/OverviewHeader.vue'
+import AddPrinterPanel from '../components/printer-setup/AddPrinterPanel.vue'
 import AssignmentList from '../components/printer-setup/AssignmentList.vue'
-import ConnectorContext from '../components/printer-setup/ConnectorContext.vue'
-import DiscoveryPanel from '../components/printer-setup/DiscoveryPanel.vue'
-import OperationStatus from '../components/printer-setup/OperationStatus.vue'
-import PreparedReview from '../components/printer-setup/PreparedReview.vue'
 import PrintersFarmSelector from '../components/printer-setup/PrintersFarmSelector.vue'
-import PrintersNavIntro from '../components/printer-setup/PrintersNavIntro.vue'
 import PrintersPageStatus from '../components/printer-setup/PrintersPageStatus.vue'
 import RegisterAssignment from '../components/printer-setup/RegisterAssignment.vue'
 import RevokeConfirmation from '../components/printer-setup/RevokeConfirmation.vue'
-import SetupForm from '../components/printer-setup/SetupForm.vue'
 import {
   validateAnycubicTargetInput,
   withoutAnycubicCredentials,
@@ -46,7 +42,8 @@ const state = createPrinterSetupState()
 const { farmId, canManage } = state
 // True once the first farm read has settled, so the empty state never flashes.
 const started = ref(false)
-const { heading, kobraErrorSummary, revokeTarget } = state
+const { kobraErrorSummary, revokeTarget } = state
+const header = ref<{ focus: () => void } | null>(null)
 const { kobraBusy, kobraBootstrap, kobraError, kobraStatus, kobraStage } = state
 const { kobraKeyState, kobraAgentId, kobraKeyId, kobraOperation } = state
 const { kobraIp, kobraLabel, kobraExpectedDeviceId, kobraUnknownNotice } = state
@@ -530,7 +527,7 @@ async function prepareCrealityPrinter() {
 
 let stopWatching: (() => void) | undefined
 onMounted(() => {
-  heading.value?.focus()
+  header.value?.focus()
   stopWatching = setup.watchSession()
   void setup.initialize().finally(() => (started.value = true))
 })
@@ -542,57 +539,28 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(setup.clear)
 </script>
 <template>
-  <main id="conteudo">
-    <h1 ref="heading" tabindex="-1">Impressoras da farm</h1>
-    <PrintersNavIntro />
-    <PrintersPageStatus :started="started" />
-    <PrintersFarmSelector />
-    <AssignmentList />
-    <section
-      v-if="farmId && canManage"
-      aria-labelledby="kobra-x-heading"
-      :aria-busy="kobraBusy"
+  <main id="conteudo" class="printers-page">
+    <OverviewHeader
+      ref="header"
+      eyebrow="Open3DFarmManager"
+      title="Impressoras da farm"
+      intro="Consulte as atribuições de impressoras. Sem conexão direta com o Connector, o modo degradado é somente leitura para operação: esta página não envia comandos de impressão nem acessa câmeras."
     >
-      <h2 id="kobra-x-heading">Adicionar impressora</h2>
-      <p id="kobra-x-intro">
-        Adicione uma impressora Klipper / Moonraker ou Anycubic Kobra X pelo
-        Connector. Para Kobra X, ative o
-        <strong>Modo LAN</strong> e use a rede local do Connector (porta TCP
-        18910). A compatibilidade do modelo, firmware e hardware permanece em
-        validação. Este adaptador opera somente em modo de leitura.
+      <p class="compat-link">
+        <NuxtLink to="/compatibilidade"
+          >Consultar compatibilidade de impressoras</NuxtLink
+        >
       </p>
-      <p
-        v-if="kobraError"
-        ref="kobraErrorSummary"
-        role="alert"
-        tabindex="-1"
-        class="kobra-alert"
-      >
-        {{ kobraError }}
-      </p>
-      <p role="status" aria-live="polite">
-        {{
-          kobraBusy && !kobraStatus ? 'Processando configuração…' : kobraStatus
-        }}
-      </p>
-      <ConnectorContext />
-      <div v-if="kobraStage === 'idle'" class="setup-columns">
-        <div class="kobra-card">
-          <h3>Descobrir impressoras</h3>
-          <DiscoveryPanel />
-        </div>
-        <SetupForm />
-      </div>
-      <div v-if="kobraBusy" class="kobra-actions">
-        <button type="button" @click="setup.abortLocalKobraWait">
-          Interromper espera local
-        </button>
-      </div>
-      <PreparedReview />
-      <OperationStatus />
+    </OverviewHeader>
+    <PrintersPageStatus :started="started" />
+    <section class="panel farm-panel" aria-labelledby="farm-heading">
+      <h2 id="farm-heading">Escolher farm</h2>
+      <PrintersFarmSelector />
     </section>
+    <AssignmentList />
+    <AddPrinterPanel v-if="farmId && canManage" />
     <RegisterAssignment />
     <RevokeConfirmation />
   </main>
 </template>
-<style scoped src="../components/printer-setup/printer-setup.css"></style>
+<style scoped src="../components/overview/printers-page.css"></style>

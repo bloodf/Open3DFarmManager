@@ -36,8 +36,17 @@ const errorSummary = ref<HTMLElement | null>(null)
 const confirmTarget = ref<ConfirmTarget | null>(null)
 const confirmChecked = ref(false)
 const confirmStatus = ref('')
+const farmSelect = ref<HTMLSelectElement | null>(null)
 
 const visibleInvites = computed(() => pendingInvites(invites.value))
+// A failed action keeps the confirmation open, so its message belongs there;
+// everything else is announced by the page-level alert.
+const dialogError = computed(() =>
+  confirmTarget.value && !loadFailed.value ? errorMessage.value : '',
+)
+const pageError = computed(() =>
+  confirmTarget.value && !loadFailed.value ? '' : errorMessage.value,
+)
 
 async function loadDirectory(selected: string) {
   const [memberPage, invitePage] = await Promise.all([
@@ -128,6 +137,7 @@ function openConfirm(target: ConfirmTarget) {
   confirmTarget.value = target
   confirmChecked.value = false
   confirmStatus.value = ''
+  errorMessage.value = ''
 }
 
 function closeConfirm() {
@@ -194,6 +204,10 @@ async function runConfirmed() {
     } catch {
       stale.value = true
     }
+    // The row that opened the dialog may be gone: keep keyboard focus on the page.
+    await nextTick()
+    if (!document.activeElement || document.activeElement === document.body)
+      farmSelect.value?.focus()
   } catch (error: unknown) {
     const status =
       error && typeof error === 'object' && 'statusCode' in error
@@ -225,38 +239,48 @@ function onRevoke(invite: FarmInvite) {
 </script>
 
 <template>
-  <main id="conteudo">
-    <h1>Membros e convites</h1>
-    <p>
-      Gerencie quem participa desta farm e revogue convites pendentes. Cada
-      alteração de papel, remoção ou revogação exige confirmação.
-    </p>
-    <p>
-      <NuxtLink to="/convites">Criar novo convite</NuxtLink>
-    </p>
-    <div v-if="errorMessage" ref="errorSummary" role="alert" tabindex="-1">
+  <main id="conteudo" class="members-page">
+    <header class="page-header">
+      <p class="eyebrow">Open3DFarmManager</p>
+      <h1>Membros e convites</h1>
+      <p class="intro">
+        Gerencie quem participa desta farm e revogue convites pendentes. Cada
+        alteração de papel, remoção ou revogação exige confirmação.
+      </p>
+      <p class="actions">
+        <NuxtLink to="/convites">Criar novo convite</NuxtLink>
+      </p>
+    </header>
+    <div v-if="pageError" ref="errorSummary" role="alert" tabindex="-1">
       <ErrorState
         v-if="loadFailed"
         title="Membros indisponíveis"
-        :description="errorMessage"
+        :description="pageError"
       >
-        <Button @click="farmId ? refresh() : start()">Tentar novamente</Button>
+        <div class="actions">
+          <Button @click="farmId ? refresh() : start()">
+            Tentar novamente
+          </Button>
+          <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
+        </div>
       </ErrorState>
-      <p v-else>{{ errorMessage }}</p>
+      <ErrorState v-else title="Ação não concluída" :description="pageError" />
     </div>
-    <p role="status" aria-live="polite">{{ loading ? '' : statusMessage }}</p>
-    <div v-if="loading" aria-busy="true">
+    <div class="live" role="status" aria-live="polite" aria-atomic="true">
+      <p v-if="!loading && statusMessage" class="notice">{{ statusMessage }}</p>
+    </div>
+    <div v-if="loading && !farms.length" aria-busy="true" class="loading panel">
       <p role="status">{{ pendingStatus('load') }}</p>
       <Skeleton /><Skeleton /><Skeleton />
     </div>
     <EmptyState
-      v-else-if="!loadFailed && !farms.length"
+      v-else-if="!loading && !loadFailed && !farms.length"
       title="Nenhuma farm disponível"
       description="Sua conta ainda não tem uma farm para gerenciar. Crie ou peça acesso a uma farm e volte a esta página."
     >
       <NuxtLink to="/farm">Abrir a página da farm</NuxtLink>
     </EmptyState>
-    <div v-else-if="farms.length" :aria-busy="pending">
+    <div v-if="farms.length" class="content" :aria-busy="pending">
       <StaleNotice
         v-if="stale"
         title="Lista desatualizada"
@@ -264,17 +288,28 @@ function onRevoke(invite: FarmInvite) {
       >
         <Button :disabled="pending" @click="refresh()">Atualizar lista</Button>
       </StaleNotice>
-      <label for="members-farm">Farm</label>
-      <select
-        id="members-farm"
-        v-model="farmId"
-        :disabled="pending || farms.length === 0"
-      >
-        <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
-          {{ farm.farmId }}
-        </option>
-      </select>
-      <template v-if="!loadFailed">
+      <div class="panel farm-field">
+        <label for="members-farm">Farm</label>
+        <select
+          id="members-farm"
+          ref="farmSelect"
+          v-model="farmId"
+          :disabled="pending || loading || farms.length === 0"
+        >
+          <option
+            v-for="(farm, index) in farms"
+            :key="farm.farmId"
+            :value="farm.farmId"
+          >
+            Farm {{ index + 1 }} · {{ farm.farmId }}
+          </option>
+        </select>
+      </div>
+      <div v-if="loading" aria-busy="true" class="loading panel">
+        <p role="status">{{ pendingStatus('load') }}</p>
+        <Skeleton /><Skeleton /><Skeleton />
+      </div>
+      <template v-else-if="!loadFailed">
         <MembersList
           :members="members"
           :pending="pending"
@@ -293,43 +328,116 @@ function onRevoke(invite: FarmInvite) {
       :target="confirmTarget"
       :pending="pending"
       :status="confirmStatus"
+      :error="dialogError"
       @confirm="runConfirmed"
       @cancel="closeConfirm"
     />
-    <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
+    <p class="back"><NuxtLink to="/">Voltar ao início</NuxtLink></p>
   </main>
 </template>
 
 <style scoped>
-main {
-  max-width: 48rem;
-  margin: 2rem auto;
-  padding: 0 1rem;
-  line-height: 1.6;
+.members-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
 }
-label,
-select {
-  display: block;
-  font: inherit;
+.page-header {
+  display: grid;
+  gap: var(--space-2);
+}
+.page-header h1,
+.page-header p,
+.back {
+  margin: 0;
+}
+.eyebrow {
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.intro {
+  color: var(--color-text-muted);
+}
+.content {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+}
+[role='alert']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-md);
+}
+.live:empty {
+  display: none;
+}
+.notice {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-inline-start: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+}
+.panel {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  min-width: 0;
+}
+.panel p {
+  margin: 0;
+}
+.loading {
+  display: grid;
+  gap: var(--space-3);
+}
+.loading :deep(.skeleton) {
+  min-block-size: 3rem;
+}
+.farm-field {
+  display: grid;
+  gap: var(--space-2);
 }
 label {
-  margin-top: 1rem;
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 select {
   width: 100%;
-  max-width: 28rem;
-  margin-top: 0.5rem;
+  max-width: 32rem;
   min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
-select:focus-visible,
-a:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+select:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
-[role='alert'],
-[role='status'] {
-  min-height: 1.5rem;
+select:disabled {
+  opacity: 0.6;
+}
+/* Same bordered surface as the panels. */
+.members-page :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+@media (max-width: 30rem) {
+  .panel {
+    padding: var(--space-4);
+  }
 }
 </style>

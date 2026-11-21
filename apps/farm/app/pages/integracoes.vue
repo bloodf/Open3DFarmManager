@@ -304,7 +304,9 @@ function grantDraft(appId: string) {
         <Button @click="farmId ? load() : start()">Tentar novamente</Button>
       </ErrorState>
     </div>
-    <p class="notice" role="status" aria-live="polite">{{ status }}</p>
+    <p v-if="status" class="notice" role="status" aria-live="polite">
+      {{ status }}
+    </p>
     <section
       v-if="newSecret"
       ref="secretPanel"

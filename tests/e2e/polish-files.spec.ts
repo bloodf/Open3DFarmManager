@@ -175,7 +175,7 @@ const library: Scenario[] = [
     settle: async (page) => {
       await page.getByText('3 item(ns) na lista.').waitFor()
       await page.getByLabel('Título').fill('nada')
-      await page.getByRole('button', { name: 'Buscar' }).click()
+      await page.getByRole('button', { name: 'Buscar', exact: true }).click()
       await page
         .getByRole('heading', { name: 'Nenhum item encontrado' })
         .waitFor()
@@ -189,7 +189,7 @@ const library: Scenario[] = [
     settle: async (page) => {
       await page.getByText('3 item(ns) na lista.').waitFor()
       await page.getByLabel('Título').fill('falha')
-      await page.getByRole('button', { name: 'Buscar' }).click()
+      await page.getByRole('button', { name: 'Buscar', exact: true }).click()
       await page.getByText('Lista desatualizada').waitFor()
     },
   },

@@ -123,6 +123,8 @@ export interface SpoolInput {
   comment?: string | null
   archived?: boolean
   extra?: Record<string, unknown>
+  firstUsedAt?: number | null
+  lastUsedAt?: number | null
 }
 
 export interface PageInput {

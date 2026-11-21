@@ -276,10 +276,27 @@ function main() {
   const implemented = matrix.rows.filter(
     (r) => r.builtin_server_compatibility_status === 'implemented',
   )
-  if (implemented.length !== 0) {
-    note(
-      `expected 0 implemented built-in server endpoints; external connector client calls do not establish server compatibility, got ${implemented.length}`,
+  for (const row of implemented) {
+    const sources = Array.isArray(row.sources) ? row.sources : []
+    const evidence = Array.isArray(row.evidence) ? row.evidence : []
+    const hasRoute =
+      sources.includes('apps/farm/server/routes/spoolman/[...path].ts') &&
+      evidence.includes('apps/farm/server/routes/spoolman/[...path].ts')
+    const hasBuiltinHandler =
+      sources.some((s) =>
+        s.startsWith('apps/farm/server/utils/spool-library/'),
+      ) &&
+      evidence.some((e) =>
+        e.startsWith('apps/farm/server/utils/spool-library/'),
+      )
+    const hasTestEvidence = evidence.some((e) =>
+      e.startsWith('scripts/test-spoolman-'),
     )
+    if (!hasValue(row.scope) || !hasRoute || !hasBuiltinHandler || !hasTestEvidence) {
+      note(
+        `matrix row ${row.endpoint_id} marks builtin_server_compatibility_status=implemented without built-in route, handler, scope, and test evidence`,
+      )
+    }
   }
 
   if (errors.length === 0) {

@@ -159,7 +159,19 @@ async function submit() {
 <style scoped>
 .upload {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+}
+.upload > * {
+  min-width: 0;
+}
+.upload :deep(.field) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.upload :deep(input),
+.upload :deep(select) {
+  max-width: 100%;
+  min-width: 0;
 }
 .error {
   color: var(--printer-error);

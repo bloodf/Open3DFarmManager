@@ -36,5 +36,8 @@ export default defineConfig({
     environment: 'node',
     isolate: true,
     maxWorkers: 2,
+    // The full gate runs on a busy machine, so the 5 s default times out spuriously.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })

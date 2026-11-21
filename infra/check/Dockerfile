@@ -1,0 +1,44 @@
+FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS go
+# Debian 13 (trixie) ships git >= 2.42 (`worktree add --orphan`). Keep linux/amd64.
+FROM node:22.23.5-trixie-slim@sha256:68c76cfad89921b927eae28ba21407475e29d0ce450afcdbe70c1532db042b64
+
+ARG TARGETARCH
+RUN test "${TARGETARCH}" = amd64 || { echo 'The check image requires linux/amd64' >&2; exit 1; }
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    ca-certificates curl ffmpeg fonts-liberation git python3 libasound2 libatk-bridge2.0-0 \
+    libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
+    libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+    libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
+    openssl ripgrep unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+# Playwright resolves its Linux chrome channel to /opt/google/chrome/chrome.
+RUN curl -fsSL --retry 3 \
+    https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/linux64/chrome-linux64.zip \
+    -o /tmp/chrome.zip \
+ && echo 'dba9cc838e1ce269c33ea68170881127bd15d078fc3ca5891c90802819a4d7c7  /tmp/chrome.zip' | sha256sum -c - \
+ && mkdir -p /opt/google \
+ && unzip -q /tmp/chrome.zip -d /opt/google \
+ && mv /opt/google/chrome-linux64 /opt/google/chrome \
+ && rm /tmp/chrome.zip
+
+COPY --from=go /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
+WORKDIR /workspace
+COPY package.json package-lock.json .npmrc ./
+COPY apps/farm/package.json apps/farm/package.json
+COPY packages/connector/package.json packages/connector/package.json
+COPY packages/farm-protocol/package.json packages/farm-protocol/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/sim-cams/package.json packages/sim-cams/package.json
+COPY packages/sim-tools/package.json packages/sim-tools/package.json
+COPY packages/webrtc-experiment/package.json packages/webrtc-experiment/package.json
+RUN npm ci --ignore-scripts && npm cache clean --force
+COPY . .
+# Non-root so permission-based refusals (e.g. mode 0500 directories) match the host suite.
+# The Node suite uses git ls-files. Index the source snapshot as the runtime user.
+RUN chown -R node:node /workspace
+USER node
+RUN git init --quiet && git add --all
+CMD ["npm", "run", "check:all"]

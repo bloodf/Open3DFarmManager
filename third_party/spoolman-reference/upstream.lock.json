@@ -1,0 +1,19 @@
+{
+  "id": "spoolman-reference-lock",
+  "upstream": {
+    "project": "Spoolman",
+    "repository": "https://github.com/Donkie/Spoolman",
+    "license": "MIT",
+    "version_tag": "v0.27.1",
+    "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
+    "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
+    "openapi_sha256": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
+    "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
+  },
+  "artifacts_sha256": {
+    "license": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d",
+    "openapi": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
+    "inventory": "6a2988c6d344200774c64d8ec56458a61040f4a12c1330081abb4205b2c20314",
+    "matrix": "4cb651adb7407e3244f4f3511b78d159711ad01336d4eb008f50c5d607b1fb56"
+  }
+}

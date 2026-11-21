@@ -10,34 +10,98 @@
       <p class="eyebrow">Como funciona</p>
       <h2 id="como-titulo">Como as peças se conectam</h2>
       <p class="section-head__intro">
-        O diagrama representa a arquitetura do projeto, incluindo integrações em
-        andamento.
+        Cinco peças e quatro tipos de conexão. O navegador fala com a aplicação
+        que você hospeda e, para o estado ao vivo, direto com o Connector que
+        fica na sua rede local. É a arquitetura do projeto, incluindo
+        integrações ainda em desenvolvimento.
       </p>
     </header>
 
-    <figure class="how__diagram">
-      <figcaption class="how__diagram-title">
-        Diagrama da arquitetura planejada (texto equivalente abaixo)
-      </figcaption>
-      <ul class="how__flow" aria-label="Navegador, aplicação e banco">
-        <li class="how__node">Navegador</li>
-        <li class="how__link">Contas, cadastro e sinalização</li>
-        <li class="how__node">Aplicação Nuxt</li>
-        <li class="how__link">Armazena em</li>
-        <li class="how__node">Banco próprio</li>
-      </ul>
-      <ul
-        class="how__flow how__flow--direct"
-        aria-label="Navegador, Connector e integrações"
+    <figure class="how__figure">
+      <div
+        class="how__diagram"
+        role="img"
+        aria-label="Diagrama de arquitetura. O navegador conversa com a aplicação auto-hospedada, que usa um banco de dados próprio, e abre uma conexão WebRTC direta com o Connector. O Connector, na rede local, conecta-se à aplicação, à impressora com Klipper e Moonraker e ao Spoolman. A lista numerada abaixo descreve as conexões."
       >
-        <li class="how__node">Navegador</li>
-        <li class="how__link how__link--direct">WebRTC direto</li>
-        <li class="how__node how__node--accent">Connector na rede local</li>
-        <li class="how__link">Conecta a</li>
-        <li class="how__node">Klipper / Moonraker</li>
-        <li class="how__link">e a</li>
-        <li class="how__node">Spoolman</li>
-      </ul>
+        <div class="how__node how__node--browser">
+          <p class="how__node-name">Navegador</p>
+          <p class="how__node-note">Interface em português, a sua conta</p>
+        </div>
+
+        <div class="how__edge how__edge--web">
+          <span class="how__edge-num">1</span>
+          <span class="how__edge-line how__edge-line--h" aria-hidden="true"
+            >↔</span
+          >
+          <span class="how__edge-text">Contas, cadastro e sinalização</span>
+        </div>
+
+        <div class="how__node how__node--app">
+          <p class="how__node-name">Aplicação auto-hospedada</p>
+          <p class="how__node-note">Nuxt, no seu servidor</p>
+          <p class="how__node-sub">Banco PostgreSQL próprio</p>
+        </div>
+
+        <div class="how__edge how__edge--rtc">
+          <span class="how__edge-num">3</span>
+          <span class="how__edge-line how__edge-line--v" aria-hidden="true"
+            >⇕</span
+          >
+          <span class="how__edge-text"
+            >WebRTC direto, do navegador ao Connector</span
+          >
+        </div>
+
+        <div class="how__edge how__edge--pair">
+          <span class="how__edge-num">2</span>
+          <span class="how__edge-line how__edge-line--v" aria-hidden="true"
+            >⇕</span
+          >
+          <span class="how__edge-text"
+            >Pareamento, sinalização e metadados, entre a aplicação e o
+            Connector</span
+          >
+        </div>
+
+        <div class="how__zone">
+          <p class="how__zone-label">Sua rede local</p>
+          <div class="how__node how__node--connector">
+            <p class="how__node-name">Connector</p>
+            <p class="how__node-note">
+              Valida acesso e comandos, e guarda as credenciais locais
+            </p>
+          </div>
+          <div class="how__edge how__edge--printer">
+            <span class="how__edge-num">4</span>
+            <span class="how__edge-line how__edge-line--h" aria-hidden="true"
+              >→</span
+            >
+            <span class="how__edge-text">API do Moonraker</span>
+          </div>
+          <div class="how__node how__node--printer">
+            <p class="how__node-name">Impressora</p>
+            <p class="how__node-note">Klipper e Moonraker</p>
+            <p class="how__node-sub">Simulada; sem prova em hardware físico</p>
+          </div>
+          <div class="how__edge how__edge--spool">
+            <span class="how__edge-num">4</span>
+            <span class="how__edge-line how__edge-line--h" aria-hidden="true"
+              >→</span
+            >
+            <span class="how__edge-text">Leitura do inventário</span>
+          </div>
+          <div class="how__node how__node--spool">
+            <p class="how__node-name">Spoolman</p>
+            <p class="how__node-note">Materiais e carretéis</p>
+            <p class="how__node-sub">Somente leitura por enquanto</p>
+          </div>
+        </div>
+      </div>
+      <figcaption class="how__caption">
+        Diagrama ilustrativo da arquitetura, desenhado para este site. Não é uma
+        captura de tela do aplicativo. As linhas mostram quem conversa com quem,
+        não a quantidade de dados.
+      </figcaption>
     </figure>
 
     <ol class="how__steps">
@@ -45,27 +109,51 @@
         <h3>O servidor cuida de contas e sinalização</h3>
         <p>
           A aplicação mantém contas, cadastro e sinalização, além das APIs de
-          integração, sobre um banco de dados próprio.
+          integração, sobre um banco de dados próprio. Você a hospeda com Docker
+          Compose, atrás de HTTPS, como descrito no guia de hospedagem.
+        </p>
+      </li>
+      <li>
+        <h3>O Connector se une à aplicação por pareamento</h3>
+        <p>
+          O Connector é pareado e aprovado por você, e a aplicação recebe dele
+          apenas metadados e instantâneos limitados. Vídeo da câmera e arquivos
+          grandes não passam pelo servidor.
         </p>
       </li>
       <li>
         <h3>Estado ao vivo e câmera vão direto ao Connector</h3>
         <p>
-          O navegador abre uma conexão WebRTC direta com o Connector na sua rede
-          local. Sem essa conexão, a experiência do navegador é somente leitura.
+          O navegador abre uma conexão WebRTC direta com o Connector, sem TURN.
+          Sem essa conexão, a experiência do navegador é somente leitura. O
+          comportamento entre redes diferentes ainda não foi comprovado.
+        </p>
+      </li>
+      <li>
+        <h3>Impressora e Spoolman ficam do lado de lá</h3>
+        <p>
+          O Connector lê a impressora pela API do Moonraker. A integração com o
+          Spoolman exibe hoje um inventário somente leitura; a senha ou o token
+          dele ficam em um arquivo privado do Connector, e o servidor nunca os
+          recebe.
         </p>
       </li>
       <li>
         <h3>O Connector decide o que pode ser executado</h3>
         <p>
           A validação e a aplicação dos comandos ficam sempre no Connector,
-          inclusive durante uma indisponibilidade do servidor. Perder a conexão
-          não interrompe, por si só, uma impressão em andamento.
+          inclusive durante uma indisponibilidade do servidor. Ele recusa
+          comandos inseguros ou não autorizados e informa o motivo. Perder a
+          conexão não interrompe, por si só, uma impressão em andamento.
         </p>
       </li>
     </ol>
 
     <h3 class="how__subtitle">Do simulador ao hardware</h3>
+    <p class="how__validation-intro">
+      Três tipos de evidência, que não se substituem. O projeto está em
+      desenvolvimento, e nada aqui está comprovado em hardware físico.
+    </p>
     <ol class="how__validation">
       <li>
         <strong>Testes locais e fixtures.</strong>

@@ -59,6 +59,14 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+A `GET /printers` item may carry a read-only `specs` object with what the
+Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
+`nozzles` (`[{ diameterMm }]`, one per tool), `spoolSlots` (integer) and
+`multicolor` (boolean; `true` when more than one tool or spool slot is
+reported, `false` only for exactly one of each). Unknown members are omitted,
+and `specs` is absent when nothing is known; values are never defaulted per
+model.
+
 Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action
 status. File and macro listing are answered live by the Connector and may be

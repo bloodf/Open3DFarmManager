@@ -26,6 +26,10 @@ import type {
   SpoolVendorInput,
 } from '../utils/spool-library/scope.ts'
 import {
+  createAuxRepository,
+  type AuxRepository,
+} from './postgres-spool-library-aux.ts'
+import {
   DECOY_SHA256,
   issueLegacyToken,
   parseLegacyToken,
@@ -147,12 +151,18 @@ class ScopedRepository implements SpoolLibraryRepository {
   readonly access: SpoolLibraryAccess
   private readonly tx: TransactionSql
   private readonly now: number
+  private readonly aux: AuxRepository
 
   constructor(tx: TransactionSql, resolved: Resolved) {
     this.tx = tx
     this.farmId = resolved.farmId
     this.access = resolved.access
     this.now = resolved.now
+    this.aux = createAuxRepository({
+      farmId: resolved.farmId,
+      now: resolved.now,
+      guarded: (mutates, work) => this.guarded(mutates, work),
+    })
   }
 
   private writable(): boolean {
@@ -214,6 +224,22 @@ class ScopedRepository implements SpoolLibraryRepository {
           >`SELECT entity_type AS "entityType", key, name, field_type AS "fieldType", sort_order AS "order", unit, default_value AS "defaultValue", choices, multi_choice AS "multiChoice" FROM farm.spool_library_fields WHERE farm_id=${this.farmId}::uuid AND entity_type=${entity} ORDER BY key LIMIT 256`,
         )
       }),
+    upsert: (definition: SpoolExtraFieldDefinition) =>
+      this.aux.extraFieldWrites.upsert(definition),
+    delete: (entity: SpoolEntityType, key: string) =>
+      this.aux.extraFieldWrites.delete(entity, key),
+  }
+
+  readonly settings = {
+    list: () => this.aux.settings.list(),
+    set: (key: string, value: unknown) => this.aux.settings.set(key, value),
+    reset: (key: string) => this.aux.settings.reset(key),
+  }
+
+  readonly locations = { list: () => this.aux.locations.list() }
+
+  renameSpoolFieldValue(field: string, from: string, to: string) {
+    return this.aux.renameSpoolFieldValue(field, from, to)
   }
 
   readonly vendors = {

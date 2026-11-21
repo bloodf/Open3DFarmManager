@@ -1,4 +1,13 @@
+import { createConfiguredExternalModule } from './legacy-api/external-config.ts'
+import { exportModule } from './legacy-api/export.ts'
+import { fieldModule } from './legacy-api/field.ts'
 import { filamentModule } from './legacy-api/filament.ts'
+import { groupModule } from './legacy-api/group.ts'
+import { infoModule } from './legacy-api/info.ts'
+import { listsModule } from './legacy-api/lists.ts'
+import { locationModule } from './legacy-api/location.ts'
+import { searchModule } from './legacy-api/search.ts'
+import { settingModule } from './legacy-api/setting.ts'
 import { spoolModule } from './legacy-api/spool.ts'
 import type {
   LegacyApiModule,
@@ -62,14 +71,23 @@ export const healthModule: LegacyApiModule = {
 }
 
 /**
- * Registered Spoolman endpoint modules, tried in order. Field, setting, tag
- * and other auxiliary modules are appended here as they are implemented.
+ * Registered Spoolman endpoint modules, tried in order. Tag modules are
+ * appended here once the tag storage exists.
  */
 export const LEGACY_API_MODULES: readonly LegacyApiModule[] = [
   healthModule,
+  infoModule,
+  settingModule,
+  fieldModule,
+  locationModule,
+  listsModule,
+  exportModule,
+  searchModule,
+  groupModule,
   vendorModule,
   filamentModule,
   spoolModule,
+  createConfiguredExternalModule(),
 ]
 
 export interface LegacyRequestContext {

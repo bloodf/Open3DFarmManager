@@ -33,7 +33,8 @@ Isolation does not rest on application code alone:
   credential's secret hash or delete credentials, and it has no access to
   connector or other farm tables. `validateSpoolLibraryRole` refuses a
   connection whose role holds anything more. Give the farm server a login role
-  that is a member of `farm_spool_library` and nothing else.
+  that is a member of `farm_spool_library` (and, for settings and extra-field
+  writes, `farm_spool_features`) and nothing else.
 - Savepoints isolate each repository call, so a rejected write never leaves a
   half-written row or poisons the surrounding transaction.
 
@@ -248,6 +249,33 @@ grants only (`farm_id` is never updatable), leaving `farm_spool_library` and
 
 Cost per print formula: `COALESCE(spool.price, filament.price) / spool.initial_weight * grams_used`,
 formatted in the farm's configured `currency`.
+
+### Spoolman auxiliary HTTP APIs (#545, #562)
+
+The legacy path `/spoolman/<token>/api/v1/...` also answers the remaining
+Spoolman v0.27.1 HTTP routes, all scoped to the credential's farm: `info`,
+`health`, `backup`, `setting`, `field`, `location`, `export`, `material`,
+`article-number`, `lot-number`, `search`, `spool/group`, `spool/field/{field}`,
+`external/*` and `tag/reader`. Per-route status is in
+`docs/compatibility/spoolman-matrix.{md,json}`, with the documented differences
+from upstream (notably `POST /api/v1/backup`, which returns a farm-scoped JSON
+export in the response body and writes no server-side file).
+
+- Writes to settings and extra-field definitions need the login role to be a
+  member of `farm_spool_features` as well as `farm_spool_library`
+  (`CREATE ROLE ... LOGIN ... IN ROLE farm_spool_library, farm_spool_features`).
+  `validateSpoolLibraryRole` accepts exactly that pair. A role without the
+  second membership still serves everything else; those writes answer 503.
+- The API path is percent-decoded once; encoded dots, slashes, backslashes and
+  NUL are refused with 401, as are malformed escapes. The credential segment is
+  never decoded.
+- `SPOOLMAN_EXTERNAL_DB_URL` (optional) points at a SpoolmanDB-style base URL
+  serving `filaments.json` and `materials.json`; the farm server fetches it in
+  the background, without any credential, and refreshes it daily. Unset, the
+  `external/*` routes answer as upstream does before its first sync.
+  `EXTERNAL_DB_NAME` sets the name shown by `info`.
+- Evidence: `node scripts/test-spoolman-aux-api.mjs` (disposable PostgreSQL in
+  Docker, `tests/integration/spoolman-aux/**`).
 
 ## Evidence
 

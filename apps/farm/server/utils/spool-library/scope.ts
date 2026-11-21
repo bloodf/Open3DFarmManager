@@ -167,14 +167,46 @@ export interface SpoolExtraFieldDefinition {
   multiChoice: boolean
 }
 
+/** One stored farm setting; `value` is the parsed JSON value. */
+export interface SpoolSetting {
+  key: string
+  value: unknown
+}
+
 /** Farm-bound repository. Mutations on a `read` scope resolve to `denied`. */
 export interface SpoolLibraryRepository {
   readonly farmId: string
   readonly access: SpoolLibraryAccess
-  /** Read-only view of this farm's extra-field registry. */
+  /** This farm's extra-field registry (Spoolman `/field`). */
   readonly extraFields: {
     list(entity: SpoolEntityType): Promise<Result<SpoolExtraFieldDefinition[]>>
+    /** Insert or replace one definition (key and entity identify it). */
+    upsert(definition: SpoolExtraFieldDefinition): Promise<Result<true>>
+    /** Remove a definition and its value from every record of that entity. */
+    delete(entity: SpoolEntityType, key: string): Promise<Result<true>>
   }
+  /** Settings the farm has set; unset keys are absent (Spoolman `/setting`). */
+  readonly settings: {
+    list(): Promise<Result<SpoolSetting[]>>
+    set(key: string, value: unknown): Promise<Result<true>>
+    /** Back to the default: drops the stored value. */
+    reset(key: string): Promise<Result<true>>
+  }
+  /** Spool locations (Spoolman `/location`, `PATCH /spool/field/location`). */
+  readonly locations: {
+    /** Distinct locations held by this farm's spools, ascending. */
+    list(): Promise<Result<string[]>>
+  }
+  /**
+   * Rename one value of one spool field wherever it occurs (archived spools
+   * included); returns how many spools changed. `field` is `location` or
+   * `extra.<key>`. Renaming onto a value in use merges the two.
+   */
+  renameSpoolFieldValue(
+    field: string,
+    from: string,
+    to: string,
+  ): Promise<Result<number>>
   readonly vendors: Crud<
     SpoolVendor,
     SpoolVendorInput,

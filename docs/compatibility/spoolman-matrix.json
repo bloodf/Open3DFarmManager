@@ -64,10 +64,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_article_numbers_article_number_get",
       "upstream_tags": ["other"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Distinct filament article numbers of this farm, ascending.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -91,11 +96,15 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1article-number/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1article-number/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/backup",
@@ -104,10 +113,16 @@
       "transport": "http",
       "upstream_operation_id": "backup_backup_post",
       "upstream_tags": [],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Implemented with a documented difference: the built-in server has no SQLite file to copy and writes no server-side file. It answers 200 with the upstream BackupResponse fields (created true, path \"inline:export\") plus an \"export\" member holding a farm-scoped JSON export (vendors, filaments, spools, extra-field definitions and set settings) in the shape the library import accepts. Only the calling farm is exported; read-only credentials may call it because nothing is written.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/info.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -141,11 +156,18 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1backup/post"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1backup/post",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/info.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/info-backup.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "POST /api/v1/backup returns a farm-scoped JSON export in the response body instead of a server-side backup file; path is the fixed text \"inline:export\" and the 500 \"Backup failed\" case cannot occur."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/filaments",
@@ -154,10 +176,15 @@
       "transport": "http",
       "upstream_operation_id": "Export_filaments_export_filaments_get",
       "upstream_tags": ["export"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API: fmt=json returns filaments with their vendor, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; missing or invalid fmt answers the 422 enum error.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -196,15 +223,17 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
-      ],
+      "relevant_headers": ["content-type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1filaments/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1filaments/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/spools",
@@ -213,10 +242,15 @@
       "transport": "http",
       "upstream_operation_id": "Export_spools_export_spools_get",
       "upstream_tags": ["export"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API: fmt=json returns spools with filament and vendor, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; archived spools are excluded unless allow_archived=true.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -266,15 +300,17 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
-      ],
+      "relevant_headers": ["content-type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1spools/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1spools/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/vendors",
@@ -283,10 +319,15 @@
       "transport": "http",
       "upstream_operation_id": "Export_vendors_export_vendors_get",
       "upstream_tags": ["export"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API: fmt=json returns the vendor list in the API wire shape, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; missing or invalid fmt answers the 422 enum error.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -325,15 +366,17 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
-      ],
+      "relevant_headers": ["content-type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1vendors/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1vendors/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/export.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/filament",
@@ -342,10 +385,16 @@
       "transport": "http",
       "upstream_operation_id": "Get_all_external_filaments_external_filament_get",
       "upstream_tags": ["external"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API from the external catalog module (#562). The catalog is fetched in the background from SPOOLMAN_EXTERNAL_DB_URL (filaments.json and materials.json, no credential forwarded) and refreshed daily; until the first sync, or when no URL is configured, it answers 500 as upstream does before its first sync.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -365,15 +414,21 @@
       "errors": [
         "No error response documented for this endpoint in pinned OpenAPI/source inventory."
       ],
-      "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
-      ],
+      "relevant_headers": ["etag", "last-modified"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/external-routes.test.ts",
+        "scripts/test-spoolman-external-filament.mjs"
       ],
-      "gaps": [],
+      "gaps": [
+        "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/filament/search",
@@ -382,10 +437,16 @@
       "transport": "http",
       "upstream_operation_id": "Search_external_filaments_external_filament_search_get",
       "upstream_tags": ["external"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served from the external catalog module (#562) with query/limit/offset validation and x-total-count; without a configured or synced catalog it answers an empty list.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -452,15 +513,21 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
-      ],
+      "relevant_headers": ["x-total-count"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament~1search/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament~1search/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/external-routes.test.ts",
+        "scripts/test-spoolman-external-filament.mjs"
       ],
-      "gaps": [],
+      "gaps": [
+        "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/material",
@@ -469,10 +536,16 @@
       "transport": "http",
       "upstream_operation_id": "Get_all_external_materials_external_material_get",
       "upstream_tags": ["external"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served from the external catalog module (#562): the materials of the synced materials.json with null temperatures omitted; 500 until the first sync, as upstream.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -496,11 +569,18 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1material/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1material/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/external-routes.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/field/{entity_type}",
@@ -509,10 +589,16 @@
       "transport": "http",
       "upstream_operation_id": "Get_extra_fields_field__entity_type__get",
       "upstream_tags": ["field"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API from this farm's extra-field registry, ordered by order then key; unknown entity types answer the 422 enum error.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -556,11 +642,16 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/field/{entity_type}/{key}",
@@ -569,10 +660,16 @@
       "transport": "http",
       "upstream_operation_id": "Delete_extra_field_field__entity_type___key__delete",
       "upstream_tags": ["field"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Delete one definition and remove its value from every record of that entity on this farm; 404 Message for an unknown key; answers with the remaining list. Requires a write credential.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -639,11 +736,18 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/delete"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/delete",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/field/{entity_type}/{key}",
@@ -652,10 +756,16 @@
       "transport": "http",
       "upstream_operation_id": "Add_or_update_extra_field_field__entity_type___key__post",
       "upstream_tags": ["field"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Add or update one extra-field definition on the farm-scoped registry and answer with the entity's full definition list; pydantic-shaped 422 errors for path and body, 400 for registry rule violations (choices, multi_choice, invalid default value, field type change). Requires a write credential.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -724,11 +834,18 @@
       ],
       "relevant_headers": ["Content-Type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/field/{entity_type}/{key}/values",
@@ -737,10 +854,15 @@
       "transport": "http",
       "upstream_operation_id": "Get_extra_field_values_field__entity_type___key__values_get",
       "upstream_tags": ["field"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Distinct values currently stored for the field across this farm's records, ascending; 404 Message for an unknown key.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -807,11 +929,17 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}~1values/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}~1values/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/field.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/filament",
@@ -1669,12 +1797,15 @@
       "transport": "http",
       "upstream_operation_id": "health_health_get",
       "upstream_tags": [],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API with the pinned HealthCheck example ({\"status\":\"healthy\"}); proven by scripts/test-spoolman-aux-api.mjs.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "tests/node/e16-353.test.mjs",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "scripts/test-spoolman-aux-api.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1701,11 +1832,14 @@
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1health/get",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "tests/node/e16-353.test.mjs",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "scripts/test-spoolman-aux-api.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/info",
@@ -1714,12 +1848,16 @@
       "transport": "http",
       "upstream_operation_id": "info_info_get",
       "upstream_tags": [],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Reports version 0.27.1 and db_type postgresql; data_dir, logs_dir and backups_dir are empty strings (no host path is disclosed) and no update check runs (latest_version null, update_available false). external_db_name comes from EXTERNAL_DB_NAME (default SpoolmanDB).",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "tests/node/e16-353.test.mjs",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/info.ts",
+        "scripts/test-spoolman-aux-api.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1746,11 +1884,15 @@
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1info/get",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "tests/node/e16-353.test.mjs",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/info.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/info-backup.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/location",
@@ -1759,10 +1901,16 @@
       "transport": "http",
       "upstream_operation_id": "Find_locations_location_get",
       "upstream_tags": ["other"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Distinct, non-null locations held by this farm's spools (archived included), ascending by code point.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -1786,11 +1934,16 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/location.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/location/{location}",
@@ -1799,10 +1952,17 @@
       "transport": "http",
       "upstream_operation_id": "Rename_location_location__location__patch",
       "upstream_tags": ["other"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Renames a location on this farm's spools (merging onto a name already in use) and answers the new name as a JSON string. The API path is percent-decoded once so names with spaces work; encoded dots, slashes, backslashes and NUL are refused. Requires a write credential.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "apps/farm/server/utils/spool-library/legacy-path.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -1848,11 +2008,17 @@
       ],
       "relevant_headers": ["Content-Type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "apps/farm/server/utils/spool-library/legacy-path.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/location.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/lot-number",
@@ -1861,10 +2027,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_lot_numbers_lot_number_get",
       "upstream_tags": ["other"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Distinct spool lot numbers of this farm, ascending.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -1888,11 +2059,15 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1lot-number/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1lot-number/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/material",
@@ -1901,10 +2076,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_materials_material_get",
       "upstream_tags": ["other"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Distinct filament materials of this farm, ascending.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -1928,11 +2108,15 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1material/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1material/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/search",
@@ -1941,10 +2125,15 @@
       "transport": "http",
       "upstream_operation_id": "Search_search_get",
       "upstream_tags": ["search"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Cross-entity search over this farm: every whitespace-separated term must match case-insensitively in a text field (or text/choice extra field, or a filament's vendor name); numeric queries also match a spool id; a #hex query adds colour-similarity filament matches; allow_archived, limit and spools_per_filament are honoured.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/search.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -2042,11 +2231,18 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1search/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1search/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/search.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "CSS colour-name queries (e.g. \"red\") are not recognised as colour queries; only #hex codes are.",
+        "Result ranking (exact, prefix, substring, then id) is approximated; the upstream ranking is not pinned."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/setting/",
@@ -2055,10 +2251,16 @@
       "transport": "http",
       "upstream_operation_id": "Get_all_settings_setting__get",
       "upstream_tags": ["setting"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "All registered settings (currency, round_prices, print_presets, base_url, locations_spoolorders and the extra_fields_* views of the registry) with is_set false and the default value when unset.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -2082,11 +2284,16 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/setting/{key}",
@@ -2095,10 +2302,16 @@
       "transport": "http",
       "upstream_operation_id": "Get_setting_setting__key__get",
       "upstream_tags": ["setting"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "One registered setting as {value, is_set, type}; 404 Message for an unregistered key. The websocket on the same path is not served.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -2160,11 +2373,18 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/setting/{key}",
@@ -2173,10 +2393,16 @@
       "transport": "http",
       "upstream_operation_id": "Set_setting_setting__key__post",
       "upstream_tags": ["setting"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Sets a registered setting from the double-encoded JSON string body; an empty body or null resets it to the default. 404 for unknown keys, 415 when the value is not JSON of the setting's type. extra_fields_* follow the extra-field registry and answer 400 here. Requires a write credential.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -2245,11 +2471,18 @@
       ],
       "relevant_headers": ["Content-Type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/setting-field.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "WS /api/v1/setting/{key}",
@@ -2822,10 +3055,16 @@
       "transport": "http",
       "upstream_operation_id": "Rename_a_spool_field_value_spool_field__field__patch",
       "upstream_tags": ["spool"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Renames one value of location or of a text/single-choice extra field across all of this farm's spools, archived included, and answers {spools_updated}. Requires a write credential.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -2884,11 +3123,18 @@
       ],
       "relevant_headers": ["Content-Type"],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/location.ts",
+        "apps/farm/server/storage/postgres-spool-library-aux.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/location.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/spool/group",
@@ -2897,10 +3143,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_spool_groups_spool_group_get",
       "upstream_tags": ["spool"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Groups this farm's spools by filament, vendor, material, location or a text/single-choice extra field with spool_count, in_use_count, total_remaining_weight, last_used, preview and include_empty; pagination is over groups and x-total-count, x-total-spools and x-total-remaining-weight are returned.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/group.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [
           {
@@ -3241,14 +3492,23 @@
         }
       ],
       "relevant_headers": [
-        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+        "x-total-count",
+        "x-total-spools",
+        "x-total-remaining-weight"
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1group/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1group/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/group.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "Sorting supports the group.* keys and filament.name, filament.material and filament.vendor.name; other documented sort keys are ignored.",
+        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/spool/{spool_id}",
@@ -3943,10 +4203,15 @@
       "transport": "http",
       "upstream_operation_id": "List_recently_seen_tag_readers_tag_reader_get",
       "upstream_tags": ["tag"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
-      "sources": [],
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Always the empty list: the upstream registry is in memory and only filled by tag scans, which are not accepted by the built-in server yet.",
+      "sources": [
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs"
+      ],
       "request_schema": {
         "parameters": [],
         "body_required": false,
@@ -3970,11 +4235,17 @@
         "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
       ],
       "evidence": [
-        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1reader/get"
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1reader/get",
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
+        "scripts/test-spoolman-aux-api.mjs",
+        "tests/integration/spoolman-aux/catalog.test.ts"
       ],
-      "gaps": [],
+      "gaps": [
+        "POST /api/v1/tag/scan is not served, so no reader is ever listed."
+      ],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/tag/scan",
@@ -4662,6 +4933,21 @@
       "endpoint": "GET /api/v1/spool",
       "name": "x-total-count",
       "direction": "response"
+    },
+    {
+      "endpoint": "GET /api/v1/spool/group",
+      "name": "x-total-count",
+      "direction": "response"
+    },
+    {
+      "endpoint": "GET /api/v1/spool/group",
+      "name": "x-total-spools",
+      "direction": "response"
+    },
+    {
+      "endpoint": "GET /api/v1/spool/group",
+      "name": "x-total-remaining-weight",
+      "direction": "response"
     }
   ],
   "client_contracts": [
@@ -4741,15 +5027,27 @@
     },
     {
       "path": "tests/fixtures/spoolman/spool-api/cases.json",
-      "sha256": "3d479dfce543250e86d223235047d3d408ca34506ee6952c39a684d10ae3c1f7",
+      "sha256": "967e4dfb1e4f20a3b128917a929b5e35afd6036228822b9a2907c55bb2b79354",
       "purpose": "Spool API request corpus for upstream capture and built-in server parity tests (#540)",
       "provenance": "Original MIT test request definitions exercising all 7 Spoolman v0.27.1 HTTP spool endpoints, filters, sorting, pagination, extra fields, archive, use and measure semantics."
     },
     {
       "path": "tests/fixtures/spoolman/spool-api/upstream.json",
-      "sha256": "b911b367a139e88049ff393eecaeb63f4416aaa06738eaeb0d0643dfe1a11612",
+      "sha256": "024f2edee070f73225a2aaa2348eb8da259c93d4f42e2546deab2528dcd67697",
       "purpose": "Recorded upstream Spoolman v0.27.1 HTTP responses for spool API contract replay (#540)",
       "provenance": "Captured directly from local digest-pinned ghcr.io/donkie/spoolman:0.27.1 (revision ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b) with --network none via scripts/capture-spoolman-spool-api.mjs."
+    },
+    {
+      "path": "tests/fixtures/spoolman/aux/filaments.json",
+      "sha256": "f03df1f065f6dbcc14f25c010efb40803e5542ce076e964d2534b15ac925cfce",
+      "purpose": "External filament library fixture for the auxiliary API tests (#545, #562)",
+      "provenance": "Original MIT fixture data: two synthetic filaments in the SpoolmanDB filaments.json shape pinned by upstream v0.27.1 ExternalFilament. Not copied from the upstream database."
+    },
+    {
+      "path": "tests/fixtures/spoolman/aux/materials.json",
+      "sha256": "f1b360624af4b407fe85037db389592233d12e839cbcac645efa51678d644da2",
+      "purpose": "External material library fixture for the auxiliary API tests (#545, #562)",
+      "provenance": "Original MIT fixture data: three synthetic materials in the SpoolmanDB materials.json shape pinned by upstream v0.27.1 ExternalMaterial. Not copied from the upstream database."
     }
   ],
   "gaps": [
@@ -4758,5 +5056,16 @@
     "Farm UI stores Spoolman origin in Postgres; it does not proxy arbitrary Spoolman REST.",
     "Simulator mock implements a subset for tests; mock behavior is not claimed as full upstream parity.",
     "No live Spoolman execution was required for this matrix; disposable API receipts remain in docs/SPOOLMAN-ACTUAL-API-VALIDATION.md."
+  ],
+  "builtin_server_differences": [
+    "POST /api/v1/backup returns a farm-scoped JSON export in the response body (BackupResponse fields created and path, plus an export member); no server-side file is written, so there is no backup directory and no 500 \"Backup failed\" case.",
+    "GET /api/v1/info describes the built-in server: db_type postgresql, empty data_dir, logs_dir and backups_dir, no update check.",
+    "Settings: only registered keys exist (currency, round_prices, print_presets, base_url, locations_spoolorders, extra_fields_vendor, extra_fields_filament, extra_fields_spool). The extra_fields_* settings mirror the farm's extra-field registry and are changed through /api/v1/field, not through /api/v1/setting.",
+    "Error message texts of 400/404/415 answers for fields, settings, renames and groups are not verified against the upstream source, which is not vendored; status codes and body shapes follow the pinned OpenAPI.",
+    "GET /api/v1/search recognises #hex colour queries only (no CSS colour names); ranking is approximated.",
+    "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served because migration 0089 has no tag storage; GET /tag/reader is always empty. Websocket routes are a separate unit.",
+    "The external filament library needs SPOOLMAN_EXTERNAL_DB_URL; it syncs in the background and answers 500 until the first sync, as upstream does before its first sync.",
+    "The API path is percent-decoded once (so location names with spaces work); encoded dots, slashes, backslashes and NUL are refused with 401, as are malformed escapes.",
+    "Writes to settings and extra-field definitions need the runtime database role to be a member of farm_spool_features (migration 0089) as well as farm_spool_library; without it those writes answer 503 and everything else is unaffected."
   ]
 }

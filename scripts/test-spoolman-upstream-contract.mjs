@@ -27,7 +27,7 @@ print(json.dumps({'status':response.status,'response':json.load(response)}))`
 function docker(args, options = {}) {
   const result = spawnSync('docker', args, {
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: args[0] === 'run' ? 180000 : 30000,
     ...options,
   })
   if (result.error || result.status !== 0)

@@ -22,6 +22,39 @@ function fail(message) {
   process.exitCode = 1
 }
 
+const PRODUCT_STATUSES = new Set([
+  'implemented',
+  'unimplemented',
+  'simulator_or_test_only',
+  'experimental',
+])
+const CLIENT_COVERAGE_STATUSES = new Set([
+  'covered',
+  'not_covered',
+  'partial',
+  'not_applicable',
+  'unknown',
+])
+
+function hasValue(value) {
+  if (typeof value === 'string') return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  if (value && typeof value === 'object') return Object.keys(value).length > 0
+  return false
+}
+
+function requireList(row, key, endpointId, note) {
+  if (!Array.isArray(row[key])) {
+    note(`matrix row ${endpointId} ${key} must be an array`)
+    return
+  }
+  for (const [index, value] of row[key].entries()) {
+    if (!hasValue(value)) {
+      note(`matrix row ${endpointId} ${key}[${index}] must not be empty`)
+    }
+  }
+}
+
 function main() {
   const errors = []
   const note = (message) => errors.push(message)
@@ -125,6 +158,64 @@ function main() {
     if (!row.product_status) {
       note(`matrix row ${endpoint.id} missing product_status`)
     }
+
+    const upstreamStatuses = [...(endpoint.responses ?? [])].map(String).sort()
+    const matrixStatuses = Array.isArray(row.statuses)
+      ? row.statuses.map((status) => String(status.code ?? '')).sort()
+      : []
+    if (JSON.stringify(matrixStatuses) !== JSON.stringify(upstreamStatuses)) {
+      note(`matrix row ${endpoint.id} statuses do not match pinned inventory`)
+    }
+
+    for (const field of ['request_schema', 'output_schema']) {
+      if (!hasValue(row[field])) {
+        note(`matrix row ${endpoint.id} missing ${field}`)
+      }
+    }
+
+    for (const field of [
+      'statuses',
+      'errors',
+      'relevant_headers',
+      'evidence',
+      'gaps',
+    ]) {
+      requireList(row, field, endpoint.id, note)
+    }
+
+    if (!row.evidence?.length && !row.gaps?.length) {
+      note(`matrix row ${endpoint.id} needs evidence or an explicit gap`)
+    }
+
+    if (
+      typeof row.external_client_coverage_status !== 'string' ||
+      !CLIENT_COVERAGE_STATUSES.has(row.external_client_coverage_status)
+    ) {
+      note(
+        `matrix row ${endpoint.id} external_client_coverage_status must be one of ${[...CLIENT_COVERAGE_STATUSES].join(', ')}`,
+      )
+    }
+
+    if (
+      typeof row.builtin_server_compatibility_status !== 'string' ||
+      !PRODUCT_STATUSES.has(row.builtin_server_compatibility_status)
+    ) {
+      note(
+        `matrix row ${endpoint.id} builtin_server_compatibility_status must be one of ${[...PRODUCT_STATUSES].join(', ')}`,
+      )
+    }
+
+    // product_status is retained as a compatibility alias and always describes
+    // the built-in replacement server. External client calls cannot establish
+    // that the server implements an upstream endpoint.
+    if (
+      row.builtin_server_compatibility_status &&
+      row.product_status !== row.builtin_server_compatibility_status
+    ) {
+      note(
+        `matrix row ${endpoint.id} product_status must match builtin_server_compatibility_status`,
+      )
+    }
   }
 
   for (const row of matrix.rows) {
@@ -150,6 +241,20 @@ function main() {
     note('matrix.client_contracts must list maintained request contracts')
   }
 
+  for (const row of matrix.rows) {
+    if (
+      ['covered', 'partial'].includes(row.external_client_coverage_status) &&
+      !matrix.client_contracts.some(
+        (contract) =>
+          contract.method === row.method && contract.path === row.path,
+      )
+    ) {
+      note(
+        `matrix row ${row.endpoint_id} claims external client coverage without a matching client contract`,
+      )
+    }
+  }
+
   for (const fixture of matrix.fixture_provenance ?? []) {
     const digest = sha256(fixture.path)
     if (fixture.sha256 !== digest) {
@@ -169,11 +274,11 @@ function main() {
   }
 
   const implemented = matrix.rows.filter(
-    (r) => r.product_status === 'implemented',
+    (r) => r.builtin_server_compatibility_status === 'implemented',
   )
-  if (implemented.length !== 2) {
+  if (implemented.length !== 0) {
     note(
-      `expected exactly 2 implemented product endpoints (GET spool + root WS), got ${implemented.length}`,
+      `expected 0 implemented built-in server endpoints; external connector client calls do not establish server compatibility, got ${implemented.length}`,
     )
   }
 

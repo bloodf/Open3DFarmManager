@@ -10,12 +10,12 @@
     "version_tag": "v0.27.1",
     "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
     "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
-    "openapi_sha256": "faacc40c2b61d445042b797934e005142bf9cc93e6cc20d5e8685c86fc032fe5",
+    "openapi_sha256": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
     "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
   },
   "inventory_file": "docs/compatibility/spoolman-endpoint-inventory.json",
   "openapi_file": "docs/compatibility/spoolman-openapi-v0.27.1.json",
-  "method": "Static review of pinned upstream OpenAPI/source and maintained product paths. Compatibility with a running Spoolman service is established only by separate qualification receipts.",
+  "method": "Static comparison of pinned v0.27.1 OpenAPI/source, maintained external Connector client calls, and built-in replacement server routes. Client coverage and built-in server compatibility are measured separately; no live server qualification is implied.",
   "endpoint_count": 54,
   "rows": [
     {
@@ -25,10 +25,37 @@
       "transport": "websocket",
       "upstream_operation_id": null,
       "upstream_tags": ["websocket"],
-      "product_status": "implemented",
-      "scope": "connector_invalidation_only",
-      "notes": "Root websocket for spool/filament/vendor added|updated|deleted; ignores setting/tag_scan. No subscription messages.",
-      "sources": ["packages/connector/src/runtime/spoolman-provider.ts"]
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External Connector client coverage only (connector_root_websocket); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
+      "sources": ["packages/connector/src/runtime/spoolman-provider.ts"],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["SpoolEvent", "FilamentEvent", "VendorEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1/websocket-source-inventory",
+        "packages/connector/src/runtime/spoolman-provider.ts"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "partial",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/article-number",
@@ -39,8 +66,36 @@
       "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Location and facet listing endpoints not called by product code.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<string>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "A list of all article numbers."
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1article-number/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/backup",
@@ -51,8 +106,46 @@
       "upstream_tags": [],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "BackupResponse"
+        },
+        "500": {
+          "application/json": "Message"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "500",
+          "description": "Internal Server Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "500",
+          "description": "Internal Server Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1backup/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/filaments",
@@ -63,8 +156,55 @@
       "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExportFormat"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "inline schema"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1filaments/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/spools",
@@ -75,8 +215,66 @@
       "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExportFormat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "allow_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Whether to include archived spools in the export.",
+              "title": "Allow Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "inline schema"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1spools/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/export/vendors",
@@ -87,8 +285,55 @@
       "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExportFormat"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "inline schema"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1vendors/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/filament",
@@ -99,8 +344,36 @@
       "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "External catalog and x-total-count header not consumed.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExternalFilament>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/filament/search",
@@ -111,8 +384,83 @@
       "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "External catalog and x-total-count header not consumed.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "Search query, matched word-by-word against manufacturer, name and material.",
+              "examples": ["polymaker pla"],
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of results to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matches to skip, for paging through the results.",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExternalFilament>"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament~1search/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/external/material",
@@ -123,8 +471,36 @@
       "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "External catalog and x-total-count header not consumed.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExternalMaterial>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1material/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/field/{entity_type}",
@@ -135,8 +511,56 @@
       "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityType",
+              "description": "Entity type this field is for"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExtraField>"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/field/{entity_type}/{key}",
@@ -147,8 +571,79 @@
       "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityType",
+              "description": "Entity type this field is for"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9_]+$",
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExtraField>"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/delete"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/field/{entity_type}/{key}",
@@ -159,8 +654,81 @@
       "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityType",
+              "description": "Entity type this field is for"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9_]+$",
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/ExtraFieldParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<ExtraField>"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/field/{entity_type}/{key}/values",
@@ -171,8 +739,79 @@
       "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityType",
+              "description": "Entity type this field is for"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9_]+$",
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<string>"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}~1values/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/filament",
@@ -181,13 +820,296 @@
       "transport": "http",
       "upstream_operation_id": "Find_filaments_filament_get",
       "upstream_tags": ["filament"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "vendor_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See vendor.name.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vendor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See vendor.id.",
+              "title": "Vendor ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vendor.name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament vendor name. Separate multiple terms with a comma. Specify an empty string to match filaments with no vendor name. Surround a term with quotes to search for the exact term.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vendor.id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Specify -1 to match filaments with no vendor.",
+              "examples": ["1", "1,2"],
+              "title": "Vendor ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament name. Separate multiple terms with a comma. Specify an empty string to match filaments with no name. Surround a term with quotes to search for the exact term.",
+              "title": "Filament Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "material",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament material. Separate multiple terms with a comma. Specify an empty string to match filaments with no material. Surround a term with quotes to search for the exact term.",
+              "title": "Filament Material"
+            }
+          },
+          {
+            "in": "query",
+            "name": "article_number",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament article number. Separate multiple terms with a comma. Specify an empty string to match filaments with no article number. Surround a term with quotes to search for the exact term.",
+              "title": "Filament Article Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color_hex",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match filament by similar color.",
+              "title": "Filament Color"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color_similarity_threshold",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
+              "examples": [20],
+              "title": "Color Similarity Threshold",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Find filaments imported by the given external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
+              "examples": ["polymaker_pla_polysonicblack_1000_175"],
+              "title": "External Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match the filament that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter. Only a tag linked to the filament itself matches, not a tag on one of its spools; look those up on the spool endpoint. Returns either one filament or none. Returns 400 if the UID is not hexadecimal.",
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
+              "title": "Tag UID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+              "examples": ["vendor.name:asc,spool_weight:desc"],
+              "title": "Sort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum number of items in the response.",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset in the full result set if a limit is set.",
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<Filament>"
+        },
+        "299": {
+          "application/json": "FilamentEvent"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/filament",
@@ -196,13 +1118,66 @@
       "transport": "http",
       "upstream_operation_id": "Add_filament_filament_post",
       "upstream_tags": ["filament"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/FilamentParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Filament"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament/post",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/filament/{filament_id}",
@@ -211,13 +1186,85 @@
       "transport": "http",
       "upstream_operation_id": "Delete_filament_filament__filament_id__delete",
       "upstream_tags": ["filament"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filament_id",
+            "required": true,
+            "schema": {
+              "title": "Filament Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Message"
+        },
+        "403": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "403",
+          "description": "Forbidden"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "403",
+          "description": "Forbidden"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/delete",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/filament/{filament_id}",
@@ -226,13 +1273,81 @@
       "transport": "http",
       "upstream_operation_id": "Get_filament_filament__filament_id__get",
       "upstream_tags": ["filament"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filament_id",
+            "required": true,
+            "schema": {
+              "title": "Filament Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Filament"
+        },
+        "299": {
+          "application/json": "FilamentEvent"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/filament/{filament_id}",
@@ -241,13 +1356,87 @@
       "transport": "http",
       "upstream_operation_id": "Update_filament_filament__filament_id__patch",
       "upstream_tags": ["filament"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filament_id",
+            "required": true,
+            "schema": {
+              "title": "Filament Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/FilamentUpdateParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Filament"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/patch",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/filament/{filament_id}",
@@ -258,8 +1447,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["FilamentEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/filament/{filament_id}/tag",
@@ -270,8 +1485,91 @@
       "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filament_id",
+            "required": true,
+            "schema": {
+              "title": "Filament Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/TagLinkParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "201": {
+          "application/json": "Tag"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "409": {
+          "application/json": "TagConflictMessage"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "201",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "409",
+          "description": "Conflict"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "409",
+          "description": "Conflict"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}~1tag/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/filament/{filament_id}/tag/{uid}",
@@ -282,8 +1580,87 @@
       "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filament_id",
+            "required": true,
+            "schema": {
+              "title": "Filament Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "The tag's UID, in any shape. Normalized before matching.",
+              "examples": ["04A2B3C4D5E6F7"],
+              "title": "Tag UID",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "204": {},
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "204",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}~1tag~1{uid}/delete"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/health",
@@ -292,13 +1669,43 @@
       "transport": "http",
       "upstream_operation_id": "health_health_get",
       "upstream_tags": [],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "HealthCheck"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1health/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/info",
@@ -307,13 +1714,43 @@
       "transport": "http",
       "upstream_operation_id": "info_info_get",
       "upstream_tags": [],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Info"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1info/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/location",
@@ -324,8 +1761,36 @@
       "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Location and facet listing endpoints not called by product code.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<string>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "A list of all spool locations."
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/location/{location}",
@@ -336,8 +1801,58 @@
       "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Location and facet listing endpoints not called by product code.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "location",
+            "required": true,
+            "schema": {
+              "title": "Location",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/RenameLocationBody"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "RootModel_str_"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/lot-number",
@@ -348,8 +1863,36 @@
       "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Location and facet listing endpoints not called by product code.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<string>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "A list of all lot numbers."
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1lot-number/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/material",
@@ -360,8 +1903,36 @@
       "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Location and facet listing endpoints not called by product code.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<string>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "A list of all filament materials."
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1material/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/search",
@@ -372,8 +1943,110 @@
       "upstream_tags": ["search"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Upstream search endpoint documented; no product client issues requests.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "The search query.",
+              "examples": ["red"],
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color_similarity_threshold",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
+              "examples": [20],
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Color Similarity Threshold",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of results per category (spools, filaments, vendors).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "allow_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Whether to include archived spools in the results.",
+              "title": "Allow Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "spools_per_filament",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "How many of each matching filament's spools to include with it, so a filament hit can be followed straight to one of its spools. 0 (the default) omits them entirely.",
+              "maximum": 10,
+              "minimum": 0,
+              "title": "Spools Per Filament",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "SearchResults"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1search/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/setting/",
@@ -384,8 +2057,36 @@
       "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "object"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/setting/{key}",
@@ -396,8 +2097,74 @@
       "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "SettingResponse"
+        },
+        "299": {
+          "application/json": "SettingEvent"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/setting/{key}",
@@ -408,8 +2175,81 @@
       "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "title": "Body",
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "SettingResponse"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "415": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "415",
+          "description": "Unsupported Media Type"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "415",
+          "description": "Unsupported Media Type"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/setting/{key}",
@@ -420,8 +2260,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["SettingEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/spool",
@@ -430,14 +2296,442 @@
       "transport": "http",
       "upstream_operation_id": "Find_spool_spool_get",
       "upstream_tags": ["spool"],
-      "product_status": "implemented",
-      "scope": "connector_read_only_inventory",
-      "notes": "Paginated GET only; no writes. Bounded body and traversal limits in bounded-read.ts.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External Connector client coverage only (connector_spool_inventory_get, connector_provision_probe_get); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
       "sources": [
         "packages/connector/src/spoolman/bounded-read.ts",
         "packages/connector/src/spoolman/read.ts",
         "packages/connector/src/runtime/spoolman-provider.ts"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filament_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See filament.name.",
+              "title": "Filament Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See filament.id.",
+              "title": "Filament ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament_material",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See filament.material.",
+              "title": "Filament Material"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vendor_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See filament.vendor.name.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vendor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "deprecated": true,
+              "description": "See filament.vendor.id.",
+              "title": "Vendor ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament name. Separate multiple terms with a comma. Specify an empty string to match spools with no filament name. Surround a term with quotes to search for the exact term.",
+              "title": "Filament Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
+              "examples": ["1", "1,2"],
+              "title": "Filament ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.material",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament material. Separate multiple terms with a comma. Specify an empty string to match spools with no filament material. Surround a term with quotes to search for the exact term.",
+              "title": "Filament Material"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.multi_color_direction",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match spools by their filament's multi-color direction, e.g. coaxial or longitudinal. Separate multiple terms with a comma. Specify an empty string to match single-color filaments. Surround a term with quotes to search for the exact term.",
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
+              "title": "Filament Multi-Color Direction"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.vendor.name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament vendor name. Separate multiple terms with a comma. Specify an empty string to match spools with no vendor name. Surround a term with quotes to search for the exact term.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.vendor.id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
+              "examples": ["1", "1,2"],
+              "title": "Vendor ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the spool location. Separate multiple terms with a comma. Specify an empty string to match spools with no location. Surround a term with quotes to search for the exact term.",
+              "title": "Location"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lot_nr",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the spool lot number. Separate multiple terms with a comma. Specify an empty string to match spools with no lot nr. Surround a term with quotes to search for the exact term.",
+              "title": "Lot/Batch Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match the spool that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter, so 04:a2:b3:c4, 04-A2-B3-C4 and 04a2b3c4 all find the same spool. A tag is linked to at most one spool, so this returns either one spool or none. Returns 400 if the UID is not hexadecimal.",
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
+              "title": "Tag UID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "allow_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Whether to include archived spools in the search results.",
+              "title": "Allow Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "first_used",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's first_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no first_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "First Used"
+            }
+          },
+          {
+            "in": "query",
+            "name": "last_used",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's last_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no last_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "Last Used"
+            }
+          },
+          {
+            "in": "query",
+            "name": "registered",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's registered timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no registered timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "Registered"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+              "examples": [
+                "filament.name:asc,filament.vendor.id:asc,location:desc"
+              ],
+              "title": "Sort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum number of items in the response.",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset in the full result set if a limit is set.",
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<Spool>"
+        },
+        "299": {
+          "application/json": "SpoolEvent"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool/get",
+        "packages/connector/src/spoolman/bounded-read.ts",
+        "packages/connector/src/spoolman/read.ts",
+        "packages/connector/src/runtime/spoolman-provider.ts"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "partial",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/spool",
@@ -446,13 +2740,66 @@
       "transport": "http",
       "upstream_operation_id": "Add_spool_spool_post",
       "upstream_tags": ["spool"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/SpoolParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Spool"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool/post",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/spool/field/{field}",
@@ -463,8 +2810,71 @@
       "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "description": "The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.",
+              "examples": ["location", "extra.shelf"],
+              "title": "Field",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/RenameFieldValueParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "RenameFieldValueResult"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/spool/group",
@@ -475,8 +2885,356 @@
       "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": true,
+            "schema": {
+              "description": "The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).",
+              "examples": ["location", "extra.shelf"],
+              "title": "Group By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament name. See the spool search endpoint.",
+              "title": "Filament Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
+              "title": "Filament ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.material",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament material.",
+              "title": "Filament Material"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.multi_color_direction",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.",
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
+              "title": "Filament Multi-Color Direction"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.vendor.name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the filament vendor name.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filament.vendor.id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^-?\\d+(,-?\\d+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
+              "title": "Vendor ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the spool location.",
+              "title": "Location"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lot_nr",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the spool lot number.",
+              "title": "Lot/Batch Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "allow_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Whether to include archived spools in the aggregates.",
+              "title": "Allow Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_empty",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also return matching filaments (group_by=filament) or manufacturers (group_by=vendor) that hold no matching spools, as groups of zero, instead of omitting them. In vendor mode the group of filaments with no manufacturer is not listed, since this mode lists manufacturers. Every other axis is keyed by a value read off the spools themselves and so has no empty groups to list. Filters on the spools themselves (location, lot_nr, the date filters, spool extra fields) are rejected in combination with it, since a filament with no spools has no value for them.",
+              "title": "Include Empty",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "preview",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Attach a few members to each group: up to 5 spools (id, remaining_weight, initial_weight) for group_by=filament, up to 4 filaments (id and colors) for group_by=vendor. Ignored for other axes.",
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "first_used",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's first_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no first_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "First Used"
+            }
+          },
+          {
+            "in": "query",
+            "name": "last_used",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's last_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no last_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "Last Used"
+            }
+          },
+          {
+            "in": "query",
+            "name": "registered",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the spool's registered timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no registered timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+              "examples": [
+                "2024-05-01T00:00:00Z|",
+                "|2024-05-01T00:00:00Z",
+                "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+                ""
+              ],
+              "title": "Registered"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.",
+              "examples": ["group.last_used:desc"],
+              "title": "Sort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum number of groups in the response.",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset in the full group result set if a limit is set.",
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<SpoolGroup>"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1group/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/spool/{spool_id}",
@@ -485,13 +3243,74 @@
       "transport": "http",
       "upstream_operation_id": "Delete_spool_spool__spool_id__delete",
       "upstream_tags": ["spool"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/delete",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/spool/{spool_id}",
@@ -500,13 +3319,81 @@
       "transport": "http",
       "upstream_operation_id": "Get_spool_spool__spool_id__get",
       "upstream_tags": ["spool"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Spool"
+        },
+        "299": {
+          "application/json": "SpoolEvent"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/spool/{spool_id}",
@@ -515,13 +3402,87 @@
       "transport": "http",
       "upstream_operation_id": "Update_spool_spool__spool_id__patch",
       "upstream_tags": ["spool"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/SpoolUpdateParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Spool"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/patch",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/spool/{spool_id}",
@@ -532,8 +3493,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["SpoolEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PUT /api/v1/spool/{spool_id}/measure",
@@ -544,8 +3531,80 @@
       "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/SpoolMeasureParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Spool"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1measure/put"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/spool/{spool_id}/tag",
@@ -556,8 +3615,91 @@
       "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/TagLinkParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "201": {
+          "application/json": "Tag"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "409": {
+          "application/json": "TagConflictMessage"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "201",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "409",
+          "description": "Conflict"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "409",
+          "description": "Conflict"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1tag/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/spool/{spool_id}/tag/{uid}",
@@ -568,8 +3710,87 @@
       "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "The tag's UID, in any shape. Normalized before matching.",
+              "examples": ["04A2B3C4D5E6F7"],
+              "title": "Tag UID",
+              "type": "string"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "204": {},
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "204",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1tag~1{uid}/delete"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PUT /api/v1/spool/{spool_id}/use",
@@ -578,13 +3799,87 @@
       "transport": "http",
       "upstream_operation_id": "Use_spool_filament_spool__spool_id__use_put",
       "upstream_tags": ["spool"],
-      "product_status": "experimental",
-      "scope": "kobra_x_booking_only",
-      "notes": "Not part of read-only farm mirror; used only by Kobra-X usage booking helper and node test e16-368.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External Connector client coverage only (kobra_x_spool_use_put); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
       "sources": [
         "packages/connector/src/kobra-x/booking.ts",
         "tests/node/e16-368.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "spool_id",
+            "required": true,
+            "schema": {
+              "title": "Spool Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/SpoolUseParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Spool"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1use/put",
+        "packages/connector/src/kobra-x/booking.ts",
+        "tests/node/e16-368.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/tag/reader",
@@ -595,8 +3890,36 @@
       "upstream_tags": ["tag"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Tag link/scan/websocket relay not integrated.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<TagReader>"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        }
+      ],
+      "errors": [
+        "No error response documented for this endpoint in pinned OpenAPI/source inventory."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1reader/get"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/tag/scan",
@@ -607,8 +3930,66 @@
       "upstream_tags": ["tag"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Tag link/scan/websocket relay not integrated.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "parameters": [],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/TagScanParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "TagScan"
+        },
+        "299": {
+          "application/json": "TagScanEvent"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan/post"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/tag/scan",
@@ -619,8 +4000,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Tag link/scan/websocket relay not integrated.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["TagScanEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/tag/scan/{reader_id}",
@@ -631,8 +4038,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Tag link/scan/websocket relay not integrated.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["TagScanEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan~1{reader_id}/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/vendor",
@@ -641,13 +4074,141 @@
       "transport": "http",
       "upstream_operation_id": "Find_vendor_vendor_get",
       "upstream_tags": ["vendor"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Partial case-insensitive search term for the vendor name. Separate multiple terms with a comma. Surround a term with quotes to search for the exact term.",
+              "title": "Vendor Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match for the vendor external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
+              "title": "Vendor External ID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+              "examples": ["name:asc,id:desc"],
+              "title": "Sort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum number of items in the response.",
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Offset in the full result set if a limit is set.",
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "array<Vendor>"
+        },
+        "299": {
+          "application/json": "VendorEvent"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "POST /api/v1/vendor",
@@ -656,13 +4217,66 @@
       "transport": "http",
       "upstream_operation_id": "Add_vendor_vendor_post",
       "upstream_tags": ["vendor"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/VendorParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Vendor"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor/post",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/vendor/{vendor_id}",
@@ -671,13 +4285,74 @@
       "transport": "http",
       "upstream_operation_id": "Delete_vendor_vendor__vendor_id__delete",
       "upstream_tags": ["vendor"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendor_id",
+            "required": true,
+            "schema": {
+              "title": "Vendor Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/delete",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "GET /api/v1/vendor/{vendor_id}",
@@ -686,13 +4361,81 @@
       "transport": "http",
       "upstream_operation_id": "Get_vendor_vendor__vendor_id__get",
       "upstream_tags": ["vendor"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendor_id",
+            "required": true,
+            "schema": {
+              "title": "Vendor Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": false,
+        "body": {}
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Vendor"
+        },
+        "299": {
+          "application/json": "VendorEvent"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "299",
+          "description": "Websocket message"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/get",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/vendor/{vendor_id}",
@@ -701,13 +4444,87 @@
       "transport": "http",
       "upstream_operation_id": "Update_vendor_vendor__vendor_id__patch",
       "upstream_tags": ["vendor"],
-      "product_status": "simulator_or_test_only",
-      "scope": "packages/sim-tools mock and qualification scripts",
-      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
       "sources": [
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
         "tests/node/e16-353.test.mjs"
-      ]
+      ],
+      "request_schema": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendor_id",
+            "required": true,
+            "schema": {
+              "title": "Vendor Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "body_required": true,
+        "body": {
+          "application/json": {
+            "$ref": "#/components/schemas/VendorUpdateParameters"
+          }
+        }
+      },
+      "output_schema": {
+        "200": {
+          "application/json": "Vendor"
+        },
+        "400": {
+          "application/json": "Message"
+        },
+        "404": {
+          "application/json": "Message"
+        },
+        "422": {
+          "application/json": "HTTPValidationError"
+        }
+      },
+      "statuses": [
+        {
+          "code": "200",
+          "description": "Successful Response"
+        },
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "errors": [
+        {
+          "code": "400",
+          "description": "Bad Request"
+        },
+        {
+          "code": "404",
+          "description": "Not Found"
+        },
+        {
+          "code": "422",
+          "description": "Validation Error"
+        }
+      ],
+      "relevant_headers": ["Content-Type"],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/patch",
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     },
     {
       "endpoint_id": "WS /api/v1/vendor/{vendor_id}",
@@ -718,8 +4535,34 @@
       "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
-      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
-      "sources": []
+      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "sources": [],
+      "request_schema": {
+        "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
+        "messages_sent_by_client": "none documented"
+      },
+      "output_schema": {
+        "handshake": "101 Switching Protocols",
+        "event_models": ["VendorEvent"]
+      },
+      "statuses": [
+        {
+          "code": "101",
+          "meaning": "WebSocket upgrade"
+        }
+      ],
+      "errors": [
+        "Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."
+      ],
+      "relevant_headers": [
+        "No endpoint-specific request/response headers documented in pinned OpenAPI/source."
+      ],
+      "evidence": [
+        "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/websocket-source-inventory"
+      ],
+      "gaps": [],
+      "external_client_coverage_status": "not_covered",
+      "builtin_server_compatibility_status": "unimplemented"
     }
   ],
   "schemas_documented": 58,

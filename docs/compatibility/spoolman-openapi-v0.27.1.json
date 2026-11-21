@@ -6,52 +6,34 @@
           "created": {
             "default": true,
             "description": "Whether this call wrote a new backup. False means an existing one was returned instead, either because the database has not changed since it was taken or because one was made very recently. Rotating discards the oldest restore point, so it is deliberately not done more often than necessary.",
-            "examples": [
-              true
-            ],
+            "examples": [true],
             "title": "Created",
             "type": "boolean"
           },
           "path": {
             "description": "Path to the created backup file.",
-            "examples": [
-              "/home/app/.local/share/spoolman/backups/spoolman.db"
-            ],
+            "examples": ["/home/app/.local/share/spoolman/backups/spoolman.db"],
             "title": "Path",
             "type": "string"
           }
         },
-        "required": [
-          "path"
-        ],
+        "required": ["path"],
         "title": "BackupResponse",
         "type": "object"
       },
       "EntityType": {
-        "enum": [
-          "vendor",
-          "filament",
-          "spool"
-        ],
+        "enum": ["vendor", "filament", "spool"],
         "title": "EntityType",
         "type": "string"
       },
       "EventType": {
         "description": "Event types.",
-        "enum": [
-          "added",
-          "updated",
-          "deleted",
-          "scanned"
-        ],
+        "enum": ["added", "updated", "deleted", "scanned"],
         "title": "EventType",
         "type": "string"
       },
       "ExportFormat": {
-        "enum": [
-          "csv",
-          "json"
-        ],
+        "enum": ["csv", "json"],
         "title": "ExportFormat",
         "type": "string"
       },
@@ -67,9 +49,7 @@
               }
             ],
             "description": "Bed temperature in \u00b0C.",
-            "examples": [
-              50
-            ],
+            "examples": [50],
             "title": "Bed Temp"
           },
           "color_hex": {
@@ -82,9 +62,7 @@
               }
             ],
             "description": "Filament color code in hex format, for single-color filaments.",
-            "examples": [
-              "2c3232"
-            ],
+            "examples": ["2c3232"],
             "title": "Color Hex"
           },
           "color_hexes": {
@@ -100,27 +78,18 @@
               }
             ],
             "description": "For multi-color filaments. List of hex color codes in hex format.",
-            "examples": [
-              [
-                "2c3232",
-                "5f5f5f"
-              ]
-            ],
+            "examples": [["2c3232", "5f5f5f"]],
             "title": "Color Hexes"
           },
           "density": {
             "description": "Density in g/cm3.",
-            "examples": [
-              1.23
-            ],
+            "examples": [1.23],
             "title": "Density",
             "type": "number"
           },
           "diameter": {
             "description": "Filament in mm.",
-            "examples": [
-              1.75
-            ],
+            "examples": [1.75],
             "title": "Diameter",
             "type": "number"
           },
@@ -134,9 +103,7 @@
               }
             ],
             "description": "Extruder/nozzle temperature in \u00b0C.",
-            "examples": [
-              210
-            ],
+            "examples": [210],
             "title": "Extruder Temp"
           },
           "finish": {
@@ -149,9 +116,7 @@
               }
             ],
             "description": "Finish of the filament.",
-            "examples": [
-              "matte"
-            ]
+            "examples": ["matte"]
           },
           "glow": {
             "default": false,
@@ -161,25 +126,19 @@
           },
           "id": {
             "description": "A unique ID for this filament.",
-            "examples": [
-              "polymaker_pla_polysonicblack_1000_175"
-            ],
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
             "title": "Id",
             "type": "string"
           },
           "manufacturer": {
             "description": "Filament manufacturer.",
-            "examples": [
-              "Polymaker"
-            ],
+            "examples": ["Polymaker"],
             "title": "Manufacturer",
             "type": "string"
           },
           "material": {
             "description": "Filament material.",
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material",
             "type": "string"
           },
@@ -193,15 +152,11 @@
               }
             ],
             "description": "Direction of multi-color filaments.",
-            "examples": [
-              "coaxial"
-            ]
+            "examples": ["coaxial"]
           },
           "name": {
             "description": "Filament name.",
-            "examples": [
-              "Polysonic\u2122 Black"
-            ],
+            "examples": ["Polysonic\u2122 Black"],
             "title": "Name",
             "type": "string"
           },
@@ -215,9 +170,7 @@
               }
             ],
             "description": "Pattern of the filament.",
-            "examples": [
-              "marble"
-            ]
+            "examples": ["marble"]
           },
           "spool_type": {
             "anyOf": [
@@ -229,9 +182,7 @@
               }
             ],
             "description": "Type of spool.",
-            "examples": [
-              "plastic"
-            ]
+            "examples": ["plastic"]
           },
           "spool_weight": {
             "anyOf": [
@@ -243,9 +194,7 @@
               }
             ],
             "description": "Weight of an empty spool.",
-            "examples": [
-              140
-            ],
+            "examples": [140],
             "title": "Spool Weight"
           },
           "translucent": {
@@ -256,9 +205,7 @@
           },
           "weight": {
             "description": "Net weight of a single spool.",
-            "examples": [
-              1000
-            ],
+            "examples": [1000],
             "title": "Weight",
             "type": "number"
           }
@@ -287,15 +234,11 @@
               }
             ],
             "description": "Bed temperature in \u00b0C.",
-            "examples": [
-              50
-            ],
+            "examples": [50],
             "title": "Bed Temp"
           },
           "density": {
-            "examples": [
-              1.24
-            ],
+            "examples": [1.24],
             "title": "Density",
             "type": "number"
           },
@@ -309,23 +252,16 @@
               }
             ],
             "description": "Extruder/nozzle temperature in \u00b0C.",
-            "examples": [
-              210
-            ],
+            "examples": [210],
             "title": "Extruder Temp"
           },
           "material": {
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material",
             "type": "string"
           }
         },
-        "required": [
-          "material",
-          "density"
-        ],
+        "required": ["material", "density"],
         "title": "ExternalMaterial",
         "type": "object"
       },
@@ -415,12 +351,7 @@
             "title": "Unit"
           }
         },
-        "required": [
-          "name",
-          "field_type",
-          "key",
-          "entity_type"
-        ],
+        "required": ["name", "field_type", "key", "entity_type"],
         "title": "ExtraField",
         "type": "object"
       },
@@ -498,10 +429,7 @@
             "title": "Unit"
           }
         },
-        "required": [
-          "name",
-          "field_type"
-        ],
+        "required": ["name", "field_type"],
         "title": "ExtraFieldParameters",
         "type": "object"
       },
@@ -532,9 +460,7 @@
               }
             ],
             "description": "Vendor article number, e.g. EAN, QR code, etc.",
-            "examples": [
-              "PM70820"
-            ],
+            "examples": ["PM70820"],
             "title": "Article Number"
           },
           "color_hex": {
@@ -549,9 +475,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. If it's a multi-color filament, the multi_color_hexes field is used instead.",
-            "examples": [
-              "FF0000"
-            ],
+            "examples": ["FF0000"],
             "title": "Color Hex"
           },
           "comment": {
@@ -565,25 +489,19 @@
               }
             ],
             "description": "Free text comment about this filament type.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "density": {
             "description": "The density of this filament in g/cm3.",
-            "examples": [
-              1.24
-            ],
+            "examples": [1.24],
             "exclusiveMinimum": 0.0,
             "title": "Density",
             "type": "number"
           },
           "diameter": {
             "description": "The diameter of this filament in mm.",
-            "examples": [
-              1.75
-            ],
+            "examples": [1.75],
             "exclusiveMinimum": 0.0,
             "title": "Diameter",
             "type": "number"
@@ -599,9 +517,7 @@
               }
             ],
             "description": "Set if this filament comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "polymaker_pla_polysonicblack_1000_175"
-            ],
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
             "title": "External Id"
           },
           "extra": {
@@ -628,9 +544,7 @@
               }
             ],
             "description": "The material of this filament, e.g. PLA.",
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material"
           },
           "multi_color_direction": {
@@ -643,10 +557,7 @@
               }
             ],
             "description": "Type of multi-color filament. Only set if the multi_color_hexes field is set.",
-            "examples": [
-              "coaxial",
-              "longitudinal"
-            ]
+            "examples": ["coaxial", "longitudinal"]
           },
           "multi_color_hexes": {
             "anyOf": [
@@ -659,9 +570,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. Specifying multiple colors separated by commas. Also set the multi_color_direction field if you specify multiple colors.",
-            "examples": [
-              "FF0000,00FF00,0000FF"
-            ],
+            "examples": ["FF0000,00FF00,0000FF"],
             "title": "Multi Color Hexes"
           },
           "name": {
@@ -675,9 +584,7 @@
               }
             ],
             "description": "Filament name, to distinguish this filament type among others from the same vendor.Should contain its color for example.",
-            "examples": [
-              "PolyTerra\u2122 Charcoal Black"
-            ],
+            "examples": ["PolyTerra\u2122 Charcoal Black"],
             "title": "Name"
           },
           "price": {
@@ -691,9 +598,7 @@
               }
             ],
             "description": "The price of this filament in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "registered": {
@@ -712,9 +617,7 @@
               }
             ],
             "description": "Overridden bed temperature, in \u00b0C.",
-            "examples": [
-              60
-            ],
+            "examples": [60],
             "title": "Settings Bed Temp"
           },
           "settings_extruder_temp": {
@@ -728,9 +631,7 @@
               }
             ],
             "description": "Overridden extruder temperature, in \u00b0C.",
-            "examples": [
-              210
-            ],
+            "examples": [210],
             "title": "Settings Extruder Temp"
           },
           "spool_weight": {
@@ -744,9 +645,7 @@
               }
             ],
             "description": "The empty spool weight, in grams.",
-            "examples": [
-              140
-            ],
+            "examples": [140],
             "title": "Spool Weight"
           },
           "tags": {
@@ -779,19 +678,11 @@
               }
             ],
             "description": "The weight of the filament in a full spool, in grams.",
-            "examples": [
-              1000
-            ],
+            "examples": [1000],
             "title": "Weight"
           }
         },
-        "required": [
-          "id",
-          "registered",
-          "density",
-          "diameter",
-          "extra"
-        ],
+        "required": ["id", "registered", "density", "diameter", "extra"],
         "title": "Filament",
         "type": "object"
       },
@@ -818,12 +709,7 @@
             "description": "Event type."
           }
         },
-        "required": [
-          "type",
-          "resource",
-          "date",
-          "payload"
-        ],
+        "required": ["type", "resource", "date", "payload"],
         "title": "FilamentEvent",
         "type": "object"
       },
@@ -840,9 +726,7 @@
               }
             ],
             "description": "Vendor article number, e.g. EAN, QR code, etc.",
-            "examples": [
-              "PM70820"
-            ],
+            "examples": ["PM70820"],
             "title": "Article Number"
           },
           "color_hex": {
@@ -855,9 +739,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. If it's a multi-color filament, the multi_color_hexes field is used instead.",
-            "examples": [
-              "FF0000"
-            ],
+            "examples": ["FF0000"],
             "title": "Color Hex"
           },
           "comment": {
@@ -871,25 +753,19 @@
               }
             ],
             "description": "Free text comment about this filament type.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "density": {
             "description": "The density of this filament in g/cm3.",
-            "examples": [
-              1.24
-            ],
+            "examples": [1.24],
             "exclusiveMinimum": 0.0,
             "title": "Density",
             "type": "number"
           },
           "diameter": {
             "description": "The diameter of this filament in mm.",
-            "examples": [
-              1.75
-            ],
+            "examples": [1.75],
             "exclusiveMinimum": 0.0,
             "title": "Diameter",
             "type": "number"
@@ -905,9 +781,7 @@
               }
             ],
             "description": "Set if this filament comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "polymaker_pla_polysonicblack_1000_175"
-            ],
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
             "title": "External Id"
           },
           "extra": {
@@ -943,9 +817,7 @@
               }
             ],
             "description": "The material of this filament, e.g. PLA.",
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material"
           },
           "multi_color_direction": {
@@ -958,10 +830,7 @@
               }
             ],
             "description": "Type of multi-color filament. Only set if the color_hex field contains multiple colors. ",
-            "examples": [
-              "coaxial",
-              "longitudinal"
-            ]
+            "examples": ["coaxial", "longitudinal"]
           },
           "multi_color_hexes": {
             "anyOf": [
@@ -973,9 +842,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. Specifying multiple colors separated by commas. Also set the multi_color_direction field if you specify multiple colors.",
-            "examples": [
-              "FF0000,00FF00,0000FF"
-            ],
+            "examples": ["FF0000,00FF00,0000FF"],
             "title": "Multi Color Hexes"
           },
           "name": {
@@ -989,9 +856,7 @@
               }
             ],
             "description": "Filament name, to distinguish this filament type among others from the same vendor.Should contain its color for example.",
-            "examples": [
-              "PolyTerra\u2122 Charcoal Black"
-            ],
+            "examples": ["PolyTerra\u2122 Charcoal Black"],
             "title": "Name"
           },
           "price": {
@@ -1005,9 +870,7 @@
               }
             ],
             "description": "The price of this filament in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "settings_bed_temp": {
@@ -1021,9 +884,7 @@
               }
             ],
             "description": "Overridden bed temperature, in \u00b0C.",
-            "examples": [
-              60
-            ],
+            "examples": [60],
             "title": "Settings Bed Temp"
           },
           "settings_extruder_temp": {
@@ -1037,9 +898,7 @@
               }
             ],
             "description": "Overridden extruder temperature, in \u00b0C.",
-            "examples": [
-              210
-            ],
+            "examples": [210],
             "title": "Settings Extruder Temp"
           },
           "spool_weight": {
@@ -1053,9 +912,7 @@
               }
             ],
             "description": "The empty spool weight, in grams.",
-            "examples": [
-              140
-            ],
+            "examples": [140],
             "title": "Spool Weight"
           },
           "vendor_id": {
@@ -1081,16 +938,11 @@
               }
             ],
             "description": "The weight of the filament in a full spool, in grams. (net weight)",
-            "examples": [
-              1000
-            ],
+            "examples": [1000],
             "title": "Weight"
           }
         },
-        "required": [
-          "density",
-          "diameter"
-        ],
+        "required": ["density", "diameter"],
         "title": "FilamentParameters",
         "type": "object"
       },
@@ -1107,9 +959,7 @@
               }
             ],
             "description": "Vendor article number, e.g. EAN, QR code, etc.",
-            "examples": [
-              "PM70820"
-            ],
+            "examples": ["PM70820"],
             "title": "Article Number"
           },
           "color_hex": {
@@ -1122,9 +972,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. If it's a multi-color filament, the multi_color_hexes field is used instead.",
-            "examples": [
-              "FF0000"
-            ],
+            "examples": ["FF0000"],
             "title": "Color Hex"
           },
           "comment": {
@@ -1138,9 +986,7 @@
               }
             ],
             "description": "Free text comment about this filament type.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "density": {
@@ -1154,9 +1000,7 @@
               }
             ],
             "description": "The density of this filament in g/cm3.",
-            "examples": [
-              1.24
-            ],
+            "examples": [1.24],
             "title": "Density"
           },
           "diameter": {
@@ -1170,9 +1014,7 @@
               }
             ],
             "description": "The diameter of this filament in mm.",
-            "examples": [
-              1.75
-            ],
+            "examples": [1.75],
             "title": "Diameter"
           },
           "external_id": {
@@ -1186,9 +1028,7 @@
               }
             ],
             "description": "Set if this filament comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "polymaker_pla_polysonicblack_1000_175"
-            ],
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
             "title": "External Id"
           },
           "extra": {
@@ -1224,9 +1064,7 @@
               }
             ],
             "description": "The material of this filament, e.g. PLA.",
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material"
           },
           "multi_color_direction": {
@@ -1239,10 +1077,7 @@
               }
             ],
             "description": "Type of multi-color filament. Only set if the color_hex field contains multiple colors. ",
-            "examples": [
-              "coaxial",
-              "longitudinal"
-            ]
+            "examples": ["coaxial", "longitudinal"]
           },
           "multi_color_hexes": {
             "anyOf": [
@@ -1254,9 +1089,7 @@
               }
             ],
             "description": "Hexadecimal color code of the filament, e.g. FF0000 for red. Supports alpha channel at the end. Specifying multiple colors separated by commas. Also set the multi_color_direction field if you specify multiple colors.",
-            "examples": [
-              "FF0000,00FF00,0000FF"
-            ],
+            "examples": ["FF0000,00FF00,0000FF"],
             "title": "Multi Color Hexes"
           },
           "name": {
@@ -1270,9 +1103,7 @@
               }
             ],
             "description": "Filament name, to distinguish this filament type among others from the same vendor.Should contain its color for example.",
-            "examples": [
-              "PolyTerra\u2122 Charcoal Black"
-            ],
+            "examples": ["PolyTerra\u2122 Charcoal Black"],
             "title": "Name"
           },
           "price": {
@@ -1286,9 +1117,7 @@
               }
             ],
             "description": "The price of this filament in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "settings_bed_temp": {
@@ -1302,9 +1131,7 @@
               }
             ],
             "description": "Overridden bed temperature, in \u00b0C.",
-            "examples": [
-              60
-            ],
+            "examples": [60],
             "title": "Settings Bed Temp"
           },
           "settings_extruder_temp": {
@@ -1318,9 +1145,7 @@
               }
             ],
             "description": "Overridden extruder temperature, in \u00b0C.",
-            "examples": [
-              210
-            ],
+            "examples": [210],
             "title": "Settings Extruder Temp"
           },
           "spool_weight": {
@@ -1334,9 +1159,7 @@
               }
             ],
             "description": "The empty spool weight, in grams.",
-            "examples": [
-              140
-            ],
+            "examples": [140],
             "title": "Spool Weight"
           },
           "vendor_id": {
@@ -1362,9 +1185,7 @@
               }
             ],
             "description": "The weight of the filament in a full spool, in grams. (net weight)",
-            "examples": [
-              1000
-            ],
+            "examples": [1000],
             "title": "Weight"
           }
         },
@@ -1372,10 +1193,7 @@
         "type": "object"
       },
       "Finish": {
-        "enum": [
-          "matte",
-          "glossy"
-        ],
+        "enum": ["matte", "glossy"],
         "title": "Finish",
         "type": "string"
       },
@@ -1395,32 +1213,24 @@
       "HealthCheck": {
         "properties": {
           "status": {
-            "examples": [
-              "healthy"
-            ],
+            "examples": ["healthy"],
             "title": "Status",
             "type": "string"
           }
         },
-        "required": [
-          "status"
-        ],
+        "required": ["status"],
         "title": "HealthCheck",
         "type": "object"
       },
       "Info": {
         "properties": {
           "automatic_backups": {
-            "examples": [
-              true
-            ],
+            "examples": [true],
             "title": "Automatic Backups",
             "type": "boolean"
           },
           "backups_dir": {
-            "examples": [
-              "/home/app/.local/share/spoolman/backups"
-            ],
+            "examples": ["/home/app/.local/share/spoolman/backups"],
             "title": "Backups Dir",
             "type": "string"
           },
@@ -1433,37 +1243,27 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "2021-01-01T00:00:00Z"
-            ],
+            "examples": ["2021-01-01T00:00:00Z"],
             "title": "Build Date"
           },
           "data_dir": {
-            "examples": [
-              "/home/app/.local/share/spoolman"
-            ],
+            "examples": ["/home/app/.local/share/spoolman"],
             "title": "Data Dir",
             "type": "string"
           },
           "db_type": {
-            "examples": [
-              "sqlite"
-            ],
+            "examples": ["sqlite"],
             "title": "Db Type",
             "type": "string"
           },
           "debug_mode": {
-            "examples": [
-              false
-            ],
+            "examples": [false],
             "title": "Debug Mode",
             "type": "boolean"
           },
           "external_db_name": {
             "description": "Display name for the external filament library, configurable via EXTERNAL_DB_NAME.",
-            "examples": [
-              "SpoolmanDB"
-            ],
+            "examples": ["SpoolmanDB"],
             "title": "External Db Name",
             "type": "string"
           },
@@ -1476,9 +1276,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "a1b2c3d"
-            ],
+            "examples": ["a1b2c3d"],
             "title": "Git Commit"
           },
           "latest_version": {
@@ -1491,31 +1289,23 @@
               }
             ],
             "description": "Latest Spoolman release on GitHub. Null until the server has checked, or if the check is disabled via SPOOLMAN_UPDATE_CHECK.",
-            "examples": [
-              "0.28.0"
-            ],
+            "examples": ["0.28.0"],
             "title": "Latest Version"
           },
           "logs_dir": {
-            "examples": [
-              "/home/app/.local/share/spoolman"
-            ],
+            "examples": ["/home/app/.local/share/spoolman"],
             "title": "Logs Dir",
             "type": "string"
           },
           "update_available": {
             "default": false,
             "description": "True if latest_version is newer than the running version.",
-            "examples": [
-              false
-            ],
+            "examples": [false],
             "title": "Update Available",
             "type": "boolean"
           },
           "version": {
-            "examples": [
-              "0.7.0"
-            ],
+            "examples": ["0.7.0"],
             "title": "Version",
             "type": "string"
           }
@@ -1540,26 +1330,18 @@
             "type": "string"
           }
         },
-        "required": [
-          "message"
-        ],
+        "required": ["message"],
         "title": "Message",
         "type": "object"
       },
       "MultiColorDirection-Input": {
         "description": "Enum for multi-color direction.",
-        "enum": [
-          "coaxial",
-          "longitudinal"
-        ],
+        "enum": ["coaxial", "longitudinal"],
         "title": "MultiColorDirection",
         "type": "string"
       },
       "Pattern": {
-        "enum": [
-          "marble",
-          "sparkle"
-        ],
+        "enum": ["marble", "sparkle"],
         "title": "Pattern",
         "type": "string"
       },
@@ -1567,27 +1349,20 @@
         "properties": {
           "new_value": {
             "description": "The value to replace it with.",
-            "examples": [
-              "Shelf B"
-            ],
+            "examples": ["Shelf B"],
             "minLength": 1,
             "title": "New Value",
             "type": "string"
           },
           "value": {
             "description": "The value to replace.",
-            "examples": [
-              "Shelf A"
-            ],
+            "examples": ["Shelf A"],
             "minLength": 1,
             "title": "Value",
             "type": "string"
           }
         },
-        "required": [
-          "value",
-          "new_value"
-        ],
+        "required": ["value", "new_value"],
         "title": "RenameFieldValueParameters",
         "type": "object"
       },
@@ -1595,16 +1370,12 @@
         "properties": {
           "spools_updated": {
             "description": "How many spools held the old value.",
-            "examples": [
-              6
-            ],
+            "examples": [6],
             "title": "Spools Updated",
             "type": "integer"
           }
         },
-        "required": [
-          "spools_updated"
-        ],
+        "required": ["spools_updated"],
         "title": "RenameFieldValueResult",
         "type": "object"
       },
@@ -1617,9 +1388,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "title": "RenameLocationBody",
         "type": "object"
       },
@@ -1636,9 +1405,7 @@
           },
           "match_field": {
             "description": "Which field matched the query: a native field name (e.g. 'name', 'material', 'article_number', 'comment'), 'color' for a color-similarity match, or 'extra.<key>'.",
-            "examples": [
-              "color"
-            ],
+            "examples": ["color"],
             "title": "Match Field",
             "type": "string"
           },
@@ -1652,9 +1419,7 @@
               }
             ],
             "description": "How many spools this filament has in total, of which `spools` holds at most spools_per_filament. Only present if spools_per_filament was requested.",
-            "examples": [
-              3
-            ],
+            "examples": [3],
             "title": "Spool Count"
           },
           "spools": {
@@ -1673,10 +1438,7 @@
             "title": "Spools"
           }
         },
-        "required": [
-          "filament",
-          "match_field"
-        ],
+        "required": ["filament", "match_field"],
         "title": "SearchResultFilament",
         "type": "object"
       },
@@ -1704,9 +1466,7 @@
               }
             ],
             "description": "Where this spool can be found.",
-            "examples": [
-              "Shelf A"
-            ],
+            "examples": ["Shelf A"],
             "title": "Location"
           },
           "remaining_weight": {
@@ -1720,16 +1480,11 @@
               }
             ],
             "description": "Estimated remaining weight of filament on the spool in grams. Only set if the spool or its filament type has a weight set.",
-            "examples": [
-              500.6
-            ],
+            "examples": [500.6],
             "title": "Remaining Weight"
           }
         },
-        "required": [
-          "id",
-          "archived"
-        ],
+        "required": ["id", "archived"],
         "title": "SearchResultFilamentSpool",
         "type": "object"
       },
@@ -1738,9 +1493,7 @@
         "properties": {
           "match_field": {
             "description": "Which field matched the query: a native field name (e.g. 'comment', 'location', 'lot_nr'), 'id' for an exact spool-id match, or 'extra.<key>' for an extra field.",
-            "examples": [
-              "comment"
-            ],
+            "examples": ["comment"],
             "title": "Match Field",
             "type": "string"
           },
@@ -1749,10 +1502,7 @@
             "description": "The matching spool."
           }
         },
-        "required": [
-          "spool",
-          "match_field"
-        ],
+        "required": ["spool", "match_field"],
         "title": "SearchResultSpool",
         "type": "object"
       },
@@ -1761,9 +1511,7 @@
         "properties": {
           "match_field": {
             "description": "Which field matched the query: 'name', 'comment', or 'extra.<key>'.",
-            "examples": [
-              "name"
-            ],
+            "examples": ["name"],
             "title": "Match Field",
             "type": "string"
           },
@@ -1772,10 +1520,7 @@
             "description": "The matching vendor."
           }
         },
-        "required": [
-          "vendor",
-          "match_field"
-        ],
+        "required": ["vendor", "match_field"],
         "title": "SearchResultVendor",
         "type": "object"
       },
@@ -1792,9 +1537,7 @@
           },
           "is_color_query": {
             "description": "Whether the query was recognized as a color (hex code or CSS color name), in which case the filament results include color-similarity matches and a threshold slider is relevant.",
-            "examples": [
-              false
-            ],
+            "examples": [false],
             "title": "Is Color Query",
             "type": "boolean"
           },
@@ -1815,12 +1558,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "spools",
-          "filaments",
-          "vendors",
-          "is_color_query"
-        ],
+        "required": ["spools", "filaments", "vendors", "is_color_query"],
         "title": "SearchResults",
         "type": "object"
       },
@@ -1847,12 +1585,7 @@
             "description": "Event type."
           }
         },
-        "required": [
-          "type",
-          "resource",
-          "date",
-          "payload"
-        ],
+        "required": ["type", "resource", "date", "payload"],
         "title": "SettingEvent",
         "type": "object"
       },
@@ -1868,10 +1601,7 @@
             "description": "Setting value."
           }
         },
-        "required": [
-          "key",
-          "setting"
-        ],
+        "required": ["key", "setting"],
         "title": "SettingKV",
         "type": "object"
       },
@@ -1892,23 +1622,13 @@
             "type": "string"
           }
         },
-        "required": [
-          "value",
-          "is_set",
-          "type"
-        ],
+        "required": ["value", "is_set", "type"],
         "title": "SettingResponse",
         "type": "object"
       },
       "SettingType": {
         "description": "The type of a setting.",
-        "enum": [
-          "boolean",
-          "number",
-          "string",
-          "array",
-          "object"
-        ],
+        "enum": ["boolean", "number", "string", "array", "object"],
         "title": "SettingType",
         "type": "string"
       },
@@ -1930,9 +1650,7 @@
               }
             ],
             "description": "Free text comment about this specific spool.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "extra": {
@@ -1975,9 +1693,7 @@
               }
             ],
             "description": "The initial weight, in grams, of the filament on the spool (net weight).",
-            "examples": [
-              1246
-            ],
+            "examples": [1246],
             "title": "Initial Weight"
           },
           "last_used": {
@@ -2003,9 +1719,7 @@
               }
             ],
             "description": "Where this spool can be found.",
-            "examples": [
-              "Shelf A"
-            ],
+            "examples": ["Shelf A"],
             "title": "Location"
           },
           "lot_nr": {
@@ -2019,9 +1733,7 @@
               }
             ],
             "description": "Vendor manufacturing lot/batch number of the spool.",
-            "examples": [
-              "52342"
-            ],
+            "examples": ["52342"],
             "title": "Lot Nr"
           },
           "price": {
@@ -2035,9 +1747,7 @@
               }
             ],
             "description": "The price of this spool in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "registered": {
@@ -2056,9 +1766,7 @@
               }
             ],
             "description": "Estimated remaining length of filament on the spool in millimeters. Only set if the filament type has a weight set.",
-            "examples": [
-              5612.4
-            ],
+            "examples": [5612.4],
             "title": "Remaining Length"
           },
           "remaining_weight": {
@@ -2072,9 +1780,7 @@
               }
             ],
             "description": "Estimated remaining weight of filament on the spool in grams. Only set if the filament type has a weight set.",
-            "examples": [
-              500.6
-            ],
+            "examples": [500.6],
             "title": "Remaining Weight"
           },
           "spool_weight": {
@@ -2088,9 +1794,7 @@
               }
             ],
             "description": "Weight of an empty spool (tare weight).",
-            "examples": [
-              246
-            ],
+            "examples": [246],
             "title": "Spool Weight"
           },
           "tags": {
@@ -2103,18 +1807,14 @@
           },
           "used_length": {
             "description": "Consumed length of filament from the spool in millimeters.",
-            "examples": [
-              50.7
-            ],
+            "examples": [50.7],
             "minimum": 0.0,
             "title": "Used Length",
             "type": "number"
           },
           "used_weight": {
             "description": "Consumed weight of filament from the spool in grams.",
-            "examples": [
-              500.3
-            ],
+            "examples": [500.3],
             "minimum": 0.0,
             "title": "Used Weight",
             "type": "number"
@@ -2155,12 +1855,7 @@
             "description": "Event type."
           }
         },
-        "required": [
-          "type",
-          "resource",
-          "date",
-          "payload"
-        ],
+        "required": ["type", "resource", "date", "payload"],
         "title": "SpoolEvent",
         "type": "object"
       },
@@ -2188,9 +1883,7 @@
               }
             ],
             "description": "Only for group_by=vendor: the number of distinct filaments in the group. With include_empty=true that is every matching filament of the manufacturer, including those with no spools; otherwise it is the number of distinct filaments among the matching spools.",
-            "examples": [
-              4
-            ],
+            "examples": [4],
             "title": "Filament Count"
           },
           "filaments": {
@@ -2210,17 +1903,13 @@
           },
           "group_by": {
             "description": "The field the spools are grouped by.",
-            "examples": [
-              "filament"
-            ],
+            "examples": ["filament"],
             "title": "Group By",
             "type": "string"
           },
           "in_use_count": {
             "description": "Number of matching spools that have been used (used_weight > 0).",
-            "examples": [
-              2
-            ],
+            "examples": [2],
             "title": "In Use Count",
             "type": "integer"
           },
@@ -2234,9 +1923,7 @@
               }
             ],
             "description": "The group key. For group_by=filament/vendor this is the entity ID as a string; for material/location and extra fields it is the value. Null when the grouped field is unset (e.g. spools with no location or a filament with no vendor).",
-            "examples": [
-              "12"
-            ],
+            "examples": ["12"],
             "title": "Key"
           },
           "last_used": {
@@ -2253,9 +1940,7 @@
           },
           "spool_count": {
             "description": "Number of matching spools in this group.",
-            "examples": [
-              6
-            ],
+            "examples": [6],
             "title": "Spool Count",
             "type": "integer"
           },
@@ -2284,9 +1969,7 @@
               }
             ],
             "description": "Sum of remaining filament weight across the group's matching spools, in grams.",
-            "examples": [
-              3120.0
-            ],
+            "examples": [3120.0],
             "title": "Total Remaining Weight"
           },
           "vendor": {
@@ -2301,11 +1984,7 @@
             "description": "The vendor, embedded for group_by=vendor."
           }
         },
-        "required": [
-          "group_by",
-          "spool_count",
-          "in_use_count"
-        ],
+        "required": ["group_by", "spool_count", "in_use_count"],
         "title": "SpoolGroup",
         "type": "object"
       },
@@ -2322,16 +2001,12 @@
               }
             ],
             "description": "Hexadecimal color code of the filament.",
-            "examples": [
-              "FF0000"
-            ],
+            "examples": ["FF0000"],
             "title": "Color Hex"
           },
           "id": {
             "description": "Filament ID.",
-            "examples": [
-              7
-            ],
+            "examples": [7],
             "title": "Id",
             "type": "integer"
           },
@@ -2345,9 +2020,7 @@
               }
             ],
             "description": "Type of multi-color filament. Only set if multi_color_hexes is set.",
-            "examples": [
-              "coaxial"
-            ]
+            "examples": ["coaxial"]
           },
           "multi_color_hexes": {
             "anyOf": [
@@ -2359,15 +2032,11 @@
               }
             ],
             "description": "Comma-separated color codes of a multi-color filament.",
-            "examples": [
-              "FF0000,00FF00"
-            ],
+            "examples": ["FF0000,00FF00"],
             "title": "Multi Color Hexes"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "title": "SpoolGroupPreviewFilament",
         "type": "object"
       },
@@ -2376,9 +2045,7 @@
         "properties": {
           "id": {
             "description": "Spool ID.",
-            "examples": [
-              3
-            ],
+            "examples": [3],
             "title": "Id",
             "type": "integer"
           },
@@ -2392,9 +2059,7 @@
               }
             ],
             "description": "Initial filament weight in grams, falling back to the filament's weight. Null when unknown.",
-            "examples": [
-              1000.0
-            ],
+            "examples": [1000.0],
             "title": "Initial Weight"
           },
           "remaining_weight": {
@@ -2407,15 +2072,11 @@
               }
             ],
             "description": "Remaining filament weight in grams, as on the spool. Null when the initial weight is unknown.",
-            "examples": [
-              750.0
-            ],
+            "examples": [750.0],
             "title": "Remaining Weight"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "title": "SpoolGroupPreviewSpool",
         "type": "object"
       },
@@ -2423,16 +2084,12 @@
         "properties": {
           "weight": {
             "description": "Current gross weight of the spool, in g.",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Weight",
             "type": "number"
           }
         },
-        "required": [
-          "weight"
-        ],
+        "required": ["weight"],
         "title": "SpoolMeasureParameters",
         "type": "object"
       },
@@ -2455,9 +2112,7 @@
               }
             ],
             "description": "Free text comment about this specific spool.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "extra": {
@@ -2511,9 +2166,7 @@
               }
             ],
             "description": "The initial weight of the filament on the spool, in grams. (net weight)",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Initial Weight"
           },
           "last_used": {
@@ -2540,9 +2193,7 @@
               }
             ],
             "description": "Where this spool can be found.",
-            "examples": [
-              "Shelf A"
-            ],
+            "examples": ["Shelf A"],
             "title": "Location"
           },
           "lot_nr": {
@@ -2556,9 +2207,7 @@
               }
             ],
             "description": "Vendor manufacturing lot/batch number of the spool.",
-            "examples": [
-              "52342"
-            ],
+            "examples": ["52342"],
             "title": "Lot Nr"
           },
           "price": {
@@ -2572,9 +2221,7 @@
               }
             ],
             "description": "The price of this filament in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "remaining_weight": {
@@ -2588,9 +2235,7 @@
               }
             ],
             "description": "Remaining weight of filament on the spool. Can only be used if the filament type has a weight set.",
-            "examples": [
-              800
-            ],
+            "examples": [800],
             "title": "Remaining Weight"
           },
           "spool_weight": {
@@ -2604,9 +2249,7 @@
               }
             ],
             "description": "The weight of an empty spool, in grams. (tare weight)",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Spool Weight"
           },
           "used_weight": {
@@ -2620,24 +2263,16 @@
               }
             ],
             "description": "Used weight of filament on the spool.",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Used Weight"
           }
         },
-        "required": [
-          "filament_id"
-        ],
+        "required": ["filament_id"],
         "title": "SpoolParameters",
         "type": "object"
       },
       "SpoolType": {
-        "enum": [
-          "plastic",
-          "cardboard",
-          "metal"
-        ],
+        "enum": ["plastic", "cardboard", "metal"],
         "title": "SpoolType",
         "type": "string"
       },
@@ -2660,9 +2295,7 @@
               }
             ],
             "description": "Free text comment about this specific spool.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "extra": {
@@ -2723,9 +2356,7 @@
               }
             ],
             "description": "The initial weight of the filament on the spool, in grams. (net weight)",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Initial Weight"
           },
           "last_used": {
@@ -2752,9 +2383,7 @@
               }
             ],
             "description": "Where this spool can be found.",
-            "examples": [
-              "Shelf A"
-            ],
+            "examples": ["Shelf A"],
             "title": "Location"
           },
           "lot_nr": {
@@ -2768,9 +2397,7 @@
               }
             ],
             "description": "Vendor manufacturing lot/batch number of the spool.",
-            "examples": [
-              "52342"
-            ],
+            "examples": ["52342"],
             "title": "Lot Nr"
           },
           "price": {
@@ -2784,9 +2411,7 @@
               }
             ],
             "description": "The price of this filament in the system configured currency.",
-            "examples": [
-              20.0
-            ],
+            "examples": [20.0],
             "title": "Price"
           },
           "remaining_weight": {
@@ -2800,9 +2425,7 @@
               }
             ],
             "description": "Remaining weight of filament on the spool. Can only be used if the filament type has a weight set.",
-            "examples": [
-              800
-            ],
+            "examples": [800],
             "title": "Remaining Weight"
           },
           "spool_weight": {
@@ -2816,9 +2439,7 @@
               }
             ],
             "description": "The weight of an empty spool, in grams. (tare weight)",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Spool Weight"
           },
           "used_weight": {
@@ -2832,9 +2453,7 @@
               }
             ],
             "description": "Used weight of filament on the spool.",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Used Weight"
           }
         },
@@ -2853,9 +2472,7 @@
               }
             ],
             "description": "Length of filament to reduce by, in mm.",
-            "examples": [
-              2.2
-            ],
+            "examples": [2.2],
             "title": "Use Length"
           },
           "use_weight": {
@@ -2868,9 +2485,7 @@
               }
             ],
             "description": "Filament weight to reduce by, in g.",
-            "examples": [
-              5.3
-            ],
+            "examples": [5.3],
             "title": "Use Weight"
           }
         },
@@ -2895,24 +2510,17 @@
               }
             ],
             "description": "What kind of tag this is, e.g. openprinttag, ntag, bambu, tigertag. Informational, free-form, and not validated against a fixed list.",
-            "examples": [
-              "ntag"
-            ],
+            "examples": ["ntag"],
             "title": "Format"
           },
           "uid": {
             "description": "The tag's hardware UID, normalized to uppercase hexadecimal with separators stripped. Unique across everything tagged: one tag identifies exactly one spool or filament.",
-            "examples": [
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04A2B3C4D5E6F7"],
             "title": "Uid",
             "type": "string"
           }
         },
-        "required": [
-          "uid",
-          "added"
-        ],
+        "required": ["uid", "added"],
         "title": "Tag",
         "type": "object"
       },
@@ -2929,9 +2537,7 @@
               }
             ],
             "description": "The filament the tag is already linked to, if it is a filament that holds it.",
-            "examples": [
-              7
-            ],
+            "examples": [7],
             "title": "Filament Id"
           },
           "message": {
@@ -2948,15 +2554,11 @@
               }
             ],
             "description": "The spool the tag is already linked to, if it is a spool that holds it.",
-            "examples": [
-              42
-            ],
+            "examples": [42],
             "title": "Spool Id"
           }
         },
-        "required": [
-          "message"
-        ],
+        "required": ["message"],
         "title": "TagConflictMessage",
         "type": "object"
       },
@@ -2973,9 +2575,7 @@
               }
             ],
             "description": "Vendor GTIN, as text.",
-            "examples": [
-              "8435008400000"
-            ],
+            "examples": ["8435008400000"],
             "title": "Article Number"
           },
           "bed_temp": {
@@ -2988,9 +2588,7 @@
               }
             ],
             "description": "Bed temperature in \u00b0C.",
-            "examples": [
-              60
-            ],
+            "examples": [60],
             "title": "Bed Temp"
           },
           "color_hex": {
@@ -3002,9 +2600,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "1122FF"
-            ],
+            "examples": ["1122FF"],
             "title": "Color Hex"
           },
           "density": {
@@ -3016,9 +2612,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              1.24
-            ],
+            "examples": [1.24],
             "title": "Density"
           },
           "diameter": {
@@ -3030,9 +2624,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              1.75
-            ],
+            "examples": [1.75],
             "title": "Diameter"
           },
           "extruder_temp": {
@@ -3045,9 +2637,7 @@
               }
             ],
             "description": "Print temperature in \u00b0C.",
-            "examples": [
-              215
-            ],
+            "examples": [215],
             "title": "Extruder Temp"
           },
           "initial_weight": {
@@ -3060,9 +2650,7 @@
               }
             ],
             "description": "Measured net weight on this roll, in grams, if the tag carries one.",
-            "examples": [
-              998.5
-            ],
+            "examples": [998.5],
             "title": "Initial Weight"
           },
           "instance_uuid": {
@@ -3086,9 +2674,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "PLA"
-            ],
+            "examples": ["PLA"],
             "title": "Material"
           },
           "material_class": {
@@ -3101,9 +2687,7 @@
               }
             ],
             "description": "FFF (filament) or SLA (resin).",
-            "examples": [
-              "FFF"
-            ],
+            "examples": ["FFF"],
             "title": "Material Class"
           },
           "name": {
@@ -3115,9 +2699,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "PLA Galaxy Black"
-            ],
+            "examples": ["PLA Galaxy Black"],
             "title": "Name"
           },
           "spool_weight": {
@@ -3130,9 +2712,7 @@
               }
             ],
             "description": "Tare weight of the empty spool, in grams, if the tag carries one.",
-            "examples": [
-              140.0
-            ],
+            "examples": [140.0],
             "title": "Spool Weight"
           },
           "used_weight": {
@@ -3145,9 +2725,7 @@
               }
             ],
             "description": "Weight already used from this spool, per the tag. Informational only -- see the class docstring; this is never applied to the spool automatically.",
-            "examples": [
-              123.4
-            ],
+            "examples": [123.4],
             "title": "Used Weight"
           },
           "vendor_name": {
@@ -3159,9 +2737,7 @@
                 "type": "null"
               }
             ],
-            "examples": [
-              "Prusament"
-            ],
+            "examples": ["Prusament"],
             "title": "Vendor Name"
           },
           "weight": {
@@ -3174,9 +2750,7 @@
               }
             ],
             "description": "Nominal full net weight of the filament, in grams.",
-            "examples": [
-              1000.0
-            ],
+            "examples": [1000.0],
             "title": "Weight"
           }
         },
@@ -3197,26 +2771,19 @@
               }
             ],
             "description": "What kind of tag this is. Informational; not validated against a fixed list, because new tag types appear faster than releases do. Commonly one of: openprinttag, opentag3d, ntag, bambu, tigertag, qidi, creality, prusa.",
-            "examples": [
-              "ntag"
-            ],
+            "examples": ["ntag"],
             "title": "Format"
           },
           "uid": {
             "description": "The tag's hardware UID, in whatever shape the reader reports it. Separators (:, -, _, spaces) are stripped and the result is uppercased before storing, so every spelling of one physical tag resolves to the same tag.",
-            "examples": [
-              "04:a2:b3:c4:d5:e6:f7",
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04:a2:b3:c4:d5:e6:f7", "04A2B3C4D5E6F7"],
             "maxLength": 128,
             "minLength": 1,
             "title": "Uid",
             "type": "string"
           }
         },
-        "required": [
-          "uid"
-        ],
+        "required": ["uid"],
         "title": "TagLinkParameters",
         "type": "object"
       },
@@ -3238,9 +2805,7 @@
               }
             ],
             "description": "The last tag UID this reader reported, normalized. Lets a client offer what is already on the reader instead of waiting for another tap. Null if the reader has not scanned since the server started.",
-            "examples": [
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04A2B3C4D5E6F7"],
             "title": "Last Uid"
           },
           "name": {
@@ -3253,24 +2818,17 @@
               }
             ],
             "description": "Human-readable name for the reader, if it has sent one.",
-            "examples": [
-              "Voron spool holder"
-            ],
+            "examples": ["Voron spool holder"],
             "title": "Name"
           },
           "reader_id": {
             "description": "The reader's id.",
-            "examples": [
-              "printer-voron"
-            ],
+            "examples": ["printer-voron"],
             "title": "Reader Id",
             "type": "string"
           }
         },
-        "required": [
-          "reader_id",
-          "last_seen"
-        ],
+        "required": ["reader_id", "last_seen"],
         "title": "TagReader",
         "type": "object"
       },
@@ -3280,9 +2838,7 @@
           "created": {
             "default": false,
             "description": "Whether this scan just created a new spool from decoded tag contents and linked the tag to it. Only possible when the request set `create: true` on an otherwise-unmatched, successfully decoded tag.",
-            "examples": [
-              false
-            ],
+            "examples": [false],
             "title": "Created",
             "type": "boolean"
           },
@@ -3318,9 +2874,7 @@
               }
             ],
             "description": "What kind of tag this is, if the agent could tell.",
-            "examples": [
-              "ntag"
-            ],
+            "examples": ["ntag"],
             "title": "Format"
           },
           "matched_filament_id": {
@@ -3333,9 +2887,7 @@
               }
             ],
             "description": "The filament this tag is linked to, or null if it is not linked to a filament. A tag linked to a spool leaves this null; that spool's filament is inside `spool`.",
-            "examples": [
-              7
-            ],
+            "examples": [7],
             "title": "Matched Filament Id"
           },
           "matched_spool_id": {
@@ -3348,9 +2900,7 @@
               }
             ],
             "description": "The spool this tag is linked to, or null if it is not linked to a spool: either the tag is not known to Spoolman, or it identifies a filament (see matched_filament_id).",
-            "examples": [
-              42
-            ],
+            "examples": [42],
             "title": "Matched Spool Id"
           },
           "name": {
@@ -3363,9 +2913,7 @@
               }
             ],
             "description": "Human-readable name for the reader, if it sent one.",
-            "examples": [
-              "Voron spool holder"
-            ],
+            "examples": ["Voron spool holder"],
             "title": "Name"
           },
           "payload_b64": {
@@ -3382,9 +2930,7 @@
           },
           "reader_id": {
             "description": "Which reader reported the scan. Either the id the agent sent, or one derived from its network address when it sent none.",
-            "examples": [
-              "printer-voron"
-            ],
+            "examples": ["printer-voron"],
             "title": "Reader Id",
             "type": "string"
           },
@@ -3401,17 +2947,12 @@
           },
           "uid": {
             "description": "The scanned tag's UID, normalized to uppercase hexadecimal with separators stripped.",
-            "examples": [
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04A2B3C4D5E6F7"],
             "title": "Uid",
             "type": "string"
           }
         },
-        "required": [
-          "uid",
-          "reader_id"
-        ],
+        "required": ["uid", "reader_id"],
         "title": "TagScan",
         "type": "object"
       },
@@ -3438,12 +2979,7 @@
             "description": "Event type."
           }
         },
-        "required": [
-          "type",
-          "resource",
-          "date",
-          "payload"
-        ],
+        "required": ["type", "resource", "date", "payload"],
         "title": "TagScanEvent",
         "type": "object"
       },
@@ -3452,9 +2988,7 @@
           "create": {
             "default": false,
             "description": "If the tag is not linked to anything and its contents decode successfully, create a spool from the decoded contents and link this tag to it. Off by default -- a plain scan never creates anything. Never overwrites or relinks an already-matched tag.",
-            "examples": [
-              false
-            ],
+            "examples": [false],
             "title": "Create",
             "type": "boolean"
           },
@@ -3469,9 +3003,7 @@
               }
             ],
             "description": "What kind of tag this is, if the agent can tell. Informational; not validated against a fixed list. Commonly one of: openprinttag, opentag3d, ntag, bambu, tigertag, qidi, creality, prusa.",
-            "examples": [
-              "ntag"
-            ],
+            "examples": ["ntag"],
             "title": "Format"
           },
           "name": {
@@ -3485,9 +3017,7 @@
               }
             ],
             "description": "Human-readable name for the reader, shown when choosing one.",
-            "examples": [
-              "Voron spool holder"
-            ],
+            "examples": ["Voron spool holder"],
             "title": "Name"
           },
           "payload_b64": {
@@ -3514,26 +3044,19 @@
               }
             ],
             "description": "A stable, operator-chosen id for this reader, e.g. the device hostname. Browsers subscribe by it, so it is what binds a screen to a reader. If omitted, one is derived from the client's network address.",
-            "examples": [
-              "printer-voron"
-            ],
+            "examples": ["printer-voron"],
             "title": "Reader Id"
           },
           "uid": {
             "description": "The scanned tag's UID, case insensitive. Separators can be included if desired but are not necessary.",
-            "examples": [
-              "04-A2-B3-C4-D5-E6-F7",
-              "04a2b3c4d5e6f7"
-            ],
+            "examples": ["04-A2-B3-C4-D5-E6-F7", "04a2b3c4d5e6f7"],
             "maxLength": 128,
             "minLength": 1,
             "title": "Uid",
             "type": "string"
           }
         },
-        "required": [
-          "uid"
-        ],
+        "required": ["uid"],
         "title": "TagScanParameters",
         "type": "object"
       },
@@ -3569,11 +3092,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
+        "required": ["loc", "msg", "type"],
         "title": "ValidationError",
         "type": "object"
       },
@@ -3590,9 +3109,7 @@
               }
             ],
             "description": "Free text comment about this vendor.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "empty_spool_weight": {
@@ -3606,9 +3123,7 @@
               }
             ],
             "description": "The empty spool weight, in grams.",
-            "examples": [
-              140
-            ],
+            "examples": [140],
             "title": "Empty Spool Weight"
           },
           "external_id": {
@@ -3622,9 +3137,7 @@
               }
             ],
             "description": "Set if this vendor comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "eSun"
-            ],
+            "examples": ["eSun"],
             "title": "External Id"
           },
           "extra": {
@@ -3642,9 +3155,7 @@
           },
           "name": {
             "description": "Vendor name.",
-            "examples": [
-              "Polymaker"
-            ],
+            "examples": ["Polymaker"],
             "maxLength": 64,
             "title": "Name",
             "type": "string"
@@ -3655,12 +3166,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "registered",
-          "name",
-          "extra"
-        ],
+        "required": ["id", "registered", "name", "extra"],
         "title": "Vendor",
         "type": "object"
       },
@@ -3687,12 +3193,7 @@
             "description": "Event type."
           }
         },
-        "required": [
-          "type",
-          "resource",
-          "date",
-          "payload"
-        ],
+        "required": ["type", "resource", "date", "payload"],
         "title": "VendorEvent",
         "type": "object"
       },
@@ -3709,9 +3210,7 @@
               }
             ],
             "description": "Free text comment about this vendor.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "empty_spool_weight": {
@@ -3725,9 +3224,7 @@
               }
             ],
             "description": "The weight of an empty spool, in grams.",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Empty Spool Weight"
           },
           "external_id": {
@@ -3741,9 +3238,7 @@
               }
             ],
             "description": "Set if this vendor comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "eSun"
-            ],
+            "examples": ["eSun"],
             "title": "External Id"
           },
           "extra": {
@@ -3770,17 +3265,13 @@
           },
           "name": {
             "description": "Vendor name.",
-            "examples": [
-              "Polymaker"
-            ],
+            "examples": ["Polymaker"],
             "maxLength": 64,
             "title": "Name",
             "type": "string"
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "title": "VendorParameters",
         "type": "object"
       },
@@ -3797,9 +3288,7 @@
               }
             ],
             "description": "Free text comment about this vendor.",
-            "examples": [
-              ""
-            ],
+            "examples": [""],
             "title": "Comment"
           },
           "empty_spool_weight": {
@@ -3813,9 +3302,7 @@
               }
             ],
             "description": "The weight of an empty spool, in grams.",
-            "examples": [
-              200
-            ],
+            "examples": [200],
             "title": "Empty Spool Weight"
           },
           "external_id": {
@@ -3829,9 +3316,7 @@
               }
             ],
             "description": "Set if this vendor comes from an external database. This contains the ID in the external database.",
-            "examples": [
-              "eSun"
-            ],
+            "examples": ["eSun"],
             "title": "External Id"
           },
           "extra": {
@@ -3867,9 +3352,7 @@
               }
             ],
             "description": "Vendor name.",
-            "examples": [
-              "Polymaker"
-            ],
+            "examples": ["Polymaker"],
             "title": "Name"
           }
         },
@@ -3878,18 +3361,12 @@
       },
       "spoolman__api__v1__models__MultiColorDirection": {
         "description": "Enum for multi-color direction.",
-        "enum": [
-          "coaxial",
-          "longitudinal"
-        ],
+        "enum": ["coaxial", "longitudinal"],
         "title": "MultiColorDirection",
         "type": "string"
       },
       "spoolman__externaldb__MultiColorDirection": {
-        "enum": [
-          "coaxial",
-          "longitudinal"
-        ],
+        "enum": ["coaxial", "longitudinal"],
         "title": "MultiColorDirection",
         "type": "string"
       }
@@ -3910,10 +3387,7 @@
           "200": {
             "content": {
               "application/json": {
-                "example": [
-                  "123456",
-                  "987654"
-                ],
+                "example": ["123456", "987654"],
                 "schema": {
                   "items": {
                     "type": "string"
@@ -3927,9 +3401,7 @@
           }
         },
         "summary": "Find Article Numbers",
-        "tags": [
-          "other"
-        ]
+        "tags": ["other"]
       }
     },
     "/backup": {
@@ -3996,9 +3468,7 @@
           }
         },
         "summary": "Export Filaments",
-        "tags": [
-          "export"
-        ]
+        "tags": ["export"]
       }
     },
     "/export/spools": {
@@ -4048,9 +3518,7 @@
           }
         },
         "summary": "Export Spools",
-        "tags": [
-          "export"
-        ]
+        "tags": ["export"]
       }
     },
     "/export/vendors": {
@@ -4088,9 +3556,7 @@
           }
         },
         "summary": "Export Vendors",
-        "tags": [
-          "export"
-        ]
+        "tags": ["export"]
       }
     },
     "/external/filament": {
@@ -4114,9 +3580,7 @@
           }
         },
         "summary": "Get All External Filaments",
-        "tags": [
-          "external"
-        ]
+        "tags": ["external"]
       }
     },
     "/external/filament/search": {
@@ -4131,9 +3595,7 @@
             "required": true,
             "schema": {
               "description": "Search query, matched word-by-word against manufacturer, name and material.",
-              "examples": [
-                "polymaker pla"
-              ],
+              "examples": ["polymaker pla"],
               "title": "Query",
               "type": "string"
             }
@@ -4193,9 +3655,7 @@
           }
         },
         "summary": "Search External Filaments",
-        "tags": [
-          "external"
-        ]
+        "tags": ["external"]
       }
     },
     "/external/material": {
@@ -4219,9 +3679,7 @@
           }
         },
         "summary": "Get All External Materials",
-        "tags": [
-          "external"
-        ]
+        "tags": ["external"]
       }
     },
     "/field/{entity_type}": {
@@ -4267,9 +3725,7 @@
           }
         },
         "summary": "Get Extra Fields",
-        "tags": [
-          "field"
-        ]
+        "tags": ["field"]
       }
     },
     "/field/{entity_type}/{key}": {
@@ -4337,9 +3793,7 @@
           }
         },
         "summary": "Delete Extra Field",
-        "tags": [
-          "field"
-        ]
+        "tags": ["field"]
       },
       "post": {
         "description": "Add or update an extra field for a specific entity type. Returns the full list of extra fields for the entity type.",
@@ -4415,9 +3869,7 @@
           }
         },
         "summary": "Add Or Update Extra Field",
-        "tags": [
-          "field"
-        ]
+        "tags": ["field"]
       }
     },
     "/field/{entity_type}/{key}/values": {
@@ -4485,9 +3937,7 @@
           }
         },
         "summary": "Get Extra Field Values",
-        "tags": [
-          "field"
-        ]
+        "tags": ["field"]
       }
     },
     "/filament": {
@@ -4570,10 +4020,7 @@
                 }
               ],
               "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Specify -1 to match filaments with no vendor.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Vendor ID"
             }
           },
@@ -4657,9 +4104,7 @@
             "schema": {
               "default": 20.0,
               "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-              "examples": [
-                20.0
-              ],
+              "examples": [20.0],
               "title": "Color Similarity Threshold",
               "type": "number"
             }
@@ -4679,9 +4124,7 @@
                 }
               ],
               "description": "Find filaments imported by the given external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
-              "examples": [
-                "polymaker_pla_polysonicblack_1000_175"
-              ],
+              "examples": ["polymaker_pla_polysonicblack_1000_175"],
               "title": "External Id"
             }
           },
@@ -4700,10 +4143,7 @@
                 }
               ],
               "description": "Match the filament that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter. Only a tag linked to the filament itself matches, not a tag on one of its spools; look those up on the spool endpoint. Returns either one filament or none. Returns 400 if the UID is not hexadecimal.",
-              "examples": [
-                "04A2B3C4D5E6F7",
-                "04:a2:b3:c4:d5:e6:f7"
-              ],
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
               "title": "Tag UID"
             }
           },
@@ -4722,9 +4162,7 @@
                 }
               ],
               "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-              "examples": [
-                "vendor.name:asc,spool_weight:desc"
-              ],
+              "examples": ["vendor.name:asc,spool_weight:desc"],
               "title": "Sort"
             }
           },
@@ -4796,9 +4234,7 @@
           }
         },
         "summary": "Find Filaments",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       },
       "post": {
         "description": "Add a new filament to the database.",
@@ -4846,9 +4282,7 @@
           }
         },
         "summary": "Add Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       }
     },
     "/filament/{filament_id}": {
@@ -4909,9 +4343,7 @@
           }
         },
         "summary": "Delete Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       },
       "get": {
         "description": "Get a specific filament. A websocket is served on the same path to listen for changes to the filament. See the HTTP Response code 299 for the content of the websocket messages.",
@@ -4970,9 +4402,7 @@
           }
         },
         "summary": "Get Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       },
       "patch": {
         "description": "Update any attribute of a filament. Only fields specified in the request will be affected. If extra is set, all existing extra fields will be removed and replaced with the new ones.",
@@ -5041,9 +4471,7 @@
           }
         },
         "summary": "Update Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       }
     },
     "/filament/{filament_id}/tag": {
@@ -5124,9 +4552,7 @@
           }
         },
         "summary": "Link A Tag To A Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       }
     },
     "/filament/{filament_id}/tag/{uid}": {
@@ -5150,9 +4576,7 @@
             "required": true,
             "schema": {
               "description": "The tag's UID, in any shape. Normalized before matching.",
-              "examples": [
-                "04A2B3C4D5E6F7"
-              ],
+              "examples": ["04A2B3C4D5E6F7"],
               "title": "Tag UID",
               "type": "string"
             }
@@ -5194,9 +4618,7 @@
           }
         },
         "summary": "Unlink A Tag From A Filament",
-        "tags": [
-          "filament"
-        ]
+        "tags": ["filament"]
       }
     },
     "/health": {
@@ -5245,11 +4667,7 @@
           "200": {
             "content": {
               "application/json": {
-                "example": [
-                  "Printer 1",
-                  "Printer 2",
-                  "Storage Shelf A"
-                ],
+                "example": ["Printer 1", "Printer 2", "Storage Shelf A"],
                 "schema": {
                   "items": {
                     "type": "string"
@@ -5263,9 +4681,7 @@
           }
         },
         "summary": "Find Locations",
-        "tags": [
-          "other"
-        ]
+        "tags": ["other"]
       }
     },
     "/location/{location}": {
@@ -5316,9 +4732,7 @@
           }
         },
         "summary": "Rename Location",
-        "tags": [
-          "other"
-        ]
+        "tags": ["other"]
       }
     },
     "/lot-number": {
@@ -5329,10 +4743,7 @@
           "200": {
             "content": {
               "application/json": {
-                "example": [
-                  "123456",
-                  "987654"
-                ],
+                "example": ["123456", "987654"],
                 "schema": {
                   "items": {
                     "type": "string"
@@ -5346,9 +4757,7 @@
           }
         },
         "summary": "Find Lot Numbers",
-        "tags": [
-          "other"
-        ]
+        "tags": ["other"]
       }
     },
     "/material": {
@@ -5359,11 +4768,7 @@
           "200": {
             "content": {
               "application/json": {
-                "example": [
-                  "PLA",
-                  "ABS",
-                  "PETG"
-                ],
+                "example": ["PLA", "ABS", "PETG"],
                 "schema": {
                   "items": {
                     "type": "string"
@@ -5377,9 +4782,7 @@
           }
         },
         "summary": "Find Materials",
-        "tags": [
-          "other"
-        ]
+        "tags": ["other"]
       }
     },
     "/search": {
@@ -5394,9 +4797,7 @@
             "required": true,
             "schema": {
               "description": "The search query.",
-              "examples": [
-                "red"
-              ],
+              "examples": ["red"],
               "minLength": 1,
               "title": "Query",
               "type": "string"
@@ -5410,9 +4811,7 @@
             "schema": {
               "default": 20.0,
               "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-              "examples": [
-                20.0
-              ],
+              "examples": [20.0],
               "maximum": 100.0,
               "minimum": 0.0,
               "title": "Color Similarity Threshold",
@@ -5483,9 +4882,7 @@
           }
         },
         "summary": "Search",
-        "tags": [
-          "search"
-        ]
+        "tags": ["search"]
       }
     },
     "/setting/": {
@@ -5509,9 +4906,7 @@
           }
         },
         "summary": "Get All Settings",
-        "tags": [
-          "setting"
-        ]
+        "tags": ["setting"]
       }
     },
     "/setting/{key}": {
@@ -5572,9 +4967,7 @@
           }
         },
         "summary": "Get Setting",
-        "tags": [
-          "setting"
-        ]
+        "tags": ["setting"]
       },
       "post": {
         "description": "Set the value of a setting. The body must match the JSON type of the setting. An empty body or a body containing only 'null' will reset the setting to its default value. The new value will be returned.",
@@ -5644,9 +5037,7 @@
           }
         },
         "summary": "Set Setting",
-        "tags": [
-          "setting"
-        ]
+        "tags": ["setting"]
       }
     },
     "/spool": {
@@ -5790,10 +5181,7 @@
                 }
               ],
               "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Filament ID"
             }
           },
@@ -5830,10 +5218,7 @@
                 }
               ],
               "description": "Match spools by their filament's multi-color direction, e.g. coaxial or longitudinal. Separate multiple terms with a comma. Specify an empty string to match single-color filaments. Surround a term with quotes to search for the exact term.",
-              "examples": [
-                "\"coaxial\"",
-                "\"longitudinal\""
-              ],
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
               "title": "Filament Multi-Color Direction"
             }
           },
@@ -5871,10 +5256,7 @@
                 }
               ],
               "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Vendor ID"
             }
           },
@@ -5929,10 +5311,7 @@
                 }
               ],
               "description": "Match the spool that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter, so 04:a2:b3:c4, 04-A2-B3-C4 and 04a2b3c4 all find the same spool. A tag is linked to at most one spool, so this returns either one spool or none. Returns 400 if the UID is not hexadecimal.",
-              "examples": [
-                "04A2B3C4D5E6F7",
-                "04:a2:b3:c4:d5:e6:f7"
-              ],
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
               "title": "Tag UID"
             }
           },
@@ -6109,9 +5488,7 @@
           }
         },
         "summary": "Find Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       },
       "post": {
         "description": "Add a new spool to the database. Only specify either remaining_weight or used_weight. If no weight is set, the spool will be assumed to be full.",
@@ -6159,9 +5536,7 @@
           }
         },
         "summary": "Add Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/field/{field}": {
@@ -6176,10 +5551,7 @@
             "required": true,
             "schema": {
               "description": "The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.",
-              "examples": [
-                "location",
-                "extra.shelf"
-              ],
+              "examples": ["location", "extra.shelf"],
               "title": "Field",
               "type": "string"
             }
@@ -6228,9 +5600,7 @@
           }
         },
         "summary": "Rename A Spool Field Value",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/group": {
@@ -6245,10 +5615,7 @@
             "required": true,
             "schema": {
               "description": "The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).",
-              "examples": [
-                "location",
-                "extra.shelf"
-              ],
+              "examples": ["location", "extra.shelf"],
               "title": "Group By",
               "type": "string"
             }
@@ -6323,10 +5690,7 @@
                 }
               ],
               "description": "Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.",
-              "examples": [
-                "\"coaxial\"",
-                "\"longitudinal\""
-              ],
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
               "title": "Filament Multi-Color Direction"
             }
           },
@@ -6526,9 +5890,7 @@
                 }
               ],
               "description": "Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.",
-              "examples": [
-                "group.last_used:desc"
-              ],
+              "examples": ["group.last_used:desc"],
               "title": "Sort"
             }
           },
@@ -6600,9 +5962,7 @@
           }
         },
         "summary": "Find Spool Groups",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/{spool_id}": {
@@ -6653,9 +6013,7 @@
           }
         },
         "summary": "Delete Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       },
       "get": {
         "description": "Get a specific spool. A websocket is served on the same path to listen for changes to the spool. See the HTTP Response code 299 for the content of the websocket messages.",
@@ -6714,9 +6072,7 @@
           }
         },
         "summary": "Get Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       },
       "patch": {
         "description": "Update any attribute of a spool. Only fields specified in the request will be affected. remaining_weight and used_weight can't be set at the same time. If extra is set, all existing extra fields will be removed and replaced with the new ones.",
@@ -6785,9 +6141,7 @@
           }
         },
         "summary": "Update Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/{spool_id}/measure": {
@@ -6858,9 +6212,7 @@
           }
         },
         "summary": "Use Spool Filament Based On The Current Weight Measurement",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/{spool_id}/tag": {
@@ -6941,9 +6293,7 @@
           }
         },
         "summary": "Link A Tag To A Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/{spool_id}/tag/{uid}": {
@@ -6967,9 +6317,7 @@
             "required": true,
             "schema": {
               "description": "The tag's UID, in any shape. Normalized before matching.",
-              "examples": [
-                "04A2B3C4D5E6F7"
-              ],
+              "examples": ["04A2B3C4D5E6F7"],
               "title": "Tag UID",
               "type": "string"
             }
@@ -7011,9 +6359,7 @@
           }
         },
         "summary": "Unlink A Tag From A Spool",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/spool/{spool_id}/use": {
@@ -7084,9 +6430,7 @@
           }
         },
         "summary": "Use Spool Filament",
-        "tags": [
-          "spool"
-        ]
+        "tags": ["spool"]
       }
     },
     "/tag/reader": {
@@ -7110,9 +6454,7 @@
           }
         },
         "summary": "List Recently Seen Tag Readers",
-        "tags": [
-          "tag"
-        ]
+        "tags": ["tag"]
       }
     },
     "/tag/scan": {
@@ -7172,9 +6514,7 @@
           }
         },
         "summary": "Report A Tag Scan",
-        "tags": [
-          "tag"
-        ]
+        "tags": ["tag"]
       }
     },
     "/vendor": {
@@ -7233,9 +6573,7 @@
                 }
               ],
               "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-              "examples": [
-                "name:asc,id:desc"
-              ],
+              "examples": ["name:asc,id:desc"],
               "title": "Sort"
             }
           },
@@ -7307,9 +6645,7 @@
           }
         },
         "summary": "Find Vendor",
-        "tags": [
-          "vendor"
-        ]
+        "tags": ["vendor"]
       },
       "post": {
         "description": "Add a new vendor to the database.",
@@ -7357,9 +6693,7 @@
           }
         },
         "summary": "Add Vendor",
-        "tags": [
-          "vendor"
-        ]
+        "tags": ["vendor"]
       }
     },
     "/vendor/{vendor_id}": {
@@ -7410,9 +6744,7 @@
           }
         },
         "summary": "Delete Vendor",
-        "tags": [
-          "vendor"
-        ]
+        "tags": ["vendor"]
       },
       "get": {
         "description": "Get a specific vendor. A websocket is served on the same path to listen for changes to the vendor. See the HTTP Response code 299 for the content of the websocket messages.",
@@ -7471,9 +6803,7 @@
           }
         },
         "summary": "Get Vendor",
-        "tags": [
-          "vendor"
-        ]
+        "tags": ["vendor"]
       },
       "patch": {
         "description": "Update any attribute of a vendor. Only fields specified in the request will be affected. If extra is set, all existing extra fields will be removed and replaced with the new ones.",
@@ -7542,9 +6872,7 @@
           }
         },
         "summary": "Update Vendor",
-        "tags": [
-          "vendor"
-        ]
+        "tags": ["vendor"]
       }
     }
   }

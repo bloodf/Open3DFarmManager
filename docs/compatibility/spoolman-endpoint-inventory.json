@@ -7,7 +7,7 @@
     "version_tag": "v0.27.1",
     "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
     "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
-    "openapi_sha256": "faacc40c2b61d445042b797934e005142bf9cc93e6cc20d5e8685c86fc032fe5",
+    "openapi_sha256": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
     "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
   },
   "cutoff": "2026-11-21",
@@ -484,9 +484,9 @@
           "name": "color_similarity_threshold",
           "required": false,
           "schema": {
-            "default": 20.0,
+            "default": 20,
             "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-            "examples": [20.0],
+            "examples": [20],
             "title": "Color Similarity Threshold",
             "type": "number"
           }
@@ -846,11 +846,11 @@
           "name": "color_similarity_threshold",
           "required": false,
           "schema": {
-            "default": 20.0,
+            "default": 20,
             "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-            "examples": [20.0],
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "examples": [20],
+            "maximum": 100,
+            "minimum": 0,
             "title": "Color Similarity Threshold",
             "type": "number"
           }

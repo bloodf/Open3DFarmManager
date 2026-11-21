@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatWeight } from '../utils/ui-format.ts'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -65,6 +65,16 @@ const detailOpen = ref(false)
 const detailItem = ref<LibraryItem | null>(null)
 const showUpload = ref(false)
 let controller: AbortController | undefined
+// A failed load moves focus to the alert so it is announced and reachable.
+const errorSummary = ref<HTMLElement | null>(null)
+watch(
+  () => !!error.value && !items.value.length && !loading.value,
+  async (failed) => {
+    if (!failed) return
+    await nextTick()
+    errorSummary.value?.focus()
+  },
+)
 
 const nozzleProblem = computed(() => nozzleError(filters.value.nozzle))
 const visible = computed(() =>
@@ -218,15 +228,18 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <main class="library">
-    <h1>Biblioteca</h1>
-    <p>
-      Arquivos .gcode e .3mf da farm, com versões e dados lidos do próprio
-      arquivo.
-    </p>
-    <p v-if="status" role="status">{{ status }}</p>
+  <main id="conteudo" class="library">
+    <header class="page-header">
+      <p class="eyebrow">Open3DFarmManager</p>
+      <h1>Biblioteca</h1>
+      <p class="intro">
+        Arquivos .gcode e .3mf da farm, com versões e dados lidos do próprio
+        arquivo.
+      </p>
+    </header>
+    <p v-if="status" role="status" class="notice">{{ status }}</p>
 
-    <p v-if="modeError" role="alert" class="error">{{ modeError }}</p>
+    <p v-if="modeError" role="alert" class="notice error">{{ modeError }}</p>
 
     <EmptyState
       v-if="noFarm"
@@ -235,71 +248,83 @@ onBeforeUnmount(() => controller?.abort())
     >
       <NuxtLink to="/farm">Ir para farms</NuxtLink>
     </EmptyState>
-    <div v-else-if="error && !items.length && !loading" role="alert">
+    <div
+      v-else-if="error && !items.length && !loading"
+      ref="errorSummary"
+      role="alert"
+      tabindex="-1"
+    >
       <ErrorState title="Biblioteca indisponível" :description="error">
-        <Button @click="farmId ? search() : start()">Tentar novamente</Button>
+        <div class="actions">
+          <Button @click="farmId ? search() : start()">Tentar novamente</Button>
+          <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
+        </div>
       </ErrorState>
     </div>
 
     <template v-if="farmId">
       <form
-        class="filters"
+        class="filters panel"
         role="search"
-        aria-label="Filtros da biblioteca"
+        aria-labelledby="library-filters-title"
+        :aria-busy="loading"
         novalidate
         @submit.prevent="search()"
       >
-        <Field label="Título">
-          <template #default="{ control }">
-            <input v-bind="control" v-model="filters.title" type="search" />
-          </template>
-        </Field>
-        <Field label="Modelo da impressora">
-          <template #default="{ control }">
-            <input
-              v-bind="control"
-              v-model="filters.printerModel"
-              type="text"
-            />
-          </template>
-        </Field>
-        <Field label="Bico (mm)" :error="nozzleProblem">
-          <template #default="{ control }">
-            <input
-              v-bind="control"
-              v-model="filters.nozzle"
-              type="text"
-              inputmode="decimal"
-            />
-          </template>
-        </Field>
-        <Field label="Material">
-          <template #default="{ control }">
-            <input v-bind="control" v-model="filters.material" type="text" />
-          </template>
-        </Field>
-        <Field label="Etiqueta">
-          <template #default="{ control }">
-            <input v-bind="control" v-model="filters.tag" type="text" />
-          </template>
-        </Field>
-        <Field
-          label="Compatível com"
-          hint="Oculta o que o perfil da impressora bloqueia."
-        >
-          <template #default="{ control }">
-            <select v-bind="control" v-model="compatPrinter">
-              <option value="">Qualquer impressora</option>
-              <option
-                v-for="p in profiles"
-                :key="p.assignmentId"
-                :value="p.assignmentId"
-              >
-                {{ printerLabel(p) }}
-              </option>
-            </select>
-          </template>
-        </Field>
+        <h2 id="library-filters-title" class="panel-title">Filtros</h2>
+        <div class="filter-grid">
+          <Field label="Título">
+            <template #default="{ control }">
+              <input v-bind="control" v-model="filters.title" type="search" />
+            </template>
+          </Field>
+          <Field label="Modelo da impressora">
+            <template #default="{ control }">
+              <input
+                v-bind="control"
+                v-model="filters.printerModel"
+                type="text"
+              />
+            </template>
+          </Field>
+          <Field label="Bico (mm)" :error="nozzleProblem">
+            <template #default="{ control }">
+              <input
+                v-bind="control"
+                v-model="filters.nozzle"
+                type="text"
+                inputmode="decimal"
+              />
+            </template>
+          </Field>
+          <Field label="Material">
+            <template #default="{ control }">
+              <input v-bind="control" v-model="filters.material" type="text" />
+            </template>
+          </Field>
+          <Field label="Etiqueta">
+            <template #default="{ control }">
+              <input v-bind="control" v-model="filters.tag" type="text" />
+            </template>
+          </Field>
+          <Field
+            label="Compatível com"
+            hint="Oculta o que o perfil da impressora bloqueia."
+          >
+            <template #default="{ control }">
+              <select v-bind="control" v-model="compatPrinter">
+                <option value="">Qualquer impressora</option>
+                <option
+                  v-for="p in profiles"
+                  :key="p.assignmentId"
+                  :value="p.assignmentId"
+                >
+                  {{ printerLabel(p) }}
+                </option>
+              </select>
+            </template>
+          </Field>
+        </div>
         <div class="actions">
           <Button type="submit">Buscar</Button>
           <Button v-if="filtered" @click="clearFilters">Limpar filtros</Button>
@@ -327,9 +352,10 @@ onBeforeUnmount(() => controller?.abort())
       <section
         v-if="showUpload && settings"
         id="library-upload"
+        class="panel"
         aria-labelledby="library-upload-title"
       >
-        <h2 id="library-upload-title">Enviar arquivo</h2>
+        <h2 id="library-upload-title" class="panel-title">Enviar arquivo</h2>
         <LibraryUpload
           :farm-id="farmId"
           :mode="settings.storageMode"
@@ -352,7 +378,7 @@ onBeforeUnmount(() => controller?.abort())
         <Button @click="search()">Tentar novamente</Button>
       </StaleNotice>
 
-      <div v-if="loading" aria-busy="true" class="loading">
+      <div v-if="loading" aria-busy="true" class="loading panel">
         <p role="status">Carregando a biblioteca…</p>
         <Skeleton /><Skeleton /><Skeleton />
       </div>
@@ -459,32 +485,106 @@ onBeforeUnmount(() => controller?.abort())
 </template>
 
 <style scoped>
+.library {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+.library > * {
+  min-width: 0;
+}
+[role='alert']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-md);
+}
+.page-header {
+  display: grid;
+  gap: var(--space-2);
+}
+.eyebrow {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.page-header h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.intro {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.panel {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  min-width: 0;
+}
+.panel-title {
+  margin: 0 0 var(--space-3);
+}
+.notice {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+.notice.error {
+  border-color: var(--state-error-color);
+}
 .filters {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: var(--space-3);
-  margin-block-end: var(--space-4);
+  gap: var(--space-4);
+}
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3) var(--space-4);
 }
 .actions,
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: end;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
 }
 .toolbar {
   justify-content: space-between;
-  margin-block-end: var(--space-3);
+}
+.toolbar [role='group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.toolbar [aria-pressed='true'] {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+.count {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.count:empty {
+  display: none;
 }
 .items {
   list-style: none;
-  margin: 0 0 var(--space-4);
+  margin: 0;
   padding: 0;
   display: grid;
   gap: var(--space-3);
 }
 .items.grid {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+}
+.items li {
+  min-width: 0;
 }
 .item {
   display: flex;
@@ -499,7 +599,8 @@ onBeforeUnmount(() => controller?.abort())
   min-width: 0;
 }
 h2 {
-  font-size: 1.125rem;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
   margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
 }
@@ -509,22 +610,48 @@ img,
   block-size: 6rem;
   object-fit: contain;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--color-surface);
 }
 .no-thumb {
   display: grid;
   place-items: center;
-  color: var(--text-muted);
+  color: var(--color-text-muted);
 }
 .line {
   margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
 }
-.error {
-  color: var(--printer-error);
-}
 .loading {
   display: grid;
   gap: var(--space-3);
+}
+.loading p {
+  margin: 0;
+}
+input,
+select {
+  inline-size: 100%;
+  min-height: 2.75rem;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+:is(input, select):focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* Same bordered surface as the panels. */
+.library :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+@media (max-width: 30rem) {
+  .panel {
+    padding: var(--space-4);
+  }
 }
 </style>

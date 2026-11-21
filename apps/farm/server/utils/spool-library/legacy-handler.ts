@@ -9,13 +9,20 @@ import { locationModule } from './legacy-api/location.ts'
 import { searchModule } from './legacy-api/search.ts'
 import { settingModule } from './legacy-api/setting.ts'
 import { spoolModule } from './legacy-api/spool.ts'
-import type {
-  LegacyApiModule,
-  LegacyApiResponse,
-  LegacyBody,
+import {
+  MUTATING,
+  type LegacyApiModule,
+  type LegacyApiResponse,
+  type LegacyBody,
 } from './legacy-api/types.ts'
 import { vendorModule } from './legacy-api/vendor.ts'
+import {
+  spoolFeedBus,
+  type SpoolFeedBus,
+  type SpoolFeedEvent,
+} from './events.ts'
 import { splitLegacyPath } from './legacy-path.ts'
+import { observeRepository } from './observe.ts'
 import type {
   Result,
   SpoolLibraryFailureReason,
@@ -116,6 +123,7 @@ export async function handleLegacyRequest(
   storage: SpoolLibraryStorage,
   context: LegacyRequestContext,
   dispatch: LegacyDispatch | readonly LegacyApiModule[] = LEGACY_API_MODULES,
+  feed: SpoolFeedBus = spoolFeedBus,
 ): Promise<LegacyApiResponse> {
   const path = splitLegacyPath(context.pathname)
   if (!path.ok) return legacyFailure('unauthorized')
@@ -127,9 +135,19 @@ export async function handleLegacyRequest(
     query: context.query ?? new URLSearchParams(),
     body: context.body ?? ({ kind: 'none' } as const),
   }
+  // Changes are recorded while the farm's transaction runs and published only
+  // once it has committed, to that farm's websocket feeds alone.
+  const events: SpoolFeedEvent[] = []
+  let farmId = ''
   const result = await storage.withScope(
     { kind: 'legacy-credential', token: path.token },
-    async (repository): Promise<Result<LegacyApiResponse>> => {
+    async (scoped): Promise<Result<LegacyApiResponse>> => {
+      farmId = scoped.farmId
+      const mutating = MUTATING.has(request.method)
+      const repository =
+        mutating && feed.hasSubscribers(farmId)
+          ? observeRepository(scoped, events)
+          : scoped
       for (const module of modules) {
         const handled = await module.handle(repository, request)
         if (handled !== undefined) return handled
@@ -137,7 +155,10 @@ export async function handleLegacyRequest(
       return { ok: false, reason: 'not-found' }
     },
   )
-  return result.ok ? result.value : legacyFailure(result.reason)
+  if (!result.ok) return legacyFailure(result.reason)
+  if (events.length > 0 && result.value.status < 400)
+    feed.publish(farmId, events)
+  return result.value
 }
 
 export function legacyFailure(

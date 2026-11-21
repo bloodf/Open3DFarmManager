@@ -157,20 +157,28 @@ for (const signal of ['SIGINT', 'SIGTERM'])
   })
 
 const config = {
-  image: process.env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
+  image:
+    process.env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
   npmCacheVolume:
     process.env.OPENFARM_GATE_NPM_CACHE_VOLUME || 'openfarm-e2e-npm-cache',
 }
 
-function pinnedNodeVersion() {
-  // The Node version the connector ships on; the local runner image must match it exactly.
+function nodeImage() {
+  // Same digest-pinned image the connector ships on; keeps the Node version identical to CI.
   const dockerfile = readFileSync(
     join(repoRoot, 'packages/connector/Dockerfile'),
     'utf8',
   )
-  const match = /^FROM node:(\d+\.\d+\.\d+)\S*@sha256:[0-9a-f]{64}/m.exec(dockerfile)
+  const match = /^FROM (node:\S+@sha256:[0-9a-f]{64})/m.exec(dockerfile)
   if (!match)
     throw new Error('Pinned node image not found in connector Dockerfile')
+  return match[1]
+}
+
+// The local runner image must run exactly the Node version the connector pins.
+function pinnedNodeVersion() {
+  const match = /^node:(\d+\.\d+\.\d+)/.exec(nodeImage())
+  if (!match) throw new Error(`Pinned node image ${nodeImage()} has no version`)
   return match[1]
 }
 
@@ -244,9 +252,7 @@ async function checkPrerequisites() {
     throw new Error(
       `Runner image ${config.image} is not available locally. ${OFFLINE_HINT}`,
     )
-  if (
-    run('docker', ['volume', 'inspect', config.npmCacheVolume]).status !== 0
-  )
+  if (run('docker', ['volume', 'inspect', config.npmCacheVolume]).status !== 0)
     throw new Error(
       `npm cache volume ${config.npmCacheVolume} does not exist. ${OFFLINE_HINT}`,
     )
@@ -268,7 +274,9 @@ async function checkPrerequisites() {
       `Runner image ${config.image} has Node ${lines[0] || '?'}; the connector pins ${expected}. ${OFFLINE_HINT}`,
     )
   if (!lines.includes('openssl-ok'))
-    throw new Error(`Runner image ${config.image} has no openssl. ${OFFLINE_HINT}`)
+    throw new Error(
+      `Runner image ${config.image} has no openssl. ${OFFLINE_HINT}`,
+    )
   if (!lines.includes('cache-ok'))
     throw new Error(
       `npm cache volume ${config.npmCacheVolume} has no _cacache. ${OFFLINE_HINT}`,

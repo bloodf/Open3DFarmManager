@@ -27,6 +27,8 @@ type Mock = {
   account?: 'anonymous' | 'signed-in'
   google?: { enabled: boolean; reason?: string }
   oidc?: boolean
+  /** The browser reports no network (the offline Docker runner always does). */
+  offline?: boolean
   login?: 'ok' | '401' | '429' | '500' | 'hang'
   reset?: 'ok' | 'error' | 'hang'
   logout?: 'ok' | 'error' | 'hang'
@@ -37,6 +39,13 @@ type Call = { path: string; body: unknown; headers: Record<string, string> }
 /** Every /api call of the page is answered here; nothing leaves the test. */
 async function mockApi(page: Page, mock: Mock = {}) {
   const calls: Call[] = []
+  // The runner has no network, so the browser would report it offline.
+  await page.addInitScript((offline) => {
+    Object.defineProperty(navigator, 'onLine', {
+      configurable: true,
+      get: () => !offline,
+    })
+  }, mock.offline === true)
   const unmocked: string[] = []
   await page.route(
     (url) => !['127.0.0.1', 'localhost'].includes(url.hostname),
@@ -162,7 +171,7 @@ const scenarios: Scenario[] = [
     name: 'entrar-google-offline',
     path: '/entrar',
     heading: 'Entrar',
-    mock: { google: { enabled: false, reason: 'offline' } },
+    mock: { offline: true },
     run: async (page) => {
       await expect(page.getByText('Sem conexão com a internet.')).toBeVisible()
     },
@@ -348,6 +357,8 @@ async function open(
   viewport: Viewport,
   theme: Theme,
 ) {
+  // A reused page must reload, not just change the hash.
+  await page.goto('about:blank')
   await page.setViewportSize(viewport)
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
   const api = await mockApi(page, scenario.mock)

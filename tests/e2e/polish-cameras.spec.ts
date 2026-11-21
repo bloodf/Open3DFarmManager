@@ -267,9 +267,9 @@ async function mountHarness(page: Page, kind: 'display' | 'panel') {
 const useStub = (page: Page, name: StubName) =>
   page.evaluate(
     (name) =>
-      (
-        window as unknown as Window & Harness
-      ).harness.setStream((window as unknown as Window & Harness).stubs[name]),
+      (window as unknown as Window & Harness).harness.setStream(
+        (window as unknown as Window & Harness).stubs[name],
+      ),
     name,
   )
 const setPanel = (page: Page, list: readonly unknown[], live?: StubName) =>
@@ -281,8 +281,7 @@ const setPanel = (page: Page, list: readonly unknown[], live?: StubName) =>
     { list, live },
   )
 
-const camera = (page: Page) =>
-  page.getByRole('region', { name: displayRegion })
+const camera = (page: Page) => page.getByRole('region', { name: displayRegion })
 const panel = (page: Page) => page.getByRole('region', { name: 'Câmeras' })
 
 async function open(

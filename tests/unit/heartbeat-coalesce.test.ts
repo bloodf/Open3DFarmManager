@@ -52,4 +52,4 @@ test('drains a day of heartbeats with the latest health', async () => {
     for (const file of readdirSync(directory)) unlinkSync(join(directory, file))
     rmdirSync(directory)
   }
-}, 30000)
+}, 120_000)

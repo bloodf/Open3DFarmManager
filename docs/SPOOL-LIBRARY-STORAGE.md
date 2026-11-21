@@ -159,8 +159,41 @@ Endpoints are modules (`legacy-api/types.ts`, `LegacyApiModule`): the shared
 dispatcher authenticates the credential, opens one farm-bound transaction and
 offers the request to each module in `LEGACY_API_MODULES`. A module returns a
 response, a repository failure (which rolls the transaction back), or
-`undefined` for paths it does not own. Spool, field, setting, tag and other
+`undefined` for paths it does not own. Field, setting, tag, grouping and other
 auxiliary endpoints are added as further modules.
+
+### Spoolman spool API (migration `0088_spoolman_spool_api`)
+
+The legacy path serves the pinned Spoolman v0.27.1 spool endpoints for the
+credential's farm (`apps/farm/server/utils/spool-library/legacy-api/spool.ts`):
+
+| Path                               | Methods                    |
+| ---------------------------------- | -------------------------- |
+| `/api/v1/spool`                    | `GET` (find), `POST` (add) |
+| `/api/v1/spool/{spool_id}`         | `GET`, `PATCH`, `DELETE`   |
+| `/api/v1/spool/{spool_id}/use`     | `PUT`                      |
+| `/api/v1/spool/{spool_id}/measure` | `PUT`                      |
+
+They follow upstream v0.27.1 semantics: nested `filament` (with nested `vendor`)
+and derived `remaining_weight`, `used_length`, `remaining_length`, `tags` list,
+`extra` field validation/merge/clear against `farm.spool_library_fields`
+(migration `0088_spoolman_spool_api` widens `spools_extra_check` to 9 MiB to
+match upstream `max_length` sizing), `allow_archived` default `false`, deprecated
+and nested filters (`filament.*`, `filament.vendor.*`, `extra.<key>`,
+`filament.extra.<key>`, `filament.vendor.extra.<key>`), ISO 8601 `first_used`,
+`last_used`, and `registered` range/exact/empty filters, multi-field sorting with
+NULLs last, `limit`/`offset` with `x-total-count`, `use` (`use_weight` or
+`use_length`, mutually exclusive, negative consumption clamped to `0`,
+`first_used`/`last_used` stamped), and `measure` (gross-weight consumption,
+`initial_weight` reset when gross weight exceeds initial gross weight, and
+lower-bound spool-weight clamping). Sibling endpoints (`/spool/group`,
+`/spool/field/{field}`, `/spool/{id}/tag*`, `WS /spool/{id}`) are left unclaimed.
+
+Recorded upstream answers live in `tests/fixtures/spoolman/spool-api/`:
+`cases.json` defines the request corpus and
+`node scripts/capture-spoolman-spool-api.mjs` replays it against the local
+digest-pinned `ghcr.io/donkie/spoolman:0.27.1` image (no network, fresh database,
+container removed on exit) to produce `upstream.json`.
 
 ### Owner-applied Moonraker configuration
 
@@ -189,9 +222,9 @@ Treat the token like a password:
 - OpenFarm's storage layer never logs tokens, and a credential is never
   returned after creation (listings show label, access and timestamps only).
 
-### Auxiliary APIs and farm features schema (migration `0088_spool_features_schema`)
+### Auxiliary APIs and farm features schema (migration `0089_spool_features_schema`)
 
-Migration `0088` adds the farm-scoped tables and column extensions shared by the
+Migration `0089` adds the farm-scoped tables and column extensions shared by the
 Spoolman auxiliary APIs (#545) and farm spool features (#543), with row types in
 `apps/farm/server/storage/spool-features-types.ts`:
 
@@ -222,16 +255,28 @@ formatted in the farm's configured `currency`.
 node scripts/test-spool-library-storage.mjs
 node scripts/test-spool-library-legacy-access.mjs
 node scripts/test-spoolman-vendor-filament.mjs
+node scripts/test-spoolman-spool-api.mjs
 node scripts/test-spool-features-schema.mjs
 ```
 
+`test-spoolman-spool-api.mjs` applies the migrations through `0088`, serves the
+legacy dispatcher over loopback HTTP, replays every recorded upstream v0.27.1
+spool fixture on one farm (status, body, key order and `x-total-count`), replays
+literal Moonraker/OctoPrint/Home Assistant/OrcaSlicer/Connector/Kobra X client
+contracts, verifies cross-farm isolation across all 7 spool endpoints, checks
+read-only `403` and invalid/forged/revoked `401` handling, confirms
+`/api/v1/spool/group` remains unclaimed, and proves no credential reaches app
+output or the PostgreSQL statement log. Its container is labelled
+`o3dfm.task=spoolman-spool-api-540`; set `SPOOL_API_EVIDENCE_DIR` for its
+ledger.
+
 `test-spool-features-schema.mjs` starts a disposable local `postgres:17` Docker
 container (label `o3dfm.task=spool-features-schema-545-543`, optional
-`SPOOL_FEATURES_SCHEMA_EVIDENCE_DIR`), applies all migrations up through `0088`,
+`SPOOL_FEATURES_SCHEMA_EVIDENCE_DIR`), applies all migrations up through `0089`,
 verifies every table, check constraint, active-slot uniqueness, cost formula,
 cross-farm FK rejection, `farm_spool_features` least-privilege boundaries, and
 `farm_spool_library`/`farm_spool_import` role policy compatibility, then tests
-the `0088` down/up rollback and confirms container removal.
+the `0089` down/up rollback and confirms container removal.
 
 `test-spoolman-vendor-filament.mjs` applies the migrations through `0087`,
 replays every recorded upstream answer on one farm (status, body, key order and
@@ -266,5 +311,7 @@ directory is used and printed. The legacy-access script uses
 
 ## Not in this unit
 
-Spoolman routes other than health, vendor and filament, WebSocket, importing from an
+Spoolman routes other than health, vendor, filament and the 7 HTTP spool
+endpoints (such as `/spool/group`, `/spool/field/{field}`, tags, settings,
+search, export, backup, external catalog), WebSocket, importing from an
 external Spoolman, web pages and the owner UI for issuing credentials.

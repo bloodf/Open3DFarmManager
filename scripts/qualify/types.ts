@@ -15,6 +15,7 @@ export interface QualifyCliOptions {
   port?: number | undefined
   credentialFile?: string | undefined
   serial?: string | undefined
+  model?: string | undefined
   timeoutMs?: number | undefined
   cameraPort?: number | undefined
   ftpsPort?: number | undefined
@@ -46,6 +47,15 @@ export interface ObservedTelemetry {
 
 export interface ObservedCamera {
   reachable: boolean
+  webcams?:
+    | {
+        name: string
+        enabled: boolean
+        reachable: boolean
+        url: string | null
+        detail: string
+      }[]
+    | undefined
   kind?: 'mjpeg' | 'jpeg' | 'rtsps' | 'webcam' | 'unknown' | null | undefined
   url?: string | null | undefined
   detail?: string | null | undefined

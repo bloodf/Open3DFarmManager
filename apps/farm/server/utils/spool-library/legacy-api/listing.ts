@@ -93,7 +93,8 @@ function compareValues(a: unknown, b: unknown): number {
   return compareText(String(a), String(b))
 }
 
-type Key<T> = { get: (row: T) => unknown; direction: Direction }
+export type SortKey<T> = { get: (row: T) => unknown; direction: Direction }
+type Key<T> = SortKey<T>
 
 /**
  * Upstream order: registered `extra.*` sort keys first (unknown ones are

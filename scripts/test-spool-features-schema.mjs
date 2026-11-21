@@ -1,8 +1,8 @@
-// Evidence for the farm-scoped spool auxiliary & farm features schema (migration 0088).
+// Evidence for the farm-scoped spool auxiliary & farm features schema (migration 0089).
 //
 // Starts one disposable PostgreSQL 17 Docker container (digest-pinned local
 // image, never pulled, loopback port, read-only root, removed on exit), applies
-// all migrations up through 0088, verifies tables, constraints, role policies,
+// all migrations up through 0089, verifies tables, constraints, role policies,
 // cross-farm isolation, cost-per-print computation, and down/up rollback, then
 // removes the container and verifies removal.
 //
@@ -29,7 +29,7 @@ import { validateSpoolLibraryRole } from '../apps/farm/server/utils/spool-librar
 import { validateSpoolImportRole } from '../apps/farm/server/utils/spool-library-import/role-policy.ts'
 
 const exec = promisify(execFile)
-const MIGRATION = '0088_spool_features_schema'
+const MIGRATION = '0089_spool_features_schema'
 const TASK_LABEL = 'spool-features-schema-545-543'
 const NEW_TABLES = [
   'spool_locations',
@@ -169,7 +169,7 @@ try {
   assert.equal(await hasFeaturesRole(), 1)
   check('schema-objects-present-after-up')
 
-  // --- existing role policies remain valid after 0088 -----------------------
+  // --- existing role policies remain valid after 0089 -----------------------
   librarySql = await connectAs('farm_spool_library')
   importSql = await connectAs('farm_spool_import')
   featuresSql = await connectAs('farm_spool_features')
@@ -571,7 +571,7 @@ try {
   assert.equal(await countNewTables(), 0)
   assert.equal(await hasThresholdColumn(), 0)
   assert.equal(await hasFeaturesRole(), 0)
-  // Existing settings and fields rows survive 0088 rollback untouched
+  // Existing settings and fields rows survive 0089 rollback untouched
   const survivingSetting =
     await admin`SELECT key FROM farm.spool_library_settings WHERE farm_id = ${farmA}::uuid ORDER BY key`
   assert.deepEqual(
@@ -591,10 +591,10 @@ try {
     ),
     '23502',
   )
-  // Existing roles still valid after 0088 down
+  // Existing roles still valid after 0089 down
   await validateSpoolLibraryRole(librarySql)
   await validateSpoolImportRole(importSql)
-  check('migration-0088-down-with-data-and-provenance-preserved')
+  check('migration-0089-down-with-data-and-provenance-preserved')
 
   // Re-apply up and roll back down cleanly
   await runMigrations(admin, catalog, { kind: 'up' })
@@ -607,7 +607,7 @@ try {
   })
   assert.equal(await countNewTables(), 0)
   assert.equal(await hasFeaturesRole(), 0)
-  check('migration-0088-up-down-clean-round-trip')
+  check('migration-0089-up-down-clean-round-trip')
 
   console.log(
     JSON.stringify(

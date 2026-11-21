@@ -1,4 +1,5 @@
 import { filamentModule } from './legacy-api/filament.ts'
+import { spoolModule } from './legacy-api/spool.ts'
 import type {
   LegacyApiModule,
   LegacyApiResponse,
@@ -61,13 +62,14 @@ export const healthModule: LegacyApiModule = {
 }
 
 /**
- * Registered Spoolman endpoint modules, tried in order. Spool, field, setting,
- * tag and other auxiliary modules are appended here as they are implemented.
+ * Registered Spoolman endpoint modules, tried in order. Field, setting, tag
+ * and other auxiliary modules are appended here as they are implemented.
  */
 export const LEGACY_API_MODULES: readonly LegacyApiModule[] = [
   healthModule,
   vendorModule,
   filamentModule,
+  spoolModule,
 ]
 
 export interface LegacyRequestContext {

@@ -12,6 +12,7 @@ Arguments:
 
 Options:
   --port <port>                  Target network port (defaults by vendor: moonraker=7125, bambu=8883, creality=9999, anycubic=9883)
+  --model <name>                Override detected Moonraker printer model
   --serial <serial>              Printer serial number (Bambu, Anycubic)
   --timeout <ms>                 Timeout in milliseconds (default: 10000)
   --camera-port <port>           Explicit camera port override
@@ -74,6 +75,7 @@ export function parseCliArgs(args: string[]): {
   let host: string | undefined
   let port: number | undefined
   let credentialFile: string | undefined
+  let model: string | undefined
   let serial: string | undefined
   let timeoutMs: number | undefined
   let cameraPort: number | undefined
@@ -108,6 +110,14 @@ export function parseCliArgs(args: string[]): {
       if (i + 1 >= args.length)
         return { error: 'Missing value for --credential-file' }
       credentialFile = args[++i]
+    } else if (arg === '--model') {
+      if (
+        i + 1 >= args.length ||
+        !args[i + 1]?.trim() ||
+        args[i + 1]?.startsWith('--')
+      )
+        return { error: 'Missing value for --model' }
+      model = args[++i]!.trim()
     } else if (arg === '--serial') {
       if (i + 1 >= args.length) return { error: 'Missing value for --serial' }
       serial = args[++i]
@@ -178,6 +188,7 @@ export function parseCliArgs(args: string[]): {
       ...(port !== undefined ? { port } : {}),
       ...(credentialFile !== undefined ? { credentialFile } : {}),
       ...(serial !== undefined ? { serial } : {}),
+      ...(model !== undefined ? { model } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(cameraPort !== undefined ? { cameraPort } : {}),
       ...(ftpsPort !== undefined ? { ftpsPort } : {}),

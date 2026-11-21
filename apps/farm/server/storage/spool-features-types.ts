@@ -1,6 +1,6 @@
 /**
  * Row types for farm-scoped spool auxiliary APIs (#545) and farm features (#543),
- * matching migration 0088_spool_features_schema. Row types only.
+ * matching migration 0089_spool_features_schema. Row types only.
  */
 import type {
   SpoolEntityType,

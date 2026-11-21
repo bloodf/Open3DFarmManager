@@ -6,6 +6,7 @@
 import type {
   PageInput,
   Result,
+  Spool,
   SpoolFilament,
   SpoolRecordId,
   SpoolVendor,
@@ -102,5 +103,78 @@ export function filamentJson(
   ])
 }
 
-export const notFound = (kind: 'vendor' | 'filament', id: number) =>
+/** Upstream `spoolman.math.weight_from_length`: mm -> g. */
+export function weightFromLength(
+  length: number,
+  diameter: number,
+  density: number,
+): number {
+  const volumeMm3 = length * Math.PI * (diameter / 2) ** 2
+  const volumeCm3 = volumeMm3 / 1000
+  return density * volumeCm3
+}
+
+/** Upstream `spoolman.math.length_from_weight`: g -> mm. */
+export function lengthFromWeight(
+  weight: number,
+  diameter: number,
+  density: number,
+): number {
+  const volumeCm3 = weight / density
+  const volumeMm3 = volumeCm3 * 1000
+  return volumeMm3 / (Math.PI * (diameter / 2) ** 2)
+}
+
+export function spoolJson(
+  spool: Spool,
+  filament: SpoolFilament,
+  vendor: SpoolVendor | null,
+): Record<string, unknown> {
+  let remainingWeight: number | null = null
+  let remainingLength: number | null = null
+  const baseWeight =
+    spool.initialWeight !== null ? spool.initialWeight : filament.weight
+  if (baseWeight !== null) {
+    remainingWeight = Math.max(baseWeight - spool.usedWeight, 0)
+    remainingLength = lengthFromWeight(
+      remainingWeight,
+      filament.diameter,
+      filament.density,
+    )
+  }
+  const usedLength = lengthFromWeight(
+    spool.usedWeight,
+    filament.diameter,
+    filament.density,
+  )
+  return present([
+    ['id', spool.id],
+    ['registered', spoolmanDateTime(spool.registeredAt)],
+    [
+      'first_used',
+      spool.firstUsedAt !== null ? spoolmanDateTime(spool.firstUsedAt) : null,
+    ],
+    [
+      'last_used',
+      spool.lastUsedAt !== null ? spoolmanDateTime(spool.lastUsedAt) : null,
+    ],
+    ['filament', filamentJson(filament, vendor)],
+    ['price', spool.price],
+    ['remaining_weight', remainingWeight],
+    ['initial_weight', spool.initialWeight],
+    ['spool_weight', spool.spoolWeight],
+    ['used_weight', spool.usedWeight],
+    ['remaining_length', remainingLength],
+    ['used_length', usedLength],
+    ['location', spool.location],
+    ['lot_nr', spool.lotNr],
+    ['comment', spool.comment],
+    ['archived', spool.archived],
+    ['extra', extraOf(spool.extra)],
+    // NFC/RFID tag links are served by the tag module; none exist without it.
+    ['tags', []],
+  ])
+}
+
+export const notFound = (kind: 'vendor' | 'filament' | 'spool', id: number) =>
   `No ${kind} with ID ${id} found.`

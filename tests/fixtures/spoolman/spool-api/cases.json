@@ -1,0 +1,1006 @@
+[
+  {
+    "name": "field-vendor-tier",
+    "method": "POST",
+    "path": "/api/v1/field/vendor/tier",
+    "body": { "name": "Tier", "field_type": "text" },
+    "setup": "field"
+  },
+  {
+    "name": "field-filament-finish",
+    "method": "POST",
+    "path": "/api/v1/field/filament/finish",
+    "body": {
+      "name": "Finish",
+      "field_type": "choice",
+      "choices": ["matte", "glossy", "silk"],
+      "multi_choice": false
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-filament-dry-temp",
+    "method": "POST",
+    "path": "/api/v1/field/filament/dry_temp",
+    "body": { "name": "Dry Temp", "field_type": "integer", "unit": "C" },
+    "setup": "field"
+  },
+  {
+    "name": "field-spool-shelf",
+    "method": "POST",
+    "path": "/api/v1/field/spool/shelf",
+    "body": { "name": "Shelf", "field_type": "text" },
+    "setup": "field"
+  },
+  {
+    "name": "field-spool-rating",
+    "method": "POST",
+    "path": "/api/v1/field/spool/rating",
+    "body": { "name": "Rating", "field_type": "integer" },
+    "setup": "field"
+  },
+  {
+    "name": "field-spool-opened",
+    "method": "POST",
+    "path": "/api/v1/field/spool/opened",
+    "body": { "name": "Opened", "field_type": "boolean" },
+    "setup": "field"
+  },
+  {
+    "name": "field-spool-dried-at",
+    "method": "POST",
+    "path": "/api/v1/field/spool/dried_at",
+    "body": { "name": "Dried At", "field_type": "datetime" },
+    "setup": "field"
+  },
+  {
+    "name": "field-spool-labels",
+    "method": "POST",
+    "path": "/api/v1/field/spool/labels",
+    "body": {
+      "name": "Labels",
+      "field_type": "choice",
+      "choices": ["dry", "ams", "test"],
+      "multi_choice": true
+    },
+    "setup": "field"
+  },
+  {
+    "name": "setup-vendor-1",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Polymaker",
+      "empty_spool_weight": 140,
+      "extra": { "tier": "\"pro\"" }
+    }
+  },
+  {
+    "name": "setup-vendor-2",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Prusament",
+      "empty_spool_weight": 200,
+      "extra": { "tier": "\"studio\"" }
+    }
+  },
+  {
+    "name": "setup-vendor-3",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": { "name": "LateTare" }
+  },
+  {
+    "name": "setup-filament-1",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "PolyLite PLA",
+      "vendor_id": 1,
+      "material": "PLA",
+      "price": 24.99,
+      "density": 1.24,
+      "diameter": 1.75,
+      "weight": 1000,
+      "spool_weight": 140,
+      "color_hex": "FF0000",
+      "extra": { "finish": "\"matte\"", "dry_temp": "50" }
+    }
+  },
+  {
+    "name": "setup-filament-2",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Prusament PETG",
+      "vendor_id": 2,
+      "material": "PETG",
+      "price": 29.99,
+      "density": 1.27,
+      "diameter": 1.75,
+      "weight": 1000,
+      "spool_weight": 200,
+      "multi_color_hexes": "00FF00,0000FF",
+      "multi_color_direction": "coaxial",
+      "extra": { "finish": "\"glossy\"", "dry_temp": "65" }
+    }
+  },
+  {
+    "name": "setup-filament-3-no-weight-no-vendor",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Generic ABS",
+      "material": "ABS",
+      "density": 1.04,
+      "diameter": 1.75
+    }
+  },
+  {
+    "name": "setup-filament-4-late-tare",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "LateTare TPU",
+      "vendor_id": 3,
+      "material": "TPU",
+      "density": 1.21,
+      "diameter": 1.75,
+      "weight": 750
+    }
+  },
+  {
+    "name": "setup-vendor-3-add-tare",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/3",
+    "body": { "empty_spool_weight": 185 }
+  },
+
+  {
+    "name": "spool-list-empty",
+    "method": "GET",
+    "path": "/api/v1/spool"
+  },
+  {
+    "name": "spool-create-minimal",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1 }
+  },
+  {
+    "name": "spool-create-full-remaining-weight",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "price": 19.5,
+      "initial_weight": 1000,
+      "spool_weight": 145,
+      "remaining_weight": 750,
+      "first_used": "2024-05-01T12:30:00+02:00",
+      "last_used": "2024-05-02T09:15:00Z",
+      "location": "Rack A1",
+      "lot_nr": "LOT-001",
+      "comment": "Primary red PLA",
+      "archived": false,
+      "extra": {
+        "shelf": "\"A-top\"",
+        "rating": "9",
+        "opened": "true",
+        "dried_at": "\"2024-05-01T08:00:00Z\"",
+        "labels": "[\"dry\",\"ams\"]"
+      }
+    }
+  },
+  {
+    "name": "spool-create-used-weight-zero-tare",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 2,
+      "initial_weight": 950,
+      "spool_weight": 0,
+      "used_weight": 120.5,
+      "first_used": "2024-06-10T10:00:00Z",
+      "last_used": "2024-06-12T18:00:00Z",
+      "location": "Top shelf, Rack 3",
+      "lot_nr": "LOT-002",
+      "extra": {
+        "shelf": "\"B-mid\"",
+        "rating": "4",
+        "opened": "false",
+        "labels": "[\"test\"]"
+      }
+    }
+  },
+  {
+    "name": "spool-create-archived",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 2,
+      "used_weight": 1000,
+      "location": "Archive Bin",
+      "lot_nr": "LOT-ARC",
+      "archived": true,
+      "extra": { "rating": "1" }
+    }
+  },
+  {
+    "name": "spool-create-no-weight-filament",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 3,
+      "location": "Drybox 2"
+    }
+  },
+  {
+    "name": "spool-create-remaining-exceeds-initial",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 3,
+      "initial_weight": 500,
+      "remaining_weight": 600,
+      "comment": "Overfilled"
+    }
+  },
+  {
+    "name": "spool-create-vendor-tare-fallback",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 4,
+      "location": "TPU Shelf"
+    }
+  },
+
+  {
+    "name": "spool-create-missing-filament-id",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "location": "X" }
+  },
+  {
+    "name": "spool-create-null-filament-id",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": null }
+  },
+  {
+    "name": "spool-create-unknown-filament-id",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 999 }
+  },
+  {
+    "name": "spool-create-both-remaining-and-used",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "remaining_weight": 500,
+      "used_weight": 500
+    }
+  },
+  {
+    "name": "spool-create-remaining-without-initial",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 3,
+      "remaining_weight": 400
+    }
+  },
+  {
+    "name": "spool-create-remaining-with-zero-initial",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 3,
+      "initial_weight": 0,
+      "remaining_weight": 100
+    }
+  },
+  {
+    "name": "spool-create-negative-fields",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "price": -1,
+      "initial_weight": -10,
+      "spool_weight": -5,
+      "used_weight": -2
+    }
+  },
+  {
+    "name": "spool-create-location-too-long",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "location": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+    }
+  },
+  {
+    "name": "spool-create-lot-nr-too-long",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "lot_nr": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  {
+    "name": "spool-create-archived-null",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "archived": null }
+  },
+  {
+    "name": "spool-create-archived-bad-string",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "archived": "maybe" }
+  },
+  {
+    "name": "spool-create-first-used-bad-string",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "first_used": "not-a-date" }
+  },
+  {
+    "name": "spool-create-first-used-bad-type",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "first_used": [] }
+  },
+  {
+    "name": "spool-create-unknown-extra",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "extra": { "nope": "\"x\"" } }
+  },
+  {
+    "name": "spool-create-invalid-extra-type",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "extra": { "rating": "\"not-an-int\"" } }
+  },
+  {
+    "name": "spool-create-extra-not-dict",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "extra": ["x"] }
+  },
+  {
+    "name": "spool-create-extra-non-string-value",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": { "filament_id": 1, "extra": { "rating": 5 } }
+  },
+  {
+    "name": "spool-create-invalid-json",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "rawBody": "{broken",
+    "contentType": "application/json",
+    "compare": "status-type"
+  },
+  {
+    "name": "spool-create-no-body",
+    "method": "POST",
+    "path": "/api/v1/spool"
+  },
+  {
+    "name": "spool-create-array-body",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": [{ "filament_id": 1 }]
+  },
+  {
+    "name": "spool-create-text-plain",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "rawBody": "{\"filament_id\":1}",
+    "contentType": "text/plain"
+  },
+
+  {
+    "name": "spool-get-ok",
+    "method": "GET",
+    "path": "/api/v1/spool/2"
+  },
+  {
+    "name": "spool-get-missing",
+    "method": "GET",
+    "path": "/api/v1/spool/999"
+  },
+  {
+    "name": "spool-get-bad-id",
+    "method": "GET",
+    "path": "/api/v1/spool/not-an-int"
+  },
+  {
+    "name": "spool-collection-put-405",
+    "method": "PUT",
+    "path": "/api/v1/spool"
+  },
+  {
+    "name": "spool-item-post-405",
+    "method": "POST",
+    "path": "/api/v1/spool/1"
+  },
+
+  {
+    "name": "spool-patch-partial-and-extra-merge",
+    "method": "PATCH",
+    "path": "/api/v1/spool/2",
+    "body": {
+      "comment": "Updated comment",
+      "extra": {
+        "shelf": "\"A-mid\"",
+        "opened": null
+      }
+    }
+  },
+  {
+    "name": "spool-patch-remaining-weight",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "remaining_weight": 820 }
+  },
+  {
+    "name": "spool-patch-used-weight",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "used_weight": 150 }
+  },
+  {
+    "name": "spool-patch-initial-and-remaining-order",
+    "method": "PATCH",
+    "path": "/api/v1/spool/6",
+    "body": { "initial_weight": 600, "remaining_weight": 450 }
+  },
+  {
+    "name": "spool-patch-archive-and-unarchive",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "archived": true }
+  },
+  {
+    "name": "spool-patch-unarchive",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "archived": false }
+  },
+  {
+    "name": "spool-patch-filament-copies-weight",
+    "method": "PATCH",
+    "path": "/api/v1/spool/5",
+    "body": { "filament_id": 1 }
+  },
+  {
+    "name": "spool-patch-filament-back-and-clear-initial",
+    "method": "PATCH",
+    "path": "/api/v1/spool/5",
+    "body": { "filament_id": 3, "initial_weight": null }
+  },
+  {
+    "name": "spool-patch-dates-set-and-clear",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "first_used": "2024-04-01T00:00:00Z", "last_used": "2024-04-05T12:00:00Z" }
+  },
+  {
+    "name": "spool-patch-clear-last-used",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "last_used": null }
+  },
+  {
+    "name": "spool-patch-filament-id-null",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "filament_id": null }
+  },
+  {
+    "name": "spool-patch-filament-id-missing",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "filament_id": 999 }
+  },
+  {
+    "name": "spool-patch-missing-spool",
+    "method": "PATCH",
+    "path": "/api/v1/spool/999",
+    "body": { "location": "Nowhere" }
+  },
+  {
+    "name": "spool-patch-both-remaining-and-used",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "remaining_weight": 500, "used_weight": 500 }
+  },
+  {
+    "name": "spool-patch-remaining-without-initial",
+    "method": "PATCH",
+    "path": "/api/v1/spool/5",
+    "body": { "remaining_weight": 200 }
+  },
+  {
+    "name": "spool-patch-archived-null",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "archived": null }
+  },
+  {
+    "name": "spool-patch-unknown-extra",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": { "extra": { "bogus": "\"x\"" } }
+  },
+  {
+    "name": "spool-patch-bad-id-and-body",
+    "method": "PATCH",
+    "path": "/api/v1/spool/abc",
+    "body": { "price": -5 }
+  },
+
+  {
+    "name": "spool-use-weight-positive",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_weight": 25.5 }
+  },
+  {
+    "name": "spool-use-length-positive",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_length": 1000 }
+  },
+  {
+    "name": "spool-use-weight-negative-partial",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_weight": -10 }
+  },
+  {
+    "name": "spool-use-weight-negative-clamp-zero",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_weight": -9999 }
+  },
+  {
+    "name": "spool-use-length-negative-clamp-zero",
+    "method": "PUT",
+    "path": "/api/v1/spool/6/use",
+    "body": { "use_length": -500000 }
+  },
+  {
+    "name": "spool-use-both-error",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_weight": 5, "use_length": 100 }
+  },
+  {
+    "name": "spool-use-neither-error",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": {}
+  },
+  {
+    "name": "spool-use-weight-missing-spool",
+    "method": "PUT",
+    "path": "/api/v1/spool/999/use",
+    "body": { "use_weight": 5 }
+  },
+  {
+    "name": "spool-use-length-missing-spool",
+    "method": "PUT",
+    "path": "/api/v1/spool/999/use",
+    "body": { "use_length": 100 }
+  },
+  {
+    "name": "spool-use-bad-type",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": { "use_weight": "heavy" }
+  },
+  {
+    "name": "spool-use-get-405",
+    "method": "GET",
+    "path": "/api/v1/spool/1/use"
+  },
+
+  {
+    "name": "spool-measure-normal",
+    "method": "PUT",
+    "path": "/api/v1/spool/7/measure",
+    "body": { "weight": 800 }
+  },
+  {
+    "name": "spool-measure-clamp-below-tare",
+    "method": "PUT",
+    "path": "/api/v1/spool/7/measure",
+    "body": { "weight": 100 }
+  },
+  {
+    "name": "spool-measure-reset-initial-above-gross",
+    "method": "PUT",
+    "path": "/api/v1/spool/7/measure",
+    "body": { "weight": 1100 }
+  },
+  {
+    "name": "spool-measure-zero-tare-fallback",
+    "method": "PUT",
+    "path": "/api/v1/spool/6/measure",
+    "body": { "weight": 420 }
+  },
+  {
+    "name": "spool-measure-missing-spool",
+    "method": "PUT",
+    "path": "/api/v1/spool/999/measure",
+    "body": { "weight": 500 }
+  },
+  {
+    "name": "spool-measure-no-initial-weight",
+    "method": "PUT",
+    "path": "/api/v1/spool/5/measure",
+    "body": { "weight": 500 }
+  },
+  {
+    "name": "spool-measure-missing-weight",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/measure",
+    "body": {}
+  },
+  {
+    "name": "spool-measure-bad-weight",
+    "method": "PUT",
+    "path": "/api/v1/spool/1/measure",
+    "body": { "weight": "abc" }
+  },
+  {
+    "name": "spool-measure-post-405",
+    "method": "POST",
+    "path": "/api/v1/spool/1/measure"
+  },
+
+  {
+    "name": "spool-find-default-excludes-archived",
+    "method": "GET",
+    "path": "/api/v1/spool"
+  },
+  {
+    "name": "spool-find-allow-archived-true",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=true"
+  },
+  {
+    "name": "spool-find-allow-archived-1",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=1"
+  },
+  {
+    "name": "spool-find-allow-archived-bad",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=nope"
+  },
+  {
+    "name": "spool-find-filament-id",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.id=1,2"
+  },
+  {
+    "name": "spool-find-filament-id-deprecated",
+    "method": "GET",
+    "path": "/api/v1/spool?filament_id=2&allow_archived=true"
+  },
+  {
+    "name": "spool-find-filament-id-override",
+    "method": "GET",
+    "path": "/api/v1/spool?filament_id=2&filament.id=1"
+  },
+  {
+    "name": "spool-find-filament-id-bad",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.id=abc"
+  },
+  {
+    "name": "spool-find-vendor-id-minus-one",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.vendor.id=-1"
+  },
+  {
+    "name": "spool-find-vendor-id-multi",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.vendor.id=1,-1"
+  },
+  {
+    "name": "spool-find-vendor-id-deprecated",
+    "method": "GET",
+    "path": "/api/v1/spool?vendor_id=2&allow_archived=true"
+  },
+  {
+    "name": "spool-find-vendor-name",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.vendor.name=prusa&allow_archived=true"
+  },
+  {
+    "name": "spool-find-vendor-name-deprecated",
+    "method": "GET",
+    "path": "/api/v1/spool?vendor_name=poly"
+  },
+  {
+    "name": "spool-find-filament-name",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.name=poly"
+  },
+  {
+    "name": "spool-find-filament-name-exact",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.name=%22PolyLite%20PLA%22"
+  },
+  {
+    "name": "spool-find-filament-material",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.material=pla,abs"
+  },
+  {
+    "name": "spool-find-multi-color-direction",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.multi_color_direction=coaxial"
+  },
+  {
+    "name": "spool-find-multi-color-direction-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.multi_color_direction="
+  },
+  {
+    "name": "spool-find-location-quoted-comma",
+    "method": "GET",
+    "path": "/api/v1/spool?location=%22Top%20shelf%2C%20Rack%203%22"
+  },
+  {
+    "name": "spool-find-location-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?location="
+  },
+  {
+    "name": "spool-find-lot-nr",
+    "method": "GET",
+    "path": "/api/v1/spool?lot_nr=LOT-00"
+  },
+  {
+    "name": "spool-find-lot-nr-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?lot_nr="
+  },
+  {
+    "name": "spool-find-tag-valid-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?tag=04:a2:b3:c4"
+  },
+  {
+    "name": "spool-find-tag-invalid",
+    "method": "GET",
+    "path": "/api/v1/spool?tag=not-hex!"
+  },
+  {
+    "name": "spool-find-first-used-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=&allow_archived=true"
+  },
+  {
+    "name": "spool-find-first-used-exact-utc",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=2024-05-01T10:30:00Z"
+  },
+  {
+    "name": "spool-find-first-used-range",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=2024-05-01T00:00:00Z|2024-06-15T00:00:00Z"
+  },
+  {
+    "name": "spool-find-first-used-open-start",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=|2024-05-01T10:30:00Z"
+  },
+  {
+    "name": "spool-find-first-used-or-unset",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=,2024-05-01T10:30:00Z&allow_archived=true"
+  },
+  {
+    "name": "spool-find-last-used-quoted",
+    "method": "GET",
+    "path": "/api/v1/spool?last_used=%222024-05-02T09:15:00Z%22"
+  },
+  {
+    "name": "spool-find-registered-open-end",
+    "method": "GET",
+    "path": "/api/v1/spool?registered=2020-01-01T00:00:00Z|"
+  },
+  {
+    "name": "spool-find-first-used-empty-range-400",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=|"
+  },
+  {
+    "name": "spool-find-first-used-bad-date-400",
+    "method": "GET",
+    "path": "/api/v1/spool?first_used=not-a-date"
+  },
+  {
+    "name": "spool-find-extra-spool-text",
+    "method": "GET",
+    "path": "/api/v1/spool?extra.shelf=mid"
+  },
+  {
+    "name": "spool-find-extra-spool-int-range",
+    "method": "GET",
+    "path": "/api/v1/spool?extra.rating=4:10&allow_archived=true"
+  },
+  {
+    "name": "spool-find-extra-spool-bool-empty",
+    "method": "GET",
+    "path": "/api/v1/spool?extra.opened="
+  },
+  {
+    "name": "spool-find-extra-spool-multichoice",
+    "method": "GET",
+    "path": "/api/v1/spool?extra.labels=ams"
+  },
+  {
+    "name": "spool-find-extra-spool-bad-int-400",
+    "method": "GET",
+    "path": "/api/v1/spool?extra.rating=abc"
+  },
+  {
+    "name": "spool-find-extra-filament-choice",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.extra.finish=matte"
+  },
+  {
+    "name": "spool-find-extra-filament-int-range",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.extra.dry_temp=60:70&allow_archived=true"
+  },
+  {
+    "name": "spool-find-extra-vendor-text",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.vendor.extra.tier=pro"
+  },
+  {
+    "name": "spool-find-extra-vendor-empty-includes-no-vendor",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.vendor.extra.tier="
+  },
+
+  {
+    "name": "spool-sort-id-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=id:desc"
+  },
+  {
+    "name": "spool-sort-remaining-weight-asc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=remaining_weight:asc&allow_archived=true"
+  },
+  {
+    "name": "spool-sort-remaining-weight-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=remaining_weight:desc&allow_archived=true"
+  },
+  {
+    "name": "spool-sort-remaining-length-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=remaining_length:desc"
+  },
+  {
+    "name": "spool-sort-used-length-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=used_length:desc&allow_archived=true"
+  },
+  {
+    "name": "spool-sort-combined-name-asc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=filament.combined_name:asc"
+  },
+  {
+    "name": "spool-sort-combined-name-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=filament.combined_name:desc"
+  },
+  {
+    "name": "spool-sort-price-asc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=price:asc"
+  },
+  {
+    "name": "spool-sort-location-asc-nulls-last",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=location:asc"
+  },
+  {
+    "name": "spool-sort-extra-rating-desc",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=extra.rating:desc&allow_archived=true"
+  },
+  {
+    "name": "spool-sort-extra-unknown-ignored",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=extra.unknown:asc,id:desc"
+  },
+  {
+    "name": "spool-sort-invalid-syntax-400",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=location"
+  },
+  {
+    "name": "spool-sort-invalid-direction-400",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=location:sideways"
+  },
+  {
+    "name": "spool-sort-invalid-field-400",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=bogus:asc"
+  },
+  {
+    "name": "spool-sort-bare-relation-400",
+    "method": "GET",
+    "path": "/api/v1/spool?sort=filament:asc"
+  },
+
+  {
+    "name": "spool-page-limit-2-offset-0",
+    "method": "GET",
+    "path": "/api/v1/spool?limit=2&offset=0&sort=id:asc"
+  },
+  {
+    "name": "spool-page-limit-2-offset-2",
+    "method": "GET",
+    "path": "/api/v1/spool?limit=2&offset=2&sort=id:asc"
+  },
+  {
+    "name": "spool-page-offset-without-limit",
+    "method": "GET",
+    "path": "/api/v1/spool?offset=2&sort=id:asc"
+  },
+  {
+    "name": "spool-page-negative-limit",
+    "method": "GET",
+    "path": "/api/v1/spool?limit=-1&offset=2&sort=id:asc"
+  },
+  {
+    "name": "spool-page-bad-limit-422",
+    "method": "GET",
+    "path": "/api/v1/spool?limit=abc"
+  },
+
+  {
+    "name": "spool-delete-ok",
+    "method": "DELETE",
+    "path": "/api/v1/spool/4"
+  },
+  {
+    "name": "spool-delete-get-after-404",
+    "method": "GET",
+    "path": "/api/v1/spool/4"
+  },
+  {
+    "name": "spool-delete-again-404",
+    "method": "DELETE",
+    "path": "/api/v1/spool/4"
+  },
+  {
+    "name": "spool-delete-bad-id-422",
+    "method": "DELETE",
+    "path": "/api/v1/spool/not-an-int"
+  }
+]

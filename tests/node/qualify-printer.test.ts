@@ -98,7 +98,7 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
   // 1. Camera snapshot HTTP server
   const jpegHeader = Buffer.from([255, 216, 1, 2, 255, 217])
   const camServer = createHttpServer((req, res) => {
-    if (req.url === '/webcam/?action=snapshot') {
+    if (req.url === '/webcam/?action=snapshot' || req.url === '/foreign') {
       res.writeHead(200, { 'content-type': 'image/jpeg' })
       res.end(jpegHeader)
       return
@@ -119,6 +119,7 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
   assert.ok(moonAddr && typeof moonAddr !== 'string')
   const moonPort = moonAddr.port
 
+  let hostname = 'sovol-sv08'
   moonServer.on('connection', (socket: Ws.WebSocket) => {
     socket.on('message', (data: Ws.RawData) => {
       const rpc = JSON.parse(data.toString())
@@ -141,9 +142,18 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
             extruder1: { temperature: 24, target: 0 },
           },
         }
+      } else if (rpc.method === 'printer.info') {
+        result = { software_version: 'v0.12.0', hostname }
+      } else if (rpc.method === 'machine.system_info') {
+        result = { system_info: { hostname } }
       } else if (rpc.method === 'server.webcams.list') {
         result = {
           webcams: [
+            {
+              name: 'case',
+              snapshot_url: `http://127.0.0.1:${camPort}/foreign`,
+            },
+            { name: 'broken', snapshot_url: '/missing' },
             {
               name: 'default',
               snapshot_url: '/webcam/?action=snapshot',
@@ -182,7 +192,9 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
     assert.equal(report.host, '127.0.0.1')
     assert.equal(report.port, moonPort)
     assert.equal(report.identity.vendor, 'Klipper')
-    assert.equal(report.identity.firmware, 'Moonraker v0.8.0')
+    assert.equal(report.identity.firmware, 'Klipper v0.12.0; Moonraker v0.8.0')
+    assert.equal(report.identity.model, 'Sovol SV08')
+    assert.equal(report.identity.hostname, 'sovol-sv08')
 
     assert.equal(report.telemetry.observed, true)
     assert.ok(report.telemetry.fields.includes('klippyConnected'))
@@ -190,6 +202,17 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
 
     assert.equal(report.camera.reachable, true)
     assert.equal(report.camera.kind, 'webcam')
+    assert.deepEqual(
+      report.camera.webcams.map((c: { name: string; reachable: boolean }) => [
+        c.name,
+        c.reachable,
+      ]),
+      [
+        ['case', true],
+        ['broken', false],
+        ['default', true],
+      ],
+    )
 
     assert.equal(report.files.listable, true)
     assert.equal(report.files.count, 2)
@@ -197,7 +220,38 @@ test('qualify Moonraker printer against fixture with telemetry, camera and files
 
     assert.equal(report.qualification.status, 'qualified')
     assert.equal(report.catalog.canPromoteToHardwareProven, true)
-    assert.equal(report.catalog.matchedCatalogId, 'klipper-generic-moonraker')
+    assert.equal(report.catalog.matchedCatalogId, 'sovol-sv08')
+    const overridden = await runCli([
+      '--vendor',
+      'moonraker',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(moonPort),
+      '--camera-port',
+      String(camPort),
+      '--model',
+      'Voron 2.4',
+    ])
+    assert.equal(overridden.code, 0, overridden.err)
+    assert.equal(JSON.parse(overridden.out).identity.model, 'Voron 2.4')
+    assert.equal(
+      JSON.parse(overridden.out).catalog.matchedCatalogId,
+      'voron-2-4-kit',
+    )
+    hostname = 'raspberrypi'
+    const generic = await runCli([
+      '--vendor',
+      'moonraker',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(moonPort),
+      '--camera-port',
+      String(camPort),
+    ])
+    assert.equal(generic.code, 0, generic.err)
+    assert.equal(JSON.parse(generic.out).identity.model, 'Moonraker Generic')
   } finally {
     await new Promise<void>((resolve) => moonServer.close(() => resolve()))
     await new Promise<void>((resolve) => camServer.close(() => resolve()))

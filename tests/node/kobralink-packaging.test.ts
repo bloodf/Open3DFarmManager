@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -396,7 +397,7 @@ test('assertExternalDestination rejects repository paths, symlinks, non-director
     /Destination must stay strictly outside Open3DFarmManager/,
   )
 
-  const tempDir = mkdtempSync(join(tmpdir(), 'o3dfm-test-dest-'))
+  const tempDir = mkdtempSync(join(realpathSync(tmpdir()), 'o3dfm-test-dest-'))
   try {
     // Reject symlink destination
     const realTarget = join(tempDir, 'real-dir')
@@ -441,7 +442,9 @@ test('assertExternalDestination rejects repository paths, symlinks, non-director
 })
 
 test('verifyCheckout and cloneOrFetch enforce pin, cleanliness, origin and idempotent refusal', async () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'o3dfm-test-checkout-'))
+  const tempDir = mkdtempSync(
+    join(realpathSync(tmpdir()), 'o3dfm-test-checkout-'),
+  )
   try {
     const { repoDir, commit, lock } = createSyntheticUpstreamRepo(tempDir)
 

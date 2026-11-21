@@ -79,6 +79,43 @@ function authorizedRows(principal: IntegrationPrincipal, farmId?: string) {
   }
 }
 
+export interface IntegrationPrinterSpecs {
+  buildVolumeMm?: { x: number; y: number; z: number }
+  nozzles?: { diameterMm: number }[]
+  spoolSlots?: number
+  multicolor?: boolean
+}
+
+/**
+ * Read-only physical specs from what the Connector reported (`machine` and
+ * `materials`). Unknown members are omitted, never guessed; `undefined` means
+ * nothing is known.
+ */
+export function printerSpecs(
+  state: ReturnType<typeof parsedState>,
+): IntegrationPrinterSpecs | undefined {
+  if (!state.success) return undefined
+  const { machine, materials } = state.data
+  const specs: IntegrationPrinterSpecs = {}
+  if (machine?.bedSizeMm) {
+    const { x, y, z } = machine.bedSizeMm
+    specs.buildVolumeMm = { x, y, z }
+  }
+  if (machine?.nozzleDiametersMm?.length)
+    specs.nozzles = machine.nozzleDiametersMm.map((diameterMm) => ({
+      diameterMm,
+    }))
+  const slots = materials?.length
+    ? new Set(materials.map((material) => material.slot)).size
+    : undefined
+  if (slots !== undefined) specs.spoolSlots = slots
+  const tools = machine?.toolCount ?? machine?.nozzleDiametersMm?.length
+  if ((tools !== undefined && tools > 1) || (slots !== undefined && slots > 1))
+    specs.multicolor = true
+  else if (tools === 1 && slots === 1) specs.multicolor = false
+  return Object.keys(specs).length ? specs : undefined
+}
+
 function toPrinter(row: IntegrationPrinterRow) {
   const parsed = parsedState(row)
   const data = {
@@ -92,6 +129,8 @@ function toPrinter(row: IntegrationPrinterRow) {
     const { vendor, model } = parsed.data.identity ?? {}
     if (vendor !== undefined) data.vendor = vendor
     if (model !== undefined) data.model = model
+    const specs = printerSpecs(parsed)
+    if (specs) data.specs = specs
   }
   return data
 }

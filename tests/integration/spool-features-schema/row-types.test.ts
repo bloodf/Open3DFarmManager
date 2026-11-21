@@ -12,7 +12,7 @@ import type {
   SpoolUsageRecordRow,
 } from '../../../apps/farm/server/storage/spool-features-types.ts'
 
-test('spool features row types cover every migration 0088 table and invariant', () => {
+test('spool features row types cover every migration 0089 table and invariant', () => {
   const farmId = '00000000-0000-4000-8000-000000000001'
   const printerId = '00000000-0000-4000-8000-000000000002'
 

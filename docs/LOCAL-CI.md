@@ -67,6 +67,16 @@ uma página estática em loopback. Sobrescreva a tag com `OPEN3D_CHECK_IMAGE_TAG
 se precisar isolar a execução. Com `OPEN3D_CHECK_IMAGE_SKIP_BUILD=1`, reutiliza
 uma imagem já construída (somente para repetir o smoke).
 
+A imagem de verificação (`infra/check/Dockerfile`) é linux/amd64, digest-pinned,
+Debian 13 (trixie) com git ≥ 2.42, Python 3 e Chrome. Ela corre como o utilizador
+não-root `node` (dono de `/workspace`) para que rejeições por permissão de
+ficheiro sejam as mesmas que no anfitrião; o `.dockerignore` inclui
+`.env.example` (necessário ao guia self-host). Ambiente sensível (quatro suites):
+
+```sh
+node scripts/test-docker-check-env.mjs
+```
+
 Build e gate completo explícitos (equivalente ao que o smoke monta):
 
 ```sh

@@ -9,8 +9,7 @@ import { test } from 'node:test'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const imageTag =
-  process.env.OPEN3D_CHECK_IMAGE_TAG?.trim() ||
-  'open3dfarmmanager/check:node22'
+  process.env.OPEN3D_CHECK_IMAGE_TAG?.trim() || 'open3dfarmmanager/check:node22'
 const inner = process.env.OPEN3D_DOCKER_CHECK_INNER === '1'
 const skipBuild = process.env.OPEN3D_CHECK_IMAGE_SKIP_BUILD === '1'
 
@@ -32,9 +31,8 @@ function run(command, args, options = {}) {
 
 async function assertChromeLoadsLoopbackPage() {
   accessSync('/opt/google/chrome/chrome', constants.X_OK)
-  const { browserOptions, withBrowser } = await import(
-    '../tests/helpers/browser.ts'
-  )
+  const { browserOptions, withBrowser } =
+    await import('../tests/helpers/browser.ts')
   assert.match(process.version, /^v22\./)
   assert.equal(browserOptions().channel, 'chrome')
 

@@ -666,7 +666,7 @@ input:disabled {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   align-items: center;
-  margin-top: var(--space-2);
+  margin-top: var(--space-3);
 }
 .wrap {
   overflow-wrap: anywhere;

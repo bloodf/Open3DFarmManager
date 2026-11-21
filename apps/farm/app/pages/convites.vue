@@ -41,6 +41,10 @@ async function loadFarms() {
   } finally {
     loading.value = false
   }
+  if (loadFailed.value) {
+    await nextTick()
+    errorSummary.value?.focus()
+  }
 }
 onMounted(loadFarms)
 

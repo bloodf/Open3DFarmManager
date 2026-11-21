@@ -128,8 +128,15 @@ onMounted(async () => {
   await start()
 })
 
-watch(farmId, () => {
-  if (!loading.value) void refresh()
+watch(farmId, async () => {
+  if (loading.value) return
+  // The field is disabled while the lists load, which drops keyboard focus.
+  const hadFocus = document.activeElement === farmSelect.value
+  await refresh()
+  if (hadFocus && !loadFailed.value) {
+    await nextTick()
+    farmSelect.value?.focus()
+  }
 })
 
 function openConfirm(target: ConfirmTarget) {

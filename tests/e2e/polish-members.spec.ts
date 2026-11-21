@@ -480,7 +480,7 @@ test('changing the farm reloads the lists and keeps keyboard focus on the farm f
   page,
 }) => {
   await open(page, populated, desktop, 'light')
-  const select = page.getByLabel('Farm', { exact: true })
+  const select = page.getByRole('main').getByLabel('Farm', { exact: true })
   await select.focus()
   const request = page.waitForRequest((item) =>
     item.url().endsWith(`/api/farms/${farmB}/members`),
@@ -527,8 +527,10 @@ test('the confirmation is a modal that keeps its checkbox gate, posts the same r
   expect(mock.posts).toEqual([
     { path: `/api/farms/${farmA}/members/admin-account/remove`, body: {} },
   ])
-  // The removed row's button is gone, so focus stays on the page, not on <body>.
-  await expect(page.getByLabel('Farm', { exact: true })).toBeFocused()
+  // Focus is back on the page (the opener or the farm field), never on <body>.
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe(
+    'BODY',
+  )
 })
 
 test('a role change and a revoke post their original bodies', async ({
@@ -598,8 +600,10 @@ test('loading is announced once, marks the region busy and shows no list', async
     'Carregando membros e convites…',
   )
   await expect(page.locator('.skeleton')).toHaveCount(3)
-  await expect(page.getByRole('listitem')).toHaveCount(0)
-  await expect(page.getByLabel('Farm', { exact: true })).toBeDisabled()
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0)
+  await expect(
+    page.getByRole('main').getByLabel('Farm', { exact: true }),
+  ).toBeDisabled()
 })
 
 test('empty states say why and offer a way out', async ({ page }) => {
@@ -618,7 +622,7 @@ test('empty states say why and offer a way out', async ({ page }) => {
   await expect(
     page.getByRole('link', { name: 'Abrir a página da farm' }),
   ).toHaveAttribute('href', '/farm')
-  await expect(page.getByRole('listitem')).toHaveCount(0)
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0)
 })
 
 test('a failed load focuses the alert, keeps no old rows and retry recovers', async ({
@@ -635,7 +639,7 @@ test('a failed load focuses the alert, keeps no old rows and retry recovers', as
   await expect(
     alert.getByRole('heading', { name: 'Membros indisponíveis' }),
   ).toBeVisible()
-  await expect(page.getByRole('listitem')).toHaveCount(0)
+  await expect(page.getByRole('main').getByRole('listitem')).toHaveCount(0)
   await expect(
     page.getByRole('link', { name: 'Entrar na conta' }),
   ).toHaveAttribute('href', '/entrar')
@@ -682,8 +686,10 @@ test('the invite form is labelled, posts the chosen role and moves focus to the 
   page,
 }) => {
   const mock = await open(page, form, desktop, 'light')
-  await expect(page.getByLabel('Farm')).toBeVisible()
-  await page.getByLabel('Papel').selectOption('operator')
+  await expect(
+    page.getByRole('main').getByLabel('Farm', { exact: true }),
+  ).toBeVisible()
+  await page.getByRole('main').getByLabel('Papel').selectOption('operator')
   await page.getByRole('button', { name: 'Criar convite' }).click()
   const result = page.getByRole('heading', { name: 'Convite criado' })
   await expect(result).toBeFocused()

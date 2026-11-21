@@ -139,12 +139,12 @@ jobs:
             try {
               run('docker', ['pull', '--platform', 'linux/amd64', destination])
             } catch (error) {
-              // Only a registry's explicit missing-image response permits a push.
-              const escaped = destination.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-              const missingManifest = /^Error response from daemon: (?:manifest for \S+ not found: )?manifest unknown\b/m
-              const missingReference = new RegExp(`^Error response from daemon: failed to resolve reference "${escaped}": ${escaped}: not found$`, 'm')
-              const stderr = error.stderr ?? ''
-              if (!missingManifest.test(stderr) && !missingReference.test(stderr)) {
+              // Only an exact missing-image response permits a push.
+              if (![
+                'Error response from daemon: manifest unknown',
+                `Error response from daemon: manifest for ${destination} not found: manifest unknown: manifest unknown`,
+                `Error response from daemon: failed to resolve reference "${destination}": ${destination}: not found`,
+              ].includes((error.stderr ?? '').trim())) {
                 throw error
               }
               return { source, destination }

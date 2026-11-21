@@ -542,6 +542,7 @@ onBeforeUnmount(() => controller?.abort())
   gap: var(--space-4);
 }
 .filter-grid {
+  align-items: start;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: var(--space-3) var(--space-4);
@@ -641,6 +642,30 @@ select {
   border-radius: var(--radius-sm);
 }
 :is(input, select):focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* Child forms (upload, storage) share the page's control look. */
+.library :deep(.stale strong) {
+  display: block;
+}
+.library :deep(select),
+.library :deep(textarea),
+.library :deep(input:not([type='file'], [type='checkbox'], [type='radio'])) {
+  min-height: 2.75rem;
+  max-inline-size: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.library :deep(#library-storage ~ * select),
+.library :deep(section[aria-labelledby='library-storage'] select) {
+  margin-inline: var(--space-2);
+}
+.library :deep(:is(select, textarea, input):focus-visible) {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }

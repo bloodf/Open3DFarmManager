@@ -821,6 +821,9 @@ progress {
   margin: 0;
   flex: 1 1 14rem;
 }
+.files-page :deep(.stale strong) {
+  display: block;
+}
 /* Same bordered surface as the panels. */
 .files-page :deep(.ui-card) {
   border: 1px solid var(--color-border);

@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
@@ -7,8 +8,7 @@ import { expect, test, type Page } from '@playwright/test'
 // service or external network is involved: every request that is not served by
 // the page itself is either fulfilled here or aborted.
 //
-// Screenshots are an opt-in side effect: set POLISH_FARM_SHOTS_DIR to a folder
-// outside the repository and run with `--grep screenshots`.
+// Screenshots are saved outside the repository for evidence.
 const farm = '00000000-0000-4000-8000-0000000000f1'
 const agent = '00000000-0000-4000-8000-0000000000a1'
 const firstAssignment = '00000000-0000-4000-8000-0000000000b1'
@@ -329,18 +329,18 @@ test('makes no request outside the loopback host', async ({ page }) => {
 })
 
 test('screenshots of real screen states', async ({ page }, testInfo) => {
-  const dir = process.env.POLISH_FARM_SHOTS_DIR
-  test.skip(!dir, 'set POLISH_FARM_SHOTS_DIR to capture evidence screenshots')
-  await mkdir(dir!, { recursive: true })
+  const dir =
+    process.env.POLISH_FARM_SHOTS_DIR ??
+    (await mkdtemp(join(tmpdir(), 'openfarm-shots-')))
+  await mkdir(dir, { recursive: true })
   testInfo.setTimeout(180_000)
   for (const scenario of scenarios)
     for (const viewport of viewports)
       for (const theme of themes) {
         await page.unrouteAll({ behavior: 'ignoreErrors' })
         await open(page, scenario, viewport, theme)
-        await page.screenshot({
-          path: join(dir!, `${scenario}-${viewport.name}-${theme}.png`),
-          fullPage: true,
-        })
+        const path = join(dir, `${scenario}-${viewport.name}-${theme}.png`)
+        await page.screenshot({ path, fullPage: true })
+        expect((await stat(path)).size).toBeGreaterThan(0)
       }
 })

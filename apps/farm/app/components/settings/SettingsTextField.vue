@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import Field from '../ui/Field.vue'
+import { computed, useId } from 'vue'
 
-// A labelled text or password input built on the shared Field: the label,
-// hint and error are wired to the control by id. Native attributes
+// A labelled text or password input: the label, hint and error are wired to
+// the control by id. `id` is optional and stable when given (page contracts
+// and anchors target it); otherwise one is generated. Native attributes
 // (autocomplete, required, minlength, disabled, ...) go to the input.
 defineOptions({ inheritAttrs: false })
-withDefaults(
+const props = withDefaults(
   defineProps<{
+    id?: string
     label: string
     modelValue: string
     hint?: string
@@ -14,6 +16,17 @@ withDefaults(
     type?: 'text' | 'password'
   }>(),
   { type: 'text' },
+)
+const generated = useId()
+const controlId = computed(() => props.id ?? generated)
+const describedBy = computed(
+  () =>
+    [
+      props.hint && `${controlId.value}-hint`,
+      props.error && `${controlId.value}-error`,
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined,
 )
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 function update(event: Event) {
@@ -23,34 +36,42 @@ function update(event: Event) {
 </script>
 
 <template>
-  <Field
-    v-slot="{ control }"
-    class="settings-field"
-    :label="label"
-    :hint="hint"
-    :error="error"
-  >
+  <div class="settings-field">
+    <label :for="controlId">{{ label }}</label>
     <input
-      v-bind="{ ...control, ...$attrs }"
+      v-bind="$attrs"
+      :id="controlId"
       class="settings-input"
       :type="type"
       :value="modelValue"
+      :aria-describedby="describedBy"
+      :aria-invalid="error ? true : undefined"
       @input="update"
     />
-  </Field>
+    <span v-if="hint" :id="`${controlId}-hint`" class="hint">{{ hint }}</span>
+    <span v-if="error" :id="`${controlId}-error`" class="error">{{
+      error
+    }}</span>
+  </div>
 </template>
 
 <style scoped>
 .settings-field {
+  display: grid;
+  gap: var(--space-1);
   max-inline-size: 28rem;
 }
-.settings-field :deep(label) {
+.settings-field label {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
-.settings-field :deep(span:not(.error)) {
+.settings-field .hint {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
+}
+.settings-field .error {
+  font-size: var(--font-size-sm);
+  color: var(--printer-error);
 }
 .settings-input {
   inline-size: 100%;

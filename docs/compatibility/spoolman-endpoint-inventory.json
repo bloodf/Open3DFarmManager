@@ -34,16 +34,12 @@
       "path": "/api/v1/",
       "operationId": null,
       "summary": "WebSocket on /api/v1/ (from router.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "GET /api/v1/article-number",
@@ -51,16 +47,12 @@
       "path": "/api/v1/article-number",
       "operationId": "Find_article_numbers_article_number_get",
       "summary": "Find Article Numbers",
-      "tags": [
-        "other"
-      ],
+      "tags": ["other"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "POST /api/v1/backup",
@@ -73,10 +65,7 @@
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "500"
-      ]
+      "responses": ["200", "500"]
     },
     {
       "id": "GET /api/v1/export/filaments",
@@ -84,9 +73,7 @@
       "path": "/api/v1/export/filaments",
       "operationId": "Export_filaments_export_filaments_get",
       "summary": "Export Filaments",
-      "tags": [
-        "export"
-      ],
+      "tags": ["export"],
       "transport": "http",
       "query_parameters": [
         {
@@ -99,10 +86,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "GET /api/v1/export/spools",
@@ -110,9 +94,7 @@
       "path": "/api/v1/export/spools",
       "operationId": "Export_spools_export_spools_get",
       "summary": "Export Spools",
-      "tags": [
-        "export"
-      ],
+      "tags": ["export"],
       "transport": "http",
       "query_parameters": [
         {
@@ -135,10 +117,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "GET /api/v1/export/vendors",
@@ -146,9 +125,7 @@
       "path": "/api/v1/export/vendors",
       "operationId": "Export_vendors_export_vendors_get",
       "summary": "Export Vendors",
-      "tags": [
-        "export"
-      ],
+      "tags": ["export"],
       "transport": "http",
       "query_parameters": [
         {
@@ -161,10 +138,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "GET /api/v1/external/filament",
@@ -172,16 +146,12 @@
       "path": "/api/v1/external/filament",
       "operationId": "Get_all_external_filaments_external_filament_get",
       "summary": "Get All External Filaments",
-      "tags": [
-        "external"
-      ],
+      "tags": ["external"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/external/filament/search",
@@ -189,9 +159,7 @@
       "path": "/api/v1/external/filament/search",
       "operationId": "Search_external_filaments_external_filament_search_get",
       "summary": "Search External Filaments",
-      "tags": [
-        "external"
-      ],
+      "tags": ["external"],
       "transport": "http",
       "query_parameters": [
         {
@@ -199,9 +167,7 @@
           "required": true,
           "schema": {
             "description": "Search query, matched word-by-word against manufacturer, name and material.",
-            "examples": [
-              "polymaker pla"
-            ],
+            "examples": ["polymaker pla"],
             "title": "Query",
             "type": "string"
           }
@@ -232,10 +198,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "GET /api/v1/external/material",
@@ -243,16 +206,12 @@
       "path": "/api/v1/external/material",
       "operationId": "Get_all_external_materials_external_material_get",
       "summary": "Get All External Materials",
-      "tags": [
-        "external"
-      ],
+      "tags": ["external"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/field/{entity_type}",
@@ -260,9 +219,7 @@
       "path": "/api/v1/field/{entity_type}",
       "operationId": "Get_extra_fields_field__entity_type__get",
       "summary": "Get Extra Fields",
-      "tags": [
-        "field"
-      ],
+      "tags": ["field"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -276,10 +233,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "DELETE /api/v1/field/{entity_type}/{key}",
@@ -287,9 +241,7 @@
       "path": "/api/v1/field/{entity_type}/{key}",
       "operationId": "Delete_extra_field_field__entity_type___key__delete",
       "summary": "Delete Extra Field",
-      "tags": [
-        "field"
-      ],
+      "tags": ["field"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -314,11 +266,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "404", "422"]
     },
     {
       "id": "POST /api/v1/field/{entity_type}/{key}",
@@ -326,9 +274,7 @@
       "path": "/api/v1/field/{entity_type}/{key}",
       "operationId": "Add_or_update_extra_field_field__entity_type___key__post",
       "summary": "Add Or Update Extra Field",
-      "tags": [
-        "field"
-      ],
+      "tags": ["field"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -353,16 +299,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -371,9 +311,7 @@
       "path": "/api/v1/field/{entity_type}/{key}/values",
       "operationId": "Get_extra_field_values_field__entity_type___key__values_get",
       "summary": "Get Extra Field Values",
-      "tags": [
-        "field"
-      ],
+      "tags": ["field"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -398,11 +336,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "404", "422"]
     },
     {
       "id": "GET /api/v1/filament",
@@ -410,9 +344,7 @@
       "path": "/api/v1/filament",
       "operationId": "Find_filaments_filament_get",
       "summary": "Find Filaments",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [
         {
@@ -480,10 +412,7 @@
               }
             ],
             "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Specify -1 to match filaments with no vendor.",
-            "examples": [
-              "1",
-              "1,2"
-            ],
+            "examples": ["1", "1,2"],
             "title": "Vendor ID"
           }
         },
@@ -557,9 +486,7 @@
           "schema": {
             "default": 20,
             "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-            "examples": [
-              20
-            ],
+            "examples": [20],
             "title": "Color Similarity Threshold",
             "type": "number"
           }
@@ -577,9 +504,7 @@
               }
             ],
             "description": "Find filaments imported by the given external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
-            "examples": [
-              "polymaker_pla_polysonicblack_1000_175"
-            ],
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
             "title": "External Id"
           }
         },
@@ -596,10 +521,7 @@
               }
             ],
             "description": "Match the filament that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter. Only a tag linked to the filament itself matches, not a tag on one of its spools; look those up on the spool endpoint. Returns either one filament or none. Returns 400 if the UID is not hexadecimal.",
-            "examples": [
-              "04A2B3C4D5E6F7",
-              "04:a2:b3:c4:d5:e6:f7"
-            ],
+            "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
             "title": "Tag UID"
           }
         },
@@ -616,9 +538,7 @@
               }
             ],
             "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-            "examples": [
-              "vendor.name:asc,spool_weight:desc"
-            ],
+            "examples": ["vendor.name:asc,spool_weight:desc"],
             "title": "Sort"
           }
         },
@@ -651,11 +571,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "422"
-      ]
+      "responses": ["200", "299", "422"]
     },
     {
       "id": "POST /api/v1/filament",
@@ -663,23 +579,15 @@
       "path": "/api/v1/filament",
       "operationId": "Add_filament_filament_post",
       "summary": "Add Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -688,9 +596,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "operationId": "Delete_filament_filament__filament_id__delete",
       "summary": "Delete Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -704,12 +610,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "403",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "403", "404", "422"]
     },
     {
       "id": "GET /api/v1/filament/{filament_id}",
@@ -717,9 +618,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "operationId": "Get_filament_filament__filament_id__get",
       "summary": "Get Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -733,12 +632,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "299", "404", "422"]
     },
     {
       "id": "PATCH /api/v1/filament/{filament_id}",
@@ -746,9 +640,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "operationId": "Update_filament_filament__filament_id__patch",
       "summary": "Update Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -762,17 +654,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "404",
-        "422"
-      ],
+      "responses": ["200", "400", "404", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -781,16 +666,12 @@
       "path": "/api/v1/filament/{filament_id}",
       "operationId": null,
       "summary": "WebSocket on /api/v1/filament/{filament_id} (from filament.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "POST /api/v1/filament/{filament_id}/tag",
@@ -798,9 +679,7 @@
       "path": "/api/v1/filament/{filament_id}/tag",
       "operationId": "Link_a_tag_to_a_filament_filament__filament_id__tag_post",
       "summary": "Link A Tag To A Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -814,18 +693,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "201",
-        "400",
-        "404",
-        "409",
-        "422"
-      ],
+      "responses": ["201", "400", "404", "409", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -834,9 +705,7 @@
       "path": "/api/v1/filament/{filament_id}/tag/{uid}",
       "operationId": "Unlink_a_tag_from_a_filament_filament__filament_id__tag__uid__delete",
       "summary": "Unlink A Tag From A Filament",
-      "tags": [
-        "filament"
-      ],
+      "tags": ["filament"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -853,21 +722,14 @@
           "required": true,
           "schema": {
             "description": "The tag's UID, in any shape. Normalized before matching.",
-            "examples": [
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04A2B3C4D5E6F7"],
             "title": "Tag UID",
             "type": "string"
           }
         }
       ],
       "response_headers": [],
-      "responses": [
-        "204",
-        "400",
-        "404",
-        "422"
-      ]
+      "responses": ["204", "400", "404", "422"]
     },
     {
       "id": "GET /api/v1/health",
@@ -880,9 +742,7 @@
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/info",
@@ -895,9 +755,7 @@
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/location",
@@ -905,16 +763,12 @@
       "path": "/api/v1/location",
       "operationId": "Find_locations_location_get",
       "summary": "Find Locations",
-      "tags": [
-        "other"
-      ],
+      "tags": ["other"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "PATCH /api/v1/location/{location}",
@@ -922,9 +776,7 @@
       "path": "/api/v1/location/{location}",
       "operationId": "Rename_location_location__location__patch",
       "summary": "Rename Location",
-      "tags": [
-        "other"
-      ],
+      "tags": ["other"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -938,15 +790,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ],
+      "responses": ["200", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -955,16 +802,12 @@
       "path": "/api/v1/lot-number",
       "operationId": "Find_lot_numbers_lot_number_get",
       "summary": "Find Lot Numbers",
-      "tags": [
-        "other"
-      ],
+      "tags": ["other"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/material",
@@ -972,16 +815,12 @@
       "path": "/api/v1/material",
       "operationId": "Find_materials_material_get",
       "summary": "Find Materials",
-      "tags": [
-        "other"
-      ],
+      "tags": ["other"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/search",
@@ -989,9 +828,7 @@
       "path": "/api/v1/search",
       "operationId": "Search_search_get",
       "summary": "Search",
-      "tags": [
-        "search"
-      ],
+      "tags": ["search"],
       "transport": "http",
       "query_parameters": [
         {
@@ -999,9 +836,7 @@
           "required": true,
           "schema": {
             "description": "The search query.",
-            "examples": [
-              "red"
-            ],
+            "examples": ["red"],
             "minLength": 1,
             "title": "Query",
             "type": "string"
@@ -1013,9 +848,7 @@
           "schema": {
             "default": 20,
             "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-            "examples": [
-              20
-            ],
+            "examples": [20],
             "maximum": 100,
             "minimum": 0,
             "title": "Color Similarity Threshold",
@@ -1059,10 +892,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "422"
-      ]
+      "responses": ["200", "422"]
     },
     {
       "id": "GET /api/v1/setting/",
@@ -1070,16 +900,12 @@
       "path": "/api/v1/setting/",
       "operationId": "Get_all_settings_setting__get",
       "summary": "Get All Settings",
-      "tags": [
-        "setting"
-      ],
+      "tags": ["setting"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "GET /api/v1/setting/{key}",
@@ -1087,9 +913,7 @@
       "path": "/api/v1/setting/{key}",
       "operationId": "Get_setting_setting__key__get",
       "summary": "Get Setting",
-      "tags": [
-        "setting"
-      ],
+      "tags": ["setting"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -1103,12 +927,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "299", "404", "422"]
     },
     {
       "id": "POST /api/v1/setting/{key}",
@@ -1116,9 +935,7 @@
       "path": "/api/v1/setting/{key}",
       "operationId": "Set_setting_setting__key__post",
       "summary": "Set Setting",
-      "tags": [
-        "setting"
-      ],
+      "tags": ["setting"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -1132,17 +949,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "404",
-        "415",
-        "422"
-      ],
+      "responses": ["200", "404", "415", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -1151,16 +961,12 @@
       "path": "/api/v1/setting/{key}",
       "operationId": null,
       "summary": "WebSocket on /api/v1/setting/{key} (from setting.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "GET /api/v1/spool",
@@ -1168,9 +974,7 @@
       "path": "/api/v1/spool",
       "operationId": "Find_spool_spool_get",
       "summary": "Find Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [
         {
@@ -1290,10 +1094,7 @@
               }
             ],
             "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
-            "examples": [
-              "1",
-              "1,2"
-            ],
+            "examples": ["1", "1,2"],
             "title": "Filament ID"
           }
         },
@@ -1326,10 +1127,7 @@
               }
             ],
             "description": "Match spools by their filament's multi-color direction, e.g. coaxial or longitudinal. Separate multiple terms with a comma. Specify an empty string to match single-color filaments. Surround a term with quotes to search for the exact term.",
-            "examples": [
-              "\"coaxial\"",
-              "\"longitudinal\""
-            ],
+            "examples": ["\"coaxial\"", "\"longitudinal\""],
             "title": "Filament Multi-Color Direction"
           }
         },
@@ -1363,10 +1161,7 @@
               }
             ],
             "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
-            "examples": [
-              "1",
-              "1,2"
-            ],
+            "examples": ["1", "1,2"],
             "title": "Vendor ID"
           }
         },
@@ -1415,10 +1210,7 @@
               }
             ],
             "description": "Match the spool that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter, so 04:a2:b3:c4, 04-A2-B3-C4 and 04a2b3c4 all find the same spool. A tag is linked to at most one spool, so this returns either one spool or none. Returns 400 if the UID is not hexadecimal.",
-            "examples": [
-              "04A2B3C4D5E6F7",
-              "04:a2:b3:c4:d5:e6:f7"
-            ],
+            "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
             "title": "Tag UID"
           }
         },
@@ -1546,11 +1338,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "422"
-      ]
+      "responses": ["200", "299", "422"]
     },
     {
       "id": "POST /api/v1/spool",
@@ -1558,23 +1346,15 @@
       "path": "/api/v1/spool",
       "operationId": "Add_spool_spool_post",
       "summary": "Add Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -1583,9 +1363,7 @@
       "path": "/api/v1/spool/field/{field}",
       "operationId": "Rename_a_spool_field_value_spool_field__field__patch",
       "summary": "Rename A Spool Field Value",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -1594,26 +1372,17 @@
           "required": true,
           "schema": {
             "description": "The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.",
-            "examples": [
-              "location",
-              "extra.shelf"
-            ],
+            "examples": ["location", "extra.shelf"],
             "title": "Field",
             "type": "string"
           }
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -1622,9 +1391,7 @@
       "path": "/api/v1/spool/group",
       "operationId": "Find_spool_groups_spool_group_get",
       "summary": "Find Spool Groups",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [
         {
@@ -1632,10 +1399,7 @@
           "required": true,
           "schema": {
             "description": "The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).",
-            "examples": [
-              "location",
-              "extra.shelf"
-            ],
+            "examples": ["location", "extra.shelf"],
             "title": "Group By",
             "type": "string"
           }
@@ -1702,10 +1466,7 @@
               }
             ],
             "description": "Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.",
-            "examples": [
-              "\"coaxial\"",
-              "\"longitudinal\""
-            ],
+            "examples": ["\"coaxial\"", "\"longitudinal\""],
             "title": "Filament Multi-Color Direction"
           }
         },
@@ -1883,9 +1644,7 @@
               }
             ],
             "description": "Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.",
-            "examples": [
-              "group.last_used:desc"
-            ],
+            "examples": ["group.last_used:desc"],
             "title": "Sort"
           }
         },
@@ -1918,11 +1677,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ]
+      "responses": ["200", "400", "422"]
     },
     {
       "id": "DELETE /api/v1/spool/{spool_id}",
@@ -1930,9 +1685,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "operationId": "Delete_spool_spool__spool_id__delete",
       "summary": "Delete Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -1946,11 +1699,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "404", "422"]
     },
     {
       "id": "GET /api/v1/spool/{spool_id}",
@@ -1958,9 +1707,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "operationId": "Get_spool_spool__spool_id__get",
       "summary": "Get Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -1974,12 +1721,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "299", "404", "422"]
     },
     {
       "id": "PATCH /api/v1/spool/{spool_id}",
@@ -1987,9 +1729,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "operationId": "Update_spool_spool__spool_id__patch",
       "summary": "Update Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2003,17 +1743,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "404",
-        "422"
-      ],
+      "responses": ["200", "400", "404", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2022,16 +1755,12 @@
       "path": "/api/v1/spool/{spool_id}",
       "operationId": null,
       "summary": "WebSocket on /api/v1/spool/{spool_id} (from spool.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "PUT /api/v1/spool/{spool_id}/measure",
@@ -2039,9 +1768,7 @@
       "path": "/api/v1/spool/{spool_id}/measure",
       "operationId": "Use_spool_filament_based_on_the_current_weight_measurement_spool__spool_id__measure_put",
       "summary": "Use Spool Filament Based On The Current Weight Measurement",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2055,17 +1782,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "404",
-        "422"
-      ],
+      "responses": ["200", "400", "404", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2074,9 +1794,7 @@
       "path": "/api/v1/spool/{spool_id}/tag",
       "operationId": "Link_a_tag_to_a_spool_spool__spool_id__tag_post",
       "summary": "Link A Tag To A Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2090,18 +1808,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "201",
-        "400",
-        "404",
-        "409",
-        "422"
-      ],
+      "responses": ["201", "400", "404", "409", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2110,9 +1820,7 @@
       "path": "/api/v1/spool/{spool_id}/tag/{uid}",
       "operationId": "Unlink_a_tag_from_a_spool_spool__spool_id__tag__uid__delete",
       "summary": "Unlink A Tag From A Spool",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2129,21 +1837,14 @@
           "required": true,
           "schema": {
             "description": "The tag's UID, in any shape. Normalized before matching.",
-            "examples": [
-              "04A2B3C4D5E6F7"
-            ],
+            "examples": ["04A2B3C4D5E6F7"],
             "title": "Tag UID",
             "type": "string"
           }
         }
       ],
       "response_headers": [],
-      "responses": [
-        "204",
-        "400",
-        "404",
-        "422"
-      ]
+      "responses": ["204", "400", "404", "422"]
     },
     {
       "id": "PUT /api/v1/spool/{spool_id}/use",
@@ -2151,9 +1852,7 @@
       "path": "/api/v1/spool/{spool_id}/use",
       "operationId": "Use_spool_filament_spool__spool_id__use_put",
       "summary": "Use Spool Filament",
-      "tags": [
-        "spool"
-      ],
+      "tags": ["spool"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2167,17 +1866,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "404",
-        "422"
-      ],
+      "responses": ["200", "400", "404", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2186,16 +1878,12 @@
       "path": "/api/v1/tag/reader",
       "operationId": "List_recently_seen_tag_readers_tag_reader_get",
       "summary": "List Recently Seen Tag Readers",
-      "tags": [
-        "tag"
-      ],
+      "tags": ["tag"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200"
-      ]
+      "responses": ["200"]
     },
     {
       "id": "POST /api/v1/tag/scan",
@@ -2203,24 +1891,15 @@
       "path": "/api/v1/tag/scan",
       "operationId": "Report_a_tag_scan_tag_scan_post",
       "summary": "Report A Tag Scan",
-      "tags": [
-        "tag"
-      ],
+      "tags": ["tag"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "299", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2229,16 +1908,12 @@
       "path": "/api/v1/tag/scan",
       "operationId": null,
       "summary": "WebSocket on /api/v1/tag/scan (from tag.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "WS /api/v1/tag/scan/{reader_id}",
@@ -2246,16 +1921,12 @@
       "path": "/api/v1/tag/scan/{reader_id}",
       "operationId": null,
       "summary": "WebSocket on /api/v1/tag/scan/{reader_id} (from tag.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     },
     {
       "id": "GET /api/v1/vendor",
@@ -2263,9 +1934,7 @@
       "path": "/api/v1/vendor",
       "operationId": "Find_vendor_vendor_get",
       "summary": "Find Vendor",
-      "tags": [
-        "vendor"
-      ],
+      "tags": ["vendor"],
       "transport": "http",
       "query_parameters": [
         {
@@ -2313,9 +1982,7 @@
               }
             ],
             "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-            "examples": [
-              "name:asc,id:desc"
-            ],
+            "examples": ["name:asc,id:desc"],
             "title": "Sort"
           }
         },
@@ -2348,11 +2015,7 @@
       ],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "422"
-      ]
+      "responses": ["200", "299", "422"]
     },
     {
       "id": "POST /api/v1/vendor",
@@ -2360,23 +2023,15 @@
       "path": "/api/v1/vendor",
       "operationId": "Add_vendor_vendor_post",
       "summary": "Add Vendor",
-      "tags": [
-        "vendor"
-      ],
+      "tags": ["vendor"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "422"
-      ],
+      "responses": ["200", "400", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2385,9 +2040,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "operationId": "Delete_vendor_vendor__vendor_id__delete",
       "summary": "Delete Vendor",
-      "tags": [
-        "vendor"
-      ],
+      "tags": ["vendor"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2401,11 +2054,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "404", "422"]
     },
     {
       "id": "GET /api/v1/vendor/{vendor_id}",
@@ -2413,9 +2062,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "operationId": "Get_vendor_vendor__vendor_id__get",
       "summary": "Get Vendor",
-      "tags": [
-        "vendor"
-      ],
+      "tags": ["vendor"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2429,12 +2076,7 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "299",
-        "404",
-        "422"
-      ]
+      "responses": ["200", "299", "404", "422"]
     },
     {
       "id": "PATCH /api/v1/vendor/{vendor_id}",
@@ -2442,9 +2084,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "operationId": "Update_vendor_vendor__vendor_id__patch",
       "summary": "Update Vendor",
-      "tags": [
-        "vendor"
-      ],
+      "tags": ["vendor"],
       "transport": "http",
       "query_parameters": [],
       "path_parameters": [
@@ -2458,17 +2098,10 @@
         }
       ],
       "response_headers": [],
-      "responses": [
-        "200",
-        "400",
-        "404",
-        "422"
-      ],
+      "responses": ["200", "400", "404", "422"],
       "request_body": {
         "required": true,
-        "content_types": [
-          "application/json"
-        ]
+        "content_types": ["application/json"]
       }
     },
     {
@@ -2477,29 +2110,20 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "operationId": null,
       "summary": "WebSocket on /api/v1/vendor/{vendor_id} (from vendor.py)",
-      "tags": [
-        "websocket"
-      ],
+      "tags": ["websocket"],
       "transport": "websocket",
       "query_parameters": [],
       "path_parameters": [],
       "response_headers": [],
-      "responses": [
-        "101"
-      ]
+      "responses": ["101"]
     }
   ],
   "schemas": {
     "BackupResponse": {
       "type": "object",
       "title": "BackupResponse",
-      "required": [
-        "path"
-      ],
-      "properties": [
-        "created",
-        "path"
-      ],
+      "required": ["path"],
+      "properties": ["created", "path"],
       "enum": null
     },
     "EntityType": {
@@ -2507,33 +2131,21 @@
       "title": "EntityType",
       "required": [],
       "properties": [],
-      "enum": [
-        "vendor",
-        "filament",
-        "spool"
-      ]
+      "enum": ["vendor", "filament", "spool"]
     },
     "EventType": {
       "type": "string",
       "title": "EventType",
       "required": [],
       "properties": [],
-      "enum": [
-        "added",
-        "updated",
-        "deleted",
-        "scanned"
-      ]
+      "enum": ["added", "updated", "deleted", "scanned"]
     },
     "ExportFormat": {
       "type": "string",
       "title": "ExportFormat",
       "required": [],
       "properties": [],
-      "enum": [
-        "csv",
-        "json"
-      ]
+      "enum": ["csv", "json"]
     },
     "ExternalFilament": {
       "type": "object",
@@ -2572,27 +2184,14 @@
     "ExternalMaterial": {
       "type": "object",
       "title": "ExternalMaterial",
-      "required": [
-        "material",
-        "density"
-      ],
-      "properties": [
-        "bed_temp",
-        "density",
-        "extruder_temp",
-        "material"
-      ],
+      "required": ["material", "density"],
+      "properties": ["bed_temp", "density", "extruder_temp", "material"],
       "enum": null
     },
     "ExtraField": {
       "type": "object",
       "title": "ExtraField",
-      "required": [
-        "name",
-        "field_type",
-        "key",
-        "entity_type"
-      ],
+      "required": ["name", "field_type", "key", "entity_type"],
       "properties": [
         "choices",
         "default_value",
@@ -2609,10 +2208,7 @@
     "ExtraFieldParameters": {
       "type": "object",
       "title": "ExtraFieldParameters",
-      "required": [
-        "name",
-        "field_type"
-      ],
+      "required": ["name", "field_type"],
       "properties": [
         "choices",
         "default_value",
@@ -2643,13 +2239,7 @@
     "Filament": {
       "type": "object",
       "title": "Filament",
-      "required": [
-        "id",
-        "registered",
-        "density",
-        "diameter",
-        "extra"
-      ],
+      "required": ["id", "registered", "density", "diameter", "extra"],
       "properties": [
         "article_number",
         "color_hex",
@@ -2677,27 +2267,14 @@
     "FilamentEvent": {
       "type": "object",
       "title": "FilamentEvent",
-      "required": [
-        "type",
-        "resource",
-        "date",
-        "payload"
-      ],
-      "properties": [
-        "date",
-        "payload",
-        "resource",
-        "type"
-      ],
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
       "enum": null
     },
     "FilamentParameters": {
       "type": "object",
       "title": "FilamentParameters",
-      "required": [
-        "density",
-        "diameter"
-      ],
+      "required": ["density", "diameter"],
       "properties": [
         "article_number",
         "color_hex",
@@ -2749,29 +2326,20 @@
       "title": "Finish",
       "required": [],
       "properties": [],
-      "enum": [
-        "matte",
-        "glossy"
-      ]
+      "enum": ["matte", "glossy"]
     },
     "HTTPValidationError": {
       "type": "object",
       "title": "HTTPValidationError",
       "required": [],
-      "properties": [
-        "detail"
-      ],
+      "properties": ["detail"],
       "enum": null
     },
     "HealthCheck": {
       "type": "object",
       "title": "HealthCheck",
-      "required": [
-        "status"
-      ],
-      "properties": [
-        "status"
-      ],
+      "required": ["status"],
+      "properties": ["status"],
       "enum": null
     },
     "Info": {
@@ -2806,12 +2374,8 @@
     "Message": {
       "type": "object",
       "title": "Message",
-      "required": [
-        "message"
-      ],
-      "properties": [
-        "message"
-      ],
+      "required": ["message"],
+      "properties": ["message"],
       "enum": null
     },
     "MultiColorDirection-Input": {
@@ -2819,54 +2383,34 @@
       "title": "MultiColorDirection",
       "required": [],
       "properties": [],
-      "enum": [
-        "coaxial",
-        "longitudinal"
-      ]
+      "enum": ["coaxial", "longitudinal"]
     },
     "Pattern": {
       "type": "string",
       "title": "Pattern",
       "required": [],
       "properties": [],
-      "enum": [
-        "marble",
-        "sparkle"
-      ]
+      "enum": ["marble", "sparkle"]
     },
     "RenameFieldValueParameters": {
       "type": "object",
       "title": "RenameFieldValueParameters",
-      "required": [
-        "value",
-        "new_value"
-      ],
-      "properties": [
-        "new_value",
-        "value"
-      ],
+      "required": ["value", "new_value"],
+      "properties": ["new_value", "value"],
       "enum": null
     },
     "RenameFieldValueResult": {
       "type": "object",
       "title": "RenameFieldValueResult",
-      "required": [
-        "spools_updated"
-      ],
-      "properties": [
-        "spools_updated"
-      ],
+      "required": ["spools_updated"],
+      "properties": ["spools_updated"],
       "enum": null
     },
     "RenameLocationBody": {
       "type": "object",
       "title": "RenameLocationBody",
-      "required": [
-        "name"
-      ],
-      "properties": [
-        "name"
-      ],
+      "required": ["name"],
+      "properties": ["name"],
       "enum": null
     },
     "RootModel_str_": {
@@ -2879,119 +2423,57 @@
     "SearchResultFilament": {
       "type": "object",
       "title": "SearchResultFilament",
-      "required": [
-        "filament",
-        "match_field"
-      ],
-      "properties": [
-        "filament",
-        "match_field",
-        "spool_count",
-        "spools"
-      ],
+      "required": ["filament", "match_field"],
+      "properties": ["filament", "match_field", "spool_count", "spools"],
       "enum": null
     },
     "SearchResultFilamentSpool": {
       "type": "object",
       "title": "SearchResultFilamentSpool",
-      "required": [
-        "id",
-        "archived"
-      ],
-      "properties": [
-        "archived",
-        "id",
-        "location",
-        "remaining_weight"
-      ],
+      "required": ["id", "archived"],
+      "properties": ["archived", "id", "location", "remaining_weight"],
       "enum": null
     },
     "SearchResultSpool": {
       "type": "object",
       "title": "SearchResultSpool",
-      "required": [
-        "spool",
-        "match_field"
-      ],
-      "properties": [
-        "match_field",
-        "spool"
-      ],
+      "required": ["spool", "match_field"],
+      "properties": ["match_field", "spool"],
       "enum": null
     },
     "SearchResultVendor": {
       "type": "object",
       "title": "SearchResultVendor",
-      "required": [
-        "vendor",
-        "match_field"
-      ],
-      "properties": [
-        "match_field",
-        "vendor"
-      ],
+      "required": ["vendor", "match_field"],
+      "properties": ["match_field", "vendor"],
       "enum": null
     },
     "SearchResults": {
       "type": "object",
       "title": "SearchResults",
-      "required": [
-        "spools",
-        "filaments",
-        "vendors",
-        "is_color_query"
-      ],
-      "properties": [
-        "filaments",
-        "is_color_query",
-        "spools",
-        "vendors"
-      ],
+      "required": ["spools", "filaments", "vendors", "is_color_query"],
+      "properties": ["filaments", "is_color_query", "spools", "vendors"],
       "enum": null
     },
     "SettingEvent": {
       "type": "object",
       "title": "SettingEvent",
-      "required": [
-        "type",
-        "resource",
-        "date",
-        "payload"
-      ],
-      "properties": [
-        "date",
-        "payload",
-        "resource",
-        "type"
-      ],
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
       "enum": null
     },
     "SettingKV": {
       "type": "object",
       "title": "SettingKV",
-      "required": [
-        "key",
-        "setting"
-      ],
-      "properties": [
-        "key",
-        "setting"
-      ],
+      "required": ["key", "setting"],
+      "properties": ["key", "setting"],
       "enum": null
     },
     "SettingResponse": {
       "type": "object",
       "title": "SettingResponse",
-      "required": [
-        "value",
-        "is_set",
-        "type"
-      ],
-      "properties": [
-        "is_set",
-        "type",
-        "value"
-      ],
+      "required": ["value", "is_set", "type"],
+      "properties": ["is_set", "type", "value"],
       "enum": null
     },
     "SettingType": {
@@ -2999,13 +2481,7 @@
       "title": "SettingType",
       "required": [],
       "properties": [],
-      "enum": [
-        "boolean",
-        "number",
-        "string",
-        "array",
-        "object"
-      ]
+      "enum": ["boolean", "number", "string", "array", "object"]
     },
     "Spool": {
       "type": "object",
@@ -3044,28 +2520,14 @@
     "SpoolEvent": {
       "type": "object",
       "title": "SpoolEvent",
-      "required": [
-        "type",
-        "resource",
-        "date",
-        "payload"
-      ],
-      "properties": [
-        "date",
-        "payload",
-        "resource",
-        "type"
-      ],
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
       "enum": null
     },
     "SpoolGroup": {
       "type": "object",
       "title": "SpoolGroup",
-      "required": [
-        "group_by",
-        "spool_count",
-        "in_use_count"
-      ],
+      "required": ["group_by", "spool_count", "in_use_count"],
       "properties": [
         "filament",
         "filament_count",
@@ -3084,9 +2546,7 @@
     "SpoolGroupPreviewFilament": {
       "type": "object",
       "title": "SpoolGroupPreviewFilament",
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "properties": [
         "color_hex",
         "id",
@@ -3098,33 +2558,21 @@
     "SpoolGroupPreviewSpool": {
       "type": "object",
       "title": "SpoolGroupPreviewSpool",
-      "required": [
-        "id"
-      ],
-      "properties": [
-        "id",
-        "initial_weight",
-        "remaining_weight"
-      ],
+      "required": ["id"],
+      "properties": ["id", "initial_weight", "remaining_weight"],
       "enum": null
     },
     "SpoolMeasureParameters": {
       "type": "object",
       "title": "SpoolMeasureParameters",
-      "required": [
-        "weight"
-      ],
-      "properties": [
-        "weight"
-      ],
+      "required": ["weight"],
+      "properties": ["weight"],
       "enum": null
     },
     "SpoolParameters": {
       "type": "object",
       "title": "SpoolParameters",
-      "required": [
-        "filament_id"
-      ],
+      "required": ["filament_id"],
       "properties": [
         "archived",
         "comment",
@@ -3147,11 +2595,7 @@
       "title": "SpoolType",
       "required": [],
       "properties": [],
-      "enum": [
-        "plastic",
-        "cardboard",
-        "metal"
-      ]
+      "enum": ["plastic", "cardboard", "metal"]
     },
     "SpoolUpdateParameters": {
       "type": "object",
@@ -3178,37 +2622,21 @@
       "type": "object",
       "title": "SpoolUseParameters",
       "required": [],
-      "properties": [
-        "use_length",
-        "use_weight"
-      ],
+      "properties": ["use_length", "use_weight"],
       "enum": null
     },
     "Tag": {
       "type": "object",
       "title": "Tag",
-      "required": [
-        "uid",
-        "added"
-      ],
-      "properties": [
-        "added",
-        "format",
-        "uid"
-      ],
+      "required": ["uid", "added"],
+      "properties": ["added", "format", "uid"],
       "enum": null
     },
     "TagConflictMessage": {
       "type": "object",
       "title": "TagConflictMessage",
-      "required": [
-        "message"
-      ],
-      "properties": [
-        "filament_id",
-        "message",
-        "spool_id"
-      ],
+      "required": ["message"],
+      "properties": ["filament_id", "message", "spool_id"],
       "enum": null
     },
     "TagDecodedInfo": {
@@ -3237,37 +2665,21 @@
     "TagLinkParameters": {
       "type": "object",
       "title": "TagLinkParameters",
-      "required": [
-        "uid"
-      ],
-      "properties": [
-        "format",
-        "uid"
-      ],
+      "required": ["uid"],
+      "properties": ["format", "uid"],
       "enum": null
     },
     "TagReader": {
       "type": "object",
       "title": "TagReader",
-      "required": [
-        "reader_id",
-        "last_seen"
-      ],
-      "properties": [
-        "last_seen",
-        "last_uid",
-        "name",
-        "reader_id"
-      ],
+      "required": ["reader_id", "last_seen"],
+      "properties": ["last_seen", "last_uid", "name", "reader_id"],
       "enum": null
     },
     "TagScan": {
       "type": "object",
       "title": "TagScan",
-      "required": [
-        "uid",
-        "reader_id"
-      ],
+      "required": ["uid", "reader_id"],
       "properties": [
         "created",
         "decoded",
@@ -3286,26 +2698,14 @@
     "TagScanEvent": {
       "type": "object",
       "title": "TagScanEvent",
-      "required": [
-        "type",
-        "resource",
-        "date",
-        "payload"
-      ],
-      "properties": [
-        "date",
-        "payload",
-        "resource",
-        "type"
-      ],
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
       "enum": null
     },
     "TagScanParameters": {
       "type": "object",
       "title": "TagScanParameters",
-      "required": [
-        "uid"
-      ],
+      "required": ["uid"],
       "properties": [
         "create",
         "format",
@@ -3319,29 +2719,14 @@
     "ValidationError": {
       "type": "object",
       "title": "ValidationError",
-      "required": [
-        "loc",
-        "msg",
-        "type"
-      ],
-      "properties": [
-        "ctx",
-        "input",
-        "loc",
-        "msg",
-        "type"
-      ],
+      "required": ["loc", "msg", "type"],
+      "properties": ["ctx", "input", "loc", "msg", "type"],
       "enum": null
     },
     "Vendor": {
       "type": "object",
       "title": "Vendor",
-      "required": [
-        "id",
-        "registered",
-        "name",
-        "extra"
-      ],
+      "required": ["id", "registered", "name", "extra"],
       "properties": [
         "comment",
         "empty_spool_weight",
@@ -3356,26 +2741,14 @@
     "VendorEvent": {
       "type": "object",
       "title": "VendorEvent",
-      "required": [
-        "type",
-        "resource",
-        "date",
-        "payload"
-      ],
-      "properties": [
-        "date",
-        "payload",
-        "resource",
-        "type"
-      ],
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
       "enum": null
     },
     "VendorParameters": {
       "type": "object",
       "title": "VendorParameters",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "properties": [
         "comment",
         "empty_spool_weight",
@@ -3403,20 +2776,14 @@
       "title": "MultiColorDirection",
       "required": [],
       "properties": [],
-      "enum": [
-        "coaxial",
-        "longitudinal"
-      ]
+      "enum": ["coaxial", "longitudinal"]
     },
     "spoolman__externaldb__MultiColorDirection": {
       "type": "string",
       "title": "MultiColorDirection",
       "required": [],
       "properties": [],
-      "enum": [
-        "coaxial",
-        "longitudinal"
-      ]
+      "enum": ["coaxial", "longitudinal"]
     }
   },
   "websocket_events": [

@@ -24,26 +24,18 @@
       "path": "/api/v1/",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "External Connector client coverage only (connector_root_websocket); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
-      "sources": [
-        "packages/connector/src/runtime/spoolman-provider.ts"
-      ],
+      "sources": ["packages/connector/src/runtime/spoolman-provider.ts"],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
         "messages_sent_by_client": "none documented"
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "SpoolEvent",
-          "FilamentEvent",
-          "VendorEvent"
-        ]
+        "event_models": ["SpoolEvent", "FilamentEvent", "VendorEvent"]
       },
       "statuses": [
         {
@@ -71,9 +63,7 @@
       "path": "/api/v1/article-number",
       "transport": "http",
       "upstream_operation_id": "Find_article_numbers_article_number_get",
-      "upstream_tags": [
-        "other"
-      ],
+      "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -163,9 +153,7 @@
       "path": "/api/v1/export/filaments",
       "transport": "http",
       "upstream_operation_id": "Export_filaments_export_filaments_get",
-      "upstream_tags": [
-        "export"
-      ],
+      "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -224,9 +212,7 @@
       "path": "/api/v1/export/spools",
       "transport": "http",
       "upstream_operation_id": "Export_spools_export_spools_get",
-      "upstream_tags": [
-        "export"
-      ],
+      "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -296,9 +282,7 @@
       "path": "/api/v1/export/vendors",
       "transport": "http",
       "upstream_operation_id": "Export_vendors_export_vendors_get",
-      "upstream_tags": [
-        "export"
-      ],
+      "upstream_tags": ["export"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -357,9 +341,7 @@
       "path": "/api/v1/external/filament",
       "transport": "http",
       "upstream_operation_id": "Get_all_external_filaments_external_filament_get",
-      "upstream_tags": [
-        "external"
-      ],
+      "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -399,9 +381,7 @@
       "path": "/api/v1/external/filament/search",
       "transport": "http",
       "upstream_operation_id": "Search_external_filaments_external_filament_search_get",
-      "upstream_tags": [
-        "external"
-      ],
+      "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -414,9 +394,7 @@
             "required": true,
             "schema": {
               "description": "Search query, matched word-by-word against manufacturer, name and material.",
-              "examples": [
-                "polymaker pla"
-              ],
+              "examples": ["polymaker pla"],
               "title": "Query",
               "type": "string"
             }
@@ -490,9 +468,7 @@
       "path": "/api/v1/external/material",
       "transport": "http",
       "upstream_operation_id": "Get_all_external_materials_external_material_get",
-      "upstream_tags": [
-        "external"
-      ],
+      "upstream_tags": ["external"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -532,9 +508,7 @@
       "path": "/api/v1/field/{entity_type}",
       "transport": "http",
       "upstream_operation_id": "Get_extra_fields_field__entity_type__get",
-      "upstream_tags": [
-        "field"
-      ],
+      "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -594,9 +568,7 @@
       "path": "/api/v1/field/{entity_type}/{key}",
       "transport": "http",
       "upstream_operation_id": "Delete_extra_field_field__entity_type___key__delete",
-      "upstream_tags": [
-        "field"
-      ],
+      "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -679,9 +651,7 @@
       "path": "/api/v1/field/{entity_type}/{key}",
       "transport": "http",
       "upstream_operation_id": "Add_or_update_extra_field_field__entity_type___key__post",
-      "upstream_tags": [
-        "field"
-      ],
+      "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -752,9 +722,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post"
       ],
@@ -768,9 +736,7 @@
       "path": "/api/v1/field/{entity_type}/{key}/values",
       "transport": "http",
       "upstream_operation_id": "Get_extra_field_values_field__entity_type___key__values_get",
-      "upstream_tags": [
-        "field"
-      ],
+      "upstream_tags": ["field"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -853,9 +819,7 @@
       "path": "/api/v1/filament",
       "transport": "http",
       "upstream_operation_id": "Find_filaments_filament_get",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -934,10 +898,7 @@
                 }
               ],
               "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Specify -1 to match filaments with no vendor.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Vendor ID"
             }
           },
@@ -1016,9 +977,7 @@
             "schema": {
               "default": 20,
               "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-              "examples": [
-                20
-              ],
+              "examples": [20],
               "title": "Color Similarity Threshold",
               "type": "number"
             }
@@ -1037,9 +996,7 @@
                 }
               ],
               "description": "Find filaments imported by the given external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
-              "examples": [
-                "polymaker_pla_polysonicblack_1000_175"
-              ],
+              "examples": ["polymaker_pla_polysonicblack_1000_175"],
               "title": "External Id"
             }
           },
@@ -1057,10 +1014,7 @@
                 }
               ],
               "description": "Match the filament that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter. Only a tag linked to the filament itself matches, not a tag on one of its spools; look those up on the spool endpoint. Returns either one filament or none. Returns 400 if the UID is not hexadecimal.",
-              "examples": [
-                "04A2B3C4D5E6F7",
-                "04:a2:b3:c4:d5:e6:f7"
-              ],
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
               "title": "Tag UID"
             }
           },
@@ -1078,9 +1032,7 @@
                 }
               ],
               "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-              "examples": [
-                "vendor.name:asc,spool_weight:desc"
-              ],
+              "examples": ["vendor.name:asc,spool_weight:desc"],
               "title": "Sort"
             }
           },
@@ -1165,9 +1117,7 @@
       "path": "/api/v1/filament",
       "transport": "http",
       "upstream_operation_id": "Add_filament_filament_post",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1219,9 +1169,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament/post",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -1237,9 +1185,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "transport": "http",
       "upstream_operation_id": "Delete_filament_filament__filament_id__delete",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1326,9 +1272,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "transport": "http",
       "upstream_operation_id": "Get_filament_filament__filament_id__get",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1411,9 +1355,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "transport": "http",
       "upstream_operation_id": "Update_filament_filament__filament_id__patch",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1486,9 +1428,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/patch",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -1504,9 +1444,7 @@
       "path": "/api/v1/filament/{filament_id}",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1517,9 +1455,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "FilamentEvent"
-        ]
+        "event_models": ["FilamentEvent"]
       },
       "statuses": [
         {
@@ -1546,9 +1482,7 @@
       "path": "/api/v1/filament/{filament_id}/tag",
       "transport": "http",
       "upstream_operation_id": "Link_a_tag_to_a_filament_filament__filament_id__tag_post",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1629,9 +1563,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}~1tag/post"
       ],
@@ -1645,9 +1577,7 @@
       "path": "/api/v1/filament/{filament_id}/tag/{uid}",
       "transport": "http",
       "upstream_operation_id": "Unlink_a_tag_from_a_filament_filament__filament_id__tag__uid__delete",
-      "upstream_tags": [
-        "filament"
-      ],
+      "upstream_tags": ["filament"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1669,9 +1599,7 @@
             "required": true,
             "schema": {
               "description": "The tag's UID, in any shape. Normalized before matching.",
-              "examples": [
-                "04A2B3C4D5E6F7"
-              ],
+              "examples": ["04A2B3C4D5E6F7"],
               "title": "Tag UID",
               "type": "string"
             }
@@ -1830,9 +1758,7 @@
       "path": "/api/v1/location",
       "transport": "http",
       "upstream_operation_id": "Find_locations_location_get",
-      "upstream_tags": [
-        "other"
-      ],
+      "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1872,9 +1798,7 @@
       "path": "/api/v1/location/{location}",
       "transport": "http",
       "upstream_operation_id": "Rename_location_location__location__patch",
-      "upstream_tags": [
-        "other"
-      ],
+      "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1922,9 +1846,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch"
       ],
@@ -1938,9 +1860,7 @@
       "path": "/api/v1/lot-number",
       "transport": "http",
       "upstream_operation_id": "Find_lot_numbers_lot_number_get",
-      "upstream_tags": [
-        "other"
-      ],
+      "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -1980,9 +1900,7 @@
       "path": "/api/v1/material",
       "transport": "http",
       "upstream_operation_id": "Find_materials_material_get",
-      "upstream_tags": [
-        "other"
-      ],
+      "upstream_tags": ["other"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2022,9 +1940,7 @@
       "path": "/api/v1/search",
       "transport": "http",
       "upstream_operation_id": "Search_search_get",
-      "upstream_tags": [
-        "search"
-      ],
+      "upstream_tags": ["search"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2037,9 +1953,7 @@
             "required": true,
             "schema": {
               "description": "The search query.",
-              "examples": [
-                "red"
-              ],
+              "examples": ["red"],
               "minLength": 1,
               "title": "Query",
               "type": "string"
@@ -2052,9 +1966,7 @@
             "schema": {
               "default": 20,
               "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
-              "examples": [
-                20
-              ],
+              "examples": [20],
               "maximum": 100,
               "minimum": 0,
               "title": "Color Similarity Threshold",
@@ -2142,9 +2054,7 @@
       "path": "/api/v1/setting/",
       "transport": "http",
       "upstream_operation_id": "Get_all_settings_setting__get",
-      "upstream_tags": [
-        "setting"
-      ],
+      "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2184,9 +2094,7 @@
       "path": "/api/v1/setting/{key}",
       "transport": "http",
       "upstream_operation_id": "Get_setting_setting__key__get",
-      "upstream_tags": [
-        "setting"
-      ],
+      "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2264,9 +2172,7 @@
       "path": "/api/v1/setting/{key}",
       "transport": "http",
       "upstream_operation_id": "Set_setting_setting__key__post",
-      "upstream_tags": [
-        "setting"
-      ],
+      "upstream_tags": ["setting"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2337,9 +2243,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post"
       ],
@@ -2353,9 +2257,7 @@
       "path": "/api/v1/setting/{key}",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2366,9 +2268,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "SettingEvent"
-        ]
+        "event_models": ["SettingEvent"]
       },
       "statuses": [
         {
@@ -2395,9 +2295,7 @@
       "path": "/api/v1/spool",
       "transport": "http",
       "upstream_operation_id": "Find_spool_spool_get",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "External Connector client coverage only (connector_spool_inventory_get, connector_provision_probe_get); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
@@ -2532,10 +2430,7 @@
                 }
               ],
               "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Filament ID"
             }
           },
@@ -2570,10 +2465,7 @@
                 }
               ],
               "description": "Match spools by their filament's multi-color direction, e.g. coaxial or longitudinal. Separate multiple terms with a comma. Specify an empty string to match single-color filaments. Surround a term with quotes to search for the exact term.",
-              "examples": [
-                "\"coaxial\"",
-                "\"longitudinal\""
-              ],
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
               "title": "Filament Multi-Color Direction"
             }
           },
@@ -2609,10 +2501,7 @@
                 }
               ],
               "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
-              "examples": [
-                "1",
-                "1,2"
-              ],
+              "examples": ["1", "1,2"],
               "title": "Vendor ID"
             }
           },
@@ -2664,10 +2553,7 @@
                 }
               ],
               "description": "Match the spool that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter, so 04:a2:b3:c4, 04-A2-B3-C4 and 04a2b3c4 all find the same spool. A tag is linked to at most one spool, so this returns either one spool or none. Returns 400 if the UID is not hexadecimal.",
-              "examples": [
-                "04A2B3C4D5E6F7",
-                "04:a2:b3:c4:d5:e6:f7"
-              ],
+              "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
               "title": "Tag UID"
             }
           },
@@ -2853,9 +2739,7 @@
       "path": "/api/v1/spool",
       "transport": "http",
       "upstream_operation_id": "Add_spool_spool_post",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2907,9 +2791,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool/post",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -2925,9 +2807,7 @@
       "path": "/api/v1/spool/field/{field}",
       "transport": "http",
       "upstream_operation_id": "Rename_a_spool_field_value_spool_field__field__patch",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -2940,10 +2820,7 @@
             "required": true,
             "schema": {
               "description": "The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.",
-              "examples": [
-                "location",
-                "extra.shelf"
-              ],
+              "examples": ["location", "extra.shelf"],
               "title": "Field",
               "type": "string"
             }
@@ -2991,9 +2868,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch"
       ],
@@ -3007,9 +2882,7 @@
       "path": "/api/v1/spool/group",
       "transport": "http",
       "upstream_operation_id": "Find_spool_groups_spool_group_get",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3022,10 +2895,7 @@
             "required": true,
             "schema": {
               "description": "The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).",
-              "examples": [
-                "location",
-                "extra.shelf"
-              ],
+              "examples": ["location", "extra.shelf"],
               "title": "Group By",
               "type": "string"
             }
@@ -3096,10 +2966,7 @@
                 }
               ],
               "description": "Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.",
-              "examples": [
-                "\"coaxial\"",
-                "\"longitudinal\""
-              ],
+              "examples": ["\"coaxial\"", "\"longitudinal\""],
               "title": "Filament Multi-Color Direction"
             }
           },
@@ -3288,9 +3155,7 @@
                 }
               ],
               "description": "Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.",
-              "examples": [
-                "group.last_used:desc"
-              ],
+              "examples": ["group.last_used:desc"],
               "title": "Sort"
             }
           },
@@ -3377,9 +3242,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "transport": "http",
       "upstream_operation_id": "Delete_spool_spool__spool_id__delete",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3455,9 +3318,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "transport": "http",
       "upstream_operation_id": "Get_spool_spool__spool_id__get",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3540,9 +3401,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "transport": "http",
       "upstream_operation_id": "Update_spool_spool__spool_id__patch",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3615,9 +3474,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/patch",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -3633,9 +3490,7 @@
       "path": "/api/v1/spool/{spool_id}",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3646,9 +3501,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "SpoolEvent"
-        ]
+        "event_models": ["SpoolEvent"]
       },
       "statuses": [
         {
@@ -3675,9 +3528,7 @@
       "path": "/api/v1/spool/{spool_id}/measure",
       "transport": "http",
       "upstream_operation_id": "Use_spool_filament_based_on_the_current_weight_measurement_spool__spool_id__measure_put",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3747,9 +3598,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1measure/put"
       ],
@@ -3763,9 +3612,7 @@
       "path": "/api/v1/spool/{spool_id}/tag",
       "transport": "http",
       "upstream_operation_id": "Link_a_tag_to_a_spool_spool__spool_id__tag_post",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3846,9 +3693,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1tag/post"
       ],
@@ -3862,9 +3707,7 @@
       "path": "/api/v1/spool/{spool_id}/tag/{uid}",
       "transport": "http",
       "upstream_operation_id": "Unlink_a_tag_from_a_spool_spool__spool_id__tag__uid__delete",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -3886,9 +3729,7 @@
             "required": true,
             "schema": {
               "description": "The tag's UID, in any shape. Normalized before matching.",
-              "examples": [
-                "04A2B3C4D5E6F7"
-              ],
+              "examples": ["04A2B3C4D5E6F7"],
               "title": "Tag UID",
               "type": "string"
             }
@@ -3957,9 +3798,7 @@
       "path": "/api/v1/spool/{spool_id}/use",
       "transport": "http",
       "upstream_operation_id": "Use_spool_filament_spool__spool_id__use_put",
-      "upstream_tags": [
-        "spool"
-      ],
+      "upstream_tags": ["spool"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "External Connector client coverage only (kobra_x_spool_use_put); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.",
@@ -4032,9 +3871,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}~1use/put",
         "packages/connector/src/kobra-x/booking.ts",
@@ -4050,9 +3887,7 @@
       "path": "/api/v1/tag/reader",
       "transport": "http",
       "upstream_operation_id": "List_recently_seen_tag_readers_tag_reader_get",
-      "upstream_tags": [
-        "tag"
-      ],
+      "upstream_tags": ["tag"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4092,9 +3927,7 @@
       "path": "/api/v1/tag/scan",
       "transport": "http",
       "upstream_operation_id": "Report_a_tag_scan_tag_scan_post",
-      "upstream_tags": [
-        "tag"
-      ],
+      "upstream_tags": ["tag"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4150,9 +3983,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan/post"
       ],
@@ -4166,9 +3997,7 @@
       "path": "/api/v1/tag/scan",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4179,9 +4008,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "TagScanEvent"
-        ]
+        "event_models": ["TagScanEvent"]
       },
       "statuses": [
         {
@@ -4208,9 +4035,7 @@
       "path": "/api/v1/tag/scan/{reader_id}",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4221,9 +4046,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "TagScanEvent"
-        ]
+        "event_models": ["TagScanEvent"]
       },
       "statuses": [
         {
@@ -4250,9 +4073,7 @@
       "path": "/api/v1/vendor",
       "transport": "http",
       "upstream_operation_id": "Find_vendor_vendor_get",
-      "upstream_tags": [
-        "vendor"
-      ],
+      "upstream_tags": ["vendor"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4310,9 +4131,7 @@
                 }
               ],
               "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
-              "examples": [
-                "name:asc,id:desc"
-              ],
+              "examples": ["name:asc,id:desc"],
               "title": "Sort"
             }
           },
@@ -4397,9 +4216,7 @@
       "path": "/api/v1/vendor",
       "transport": "http",
       "upstream_operation_id": "Add_vendor_vendor_post",
-      "upstream_tags": [
-        "vendor"
-      ],
+      "upstream_tags": ["vendor"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4451,9 +4268,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor/post",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -4469,9 +4284,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "transport": "http",
       "upstream_operation_id": "Delete_vendor_vendor__vendor_id__delete",
-      "upstream_tags": [
-        "vendor"
-      ],
+      "upstream_tags": ["vendor"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4547,9 +4360,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "transport": "http",
       "upstream_operation_id": "Get_vendor_vendor__vendor_id__get",
-      "upstream_tags": [
-        "vendor"
-      ],
+      "upstream_tags": ["vendor"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4632,9 +4443,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "transport": "http",
       "upstream_operation_id": "Update_vendor_vendor__vendor_id__patch",
-      "upstream_tags": [
-        "vendor"
-      ],
+      "upstream_tags": ["vendor"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4707,9 +4516,7 @@
           "description": "Validation Error"
         }
       ],
-      "relevant_headers": [
-        "Content-Type"
-      ],
+      "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/patch",
         "packages/sim-tools/src/mocks/spoolman-mock.ts",
@@ -4725,9 +4532,7 @@
       "path": "/api/v1/vendor/{vendor_id}",
       "transport": "websocket",
       "upstream_operation_id": null,
-      "upstream_tags": [
-        "websocket"
-      ],
+      "upstream_tags": ["websocket"],
       "product_status": "unimplemented",
       "scope": null,
       "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
@@ -4738,9 +4543,7 @@
       },
       "output_schema": {
         "handshake": "101 Switching Protocols",
-        "event_models": [
-          "VendorEvent"
-        ]
+        "event_models": ["VendorEvent"]
       },
       "statuses": [
         {

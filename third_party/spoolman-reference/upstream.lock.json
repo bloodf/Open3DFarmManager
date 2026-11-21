@@ -7,13 +7,13 @@
     "version_tag": "v0.27.1",
     "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
     "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
-    "openapi_sha256": "faacc40c2b61d445042b797934e005142bf9cc93e6cc20d5e8685c86fc032fe5",
+    "openapi_sha256": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
     "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
   },
   "artifacts_sha256": {
     "license": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d",
-    "openapi": "faacc40c2b61d445042b797934e005142bf9cc93e6cc20d5e8685c86fc032fe5",
-    "inventory": "5b8c3947f73ba4a145b2463fd92688a14c65f2c7b180a329d51e125ee13cf6e9",
-    "matrix": "e4fdf99344dd8f6dbfc86fcccfd726b2ac2f7d773b2b9914833e457c9038955f"
+    "openapi": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
+    "inventory": "d63e44d6ff4bce24989f5396a5e326c30845696a6c93a427f7aecc19ac78c345",
+    "matrix": "08d4712ae3a56354ba8d0a719f4d1ccddaeaf82a437255b236cb093d28ba42e9"
   }
 }

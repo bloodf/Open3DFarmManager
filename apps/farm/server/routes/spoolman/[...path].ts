@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import { Readable } from 'node:stream'
 import { logUnhandledError } from '../../utils/log-unhandled-error.ts'
 import {
   handleLegacyRequest,
@@ -7,9 +8,8 @@ import {
 import { classifyLegacyBody } from '../../utils/spool-library/legacy-api/body.ts'
 import { spoolLibraryRuntime } from '../../utils/spool-library/runtime.ts'
 import { createSpoolFeedHooks } from '../../utils/spool-library/ws-feed.ts'
-
-/** Upstream allows 128 extra fields of 65535 characters; leave room for that. */
-const MAX_BODY_BYTES = 10 * 1024 * 1024
+import { splitLegacyPath } from '../../utils/spool-library/legacy-path.ts'
+import { readAuthenticatedBody } from './body.ts'
 
 /**
  * The same path serves the Spoolman HTTP API and, for an upgrade request, the
@@ -33,17 +33,34 @@ async function handleHttp(event: H3Event) {
     const query = new URLSearchParams(
       queryAt === -1 ? '' : url.slice(queryAt + 1),
     )
-    const length = Number(getRequestHeader(event, 'content-length') ?? 0)
-    if (length > MAX_BODY_BYTES) {
-      setResponseStatus(event, 413)
-      return { message: 'Request Entity Too Large' }
-    }
-    const raw = ['POST', 'PATCH', 'PUT'].includes(event.method)
-      ? await readRawBody(event, 'utf8')
-      : undefined
-    if (raw && Buffer.byteLength(raw) > MAX_BODY_BYTES) {
-      setResponseStatus(event, 413)
-      return { message: 'Request Entity Too Large' }
+    const bodyMethod = ['POST', 'PATCH', 'PUT'].includes(event.method)
+    let raw: string | undefined
+    if (bodyMethod) {
+      const legacyPath = splitLegacyPath(pathname)
+      const auth = legacyPath.ok
+        ? await (
+            await spoolLibraryRuntime()
+          ).withScope(
+            { kind: 'legacy-credential', token: legacyPath.token },
+            async () => ({ ok: true as const, value: true }),
+          )
+        : { ok: false as const, reason: 'unauthorized' as const }
+      const read = await readAuthenticatedBody(
+        Readable.toWeb(event.node.req) as ReadableStream<Uint8Array>,
+        async () => auth.ok,
+      )
+      if (read.status !== 200) {
+        setResponseStatus(event, read.status)
+        return {
+          message:
+            read.status === 413
+              ? 'Request Entity Too Large'
+              : read.status === 408
+                ? 'Request Timeout'
+                : 'Unauthorized',
+        }
+      }
+      raw = read.body
     }
     result = await handleLegacyRequest(await spoolLibraryRuntime(), {
       method: event.method,

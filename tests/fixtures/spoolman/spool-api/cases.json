@@ -493,7 +493,10 @@
     "name": "spool-patch-dates-set-and-clear",
     "method": "PATCH",
     "path": "/api/v1/spool/1",
-    "body": { "first_used": "2024-04-01T00:00:00Z", "last_used": "2024-04-05T12:00:00Z" }
+    "body": {
+      "first_used": "2024-04-01T00:00:00Z",
+      "last_used": "2024-04-05T12:00:00Z"
+    }
   },
   {
     "name": "spool-patch-clear-last-used",

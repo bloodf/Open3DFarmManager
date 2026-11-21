@@ -167,8 +167,10 @@ function parseSpoolExtraFilters(query: URLSearchParams) {
   const filament = new Map<string, string>()
   const vendor = new Map<string, string>()
   for (const [key, value] of query) {
-    if (key.startsWith('filament.vendor.extra.')) vendor.set(key.slice(22), value)
-    else if (key.startsWith('filament.extra.')) filament.set(key.slice(15), value)
+    if (key.startsWith('filament.vendor.extra.'))
+      vendor.set(key.slice(22), value)
+    else if (key.startsWith('filament.extra.'))
+      filament.set(key.slice(15), value)
     else if (key.startsWith('extra.')) spool.set(key.slice(6), value)
   }
   return { spool, filament, vendor }
@@ -289,7 +291,12 @@ async function find(
 ): Promise<LegacyModuleResult> {
   const issues: Issue[] = []
   const q = (key: string) => lastQueryValue(query, key)
-  for (const key of ['filament_id', 'vendor_id', 'filament.id', 'filament.vendor.id']) {
+  for (const key of [
+    'filament_id',
+    'vendor_id',
+    'filament.id',
+    'filament.vendor.id',
+  ]) {
     const value = q(key)
     if (value !== null && !ID_LIST.test(value))
       issues.push(patternIssue(key, value))
@@ -325,7 +332,8 @@ async function find(
 
   const extraMaps = parseSpoolExtraFilters(query)
   const needsSpoolFields =
-    extraMaps.spool.size > 0 || [...sort.keys()].some((k) => k.startsWith('extra.'))
+    extraMaps.spool.size > 0 ||
+    [...sort.keys()].some((k) => k.startsWith('extra.'))
   const spoolFieldsRes = needsSpoolFields
     ? await repo.extraFields.list('spool')
     : { ok: true as const, value: [] as SpoolExtraFieldDefinition[] }
@@ -336,7 +344,10 @@ async function find(
   let vendorExtraFilters: ((extra: Record<string, unknown>) => boolean)[] = []
   try {
     if (extraMaps.spool.size)
-      spoolExtraFilters = compileExtraFilters(spoolFieldsRes.value, extraMaps.spool)
+      spoolExtraFilters = compileExtraFilters(
+        spoolFieldsRes.value,
+        extraMaps.spool,
+      )
     if (extraMaps.filament.size) {
       const filamentFields = await repo.extraFields.list('filament')
       if (!filamentFields.ok) return filamentFields
@@ -348,7 +359,10 @@ async function find(
     if (extraMaps.vendor.size) {
       const vendorFields = await repo.extraFields.list('vendor')
       if (!vendorFields.ok) return vendorFields
-      vendorExtraFilters = compileExtraFilters(vendorFields.value, extraMaps.vendor)
+      vendorExtraFilters = compileExtraFilters(
+        vendorFields.value,
+        extraMaps.vendor,
+      )
     }
   } catch (error) {
     return message(400, (error as Error).message)
@@ -370,7 +384,8 @@ async function find(
       f.id,
       {
         ...f,
-        vendor: f.vendorId === null ? null : (vendorById.get(f.vendorId) ?? null),
+        vendor:
+          f.vendorId === null ? null : (vendorById.get(f.vendorId) ?? null),
       },
     ]),
   )
@@ -398,7 +413,10 @@ async function find(
     q('filament.material') ?? q('filament_material'),
     true,
   )
-  const byMultiColorDir = stringFilter(q('filament.multi_color_direction'), true)
+  const byMultiColorDir = stringFilter(
+    q('filament.multi_color_direction'),
+    true,
+  )
   const byLocation = stringFilter(q('location'), true)
   const byLotNr = stringFilter(q('lot_nr'), true)
 
@@ -423,7 +441,9 @@ async function find(
       (!byRegistered || byRegistered(s.registeredAt)) &&
       spoolExtraFilters.every((match) => match(s.extra)) &&
       filamentExtraFilters.every((match) => match(s.filament.extra)) &&
-      vendorExtraFilters.every((match) => match(s.filament.vendor?.extra ?? {})),
+      vendorExtraFilters.every((match) =>
+        match(s.filament.vendor?.extra ?? {}),
+      ),
   )
 
   const { page, total } = paginate(sortRows(matched, keys), limit, offset)
@@ -505,7 +525,9 @@ async function create(
     extra: mergeExtra({}, extra ?? {}),
   }
   const created = await repo.spools.create(input)
-  return created.ok ? hydrateSpool(repo, created.value, filament.value) : created
+  return created.ok
+    ? hydrateSpool(repo, created.value, filament.value)
+    : created
 }
 
 async function update(
@@ -562,7 +584,8 @@ async function update(
     effInitialWeight = v.initial_weight as number | null
     patch.initialWeight = effInitialWeight
   }
-  if (set.has('spool_weight')) patch.spoolWeight = v.spool_weight as number | null
+  if (set.has('spool_weight'))
+    patch.spoolWeight = v.spool_weight as number | null
   if (set.has('remaining_weight') && v.remaining_weight !== null) {
     if (effInitialWeight === null)
       return message(
@@ -685,8 +708,7 @@ async function measure(
           ? filament.value.spoolWeight
           : (vendor?.emptySpoolWeight ?? null)
     if (initialWeight === null || initialWeight === 0)
-      initialWeight =
-        filament.value.weight !== null ? filament.value.weight : 0
+      initialWeight = filament.value.weight !== null ? filament.value.weight : 0
   }
 
   if (initialWeight === null || initialWeight === 0)
@@ -717,10 +739,9 @@ async function measure(
 export const spoolModule: LegacyApiModule = {
   name: 'spool',
   async handle(repo, request) {
-    const match =
-      /^\/api\/v1\/spool(?:\/([^/]+)(?:\/(use|measure))?)?$/.exec(
-        request.apiPath,
-      )
+    const match = /^\/api\/v1\/spool(?:\/([^/]+)(?:\/(use|measure))?)?$/.exec(
+      request.apiPath,
+    )
     if (!match) return undefined
     const rawId = match[1]
     const action = match[2]

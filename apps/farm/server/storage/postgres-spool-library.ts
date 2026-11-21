@@ -494,7 +494,11 @@ class ScopedRepository implements SpoolLibraryRepository {
       }),
     use: (id: SpoolRecordId, grams: number) =>
       this.guarded(true, async (sp) => {
-        if (!validId(id) || typeof grams !== 'number' || !Number.isFinite(grams))
+        if (
+          !validId(id) ||
+          typeof grams !== 'number' ||
+          !Number.isFinite(grams)
+        )
           return fail('invalid-input')
         const rows = await sp<Spool[]>`
           UPDATE farm.spools

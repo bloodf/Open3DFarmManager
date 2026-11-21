@@ -245,9 +245,7 @@ export function asDateTime(loc: Loc, input: unknown): Checked<number> {
     const ms = parseIsoUtcMs(input, false)
     if (ms !== null) return good(ms)
     const err =
-      input.length < 4
-        ? 'input is too short'
-        : 'invalid character in year'
+      input.length < 4 ? 'input is too short' : 'invalid character in year'
     return bad({
       type: 'datetime_from_date_parsing',
       loc,

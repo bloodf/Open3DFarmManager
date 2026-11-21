@@ -34,11 +34,7 @@
       "body": {
         "name": "Finish",
         "field_type": "choice",
-        "choices": [
-          "matte",
-          "glossy",
-          "silk"
-        ],
+        "choices": ["matte", "glossy", "silk"],
         "multi_choice": false
       },
       "setup": "field",
@@ -49,11 +45,7 @@
           "name": "Finish",
           "order": 0,
           "field_type": "choice",
-          "choices": [
-            "matte",
-            "glossy",
-            "silk"
-          ],
+          "choices": ["matte", "glossy", "silk"],
           "multi_choice": false,
           "key": "finish",
           "entity_type": "filament"
@@ -77,11 +69,7 @@
           "name": "Finish",
           "order": 0,
           "field_type": "choice",
-          "choices": [
-            "matte",
-            "glossy",
-            "silk"
-          ],
+          "choices": ["matte", "glossy", "silk"],
           "multi_choice": false,
           "key": "finish",
           "entity_type": "filament"
@@ -229,11 +217,7 @@
       "body": {
         "name": "Labels",
         "field_type": "choice",
-        "choices": [
-          "dry",
-          "ams",
-          "test"
-        ],
+        "choices": ["dry", "ams", "test"],
         "multi_choice": true
       },
       "setup": "field",
@@ -272,11 +256,7 @@
           "name": "Labels",
           "order": 0,
           "field_type": "choice",
-          "choices": [
-            "dry",
-            "ams",
-            "test"
-          ],
+          "choices": ["dry", "ams", "test"],
           "multi_choice": true,
           "key": "labels",
           "entity_type": "spool"
@@ -905,10 +885,7 @@
         "detail": [
           {
             "type": "missing",
-            "loc": [
-              "body",
-              "filament_id"
-            ],
+            "loc": ["body", "filament_id"],
             "msg": "Field required",
             "input": {
               "location": "X"
@@ -930,10 +907,7 @@
         "detail": [
           {
             "type": "int_type",
-            "loc": [
-              "body",
-              "filament_id"
-            ],
+            "loc": ["body", "filament_id"],
             "msg": "Input should be a valid integer",
             "input": null
           }
@@ -1014,10 +988,7 @@
         "detail": [
           {
             "type": "greater_than_equal",
-            "loc": [
-              "body",
-              "price"
-            ],
+            "loc": ["body", "price"],
             "msg": "Input should be greater than or equal to 0",
             "input": -1,
             "ctx": {
@@ -1026,10 +997,7 @@
           },
           {
             "type": "greater_than_equal",
-            "loc": [
-              "body",
-              "initial_weight"
-            ],
+            "loc": ["body", "initial_weight"],
             "msg": "Input should be greater than or equal to 0",
             "input": -10,
             "ctx": {
@@ -1038,10 +1006,7 @@
           },
           {
             "type": "greater_than_equal",
-            "loc": [
-              "body",
-              "spool_weight"
-            ],
+            "loc": ["body", "spool_weight"],
             "msg": "Input should be greater than or equal to 0",
             "input": -5,
             "ctx": {
@@ -1050,10 +1015,7 @@
           },
           {
             "type": "greater_than_equal",
-            "loc": [
-              "body",
-              "used_weight"
-            ],
+            "loc": ["body", "used_weight"],
             "msg": "Input should be greater than or equal to 0",
             "input": -2,
             "ctx": {
@@ -1077,10 +1039,7 @@
         "detail": [
           {
             "type": "string_too_long",
-            "loc": [
-              "body",
-              "location"
-            ],
+            "loc": ["body", "location"],
             "msg": "String should have at most 64 characters",
             "input": "lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
             "ctx": {
@@ -1104,10 +1063,7 @@
         "detail": [
           {
             "type": "string_too_long",
-            "loc": [
-              "body",
-              "lot_nr"
-            ],
+            "loc": ["body", "lot_nr"],
             "msg": "String should have at most 64 characters",
             "input": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "ctx": {
@@ -1131,10 +1087,7 @@
         "detail": [
           {
             "type": "bool_type",
-            "loc": [
-              "body",
-              "archived"
-            ],
+            "loc": ["body", "archived"],
             "msg": "Input should be a valid boolean",
             "input": null
           }
@@ -1155,10 +1108,7 @@
         "detail": [
           {
             "type": "bool_parsing",
-            "loc": [
-              "body",
-              "archived"
-            ],
+            "loc": ["body", "archived"],
             "msg": "Input should be a valid boolean, unable to interpret input",
             "input": "maybe"
           }
@@ -1179,10 +1129,7 @@
         "detail": [
           {
             "type": "datetime_from_date_parsing",
-            "loc": [
-              "body",
-              "first_used"
-            ],
+            "loc": ["body", "first_used"],
             "msg": "Input should be a valid datetime or date, invalid character in year",
             "input": "not-a-date",
             "ctx": {
@@ -1206,10 +1153,7 @@
         "detail": [
           {
             "type": "datetime_type",
-            "loc": [
-              "body",
-              "first_used"
-            ],
+            "loc": ["body", "first_used"],
             "msg": "Input should be a valid datetime",
             "input": []
           }
@@ -1254,9 +1198,7 @@
       "path": "/api/v1/spool",
       "body": {
         "filament_id": 1,
-        "extra": [
-          "x"
-        ]
+        "extra": ["x"]
       },
       "status": 422,
       "total": null,
@@ -1264,14 +1206,9 @@
         "detail": [
           {
             "type": "dict_type",
-            "loc": [
-              "body",
-              "extra"
-            ],
+            "loc": ["body", "extra"],
             "msg": "Input should be a valid dictionary",
-            "input": [
-              "x"
-            ]
+            "input": ["x"]
           }
         ]
       }
@@ -1292,11 +1229,7 @@
         "detail": [
           {
             "type": "string_type",
-            "loc": [
-              "body",
-              "extra",
-              "rating"
-            ],
+            "loc": ["body", "extra", "rating"],
             "msg": "Input should be a valid string",
             "input": 5
           }
@@ -1316,10 +1249,7 @@
         "detail": [
           {
             "type": "json_invalid",
-            "loc": [
-              "body",
-              1
-            ],
+            "loc": ["body", 1],
             "msg": "JSON decode error",
             "input": {},
             "ctx": {
@@ -1339,9 +1269,7 @@
         "detail": [
           {
             "type": "missing",
-            "loc": [
-              "body"
-            ],
+            "loc": ["body"],
             "msg": "Field required",
             "input": null
           }
@@ -1363,9 +1291,7 @@
         "detail": [
           {
             "type": "model_attributes_type",
-            "loc": [
-              "body"
-            ],
+            "loc": ["body"],
             "msg": "Input should be a valid dictionary or object to extract fields from",
             "input": [
               {
@@ -1388,9 +1314,7 @@
         "detail": [
           {
             "type": "model_attributes_type",
-            "loc": [
-              "body"
-            ],
+            "loc": ["body"],
             "msg": "Input should be a valid dictionary or object to extract fields from",
             "input": "{\"filament_id\":1}"
           }
@@ -1475,10 +1399,7 @@
         "detail": [
           {
             "type": "int_parsing",
-            "loc": [
-              "path",
-              "spool_id"
-            ],
+            "loc": ["path", "spool_id"],
             "msg": "Input should be a valid integer, unable to parse string as an integer",
             "input": "not-an-int"
           }
@@ -1994,10 +1915,7 @@
         "detail": [
           {
             "type": "value_error",
-            "loc": [
-              "body",
-              "filament_id"
-            ],
+            "loc": ["body", "filament_id"],
             "msg": "Value error, Value must not be None.",
             "input": null,
             "ctx": {
@@ -2073,10 +1991,7 @@
         "detail": [
           {
             "type": "bool_type",
-            "loc": [
-              "body",
-              "archived"
-            ],
+            "loc": ["body", "archived"],
             "msg": "Input should be a valid boolean",
             "input": null
           }
@@ -2111,19 +2026,13 @@
         "detail": [
           {
             "type": "int_parsing",
-            "loc": [
-              "path",
-              "spool_id"
-            ],
+            "loc": ["path", "spool_id"],
             "msg": "Input should be a valid integer, unable to parse string as an integer",
             "input": "abc"
           },
           {
             "type": "greater_than_equal",
-            "loc": [
-              "body",
-              "price"
-            ],
+            "loc": ["body", "price"],
             "msg": "Input should be greater than or equal to 0",
             "input": -5,
             "ctx": {
@@ -2436,10 +2345,7 @@
         "detail": [
           {
             "type": "float_parsing",
-            "loc": [
-              "body",
-              "use_weight"
-            ],
+            "loc": ["body", "use_weight"],
             "msg": "Input should be a valid number, unable to parse string as a number",
             "input": "heavy"
           }
@@ -2657,10 +2563,7 @@
         "detail": [
           {
             "type": "missing",
-            "loc": [
-              "body",
-              "weight"
-            ],
+            "loc": ["body", "weight"],
             "msg": "Field required",
             "input": {}
           }
@@ -2680,10 +2583,7 @@
         "detail": [
           {
             "type": "float_parsing",
-            "loc": [
-              "body",
-              "weight"
-            ],
+            "loc": ["body", "weight"],
             "msg": "Input should be a valid number, unable to parse string as a number",
             "input": "abc"
           }
@@ -3479,10 +3379,7 @@
         "detail": [
           {
             "type": "bool_parsing",
-            "loc": [
-              "query",
-              "allow_archived"
-            ],
+            "loc": ["query", "allow_archived"],
             "msg": "Input should be a valid boolean, unable to interpret input",
             "input": "nope"
           }
@@ -3850,10 +3747,7 @@
         "detail": [
           {
             "type": "string_pattern_mismatch",
-            "loc": [
-              "query",
-              "filament.id"
-            ],
+            "loc": ["query", "filament.id"],
             "msg": "String should match pattern '^-?\\d+(,-?\\d+)*$'",
             "input": "abc",
             "ctx": {
@@ -10268,10 +10162,7 @@
         "detail": [
           {
             "type": "int_parsing",
-            "loc": [
-              "query",
-              "limit"
-            ],
+            "loc": ["query", "limit"],
             "msg": "Input should be a valid integer, unable to parse string as an integer",
             "input": "abc"
           }
@@ -10318,10 +10209,7 @@
         "detail": [
           {
             "type": "int_parsing",
-            "loc": [
-              "path",
-              "spool_id"
-            ],
+            "loc": ["path", "spool_id"],
             "msg": "Input should be a valid integer, unable to parse string as an integer",
             "input": "not-an-int"
           }

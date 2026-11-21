@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, KeyObject, randomUUID } from 'node:crypto'
+import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:https'
@@ -269,6 +270,7 @@ async function world(
   const library = await createConnectorLibrary({
     endpoint: `https://localhost:${port}/api/connector/telemetry`,
     credential: { device_token, farm_id: farmId, agent_id: agentId },
+    identity: new ConnectorIdentity(KeyObject.from(pair.privateKey)),
     dataDirectory,
     ca: cert,
     library: {

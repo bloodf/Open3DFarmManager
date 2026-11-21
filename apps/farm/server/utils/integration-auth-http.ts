@@ -133,17 +133,24 @@ export async function integrationTokenRequest(
   if (!id || id.length > 128 || !secret || secret.length > 256)
     return oauthError('invalid_client', 401)
 
-  const rate = rateLimits.take(
-    'token:' + createHash('sha256').update(id).digest('base64url'),
-    30,
-  )
-  if (!rate.allowed)
-    return oauthError('rate_limited', 429, {
-      'retry-after': String(rate.retry),
-    })
-
   try {
-    const issued = await runtime().issue(id, secret, scope?.split(' '))
+    const auth = runtime()
+    const credential = await auth.store.findActiveCredential(id)
+    const rateKey = credential
+      ? 'token:' + createHash('sha256').update(id).digest('base64url')
+      : 'source:' +
+        createHash('sha256')
+          .update(
+            request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+              'unknown-source',
+          )
+          .digest('base64url')
+    const rate = rateLimits.take(rateKey, 30)
+    if (!rate.allowed)
+      return oauthError('rate_limited', 429, {
+        'retry-after': String(rate.retry),
+      })
+    const issued = await auth.issue(id, secret, scope?.split(' '))
     if (issued === 'invalid_client') return oauthError(issued, 401)
     if (issued === 'invalid_scope') return oauthError(issued)
     return Response.json(issued, {

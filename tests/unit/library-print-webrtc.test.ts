@@ -4,6 +4,7 @@
 import {
   createHash,
   generateKeyPairSync,
+  KeyObject,
   randomBytes,
   randomUUID,
 } from 'node:crypto'
@@ -188,6 +189,7 @@ async function farmServer(farmId: string, options: { tamper?: boolean } = {}) {
       publicKeySpki,
     })
     return {
+      identity: new ConnectorIdentity(KeyObject.from(pair.privateKey)),
       agent_id: agentId,
       farm_id: farmId,
       device_token: await issueConnectorCredential({
@@ -300,9 +302,11 @@ async function connector(
     agent_id: agentId,
     farm_id: farmId,
   })
+  const connectorCredential = await server.credential(agentId)
   const library = await createConnectorLibrary({
     endpoint: server.endpoint,
-    credential: await server.credential(agentId),
+    credential: connectorCredential,
+    identity: connectorCredential.identity,
     dataDirectory,
     ca: cert,
   })

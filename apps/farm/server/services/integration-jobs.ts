@@ -363,15 +363,33 @@ export class IntegrationJobsService {
 
     const target = await this.o.store.target(printer)
     const grant = target
-      ? integrationGrantFor(principal, 'jobs:start', target.farmId, printer)
+      ? libraryRequest
+        ? (principal.grants
+            .filter(
+              (candidate) =>
+                candidate.scopes.includes('jobs:start') &&
+                candidate.scopes.includes('jobs:write') &&
+                candidate.farmId === target.farmId &&
+                (candidate.printerAssignmentId === null ||
+                  candidate.printerAssignmentId === printer),
+            )
+            .find((candidate) => !candidate.requiresApproval) ??
+          principal.grants.find(
+            (candidate) =>
+              candidate.scopes.includes('jobs:start') &&
+              candidate.scopes.includes('jobs:write') &&
+              candidate.farmId === target.farmId &&
+              (candidate.printerAssignmentId === null ||
+                candidate.printerAssignmentId === printer),
+          ))
+        : integrationGrantFor(principal, 'jobs:start', target.farmId, printer)
       : undefined
-    const writeGrant =
-      libraryRequest && target
-        ? integrationGrantFor(principal, 'jobs:write', target.farmId, printer)
-        : undefined
-    if (!target || !grant) return { ok: false, problem: 'not-found' }
-    if (libraryRequest && !writeGrant)
-      return { ok: false, problem: 'insufficient-scope' }
+    if (!target) return { ok: false, problem: 'not-found' }
+    if (!grant)
+      return {
+        ok: false,
+        problem: libraryRequest ? 'insufficient-scope' : 'not-found',
+      }
 
     let file = parsed
     if (libraryRequest) {
@@ -454,7 +472,7 @@ export class IntegrationJobsService {
       // New job, or a retry of a job whose envelope was never issued.
       const issued = await envelopes.issue({
         appId: record.appId,
-        grantId: writeGrant?.id ?? record.grantId,
+        grantId: record.grantId,
         farmId: record.farmId,
         agentId: target.agentId,
         printerAssignmentId: record.printerAssignmentId,

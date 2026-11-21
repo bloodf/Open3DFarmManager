@@ -1,4 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto'
+import {
+  createHash,
+  generateKeyPairSync,
+  KeyObject,
+  randomUUID,
+} from 'node:crypto'
+import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { createServer, get, type Server } from 'node:https'
@@ -86,7 +92,8 @@ async function identities() {
       nowSeconds: Math.floor(Date.now() / 1000),
       jti: randomUUID(),
     })
-    return { agent_id: agentId, farm_id: farmId, device_token }
+    const identity = new ConnectorIdentity(KeyObject.from(pair.privateKey))
+    return { agent_id: agentId, farm_id: farmId, device_token, identity }
   }
   return {
     policy,
@@ -189,6 +196,7 @@ async function connectorFor(
   const library = await createConnectorLibrary({
     endpoint: server.endpoint,
     credential,
+    identity: credential.identity,
     dataDirectory: await directory('library-download-connector-'),
     ca: cert,
   })
@@ -210,7 +218,12 @@ async function connectorFor(
 
 function request(
   server: { port: number },
-  credential: { agent_id: string; farm_id: string; device_token: string },
+  credential: {
+    agent_id: string
+    farm_id: string
+    device_token: string
+    identity: ConnectorIdentity
+  },
   extra: Record<string, string> = {},
 ) {
   return new Promise<{ status: number; headers: object; body: Buffer }>(
@@ -223,6 +236,12 @@ function request(
             authorization: `Bearer ${credential.device_token}`,
             'x-connector-agent': credential.agent_id,
             'x-connector-farm': credential.farm_id,
+            ...credential.identity.signLibraryProof({
+              token: credential.device_token,
+              agentId: credential.agent_id,
+              farmId: credential.farm_id,
+              now: Date.now(),
+            }),
             ...extra,
           },
         },
@@ -382,6 +401,9 @@ describe('library download wiring', () => {
           farm_id: randomUUID(),
           agent_id: randomUUID(),
         },
+        identity: new ConnectorIdentity(
+          generateKeyPairSync('ed25519').privateKey,
+        ),
         dataDirectory: await directory('library-download-connector-'),
       }),
     ).toBeUndefined()

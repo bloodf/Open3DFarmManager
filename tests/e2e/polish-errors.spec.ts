@@ -72,6 +72,8 @@ async function open(
   const logged: string[] = []
   issues.set(page, logged)
   page.on('console', (message) => {
+    // The browser itself reports the 404 status of the requested document.
+    if (message.location().url === page.url()) return
     if (message.type() === 'error') logged.push(message.text())
   })
   page.on('pageerror', (error) => logged.push(error.message))

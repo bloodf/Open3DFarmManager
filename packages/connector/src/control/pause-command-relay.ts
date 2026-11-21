@@ -18,6 +18,7 @@ import type {
   PausePeerHandle,
 } from '../auth/pause-capability.ts'
 import type { CachedAuthorityFreshness } from '../auth/offline-authority.ts'
+import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type {
   PauseCommandOutcome,
   PausePhaseMessage,
@@ -43,6 +44,7 @@ export type PauseRelayConfig = Readonly<{
     issuers: readonly PauseIssuer[]
     /** Required offline lifetime gate: pass the tracker's frozen `freshness` view. */
     freshness: CachedAuthorityFreshness
+    trustedKeys?: TrustedKeyAuthority
   }>
   clock: Readonly<{ wallNow(): number; monotonicNow(): number }>
   /** Durable journal used by the dispatcher this relay owns. */
@@ -236,6 +238,9 @@ export function createPauseCommandRelay(
     authority: {
       issuers: config.authority.issuers,
       freshness: config.authority.freshness,
+      ...(config.authority.trustedKeys
+        ? { trustedKeys: config.authority.trustedKeys }
+        : {}),
     },
     clock: config.clock,
     journal: config.journal,

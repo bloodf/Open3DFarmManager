@@ -93,7 +93,8 @@ async function fullscreen() {
 }
 .webcams-select {
   min-height: 2.75rem;
-  max-width: 100%;
+  inline-size: 100%;
+  max-inline-size: 32rem;
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);

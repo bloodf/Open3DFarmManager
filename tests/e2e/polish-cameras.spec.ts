@@ -423,7 +423,11 @@ for (const scenario of scenarios)
         await open(page, scenario, viewport, theme)
         expect(await fits(page)).toBe(true)
         expect(await violations(page)).toEqual([])
-        expect(errors).toEqual([])
+        // /farm mocks the integration approvals as 403 (not allowed), which the
+        // browser logs; that mocked denial is not a page error.
+        expect(
+          errors.filter((error) => !error.includes('status of 403')),
+        ).toEqual([])
       })
 
 test('the camera is a named region with silent, labelled video and one status', async ({

@@ -112,7 +112,10 @@ const view = computed(() => {
         >
           <path d="M3 7h4l2-3h6l2 3h4v12H3z" />
           <circle cx="12" cy="13" r="3.5" />
-          <path v-if="view !== 'loading'" d="M3 3l18 18" />
+          <path
+            v-if="view === 'unavailable' || view === 'error'"
+            d="M3 3l18 18"
+          />
         </svg>
       </div>
     </div>

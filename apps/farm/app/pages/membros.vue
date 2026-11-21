@@ -161,6 +161,7 @@ async function runConfirmed() {
   errorMessage.value = ''
   statusMessage.value = pendingStatus(target.kind)
   confirmStatus.value = pendingStatus(target.kind)
+  let restoreFocus = false
   try {
     switch (target.kind) {
       case 'role':
@@ -211,10 +212,7 @@ async function runConfirmed() {
     } catch {
       stale.value = true
     }
-    // The row that opened the dialog may be gone: keep keyboard focus on the page.
-    await nextTick()
-    if (!document.activeElement || document.activeElement === document.body)
-      farmSelect.value?.focus()
+    restoreFocus = true
   } catch (error: unknown) {
     const status =
       error && typeof error === 'object' && 'statusCode' in error
@@ -229,6 +227,13 @@ async function runConfirmed() {
     errorSummary.value?.focus()
   } finally {
     pending.value = false
+  }
+  // The row that opened the dialog may be gone, and its buttons were disabled
+  // while the request ran: keep keyboard focus on the page.
+  if (restoreFocus) {
+    await nextTick()
+    if (!document.activeElement || document.activeElement === document.body)
+      farmSelect.value?.focus()
   }
 }
 

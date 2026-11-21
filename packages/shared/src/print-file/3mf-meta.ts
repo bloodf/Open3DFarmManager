@@ -21,6 +21,7 @@ const THUMBNAIL_MAX_BYTES = 512 * 1024
 const GCODE_HEAD = GCODE_HEAD_BYTES
 const GCODE_TAIL = GCODE_TAIL_BYTES
 const MAX_PLATES = 256
+const MAX_ATTRIBUTE_VALUE_LENGTH = 16 * 1024
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
 export const UNSLICED_REASON =
@@ -323,10 +324,27 @@ function settingsFilaments(settings: ProjectSettings): ThreeMfFilament[] {
 
 function attributes(source: string): Map<string, string> {
   const map = new Map<string, string>()
-  for (const match of source.matchAll(
-    /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
-  )) {
-    map.set(match[1]!, unescapeXml(match[2] ?? match[3] ?? ''))
+  let i = 0
+  while (i < source.length) {
+    if (!/[A-Za-z_]/.test(source[i]!)) {
+      i++
+      continue
+    }
+    const start = i++
+    while (i < source.length && /[\w:.-]/.test(source[i]!)) i++
+    const name = source.slice(start, i)
+    while (i < source.length && /\s/.test(source[i]!)) i++
+    if (source[i] !== '=') continue
+    i++
+    while (i < source.length && /\s/.test(source[i]!)) i++
+    const quote = source[i]
+    if (quote !== '"' && quote !== "'") continue
+    const valueStart = ++i
+    while (i < source.length && source[i] !== quote) i++
+    if (i === source.length) break
+    if (i - valueStart <= MAX_ATTRIBUTE_VALUE_LENGTH)
+      map.set(name, unescapeXml(source.slice(valueStart, i)))
+    i++
   }
   return map
 }

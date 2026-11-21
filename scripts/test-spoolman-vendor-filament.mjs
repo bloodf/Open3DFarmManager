@@ -141,10 +141,9 @@ assert.deepEqual(classifyLegacyBody('{"a":1}', 'text/plain'), {
   kind: 'raw',
   text: '{"a":1}',
 })
-assert.deepEqual(
-  LEGACY_API_MODULES.map((m) => m.name),
-  ['health', 'vendor', 'filament'],
-)
+const moduleNames = LEGACY_API_MODULES.map((m) => m.name)
+for (const name of ['health', 'vendor', 'filament'])
+  assert.ok(moduleNames.includes(name), `missing legacy module ${name}`)
 check('fastapi-body-classification-and-module-registry')
 
 // ---- disposable PostgreSQL
@@ -526,7 +525,7 @@ try {
     [...LEGACY_API_MODULES, probe],
   )
   assert.deepEqual(extended.body, { farm: true, q: '1' })
-  const unclaimed = await call(writeA, 'GET', '/api/v1/spool')
+  const unclaimed = await call(writeA, 'GET', '/api/v1/unclaimed-endpoint')
   assert.deepEqual(
     [unclaimed.status, unclaimed.body],
     [404, { message: 'Not Found' }],

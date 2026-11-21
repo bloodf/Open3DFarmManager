@@ -130,10 +130,146 @@ export function asStr(loc: Loc, input: unknown, max?: number): Checked<string> {
   return good(input)
 }
 
+const BOOL_TRUE = new Set(['1', 'true', 't', 'yes', 'y', 'on'])
+const BOOL_FALSE = new Set(['0', 'false', 'f', 'no', 'n', 'off'])
+
+/** pydantic `bool` in lax mode. */
+export function asBool(loc: Loc, input: unknown): Checked<boolean> {
+  if (typeof input === 'boolean') return good(input)
+  if (typeof input === 'number') {
+    if (input === 1) return good(true)
+    if (input === 0) return good(false)
+    return bad({
+      type: 'bool_parsing',
+      loc,
+      msg: 'Input should be a valid boolean, unable to interpret input',
+      input,
+    })
+  }
+  if (typeof input === 'string') {
+    const low = input.toLowerCase()
+    if (BOOL_TRUE.has(low)) return good(true)
+    if (BOOL_FALSE.has(low)) return good(false)
+    return bad({
+      type: 'bool_parsing',
+      loc,
+      msg: 'Input should be a valid boolean, unable to interpret input',
+      input,
+    })
+  }
+  return bad({
+    type: 'bool_type',
+    loc,
+    msg: 'Input should be a valid boolean',
+    input,
+  })
+}
+
+const ISO_DT =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|z|[+-]\d{2}:?\d{2})?)?$/
+
+/**
+ * Parse an ISO 8601 date or datetime string into UTC milliseconds.
+ * Returns `null` if invalid or out of calendar range.
+ */
+export function parseIsoUtcMs(
+  raw: string,
+  allowDateOnly = false,
+): number | null {
+  const m = ISO_DT.exec(raw)
+  if (!m) return null
+  if (!allowDateOnly && m[4] === undefined) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const hour = m[4] ? Number(m[4]) : 0
+  const minute = m[5] ? Number(m[5]) : 0
+  const second = m[6] ? Number(m[6]) : 0
+  const frac = m[7] ? Number(`0.${m[7]}`) * 1000 : 0
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  )
+    return null
+  let offsetMs = 0
+  const tz = m[8]
+  if (tz && tz !== 'Z' && tz !== 'z') {
+    const sign = tz[0] === '-' ? -1 : 1
+    const clean = tz.slice(1).replace(':', '')
+    const th = Number(clean.slice(0, 2))
+    const tm = Number(clean.slice(2, 4))
+    if (th > 23 || tm > 59) return null
+    offsetMs = sign * (th * 60 + tm) * 60_000
+  }
+  const d = new Date(
+    Date.UTC(year, month - 1, day, hour, minute, second, Math.floor(frac)),
+  )
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  )
+    return null
+  const ms = d.getTime() - offsetMs
+  return Number.isSafeInteger(ms) && ms >= 0 ? ms : null
+}
+
+/** pydantic `datetime` in lax mode -> UTC milliseconds. */
+export function asDateTime(loc: Loc, input: unknown): Checked<number> {
+  if (typeof input === 'number') {
+    if (!Number.isFinite(input))
+      return bad({
+        type: 'datetime_parsing',
+        loc,
+        msg: 'Input should be a valid datetime, dates after 9999 are not supported as unix timestamps',
+        input,
+        ctx: { error: 'dates after 9999 are not supported as unix timestamps' },
+      })
+    const ms = Math.trunc(Math.abs(input) >= 2e10 ? input : input * 1000)
+    if (ms < 0 || !Number.isSafeInteger(ms))
+      return bad({
+        type: 'datetime_parsing',
+        loc,
+        msg: 'Input should be a valid datetime',
+        input,
+      })
+    return good(ms)
+  }
+  if (typeof input === 'string') {
+    if (/^[+-]?\d+(\.\d+)?$/.test(input)) return asDateTime(loc, Number(input))
+    const ms = parseIsoUtcMs(input, false)
+    if (ms !== null) return good(ms)
+    const err =
+      input.length < 4
+        ? 'input is too short'
+        : 'invalid character in year'
+    return bad({
+      type: 'datetime_from_date_parsing',
+      loc,
+      msg: `Input should be a valid datetime or date, ${err}`,
+      input,
+      ctx: { error: err },
+    })
+  }
+  return bad({
+    type: 'datetime_type',
+    loc,
+    msg: 'Input should be a valid datetime',
+    input,
+  })
+}
+
 export type FieldSpec =
   | { kind: 'str'; max?: number; required?: boolean }
   | { kind: 'float'; ge?: number; gt?: number; required?: boolean }
-  | { kind: 'int'; ge?: number }
+  | { kind: 'int'; ge?: number; required?: boolean }
+  | { kind: 'bool'; required?: boolean; nullable?: boolean }
+  | { kind: 'datetime'; required?: boolean }
   | { kind: 'enum'; values: readonly string[] }
   | { kind: 'extra' }
 
@@ -142,7 +278,11 @@ function checkField(
   spec: FieldSpec,
   input: unknown,
 ): Checked<unknown> {
-  if (input === null && !('required' in spec && spec.required))
+  if (
+    input === null &&
+    !('required' in spec && spec.required) &&
+    !('nullable' in spec && spec.nullable === false)
+  )
     return good(null)
   switch (spec.kind) {
     case 'str':
@@ -181,6 +321,10 @@ function checkField(
         })
       return n
     }
+    case 'bool':
+      return asBool(loc, input)
+    case 'datetime':
+      return asDateTime(loc, input)
     case 'enum': {
       if (typeof input === 'string' && spec.values.includes(input))
         return good(input)

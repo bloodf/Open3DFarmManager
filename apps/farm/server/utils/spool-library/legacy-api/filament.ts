@@ -50,7 +50,7 @@ import { VENDOR_MODEL, pageQuery } from './vendor.ts'
 
 type Row = SpoolFilament & { vendor: SpoolVendor | null }
 
-const FILAMENT_MODEL: Model<Row> = {
+export const FILAMENT_MODEL: Model<Row> = {
   name: 'Filament',
   columns: {
     id: (f) => f.id,
@@ -233,8 +233,8 @@ async function respondFilament(
   return vendor.ok ? respond(200, filamentJson(filament, vendor.value)) : vendor
 }
 
-const ID_LIST = /^-?\d+(,-?\d+)*$/
-const patternIssue = (name: string, input: string): Issue => ({
+export const ID_LIST = /^-?\d+(,-?\d+)*$/
+export const patternIssue = (name: string, input: string): Issue => ({
   type: 'string_pattern_mismatch',
   loc: ['query', name],
   msg: `String should match pattern '${ID_LIST.source}'`,

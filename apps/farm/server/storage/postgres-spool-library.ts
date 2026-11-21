@@ -124,6 +124,8 @@ const SNAKE: Record<string, string> = {
   initialWeight: 'initial_weight',
   usedWeight: 'used_weight',
   lotNr: 'lot_nr',
+  firstUsedAt: 'first_used_at',
+  lastUsedAt: 'last_used_at',
 }
 /** Column-name row of only the fields the caller supplied. */
 function columns(input: object, allowed: readonly string[], sp: Sql): Row {
@@ -416,6 +418,8 @@ class ScopedRepository implements SpoolLibraryRepository {
       optText(input.lotNr, 256) &&
       optText(input.comment, 1024) &&
       (input.archived === undefined || typeof input.archived === 'boolean') &&
+      optInt(input.firstUsedAt) &&
+      optInt(input.lastUsedAt) &&
       validExtra(input.extra)
     )
   }
@@ -445,8 +449,8 @@ class ScopedRepository implements SpoolLibraryRepository {
         if (!this.spoolValid(input, true)) return fail('invalid-input')
         const id = await this.nextId(sp, 'spool')
         const rows = await sp<Spool[]>`
-          INSERT INTO farm.spools (farm_id, id, filament_id, initial_weight, spool_weight, used_weight, price, location, lot_nr, comment, archived, extra, registered_at)
-          VALUES (${this.farmId}::uuid, ${id}, ${input.filamentId}, ${input.initialWeight ?? null}, ${input.spoolWeight ?? null}, ${input.usedWeight ?? 0}, ${input.price ?? null}, ${input.location ?? null}, ${input.lotNr ?? null}, ${input.comment ?? null}, ${input.archived ?? false}, ${sp.json((input.extra ?? {}) as never)}, ${this.now})
+          INSERT INTO farm.spools (farm_id, id, filament_id, initial_weight, spool_weight, used_weight, price, location, lot_nr, comment, archived, extra, registered_at, first_used_at, last_used_at)
+          VALUES (${this.farmId}::uuid, ${id}, ${input.filamentId}, ${input.initialWeight ?? null}, ${input.spoolWeight ?? null}, ${input.usedWeight ?? 0}, ${input.price ?? null}, ${input.location ?? null}, ${input.lotNr ?? null}, ${input.comment ?? null}, ${input.archived ?? false}, ${sp.json((input.extra ?? {}) as never)}, ${this.now}, ${input.firstUsedAt ?? null}, ${input.lastUsedAt ?? null})
           RETURNING ${sp.unsafe(SPOOL)}`
         return rows[0] ? ok(rows[0]) : fail('storage-unavailable')
       }),
@@ -466,6 +470,8 @@ class ScopedRepository implements SpoolLibraryRepository {
             'lotNr',
             'comment',
             'archived',
+            'firstUsedAt',
+            'lastUsedAt',
             'extra',
           ],
           sp,
@@ -488,9 +494,11 @@ class ScopedRepository implements SpoolLibraryRepository {
       }),
     use: (id: SpoolRecordId, grams: number) =>
       this.guarded(true, async (sp) => {
-        if (!validId(id) || !isNum(grams, 0)) return fail('invalid-input')
+        if (!validId(id) || typeof grams !== 'number' || !Number.isFinite(grams))
+          return fail('invalid-input')
         const rows = await sp<Spool[]>`
-          UPDATE farm.spools SET used_weight = used_weight + ${grams},
+          UPDATE farm.spools
+          SET used_weight = CASE WHEN used_weight + ${grams} >= 0.0 THEN used_weight + ${grams} ELSE 0.0 END,
             first_used_at = COALESCE(first_used_at, ${this.now}), last_used_at = ${this.now}
           WHERE farm_id=${this.farmId}::uuid AND id=${id} RETURNING ${sp.unsafe(SPOOL)}`
         return rows[0] ? ok(rows[0]) : fail('not-found')

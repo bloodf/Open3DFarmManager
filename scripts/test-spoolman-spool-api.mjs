@@ -52,14 +52,18 @@ const PINNED_SPOOLMAN_IMAGE_ID =
   'sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1'
 const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 if (process.argv.length !== 2)
-  throw new Error('No arguments accepted: node scripts/test-spoolman-spool-api.mjs')
+  throw new Error(
+    'No arguments accepted: node scripts/test-spoolman-spool-api.mjs',
+  )
 
 const checks = []
 const check = (name) => checks.push(name)
 const readText = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const read = (path) => JSON.parse(readText(path))
 const spec = read('../docs/compatibility/spoolman-openapi-v0.27.1.json')
-const upstreamLock = read('../third_party/spoolman-reference/upstream.lock.json')
+const upstreamLock = read(
+  '../third_party/spoolman-reference/upstream.lock.json',
+)
 const recorded = read('../tests/fixtures/spoolman/spool-api/upstream.json')
 const casesText = readText('../tests/fixtures/spoolman/spool-api/cases.json')
 const cases = JSON.parse(casesText)
@@ -460,11 +464,19 @@ try {
     JSON.stringify({ use_weight: 12.5 }),
   )
   assert.equal(kobraUse.status, 200)
-  assert.ok(Math.abs(kobraUse.body.used_weight - (0.298254952550181 + 12.5)) < 1e-9)
-  check('literal-upstream-client-contracts-moonraker-octoprint-ha-orca-connector-kobra')
+  assert.ok(
+    Math.abs(kobraUse.body.used_weight - (0.298254952550181 + 12.5)) < 1e-9,
+  )
+  check(
+    'literal-upstream-client-contracts-moonraker-octoprint-ha-orca-connector-kobra',
+  )
 
   // Unclaimed sibling subpath `/api/v1/spool/group` stays 404
-  const groupUnclaimed = await call(writeA, 'GET', '/api/v1/spool/group?group_by=location')
+  const groupUnclaimed = await call(
+    writeA,
+    'GET',
+    '/api/v1/spool/group?group_by=location',
+  )
   assert.deepEqual(
     [groupUnclaimed.status, groupUnclaimed.body],
     [404, { message: 'Not Found' }],
@@ -584,14 +596,21 @@ try {
 
   // ---- read-only credential: reads succeed, all mutations refused 403 before validation
   assert.equal((await call(readA, 'GET', '/api/v1/spool')).status, 200)
-  assert.equal((await call(readA, 'GET', `/api/v1/spool/${spoolIdA}`)).status, 200)
+  assert.equal(
+    (await call(readA, 'GET', `/api/v1/spool/${spoolIdA}`)).status,
+    200,
+  )
   for (const [method, path, body] of [
     ['POST', '/api/v1/spool', JSON.stringify({ filament_id: 1 })],
     ['POST', '/api/v1/spool', '{'],
     ['PATCH', `/api/v1/spool/${spoolIdA}`, JSON.stringify({ location: 'x' })],
     ['DELETE', `/api/v1/spool/${spoolIdA}`],
     ['PUT', `/api/v1/spool/${spoolIdA}/use`, JSON.stringify({ use_weight: 1 })],
-    ['PUT', `/api/v1/spool/${spoolIdA}/measure`, JSON.stringify({ weight: 500 })],
+    [
+      'PUT',
+      `/api/v1/spool/${spoolIdA}/measure`,
+      JSON.stringify({ weight: 500 }),
+    ],
   ]) {
     const denied = await call(readA, method, path, body)
     assert.deepEqual(

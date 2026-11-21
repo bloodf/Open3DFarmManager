@@ -292,7 +292,12 @@ function main() {
     const hasTestEvidence = evidence.some((e) =>
       e.startsWith('scripts/test-spoolman-'),
     )
-    if (!hasValue(row.scope) || !hasRoute || !hasBuiltinHandler || !hasTestEvidence) {
+    if (
+      !hasValue(row.scope) ||
+      !hasRoute ||
+      !hasBuiltinHandler ||
+      !hasTestEvidence
+    ) {
       note(
         `matrix row ${row.endpoint_id} marks builtin_server_compatibility_status=implemented without built-in route, handler, scope, and test evidence`,
       )

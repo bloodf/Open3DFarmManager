@@ -23,7 +23,10 @@ const TASK_LABEL =
   process.env.SPOOLMAN_CAPTURE_TASK_LABEL ?? 'spoolman-spool-api-540'
 const PREFIX = process.env.SPOOLMAN_CAPTURE_PREFIX ?? 'o3dfm-capture-540'
 const name = `${PREFIX}-${randomBytes(4).toString('hex')}`
-const fixtures = new URL('../tests/fixtures/spoolman/spool-api/', import.meta.url)
+const fixtures = new URL(
+  '../tests/fixtures/spoolman/spool-api/',
+  import.meta.url,
+)
 const casesText = await readFile(new URL('cases.json', fixtures), 'utf8')
 const casesSha256 = createHash('sha256').update(casesText).digest('hex')
 const cases = JSON.parse(casesText)

@@ -23,11 +23,11 @@ export function featureFetch<T>(
     body?: Record<string, unknown>
   } = {},
 ): Promise<T> {
-  return $fetch<T>(spoolApi(farmId, path), {
+  return $fetch(spoolApi(farmId, path), {
     ...options,
     retry: 0,
     timeout: 15_000,
-  })
+  }) as Promise<unknown> as Promise<T>
 }
 
 export async function fetchSpools(farmId: string) {

@@ -6,7 +6,7 @@ import type {
 } from './control-areas.ts'
 
 export type CatalogCapability =
-  'documented' | 'simulated' | 'unknown' | 'unsupported'
+  'hardware' | 'documented' | 'simulated' | 'unknown' | 'unsupported'
 
 export interface AnycubicCatalogProduct {
   readonly id: string
@@ -32,6 +32,14 @@ export interface AnycubicCatalogProduct {
       | 'cancel',
       CatalogCapability
     >
+  >
+  /**
+   * Relatórios de `scripts/qualify-printer.ts` em `docs/hardware-reports/` que
+   * sustentam cada status `hardware`. A qualificação é somente leitura, então
+   * só telemetria, arquivos e câmera podem ser promovidos por ela.
+   */
+  readonly hardwareReports?: Readonly<
+    Partial<Record<'telemetry' | 'files' | 'camera', readonly string[]>>
   >
   readonly controlAreas: ControlAreaCapabilities
   readonly controlAreaEvidence?: ControlAreaEvidenceMap

@@ -1,0 +1,128 @@
+{
+  "vendor": "moonraker",
+  "host": "<printer-host>",
+  "port": 7125,
+  "timestamp": "2026-11-21T04:43:20.255Z",
+  "identity": {
+    "vendor": "Klipper",
+    "model": "Moonraker Generic",
+    "firmware": "Moonraker 2.0.0"
+  },
+  "telemetry": {
+    "observed": true,
+    "fields": [
+      "klippyConnected",
+      "klippyState",
+      "activeTool",
+      "toolTemperatures"
+    ],
+    "sample": {
+      "klippyConnected": true,
+      "klippyState": "ready",
+      "moonrakerVersion": "2.0.0",
+      "activeTool": "extruder2",
+      "tools": [
+        {
+          "index": 0,
+          "object": "extruder",
+          "active": false,
+          "celsius": 30,
+          "targetCelsius": 0
+        },
+        {
+          "index": 1,
+          "object": "extruder1",
+          "active": false,
+          "celsius": 30,
+          "targetCelsius": 0
+        },
+        {
+          "index": 2,
+          "object": "extruder2",
+          "active": true,
+          "celsius": 30,
+          "targetCelsius": 0
+        },
+        {
+          "index": 3,
+          "object": "extruder3",
+          "active": false,
+          "celsius": 30,
+          "targetCelsius": 0
+        }
+      ]
+    }
+  },
+  "camera": {
+    "reachable": false,
+    "kind": "webcam",
+    "url": null,
+    "detail": "Declared webcam: case"
+  },
+  "files": {
+    "listable": true,
+    "count": 16,
+    "files": [
+      {
+        "name": "<redacted-1>.gcode",
+        "size": 12685809,
+        "modified": 1795208884.2710724,
+        "estimatedTime": 15940
+      },
+      {
+        "name": "<redacted-2>.gcode",
+        "size": 14179565,
+        "modified": 1795173329.5185494,
+        "estimatedTime": 16095
+      },
+      {
+        "name": "<redacted-3>.gcode",
+        "size": 10396275,
+        "modified": 1795169992.546011,
+        "estimatedTime": 15275
+      },
+      {
+        "name": "<redacted-4>.gcode",
+        "size": 10428254,
+        "modified": 1795140579.9643292,
+        "estimatedTime": 15328
+      },
+      {
+        "name": "<redacted-5>.gcode",
+        "size": 13688995,
+        "modified": 1795124586.4370735,
+        "estimatedTime": 13732
+      }
+    ]
+  },
+  "catalog": {
+    "matchedCatalogId": "klipper-generic-moonraker",
+    "matchedCatalogBrand": "Klipper",
+    "matchedCatalogModel": "Klipper + Moonraker genérico",
+    "currentCapabilities": {
+      "telemetry": "simulated",
+      "files": "unknown",
+      "camera": "simulated",
+      "materials": "simulated",
+      "pause": "simulated",
+      "resume": "simulated",
+      "cancel": "simulated"
+    },
+    "provenCapabilities": {
+      "telemetry": true,
+      "camera": false,
+      "files": true
+    },
+    "canPromoteToHardwareProven": true,
+    "promotionNotes": [
+      "Identified catalog entry: klipper-generic-moonraker (Klipper Klipper + Moonraker genérico)",
+      "Telemetry observed with 4 active field(s) [klippyConnected, klippyState, activeTool, toolTemperatures]",
+      "Camera was unreachable or not detected",
+      "File listing verified with 16 file(s) listed"
+    ]
+  },
+  "qualification": {
+    "status": "qualified",
+    "summary": "Printer successfully qualified with active telemetry (4 fields) and files verified."
+  }
+}

@@ -205,6 +205,8 @@ async function fetchMoonrakerFiles(
   _signal: AbortSignal,
 ) {
   const socket = createMoonrakerSocket(origin, limits as any)
+  // Metadata is requested for up to 100 files at once, one listener each.
+  socket.setMaxListeners(0)
   try {
     await new Promise<void>((resolve, reject) => {
       const onOpen = () => {

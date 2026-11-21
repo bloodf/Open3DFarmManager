@@ -27,6 +27,7 @@ describe('compatibility catalog view', () => {
         expect(capabilityStatusLabels[status]).toBeTruthy()
     }
     expect(capabilityStatusLabels).toEqual({
+      hardware: 'Comprovado em hardware',
       documented: 'Documentado',
       simulated: 'Simulado',
       unknown: 'Desconhecido',

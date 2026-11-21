@@ -38,6 +38,7 @@ interface State {
   assets?: Array<{ name: string; digest: string; state: string }>
   images?: Record<string, string>
   fail?: string
+  pullError?: string
   writes?: string[]
 }
 
@@ -81,6 +82,7 @@ if (path.basename(process.argv[1]) === 'docker') {
   if (command === 'image') console.log(image.startsWith('ghcr.io/') ? state.images[image] : id)
   else if (command === 'pull') {
     if (state.fail === 'registry') fail('Error response from daemon: unauthorized')
+    if (state.pullError) fail(state.pullError.replace('<destination>', image))
     if (!state.images?.[image]) fail('Error response from daemon: manifest unknown')
   } else if (command === 'push') {
     mutate('push:' + id, () => { (state.images ??= {})[image] = id })
@@ -229,3 +231,28 @@ test('checks archive integrity before publication', (t) => {
   assert.equal(f.run().status, 1)
   assert.deepEqual(f.state(), {})
 })
+
+for (const message of [
+  'Error response from daemon: manifest unknown',
+  'Error response from daemon: manifest for <destination> not found: manifest unknown: manifest unknown',
+]) {
+  test(`pushes on exact missing image: ${message}`, (t) => {
+    const f = fixture(t, { pullError: message })
+    const result = f.run()
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(f.state().writes?.includes('push:farm-id'))
+  })
+}
+
+for (const message of [
+  'Error response from daemon: manifest for ghcr.io/other/image:v1.2.3 not found: manifest unknown: manifest unknown',
+  'Error response from daemon: manifest unknown: unauthorized',
+]) {
+  test(`refuses unrelated registry error: ${message}`, (t) => {
+    const f = fixture(t, { pullError: message })
+    const result = f.run()
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, /manifest unknown/)
+    assert.equal(f.state().writes?.some((write) => write.startsWith('push:')) ?? false, false)
+  })
+}

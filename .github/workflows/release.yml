@@ -140,7 +140,10 @@ jobs:
               run('docker', ['pull', '--platform', 'linux/amd64', destination])
             } catch (error) {
               // Only a registry's explicit missing-manifest response permits a push.
-              if (!/^Error response from daemon: (?:manifest for \S+ not found: )?manifest unknown\b/m.test(error.stderr ?? '')) {
+              if (![
+                'Error response from daemon: manifest unknown',
+                `Error response from daemon: manifest for ${destination} not found: manifest unknown: manifest unknown`,
+              ].includes((error.stderr ?? '').trim())) {
                 throw error
               }
               return { source, destination }

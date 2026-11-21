@@ -189,13 +189,49 @@ Treat the token like a password:
 - OpenFarm's storage layer never logs tokens, and a credential is never
   returned after creation (listings show label, access and timestamps only).
 
+### Auxiliary APIs and farm features schema (migration `0088_spool_features_schema`)
+
+Migration `0088` adds the farm-scoped tables and column extensions shared by the
+Spoolman auxiliary APIs (#545) and farm spool features (#543), with row types in
+`apps/farm/server/storage/spool-features-types.ts`:
+
+| Table / Extension                                | Purpose                                                                                                    |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `farm.spool_library_settings` (0086)             | Per-farm upstream settings (defaults `source_key='local'` for direct API writes).                          |
+| `farm.spool_library_fields` (0086)               | Per-farm custom field definitions per entity (`vendor`/`filament`/`spool`; defaults `source_key='local'`). |
+| `farm.spool_locations`                           | Farm-scoped spool locations with ordering and rename support.                                              |
+| `farm.spool_farm_settings`                       | Per-farm default low-stock threshold (grams) and ISO-4217 currency code for print cost.                    |
+| `farm.spool_filaments.low_stock_threshold_grams` | Optional per-filament low-stock override in grams (`NULL` inherits the farm default).                      |
+| `farm.spool_slot_assignments`                    | Printer/AMS/toolhead slot history with partial unique index enforcing one active spool per slot.           |
+| `farm.spool_usage_records`                       | Per-spool consumption (`telemetry`/`manual`/`api`), optional `job_id` and `printer_id`, `corrected_by`.    |
+| `farm.spool_drying_logs`                         | Per-spool drying sessions (`started_at`, `ended_at`, `temperature_celsius`, `notes`).                      |
+| `farm.spool_humidity_readings`                   | Humidity readings (`ams`/`manual`) attached to a spool, a printer/AMS/toolhead slot, or both.              |
+
+Every new table carries `farm_id` and composite `(farm_id, id)` foreign keys into
+`farm.spools`, `farm.printer_assignments`, and `farm.job_history`. Runtime role
+`farm_spool_features` is `NOLOGIN ... NOBYPASSRLS` with column-level `UPDATE`
+grants only (`farm_id` is never updatable), leaving `farm_spool_library` and
+`farm_spool_import` within their existing role policies.
+
+Cost per print formula: `COALESCE(spool.price, filament.price) / spool.initial_weight * grams_used`,
+formatted in the farm's configured `currency`.
+
 ## Evidence
 
 ```
 node scripts/test-spool-library-storage.mjs
 node scripts/test-spool-library-legacy-access.mjs
 node scripts/test-spoolman-vendor-filament.mjs
+node scripts/test-spool-features-schema.mjs
 ```
+
+`test-spool-features-schema.mjs` starts a disposable local `postgres:17` Docker
+container (label `o3dfm.task=spool-features-schema-545-543`, optional
+`SPOOL_FEATURES_SCHEMA_EVIDENCE_DIR`), applies all migrations up through `0088`,
+verifies every table, check constraint, active-slot uniqueness, cost formula,
+cross-farm FK rejection, `farm_spool_features` least-privilege boundaries, and
+`farm_spool_library`/`farm_spool_import` role policy compatibility, then tests
+the `0088` down/up rollback and confirms container removal.
 
 `test-spoolman-vendor-filament.mjs` applies the migrations through `0087`,
 replays every recorded upstream answer on one farm (status, body, key order and

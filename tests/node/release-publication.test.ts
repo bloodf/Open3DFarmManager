@@ -82,7 +82,8 @@ if (path.basename(process.argv[1]) === 'docker') {
   if (command === 'image') console.log(image.startsWith('ghcr.io/') ? state.images[image] : id)
   else if (command === 'pull') {
     if (state.fail === 'registry') fail('Error response from daemon: unauthorized')
-    if (!state.images?.[image]) fail((state.pullError ?? 'Error response from daemon: manifest unknown').replaceAll('$IMAGE', image))
+    if (state.pullError && !state.images?.[image]) fail(state.pullError.replaceAll('$IMAGE', image))
+    if (!state.images?.[image]) fail('Error response from daemon: manifest unknown')
   } else if (command === 'push') {
     mutate('push:' + id, () => { (state.images ??= {})[image] = id })
   } else fail('Unexpected docker call')

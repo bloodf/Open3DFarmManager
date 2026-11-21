@@ -32,8 +32,15 @@ type CacheEntry = {
   modified: string | null
   expires: number
 }
+type Material = {
+  material: string
+  density: number
+  extruder_temp: number | null
+  bed_temp: number | null
+}
 type Snapshot = {
   items: Filament[]
+  materials: Material[]
   modified: Date
   etag: string
   size: number
@@ -180,6 +187,7 @@ export function createExternalFilamentCatalog(
         parseFilament,
       )
       // Upstream only publishes the filament file after both source files validate.
+      const materials: Material[] = []
       for (const value of parseList(await download('materials.json'))) {
         const obj = record(value)
         if (
@@ -188,6 +196,16 @@ export function createExternalFilamentCatalog(
           !Number.isFinite(Number(obj.density))
         )
           throw new Error('Invalid material')
+        const temp = (key: string): number | null => {
+          const raw = obj[key]
+          return typeof raw === 'number' && Number.isInteger(raw) ? raw : null
+        }
+        materials.push({
+          material: obj.material,
+          density: Number(obj.density),
+          extruder_temp: temp('extruder_temp'),
+          bed_temp: temp('bed_temp'),
+        })
       }
       const content = JSON.stringify(items)
       const modified = new Date()
@@ -195,7 +213,7 @@ export function createExternalFilamentCatalog(
       const etag = `"${createHash('md5')
         .update(`${modified.getTime() / 1000}-${size}`)
         .digest('hex')}"`
-      snapshot = { items, modified, etag, size }
+      snapshot = { items, materials, modified, etag, size }
     },
     get snapshot() {
       return snapshot
@@ -212,12 +230,24 @@ export function createExternalFilamentModule(
       const path = request.apiPath
       if (
         path !== '/api/v1/external/filament' &&
-        path !== '/api/v1/external/filament/search'
+        path !== '/api/v1/external/filament/search' &&
+        path !== '/api/v1/external/material'
       )
         return undefined
       if (request.method !== 'GET')
         return respond(405, { detail: 'Method Not Allowed' }, { allow: 'GET' })
       const snapshot = catalog.snapshot
+      if (path === '/api/v1/external/material') {
+        if (!snapshot) return respond(500, 'Internal Server Error')
+        return respond(
+          200,
+          snapshot.materials.map((item) =>
+            Object.fromEntries(
+              Object.entries(item).filter(([, value]) => value !== null),
+            ),
+          ),
+        )
+      }
       if (path.endsWith('/filament')) {
         if (!snapshot) return respond(500, 'Internal Server Error')
         // The request contract has no incoming headers. These metadata headers

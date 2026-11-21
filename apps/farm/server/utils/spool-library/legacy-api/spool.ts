@@ -186,7 +186,7 @@ function parseDatetimeBound(raw: string, fieldName: string): number {
 }
 
 /** Upstream `add_where_clause_datetime_opt`. Throws Error(msg) for 400. */
-function compileDatetimeFilter(
+export function compileDatetimeFilter(
   value: string | null,
   fieldName: string,
 ): ((ms: number | null) => boolean) | null {

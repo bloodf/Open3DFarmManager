@@ -67,17 +67,34 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - `{"kind":"Untrusted browser origin (HTTP writes or WS handshake)","websocket_close_code":4403}`
 - `{"kind":"Untrusted Host header (WS handshake)","websocket_close_code":4400}`
 
+## Diferenças documentadas do servidor embutido
+
+- POST /api/v1/backup returns a farm-scoped JSON export in the response body (BackupResponse fields created and path, plus an export member); no server-side file is written, so there is no backup directory and no 500 "Backup failed" case.
+- GET /api/v1/info describes the built-in server: db_type postgresql, empty data_dir, logs_dir and backups_dir, no update check.
+- Settings: only registered keys exist (currency, round_prices, print_presets, base_url, locations_spoolorders, extra_fields_vendor, extra_fields_filament, extra_fields_spool). The extra_fields_* settings mirror the farm's extra-field registry and are changed through /api/v1/field, not through /api/v1/setting.
+- Error message texts of 400/404/415 answers for fields, settings, renames and groups are not verified against the upstream source, which is not vendored; status codes and body shapes follow the pinned OpenAPI.
+- GET /api/v1/search recognises #hex colour queries only (no CSS colour names); ranking is approximated.
+- Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served because migration 0089 has no tag storage; GET /tag/reader is always empty. Websocket routes are a separate unit.
+- The external filament library needs SPOOLMAN_EXTERNAL_DB_URL; it syncs in the background and answers 500 until the first sync, as upstream does before its first sync.
+- The API path is percent-decoded once (so location names with spaces work); encoded dots, slashes, backslashes and NUL are refused with 401, as are malformed escapes.
+- Writes to settings and extra-field definitions need the runtime database role to be a member of farm_spool_features (migration 0089) as well as farm_spool_library; without it those writes answer 503 and everything else is unaffected.
+
 ## Cabeçalhos notáveis
 
 - `{"endpoint":"GET /api/v1/external/filament/search","name":"x-total-count","direction":"response"}`
 - `{"endpoint":"GET /api/v1/spool","name":"x-total-count","direction":"response"}`
+- `{"endpoint":"GET /api/v1/spool/group","name":"x-total-remaining-weight","direction":"response"}`
+- `{"endpoint":"GET /api/v1/spool/group","name":"x-total-spools","direction":"response"}`
+- `{"endpoint":"GET /api/v1/spool/group","name":"x-total-count","direction":"response"}`
 
 ## Fixtures e proveniência
 
 - `tests/fixtures/spoolman/spools.json` — SHA-256 `ac6584e71b23f0ad93e0c8d770fb48f4a63b09390deb481df871918fa57b69f6`. Synthetic Spoolman shapes for unit tests. Original MIT fixture data; field shapes aligned with packages/connector/src/spoolman/read.ts parsers and pinned upstream v0.27.1 models.py names. Not copied from upstream database dumps.
 - `infra/sim/spoolman/seed.json` — SHA-256 `44a863cf491f74989a813141a5031e1e9a5d621609542cf59befa53835410ad9`. Docker sim:seed inventory fixture. Original MIT fixture data; field shapes aligned with packages/connector/src/spoolman/read.ts parsers and pinned upstream v0.27.1 models.py names. Not copied from upstream database dumps.
-- `tests/fixtures/spoolman/spool-api/cases.json` — SHA-256 `3d479dfce543250e86d223235047d3d408ca34506ee6952c39a684d10ae3c1f7`. Spool API request corpus for upstream capture and built-in server parity tests (#540). Original MIT test request definitions exercising all 7 Spoolman v0.27.1 HTTP spool endpoints, filters, sorting, pagination, extra fields, archive, use and measure semantics.
-- `tests/fixtures/spoolman/spool-api/upstream.json` — SHA-256 `b911b367a139e88049ff393eecaeb63f4416aaa06738eaeb0d0643dfe1a11612`. Recorded upstream Spoolman v0.27.1 HTTP responses for spool API contract replay (#540). Captured directly from local digest-pinned ghcr.io/donkie/spoolman:0.27.1 (revision ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b) with --network none via scripts/capture-spoolman-spool-api.mjs.
+- `tests/fixtures/spoolman/spool-api/cases.json` — SHA-256 `967e4dfb1e4f20a3b128917a929b5e35afd6036228822b9a2907c55bb2b79354`. Spool API request corpus for upstream capture and built-in server parity tests (#540). Original MIT test request definitions exercising all 7 Spoolman v0.27.1 HTTP spool endpoints, filters, sorting, pagination, extra fields, archive, use and measure semantics.
+- `tests/fixtures/spoolman/spool-api/upstream.json` — SHA-256 `024f2edee070f73225a2aaa2348eb8da259c93d4f42e2546deab2528dcd67697`. Recorded upstream Spoolman v0.27.1 HTTP responses for spool API contract replay (#540). Captured directly from local digest-pinned ghcr.io/donkie/spoolman:0.27.1 (revision ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b) with --network none via scripts/capture-spoolman-spool-api.mjs.
+- `tests/fixtures/spoolman/aux/filaments.json` — SHA-256 `f03df1f065f6dbcc14f25c010efb40803e5542ce076e964d2534b15ac925cfce`. External filament library fixture for the auxiliary API tests (#545, #562). Original MIT fixture data: two synthetic filaments in the SpoolmanDB filaments.json shape pinned by upstream v0.27.1 ExternalFilament. Not copied from the upstream database.
+- `tests/fixtures/spoolman/aux/materials.json` — SHA-256 `f1b360624af4b407fe85037db389592233d12e839cbcac645efa51678d644da2`. External material library fixture for the auxiliary API tests (#545, #562). Original MIT fixture data: three synthetic materials in the SpoolmanDB materials.json shape pinned by upstream v0.27.1 ExternalMaterial. Not copied from the upstream database.
 
 ## Endpoints detalhados
 
@@ -99,7 +116,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### GET `/api/v1/article-number`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Find_article_numbers_article_number_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -107,14 +124,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"A list of all article numbers."}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1article-number/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1article-number/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/lists.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Distinct filament article numbers of this farm, ascending.
 
 ### POST `/api/v1/backup`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `backup_backup_post`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -122,89 +139,89 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"500","description":"Internal Server Error"}]`
 - **Erros:** `[{"code":"500","description":"Internal Server Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1backup/post"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1backup/post","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/info.ts","apps/farm/server/utils/spool-library/legacy-api/export.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/info-backup.test.ts"]`
+- **Lacunas:** `["POST /api/v1/backup returns a farm-scoped JSON export in the response body instead of a server-side backup file; path is the fixed text \"inline:export\" and the 500 \"Backup failed\" case cannot occur."]`
+- **Nota:** Implemented with a documented difference: the built-in server has no SQLite file to copy and writes no server-side file. It answers 200 with the upstream BackupResponse fields (created true, path "inline:export") plus an "export" member holding a farm-scoped JSON export (vendors, filaments, spools, extra-field definitions and set settings) in the shape the library import accepts. Only the calling farm is exported; read-only credentials may call it because nothing is written.
 
 ### GET `/api/v1/export/filaments`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Export_filaments_export_filaments_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"fmt","required":true,"schema":{"$ref":"#/components/schemas/ExportFormat"}}],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"inline schema"},"422":{"application/json":"HTTPValidationError"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1filaments/get"]`
+- **Cabeçalhos relevantes:** `["content-type"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1filaments/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/export.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API: fmt=json returns filaments with their vendor, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; missing or invalid fmt answers the 422 enum error.
 
 ### GET `/api/v1/export/spools`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Export_spools_export_spools_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"fmt","required":true,"schema":{"$ref":"#/components/schemas/ExportFormat"}},{"in":"query","name":"allow_archived","required":false,"schema":{"default":false,"description":"Whether to include archived spools in the export.","title":"Allow Archived","type":"boolean"}}],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"inline schema"},"422":{"application/json":"HTTPValidationError"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1spools/get"]`
+- **Cabeçalhos relevantes:** `["content-type"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1spools/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/export.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API: fmt=json returns spools with filament and vendor, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; archived spools are excluded unless allow_archived=true.
 
 ### GET `/api/v1/export/vendors`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Export_vendors_export_vendors_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"fmt","required":true,"schema":{"$ref":"#/components/schemas/ExportFormat"}}],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"inline schema"},"422":{"application/json":"HTTPValidationError"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1vendors/get"]`
+- **Cabeçalhos relevantes:** `["content-type"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1export~1vendors/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/export.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API: fmt=json returns the vendor list in the API wire shape, fmt=csv returns RFC 4180 text/csv with nested objects as dotted columns; missing or invalid fmt answers the 422 enum error.
 
 ### GET `/api/v1/external/filament`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_all_external_filaments_external_filament_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"array<ExternalFilament>"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Cabeçalhos relevantes:** `["etag","last-modified"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/external-filament.ts","apps/farm/server/utils/spool-library/legacy-api/external-config.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/external-routes.test.ts","scripts/test-spoolman-external-filament.mjs"]`
+- **Lacunas:** `["The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."]`
+- **Nota:** Served on the farm-scoped built-in legacy API from the external catalog module (#562). The catalog is fetched in the background from SPOOLMAN_EXTERNAL_DB_URL (filaments.json and materials.json, no credential forwarded) and refreshed daily; until the first sync, or when no URL is configured, it answers 500 as upstream does before its first sync.
 
 ### GET `/api/v1/external/filament/search`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Search_external_filaments_external_filament_search_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"query","required":true,"schema":{"description":"Search query, matched word-by-word against manufacturer, name and material.","examples":["polymaker pla"],"title":"Query","type":"string"}},{"in":"query","name":"limit","required":false,"schema":{"default":20,"description":"Maximum number of results to return.","maximum":100,"minimum":1,"title":"Limit","type":"integer"}},{"in":"query","name":"offset","required":false,"schema":{"default":0,"description":"Number of matches to skip, for paging through the results.","minimum":0,"title":"Offset","type":"integer"}}],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"array<ExternalFilament>"},"422":{"application/json":"HTTPValidationError"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament~1search/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Cabeçalhos relevantes:** `["x-total-count"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1filament~1search/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/external-filament.ts","apps/farm/server/utils/spool-library/legacy-api/external-config.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/external-routes.test.ts","scripts/test-spoolman-external-filament.mjs"]`
+- **Lacunas:** `["The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."]`
+- **Nota:** Served from the external catalog module (#562) with query/limit/offset validation and x-total-count; without a configured or synced catalog it answers an empty list.
 
 ### GET `/api/v1/external/material`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_all_external_materials_external_material_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -212,14 +229,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1material/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1external~1material/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/external-filament.ts","apps/farm/server/utils/spool-library/legacy-api/external-config.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/external-routes.test.ts"]`
+- **Lacunas:** `["The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."]`
+- **Nota:** Served from the external catalog module (#562): the materials of the synced materials.json with null temperatures omitted; 500 until the first sync, as upstream.
 
 ### GET `/api/v1/field/{entity_type}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_extra_fields_field__entity_type__get`
 - **Entrada:** `{"parameters":[{"in":"path","name":"entity_type","required":true,"schema":{"$ref":"#/components/schemas/EntityType","description":"Entity type this field is for"}}],"body_required":false,"body":{}}`
@@ -227,14 +244,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/field.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API from this farm's extra-field registry, ordered by order then key; unknown entity types answer the 422 enum error.
 
 ### DELETE `/api/v1/field/{entity_type}/{key}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Delete_extra_field_field__entity_type___key__delete`
 - **Entrada:** `{"parameters":[{"in":"path","name":"entity_type","required":true,"schema":{"$ref":"#/components/schemas/EntityType","description":"Entity type this field is for"}},{"in":"path","name":"key","required":true,"schema":{"maxLength":64,"minLength":1,"pattern":"^[a-z0-9_]+$","title":"Key","type":"string"}}],"body_required":false,"body":{}}`
@@ -242,14 +259,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/delete"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/delete","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/field.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Delete one definition and remove its value from every record of that entity on this farm; 404 Message for an unknown key; answers with the remaining list. Requires a write credential.
 
 ### POST `/api/v1/field/{entity_type}/{key}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Add_or_update_extra_field_field__entity_type___key__post`
 - **Entrada:** `{"parameters":[{"in":"path","name":"entity_type","required":true,"schema":{"$ref":"#/components/schemas/EntityType","description":"Entity type this field is for"}},{"in":"path","name":"key","required":true,"schema":{"maxLength":64,"minLength":1,"pattern":"^[a-z0-9_]+$","title":"Key","type":"string"}}],"body_required":true,"body":{"application/json":{"$ref":"#/components/schemas/ExtraFieldParameters"}}}`
@@ -257,14 +274,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["Content-Type"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}/post","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/field.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Add or update one extra-field definition on the farm-scoped registry and answer with the entity's full definition list; pydantic-shaped 422 errors for path and body, 400 for registry rule violations (choices, multi_choice, invalid default value, field type change). Requires a write credential.
 
 ### GET `/api/v1/field/{entity_type}/{key}/values`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_extra_field_values_field__entity_type___key__values_get`
 - **Entrada:** `{"parameters":[{"in":"path","name":"entity_type","required":true,"schema":{"$ref":"#/components/schemas/EntityType","description":"Entity type this field is for"}},{"in":"path","name":"key","required":true,"schema":{"maxLength":64,"minLength":1,"pattern":"^[a-z0-9_]+$","title":"Key","type":"string"}}],"body_required":false,"body":{}}`
@@ -272,9 +289,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}~1values/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1field~1{entity_type}~1{key}~1values/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/field.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Distinct values currently stored for the field across this farm's records, ascending; 404 Message for an unknown key.
 
 ### GET `/api/v1/filament`
 
@@ -399,7 +416,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### GET `/api/v1/health`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `health_health_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -407,14 +424,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1health/get","packages/sim-tools/src/mocks/spoolman-mock.ts","tests/node/e16-353.test.mjs"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1health/get","packages/sim-tools/src/mocks/spoolman-mock.ts","tests/node/e16-353.test.mjs","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-aux-api.mjs"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API with the pinned HealthCheck example ({"status":"healthy"}); proven by scripts/test-spoolman-aux-api.mjs.
 
 ### GET `/api/v1/info`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `info_info_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -422,14 +439,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1info/get","packages/sim-tools/src/mocks/spoolman-mock.ts","tests/node/e16-353.test.mjs"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1info/get","packages/sim-tools/src/mocks/spoolman-mock.ts","tests/node/e16-353.test.mjs","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/info.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/info-backup.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API. Reports version 0.27.1 and db_type postgresql; data_dir, logs_dir and backups_dir are empty strings (no host path is disclosed) and no update check runs (latest_version null, update_available false). external_db_name comes from EXTERNAL_DB_NAME (default SpoolmanDB).
 
 ### GET `/api/v1/location`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Find_locations_location_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -437,14 +454,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"A list of all spool locations."}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/location.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/location.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Distinct, non-null locations held by this farm's spools (archived included), ascending by code point.
 
 ### PATCH `/api/v1/location/{location}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Rename_location_location__location__patch`
 - **Entrada:** `{"parameters":[{"in":"path","name":"location","required":true,"schema":{"title":"Location","type":"string"}}],"body_required":true,"body":{"application/json":{"$ref":"#/components/schemas/RenameLocationBody"}}}`
@@ -452,14 +469,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["Content-Type"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1location~1{location}/patch","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/location.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","apps/farm/server/utils/spool-library/legacy-path.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/location.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Renames a location on this farm's spools (merging onto a name already in use) and answers the new name as a JSON string. The API path is percent-decoded once so names with spaces work; encoded dots, slashes, backslashes and NUL are refused. Requires a write credential.
 
 ### GET `/api/v1/lot-number`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Find_lot_numbers_lot_number_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -467,14 +484,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"A list of all lot numbers."}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1lot-number/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1lot-number/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/lists.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Distinct spool lot numbers of this farm, ascending.
 
 ### GET `/api/v1/material`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Find_materials_material_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -482,14 +499,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"A list of all filament materials."}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1material/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1material/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/lists.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Distinct filament materials of this farm, ascending.
 
 ### GET `/api/v1/search`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Search_search_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"q","required":true,"schema":{"description":"The search query.","examples":["red"],"minLength":1,"title":"Query","type":"string"}},{"in":"query","name":"color_similarity_threshold","required":false,"schema":{"default":20,"description":"The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.","examples":[20],"maximum":100,"minimum":0,"title":"Color Similarity Threshold","type":"number"}},{"in":"query","name":"limit","required":false,"schema":{"default":20,"description":"Maximum number of results per category (spools, filaments, vendors).","maximum":100,"minimum":1,"title":"Limit","type":"integer"}},{"in":"query","name":"allow_archived","required":false,"schema":{"default":false,"description":"Whether to include archived spools in the results.","title":"Allow Archived","type":"boolean"}},{"in":"query","name":"spools_per_filament","required":false,"schema":{"default":0,"description":"How many of each matching filament's spools to include with it, so a filament hit can be followed straight to one of its spools. 0 (the default) omits them entirely.","maximum":10,"minimum":0,"title":"Spools Per Filament","type":"integer"}}],"body_required":false,"body":{}}`
@@ -497,14 +514,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1search/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1search/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/search.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
+- **Lacunas:** `["CSS colour-name queries (e.g. \"red\") are not recognised as colour queries; only #hex codes are.","Result ranking (exact, prefix, substring, then id) is approximated; the upstream ranking is not pinned."]`
+- **Nota:** Cross-entity search over this farm: every whitespace-separated term must match case-insensitively in a text field (or text/choice extra field, or a filament's vendor name); numeric queries also match a spool id; a #hex query adds colour-similarity filament matches; allow_archived, limit and spools_per_filament are honoured.
 
 ### GET `/api/v1/setting/`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_all_settings_setting__get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -512,14 +529,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1/get"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/setting.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** All registered settings (currency, round_prices, print_presets, base_url, locations_spoolorders and the extra_fields_* views of the registry) with is_set false and the default value when unset.
 
 ### GET `/api/v1/setting/{key}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Get_setting_setting__key__get`
 - **Entrada:** `{"parameters":[{"in":"path","name":"key","required":true,"schema":{"title":"Key","type":"string"}}],"body_required":false,"body":{}}`
@@ -527,14 +544,14 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"299","description":"Websocket message"},{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"404","description":"Not Found"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/setting.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** One registered setting as {value, is_set, type}; 404 Message for an unregistered key. The websocket on the same path is not served.
 
 ### POST `/api/v1/setting/{key}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Set_setting_setting__key__post`
 - **Entrada:** `{"parameters":[{"in":"path","name":"key","required":true,"schema":{"title":"Key","type":"string"}}],"body_required":true,"body":{"application/json":{"title":"Body","type":"string"}}}`
@@ -542,9 +559,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"404","description":"Not Found"},{"code":"415","description":"Unsupported Media Type"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"404","description":"Not Found"},{"code":"415","description":"Unsupported Media Type"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["Content-Type"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/post","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/setting.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/setting-field.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Sets a registered setting from the double-encoded JSON string body; an empty body or null resets it to the default. 404 for unknown keys, 415 when the value is not JSON of the setting's type. extra_fields_* follow the extra-field registry and answer 400 here. Requires a write credential.
 
 ### WS `/api/v1/setting/{key}`
 
@@ -594,7 +611,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### PATCH `/api/v1/spool/field/{field}`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Rename_a_spool_field_value_spool_field__field__patch`
 - **Entrada:** `{"parameters":[{"in":"path","name":"field","required":true,"schema":{"description":"The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.","examples":["location","extra.shelf"],"title":"Field","type":"string"}}],"body_required":true,"body":{"application/json":{"$ref":"#/components/schemas/RenameFieldValueParameters"}}}`
@@ -602,24 +619,24 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
 - **Cabeçalhos relevantes:** `["Content-Type"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1field~1{field}/patch","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/location.ts","apps/farm/server/storage/postgres-spool-library-aux.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/location.test.ts"]`
+- **Lacunas:** `["Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Renames one value of location or of a text/single-choice extra field across all of this farm's spools, archived included, and answers {spools_updated}. Requires a write credential.
 
 ### GET `/api/v1/spool/group`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `Find_spool_groups_spool_group_get`
 - **Entrada:** `{"parameters":[{"in":"query","name":"group_by","required":true,"schema":{"description":"The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).","examples":["location","extra.shelf"],"title":"Group By","type":"string"}},{"in":"query","name":"filament.name","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Partial case-insensitive search term for the filament name. See the spool search endpoint.","title":"Filament Name"}},{"in":"query","name":"filament.id","required":false,"schema":{"anyOf":[{"pattern":"^-?\\d+(,-?\\d+)*$","type":"string"},{"type":"null"}],"description":"Match an exact filament ID. Separate multiple IDs with a comma.","title":"Filament ID"}},{"in":"query","name":"filament.material","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Partial case-insensitive search term for the filament material.","title":"Filament Material"}},{"in":"query","name":"filament.multi_color_direction","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.","examples":["\"coaxial\"","\"longitudinal\""],"title":"Filament Multi-Color Direction"}},{"in":"query","name":"filament.vendor.name","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Partial case-insensitive search term for the filament vendor name.","title":"Vendor Name"}},{"in":"query","name":"filament.vendor.id","required":false,"schema":{"anyOf":[{"pattern":"^-?\\d+(,-?\\d+)*$","type":"string"},{"type":"null"}],"description":"Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.","title":"Vendor ID"}},{"in":"query","name":"location","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Partial case-insensitive search term for the spool location.","title":"Location"}},{"in":"query","name":"lot_nr","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Partial case-insensitive search term for the spool lot number.","title":"Lot/Batch Number"}},{"in":"query","name":"allow_archived","required":false,"schema":{"default":false,"description":"Whether to include archived spools in the aggregates.","title":"Allow Archived","type":"boolean"}},{"in":"query","name":"include_empty","required":false,"schema":{"default":false,"description":"Also return matching filaments (group_by=filament) or manufacturers (group_by=vendor) that hold no matching spools, as groups of zero, instead of omitting them. In vendor mode the group of filaments with no manufacturer is not listed, since this mode lists manufacturers. Every other axis is keyed by a value read off the spools themselves and so has no empty groups to list. Filters on the spools themselves (location, lot_nr, the date filters, spool extra fields) are rejected in combination with it, since a filament with no spools has no value for them.","title":"Include Empty","type":"boolean"}},{"in":"query","name":"preview","required":false,"schema":{"default":false,"description":"Attach a few members to each group: up to 5 spools (id, remaining_weight, initial_weight) for group_by=filament, up to 4 filaments (id and colors) for group_by=vendor. Ignored for other axes.","title":"Preview","type":"boolean"}},{"in":"query","name":"first_used","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Filter by the spool's first_used timestamp. Give an inclusive range as `<start>|<end>`(ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no first_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.","examples":["2024-05-01T00:00:00Z|","|2024-05-01T00:00:00Z","2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",""],"title":"First Used"}},{"in":"query","name":"last_used","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Filter by the spool's last_used timestamp. Give an inclusive range as`<start>|<end>`(ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no last_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.","examples":["2024-05-01T00:00:00Z|","|2024-05-01T00:00:00Z","2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",""],"title":"Last Used"}},{"in":"query","name":"registered","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Filter by the spool's registered timestamp. Give an inclusive range as`<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no registered timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.","examples":["2024-05-01T00:00:00Z|","|2024-05-01T00:00:00Z","2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",""],"title":"Registered"}},{"in":"query","name":"sort","required":false,"schema":{"anyOf":[{"type":"string"},{"type":"null"}],"description":"Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.","examples":["group.last_used:desc"],"title":"Sort"}},{"in":"query","name":"limit","required":false,"schema":{"anyOf":[{"type":"integer"},{"type":"null"}],"description":"Maximum number of groups in the response.","title":"Limit"}},{"in":"query","name":"offset","required":false,"schema":{"default":0,"description":"Offset in the full group result set if a limit is set.","title":"Offset","type":"integer"}}],"body_required":false,"body":{}}`
 - **Saída:** `{"200":{"application/json":"array<SpoolGroup>"},"400":{"application/json":"Message"},"422":{"application/json":"HTTPValidationError"}}`
 - **Status:** `[{"code":"200","description":"Successful Response"},{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
 - **Erros:** `[{"code":"400","description":"Bad Request"},{"code":"422","description":"Validation Error"}]`
-- **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1group/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Cabeçalhos relevantes:** `["x-total-count","x-total-spools","x-total-remaining-weight"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1group/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/group.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
+- **Lacunas:** `["Sorting supports the group.* keys and filament.name, filament.material and filament.vendor.name; other documented sort keys are ignored.","Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."]`
+- **Nota:** Groups this farm's spools by filament, vendor, material, location or a text/single-choice extra field with spool_count, in_use_count, total_remaining_weight, last_used, preview and include_empty; pagination is over groups and x-total-count, x-total-spools and x-total-remaining-weight are returned.
 
 ### DELETE `/api/v1/spool/{spool_id}`
 
@@ -744,7 +761,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### GET `/api/v1/tag/reader`
 
 - **Transporte:** http
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **OpenAPI operationId:** `List_recently_seen_tag_readers_tag_reader_get`
 - **Entrada:** `{"parameters":[],"body_required":false,"body":{}}`
@@ -752,9 +769,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Status:** `[{"code":"200","description":"Successful Response"}]`
 - **Erros:** `["No error response documented for this endpoint in pinned OpenAPI/source inventory."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1reader/get"]`
-- **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1reader/get","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/legacy-api/lists.ts","scripts/test-spoolman-aux-api.mjs","tests/integration/spoolman-aux/catalog.test.ts"]`
+- **Lacunas:** `["POST /api/v1/tag/scan is not served, so no reader is ever listed."]`
+- **Nota:** Always the empty list: the upstream registry is in memory and only filled by tag scans, which are not accepted by the built-in server yet.
 
 ### POST `/api/v1/tag/scan`
 

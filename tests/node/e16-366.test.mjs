@@ -18,7 +18,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import postgres from 'postgres'
-import { findPostgresBin } from '../helpers/disposable-postgres.ts'
 import {
   validateKobraXTargetInput,
   describeConfigurationError,
@@ -67,7 +66,7 @@ const pgControl = { dataDir: '', sockDir: '' }
 after(() => {
   if (pgControl.dataDir) {
     try {
-      execFileSync(findPostgresBin().pg_ctl, [
+      execFileSync('/opt/homebrew/bin/pg_ctl', [
         '-D',
         pgControl.dataDir,
         '-m',
@@ -735,7 +734,7 @@ test('Server PostgreSQL database and API responses never contain client private 
   const port = await freePort()
   const pwFile = join(pgBase, 'pgpass')
   writeFileSync(pwFile, 'testpostgres\n', { mode: 0o600 })
-  execFileSync(findPostgresBin().initdb, [
+  execFileSync('/opt/homebrew/bin/initdb', [
     '-D',
     dataDir,
     '-U',
@@ -744,7 +743,7 @@ test('Server PostgreSQL database and API responses never contain client private 
     `--pwfile=${pwFile}`,
     '--encoding=UTF8',
   ])
-  execFileSync(findPostgresBin().pg_ctl, [
+  execFileSync('/opt/homebrew/bin/pg_ctl', [
     '-D',
     dataDir,
     '-l',

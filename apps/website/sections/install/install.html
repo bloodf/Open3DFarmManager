@@ -8,21 +8,33 @@
     <header class="section-head">
       <p class="section-head__index" aria-hidden="true">03 / 04</p>
       <p class="eyebrow">Instalar</p>
-      <h2 id="instalar-titulo">Execute localmente</h2>
+      <h2 id="instalar-titulo">Comece localmente, com segurança</h2>
       <p class="section-head__intro">
-        Você precisa de Node.js 22.22.3+ na série 22.x ou 24.22.2+ na série 24.x
-        e de npm, que vem com o Node.js. Docker Compose é necessário para a
-        integração com simuladores, não para abrir a interface inicial.
+        O caminho mais curto é abrir a interface de desenvolvimento no seu
+        computador. Ele não toca em impressoras, não cria contas e não precisa
+        de Docker.
       </p>
     </header>
 
+    <p class="callout install__status" role="note">
+      <strong>Prévia de desenvolvimento.</strong> A Fase 0 está em andamento. O
+      projeto não é uma versão pronta para operar uma farm em produção, e nada
+      aqui está comprovado em hardware físico (not proven on hardware). Veja
+      <a href="#install-evidencia">o que cada etapa comprova</a>.
+    </p>
+
     <div class="install__grid">
       <div class="install__block">
-        <h3>Interface de desenvolvimento</h3>
+        <h3 id="install-local-titulo">1. Execute a interface localmente</h3>
+        <p>
+          Você precisa de Node.js 22.22.3+ na série 22.x ou 24.22.2+ na série
+          24.x, e de npm, que vem com o Node.js. O arquivo
+          <code>.nvmrc</code> fixa o Node 22.23.5.
+        </p>
         <pre
           class="code"
           role="region"
-          aria-label="Comandos para executar localmente"
+          aria-labelledby="install-local-titulo"
           tabindex="0"
         ><code>git clone https://github.com/bloodf/Open3DFarmManager.git
 cd Open3DFarmManager
@@ -32,20 +44,70 @@ npm run dev</code></pre>
           Abra <code>http://127.0.0.1:3000</code>. Você verá a interface de
           desenvolvimento. Esse comando não cria contas, não configura banco de
           dados e não conecta impressoras. Autenticação e integrações começam
-          desabilitadas e exigem configuração própria.
+          desabilitadas e exigem configuração própria. A rota
+          <code>/farm</code> está disponível sem feature flag.
         </p>
       </div>
 
       <div class="install__block">
-        <h3>Hospedagem própria</h3>
+        <h3 id="install-verificar-titulo">2. Verifique antes de configurar</h3>
+        <p>
+          Rode a verificação local do repositório: formatação, tipos, testes e
+          builds. Os testes de interface precisam do build produzido por ela.
+        </p>
+        <pre
+          class="code"
+          role="region"
+          aria-labelledby="install-verificar-titulo"
+          tabindex="0"
+        ><code>npm run check:all
+
+npx playwright install chromium
+npm run test:e2e</code></pre>
+        <p>
+          Os testes automatizados nunca enviam comandos a impressoras físicas.
+          Para reproduzir os jobs da CI, consulte
+          <a href="{{repo}}/blob/main/docs/LOCAL-CI.md">CI local</a>.
+        </p>
+      </div>
+
+      <div class="install__block">
+        <h3 id="install-desktop-titulo">3. Sem Docker e sem rede externa</h3>
+        <p>
+          O guia de desktop leva uma máquina até uma página da farm com
+          impressoras simuladas. Exige Google Chrome e PostgreSQL 17+; Go 1.26+
+          é opcional e serve só ao helper RTSP.
+        </p>
+        <pre
+          class="code"
+          role="region"
+          aria-labelledby="install-desktop-titulo"
+          tabindex="0"
+        ><code>npm run build
+npm run desktop:check -- --only app-smoke
+npm run desktop:check -- --list</code></pre>
+        <p>
+          Os simuladores rodam como processos de teste em loopback. Detalhes e
+          limites em
+          <a href="{{repo}}/blob/main/docs/DESKTOP.md">docs/DESKTOP.md</a>
+          (em português) e no
+          <a href="{{repo}}/blob/main/infra/sim/README.md"
+            >guia do simulador Klipper</a
+          >.
+        </p>
+      </div>
+
+      <div class="install__block">
+        <h3 id="install-host-titulo">4. Hospedagem própria</h3>
         <p>
           O guia de hospedagem implanta uma aplicação e o seu banco PostgreSQL
-          dedicado, em uma VM Linux limpa com Docker Engine e o plugin Compose.
+          dedicado, em uma VM Linux limpa com Docker Engine e o plugin Compose,
+          com um nome DNS e um proxy reverso com certificado TLS confiável.
           Resumo das etapas:
         </p>
         <ol class="install__steps">
           <li>
-            Preparar o deploy com a imagem de release e o arquivo
+            Preparar o deploy com a imagem de release e um arquivo
             <code>.env</code> privado.
           </li>
           <li>
@@ -61,15 +123,91 @@ npm run dev</code></pre>
           <a href="{{repo}}/blob/main/docs/SELF-HOSTING.md"
             >Leia o guia completo de hospedagem própria</a
           >
-          (em inglês).
+          (em inglês). Antes de atualizar, leia também o
+          <a href="{{repo}}/blob/main/docs/SELF-HOSTING-UPGRADE.md"
+            >guia de atualização</a
+          >.
         </p>
       </div>
     </div>
 
-    <p class="callout install__warning" role="note">
-      <strong>Em desenvolvimento.</strong> Mantenha credenciais e configuração
-      privada fora do Git. O projeto não é uma versão pronta para operar uma
-      farm em produção, e a aceitação em hardware permanece aberta.
+    <div class="install__safety">
+      <h3 id="install-seguranca-titulo">Cuidados desde o primeiro dia</h3>
+      <ul class="install__list" aria-labelledby="install-seguranca-titulo">
+        <li>
+          Mantenha credenciais, <code>.env</code> e a pasta
+          <code>state/</code> fora do Git. Não coloque URLs de banco, tokens ou
+          chaves em logs nem em pedidos de suporte.
+        </li>
+        <li>
+          Não exponha o PostgreSQL publicamente. Deixe desabilitado tudo o que
+          não tiver as credenciais próprias: comandos de impressora originados
+          por API, integrações em nuvem e cadastro público.
+        </li>
+        <li>
+          Comandos do navegador usam somente WebRTC. Pareie o primeiro Connector
+          contra um simulador, nunca contra uma impressora física, e confira a
+          impressão digital exibida pela CLI antes de aprovar.
+        </li>
+      </ul>
+    </div>
+
+    <div class="install__evidence">
+      <h3 id="install-evidencia">O que cada etapa comprova</h3>
+      <p class="install__evidence-intro">
+        Testes locais, integração com fixtures, aceitação com simuladores e
+        validação em hardware físico são evidências diferentes. Siga as etapas
+        acima sabendo em qual delas você está.
+      </p>
+      <ul class="install__levels" aria-labelledby="install-evidencia">
+        <li class="install__level">
+          <span class="tag tag--wip">Executável</span>
+          <div>
+            <strong>Interface de desenvolvimento e testes locais.</strong>
+            Você pode executar e inspecionar. Isso não prova o comportamento
+            com impressoras.
+          </div>
+        </li>
+        <li class="install__level">
+          <span class="tag tag--wip">Em andamento</span>
+          <div>
+            <strong>Simuladores.</strong> Há simuladores Klipper com cenários de
+            falha de rede. A aceitação do SV06 e do cenário de quatro
+            ferramentas está pendente, e a aceitação completa da Fase 0 ainda
+            não foi concluída. Veja o
+            <a href="{{repo}}/blob/main/docs/PHASE-0.md">registro da Fase 0</a>.
+          </div>
+        </li>
+        <li class="install__level">
+          <span class="tag tag--pending">Pendente</span>
+          <div>
+            <strong>Impressoras físicas.</strong> A aceitação em hardware
+            permanece aberta e é feita pelo proprietário do projeto, depois dos
+            simuladores. O
+            <a href="{{repo}}/blob/main/docs/compatibility/fdm-matrix-final.md"
+              >catálogo de compatibilidade</a
+            >
+            marca capacidades como simuladas, documentadas ou não comprovadas;
+            nenhuma está comprovada em hardware físico (not proven on
+            hardware).
+          </div>
+        </li>
+        <li class="install__level">
+          <span class="tag tag--pending">Pendente</span>
+          <div>
+            <strong>Produção.</strong> O projeto não é uma versão pronta para
+            operar uma farm em produção. Implantação e controle de impressoras
+            físicas exigem autorização separada.
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <p class="install__license">
+      O código original usa a
+      <a href="{{repo}}/blob/main/LICENSE">licença MIT</a>. Dependências e
+      fontes de terceiros mantêm suas próprias licenças; consulte
+      <a href="{{repo}}/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.
     </p>
   </div>
 </section>

@@ -59,6 +59,31 @@ function createMemoryStorage(access: SpoolLibraryAccess): SpoolLibraryStorage {
       async list() {
         return ok([])
       },
+      async upsert() {
+        return ok(true as const)
+      },
+      async delete() {
+        return ok(true as const)
+      },
+    },
+    settings: {
+      async list() {
+        return ok([])
+      },
+      async set() {
+        return ok(true as const)
+      },
+      async reset() {
+        return ok(true as const)
+      },
+    },
+    locations: {
+      async list() {
+        return ok([])
+      },
+    },
+    async renameSpoolFieldValue() {
+      return ok(0)
     },
     vendors: {
       async list(page) {

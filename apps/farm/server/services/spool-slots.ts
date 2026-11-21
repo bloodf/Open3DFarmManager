@@ -29,7 +29,10 @@ export async function spoolSlotsRuntime(): Promise<SpoolSlotsRuntime> {
     const { useRuntimeConfig } = await import('nuxt/server')
     const config = useRuntimeConfig() as Record<string, any>
     const url =
-      config.spoolLibrary?.databaseUrl ?? config.spoolSlots?.databaseUrl
+      (config.spoolFeatures?.enabled === true &&
+        config.spoolFeatures.databaseUrl) ||
+      config.spoolSlots?.databaseUrl ||
+      config.spoolLibrary?.databaseUrl
     if (!url) throw new Error('Spool slots storage unavailable')
     const postgres = (await import('postgres')).default
     pool = postgres(url, { max: 2, idle_timeout: 3, connect_timeout: 2 })

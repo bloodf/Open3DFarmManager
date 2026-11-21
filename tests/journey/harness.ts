@@ -150,6 +150,8 @@ export type JourneyOptions = Readonly<{
 export type JourneyHarness = Readonly<{
   origin: string
   farmId: string
+  /** Empty owner farm used to verify tenant isolation in compatibility APIs. */
+  otherFarmId: string
   simulator: SimulatorName
   printerKey: string
   assignmentId: string
@@ -815,6 +817,7 @@ export async function startJourneyHarness(
     return Object.freeze({
       origin,
       farmId: database.farmId,
+      otherFarmId: database.otherFarmId,
       simulator,
       printerKey,
       assignmentId,

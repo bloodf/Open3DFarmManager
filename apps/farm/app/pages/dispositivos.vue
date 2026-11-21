@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { formatDateTime } from '../utils/ui-format.ts'
 import {
   BrowserDeviceHttpListResponse,
   BrowserDeviceHttpFarmPageResponse,
@@ -13,6 +12,12 @@ import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
+import DeviceKeyList from '../components/onboarding/DeviceKeyList.vue'
+import DeviceRecords from '../components/onboarding/DeviceRecords.vue'
+import DeviceRecoveryNotes from '../components/onboarding/DeviceRecoveryNotes.vue'
+import OnboardingField from '../components/onboarding/OnboardingField.vue'
+import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
+import OnboardingPanel from '../components/onboarding/OnboardingPanel.vue'
 import {
   readBrowserDeviceScope,
   proveBrowserDevice,
@@ -30,15 +35,10 @@ const busy = ref(false)
 const error = ref('')
 const message = ref('')
 const confirmation = ref('')
-const heading = ref<HTMLElement | null>(null)
+const shell = ref<InstanceType<typeof OnboardingPage> | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
 let controller = new AbortController()
-const statusLabel = {
-  pending: 'Pendente',
-  approved: 'Aprovado',
-  revoked: 'Revogado',
-}
 const admin = computed(
   () => page.value && ['owner', 'admin'].includes(page.value.currentRole),
 )
@@ -138,13 +138,6 @@ async function loadDevices(after?: string) {
     if (token === generation) busy.value = false
   }
 }
-function localRegistration(key: LocalDeviceKey) {
-  return page.value?.devices.find(
-    (device) =>
-      device.thumbprint === key.thumbprint &&
-      device.accountId === page.value?.currentAccountId,
-  )
-}
 async function enroll(
   key?: LocalDeviceKey,
   purpose: 'enroll' | 'recover' = 'enroll',
@@ -236,11 +229,8 @@ async function decide(
     if (token === generation) busy.value = false
   }
 }
-function date(value: number) {
-  return formatDateTime(value) ?? 'Indisponível'
-}
 onMounted(() => {
-  heading.value?.focus()
+  shell.value?.focusHeading()
   void loadFarms()
 })
 onBeforeUnmount(clear)
@@ -248,19 +238,19 @@ onBeforeRouteLeave(clear)
 </script>
 
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1 ref="heading" tabindex="-1">Dispositivos do navegador</h1>
-    <nav aria-label="Conta">
-      <NuxtLink to="/">Início</NuxtLink> ·
+  <OnboardingPage ref="shell" title="Dispositivos do navegador">
+    <template #intro>
+      <p>
+        Cadastre uma chave deste navegador para sua conta e farm. A consulta não
+        cria chaves nem concede aprovação. Este registro não estabelece conexão
+        com impressoras.
+      </p>
+    </template>
+    <nav class="links" aria-label="Conta">
+      <NuxtLink to="/">Início</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
-    <p>
-      Cadastre uma chave deste navegador para sua conta e farm. A consulta não
-      cria chaves nem concede aprovação. Este registro não estabelece conexão
-      com impressoras.
-    </p>
-    <div ref="errorSummary" role="alert" tabindex="-1">
+    <div ref="errorSummary" class="alert" role="alert" tabindex="-1">
       <ErrorState
         v-if="error"
         title="Operação não confirmada"
@@ -269,194 +259,102 @@ onBeforeRouteLeave(clear)
         <Button @click="loadFarms()">Tentar novamente</Button>
       </ErrorState>
     </div>
-    <p role="status">{{ busy && page ? 'Aguarde…' : busy ? '' : message }}</p>
-    <div v-if="busy && !page" aria-busy="true">
+    <p role="status" class="status">
+      {{ busy && page ? 'Aguarde…' : busy ? '' : message }}
+    </p>
+    <OnboardingPanel v-if="busy && !page" busy>
       <p role="status">Carregando farms e dispositivos…</p>
-      <Skeleton /><Skeleton /><Skeleton />
-    </div>
-    <section aria-labelledby="farms-heading" :aria-busy="busy">
-      <h2 id="farms-heading">Suas farms</h2>
-      <label for="device-farm">Farm</label>
-      <select id="device-farm" v-model="farmId" @change="loadDevices()">
-        <option value="">Selecione</option>
-        <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
-          {{ farm.farmId }}
-        </option>
-      </select>
-      <button :disabled="busy" @click="loadFarms()">Atualizar farms</button>
-      <button v-if="nextFarm" :disabled="busy" @click="loadFarms(nextFarm)">
-        Próxima página de farms
-      </button>
-      <button v-if="farmId" :disabled="busy" @click="loadDevices()">
-        Atualizar dispositivos
-      </button>
+      <div class="skeletons"><Skeleton /><Skeleton /><Skeleton /></div>
+    </OnboardingPanel>
+    <OnboardingPanel
+      heading-id="farms-heading"
+      title="Suas farms"
+      :busy="busy"
+    >
+      <OnboardingField id="device-farm" label="Farm">
+        <select id="device-farm" v-model="farmId" @change="loadDevices()">
+          <option value="">Selecione</option>
+          <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
+            {{ farm.farmId }}
+          </option>
+        </select>
+      </OnboardingField>
+      <div class="actions">
+        <Button :disabled="busy" @click="loadFarms()">Atualizar farms</Button>
+        <Button v-if="nextFarm" :disabled="busy" @click="loadFarms(nextFarm)">
+          Próxima página de farms
+        </Button>
+        <Button v-if="farmId" :disabled="busy" @click="loadDevices()">
+          Atualizar dispositivos
+        </Button>
+      </div>
       <EmptyState
         v-if="!busy && !farms.length && !error"
+        :level="3"
         title="Nenhuma farm disponível"
         description="Sua conta ainda não tem acesso a uma farm. Peça um convite a uma proprietária ou a um proprietário e atualize as farms."
       />
-    </section>
-    <section v-if="page" aria-labelledby="keys-heading" :aria-busy="busy">
-      <h2 id="keys-heading">Chaves deste navegador</h2>
-      <p>
-        Conta atual: {{ page.currentAccountId }}. Criar outra chave não
-        substitui nem revoga as anteriores.
-      </p>
-      <button :disabled="busy || keys.length >= 32" @click="enroll()">
-        Criar chave e solicitar cadastro
-      </button>
-      <EmptyState
-        v-if="!keys.length"
-        title="Sem chaves neste navegador"
-        description="Nenhuma chave local para esta conta e farm. Se você perdeu o armazenamento, crie uma nova chave e solicite nova aprovação."
+    </OnboardingPanel>
+    <template v-if="page">
+      <DeviceKeyList
+        :account-id="page.currentAccountId"
+        :keys="keys"
+        :devices="page.devices"
+        :busy="busy"
+        @create="enroll()"
+        @enroll="(key, purpose) => enroll(key, purpose)"
       />
-      <ul>
-        <li v-for="key in keys" :key="key.thumbprint">
-          <p>
-            Impressão digital: <code>{{ key.thumbprint }}</code>
-          </p>
-          <p v-if="!localRegistration(key)">
-            O registro desta chave não aparece nesta página. Consulte outras
-            páginas ou escolha explicitamente a operação adequada. O servidor
-            verifica o estado atual.
-          </p>
-          <button
-            v-if="
-              !localRegistration(key) ||
-              localRegistration(key)?.proofAt === null
-            "
-            :disabled="busy || localRegistration(key)?.status === 'revoked'"
-            @click="enroll(key, 'enroll')"
-          >
-            Retomar cadastro com esta chave
-          </button>
-          <button
-            v-if="
-              !localRegistration(key) ||
-              localRegistration(key)?.proofAt !== null
-            "
-            :disabled="busy || localRegistration(key)?.status === 'revoked'"
-            @click="enroll(key, 'recover')"
-          >
-            Confirmar posse da chave existente
-          </button>
-        </li>
-      </ul>
-      <h2>Registros da farm</h2>
-      <EmptyState
-        v-if="!page.devices.length"
-        title="Nenhum dispositivo nesta página"
-        description="Ainda não há registros nesta farm. Crie uma chave neste navegador e solicite o cadastro para começar."
+      <DeviceRecords
+        v-model:confirmation="confirmation"
+        :devices="page.devices"
+        :next-after="page.nextAfter"
+        :admin="Boolean(admin)"
+        :busy="busy"
+        @decide="decide"
+        @next="loadDevices(page.nextAfter ?? undefined)"
       />
-      <p v-if="admin">
-        Para aprovar ou revogar, confira a impressão digital com o titular e
-        digite o valor completo.
-      </p>
-      <label v-if="admin" for="fingerprint-confirmation"
-        >Impressão digital confirmada</label
-      >
-      <input
-        v-if="admin"
-        id="fingerprint-confirmation"
-        v-model="confirmation"
-        autocomplete="off"
-        :disabled="busy"
-      />
-      <ul>
-        <li v-for="device in page.devices" :key="device.keyId">
-          <dl>
-            <dt>Conta titular</dt>
-            <dd>{{ device.accountId }}</dd>
-            <dt>Impressão digital</dt>
-            <dd>
-              <code>{{ device.thumbprint }}</code>
-            </dd>
-            <dt>Estado</dt>
-            <dd>{{ statusLabel[device.status] }}</dd>
-            <dt>Criado em</dt>
-            <dd>{{ date(device.createdAt) }}</dd>
-            <template v-if="device.pendingExpiresAt"
-              ><dt>Prazo do pedido</dt>
-              <dd>{{ date(device.pendingExpiresAt) }}</dd></template
-            >
-          </dl>
-          <template v-if="admin"
-            ><button
-              v-if="device.status === 'pending'"
-              :disabled="
-                busy ||
-                device.proofAt === null ||
-                confirmation !== device.thumbprint
-              "
-              @click="decide(device, 'approve')"
-            >
-              Aprovar dispositivo</button
-            ><button
-              v-if="device.status !== 'revoked'"
-              :disabled="busy || confirmation !== device.thumbprint"
-              @click="decide(device, 'revoke')"
-            >
-              Revogar definitivamente
-            </button></template
-          >
-        </li>
-      </ul>
-      <button
-        v-if="page.nextAfter"
-        :disabled="busy"
-        @click="loadDevices(page.nextAfter)"
-      >
-        Próxima página de dispositivos
-      </button>
-    </section>
-    <section aria-labelledby="recovery-heading">
-      <h2 id="recovery-heading">Posse, perda e recuperação</h2>
-      <p>
-        Cada prova deve terminar em 60 segundos. Um pedido pendente dura 24
-        horas desde a criação. Confirmar novamente a posse não renova esse
-        prazo. Cada chave admite somente três desafios durante toda sua
-        existência, incluindo falhas, expiração e recuperações bem-sucedidas.
-        Não há renovação automática desse limite.
-      </p>
-      <p>
-        Em um novo login, a mesma chave pode confirmar sua posse novamente,
-        respeitando esses limites e a autorização atual. Uma chave revogada não
-        pode ser recuperada. A aprovação exige proprietário ou administrador
-        atual e acesso válido do titular.
-      </p>
-      <p>
-        A chave privada não pode ser exportada e permanece no IndexedDB deste
-        navegador. Limpar dados, trocar de navegador ou perder este
-        armazenamento pode perder a chave. Não há cópia de segurança nem
-        substituição automática. Chaves antigas continuam registradas até
-        revogação explícita por proprietário ou administrador.
-      </p>
-      <p>
-        Este cadastro não emite sessão de transporte e não oferece comandos,
-        sinalização ou conexão com Connector.
-      </p>
-    </section>
-  </main>
+    </template>
+    <DeviceRecoveryNotes />
+  </OnboardingPage>
 </template>
 
 <style scoped>
-button,
-select,
-input {
-  font: inherit;
-  min-height: 2.75rem;
-  margin: 0.5rem;
-  max-width: 100%;
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
 }
-dd,
-code {
-  overflow-wrap: anywhere;
+.alert:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-md);
 }
-li {
-  margin-block: 1.5rem;
+.alert:empty {
+  display: none;
 }
-:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+.alert :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+.status {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.status:empty {
+  display: none;
+}
+.skeletons {
+  display: grid;
+  gap: var(--space-3);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+@media (max-width: 30rem) {
+  .actions :deep(.ui-button) {
+    width: 100%;
+  }
 }
 </style>

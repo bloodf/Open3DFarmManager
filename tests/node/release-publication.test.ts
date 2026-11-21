@@ -253,6 +253,9 @@ for (const message of [
     const result = f.run()
     assert.equal(result.status, 1, result.stderr)
     assert.match(result.stderr, /manifest unknown/)
-    assert.equal(f.state().writes?.some((write) => write.startsWith('push:')) ?? false, false)
+    assert.equal(
+      f.state().writes?.some((write) => write.startsWith('push:')) ?? false,
+      false,
+    )
   })
 }

@@ -10,7 +10,7 @@
 # load after the clock sync, which Klipper reports as "Timer too close".
 # See docs/SIMULATOR-READINESS-RESULT.md.
 
-FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf AS simulavr
+FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:aa418a6a9d5469f4ede6bef38b9280a4fbfcd849da2d1764dfbff68016c8d2a6 AS simulavr
 USER root
 # Reproducible toolchain: Debian snapshot at a fixed timestamp, exact package
 # versions, and a hash-locked setuptools wheel. None of it reaches the runtime.
@@ -34,7 +34,7 @@ RUN rm -rf build \
   && cmake --build build \
   && grep -q -- '-O3' build/libsim/CMakeFiles/sim.dir/flags.make
 
-FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf
+FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:aa418a6a9d5469f4ede6bef38b9280a4fbfcd849da2d1764dfbff68016c8d2a6
 COPY --from=simulavr --chown=printer:printer /home/printer/simulavr/build /home/printer/simulavr/build
 # Real-time pacing caps emulated MCU time at this fraction of wall time. It
 # must stay below the slowest rate the emulator sustains under host load, so

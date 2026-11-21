@@ -74,10 +74,11 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - Settings: only registered keys exist (currency, round_prices, print_presets, base_url, locations_spoolorders, extra_fields_vendor, extra_fields_filament, extra_fields_spool). The extra_fields_* settings mirror the farm's extra-field registry and are changed through /api/v1/field, not through /api/v1/setting.
 - Error message texts of 400/404/415 answers for fields, settings, renames and groups are not verified against the upstream source, which is not vendored; status codes and body shapes follow the pinned OpenAPI.
 - GET /api/v1/search recognises #hex colour queries only (no CSS colour names); ranking is approximated.
-- Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served because migration 0089 has no tag storage; GET /tag/reader is always empty. Websocket routes are a separate unit.
+- Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served because migration 0089 has no tag storage; GET /tag/reader is always empty. Their websocket feeds are served; see the websocket entry below.
 - The external filament library needs SPOOLMAN_EXTERNAL_DB_URL; it syncs in the background and answers 500 until the first sync, as upstream does before its first sync.
 - The API path is percent-decoded once (so location names with spaces work); encoded dots, slashes, backslashes and NUL are refused with 401, as are malformed escapes.
 - Writes to settings and extra-field definitions need the runtime database role to be a member of farm_spool_features (migration 0089) as well as farm_spool_library; without it those writes answer 503 and everything else is unaffected.
+- Websocket feeds are served on the farm-scoped path /spoolman/<token>/api/v1/... (root, /vendor, /filament, /spool, /setting/ and the per-id and per-key paths) with the upstream event JSON, authenticated by the same legacy credential as HTTP (a read credential may listen). The farm is fixed at connect time, so a client never hears another farm's events; events are sent only after the change commits, in order, for changes made through the built-in HTTP API (a vendor delete also sends filament updates for filaments that lost their vendor; a location or field rename sends one spool update per changed spool). Clients send nothing. A handshake whose Origin differs from the Host is accepted and closed with code 4403, a missing Host with 4400, as upstream; an unknown credential or path is refused with HTTP 401 or 404. A credential revoked while a feed is open is not re-checked until the client reconnects. The tag-scan feeds accept connections but never send an event (no tag storage). One farm may hold at most 256 open feeds; further ones are closed with 1013.
 
 ## Cabeçalhos notáveis
 
@@ -101,7 +102,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### WS `/api/v1/`
 
 - **Transporte:** websocket
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `partial`
 - **Entrada:** `{"handshake":"HTTP Upgrade; optional authorization as configured by server/source","messages_sent_by_client":"none documented"}`
 - **Saída:** `{"handshake":"101 Switching Protocols","event_models":["SpoolEvent","FilamentEvent","VendorEvent"]}`
@@ -109,9 +110,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["SpoolEvent","FilamentEvent","VendorEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1/websocket-source-inventory","packages/connector/src/runtime/spoolman-provider.ts"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1/websocket-source-inventory","packages/connector/src/runtime/spoolman-provider.ts","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","apps/farm/server/utils/spool-library/events.ts","apps/farm/server/utils/spool-library/observe.ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-websocket.mjs","tests/integration/spoolman-ws/feed.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** External Connector client coverage only (connector_root_websocket); this does not establish built-in replacement-server compatibility. See the request contract and evidence fields.
+- **Nota:** Served on the farm-scoped built-in legacy API: every add, update and delete made through the built-in HTTP API (vendors, filaments, spools, settings, extra fields) is sent to this farm's root feed after the change commits, with the upstream event JSON (type, resource, date, payload); proven by scripts/test-spoolman-websocket.mjs. The entity feeds /vendor, /filament, /spool and /setting/ are served as well.
 
 ### GET `/api/v1/article-number`
 
@@ -371,7 +372,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### WS `/api/v1/filament/{filament_id}`
 
 - **Transporte:** websocket
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **Entrada:** `{"handshake":"HTTP Upgrade; optional authorization as configured by server/source","messages_sent_by_client":"none documented"}`
 - **Saída:** `{"handshake":"101 Switching Protocols","event_models":["FilamentEvent"]}`
@@ -379,9 +380,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["FilamentEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","apps/farm/server/utils/spool-library/events.ts","apps/farm/server/utils/spool-library/observe.ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-websocket.mjs","tests/integration/spoolman-ws/feed.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API (same path as upstream, behind the farm credential): the feed of this record, with the upstream event JSON, after every change made through the built-in HTTP API; proven by scripts/test-spoolman-websocket.mjs. The filament feed without an id is served as well.
 
 ### POST `/api/v1/filament/{filament_id}/tag`
 
@@ -566,7 +567,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### WS `/api/v1/setting/{key}`
 
 - **Transporte:** websocket
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **Entrada:** `{"handshake":"HTTP Upgrade; optional authorization as configured by server/source","messages_sent_by_client":"none documented"}`
 - **Saída:** `{"handshake":"101 Switching Protocols","event_models":["SettingEvent"]}`
@@ -574,9 +575,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["SettingEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1setting~1{key}/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","apps/farm/server/utils/spool-library/events.ts","apps/farm/server/utils/spool-library/observe.ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-websocket.mjs","tests/integration/spoolman-ws/feed.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API (same path as upstream, behind the farm credential): the feed of this record, with the upstream event JSON, after every change made through the built-in HTTP API; proven by scripts/test-spoolman-websocket.mjs. The /setting/ feed without a key is served as well.
 
 ### GET `/api/v1/spool`
 
@@ -686,7 +687,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### WS `/api/v1/spool/{spool_id}`
 
 - **Transporte:** websocket
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **Entrada:** `{"handshake":"HTTP Upgrade; optional authorization as configured by server/source","messages_sent_by_client":"none documented"}`
 - **Saída:** `{"handshake":"101 Switching Protocols","event_models":["SpoolEvent"]}`
@@ -694,9 +695,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["SpoolEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1spool~1{spool_id}/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","apps/farm/server/utils/spool-library/events.ts","apps/farm/server/utils/spool-library/observe.ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-websocket.mjs","tests/integration/spoolman-ws/feed.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API (same path as upstream, behind the farm credential): the feed of this record, with the upstream event JSON, after every change made through the built-in HTTP API; proven by scripts/test-spoolman-websocket.mjs. The spool feed without an id is served as well.
 
 ### PUT `/api/v1/spool/{spool_id}/measure`
 
@@ -799,9 +800,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["TagScanEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","scripts/test-spoolman-websocket.mjs"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** The feed path accepts an authenticated farm connection and never sends an event: TagScanEvent comes from POST /api/v1/tag/scan, which is not served because there is no tag storage. It never carries entity changes, as upstream.
 
 ### WS `/api/v1/tag/scan/{reader_id}`
 
@@ -814,9 +815,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["TagScanEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan~1{reader_id}/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1tag~1scan~1{reader_id}/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","scripts/test-spoolman-websocket.mjs"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** The feed path accepts an authenticated farm connection and never sends an event: TagScanEvent comes from POST /api/v1/tag/scan, which is not served because there is no tag storage. It never carries entity changes, as upstream.
 
 ### GET `/api/v1/vendor`
 
@@ -896,7 +897,7 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 ### WS `/api/v1/vendor/{vendor_id}`
 
 - **Transporte:** websocket
-- **Compatibilidade do servidor embutido:** `unimplemented`
+- **Compatibilidade do servidor embutido:** `implemented`
 - **Cobertura do cliente externo:** `not_covered`
 - **Entrada:** `{"handshake":"HTTP Upgrade; optional authorization as configured by server/source","messages_sent_by_client":"none documented"}`
 - **Saída:** `{"handshake":"101 Switching Protocols","event_models":["VendorEvent"]}`
@@ -904,9 +905,9 @@ O servidor upstream também emite respostas de atualização 101. As rotas WS, m
 - **Erros:** `["Handshake refusal/close codes are source-level behavior, not represented in OpenAPI responses; see documented_errors_and_guards."]`
 - **Cabeçalhos relevantes:** `["No endpoint-specific request/response headers documented in pinned OpenAPI/source."]`
 - **Eventos WebSocket:** `["VendorEvent"]`
-- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/websocket-source-inventory"]`
+- **Evidências:** `["docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/websocket-source-inventory","apps/farm/server/routes/spoolman/[...path].ts","apps/farm/server/utils/spool-library/ws-feed.ts","apps/farm/server/utils/spool-library/events.ts","apps/farm/server/utils/spool-library/observe.ts","apps/farm/server/utils/spool-library/legacy-handler.ts","scripts/test-spoolman-websocket.mjs","tests/integration/spoolman-ws/feed.test.ts"]`
 - **Lacunas:** `[]`
-- **Nota:** No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.
+- **Nota:** Served on the farm-scoped built-in legacy API (same path as upstream, behind the farm credential): the feed of this record, with the upstream event JSON, after every change made through the built-in HTTP API; proven by scripts/test-spoolman-websocket.mjs. The vendor feed without an id is served as well.
 
 ## Limitações gerais
 

@@ -1,7 +1,8 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-11-04',
   devtools: { enabled: false },
-  nitro: { preset: 'node-server' },
+  // The Spoolman websocket feeds (#545) are served by Nitro's websocket support.
+  nitro: { preset: 'node-server', experimental: { websocket: true } },
   hooks: {
     // impressoras.vue is a page, not a layout: serve the detail route beside
     // it instead of nesting it in a parent that has no <NuxtPage />.

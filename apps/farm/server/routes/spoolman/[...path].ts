@@ -1,3 +1,4 @@
+import type { H3Event } from 'h3'
 import { logUnhandledError } from '../../utils/log-unhandled-error.ts'
 import {
   handleLegacyRequest,
@@ -5,11 +6,23 @@ import {
 } from '../../utils/spool-library/legacy-handler.ts'
 import { classifyLegacyBody } from '../../utils/spool-library/legacy-api/body.ts'
 import { spoolLibraryRuntime } from '../../utils/spool-library/runtime.ts'
+import { createSpoolFeedHooks } from '../../utils/spool-library/ws-feed.ts'
 
 /** Upstream allows 128 extra fields of 65535 characters; leave room for that. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 
-export default defineEventHandler(async (event) => {
+/**
+ * The same path serves the Spoolman HTTP API and, for an upgrade request, the
+ * upstream websocket feeds (Nitro's websocket support resolves `websocket`).
+ */
+const websocket = createSpoolFeedHooks({ storage: spoolLibraryRuntime })
+
+export default defineEventHandler({
+  websocket,
+  handler: handleHttp,
+})
+
+async function handleHttp(event: H3Event) {
   setResponseHeader(event, 'Cache-Control', 'no-store')
   setResponseHeader(event, 'Referrer-Policy', 'no-referrer')
   let result
@@ -47,4 +60,4 @@ export default defineEventHandler(async (event) => {
   for (const [name, value] of Object.entries(result.headers ?? {}))
     setResponseHeader(event, name, value)
   return result.body
-})
+}

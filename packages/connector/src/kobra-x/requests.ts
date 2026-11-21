@@ -124,9 +124,13 @@ export function createKobraXRequests(input: {
       function onAbort() {
         finish(acked ? { kind: 'received' } : { kind: 'unanswered' })
       }
+      // Match by msgid when the report carries one; type+action is only a
+      // fallback for printers that omit msgid on the report.
       const ownsReport = (report: KobraXReport) =>
         report.msgid === msgid ||
-        (report.type === spec.type && report.action === spec.action)
+        (!report.msgid &&
+          report.type === spec.type &&
+          report.action === spec.action)
       stop = onReport((report) => {
         if (!ownsReport(report)) return
         const refusal = reportRefusal(report)

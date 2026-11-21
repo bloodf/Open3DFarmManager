@@ -96,11 +96,8 @@ export async function* streamAnycubicJpegs(input: {
     wait > 30000
   )
     throw Error('Invalid Anycubic camera reconnect limits')
-  for (
-    let attempt = 0;
-    attempt <= retries && !input.signal.aborted;
-    attempt++
-  ) {
+  let attempt = 0
+  while (attempt <= retries && !input.signal.aborted) {
     const req = request({
       host: selected.host,
       port: selected.port,
@@ -112,6 +109,7 @@ export async function* streamAnycubicJpegs(input: {
       timeout: 5000,
     })
     req.on('timeout', () => req.destroy(Error('Camera timeout')))
+    let healthy = false
     try {
       const response = await new Promise<import('node:http').IncomingMessage>(
         (resolve, reject) => {
@@ -129,6 +127,7 @@ export async function* streamAnycubicJpegs(input: {
         const boundary = match?.[1] ?? match?.[2]
         if (!boundary) throw Error()
         yield* readCrealityJpegs(response, boundary)
+        healthy = true
       } finally {
         response.destroy()
       }
@@ -137,7 +136,13 @@ export async function* streamAnycubicJpegs(input: {
     } finally {
       req.destroy()
     }
-    if (attempt === retries) throw Error('Anycubic camera unavailable')
+    if (healthy) {
+      // A completed stream replenishes the reconnect budget so a long-lived
+      // camera can recover from later drops (#616).
+      attempt = 0
+    } else if (attempt === retries) {
+      throw Error('Anycubic camera unavailable')
+    }
     try {
       await delay(Math.min(wait * 2 ** attempt, 30000), undefined, {
         signal: input.signal,
@@ -145,5 +150,6 @@ export async function* streamAnycubicJpegs(input: {
     } catch {
       return
     }
+    if (!healthy) attempt++
   }
 }

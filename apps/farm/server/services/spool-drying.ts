@@ -13,8 +13,19 @@ import {
 } from '../storage/postgres-spool-drying.ts'
 import { labelQr } from '../utils/qr/label.ts'
 
-let store: Promise<PostgresSpoolDrying> | undefined
+interface FeatureRuntime {
+  sql: ReturnType<typeof postgres>
+  drying: PostgresSpoolDrying
+}
+let store: Promise<FeatureRuntime> | undefined
+/** Validated `spoolFeatures` login (role farm_spool_features); shared by the slot routes. */
+export async function spoolFeaturesSql() {
+  return (await featureRuntime()).sql
+}
 async function runtime() {
+  return (await featureRuntime()).drying
+}
+async function featureRuntime() {
   const raw: unknown = useRuntimeConfig()['spoolFeatures']
   if (
     !raw ||
@@ -50,7 +61,7 @@ async function runtime() {
         const rows =
           await sql`SELECT pg_has_role(current_user,'farm_spool_features','USAGE') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolcanlogin) AND NOT EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user,r.oid,'MEMBER') AND (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR r.rolname NOT IN (current_user,'farm_spool_features'))) AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND c.relkind IN ('r','p','v','m','f') AND (pg_has_role(current_user,c.relowner,'MEMBER') OR has_table_privilege(current_user,c.oid,'TRUNCATE') OR has_table_privilege(current_user,c.oid,'REFERENCES') OR has_table_privilege(current_user,c.oid,'TRIGGER') OR has_table_privilege(current_user,c.oid,'UPDATE') OR ((has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'DELETE') OR has_any_column_privilege(current_user,c.oid,'UPDATE')) AND NOT (n.nspname='farm' AND c.relname=ANY(${['spool_library_settings', 'spool_library_fields', 'spool_locations', 'spool_drying_logs', 'spool_humidity_readings', 'spool_farm_settings', 'spool_slot_assignments', 'spool_usage_records', 'spool_filaments', 'spools', 'session_accounts', 'account_sessions', 'memberships']}::text[]))))) AS allowed`
         if (rows[0]?.allowed !== true) throw new Error('Invalid feature role')
-        return new PostgresSpoolDrying(sql)
+        return { sql, drying: new PostgresSpoolDrying(sql) }
       } catch (e) {
         await sql.end({ timeout: 3 })
         throw e

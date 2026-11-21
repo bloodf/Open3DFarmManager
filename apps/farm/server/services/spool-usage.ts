@@ -72,7 +72,7 @@ export async function closeSpoolUsageRuntime() {
   await closing?.end({ timeout: 3 })
 }
 
-async function body(req: Request): Promise<Record<string, unknown>> {
+export async function body(req: Request): Promise<Record<string, unknown>> {
   if (
     req.headers.get('content-type')?.split(';')[0]?.trim() !==
       'application/json' ||

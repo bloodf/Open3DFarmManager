@@ -1,6 +1,7 @@
 import type { SpoolSlotKind } from '../storage/spool-features-types.ts'
 import { PostgresSpoolSlots } from '../storage/postgres-spool-slots.ts'
 import type { Sql } from 'postgres'
+import { spoolFeaturesSql } from './spool-drying.ts'
 
 export const activeSpoolForPrinterSlotAt = (
   sql: Sql,
@@ -23,16 +24,7 @@ export const activeSpoolForPrinterSlotAt = (
 export interface SpoolSlotsRuntime {
   sql: Sql
 }
-let pool: Sql | undefined
+/** The validated `spoolFeatures` login: migration 0089 grants slot privileges only to it. */
 export async function spoolSlotsRuntime(): Promise<SpoolSlotsRuntime> {
-  if (!pool) {
-    const { useRuntimeConfig } = await import('nuxt/server')
-    const config = useRuntimeConfig() as Record<string, any>
-    const url =
-      config.spoolLibrary?.databaseUrl ?? config.spoolSlots?.databaseUrl
-    if (!url) throw new Error('Spool slots storage unavailable')
-    const postgres = (await import('postgres')).default
-    pool = postgres(url, { max: 2, idle_timeout: 3, connect_timeout: 2 })
-  }
-  return { sql: pool }
+  return { sql: await spoolFeaturesSql() }
 }

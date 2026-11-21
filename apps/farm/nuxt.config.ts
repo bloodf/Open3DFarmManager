@@ -86,6 +86,12 @@ export default defineNuxtConfig({
     library: { enabled: false, databaseUrl: '', directory: '' },
     /** A login that is a member of farm_spoolman_settings. */
     spoolmanSettings: { enabled: false, databaseUrl: '' },
+    /**
+     * A login that is a member of farm_spool_import (migration 0086). `allowedOrigins` is a
+     * comma-separated list of exact Spoolman origins the server may read for an API import;
+     * empty means only JSON and CSV uploads are accepted.
+     */
+    spoolLibraryImport: { enabled: false, databaseUrl: '', allowedOrigins: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
     telemetryPrune: {

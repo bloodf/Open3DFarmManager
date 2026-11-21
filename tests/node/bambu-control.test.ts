@@ -574,8 +574,9 @@ test('telemetry version query is not logged as a printer command', async (t) => 
   })
   try {
     // No report has been published yet, so whatever reached the printer came from the connect.
+    // The broker's own counter is used so this also runs against the pre-fix simulator.
     await eventually(
-      () => remote.requests.length > 0 || remote.queries.length > 0,
+      () => (remote.calls()['PUBLISH:device/SYNTHETIC/request'] ?? 0) > 0,
       'the telemetry version query',
     )
     assert.deepEqual(snapshots, [])

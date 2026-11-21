@@ -9,19 +9,12 @@
 // invocation builds into its own private directory, so concurrent runs never
 // share files. No server is started.
 import { spawnSync } from 'node:child_process'
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { MARKER } from './build.mjs'
+import { prepareEvidenceDir } from './lib/evidence-dir.mjs'
 import { isInside, listFiles, sha256 } from './lib/files.mjs'
 import {
   backgroundLuminance,
@@ -391,41 +384,12 @@ async function verifyThemeToggle(browser, AxeBuilder, siteDir, url, pageLabel) {
   await context.close()
 }
 
-/** Reject an evidence directory that is, or resolves to, a place inside the repository. */
-async function assertOutsideRepo(dir) {
-  const real = path.join(
-    await realpath(path.dirname(dir)).catch(() => path.dirname(dir)),
-    path.basename(dir),
-  )
-  if (isInside(repoRoot, dir) || isInside(repoRoot, real)) {
-    throw new Error(
-      `Screenshots must be written outside the repository (got ${dir}).`,
-    )
-  }
-}
-
-/**
- * Evidence directory: OPENFARM_WEBSITE_SHOTS when set (its old PNG/JSON files
- * are replaced), otherwise a fresh directory unique to this invocation.
- */
-async function prepareEvidenceDir() {
-  const override = process.env.OPENFARM_WEBSITE_SHOTS
-  if (override) {
-    const dir = path.resolve(override)
-    await assertOutsideRepo(dir)
-    await mkdir(dir, { recursive: true })
-    for (const name of await readdir(dir)) {
-      if (/\.(png|json)$/.test(name)) await rm(path.join(dir, name))
-    }
-    return dir
-  }
-  const base = path.resolve(os.tmpdir())
-  await assertOutsideRepo(path.join(base, 'openfarm-website-verify'))
-  return mkdtemp(path.join(base, 'openfarm-website-verify-'))
-}
-
 async function main() {
-  const shotsDir = await prepareEvidenceDir()
+  const shotsDir = await prepareEvidenceDir({
+    override: process.env.OPENFARM_WEBSITE_SHOTS,
+    tmpBase: os.tmpdir(),
+    repoRoot,
+  })
   process.stdout.write(`Evidence directory: ${shotsDir}\n`)
   // Private build directory owned by this invocation; removed in `finally`.
   const buildRoot = await mkdtemp(

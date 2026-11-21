@@ -2,13 +2,13 @@
 import { nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { configurationTargetHash } from '../../../../packages/farm-protocol/src/configuration-target.ts'
+import OverviewHeader from '../components/overview/OverviewHeader.vue'
 import AssignmentList from '../components/printer-setup/AssignmentList.vue'
 import ConnectorContext from '../components/printer-setup/ConnectorContext.vue'
 import DiscoveryPanel from '../components/printer-setup/DiscoveryPanel.vue'
 import OperationStatus from '../components/printer-setup/OperationStatus.vue'
 import PreparedReview from '../components/printer-setup/PreparedReview.vue'
 import PrintersFarmSelector from '../components/printer-setup/PrintersFarmSelector.vue'
-import PrintersNavIntro from '../components/printer-setup/PrintersNavIntro.vue'
 import PrintersPageStatus from '../components/printer-setup/PrintersPageStatus.vue'
 import RegisterAssignment from '../components/printer-setup/RegisterAssignment.vue'
 import RevokeConfirmation from '../components/printer-setup/RevokeConfirmation.vue'
@@ -46,7 +46,8 @@ const state = createPrinterSetupState()
 const { farmId, canManage } = state
 // True once the first farm read has settled, so the empty state never flashes.
 const started = ref(false)
-const { heading, kobraErrorSummary, revokeTarget } = state
+const { kobraErrorSummary, revokeTarget } = state
+const header = ref<{ focus: () => void } | null>(null)
 const { kobraBusy, kobraBootstrap, kobraError, kobraStatus, kobraStage } = state
 const { kobraKeyState, kobraAgentId, kobraKeyId, kobraOperation } = state
 const { kobraIp, kobraLabel, kobraExpectedDeviceId, kobraUnknownNotice } = state
@@ -530,7 +531,7 @@ async function prepareCrealityPrinter() {
 
 let stopWatching: (() => void) | undefined
 onMounted(() => {
-  heading.value?.focus()
+  header.value?.focus()
   stopWatching = setup.watchSession()
   void setup.initialize().finally(() => (started.value = true))
 })
@@ -542,14 +543,28 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(setup.clear)
 </script>
 <template>
-  <main id="conteudo">
-    <h1 ref="heading" tabindex="-1">Impressoras da farm</h1>
-    <PrintersNavIntro />
+  <main id="conteudo" class="printers-page">
+    <OverviewHeader
+      ref="header"
+      eyebrow="Open3DFarmManager"
+      title="Impressoras da farm"
+      intro="Consulte as atribuições de impressoras. Sem conexão direta com o Connector, o modo degradado é somente leitura para operação: esta página não envia comandos de impressão nem acessa câmeras."
+    >
+      <p class="compat-link">
+        <NuxtLink to="/compatibilidade"
+          >Consultar compatibilidade de impressoras</NuxtLink
+        >
+      </p>
+    </OverviewHeader>
     <PrintersPageStatus :started="started" />
-    <PrintersFarmSelector />
+    <section class="panel farm-panel" aria-labelledby="farm-heading">
+      <h2 id="farm-heading">Escolher farm</h2>
+      <PrintersFarmSelector />
+    </section>
     <AssignmentList />
     <section
       v-if="farmId && canManage"
+      class="panel"
       aria-labelledby="kobra-x-heading"
       :aria-busy="kobraBusy"
     >
@@ -570,7 +585,7 @@ onBeforeRouteLeave(setup.clear)
       >
         {{ kobraError }}
       </p>
-      <p role="status" aria-live="polite">
+      <p role="status" aria-live="polite" class="live">
         {{
           kobraBusy && !kobraStatus ? 'Processando configuração…' : kobraStatus
         }}
@@ -595,4 +610,168 @@ onBeforeRouteLeave(setup.clear)
     <RevokeConfirmation />
   </main>
 </template>
-<style scoped src="../components/printer-setup/printer-setup.css"></style>
+<style scoped>
+.printers-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  line-height: var(--line-height-normal);
+}
+.printers-page > * {
+  min-width: 0;
+}
+.compat-link,
+.live {
+  margin: 0;
+}
+.live:empty,
+.printers-page :deep(p[role='status']:empty) {
+  display: none;
+}
+.printers-page :deep(p[role='status']) {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+/* Every block of the page shares one bordered surface. */
+.printers-page .panel,
+.printers-page > :deep(section) {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+.printers-page :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+.printers-page :deep(h2) {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+}
+.printers-page :deep(h3) {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-base);
+}
+.printers-page :deep(p),
+.printers-page :deep(li),
+.printers-page :deep(dd),
+.printers-page :deep(dt) {
+  overflow-wrap: anywhere;
+}
+.printers-page :deep(label) {
+  display: block;
+  margin-block: var(--space-2) var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+.printers-page :deep(input:not([type='checkbox']):not([type='radio'])),
+.printers-page :deep(select) {
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.printers-page :deep(button) {
+  color: var(--color-accent);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+.printers-page :deep(button),
+.printers-page :deep(select),
+.printers-page :deep(input:not([type='checkbox']):not([type='radio'])) {
+  min-height: 2.75rem;
+  font: inherit;
+  max-width: 100%;
+}
+.printers-page :deep(select),
+.printers-page :deep(input:not([type='checkbox']):not([type='radio'])) {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+}
+.printers-page :deep(button) {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.printers-page :deep(p:has(> button)) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.printers-page :deep(button:disabled),
+.printers-page :deep(input:disabled),
+.printers-page :deep(select:disabled) {
+  opacity: 0.6;
+}
+.printers-page :deep(:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.printers-page :deep(section > ul) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+}
+.printers-page :deep(section > ul > li) {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.printers-page :deep(dl) {
+  margin: 0;
+}
+.printers-page :deep(dt) {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.printers-page :deep(dd) {
+  margin: 0 0 var(--space-2);
+}
+.kobra-alert {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--state-error-color);
+  border-radius: var(--radius-sm);
+  color: var(--state-error-color);
+  font-weight: var(--font-weight-semibold);
+}
+.setup-columns {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.setup-columns > * {
+  min-width: 0;
+}
+.kobra-card {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.kobra-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+}
+@media (max-width: 30rem) {
+  .printers-page .panel,
+  .printers-page > :deep(section) {
+    padding: var(--space-4);
+  }
+}
+@media (min-width: 48rem) {
+  .setup-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+</style>

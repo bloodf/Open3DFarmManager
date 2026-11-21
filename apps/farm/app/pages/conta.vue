@@ -1,10 +1,19 @@
 <script setup lang="ts">
+import { nextTick, onMounted, ref } from 'vue'
+import SettingsMessage from '../components/settings/SettingsMessage.vue'
+import SettingsPage from '../components/settings/SettingsPage.vue'
+import SettingsPanel from '../components/settings/SettingsPanel.vue'
+import SettingsTextField from '../components/settings/SettingsTextField.vue'
+import Button from '../components/ui/Button.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import StaleNotice from '../components/ui/StaleNotice.vue'
+
 const currentPassword = ref('')
 const newPassword = ref('')
 const pending = ref(false)
 const message = ref('')
 const error = ref(false)
-const summary = ref<HTMLElement | null>(null)
+const summary = ref<InstanceType<typeof SettingsMessage> | null>(null)
 const bambuCloudEnabled = ref(false)
 
 type IdentitiesResponse = {
@@ -21,7 +30,12 @@ const googleCanUnlink = ref(false)
 const googleBusy = ref(false)
 const googleMessage = ref('')
 const googleError = ref(false)
-const googleSummary = ref<HTMLElement | null>(null)
+const googleSummary = ref<InstanceType<typeof SettingsMessage> | null>(null)
+// 'loading' until the first answer; 'session' (401) and 'failed' keep the
+// Google actions hidden, because their state is unknown.
+const identitiesState = ref<'loading' | 'ready' | 'session' | 'failed'>(
+  'loading',
+)
 
 async function loadIdentities() {
   try {
@@ -33,11 +47,22 @@ async function loadIdentities() {
     googleAvailable.value = google.available === true
     googleLinked.value = google.linked === true
     googleCanUnlink.value = google.canUnlink === true
-  } catch {
+    identitiesState.value = 'ready'
+  } catch (cause: unknown) {
     googleAvailable.value = false
     googleLinked.value = false
     googleCanUnlink.value = false
+    const status =
+      cause && typeof cause === 'object' && 'statusCode' in cause
+        ? cause.statusCode
+        : undefined
+    identitiesState.value = status === 401 ? 'session' : 'failed'
   }
+}
+
+async function retryIdentities() {
+  identitiesState.value = 'loading'
+  await loadIdentities()
 }
 
 onMounted(async () => {
@@ -138,124 +163,142 @@ async function changePassword() {
 </script>
 
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1>Conta</h1>
-    <section aria-labelledby="google-heading">
-      <h2 id="google-heading">Conta Google</h2>
-      <p v-if="!googleAvailable && !googleLinked" class="help">
-        O vínculo com o Google fica indisponível enquanto o provedor não estiver
-        ativo nesta instalação.
-      </p>
-      <p v-else-if="googleLinked" class="help">
-        Uma conta Google está vinculada.
-      </p>
-      <p v-else class="help">Nenhuma conta Google vinculada.</p>
-      <p
-        ref="googleSummary"
-        :role="googleError ? 'alert' : 'status'"
-        tabindex="-1"
-      >
-        {{ googleMessage }}
-      </p>
-      <button
-        v-if="googleAvailable && !googleLinked"
-        type="button"
-        class="google-button"
-        :disabled="googleBusy"
-        :aria-busy="googleBusy"
-        @click="startGoogleLink"
-      >
-        {{ googleBusy ? 'Abrindo o Google…' : 'Vincular conta Google' }}
-      </button>
-      <button
-        v-if="googleLinked && googleCanUnlink"
-        type="button"
-        :disabled="googleBusy"
-        :aria-busy="googleBusy"
-        @click="unlinkGoogle"
-      >
-        {{ googleBusy ? 'Desvinculando…' : 'Desvincular Google' }}
-      </button>
-      <p v-if="googleLinked && !googleCanUnlink" class="help">
-        Defina uma senha ou vincule outro provedor antes de remover o Google.
-      </p>
-    </section>
-    <h2>Alterar senha</h2>
-    <form
-      method="post"
-      action="/api/auth/password"
-      :aria-busy="pending"
-      @submit.prevent="changePassword"
+  <SettingsPage title="Conta">
+    <template #intro>
+      Gerencie como você entra: o vínculo com o Google e a senha desta conta.
+    </template>
+    <SettingsPanel
+      heading-id="google-heading"
+      title="Conta Google"
+      :busy="identitiesState === 'loading' || googleBusy"
     >
-      <label for="current-password">Senha atual</label>
-      <input
-        id="current-password"
-        v-model="currentPassword"
-        type="password"
-        autocomplete="current-password"
-        required
-        :disabled="pending"
+      <div v-if="identitiesState === 'loading'" class="loading">
+        <p role="status">Consultando o vínculo com o Google…</p>
+        <Skeleton /><Skeleton />
+      </div>
+      <StaleNotice
+        v-else-if="identitiesState !== 'ready'"
+        role="alert"
+        title="Vínculo indisponível"
+        :description="
+          identitiesState === 'session'
+            ? 'Sua sessão não está disponível. Entre novamente para ver o vínculo com o Google.'
+            : 'Não foi possível consultar o vínculo com o Google. Tente novamente.'
+        "
+      >
+        <div class="actions">
+          <Button @click="retryIdentities">Tentar novamente</Button>
+          <NuxtLink v-if="identitiesState === 'session'" to="/entrar"
+            >Entrar na conta</NuxtLink
+          >
+        </div>
+      </StaleNotice>
+      <template v-else>
+        <p v-if="!googleAvailable && !googleLinked" class="help">
+          O vínculo com o Google fica indisponível enquanto o provedor não
+          estiver ativo nesta instalação.
+        </p>
+        <p v-else-if="googleLinked" class="help">
+          Uma conta Google está vinculada.
+        </p>
+        <p v-else class="help">Nenhuma conta Google vinculada.</p>
+        <div
+          v-if="
+            (googleAvailable && !googleLinked) ||
+            (googleLinked && googleCanUnlink)
+          "
+          class="actions"
+        >
+          <Button
+            v-if="googleAvailable && !googleLinked"
+            :disabled="googleBusy"
+            :aria-busy="googleBusy"
+            @click="startGoogleLink"
+          >
+            {{ googleBusy ? 'Abrindo o Google…' : 'Vincular conta Google' }}
+          </Button>
+          <Button
+            v-if="googleLinked && googleCanUnlink"
+            :disabled="googleBusy"
+            :aria-busy="googleBusy"
+            @click="unlinkGoogle"
+          >
+            {{ googleBusy ? 'Desvinculando…' : 'Desvincular Google' }}
+          </Button>
+        </div>
+        <p v-if="googleLinked && !googleCanUnlink" class="help">
+          Defina uma senha ou vincule outro provedor antes de remover o Google.
+        </p>
+      </template>
+      <SettingsMessage
+        ref="googleSummary"
+        :message="googleMessage"
+        :error="googleError"
       />
-      <label for="new-password">Nova senha</label>
-      <input
-        id="new-password"
-        v-model="newPassword"
-        type="password"
-        autocomplete="new-password"
-        required
-        minlength="12"
-        aria-describedby="new-password-help"
-        :disabled="pending"
-      />
-      <p id="new-password-help" class="help">Use 12 caracteres ou mais.</p>
-      <p ref="summary" :role="error ? 'alert' : 'status'" tabindex="-1">
-        {{ message }}
-      </p>
-      <button type="submit" :disabled="pending">
-        {{ pending ? 'Alterando…' : 'Alterar senha' }}
-      </button>
-    </form>
-    <section
+    </SettingsPanel>
+    <SettingsPanel heading-id="senha-heading" title="Alterar senha">
+      <form
+        class="form"
+        method="post"
+        action="/api/auth/password"
+        :aria-busy="pending"
+        @submit.prevent="changePassword"
+      >
+        <SettingsTextField
+          v-model="currentPassword"
+          label="Senha atual"
+          type="password"
+          autocomplete="current-password"
+          required
+          :disabled="pending"
+        />
+        <SettingsTextField
+          v-model="newPassword"
+          label="Nova senha"
+          type="password"
+          autocomplete="new-password"
+          hint="Use 12 caracteres ou mais."
+          required
+          minlength="12"
+          :disabled="pending"
+        />
+        <SettingsMessage ref="summary" :message="message" :error="error" />
+        <div class="actions">
+          <Button type="submit" :disabled="pending">
+            {{ pending ? 'Alterando…' : 'Alterar senha' }}
+          </Button>
+        </div>
+      </form>
+    </SettingsPanel>
+    <SettingsPanel
       v-if="bambuCloudEnabled"
       id="bambu-cloud-account"
-      aria-labelledby="bambu-cloud-heading"
-    >
-      <h2 id="bambu-cloud-heading">Conta Bambu Cloud</h2>
-    </section>
-    <p><NuxtLink to="/sair">Sair</NuxtLink></p>
-  </main>
+      heading-id="bambu-cloud-heading"
+      title="Conta Bambu Cloud"
+    />
+    <SettingsPanel heading-id="sessao-heading" title="Sessão">
+      <template #description>
+        Encerre a sessão neste navegador ou em todos os seus dispositivos.
+      </template>
+      <p><NuxtLink to="/sair">Sair</NuxtLink></p>
+    </SettingsPanel>
+  </SettingsPage>
 </template>
 
 <style scoped>
-label {
-  display: block;
-  margin-top: 1rem;
-  font-weight: 600;
-}
-input {
-  display: block;
-  width: 100%;
-  max-width: 26rem;
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  font: inherit;
-}
-button {
-  min-height: 2.75rem;
-  padding: 0.65rem 1.25rem;
-  font: inherit;
-  cursor: pointer;
-}
-button:focus-visible,
-input:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+.loading,
+.form {
+  display: grid;
+  gap: var(--space-3);
 }
 .help {
   max-width: 36rem;
+  margin: 0;
 }
-.google-button {
-  margin-top: 0.75rem;
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
 }
 </style>

@@ -1,4 +1,16 @@
 <script setup lang="ts">
+import { nextTick, onMounted, ref } from 'vue'
+import SettingsMessage from '../../components/settings/SettingsMessage.vue'
+import SettingsPage from '../../components/settings/SettingsPage.vue'
+import SettingsPanel from '../../components/settings/SettingsPanel.vue'
+import SettingsTextField from '../../components/settings/SettingsTextField.vue'
+import SettingsToggle from '../../components/settings/SettingsToggle.vue'
+import Button from '../../components/ui/Button.vue'
+import ErrorState from '../../components/ui/ErrorState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import StaleNotice from '../../components/ui/StaleNotice.vue'
+import StatusBadge from '../../components/ui/StatusBadge.vue'
+
 type ProviderView = {
   id: string
   enabled: boolean
@@ -17,13 +29,18 @@ const forbidden = ref(false)
 const offline = ref(false)
 const message = ref('')
 const error = ref(false)
-const summary = ref<HTMLElement | null>(null)
+const summary = ref<InstanceType<typeof SettingsMessage> | null>(null)
+const loadFailed = ref(false)
 const provider = ref<ProviderView | null>(null)
 const enabled = ref(false)
 const clientId = ref('')
 const clientSecret = ref('')
 
 async function load() {
+  loadFailed.value = false
+  hydrated.value = false
+  message.value = ''
+  error.value = false
   offline.value = typeof navigator !== 'undefined' && navigator.onLine === false
   try {
     const data = await $fetch<{ providers: ProviderView[] }>(
@@ -43,11 +60,7 @@ async function load() {
         ? cause.statusCode
         : undefined
     forbidden.value = status === 404 || status === 403
-    if (!forbidden.value) {
-      message.value =
-        'Não foi possível carregar os provedores de entrada. Tente novamente.'
-      error.value = true
-    }
+    if (!forbidden.value) loadFailed.value = true
   } finally {
     hydrated.value = true
   }
@@ -107,130 +120,162 @@ onMounted(() => {
 </script>
 
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1>Provedores de entrada</h1>
-    <p>
+  <SettingsPage title="Provedores de entrada">
+    <template #intro>
       Contas → Provedores de entrada. Só administradores da instalação podem
       alterar estas opções.
-    </p>
-    <p v-if="forbidden" role="alert">
-      Você não tem permissão para abrir as configurações de provedores de
-      entrada.
-    </p>
-    <p v-else-if="offline" role="status">
-      Sem conexão com a internet. A configuração do Google fica indisponível
-      offline; o login por senha continua funcionando.
-    </p>
-    <section
+    </template>
+    <ErrorState v-if="forbidden" title="Acesso restrito">
+      <p role="alert">
+        Você não tem permissão para abrir as configurações de provedores de
+        entrada.
+      </p>
+    </ErrorState>
+    <StaleNotice
+      v-else-if="offline"
+      title="Sem conexão"
+      description="Sem conexão com a internet. A configuração do Google fica indisponível offline; o login por senha continua funcionando."
+    />
+    <SettingsPanel
       v-else-if="provider"
-      aria-labelledby="google-titulo"
-      :aria-busy="pending || !hydrated"
+      heading-id="google-titulo"
+      title="Google"
+      :busy="pending || !hydrated"
     >
-      <h2 id="google-titulo">Google</h2>
-      <p>
-        Preset embutido: emissor
-        <code>{{ provider.issuer }}</code>, escopos
-        <code>{{ provider.scopes.join(' ') }}</code>, PKCE e e-mail verificado
-        obrigatório. Nenhum client ID ou segredo é enviado com o produto.
-      </p>
-      <p>
-        URI de redirecionamento para registrar no Google Cloud:
-        <code>{{ provider.redirectUri }}</code>
-      </p>
-      <form method="post" @submit.prevent="save">
-        <label>
-          <input
-            v-model="enabled"
-            type="checkbox"
-            :disabled="pending || offline"
-          />
-          Ativar Entrar com Google
-        </label>
-        <label for="google-client-id">Client ID</label>
-        <input
-          id="google-client-id"
+      <template #description>
+        Preset embutido, sem client ID nem segredo enviados com o produto.
+      </template>
+      <dl class="facts">
+        <div>
+          <dt>Situação</dt>
+          <dd>
+            <StatusBadge
+              :tone="provider.enabled ? 'idle' : 'offline'"
+              :label="provider.enabled ? 'Ativo' : 'Desativado'"
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>Emissor</dt>
+          <dd>
+            <code>{{ provider.issuer }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Escopos</dt>
+          <dd>
+            <code>{{ provider.scopes.join(' ') }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Segurança</dt>
+          <dd>PKCE e e-mail verificado obrigatório</dd>
+        </div>
+        <div>
+          <dt>Segredo do cliente</dt>
+          <dd>
+            <StatusBadge
+              :tone="provider.hasClientSecret ? 'idle' : 'offline'"
+              :label="provider.hasClientSecret ? 'Salvo' : 'Não definido'"
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>URI de redirecionamento para registrar no Google Cloud</dt>
+          <dd>
+            <code>{{ provider.redirectUri }}</code>
+          </dd>
+        </div>
+      </dl>
+      <form class="form" method="post" @submit.prevent="save">
+        <SettingsToggle
+          v-model="enabled"
+          label="Ativar Entrar com Google"
+          :disabled="pending || offline"
+        />
+        <SettingsTextField
           v-model="clientId"
+          label="Client ID"
           autocomplete="off"
           autocapitalize="none"
           :spellcheck="false"
           maxlength="200"
           :disabled="pending || offline"
         />
-        <label for="google-client-secret">Client secret</label>
-        <input
-          id="google-client-secret"
+        <SettingsTextField
           v-model="clientSecret"
+          label="Client secret"
           type="password"
           autocomplete="new-password"
           maxlength="512"
+          hint="O segredo é guardado criptografado e nunca é devolvido ao navegador nem escrito em logs."
           :disabled="pending || offline"
           :placeholder="
             provider.hasClientSecret
               ? 'Segredo já salvo (deixe em branco para manter)'
               : 'Cole o segredo do projeto Google Cloud'
           "
-          aria-describedby="google-secret-help"
         />
-        <p id="google-secret-help">
-          O segredo é guardado criptografado e nunca é devolvido ao navegador
-          nem escrito em logs.
-        </p>
-        <p ref="summary" :role="error ? 'alert' : 'status'" tabindex="-1">
-          {{ message }}
-        </p>
-        <button type="submit" :disabled="pending || !hydrated || offline">
-          {{ pending ? 'Salvando…' : 'Salvar Google' }}
-        </button>
+        <SettingsMessage ref="summary" :message="message" :error="error" />
+        <div class="actions">
+          <Button type="submit" :disabled="pending || !hydrated || offline">
+            {{ pending ? 'Salvando…' : 'Salvar Google' }}
+          </Button>
+        </div>
       </form>
-    </section>
-    <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
-  </main>
+    </SettingsPanel>
+    <ErrorState
+      v-else-if="hydrated && loadFailed"
+      title="Provedores indisponíveis"
+    >
+      <p role="alert">
+        Não foi possível carregar os provedores de entrada. Tente novamente.
+      </p>
+      <Button @click="load()">Tentar novamente</Button>
+    </ErrorState>
+    <div v-else class="loading" aria-busy="true">
+      <p role="status">Carregando provedores de entrada…</p>
+      <Skeleton /><Skeleton /><Skeleton />
+    </div>
+    <p class="back"><NuxtLink to="/">Voltar ao início</NuxtLink></p>
+  </SettingsPage>
 </template>
 
 <style scoped>
-form {
-  max-width: 32rem;
+.loading,
+.form {
+  display: grid;
+  gap: var(--space-3);
 }
-label {
-  display: block;
-  font-weight: 600;
-  margin-top: 1rem;
+.form {
+  max-inline-size: 32rem;
 }
-input[type='text'],
-input[type='password'],
-input:not([type]) {
-  display: block;
-  width: 100%;
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid currentColor;
-  border-radius: 0.25rem;
-  font: inherit;
+.facts {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
 }
-input[type='checkbox'] {
-  margin-right: 0.5rem;
+.facts div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
 }
-button {
-  min-height: 2.75rem;
-  margin-top: 1.25rem;
-  padding: 0.65rem 1.25rem;
-  font: inherit;
-  cursor: pointer;
+.facts dt {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
 }
-button:disabled {
-  cursor: wait;
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
-code {
-  word-break: break-all;
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
 }
-input:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
-}
-#google-secret-help {
-  font-size: 0.875rem;
+.back {
+  margin: 0;
 }
 </style>

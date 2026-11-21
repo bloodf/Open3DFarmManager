@@ -267,6 +267,32 @@ test('Snapmaker U1 pause reply envelope with vendor members is accepted', async 
   }
 })
 
+test('U1 pause replies reject wrong or missing jsonrpc and mismatched id', async () => {
+  for (const fault of ['wrong-jsonrpc', 'missing-jsonrpc', 'wrong-id'] as const) {
+    const f = await fixture({
+      pause: (socket, id) => {
+        const reply = { ...u1Envelope, id, result: 'ok', jsonrpc: fault === 'wrong-jsonrpc' ? '1.0' : '2.0' }
+        if (fault === 'missing-jsonrpc') delete (reply as { jsonrpc?: string }).jsonrpc
+        if (fault === 'wrong-id') reply.id = id + 1
+        socket.send(JSON.stringify(reply))
+        return true
+      },
+    })
+    try {
+      await f.driver.prepare()
+      await assert.rejects(f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => true,
+      }), undefined, fault)
+      await f.driver.closed
+      assert.equal(f.remote.counts().pauses, 1, fault)
+      assert.equal(f.observations.at(-1), null, fault)
+    } finally {
+      await f.cleanup()
+    }
+  }
+})
 test('error-as-success pause reply with vendor members is rejected', async () => {
   const f = await fixture({
     pause: (socket, id) => {

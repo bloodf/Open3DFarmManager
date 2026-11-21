@@ -9,6 +9,7 @@ import {
   MAX_WEBCAMS,
 } from '../../packages/connector/src/moonraker/discovery-parse.ts'
 import { discoverMoonraker } from '../../packages/connector/src/moonraker/discovery.ts'
+import { Reply as ReplyEnvelope } from '../../packages/connector/src/moonraker/frame.ts'
 import { serveWsTestServer } from './ws-serve.ts'
 
 // Hand-written from the Moonraker API docs (no real capture); 4 tools mirror
@@ -217,7 +218,7 @@ const limits = {
   reconnectMaxMs: 20,
 }
 type Reply = unknown
-async function serve(replies: Record<string, Reply>) {
+async function serve(replies: Record<string, Reply>, envelope: object = {}) {
   const methods: string[] = []
   let opened = 0
   let closed = 0
@@ -260,6 +261,7 @@ async function serve(replies: Record<string, Reply>) {
                   reply === 'notify'
                     ? base[method as keyof typeof base]
                     : reply,
+                ...envelope,
               },
         ),
       )
@@ -334,6 +336,29 @@ describe('discoverMoonraker', () => {
         String(new URL(s.origin).port),
       )
     }))
+
+  // Snapmaker U1 firmware (Moonraker 2.0.0) adds members to every reply envelope.
+  test('vendor members in the reply envelope are ignored', async () => {
+    const s = await serve(base, { cli_time: -1, dev_time: 1795235005 })
+    try {
+      expect((await run(s)).tools.tools).toHaveLength(4)
+      await s.closed()
+    } finally {
+      await s.server.stop()
+    }
+  })
+
+  test('the shared envelope never reads an error reply as a success', () => {
+    const ok = { jsonrpc: '2.0', id: 1, result: null }
+    expect(ReplyEnvelope.safeParse({ ...ok, cli_time: -1 }).success).toBe(true)
+    expect(ReplyEnvelope.safeParse({ ...ok, error: {} }).success).toBe(false)
+    expect(
+      ReplyEnvelope.safeParse({ jsonrpc: '2.0', id: 1, error: {} }).success,
+    ).toBe(false)
+    expect(ReplyEnvelope.safeParse({ jsonrpc: '2.0', id: 1 }).success).toBe(
+      false,
+    )
+  })
 
   test('without webcamOrigin only raw paths are returned', () =>
     using(base, async (s) => {

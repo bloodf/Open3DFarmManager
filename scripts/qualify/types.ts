@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 export type SupportedVendor =
-  'moonraker' | 'klipper' | 'bambu' | 'creality' | 'anycubic' | 'kobralink'
+  | 'moonraker'
+  | 'klipper'
+  | 'bambu'
+  | 'creality'
+  | 'anycubic'
+  | 'kobralink'
+  | 'kobra-x'
 
 export interface QualifyCliOptions {
   vendor: string
@@ -15,6 +21,12 @@ export interface QualifyCliOptions {
   caFile?: string | undefined
   pinSha256?: string | undefined
   webcamOrigin?: string | undefined
+  /** Kobra X client certificate override (PEM). */
+  certFile?: string | undefined
+  /** Kobra X client key override (PEM); defaults to the cert file. */
+  keyFile?: string | undefined
+  /** Kobra X HTTP identity port (`/info`, `/ctrl`); default 18910. */
+  httpPort?: number | undefined
 }
 
 export interface ObservedIdentity {

@@ -4,10 +4,14 @@
 // file:// URLs in Chromium, and checks it at desktop and 360px widths in light
 // and dark: console/page errors, external requests, overflow, keyboard focus,
 // reduced motion, theme toggle, screenshot attribution and axe (WCAG A/AA).
-// Screenshots and report.json go outside the repository. No server is started.
+// Screenshots and report.json go outside the repository, in a directory that
+// is unique to each invocation (or OPENFARM_WEBSITE_SHOTS when set), and each
+// invocation builds into its own private directory, so concurrent runs never
+// share files. No server is started.
 import { spawnSync } from 'node:child_process'
 import {
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   realpath,
@@ -17,7 +21,7 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { DEFAULT_OUT, MARKER } from './build.mjs'
+import { MARKER } from './build.mjs'
 import { isInside, listFiles, sha256 } from './lib/files.mjs'
 import {
   backgroundLuminance,
@@ -69,20 +73,20 @@ async function loadBrowserTools() {
   }
 }
 
-function runBuild() {
-  const result = spawnSync(process.execPath, [buildScript], {
+function runBuild(siteDir) {
+  const result = spawnSync(process.execPath, [buildScript, '--out', siteDir], {
     encoding: 'utf8',
   })
   if (result.status !== 0)
     throw new Error(`build failed:\n${result.stderr || result.stdout}`)
 }
 
-async function readManifest() {
-  return JSON.parse(await readFile(path.join(DEFAULT_OUT, MARKER), 'utf8'))
+async function readManifest(siteDir) {
+  return JSON.parse(await readFile(path.join(siteDir, MARKER), 'utf8'))
 }
 
-async function htmlPages() {
-  return (await listFiles(DEFAULT_OUT)).filter((file) => file.endsWith('.html'))
+async function htmlPages(siteDir) {
+  return (await listFiles(siteDir)).filter((file) => file.endsWith('.html'))
 }
 
 /** Parse docs/images/README.md into { file -> { route, viewport } } plus commit and date. */
@@ -102,7 +106,7 @@ async function readScreenshotProvenance() {
   return { rows, commit, date }
 }
 
-async function checkScreenshotAttribution(page, provenance, label) {
+async function checkScreenshotAttribution(page, siteDir, provenance, label) {
   const figures = await page.evaluate(() =>
     [...document.querySelectorAll('img[src*="assets/screenshots/"]')].map(
       (img) => ({
@@ -142,7 +146,7 @@ async function checkScreenshotAttribution(page, provenance, label) {
     if (!link.endsWith('docs/images/README.md'))
       problems.push(`${file}: caption does not link the provenance README`)
     const built = await sha256(
-      path.join(DEFAULT_OUT, 'assets', 'screenshots', file),
+      path.join(siteDir, 'assets', 'screenshots', file),
     )
     const original = await sha256(path.join(repoRoot, 'docs', 'images', file))
     if (built !== original)
@@ -155,13 +159,13 @@ async function checkScreenshotAttribution(page, provenance, label) {
   )
 }
 
-function attachGuards(page, pageUrl, issues) {
+function attachGuards(page, siteDir, issues) {
   const allowed = (url) =>
     url.startsWith('data:') ||
     url.startsWith('blob:') ||
     url === 'about:blank' ||
     (url.startsWith('file://') &&
-      isInside(DEFAULT_OUT, fileURLToPath(url.split('#')[0])))
+      isInside(siteDir, fileURLToPath(url.split('#')[0])))
   page.on('console', (message) => {
     if (['error', 'warning'].includes(message.type()))
       issues.push(`console ${message.type()}: ${message.text()}`)
@@ -277,8 +281,13 @@ async function runAxe(AxeBuilder, page, label) {
   )
 }
 
-async function verifyPage(browser, AxeBuilder, file, shotsDir, provenance) {
-  const url = pathToFileURL(path.join(DEFAULT_OUT, file)).href
+async function verifyPage(
+  browser,
+  AxeBuilder,
+  file,
+  { siteDir, shotsDir, provenance },
+) {
+  const url = pathToFileURL(path.join(siteDir, file)).href
   const slug = file.replace(/\.html$/, '').replace(/[\\/]/g, '-')
   const pageLabel = `[${file}]`
   for (const viewport of VIEWPORTS) {
@@ -293,7 +302,7 @@ async function verifyPage(browser, AxeBuilder, file, shotsDir, provenance) {
       const page = await context.newPage()
       page.setDefaultTimeout(15_000)
       const issues = []
-      attachGuards(page, url, issues)
+      attachGuards(page, siteDir, issues)
       await page.goto(url, { waitUntil: 'load' })
       await page.evaluate(() => document.fonts.ready)
 
@@ -310,7 +319,7 @@ async function verifyPage(browser, AxeBuilder, file, shotsDir, provenance) {
       const overflow = await page.evaluate(inspectOverflow)
       record(overflow.length === 0, `${label} no horizontal overflow`, overflow)
       if (viewport.name === 'desktop' && scheme === 'light')
-        await checkScreenshotAttribution(page, provenance, label)
+        await checkScreenshotAttribution(page, siteDir, provenance, label)
 
       await page.screenshot({
         path: path.join(shotsDir, `${slug}-${viewport.name}-${scheme}.png`),
@@ -327,7 +336,7 @@ async function verifyPage(browser, AxeBuilder, file, shotsDir, provenance) {
     }
   }
   await verifyReducedMotion(browser, url, pageLabel)
-  await verifyThemeToggle(browser, AxeBuilder, url, pageLabel)
+  await verifyThemeToggle(browser, AxeBuilder, siteDir, url, pageLabel)
 }
 
 async function verifyReducedMotion(browser, url, pageLabel) {
@@ -345,7 +354,7 @@ async function verifyReducedMotion(browser, url, pageLabel) {
   await context.close()
 }
 
-async function verifyThemeToggle(browser, AxeBuilder, url, pageLabel) {
+async function verifyThemeToggle(browser, AxeBuilder, siteDir, url, pageLabel) {
   const label = `${pageLabel} theme toggle`
   const context = await browser.newContext({
     colorScheme: 'light',
@@ -353,7 +362,7 @@ async function verifyThemeToggle(browser, AxeBuilder, url, pageLabel) {
   })
   const page = await context.newPage()
   const issues = []
-  attachGuards(page, url, issues)
+  attachGuards(page, siteDir, issues)
   await page.goto(url, { waitUntil: 'load' })
   const toggle = page.locator('[data-theme-toggle]')
   const problems = []
@@ -382,37 +391,67 @@ async function verifyThemeToggle(browser, AxeBuilder, url, pageLabel) {
   await context.close()
 }
 
-async function main() {
-  const shotsDir = path.resolve(
-    process.env.OPENFARM_WEBSITE_SHOTS ??
-      path.join(os.tmpdir(), 'openfarm-website-verify'),
+/** Reject an evidence directory that is, or resolves to, a place inside the repository. */
+async function assertOutsideRepo(dir) {
+  const real = path.join(
+    await realpath(path.dirname(dir)).catch(() => path.dirname(dir)),
+    path.basename(dir),
   )
-  const realShots = path.join(
-    await realpath(path.dirname(shotsDir)).catch(() => path.dirname(shotsDir)),
-    path.basename(shotsDir),
-  )
-  if (isInside(repoRoot, shotsDir) || isInside(repoRoot, realShots)) {
+  if (isInside(repoRoot, dir) || isInside(repoRoot, real)) {
     throw new Error(
-      `Screenshots must be written outside the repository (got ${shotsDir}).`,
+      `Screenshots must be written outside the repository (got ${dir}).`,
     )
   }
-  await mkdir(shotsDir, { recursive: true })
-  for (const name of await readdir(shotsDir)) {
-    if (/\.(png|json)$/.test(name)) await rm(path.join(shotsDir, name))
-  }
+}
 
+/**
+ * Evidence directory: OPENFARM_WEBSITE_SHOTS when set (its old PNG/JSON files
+ * are replaced), otherwise a fresh directory unique to this invocation.
+ */
+async function prepareEvidenceDir() {
+  const override = process.env.OPENFARM_WEBSITE_SHOTS
+  if (override) {
+    const dir = path.resolve(override)
+    await assertOutsideRepo(dir)
+    await mkdir(dir, { recursive: true })
+    for (const name of await readdir(dir)) {
+      if (/\.(png|json)$/.test(name)) await rm(path.join(dir, name))
+    }
+    return dir
+  }
+  const base = path.resolve(os.tmpdir())
+  await assertOutsideRepo(path.join(base, 'openfarm-website-verify'))
+  return mkdtemp(path.join(base, 'openfarm-website-verify-'))
+}
+
+async function main() {
+  const shotsDir = await prepareEvidenceDir()
+  process.stdout.write(`Evidence directory: ${shotsDir}\n`)
+  // Private build directory owned by this invocation; removed in `finally`.
+  const buildRoot = await mkdtemp(
+    path.join(path.resolve(os.tmpdir()), 'openfarm-website-build-'),
+  )
+  const siteDir = path.join(buildRoot, 'site')
+  try {
+    await verifySite({ shotsDir, siteDir })
+  } finally {
+    await rm(buildRoot, { recursive: true, force: true })
+  }
+}
+
+async function verifySite({ shotsDir, siteDir }) {
   const { chromium, AxeBuilder } = await loadBrowserTools()
 
-  runBuild()
-  const first = await readManifest()
-  runBuild()
-  const second = await readManifest()
+  runBuild(siteDir)
+  const first = await readManifest(siteDir)
+  runBuild(siteDir)
+  const second = await readManifest(siteDir)
   record(
     JSON.stringify(first) === JSON.stringify(second),
     `build is deterministic (${Object.keys(first).length} files)`,
   )
 
-  const pages = await htmlPages()
+  const pages = await htmlPages(siteDir)
   record(
     pages.length > 0,
     `found ${pages.length} built page(s): ${pages.join(', ')}`,
@@ -427,7 +466,11 @@ async function main() {
   const browser = await chromium.launch()
   try {
     for (const file of pages)
-      await verifyPage(browser, AxeBuilder, file, shotsDir, provenance)
+      await verifyPage(browser, AxeBuilder, file, {
+        siteDir,
+        shotsDir,
+        provenance,
+      })
   } finally {
     await browser.close()
   }

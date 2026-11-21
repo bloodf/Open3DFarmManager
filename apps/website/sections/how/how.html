@@ -1,0 +1,90 @@
+<section
+  id="como-funciona"
+  class="section how"
+  data-nav="Como funciona"
+  aria-labelledby="como-titulo"
+>
+  <div class="container">
+    <header class="section-head">
+      <p class="section-head__index" aria-hidden="true">02 / 04</p>
+      <p class="eyebrow">Como funciona</p>
+      <h2 id="como-titulo">Como as peças se conectam</h2>
+      <p class="section-head__intro">
+        O diagrama representa a arquitetura do projeto, incluindo integrações em
+        andamento.
+      </p>
+    </header>
+
+    <figure class="how__diagram">
+      <figcaption class="how__diagram-title">
+        Diagrama da arquitetura planejada (texto equivalente abaixo)
+      </figcaption>
+      <ul class="how__flow" aria-label="Navegador, aplicação e banco">
+        <li class="how__node">Navegador</li>
+        <li class="how__link">Contas, cadastro e sinalização</li>
+        <li class="how__node">Aplicação Nuxt</li>
+        <li class="how__link">Armazena em</li>
+        <li class="how__node">Banco próprio</li>
+      </ul>
+      <ul
+        class="how__flow how__flow--direct"
+        aria-label="Navegador, Connector e integrações"
+      >
+        <li class="how__node">Navegador</li>
+        <li class="how__link how__link--direct">WebRTC direto</li>
+        <li class="how__node how__node--accent">Connector na rede local</li>
+        <li class="how__link">Conecta a</li>
+        <li class="how__node">Klipper / Moonraker</li>
+        <li class="how__link">e a</li>
+        <li class="how__node">Spoolman</li>
+      </ul>
+    </figure>
+
+    <ol class="how__steps">
+      <li>
+        <h3>O servidor cuida de contas e sinalização</h3>
+        <p>
+          A aplicação mantém contas, cadastro e sinalização, além das APIs de
+          integração, sobre um banco de dados próprio.
+        </p>
+      </li>
+      <li>
+        <h3>Estado ao vivo e câmera vão direto ao Connector</h3>
+        <p>
+          O navegador abre uma conexão WebRTC direta com o Connector na sua rede
+          local. Sem essa conexão, a experiência do navegador é somente leitura.
+        </p>
+      </li>
+      <li>
+        <h3>O Connector decide o que pode ser executado</h3>
+        <p>
+          A validação e a aplicação dos comandos ficam sempre no Connector,
+          inclusive durante uma indisponibilidade do servidor. Perder a conexão
+          não interrompe, por si só, uma impressão em andamento.
+        </p>
+      </li>
+    </ol>
+
+    <h3 class="how__subtitle">Do simulador ao hardware</h3>
+    <ol class="how__validation">
+      <li>
+        <strong>Testes locais e fixtures.</strong>
+        <span>Código verificado com dados sintéticos.</span>
+      </li>
+      <li>
+        <strong>Simuladores.</strong>
+        <span
+          >Klipper/Moonraker e Spoolman em loopback, nunca ligados a impressoras
+          físicas.</span
+        >
+      </li>
+      <li>
+        <strong>Hardware físico.</strong>
+        <span
+          >Aceitação feita pelo proprietário, depois dos simuladores. Ainda não
+          realizada.</span
+        >
+      </li>
+    </ol>
+  </div>
+</section>

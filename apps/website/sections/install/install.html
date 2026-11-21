@@ -1,0 +1,75 @@
+<section
+  id="instalar"
+  class="section install"
+  data-nav="Instalar"
+  aria-labelledby="instalar-titulo"
+>
+  <div class="container">
+    <header class="section-head">
+      <p class="section-head__index" aria-hidden="true">03 / 04</p>
+      <p class="eyebrow">Instalar</p>
+      <h2 id="instalar-titulo">Execute localmente</h2>
+      <p class="section-head__intro">
+        Você precisa de Node.js 22.22.3+ na série 22.x ou 24.22.2+ na série 24.x
+        e de npm, que vem com o Node.js. Docker Compose é necessário para a
+        integração com simuladores, não para abrir a interface inicial.
+      </p>
+    </header>
+
+    <div class="install__grid">
+      <div class="install__block">
+        <h3>Interface de desenvolvimento</h3>
+        <pre
+          class="code"
+          role="region"
+          aria-label="Comandos para executar localmente"
+          tabindex="0"
+        ><code>git clone https://github.com/bloodf/Open3DFarmManager.git
+cd Open3DFarmManager
+npm ci --ignore-scripts
+npm run dev</code></pre>
+        <p>
+          Abra <code>http://127.0.0.1:3000</code>. Você verá a interface de
+          desenvolvimento. Esse comando não cria contas, não configura banco de
+          dados e não conecta impressoras. Autenticação e integrações começam
+          desabilitadas e exigem configuração própria.
+        </p>
+      </div>
+
+      <div class="install__block">
+        <h3>Hospedagem própria</h3>
+        <p>
+          O guia de hospedagem implanta uma aplicação e o seu banco PostgreSQL
+          dedicado, em uma VM Linux limpa com Docker Engine e o plugin Compose.
+          Resumo das etapas:
+        </p>
+        <ol class="install__steps">
+          <li>
+            Preparar o deploy com a imagem de release e o arquivo
+            <code>.env</code> privado.
+          </li>
+          <li>
+            Inicializar segredos e o banco de dados, com um dono de migração
+            dedicado.
+          </li>
+          <li>Configurar o proxy reverso com TLS válido e WebSocket.</li>
+          <li>Criar o primeiro proprietário com o token de uso único.</li>
+          <li>Parear um Connector contra um simulador.</li>
+          <li>Habilitar cada subsistema opcional de forma deliberada.</li>
+        </ol>
+        <p>
+          <a href="{{repo}}/blob/main/docs/SELF-HOSTING.md"
+            >Leia o guia completo de hospedagem própria</a
+          >
+          (em inglês).
+        </p>
+      </div>
+    </div>
+
+    <p class="callout install__warning" role="note">
+      <strong>Em desenvolvimento.</strong> Mantenha credenciais e configuração
+      privada fora do Git. O projeto não é uma versão pronta para operar uma
+      farm em produção, e a aceitação em hardware permanece aberta.
+    </p>
+  </div>
+</section>

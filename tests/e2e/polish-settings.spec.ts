@@ -554,6 +554,7 @@ async function open(
   scene: Scene,
   viewport: Viewport,
   theme: Theme,
+  lenient = false,
 ) {
   await page.unrouteAll({ behavior: 'ignoreErrors' })
   await page.setViewportSize(viewport)
@@ -567,7 +568,10 @@ async function open(
   await page
     .getByRole('heading', { level: 1, name: scene.heading, exact: true })
     .waitFor()
-  await scene.ready(page)
+  // The pre-polish baseline is captured with the same steps but cannot show
+  // text that only the polished pages have: it is photographed as it is.
+  if (lenient) await scene.ready(page).catch(() => undefined)
+  else await scene.ready(page)
 }
 
 async function violations(page: Page) {
@@ -982,12 +986,13 @@ test('screenshots of real screen states', async ({ page }, testInfo) => {
     process.env.POLISH_SETTINGS_SHOTS_DIR ??
     (await mkdtemp(join(tmpdir(), 'openfarm-settings-shots-')))
   await mkdir(dir, { recursive: true })
+  const capture = process.env.POLISH_CAPTURE === '1'
   const written: string[] = []
   for (const scene of scenes)
     for (const viewport of viewports)
       for (const theme of themes) {
         await page.unrouteAll({ behavior: 'ignoreErrors' })
-        await open(page, scene, viewport, theme)
+        await open(page, scene, viewport, theme, capture)
         const path = join(dir, `${scene.id}-${viewport.name}-${theme}.png`)
         await page.screenshot({ path, fullPage: true })
         if ((await stat(path)).size <= 0) throw new Error(`Empty ${path}`)

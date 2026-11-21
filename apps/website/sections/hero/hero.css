@@ -1,0 +1,36 @@
+.hero {
+  padding-block: var(--space-7);
+  background:
+    radial-gradient(circle, var(--rule) 1px, transparent 1.5px) 0 0 / 22px 22px,
+    var(--paper);
+}
+
+.hero__grid {
+  display: grid;
+  gap: var(--space-6);
+  align-items: center;
+}
+
+.hero__copy {
+  display: grid;
+  gap: var(--space-5);
+  justify-items: start;
+  min-width: 0;
+}
+
+.hero h1 em {
+  color: var(--copper);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.hero__shot {
+  min-width: 0;
+}
+
+@media (min-width: 62rem) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: var(--space-7);
+  }
+}

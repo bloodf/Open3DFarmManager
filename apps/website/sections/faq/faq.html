@@ -1,0 +1,101 @@
+<section
+  id="faq"
+  class="section faq"
+  data-nav="FAQ"
+  aria-labelledby="faq-titulo"
+>
+  <div class="container">
+    <header class="section-head">
+      <p class="section-head__index" aria-hidden="true">04 / 04</p>
+      <p class="eyebrow">Perguntas frequentes</p>
+      <h2 id="faq-titulo">O que mais perguntam</h2>
+    </header>
+
+    <div class="faq__list">
+      <details>
+        <summary>Já posso usar em produção?</summary>
+        <p>
+          Não. A Fase 0 está em andamento e a aceitação integrada ainda não foi
+          concluída. O projeto já tem autenticação, pareamento, inventário,
+          visão da farm, câmera e pausa assinada, atrás de flags e configuração
+          explícita, mas nada disso está comprovado em hardware físico.
+        </p>
+      </details>
+      <details>
+        <summary>Qual é a diferença entre simulador e hardware físico?</summary>
+        <p>
+          Os simuladores Klipper/Moonraker rodam em loopback e nunca se conectam
+          a impressoras físicas. “Simulada” em uma capacidade quer dizer que ela
+          foi exercitada nesses simuladores e em testes unitários. A aceitação
+          em hardware físico vem depois e é feita pelo proprietário; ainda não
+          aconteceu.
+        </p>
+      </details>
+      <details>
+        <summary>Funciona com a minha impressora?</summary>
+        <p>
+          O primeiro alvo é Klipper/Moonraker, com Spoolman para materiais. O
+          catálogo de compatibilidade cobre as famílias Klipper/Moonraker,
+          Creality, Anycubic e Bambu e marca cada capacidade como simulada,
+          documentada ou não comprovada. Nenhuma delas está comprovada em
+          hardware físico. Consulte o
+          <a href="{{repo}}/tree/main/docs/compatibility"
+            >catálogo de compatibilidade</a
+          >.
+        </p>
+      </details>
+      <details>
+        <summary>O que é o Connector?</summary>
+        <p>
+          É o aplicativo que conecta a farm às impressoras, instalado na sua
+          rede local. Ele valida identidade, assinatura, escopo, expiração e
+          revogação, e aplica as regras de segurança dos comandos, mesmo quando
+          o servidor está indisponível.
+        </p>
+      </details>
+      <details>
+        <summary>Posso comandar impressoras pela API?</summary>
+        <p>
+          Somente com um escopo concedido pelo proprietário, por envelopes
+          assinados pelo emissor e verificados pelo Connector, que recusa
+          comandos inseguros ou não autorizados e informa o motivo. Comandos do
+          navegador usam apenas WebRTC. Nenhum comando incerto é repetido
+          automaticamente, e os testes automatizados nunca comandam impressoras
+          físicas.
+        </p>
+      </details>
+      <details>
+        <summary>E a integração KobraLink com a Anycubic Kobra X?</summary>
+        <p>
+          Ela exibe telemetria somente leitura de impressoras Kobra X dentro da
+          interface do OpenFarm. O serviço KobraLink é instalado e operado
+          separadamente. Câmera e controles não fazem parte dessa integração.
+          Veja o
+          <a href="{{repo}}/blob/main/docs/KOBRALINK-SELF-HOSTING.md"
+            >guia de hospedagem do KobraLink</a
+          >.
+        </p>
+      </details>
+      <details>
+        <summary>Qual é a licença?</summary>
+        <p>
+          O código original usa a
+          <a href="{{repo}}/blob/main/LICENSE">licença MIT</a>. Dependências e
+          fontes de terceiros mantêm suas próprias licenças e avisos, listados
+          em <a href="{{repo}}/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.
+        </p>
+      </details>
+      <details>
+        <summary>Como contribuo?</summary>
+        <p>
+          Consulte as <a href="{{repo}}/issues">issues</a> e o
+          <a href="{{repo}}/blob/main/docs/PHASE-0.md">registro de aceitação</a
+          >. Relatos com passos para reproduzir, melhorias de acessibilidade e
+          testes em simuladores ajudam. Trabalhe em uma branch, execute
+          <code>npm run check:all</code> e abra um draft PR sem segredos nem
+          configuração de hospedagem.
+        </p>
+      </details>
+    </div>
+  </div>
+</section>

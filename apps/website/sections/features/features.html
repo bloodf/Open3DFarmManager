@@ -1,0 +1,216 @@
+<section
+  id="recursos"
+  class="section features"
+  data-nav="Recursos"
+  aria-labelledby="recursos-titulo"
+>
+  <div class="container">
+    <header class="section-head">
+      <p class="section-head__index" aria-hidden="true">01 / 04</p>
+      <p class="eyebrow">Recursos</p>
+      <h2 id="recursos-titulo">Por que este projeto?</h2>
+      <p class="section-head__intro">
+        Administrar várias impressoras envolve mais do que abrir uma interface
+        por máquina. O Open3DFarmManager está sendo construído para reunir a
+        operação da farm sem tirar do Connector local a responsabilidade de
+        validar o acesso e os comandos.
+      </p>
+    </header>
+
+    <ul class="features__list">
+      <li>
+        <h3>Uma visão da farm no navegador</h3>
+        <p>
+          Cadastro de impressoras e Connectors separado do estado recebido de
+          cada máquina, para não confundir uma aprovação com uma conexão ativa.
+        </p>
+      </li>
+      <li>
+        <h3>Acesso que você pode administrar</h3>
+        <p>
+          Contas próprias, aprovação de Connectors e dispositivos do navegador,
+          com revogação e recuperação de acesso.
+        </p>
+      </li>
+      <li>
+        <h3>Conexão direta por WebRTC</h3>
+        <p>
+          Estado ao vivo e câmera seguem pelo caminho direto entre o navegador e
+          o Connector. Comandos do navegador usam somente WebRTC, sem TURN e sem
+          alternativa por HTTP. Comandos originados por API só são aceitos com
+          escopo concedido pelo proprietário, entregues como envelopes assinados
+          pelo emissor e verificados pelo Connector, que recusa comandos
+          inseguros ou não autorizados e informa o motivo. Não há nova tentativa
+          automática de comandos incertos, e testes automatizados nunca comandam
+          impressoras físicas.
+        </p>
+      </li>
+      <li>
+        <h3>Começando por Klipper/Moonraker e Spoolman</h3>
+        <p>A validação passa por simuladores antes de chegar ao hardware.</p>
+      </li>
+      <li>
+        <h3>Código aberto para acompanhar e contribuir</h3>
+        <p>
+          Implementação, testes e registros de aceitação ficam disponíveis no
+          repositório.
+        </p>
+      </li>
+    </ul>
+
+    <h3 class="features__subtitle" id="evidencia-titulo">
+      Três tipos de evidência
+    </h3>
+    <p class="muted">
+      Cada afirmação do projeto aponta para uma destas fontes. Elas não se
+      substituem.
+    </p>
+    <dl class="features__evidence" aria-labelledby="evidencia-titulo">
+      <div>
+        <dt>Testes locais e fixtures</dt>
+        <dd>
+          Verificam o código com dados sintéticos e protocolos simulados em
+          loopback.
+        </dd>
+      </div>
+      <div>
+        <dt>Simuladores</dt>
+        <dd>
+          Exercitam o caminho contra simuladores Klipper/Moonraker em loopback.
+          Nunca se conectam a impressoras físicas.
+        </dd>
+      </div>
+      <div>
+        <dt>Hardware físico</dt>
+        <dd>
+          A aceitação em hardware vem depois da aceitação em simuladores e é
+          feita pelo proprietário.
+          <strong>Hoje nada está comprovado em hardware físico.</strong>
+        </dd>
+      </div>
+    </dl>
+
+    <h3 class="features__subtitle" id="estado-titulo">Estado atual por área</h3>
+    <dl class="features__status" aria-labelledby="estado-titulo">
+      <div>
+        <dt>Contas e acesso <span class="tag tag--done">Implementado</span></dt>
+        <dd>
+          Login, sessões próprias, convites, redefinição de senha e autorização
+          por farm. Os serviços dependem de configuração explícita.
+        </dd>
+      </div>
+      <div>
+        <dt>
+          Connectors e dispositivos
+          <span class="tag tag--done">Implementado</span>
+        </dt>
+        <dd>
+          Pareamento, aprovação, inventário, revogação, provas de identidade e
+          renovação de credenciais. CLI com pareamento e status.
+        </dd>
+      </div>
+      <div>
+        <dt>Visão da farm <span class="tag tag--done">Implementado</span></dt>
+        <dd>
+          Página <code>/farm</code> com inventário, estado ao vivo por WebRTC
+          direto, idade dos dados e reconexão com recuo. A aceitação em loopback
+          com dados simulados é separada da aceitação em hardware, que permanece
+          aberta.
+        </dd>
+      </div>
+      <div>
+        <dt>Câmera <span class="tag tag--wip">Em andamento</span></dt>
+        <dd>
+          Vídeo RTSP levado ao navegador pelo canal WebRTC autorizado. Medição
+          de memória nativa e aceitação de ponta a ponta com MediaMTX pendentes.
+        </dd>
+      </div>
+      <div>
+        <dt>Pausa assinada <span class="tag tag--wip">Em andamento</span></dt>
+        <dd>
+          Pausa confirmada e assinada na página da farm, enviada somente por
+          WebRTC ao Connector. O sinal de prontidão do Connector após reconexão
+          ainda está pendente.
+        </dd>
+      </div>
+      <div>
+        <dt>
+          Impressoras e simuladores
+          <span class="tag tag--wip">Em andamento</span>
+        </dt>
+        <dd>
+          Identificação Moonraker, várias ferramentas e webcams. Aceitação do
+          SV06 e do cenário de quatro ferramentas pendente.
+        </dd>
+      </div>
+      <div>
+        <dt>
+          Arquivos e histórico <span class="tag tag--wip">Em andamento</span>
+        </dt>
+        <dd>
+          Páginas de arquivos da impressora e de histórico de trabalhos. Envio
+          completo de arquivos para o Connector e importação de histórico
+          Moonraker em desenvolvimento.
+        </dd>
+      </div>
+      <div>
+        <dt>Spoolman <span class="tag tag--wip">Em andamento</span></dt>
+        <dd>
+          Inventário somente leitura na visão da farm. Integração por farm e
+          registro de uso de filamento por trabalho em desenvolvimento.
+        </dd>
+      </div>
+      <div>
+        <dt>
+          Compatibilidade <span class="tag tag--pending">Não comprovada</span>
+        </dt>
+        <dd>
+          Catálogo por família (Klipper/Moonraker, Creality, Anycubic e Bambu),
+          com capacidades marcadas como simuladas, documentadas ou não
+          comprovadas. Nenhuma delas está comprovada em hardware físico.
+        </dd>
+      </div>
+    </dl>
+
+    <h3 class="features__subtitle">A interface hoje</h3>
+    <div class="features__shots">
+      <figure class="shot">
+        <div class="shot__frame">
+          <img
+            src="assets/screenshots/app-login.png"
+            width="720"
+            height="650"
+            alt="Tela real de login com campos de usuário e senha vazios."
+          />
+        </div>
+        <figcaption>
+          Captura real da rota <code>/entrar</code>, em 720 × 650, de 5 de
+          novembro de 2026 (commit <code>c6f1d6f</code>), sem sessão autenticada
+          e sem edição visual.
+          <a href="{{repo}}/blob/main/docs/images/README.md"
+            >Origem da captura</a
+          >.
+        </figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="shot__frame">
+          <img
+            src="assets/screenshots/app-pairing.png"
+            width="720"
+            height="800"
+            alt="Tela real de aprovação do Connector, com conferência da impressão digital e controles desabilitados sem autenticação."
+          />
+        </div>
+        <figcaption>
+          Captura real da rota <code>/parear</code>, em 720 × 800, de 5 de
+          novembro de 2026 (commit <code>c6f1d6f</code>), sem sessão
+          autenticada: o formulário de pareamento fica desabilitado. Não
+          comprova pareamento nem integração com hardware.
+          <a href="{{repo}}/blob/main/docs/images/README.md"
+            >Origem da captura</a
+          >.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>

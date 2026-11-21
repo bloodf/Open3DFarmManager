@@ -1,0 +1,142 @@
+.how__diagram {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--paper-raised);
+}
+
+.how__diagram-title {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+
+.how__flow {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.how__node {
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  font-weight: 700;
+  text-align: center;
+}
+
+.how__node--accent {
+  border-color: var(--copper);
+  border-width: 2.5px;
+}
+
+.how__link {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.how__link::before {
+  content: '↓ ';
+}
+
+.how__link--direct {
+  color: var(--copper);
+  font-weight: 600;
+}
+
+.how__link--direct::before {
+  content: '↕ ';
+}
+
+.how__steps,
+.how__validation {
+  display: grid;
+  gap: 0;
+  margin-top: var(--space-6);
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.how__steps > li,
+.how__validation > li {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-bottom: var(--hairline) solid var(--rule);
+  counter-increment: how;
+}
+
+.how__steps > li:first-child,
+.how__validation > li:first-child {
+  border-top: var(--hairline) solid var(--rule-strong);
+}
+
+.how__steps > li::before,
+.how__validation > li::before {
+  content: counter(how, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--copper);
+}
+
+.how__subtitle {
+  margin-top: var(--space-7);
+  font-size: var(--step-2);
+}
+
+.how__validation > li span {
+  color: var(--ink-muted);
+}
+
+@media (min-width: 62rem) {
+  .how__flow {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .how__node {
+    flex: 0 1 auto;
+  }
+
+  .how__link {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .how__link::before {
+    content: '→ ';
+  }
+
+  .how__link--direct::before {
+    content: '↔ ';
+  }
+
+  .how__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+
+  .how__steps > li,
+  .how__validation > li {
+    align-content: start;
+  }
+
+  .how__validation {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+}
+
+.how__flow + .how__flow {
+  margin-top: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: var(--hairline) dashed var(--rule-strong);
+}

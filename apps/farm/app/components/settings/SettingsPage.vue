@@ -46,6 +46,8 @@ onMounted(() => {
 }
 .page-header h1 {
   margin: 0;
+  inline-size: fit-content;
+  max-inline-size: 100%;
   overflow-wrap: anywhere;
 }
 .page-header h1:focus-visible {

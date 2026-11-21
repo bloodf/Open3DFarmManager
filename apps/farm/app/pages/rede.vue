@@ -474,6 +474,9 @@ select:disabled {
   background: var(--color-surface-raised);
   min-width: 0;
 }
+:deep(section[aria-labelledby='farm-scope-heading'] .actions:empty) {
+  display: none;
+}
 @media (max-width: 30rem) {
   .panel,
   :deep(section[aria-labelledby='farm-scope-heading']) {

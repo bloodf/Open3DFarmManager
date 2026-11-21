@@ -94,6 +94,7 @@ export default defineNuxtConfig({
      * empty means only JSON and CSV uploads are accepted.
      */
     spoolLibraryImport: { enabled: false, databaseUrl: '', allowedOrigins: '' },
+    spoolFeatures: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
     telemetryPrune: {

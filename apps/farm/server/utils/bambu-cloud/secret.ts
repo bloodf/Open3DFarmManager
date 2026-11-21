@@ -1,3 +1,4 @@
+import { credentialReadKey, credentialWriteKey } from '../sealed-credential-key.ts'
 import {
   createCipheriv,
   createDecipheriv,
@@ -35,10 +36,12 @@ export function sealBambuCloudSecret(
     !/^[\x21-\x7E]+$/.test(plain)
   )
     throw new Error('invalid bambu cloud token')
-  const key = deriveKey(master)
+  const write = credentialWriteKey(master)
+  const key = deriveKey(write.key)
   const nonce = randomBytes(NONCE_BYTES)
   const cipher = createCipheriv(ALG, key, nonce)
   const body = Buffer.concat([
+    write.prefix,
     cipher.update(plain, 'utf8'),
     cipher.final(),
     cipher.getAuthTag(),
@@ -55,14 +58,16 @@ export function openBambuCloudSecret(
     !Buffer.isBuffer(sealed.nonce) ||
     sealed.nonce.length !== NONCE_BYTES ||
     sealed.ciphertext.length < TAG_BYTES ||
-    sealed.ciphertext.length > MAX_PLAIN + TAG_BYTES
+    sealed.ciphertext.length > MAX_PLAIN + TAG_BYTES + 20
   )
     throw new Error('invalid sealed bambu cloud token')
-  const key = deriveKey(master)
-  const tag = sealed.ciphertext.subarray(sealed.ciphertext.length - TAG_BYTES)
-  const data = sealed.ciphertext.subarray(
+  const read = credentialReadKey(master, sealed.ciphertext)
+  const key = deriveKey(read.key)
+  const ciphertext = read.ciphertext
+  const tag = ciphertext.subarray(ciphertext.length - TAG_BYTES)
+  const data = ciphertext.subarray(
     0,
-    sealed.ciphertext.length - TAG_BYTES,
+    ciphertext.length - TAG_BYTES,
   )
   const decipher = createDecipheriv(ALG, key, sealed.nonce)
   decipher.setAuthTag(tag)

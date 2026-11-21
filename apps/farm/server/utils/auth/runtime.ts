@@ -1,3 +1,4 @@
+import { credentialKeyring } from '../sealed-credential-key.ts'
 import { createHash } from 'node:crypto'
 import postgres from 'postgres'
 import { createError, useRuntimeConfig, type SessionConfig } from 'nuxt/server'
@@ -99,7 +100,7 @@ export function authRuntime(): AuthRuntime {
       oidc: new PostgresOidc(sql),
       identities: new PostgresIdentities(sql),
       signInRules: new PostgresSignInRules(sql),
-      signInProviders: new PostgresSignInProviderStore(sql, secret),
+      signInProviders: new PostgresSignInProviderStore(sql, credentialKeyring(config)),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

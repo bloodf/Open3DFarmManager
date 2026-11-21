@@ -1,3 +1,4 @@
+import { credentialReadKey, credentialWriteKey } from './sealed-credential-key.ts'
 import {
   createCipheriv,
   createDecipheriv,
@@ -26,10 +27,12 @@ export function sealClientSecret(plain: string, master: string): SealedSecret {
   if (typeof plain !== 'string' || plain.length < 1 || plain.length > 512)
     throw new Error('invalid client secret')
   if (!/^[\x21-\x7E]+$/.test(plain)) throw new Error('invalid client secret')
-  const key = deriveKey(master)
+  const write = credentialWriteKey(master)
+  const key = deriveKey(write.key)
   const nonce = randomBytes(NONCE_BYTES)
   const cipher = createCipheriv(ALG, key, nonce)
   const body = Buffer.concat([
+    write.prefix,
     cipher.update(plain, 'utf8'),
     cipher.final(),
     cipher.getAuthTag(),
@@ -46,9 +49,11 @@ export function openClientSecret(sealed: SealedSecret, master: string): string {
     sealed.ciphertext.length > 1024
   )
     throw new Error('invalid sealed secret')
-  const key = deriveKey(master)
-  const tag = sealed.ciphertext.subarray(sealed.ciphertext.length - 16)
-  const data = sealed.ciphertext.subarray(0, sealed.ciphertext.length - 16)
+  const read = credentialReadKey(master, sealed.ciphertext)
+  const key = deriveKey(read.key)
+  const ciphertext = read.ciphertext
+  const tag = ciphertext.subarray(ciphertext.length - 16)
+  const data = ciphertext.subarray(0, ciphertext.length - 16)
   const decipher = createDecipheriv(ALG, key, sealed.nonce)
   decipher.setAuthTag(tag)
   return Buffer.concat([decipher.update(data), decipher.final()]).toString(

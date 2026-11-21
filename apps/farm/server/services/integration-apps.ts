@@ -108,7 +108,15 @@ export interface IntegrationAppsStore {
     actorId: string,
     grantId: string,
     now: number,
-  ): Promise<'ok' | StoreFailure>
+    expectedFarmId?: string,
+  ): Promise<
+    | {
+        farmId: string
+        appId: string
+        printerAssignmentId: string | null
+      }
+    | StoreFailure
+  >
   listApps(actorId: string, farmId: string): Promise<IntegrationApp[] | null>
   listGrants(actorId: string, appId: string): Promise<IntegrationGrant[] | null>
   /** Token-endpoint lookup: an active credential on an active app, or null. */
@@ -174,8 +182,8 @@ export class IntegrationAppsService {
       farmId,
     )
   }
-  revokeGrant(actorId: string, grantId: string) {
-    return this.store.revokeGrant(actorId, grantId, this.now())
+  revokeGrant(actorId: string, grantId: string, farmId?: string) {
+    return this.store.revokeGrant(actorId, grantId, this.now(), farmId)
   }
   /** The plaintext secret is returned once and never stored. */
   async issueCredential(

@@ -196,17 +196,39 @@ export class PostgresIntegrationApps implements IntegrationAppsStore {
     actorId: string,
     grantId: string,
     now: number,
-  ): Promise<'ok' | StoreFailure> {
+    expectedFarmId?: string,
+  ): Promise<
+    | {
+        farmId: string
+        appId: string
+        printerAssignmentId: string | null
+      }
+    | StoreFailure
+  > {
     if (!validTime(now) || !uuid.test(grantId)) return 'invalid-input'
-    return await this.run<'ok' | StoreFailure>(async (tx) => {
+    return await this.run<
+      | {
+          farmId: string
+          appId: string
+          printerAssignmentId: string | null
+        }
+      | StoreFailure
+    >(async (tx) => {
       const rows =
-        await tx`SELECT farm_id, created_at::float8 AS created FROM farm.integration_app_grants WHERE id = ${grantId}::uuid AND disabled_at IS NULL FOR UPDATE`
+        await tx`SELECT farm_id, app_id, printer_assignment_id, created_at::float8 AS created FROM farm.integration_app_grants WHERE id = ${grantId}::uuid AND disabled_at IS NULL FOR UPDATE`
       const row = rows[0]
       if (!row || !(await this.manages(tx, actorId, row.farm_id as string)))
         return 'not-found'
+      if (expectedFarmId !== undefined && row.farm_id !== expectedFarmId)
+        return 'not-found'
       if (now < (row.created as number)) return 'invalid-input'
       await tx`UPDATE farm.integration_app_grants SET disabled_at = ${now}, disabled_reason = 'revoked' WHERE id = ${grantId}::uuid AND disabled_at IS NULL`
-      return 'ok'
+      return {
+        farmId: row.farm_id as string,
+        appId: row.app_id as string,
+        printerAssignmentId:
+          (row.printer_assignment_id as string | null) ?? null,
+      }
     })
   }
 

@@ -321,7 +321,11 @@ export async function testPostgresIntegrationApps(
     }),
     'printer-unavailable',
   )
-  assert.equal(await store.revokeGrant(owner, wide.id, ++clock.now), 'ok')
+  assert.deepEqual(await store.revokeGrant(owner, wide.id, ++clock.now), {
+    farmId: farm,
+    appId: app.id,
+    printerAssignmentId: null,
+  })
   assert.equal(
     await store.revokeGrant(owner, wide.id, ++clock.now),
     'not-found',

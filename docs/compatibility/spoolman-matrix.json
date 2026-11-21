@@ -1,0 +1,847 @@
+{
+  "id": "spoolman-matrix",
+  "parent_issue": 538,
+  "issue": 542,
+  "cutoff": "2026-11-21",
+  "upstream": {
+    "project": "Spoolman",
+    "repository": "https://github.com/Donkie/Spoolman",
+    "license": "MIT",
+    "version_tag": "v0.27.1",
+    "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
+    "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
+    "openapi_sha256": "faacc40c2b61d445042b797934e005142bf9cc93e6cc20d5e8685c86fc032fe5",
+    "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
+  },
+  "inventory_file": "docs/compatibility/spoolman-endpoint-inventory.json",
+  "openapi_file": "docs/compatibility/spoolman-openapi-v0.27.1.json",
+  "method": "Static review of pinned upstream OpenAPI/source and maintained product paths. Compatibility with a running Spoolman service is established only by separate qualification receipts.",
+  "endpoint_count": 54,
+  "rows": [
+    {
+      "endpoint_id": "WS /api/v1/",
+      "method": "WS",
+      "path": "/api/v1/",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "implemented",
+      "scope": "connector_invalidation_only",
+      "notes": "Root websocket for spool/filament/vendor added|updated|deleted; ignores setting/tag_scan. No subscription messages.",
+      "sources": ["packages/connector/src/runtime/spoolman-provider.ts"]
+    },
+    {
+      "endpoint_id": "GET /api/v1/article-number",
+      "method": "GET",
+      "path": "/api/v1/article-number",
+      "transport": "http",
+      "upstream_operation_id": "Find_article_numbers_article_number_get",
+      "upstream_tags": ["other"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Location and facet listing endpoints not called by product code.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/backup",
+      "method": "POST",
+      "path": "/api/v1/backup",
+      "transport": "http",
+      "upstream_operation_id": "backup_backup_post",
+      "upstream_tags": [],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/export/filaments",
+      "method": "GET",
+      "path": "/api/v1/export/filaments",
+      "transport": "http",
+      "upstream_operation_id": "Export_filaments_export_filaments_get",
+      "upstream_tags": ["export"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/export/spools",
+      "method": "GET",
+      "path": "/api/v1/export/spools",
+      "transport": "http",
+      "upstream_operation_id": "Export_spools_export_spools_get",
+      "upstream_tags": ["export"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/export/vendors",
+      "method": "GET",
+      "path": "/api/v1/export/vendors",
+      "transport": "http",
+      "upstream_operation_id": "Export_vendors_export_vendors_get",
+      "upstream_tags": ["export"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/external/filament",
+      "method": "GET",
+      "path": "/api/v1/external/filament",
+      "transport": "http",
+      "upstream_operation_id": "Get_all_external_filaments_external_filament_get",
+      "upstream_tags": ["external"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External catalog and x-total-count header not consumed.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/external/filament/search",
+      "method": "GET",
+      "path": "/api/v1/external/filament/search",
+      "transport": "http",
+      "upstream_operation_id": "Search_external_filaments_external_filament_search_get",
+      "upstream_tags": ["external"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External catalog and x-total-count header not consumed.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/external/material",
+      "method": "GET",
+      "path": "/api/v1/external/material",
+      "transport": "http",
+      "upstream_operation_id": "Get_all_external_materials_external_material_get",
+      "upstream_tags": ["external"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "External catalog and x-total-count header not consumed.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/field/{entity_type}",
+      "method": "GET",
+      "path": "/api/v1/field/{entity_type}",
+      "transport": "http",
+      "upstream_operation_id": "Get_extra_fields_field__entity_type__get",
+      "upstream_tags": ["field"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/field/{entity_type}/{key}",
+      "method": "DELETE",
+      "path": "/api/v1/field/{entity_type}/{key}",
+      "transport": "http",
+      "upstream_operation_id": "Delete_extra_field_field__entity_type___key__delete",
+      "upstream_tags": ["field"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/field/{entity_type}/{key}",
+      "method": "POST",
+      "path": "/api/v1/field/{entity_type}/{key}",
+      "transport": "http",
+      "upstream_operation_id": "Add_or_update_extra_field_field__entity_type___key__post",
+      "upstream_tags": ["field"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/field/{entity_type}/{key}/values",
+      "method": "GET",
+      "path": "/api/v1/field/{entity_type}/{key}/values",
+      "transport": "http",
+      "upstream_operation_id": "Get_extra_field_values_field__entity_type___key__values_get",
+      "upstream_tags": ["field"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/filament",
+      "method": "GET",
+      "path": "/api/v1/filament",
+      "transport": "http",
+      "upstream_operation_id": "Find_filaments_filament_get",
+      "upstream_tags": ["filament"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "POST /api/v1/filament",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "transport": "http",
+      "upstream_operation_id": "Add_filament_filament_post",
+      "upstream_tags": ["filament"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/filament/{filament_id}",
+      "method": "DELETE",
+      "path": "/api/v1/filament/{filament_id}",
+      "transport": "http",
+      "upstream_operation_id": "Delete_filament_filament__filament_id__delete",
+      "upstream_tags": ["filament"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/filament/{filament_id}",
+      "method": "GET",
+      "path": "/api/v1/filament/{filament_id}",
+      "transport": "http",
+      "upstream_operation_id": "Get_filament_filament__filament_id__get",
+      "upstream_tags": ["filament"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "PATCH /api/v1/filament/{filament_id}",
+      "method": "PATCH",
+      "path": "/api/v1/filament/{filament_id}",
+      "transport": "http",
+      "upstream_operation_id": "Update_filament_filament__filament_id__patch",
+      "upstream_tags": ["filament"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "WS /api/v1/filament/{filament_id}",
+      "method": "WS",
+      "path": "/api/v1/filament/{filament_id}",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/filament/{filament_id}/tag",
+      "method": "POST",
+      "path": "/api/v1/filament/{filament_id}/tag",
+      "transport": "http",
+      "upstream_operation_id": "Link_a_tag_to_a_filament_filament__filament_id__tag_post",
+      "upstream_tags": ["filament"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/filament/{filament_id}/tag/{uid}",
+      "method": "DELETE",
+      "path": "/api/v1/filament/{filament_id}/tag/{uid}",
+      "transport": "http",
+      "upstream_operation_id": "Unlink_a_tag_from_a_filament_filament__filament_id__tag__uid__delete",
+      "upstream_tags": ["filament"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/health",
+      "method": "GET",
+      "path": "/api/v1/health",
+      "transport": "http",
+      "upstream_operation_id": "health_health_get",
+      "upstream_tags": [],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/info",
+      "method": "GET",
+      "path": "/api/v1/info",
+      "transport": "http",
+      "upstream_operation_id": "info_info_get",
+      "upstream_tags": [],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/location",
+      "method": "GET",
+      "path": "/api/v1/location",
+      "transport": "http",
+      "upstream_operation_id": "Find_locations_location_get",
+      "upstream_tags": ["other"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Location and facet listing endpoints not called by product code.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "PATCH /api/v1/location/{location}",
+      "method": "PATCH",
+      "path": "/api/v1/location/{location}",
+      "transport": "http",
+      "upstream_operation_id": "Rename_location_location__location__patch",
+      "upstream_tags": ["other"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Location and facet listing endpoints not called by product code.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/lot-number",
+      "method": "GET",
+      "path": "/api/v1/lot-number",
+      "transport": "http",
+      "upstream_operation_id": "Find_lot_numbers_lot_number_get",
+      "upstream_tags": ["other"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Location and facet listing endpoints not called by product code.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/material",
+      "method": "GET",
+      "path": "/api/v1/material",
+      "transport": "http",
+      "upstream_operation_id": "Find_materials_material_get",
+      "upstream_tags": ["other"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Location and facet listing endpoints not called by product code.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/search",
+      "method": "GET",
+      "path": "/api/v1/search",
+      "transport": "http",
+      "upstream_operation_id": "Search_search_get",
+      "upstream_tags": ["search"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Upstream search endpoint documented; no product client issues requests.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/setting/",
+      "method": "GET",
+      "path": "/api/v1/setting/",
+      "transport": "http",
+      "upstream_operation_id": "Get_all_settings_setting__get",
+      "upstream_tags": ["setting"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/setting/{key}",
+      "method": "GET",
+      "path": "/api/v1/setting/{key}",
+      "transport": "http",
+      "upstream_operation_id": "Get_setting_setting__key__get",
+      "upstream_tags": ["setting"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/setting/{key}",
+      "method": "POST",
+      "path": "/api/v1/setting/{key}",
+      "transport": "http",
+      "upstream_operation_id": "Set_setting_setting__key__post",
+      "upstream_tags": ["setting"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "WS /api/v1/setting/{key}",
+      "method": "WS",
+      "path": "/api/v1/setting/{key}",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/spool",
+      "method": "GET",
+      "path": "/api/v1/spool",
+      "transport": "http",
+      "upstream_operation_id": "Find_spool_spool_get",
+      "upstream_tags": ["spool"],
+      "product_status": "implemented",
+      "scope": "connector_read_only_inventory",
+      "notes": "Paginated GET only; no writes. Bounded body and traversal limits in bounded-read.ts.",
+      "sources": [
+        "packages/connector/src/spoolman/bounded-read.ts",
+        "packages/connector/src/spoolman/read.ts",
+        "packages/connector/src/runtime/spoolman-provider.ts"
+      ]
+    },
+    {
+      "endpoint_id": "POST /api/v1/spool",
+      "method": "POST",
+      "path": "/api/v1/spool",
+      "transport": "http",
+      "upstream_operation_id": "Add_spool_spool_post",
+      "upstream_tags": ["spool"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "PATCH /api/v1/spool/field/{field}",
+      "method": "PATCH",
+      "path": "/api/v1/spool/field/{field}",
+      "transport": "http",
+      "upstream_operation_id": "Rename_a_spool_field_value_spool_field__field__patch",
+      "upstream_tags": ["spool"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/spool/group",
+      "method": "GET",
+      "path": "/api/v1/spool/group",
+      "transport": "http",
+      "upstream_operation_id": "Find_spool_groups_spool_group_get",
+      "upstream_tags": ["spool"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/spool/{spool_id}",
+      "method": "DELETE",
+      "path": "/api/v1/spool/{spool_id}",
+      "transport": "http",
+      "upstream_operation_id": "Delete_spool_spool__spool_id__delete",
+      "upstream_tags": ["spool"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/spool/{spool_id}",
+      "method": "GET",
+      "path": "/api/v1/spool/{spool_id}",
+      "transport": "http",
+      "upstream_operation_id": "Get_spool_spool__spool_id__get",
+      "upstream_tags": ["spool"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "PATCH /api/v1/spool/{spool_id}",
+      "method": "PATCH",
+      "path": "/api/v1/spool/{spool_id}",
+      "transport": "http",
+      "upstream_operation_id": "Update_spool_spool__spool_id__patch",
+      "upstream_tags": ["spool"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "WS /api/v1/spool/{spool_id}",
+      "method": "WS",
+      "path": "/api/v1/spool/{spool_id}",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "PUT /api/v1/spool/{spool_id}/measure",
+      "method": "PUT",
+      "path": "/api/v1/spool/{spool_id}/measure",
+      "transport": "http",
+      "upstream_operation_id": "Use_spool_filament_based_on_the_current_weight_measurement_spool__spool_id__measure_put",
+      "upstream_tags": ["spool"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/spool/{spool_id}/tag",
+      "method": "POST",
+      "path": "/api/v1/spool/{spool_id}/tag",
+      "transport": "http",
+      "upstream_operation_id": "Link_a_tag_to_a_spool_spool__spool_id__tag_post",
+      "upstream_tags": ["spool"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/spool/{spool_id}/tag/{uid}",
+      "method": "DELETE",
+      "path": "/api/v1/spool/{spool_id}/tag/{uid}",
+      "transport": "http",
+      "upstream_operation_id": "Unlink_a_tag_from_a_spool_spool__spool_id__tag__uid__delete",
+      "upstream_tags": ["spool"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "No maintained product client located in packages/connector, apps/farm or scripts except simulator/qualification.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "PUT /api/v1/spool/{spool_id}/use",
+      "method": "PUT",
+      "path": "/api/v1/spool/{spool_id}/use",
+      "transport": "http",
+      "upstream_operation_id": "Use_spool_filament_spool__spool_id__use_put",
+      "upstream_tags": ["spool"],
+      "product_status": "experimental",
+      "scope": "kobra_x_booking_only",
+      "notes": "Not part of read-only farm mirror; used only by Kobra-X usage booking helper and node test e16-368.",
+      "sources": [
+        "packages/connector/src/kobra-x/booking.ts",
+        "tests/node/e16-368.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/tag/reader",
+      "method": "GET",
+      "path": "/api/v1/tag/reader",
+      "transport": "http",
+      "upstream_operation_id": "List_recently_seen_tag_readers_tag_reader_get",
+      "upstream_tags": ["tag"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Tag link/scan/websocket relay not integrated.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "POST /api/v1/tag/scan",
+      "method": "POST",
+      "path": "/api/v1/tag/scan",
+      "transport": "http",
+      "upstream_operation_id": "Report_a_tag_scan_tag_scan_post",
+      "upstream_tags": ["tag"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Tag link/scan/websocket relay not integrated.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "WS /api/v1/tag/scan",
+      "method": "WS",
+      "path": "/api/v1/tag/scan",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Tag link/scan/websocket relay not integrated.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "WS /api/v1/tag/scan/{reader_id}",
+      "method": "WS",
+      "path": "/api/v1/tag/scan/{reader_id}",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Tag link/scan/websocket relay not integrated.",
+      "sources": []
+    },
+    {
+      "endpoint_id": "GET /api/v1/vendor",
+      "method": "GET",
+      "path": "/api/v1/vendor",
+      "transport": "http",
+      "upstream_operation_id": "Find_vendor_vendor_get",
+      "upstream_tags": ["vendor"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "POST /api/v1/vendor",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "transport": "http",
+      "upstream_operation_id": "Add_vendor_vendor_post",
+      "upstream_tags": ["vendor"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "DELETE /api/v1/vendor/{vendor_id}",
+      "method": "DELETE",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "transport": "http",
+      "upstream_operation_id": "Delete_vendor_vendor__vendor_id__delete",
+      "upstream_tags": ["vendor"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "GET /api/v1/vendor/{vendor_id}",
+      "method": "GET",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "transport": "http",
+      "upstream_operation_id": "Get_vendor_vendor__vendor_id__get",
+      "upstream_tags": ["vendor"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "PATCH /api/v1/vendor/{vendor_id}",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "transport": "http",
+      "upstream_operation_id": "Update_vendor_vendor__vendor_id__patch",
+      "upstream_tags": ["vendor"],
+      "product_status": "simulator_or_test_only",
+      "scope": "packages/sim-tools mock and qualification scripts",
+      "notes": "Not used by maintained Connector inventory mirror against real services.",
+      "sources": [
+        "packages/sim-tools/src/mocks/spoolman-mock.ts",
+        "tests/node/e16-353.test.mjs"
+      ]
+    },
+    {
+      "endpoint_id": "WS /api/v1/vendor/{vendor_id}",
+      "method": "WS",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "transport": "websocket",
+      "upstream_operation_id": null,
+      "upstream_tags": ["websocket"],
+      "product_status": "unimplemented",
+      "scope": null,
+      "notes": "Per-entity websocket paths exist upstream; product uses root /api/v1/ only.",
+      "sources": []
+    }
+  ],
+  "schemas_documented": 58,
+  "websocket_event_models": [
+    "SpoolEvent",
+    "FilamentEvent",
+    "VendorEvent",
+    "SettingEvent",
+    "TagScanEvent"
+  ],
+  "documented_errors_and_guards": [
+    {
+      "kind": "ItemNotFoundError",
+      "http_status": 404,
+      "body": {
+        "message": "string"
+      }
+    },
+    {
+      "kind": "Backup failure",
+      "http_status": 500,
+      "body": {
+        "message": "Backup failed. See server logs for more information."
+      }
+    },
+    {
+      "kind": "Untrusted browser origin (HTTP writes or WS handshake)",
+      "websocket_close_code": 4403
+    },
+    {
+      "kind": "Untrusted Host header (WS handshake)",
+      "websocket_close_code": 4400
+    }
+  ],
+  "notable_headers": [
+    {
+      "endpoint": "GET /api/v1/external/filament/search",
+      "name": "x-total-count",
+      "direction": "response"
+    }
+  ],
+  "client_contracts": [
+    {
+      "id": "connector_spool_inventory_get",
+      "method": "GET",
+      "path": "/api/v1/spool",
+      "query": {
+        "limit": "configurable 1-200 (SpoolmanConfig.limit)",
+        "offset": "non-negative integer, ascending pagination",
+        "sort": "id:asc (fixed)",
+        "allow_archived": "true (fixed)"
+      },
+      "headers": {
+        "accept": "application/json",
+        "authorization": "optional bearer/basic from credentials/spoolman.json"
+      },
+      "redirects": "error",
+      "credentials": "omit",
+      "response": "200 application/json array of Spool models",
+      "source": "packages/connector/src/spoolman/bounded-read.ts"
+    },
+    {
+      "id": "connector_provision_probe_get",
+      "method": "GET",
+      "path": "/api/v1/spool",
+      "query": {
+        "limit": "1"
+      },
+      "headers": {
+        "accept": "application/json",
+        "authorization": "optional"
+      },
+      "redirects": "error",
+      "credentials": "omit",
+      "response": "reachable when 200 JSON array; 401/403 => unauthorized",
+      "source": "packages/connector/src/provisioning/spoolman.ts"
+    },
+    {
+      "id": "connector_root_websocket",
+      "method": "WS",
+      "path": "/api/v1/",
+      "subscription": "implicit on connect; no client subscribe frames",
+      "message_schema": "type added|updated|deleted; resource spool|filament|vendor; date; payload",
+      "headers": {
+        "authorization": "optional on handshake"
+      },
+      "source": "packages/connector/src/runtime/spoolman-provider.ts"
+    },
+    {
+      "id": "kobra_x_spool_use_put",
+      "method": "PUT",
+      "path": "/api/v1/spool/{spool_id}/use",
+      "body": {
+        "use_weight": "positive number (grams)"
+      },
+      "headers": {
+        "accept": "application/json",
+        "content-type": "application/json"
+      },
+      "product_status": "experimental",
+      "source": "packages/connector/src/kobra-x/booking.ts"
+    }
+  ],
+  "fixture_provenance": [
+    {
+      "path": "tests/fixtures/spoolman/spools.json",
+      "sha256": "ac6584e71b23f0ad93e0c8d770fb48f4a63b09390deb481df871918fa57b69f6",
+      "purpose": "Synthetic Spoolman shapes for unit tests",
+      "provenance": "Original MIT fixture data; field shapes aligned with packages/connector/src/spoolman/read.ts parsers and pinned upstream v0.27.1 models.py names. Not copied from upstream database dumps."
+    },
+    {
+      "path": "infra/sim/spoolman/seed.json",
+      "sha256": "44a863cf491f74989a813141a5031e1e9a5d621609542cf59befa53835410ad9",
+      "purpose": "Docker sim:seed inventory fixture",
+      "provenance": "Original MIT fixture data; field shapes aligned with packages/connector/src/spoolman/read.ts parsers and pinned upstream v0.27.1 models.py names. Not copied from upstream database dumps."
+    }
+  ],
+  "gaps": [
+    "Search, tag relay, external catalog, settings writes, export, backup and location rename are upstream features without maintained product clients.",
+    "Per-entity websockets and TagScanEvent (resource tag_scan, type scanned) are not handled by the Connector provider.",
+    "Farm UI stores Spoolman origin in Postgres; it does not proxy arbitrary Spoolman REST.",
+    "Simulator mock implements a subset for tests; mock behavior is not claimed as full upstream parity.",
+    "No live Spoolman execution was required for this matrix; disposable API receipts remain in docs/SPOOLMAN-ACTUAL-API-VALIDATION.md."
+  ]
+}

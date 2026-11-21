@@ -95,11 +95,15 @@ import {
 process.env.WS_NO_BUFFER_UTIL = '1'
 process.env.WS_NO_UTF_8_VALIDATE = '1'
 const { default: WebSocket } = await import('ws')
-const Reply = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int(),
-  result: z.unknown(),
-})
+// Vendor firmware adds envelope members (Snapmaker U1: `cli_time`, `dev_time`),
+// so unknown members are ignored. An error reply is never a success reply.
+const Reply = z
+  .looseObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.number().int(),
+    result: z.unknown(),
+  })
+  .refine((reply) => Object.hasOwn(reply, 'result') && !('error' in reply))
 // Moonraker broadcasts these while PAUSE runs. They carry no command or
 // freshness authority; only a matching reply and complete query may do that.
 const SideNotification = z.strictObject({

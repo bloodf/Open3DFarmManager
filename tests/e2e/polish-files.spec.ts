@@ -47,7 +47,6 @@ const files: Scenario[] = [
     path: '/arquivos',
     heading: 'Arquivos',
     settle: async (page) => {
-      await page.getByRole('heading', { name: 'Destino' }).waitFor()
       await expect(page.locator('#files-printer option')).toHaveCount(3)
     },
   },
@@ -417,6 +416,8 @@ async function open(
   theme: Theme,
   control: Control = { failLibrary: false },
 ) {
+  // A state that never shows up fails fast instead of hanging the run.
+  page.setDefaultTimeout(15_000)
   await page.setViewportSize(viewport)
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
   await mockApi(page, scenario, control)

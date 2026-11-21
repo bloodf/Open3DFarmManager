@@ -2,8 +2,17 @@
 // Docker-only targeted check for the Bambu control gate (tests/node/bambu-control.test.ts).
 //
 // Every service (the in-process synthetic Bambu MQTT broker and the test runner) runs inside
-// disposable containers. Nothing runs on the host except `git` and `docker`. The test containers
-// have no network (loopback only), so only local mocks can answer: no printer, no paid API.
+// disposable containers. Nothing runs on the host except `git` and `docker`. The run is offline:
+//   * no image is pulled or built (`--pull never`); the runner image must already exist locally;
+//   * locked dependencies come from `npm ci --offline` against a local, read-only npm cache volume;
+//   * every container (install and test) has no network (loopback only), so only local mocks can
+//     answer: no registry, no printer, no paid API.
+// A missing image, cache volume, Node/openssl mismatch or uncached package fails the run clearly.
+//
+// Prerequisites (shared with scripts/check-all-docker.mjs; override via env):
+//   OPENFARM_GATE_NODE_IMAGE        default openfarm-e2e-node22.23.5:latest (Node + openssl;
+//                                   its Node version must equal the connector Dockerfile's pin)
+//   OPENFARM_GATE_NPM_CACHE_VOLUME  default openfarm-e2e-npm-cache (populated npm _cacache)
 //
 // Usage:
 //   node tests/node/run-bambu-gate.mjs [--ref <git-ref>]... [--repeat N] [--cpus X]
@@ -13,7 +22,7 @@
 //   --test-from overlays only the test file from another ref onto every --ref, e.g. to run the
 //   fixed test against the unfixed baseline and show it reproduces the failure there.
 //
-// Resource ownership: every container/volume carries the label `openfarm.bambu-gate=<runId>` and
+// Resource ownership: every container/volume this run creates carries the label `openfarm.bambu-gate=<runId>` and
 // a `<runId>-` name prefix, and every host directory lives under one mkdtemp root. All of them are
 // removed on exit, on failure and on SIGINT/SIGTERM, then the leftovers are verified (exit 2 if any).
 import { spawn, spawnSync } from 'node:child_process'
@@ -147,6 +156,13 @@ for (const signal of ['SIGINT', 'SIGTERM'])
     process.exit(130)
   })
 
+const config = {
+  image:
+    process.env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
+  npmCacheVolume:
+    process.env.OPENFARM_GATE_NPM_CACHE_VOLUME || 'openfarm-e2e-npm-cache',
+}
+
 function nodeImage() {
   // Same digest-pinned image the connector ships on; keeps the Node version identical to CI.
   const dockerfile = readFileSync(
@@ -158,6 +174,17 @@ function nodeImage() {
     throw new Error('Pinned node image not found in connector Dockerfile')
   return match[1]
 }
+
+// The local runner image must run exactly the Node version the connector pins.
+function pinnedNodeVersion() {
+  const match = /^node:(\d+\.\d+\.\d+)/.exec(nodeImage())
+  if (!match) throw new Error(`Pinned node image ${nodeImage()} has no version`)
+  return match[1]
+}
+
+const OFFLINE_HINT =
+  'The Bambu gate runs offline and never pulls, builds or downloads. Provide it locally ' +
+  '(see the header of tests/node/run-bambu-gate.mjs / scripts/check-all-docker.mjs).'
 
 function resolveRef(ref) {
   const resolved = run('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
@@ -207,27 +234,55 @@ function dependencyKey(directory) {
   return hash.digest('hex').slice(0, 12)
 }
 
-// The slim base image has no `openssl`; the synthetic broker shells out to it to mint a throwaway
-// TLS identity. Build a labelled, run-owned image on top of the pinned base (removed on cleanup).
-function buildRunnerImage(base) {
-  const tag = `${runId}-runner:latest`
-  const dockerfile = `FROM ${base}\nRUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*\n`
-  const built = run(
-    'docker',
-    ['build', '--quiet', '--label', `${LABEL}=${runId}`, '-t', tag, '-'],
-    { input: dockerfile },
-  )
-  if (built.status !== 0)
-    throw new Error(`runner image build failed:\n${built.stderr}`)
-  return tag
-}
-
 const common = (name) => [
   '--name',
   `${runId}-${name}`,
   '--label',
   `${LABEL}=${runId}`,
+  '--pull',
+  'never',
+  '--network',
+  'none',
 ]
+
+// The synthetic broker shells out to `openssl` to mint a throwaway TLS identity, so the local
+// runner image must carry it next to the pinned Node version. Nothing is pulled or built.
+async function checkPrerequisites() {
+  if (run('docker', ['image', 'inspect', config.image]).status !== 0)
+    throw new Error(
+      `Runner image ${config.image} is not available locally. ${OFFLINE_HINT}`,
+    )
+  if (run('docker', ['volume', 'inspect', config.npmCacheVolume]).status !== 0)
+    throw new Error(
+      `npm cache volume ${config.npmCacheVolume} does not exist. ${OFFLINE_HINT}`,
+    )
+  const expected = pinnedNodeVersion()
+  const probe = await stream('docker', [
+    'run',
+    '--rm',
+    ...common('probe'),
+    '-v',
+    `${config.npmCacheVolume}:/npm-cache:ro`,
+    config.image,
+    'sh',
+    '-c',
+    'node -p process.versions.node && command -v openssl >/dev/null && echo openssl-ok && test -d /npm-cache/_cacache && echo cache-ok',
+  ])
+  const lines = probe.output.trim().split('\n')
+  if (lines[0] !== expected)
+    throw new Error(
+      `Runner image ${config.image} has Node ${lines[0] || '?'}; the connector pins ${expected}. ${OFFLINE_HINT}`,
+    )
+  if (!lines.includes('openssl-ok'))
+    throw new Error(
+      `Runner image ${config.image} has no openssl. ${OFFLINE_HINT}`,
+    )
+  if (!lines.includes('cache-ok'))
+    throw new Error(
+      `npm cache volume ${config.npmCacheVolume} has no _cacache. ${OFFLINE_HINT}`,
+    )
+  return expected
+}
 
 async function installDependencies(image, directory, key) {
   const volume = `${runId}-nm-${key}`
@@ -239,7 +294,7 @@ async function installDependencies(image, directory, key) {
     volume,
   ])
   if (created.status !== 0) throw new Error(created.stderr)
-  // Network is allowed only here, only to fetch the lockfile's pinned packages from the registry.
+  // No network: every locked package must already be in the read-only npm cache volume.
   const result = await stream('docker', [
     'run',
     '--rm',
@@ -248,21 +303,30 @@ async function installDependencies(image, directory, key) {
     `${directory}:/work`,
     '-v',
     `${volume}:/work/node_modules`,
+    '-v',
+    `${config.npmCacheVolume}:/npm-cache:ro`,
     '-w',
     '/work',
-    '-e',
-    'npm_config_update_notifier=false',
-    '-e',
-    'HOME=/tmp',
+    ...[
+      'npm_config_offline=true',
+      'npm_config_cache=/npm-cache',
+      'npm_config_logs_dir=/tmp/npm-logs',
+      'npm_config_update_notifier=false',
+      'npm_config_audit=false',
+      'npm_config_fund=false',
+      'HOME=/tmp',
+    ].flatMap((entry) => ['-e', entry]),
     '--tmpfs',
     '/tmp:rw,size=1g',
     image,
     'sh',
     '-ec',
-    'npm ci --ignore-scripts --no-audit --no-fund; npm rebuild node-datachannel >/dev/null 2>&1 || true; chown -R 1000:1000 /work/node_modules',
+    'npm ci --offline --ignore-scripts --no-audit --no-fund; npm rebuild --offline node-datachannel >/dev/null 2>&1 || true; chown -R 1000:1000 /work/node_modules',
   ])
   if (result.status !== 0)
-    throw new Error(`npm ci failed:\n${result.output.slice(-4000)}`)
+    throw new Error(
+      `npm ci --offline failed (a locked package is missing from ${config.npmCacheVolume}?). ${OFFLINE_HINT}\n${result.output.slice(-4000)}`,
+    )
   return volume
 }
 
@@ -297,8 +361,6 @@ async function runTest(image, directory, volume, options, label) {
     'run',
     '--rm',
     ...common(label),
-    '--network',
-    'none',
     '--read-only',
     '--tmpfs',
     '/tmp:rw,size=256m',
@@ -342,11 +404,12 @@ async function runTest(image, directory, volume, options, label) {
           : failureExcerpt(result.output),
     command: `docker ${[
       'run',
+      '--pull never',
       '--network none',
       '--read-only',
       '--cap-drop ALL',
       ...(options.cpus ? [`--cpus ${options.cpus}`] : []),
-      '<runner=pinned node + openssl>',
+      `<runner=${config.image}>`,
       ...testArgs,
     ].join(' ')}`,
   }
@@ -356,11 +419,11 @@ async function main() {
   const options = parseArgs(process.argv.slice(2))
   if (run('docker', ['info', '--format', '{{.ServerVersion}}']).status !== 0)
     throw new Error('Docker daemon unavailable')
-  const baseImage = nodeImage()
+  const nodeVersion = await checkPrerequisites()
+  const image = config.image
   state.root = mkdtempSync(join(tmpdir(), `${runId}-`))
-  const image = buildRunnerImage(baseImage)
   console.log(
-    `run ${runId}  base ${baseImage.split('@')[0]}  runner ${image}  file ${options.file}` +
+    `run ${runId}  offline  node ${nodeVersion}  runner ${image}  npm-cache ${config.npmCacheVolume}  file ${options.file}` +
       (options.testFrom ? `  test-from ${options.testFrom}` : ''),
   )
   const volumes = new Map()

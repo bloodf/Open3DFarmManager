@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import CompatibilityProduct from '../components/overview/CompatibilityProduct.vue'
+import OverviewHeader from '../components/overview/OverviewHeader.vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import {
-  capabilityLabels,
-  capabilityStatusLabels,
   compatibilityPageCatalog,
-  controlAreaKeys,
-  controlAreaLabels,
   filterCompatibility,
   klipperFamilyIds,
 } from '../utils/compatibility/index'
@@ -19,21 +17,30 @@ const products = computed(() =>
 </script>
 
 <template>
-  <main>
-    <h1>Compatibilidade de impressoras</h1>
-    <p>
-      Este catálogo reúne informações e limitações conhecidas. Documentação e
-      simulação não comprovam integração ou suporte ao hardware. Os rótulos não
-      habilitam comandos.
-    </p>
-    <label for="compat-search">Buscar marca ou modelo</label>
-    <input
-      id="compat-search"
-      v-model="search"
-      type="search"
-      autocomplete="off"
+  <main id="conteudo" class="compat-page">
+    <OverviewHeader
+      eyebrow="Open3DFarmManager"
+      title="Compatibilidade de impressoras"
+      intro="Este catálogo reúne informações e limitações conhecidas. Documentação e simulação não comprovam integração ou suporte ao hardware. Os rótulos não habilitam comandos."
     />
-    <p role="status">{{ products.length }} resultado(s)</p>
+    <p class="back">
+      <NuxtLink to="/impressoras">Voltar para impressoras</NuxtLink>
+    </p>
+    <form
+      class="search"
+      role="search"
+      aria-label="Buscar no catálogo"
+      @submit.prevent
+    >
+      <label for="compat-search">Buscar marca ou modelo</label>
+      <input
+        id="compat-search"
+        v-model="search"
+        type="search"
+        autocomplete="off"
+      />
+      <p class="count" role="status">{{ products.length }} resultado(s)</p>
+    </form>
     <EmptyState
       v-if="!products.length"
       title="Nenhum modelo encontrado"
@@ -41,96 +48,68 @@ const products = computed(() =>
     >
       <Button v-if="search" @click="search = ''">Limpar busca</Button>
     </EmptyState>
-    <section
+    <CompatibilityProduct
       v-for="product in products"
       :key="product.id"
-      :aria-labelledby="product.id"
-    >
-      <h2 :id="product.id">{{ product.brand }} {{ product.model }}</h2>
-      <p v-if="klipperFamilyIds.has(product.id)">
-        Família Klipper/Moonraker. Simulado indica teste contra simuladores, não
-        contra hardware.
-      </p>
-      <dl>
-        <dt>Lançamento</dt>
-        <dd>
-          {{ product.releaseStatus
-          }}<span v-if="product.releaseDate"> ({{ product.releaseDate }})</span>
-        </dd>
-        <dt>Firmware</dt>
-        <dd>{{ product.firmwareStatus }}</dd>
-        <dt>Conexão</dt>
-        <dd>{{ product.connection }}</dd>
-        <template
-          v-for="(status, capability) in product.capabilities"
-          :key="capability"
-        >
-          <dt>{{ capabilityLabels[capability] }}</dt>
-          <dd>{{ capabilityStatusLabels[status] }}</dd>
-        </template>
-      </dl>
-      <h3>Áreas de controle</h3>
-      <dl>
-        <template v-for="area in controlAreaKeys" :key="area">
-          <dt>{{ controlAreaLabels[area] }}</dt>
-          <dd>{{ capabilityStatusLabels[product.controlAreas[area]] }}</dd>
-        </template>
-      </dl>
-      <template v-if="product.firmwareNotes?.length">
-        <h3>Notas de firmware</h3>
-        <ul>
-          <li v-for="(entry, index) in product.firmwareNotes" :key="index">
-            {{ entry.firmware }}: {{ entry.note }}
-          </li>
-        </ul>
-      </template>
-      <h3>Limitações</h3>
-      <ul>
-        <li v-for="limit in product.limitations" :key="limit">{{ limit }}</li>
-      </ul>
-      <h3>Fontes</h3>
-      <ul>
-        <li v-for="(source, index) in product.sources" :key="source">
-          <a :href="source">Fonte {{ index + 1 }} para {{ product.model }}</a>
-        </li>
-      </ul>
-    </section>
-    <NuxtLink to="/impressoras">Voltar para impressoras</NuxtLink>
+      :product="product"
+      :klipper-family="klipperFamilyIds.has(product.id)"
+    />
   </main>
 </template>
 
 <style scoped>
-main {
-  max-width: 58rem;
-  margin: 2rem auto;
-  padding: 0 1rem;
-  line-height: 1.6;
+.compat-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
 }
-label,
-input {
-  display: block;
-  margin-block: 0.6rem;
+.back,
+.count {
+  margin: 0;
+}
+.search {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 input {
-  font: inherit;
   width: 100%;
-  max-width: 100%;
   min-height: 2.75rem;
-  padding: 0.5rem;
-  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
-section {
-  margin-block: 2rem;
-  border: 1px solid currentColor;
-  padding: 1rem;
+input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
-p,
-li,
-dd {
-  overflow-wrap: anywhere;
+.count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
-:focus-visible {
-  outline: 3px solid #155e75;
-  outline-offset: 3px;
+a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+/* Same bordered surface as the search and product panels. */
+.compat-page :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+@media (max-width: 30rem) {
+  .search {
+    padding: var(--space-4);
+  }
 }
 </style>

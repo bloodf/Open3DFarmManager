@@ -95,6 +95,8 @@ export default defineNuxtConfig({
      */
     spoolLibraryImport: { enabled: false, databaseUrl: '', allowedOrigins: '' },
     spoolFeatures: { enabled: false, databaseUrl: '' },
+    /** A login that is a member of the roles listed in server/services/spool-usage-role.ts. */
+    spoolUsage: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
     telemetryPrune: {

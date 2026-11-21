@@ -648,6 +648,9 @@ input:disabled {
   gap: var(--space-2);
   align-content: start;
 }
+.app-card .actions {
+  margin-top: 0;
+}
 .app-head {
   display: flex;
   flex-wrap: wrap;

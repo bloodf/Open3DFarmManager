@@ -334,7 +334,8 @@ async function mockBambu(page: Page, state: State, hang: Hang) {
           : { ...account, connected: false, account: null, expiresAt: null },
     })
   })
-  if (state === 'unavailable') sessionOf(page).failing.push(path)
+  if (state === 'unavailable' || state === 'refused')
+    sessionOf(page).failing.push(path)
 }
 
 async function mockConnectors(page: Page, state: State) {
@@ -463,7 +464,9 @@ async function interact(page: Page, screen: Screen, state: State) {
     case 'populated':
     case 'read-only':
     case 'recovery':
-      await page.getByLabel('Selecione uma farm').selectOption(farm)
+      await page
+        .getByLabel('Selecione uma farm', { exact: true })
+        .selectOption(farm)
       await page.getByText(agentA, { exact: true }).waitFor()
       if (state === 'recovery')
         await page
@@ -472,7 +475,9 @@ async function interact(page: Page, screen: Screen, state: State) {
           .click()
       break
     case 'empty':
-      await page.getByLabel('Selecione uma farm').selectOption(farm)
+      await page
+        .getByLabel('Selecione uma farm', { exact: true })
+        .selectOption(farm)
       await page
         .getByRole('heading', { name: 'Nenhum Connector registrado' })
         .waitFor()
@@ -886,7 +891,9 @@ test('connectors: the heading takes focus and keyboard order is heading, account
     await expect(account.getByRole('link', { name })).toBeFocused()
   }
   await page.keyboard.press('Tab')
-  await expect(page.getByLabel('Selecione uma farm')).toBeFocused()
+  await expect(
+    page.getByLabel('Selecione uma farm', { exact: true }),
+  ).toBeFocused()
 })
 
 test('connectors: revocation needs the checkbox, sends the fingerprint and can be cancelled', async ({
@@ -955,7 +962,9 @@ test('connectors: loading, empty and error states say why and offer a way out', 
   const alert = page.getByRole('alert')
   await expect(alert).toBeFocused()
   await expect(alert).toContainText('Não foi possível consultar o inventário.')
-  await expect(page.getByLabel('Selecione uma farm')).toBeDisabled()
+  await expect(
+    page.getByLabel('Selecione uma farm', { exact: true }),
+  ).toBeDisabled()
   await expect(
     page.getByRole('link', { name: 'Entrar na conta' }),
   ).toHaveAttribute('href', '/entrar')

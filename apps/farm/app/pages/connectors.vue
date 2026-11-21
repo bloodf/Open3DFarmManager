@@ -461,6 +461,10 @@ onBeforeRouteLeave(() => {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.page-header h1 {
+  justify-self: start;
+  max-width: 100%;
+}
 .page-header h1:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);

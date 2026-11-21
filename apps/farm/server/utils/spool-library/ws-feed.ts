@@ -15,6 +15,7 @@
 import { legacyFailure } from './legacy-handler.ts'
 import { spoolFeedBus, type SpoolFeedBus } from './events.ts'
 import { splitLegacyPath } from './legacy-path.ts'
+import { isTrustedOrigin } from './origin-guard.ts'
 import type { SpoolLibraryStorage } from './scope.ts'
 
 export interface FeedPeer {
@@ -53,10 +54,10 @@ export function feedPool(apiPath: string): readonly string[] | undefined {
   if (/^\/api\/v1\/?$/.test(apiPath)) return []
   let m = /^\/api\/v1\/(vendor|filament|spool)\/?$/.exec(apiPath)
   if (m) return [m[1]!]
-  m = /^\/api\/v1\/(vendor|filament|spool)\/(\d{1,10})$/.exec(apiPath)
+  m = /^\/api\/v1\/(vendor|filament|spool)\/(-?\d{1,10})$/.exec(apiPath)
   if (m) {
     const id = Number(m[2])
-    return id <= MAX_ID ? [m[1]!, String(id)] : undefined
+    return Math.abs(id) <= MAX_ID ? [m[1]!, String(id)] : undefined
   }
   if (/^\/api\/v1\/setting\/?$/.test(apiPath)) return ['setting']
   m = /^\/api\/v1\/setting\/([^/]+)$/.exec(apiPath)
@@ -79,16 +80,11 @@ function handshakeRefusal(
 ): { code: number; reason: string } | undefined {
   const host = headers.get('host')
   if (!host) return { code: 4400, reason: 'Untrusted host' }
-  const origin = headers.get('origin')
-  if (origin === null) return undefined
-  let originHost: string | undefined
-  try {
-    originHost = new URL(origin).host
-  } catch {
-    // "null" and malformed origins are untrusted.
-  }
-  const trusted = [host, headers.get('x-forwarded-host')]
-  return originHost !== undefined && trusted.includes(originHost)
+  return isTrustedOrigin(
+    headers.get('origin'),
+    host,
+    headers.get('x-forwarded-host'),
+  )
     ? undefined
     : { code: 4403, reason: 'Untrusted origin' }
 }
@@ -163,8 +159,16 @@ export function createSpoolFeedHooks(
       session.unsubscribe = unsubscribe
     },
 
-    // Clients have nothing to say; upstream reads and discards.
-    message() {},
+    // Upstream answers any text a client sends with its health status.
+    message(peer, message) {
+      const text =
+        typeof message === 'string'
+          ? message
+          : typeof (message as { text?: unknown })?.text === 'function'
+            ? (message as { text: () => string }).text()
+            : ''
+      if (text !== '') peer.send(JSON.stringify({ status: 'healthy' }))
+    },
     close: leave,
     error: leave,
   }

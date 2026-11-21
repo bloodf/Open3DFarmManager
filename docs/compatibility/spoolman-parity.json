@@ -1,0 +1,113 @@
+{
+  "id": "spoolman-parity-record",
+  "issues": [546, 548, 542],
+  "upstream": {
+    "project": "Spoolman",
+    "version": "0.27.1",
+    "version_tag": "v0.27.1",
+    "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
+    "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
+    "lock_file": "third_party/spoolman-reference/upstream.lock.json"
+  },
+  "builtin": {
+    "postgres_image": "postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232",
+    "migration": "0089_spool_features_schema"
+  },
+  "allowed_differences_sha256": "55a7aaa50f32fb28ea2b33109ee7e7355c402e730ce6fed665a2b4116bdfa950",
+  "corpora": [
+    {
+      "corpus": "spool-api",
+      "kind": "http",
+      "files": [
+        {
+          "path": "tests/fixtures/spoolman/spool-api/cases.json",
+          "sha256": "967e4dfb1e4f20a3b128917a929b5e35afd6036228822b9a2907c55bb2b79354"
+        },
+        {
+          "path": "tests/fixtures/spoolman/spool-api/upstream.json",
+          "sha256": "96cf2cc667cfdaa4241f81170cb4bcb192ce684b2fa121c24e884f53b6e731e5"
+        }
+      ],
+      "total": 154,
+      "outcomes": {
+        "identical": 154
+      }
+    },
+    {
+      "corpus": "vendor-filament",
+      "kind": "http",
+      "files": [
+        {
+          "path": "tests/fixtures/spoolman/vendor-filament/cases.json",
+          "sha256": "3d2636016e45d27f26f21c8ab7bcece126083dc5c1a4206503fc4d329ef30339"
+        },
+        {
+          "path": "tests/fixtures/spoolman/vendor-filament/upstream.json",
+          "sha256": "599f9fc8429c58203b582b1094150b80c4db12945e92a843313a0d4c2c609456"
+        }
+      ],
+      "total": 182,
+      "outcomes": {
+        "identical": 182
+      }
+    },
+    {
+      "corpus": "client-contracts",
+      "kind": "http",
+      "files": [
+        {
+          "path": "tests/fixtures/spoolman/upstream-contract/requests.json",
+          "sha256": "aa6669b117da84d9660804c87d922f27c9bfe8215649a475da72d907c4937d2b"
+        },
+        {
+          "path": "tests/fixtures/spoolman/parity/client-flows.json",
+          "sha256": "9613249d30434d4a02b5c1ca5d55125c832d8974695d7f258aa6b652d7cfbf89"
+        }
+      ],
+      "total": 49,
+      "outcomes": {
+        "identical": 49
+      }
+    },
+    {
+      "corpus": "auxiliary-api",
+      "kind": "http",
+      "files": [
+        {
+          "path": "tests/fixtures/spoolman/parity/aux-cases.json",
+          "sha256": "46329f07b30a6b953ee68e7f20b2df3997bbe0c1726d26bbf4a93262a2d10656"
+        }
+      ],
+      "total": 262,
+      "outcomes": {
+        "identical": 255,
+        "explained:info-deployment": 1,
+        "explained:backup-inline-export": 1,
+        "explained:tag-scan-unserved": 1,
+        "explained:tag-link-spool-unserved": 1,
+        "explained:tag-unlink-spool-unserved": 1,
+        "explained:tag-link-filament-unserved": 1,
+        "explained:tag-unlink-filament-unserved": 1
+      }
+    },
+    {
+      "corpus": "websocket",
+      "kind": "websocket",
+      "files": [
+        {
+          "path": "tests/fixtures/spoolman/parity/websocket-scenarios.json",
+          "sha256": "e28d095064046314e9f794b57ba51cb3ccbbde645f99994484cae61dcb9d2c5d"
+        }
+      ],
+      "total": 12,
+      "outcomes": {
+        "identical": 7,
+        "explained:ws-vendor-delete-updates-filaments": 1,
+        "explained:ws-rename-updates-spools": 1,
+        "explained:ws-handshake-refusal": 1,
+        "explained:ws-handshake-path-spellings": 1,
+        "explained:ws-handshake-unknown-paths": 1
+      }
+    }
+  ]
+}

@@ -44,8 +44,8 @@ export function createInfoModule(options: InfoOptions = {}): LegacyApiModule {
         // Upstream: `{path, created}`. No file exists here; `path` names the
         // inline export and `export` carries it (farm-scoped, never a file).
         return respond(200, {
-          created: true,
           path: 'inline:export',
+          created: true,
           export: bundle.value,
         })
       }

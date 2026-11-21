@@ -114,3 +114,107 @@ test('check-all-docker supplies the Node image Chromium to the unmodified check:
       .some((p: string) => /OPENFARM_CHROME_PATH/.test(p)),
   )
 })
+
+type RuntimeModule = {
+  PYTHON_BIN_DIR: string
+  PREPARE_PYTHON: string
+  SCRATCH_DIR: string
+  MIN_SCRATCH_BYTES: number
+  PREPARE_SCRATCH: string
+  scratchMount: () => string
+}
+
+test('check-all-docker supplies python3 with the Node image libraries it needs', async () => {
+  const runner = (await import(
+    new URL('../../scripts/check-all-docker.mjs', import.meta.url).href
+  )) as RunnerModule
+  const runtime = (await import(
+    new URL('../../scripts/check-all-docker-runtime.mjs', import.meta.url).href
+  )) as RuntimeModule
+  const names = runner.resourceNames('python-test')
+  const calls = runner.planCalls(runner.resolveConfig({}), names)
+  const labels = runner.execPlan(names).map((step) => step.label)
+  const gate = calls.at(-1) ?? []
+  const path = gate.find((arg) => arg.startsWith('PATH='))?.slice(5) ?? ''
+  const dirs = path.split(':')
+
+  // The wrapper directory wins over the Node image's raw /usr/bin.
+  assert.ok(dirs.indexOf(runtime.PYTHON_BIN_DIR) >= 0)
+  assert.ok(
+    dirs.indexOf(runtime.PYTHON_BIN_DIR) < dirs.indexOf('/opt/gate-tools/bin'),
+  )
+  assert.ok(
+    labels.indexOf('prepare python runtime') > labels.indexOf('prepare home'),
+  )
+  assert.ok(
+    labels.indexOf('prepare python runtime') <
+      labels.indexOf('npm run check:all'),
+  )
+  // Only libraries the container lacks are added; glibc is never shadowed;
+  // pyexpat (libexpat.so.1) is proven to load before the gate starts.
+  const script = runtime.PREPARE_PYTHON
+  assert.match(script, /^set -eu\n/)
+  assert.match(
+    script,
+    /\[ -e "\/usr\/lib\/\$triplet\/\$name" \] \|\| \[ -e "\/lib\/\$triplet\/\$name" \]/,
+  )
+  assert.match(script, /ldd/)
+  assert.match(script, /import pyexpat/)
+  assert.doesNotMatch(script, /\b(curl|wget|apt-get|pip|npx)\b/)
+  assert.ok(calls.some((call) => call.at(-1) === script))
+  assert.ok(
+    runner
+      .findPlanProblems(calls.filter((call) => call.at(-1) !== script))
+      .some((p) => /python3/.test(p)),
+  )
+})
+
+test('check-all-docker gives /tmp a task-owned scratch volume with at least 10 GiB free', async () => {
+  const runner = (await import(
+    new URL('../../scripts/check-all-docker.mjs', import.meta.url).href
+  )) as RunnerModule
+  const runtime = (await import(
+    new URL('../../scripts/check-all-docker-runtime.mjs', import.meta.url).href
+  )) as RuntimeModule
+  const names = runner.resourceNames('scratch-test')
+  const calls = runner.planCalls(runner.resolveConfig({}), names)
+  const create = calls[0] ?? []
+  const labels = runner.execPlan(names).map((step) => step.label)
+
+  // Anonymous volume (no source): owned by the container, removed with `rm -v`.
+  assert.equal(runtime.scratchMount(), 'type=volume,destination=/tmp')
+  assert.ok(create.includes(runtime.scratchMount()))
+  assert.ok(!create.some((arg) => /^\/tmp:/.test(arg)), 'no /tmp tmpfs')
+  // The rehearsal asserts > 10 GiB; the runner checks it up front, fail-closed.
+  assert.ok(runtime.MIN_SCRATCH_BYTES > 10 * 1024 ** 3)
+  assert.match(runtime.PREPARE_SCRATCH, /^set -eu\n/)
+  assert.match(runtime.PREPARE_SCRATCH, /df -Pk/)
+  assert.ok(
+    labels.indexOf('check scratch space') < labels.indexOf('prepare home'),
+  )
+  assert.deepEqual(runner.findPlanProblems(calls), [])
+
+  // The checker refuses a named (shared) or missing scratch volume.
+  const swap = (mount: string) =>
+    calls.map((call, i) =>
+      i === 0
+        ? call.map((arg) => (arg === runtime.scratchMount() ? mount : arg))
+        : call,
+    )
+  for (const tainted of [
+    swap('type=volume,source=shared,destination=/tmp'),
+    calls.map((call, i) =>
+      i === 0
+        ? call.filter(
+            (arg, j) =>
+              arg !== runtime.scratchMount() &&
+              call[j + 1] !== runtime.scratchMount(),
+          )
+        : call,
+    ),
+  ])
+    assert.ok(
+      runner.findPlanProblems(tainted).some((p) => /scratch/.test(p)),
+      JSON.stringify(tainted[0]),
+    )
+})

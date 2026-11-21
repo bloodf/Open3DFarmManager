@@ -21,6 +21,18 @@
 // "no PostgreSQL installed" error when PATH and OPENFARM_PG_BIN are empty.
 // The browser suites get the Node image's Playwright Chromium through
 // OPENFARM_CHROME_PATH (see check-all-docker-browser.mjs); nothing is skipped.
+// python3 is the Node image's, run through a wrapper that adds the image
+// libraries the Debian userland lacks (libexpat.so.1 for pyexpat), and /tmp is
+// an anonymous, task-owned Docker volume on the Docker host disk so the release
+// rehearsal sees its required > 10 GiB (see check-all-docker-runtime.mjs).
+//
+// Resource ownership and cleanup: a run owns exactly one container
+// (`openfarm-check-all-<id>`, label org.open3dfarmmanager.check-all-docker=<id>)
+// and that container's anonymous /tmp volume. Images and the npm cache volume
+// are only mounted read-only. Cleanup verifies the label, runs
+// `docker rm -f -v <container id>` (which deletes the anonymous volume too) and
+// confirms neither the container nor the volume remains; the ledger under the
+// host tmpdir records the volume name and the outcome.
 //
 //   node scripts/check-all-docker.mjs              # run the full gate
 //   node scripts/check-all-docker.mjs --self-test  # fast, starts no service
@@ -38,6 +50,14 @@ import {
   browserMount,
   browserPlanChecks,
 } from './check-all-docker-browser.mjs'
+import {
+  PREPARE_PYTHON,
+  PREPARE_SCRATCH,
+  PYTHON_BIN_DIR,
+  SCRATCH_DIR,
+  runtimePlanChecks,
+  scratchMount,
+} from './check-all-docker-runtime.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const MIN_DOCKER_MAJOR = 28 // `--mount type=image` with image-subpath
@@ -65,7 +85,6 @@ export function resolveConfig(env = process.env) {
     cpus: env.OPENFARM_GATE_CPUS || '6',
     memory: env.OPENFARM_GATE_MEMORY || '10g',
     workSize: env.OPENFARM_GATE_WORK_SIZE || '6g',
-    tmpSize: env.OPENFARM_GATE_TMP_SIZE || '3g',
   }
 }
 
@@ -75,7 +94,7 @@ export function resourceNames(id) {
 
 const CONTAINER_ENV = {
   HOME: '/tmp/home',
-  PATH: '/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/gate-tools/bin',
+  PATH: `/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:${PYTHON_BIN_DIR}:/opt/gate-tools/bin`,
   LANG: 'C.UTF-8',
   LC_ALL: 'C.UTF-8',
   OPENFARM_PG_BIN: '/opt/pg/lib/postgresql/17/bin',
@@ -110,10 +129,7 @@ export function createArgs(cfg, names) {
       '--tmpfs',
       `/work:rw,exec,uid=999,gid=999,mode=0755,size=${cfg.workSize}`,
     ],
-    ...[
-      '--tmpfs',
-      `/tmp:rw,exec,uid=999,gid=999,mode=1777,size=${cfg.tmpSize}`,
-    ],
+    ...['--mount', scratchMount()],
     ...['--tmpfs', '/usr/lib/postgresql:ro,size=1m'],
     ...[
       '--mount',
@@ -170,8 +186,10 @@ export function execPlan(names) {
       args: [...execBase(names), 'node', '-e', NODE_CHECK],
     },
     { label: 'postgres version', args: sh(PG_CHECK) },
+    { label: 'check scratch space', args: sh(PREPARE_SCRATCH) },
     { label: 'prepare home', args: sh('mkdir -p "$HOME" /tmp/npm-logs') },
     { label: 'prepare offline browser', args: sh(PREPARE_BROWSER) },
+    { label: 'prepare python runtime', args: sh(PREPARE_PYTHON) },
     {
       label: 'copy source',
       args: sh('tar -x --warning=no-unknown-keyword -f -', { stdin: true }),
@@ -248,9 +266,28 @@ export function findPlanProblems(calls) {
     'create must not run as root',
   )
   const mounts = create.filter((arg, i) => create[i - 1] === '--mount')
+  const scratch = mounts.filter((m) =>
+    m.split(',').includes(`destination=${SCRATCH_DIR}`),
+  )
   requireThat(
-    mounts.length === 5 && mounts.every((m) => m.endsWith(',readonly')),
+    scratch.length === 1 && scratch[0] === scratchMount(),
+    'scratch /tmp must be exactly one anonymous (task-owned) volume',
+  )
+  const shared = mounts.filter((m) => !scratch.includes(m))
+  requireThat(
+    shared.length === 5 && shared.every((m) => m.endsWith(',readonly')),
     'image and cache mounts must all be read-only',
+  )
+  const path = CONTAINER_ENV.PATH.split(':')
+  requireThat(
+    calls.some((call) => call.at(-1) === PREPARE_PYTHON) &&
+      path.includes(PYTHON_BIN_DIR) &&
+      path.indexOf(PYTHON_BIN_DIR) < path.indexOf('/opt/gate-tools/bin'),
+    'python3 must run through the prepared wrapper',
+  )
+  requireThat(
+    calls.some((call) => call.at(-1) === PREPARE_SCRATCH),
+    'scratch free space must be checked before the gate',
   )
   const gate = calls.find((call) => call.at(-1) === 'check:all')
   requireThat(
@@ -463,6 +500,7 @@ async function runGate(cfg, log) {
   let exitCode = 1
   let cleanupFailed = false
   let cleanupRun
+  let scratchVolume = ''
   // Memoized: the signal handler and the finally block share one removal.
   const cleanup = () => (cleanupRun ??= removeContainer())
   const removeContainer = async () => {
@@ -471,18 +509,25 @@ async function runGate(cfg, log) {
     const owner = await docker([
       'inspect',
       '--format',
-      `{{index .Config.Labels "${LABEL_KEY}"}} {{.Id}}`,
+      `{{index .Config.Labels "${LABEL_KEY}"}} {{.Id}} {{range .Mounts}}{{if eq .Destination "${SCRATCH_DIR}"}}{{.Name}}{{end}}{{end}}`,
       names.container,
     ])
-    const [label, containerId] = owner.stdout.split(' ')
+    const [label, containerId, volume = ''] = owner.stdout.split(' ')
+    scratchVolume = volume
     if (owner.code === 0 && label === names.id) {
-      const removed = await docker(['rm', '-f', containerId])
+      // -v deletes the anonymous scratch volume together with the container.
+      const removed = await docker(['rm', '-f', '-v', containerId])
       const left = await docker(['ps', '-aq', '--filter', `id=${containerId}`])
-      cleanupFailed = removed.code !== 0 || left.stdout !== ''
+      const volumes = await docker(['volume', 'ls', '-q'])
+      const volumeLeft =
+        volume === '' ||
+        volumes.code !== 0 ||
+        volumes.stdout.split('\n').includes(volume)
+      cleanupFailed = removed.code !== 0 || left.stdout !== '' || volumeLeft
       say(
         cleanupFailed
-          ? `cleanup FAILED for container ${containerId}`
-          : `removed container ${containerId}`,
+          ? `cleanup FAILED for container ${containerId} / scratch volume ${volume || '(unknown)'}`
+          : `removed container ${containerId} and scratch volume ${volume}`,
       )
     } else if (owner.code === 0) {
       cleanupFailed = true
@@ -490,6 +535,7 @@ async function runGate(cfg, log) {
     }
     await record('cleanup.json', {
       container: names.container,
+      scratchVolume,
       failed: cleanupFailed,
     })
   }
@@ -620,9 +666,12 @@ export async function selfTest(log = console.log) {
     'every image and cache mount is read-only',
     create
       .filter((_, i) => create[i - 1] === '--mount')
+      .filter((m) => m !== scratchMount())
       .every((m) => m.endsWith(',readonly')),
   )
   for (const [name, ok] of browserPlanChecks(cfg, calls, execPlan(names)))
+    check(name, ok)
+  for (const [name, ok] of runtimePlanChecks(calls, execPlan(names)))
     check(name, ok)
   for (const [name, taint] of [
     ['--privileged', [['create', '--privileged']]],

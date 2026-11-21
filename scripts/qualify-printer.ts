@@ -6,7 +6,7 @@ import type { QualifyCliOptions } from './qualify/types.ts'
 const USAGE = `Usage: node scripts/qualify-printer.ts --vendor <v> --host <h> [credential file] [options]
 
 Arguments:
-  --vendor, -v <vendor>          Printer vendor (moonraker, bambu, creality, anycubic, kobralink) [required]
+  --vendor, -v <vendor>          Printer vendor (moonraker, bambu, creality, anycubic, kobralink, kobra-x) [required]
   --host, -h <host>              Printer IP or hostname [required]
   [credential file]              Optional path to credentials JSON or token file
 
@@ -19,6 +19,9 @@ Options:
   --ca-file <path>               TLS CA certificate path
   --pin-sha256 <hex>             TLS certificate SHA-256 pin
   --webcam-origin <origin>       Moonraker webcam origin override
+  --cert-file <path>             Kobra X client certificate (PEM) override
+  --key-file <path>              Kobra X client key (PEM) override; defaults to --cert-file
+  --info-port <port>             Kobra X HTTP identity port (/info, /ctrl); default 18910
   --help                         Show this help message
 
 Security Guarantee:
@@ -78,6 +81,9 @@ export function parseCliArgs(args: string[]): {
   let caFile: string | undefined
   let pinSha256: string | undefined
   let webcamOrigin: string | undefined
+  let certFile: string | undefined
+  let keyFile: string | undefined
+  let httpPort: number | undefined
 
   let i = 0
   while (i < args.length) {
@@ -135,6 +141,20 @@ export function parseCliArgs(args: string[]): {
       if (i + 1 >= args.length)
         return { error: 'Missing value for --webcam-origin' }
       webcamOrigin = args[++i]
+    } else if (arg === '--cert-file') {
+      if (i + 1 >= args.length)
+        return { error: 'Missing value for --cert-file' }
+      certFile = args[++i]
+    } else if (arg === '--key-file') {
+      if (i + 1 >= args.length) return { error: 'Missing value for --key-file' }
+      keyFile = args[++i]
+    } else if (arg === '--info-port') {
+      if (i + 1 >= args.length)
+        return { error: 'Missing value for --info-port' }
+      const ip = Number(args[++i])
+      if (!Number.isInteger(ip) || ip < 1 || ip > 65535)
+        return { error: 'Invalid info port' }
+      httpPort = ip
     } else if (!arg.startsWith('-') && !credentialFile) {
       // Positional argument for credential file
       credentialFile = arg
@@ -164,6 +184,9 @@ export function parseCliArgs(args: string[]): {
       ...(caFile !== undefined ? { caFile } : {}),
       ...(pinSha256 !== undefined ? { pinSha256 } : {}),
       ...(webcamOrigin !== undefined ? { webcamOrigin } : {}),
+      ...(certFile !== undefined ? { certFile } : {}),
+      ...(keyFile !== undefined ? { keyFile } : {}),
+      ...(httpPort !== undefined ? { httpPort } : {}),
     },
   }
 }
@@ -186,7 +209,8 @@ export async function main(args: string[]): Promise<number> {
   try {
     const report = await qualifyPrinter(parsed.options)
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
-    return 0
+    // The report is still printed as evidence; nothing answered, so it failed.
+    return report.qualification.status === 'unreachable' ? 1 : 0
   } catch (error) {
     process.stderr.write(
       `Printer qualification failed: ${error instanceof Error ? error.message : 'unknown error'}\n`,

@@ -291,6 +291,11 @@ describe('Bambu detail stream over the simulator', () => {
     expect(
       sim.requests.every((request) => request.command === 'get_version'),
     ).toBe(true)
+    // Read-only queries are logged apart; no printer command was sent at all.
+    expect(sim.requests).toEqual([])
+    expect(sim.queries.every((query) => query.command === 'get_version')).toBe(
+      true,
+    )
     stop()
     stop()
     expect(stream.active).toBe(false)

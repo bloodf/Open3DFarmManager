@@ -25,6 +25,14 @@ import {
 import { createBambuRuntimeSubscription } from '../../packages/connector/src/bambu/runtime.ts'
 const SECRET = 'synthetic-access-do-not-log'
 const monotonicNow = () => performance.now()
+async function eventually(condition: () => boolean, what: string) {
+  const deadline = performance.now() + 5000
+  while (!condition()) {
+    if (performance.now() > deadline)
+      throw Error(`Timed out waiting for ${what}`)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
 async function commandFixture(action: 'pause' | 'resume' | 'cancel') {
   const now = Date.now()
   const pair = await crypto.subtle.generateKey(
@@ -494,10 +502,22 @@ for (const control of [undefined, false, true]) {
         )
         assert.equal(JSON.stringify(printer).includes(SECRET), false)
         assert.deepEqual(remote.requests, [])
+        // Regression: the telemetry connection's read-only version query is sent concurrently
+        // with the first report. Once it has provably reached the printer, still no command may
+        // have been sent, and the query must be the only thing the connection asked for.
+        await eventually(
+          () => remote.queries.length > 0,
+          'the telemetry version query',
+        )
+        assert.deepEqual(remote.queries, [
+          { command: 'get_version', sequence_id: '0' },
+        ])
+        assert.deepEqual(remote.requests, [])
       } finally {
         sub.close()
         await sub.done
       }
+      assert.deepEqual(remote.requests, [])
       assert.equal(JSON.stringify(messages).includes(SECRET), false)
       // Malformed private credential contents cannot escape through diagnostics.
       writeFileSync(
@@ -516,6 +536,63 @@ for (const control of [undefined, false, true]) {
     },
   )
 }
+
+// Regression for the gate failure where the opt-in telemetry check saw an unexpected
+// `get_version` in the printer's command log. It forces the ordering that used to lose the race:
+// the version query reaches the printer before the first report is delivered.
+test('telemetry version query is not logged as a printer command', async (t) => {
+  const remote = await startBambuSimulator({})
+  const directory = mkdtempSync(join(tmpdir(), 'bambu-control-version-'))
+  const owner = new AbortController()
+  t.after(async () => {
+    owner.abort()
+    await remote.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+  writeFileSync(
+    join(directory, 'credentials'),
+    JSON.stringify({ accessCode: SECRET }),
+    { mode: 0o600 },
+  )
+  writeFileSync(join(directory, 'ca'), remote.syntheticTrust)
+  const binding = parseBambuBinding({
+    host: remote.host,
+    port: remote.port,
+    serial: 'SYNTHETIC',
+    printerKey: 'synthetic',
+    credentialFile: join(directory, 'credentials'),
+    caFile: join(directory, 'ca'),
+    allowedEndpoints: [{ host: remote.host, port: remote.port }],
+  })
+  const snapshots: unknown[] = []
+  const sub = createBambuRuntimeSubscription({
+    binding,
+    signal: owner.signal,
+    onEvent(event) {
+      if (event.kind === 'snapshot') snapshots.push(event.printer)
+    },
+  })
+  try {
+    // No report has been published yet, so whatever reached the printer came from the connect.
+    // The broker's own counter is used so this also runs against the pre-fix simulator.
+    await eventually(
+      () => (remote.calls()['PUBLISH:device/SYNTHETIC/request'] ?? 0) > 0,
+      'the telemetry version query',
+    )
+    assert.deepEqual(snapshots, [])
+    remote.publishReport({ print: { gcode_state: 'RUNNING', mc_percent: 25 } })
+    await eventually(() => snapshots.length > 0, 'the first snapshot')
+    assert.deepEqual(Reflect.get(Object(snapshots[0]), 'controls'), [])
+    assert.deepEqual(remote.requests, [])
+    assert.deepEqual(remote.queries, [
+      { command: 'get_version', sequence_id: '0' },
+    ])
+  } finally {
+    sub.close()
+    await sub.done
+  }
+  assert.deepEqual(remote.requests, [])
+})
 
 test('abort before dispatch cannot publish', async (t) => {
   const f = await fixture(t, 'pause')

@@ -12,6 +12,8 @@ export interface ParsedCredentials {
   pinSha256?: string
   name?: string
   email?: string
+  certFile?: string
+  keyFile?: string
 }
 
 export function loadCredentials(filePath?: string): ParsedCredentials {
@@ -44,6 +46,10 @@ export function loadCredentials(filePath?: string): ParsedCredentials {
           result.pinSha256 = parsed.pinSha256.trim()
         if (typeof parsed.name === 'string') result.name = parsed.name.trim()
         if (typeof parsed.email === 'string') result.email = parsed.email.trim()
+        if (typeof parsed.certFile === 'string')
+          result.certFile = parsed.certFile.trim()
+        if (typeof parsed.keyFile === 'string')
+          result.keyFile = parsed.keyFile.trim()
         if (typeof parsed.caPem === 'string') result.caPem = parsed.caPem
         if (typeof parsed.caFile === 'string') {
           try {

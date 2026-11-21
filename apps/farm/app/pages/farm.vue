@@ -221,31 +221,39 @@ function cancelPause(event: Event) {
 }
 </script>
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1 ref="heading" tabindex="-1">Minha farm</h1>
-    <nav aria-label="Navegação da farm" class="actions">
-      <NuxtLink to="/">Início</NuxtLink>
-      <NuxtLink to="/arquivos">Arquivos</NuxtLink>
-      <NuxtLink to="/impressoras">Impressoras</NuxtLink>
-      <NuxtLink to="/parear">Connectors</NuxtLink>
-      <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
-      <NuxtLink to="/sair">Sair da conta</NuxtLink>
-    </nav>
-    <p>
-      Os controles desta página são somente leitura, exceto a pausa, que exige
-      confirmação e uma conexão direta segura.
-    </p>
-    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+  <main id="conteudo" class="farm-page">
+    <header class="page-header">
+      <p class="eyebrow">Open3DFarmManager</p>
+      <h1 ref="heading" tabindex="-1">Minha farm</h1>
+      <p class="intro">
+        Os controles desta página são somente leitura, exceto a pausa, que exige
+        confirmação e uma conexão direta segura.
+      </p>
+      <nav aria-label="Navegação da farm">
+        <ul class="nav-links">
+          <li><NuxtLink to="/">Início</NuxtLink></li>
+          <li><NuxtLink to="/arquivos">Arquivos</NuxtLink></li>
+          <li><NuxtLink to="/impressoras">Impressoras</NuxtLink></li>
+          <li><NuxtLink to="/parear">Connectors</NuxtLink></li>
+          <li>
+            <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
+          </li>
+          <li><NuxtLink to="/sair">Sair da conta</NuxtLink></li>
+        </ul>
+      </nav>
+    </header>
+    <div v-if="state.kind === 'loading'" class="loading panel" aria-busy="true">
       <p role="status">Carregando suas farms…</p>
       <Skeleton /><Skeleton /><Skeleton />
     </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
+      class="panel"
     >
+      <h2>Entre para ver a farm</h2>
       <p>Entre na sua conta para consultar suas farms.</p>
-      <NuxtLink to="/entrar">Entrar</NuxtLink>
+      <NuxtLink to="/entrar" class="cta">Entrar</NuxtLink>
     </section>
     <ErrorState
       v-else-if="state.kind === 'error'"
@@ -257,20 +265,23 @@ function cancelPause(event: Event) {
         <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
       </div>
     </ErrorState>
-    <template v-else-if="ready">
-      <p class="opaque">Conta atual: {{ ready.accountId }}</p>
-      <FarmScopeSelector
-        :ready="ready"
-        @select="selectFarm"
-        @discover="discover"
-      />
-      <template v-if="ready.scope">
-        <ApprovalPanel :farm-id="ready.scope.farmId" />
+    <div v-else-if="ready" class="stack">
+      <p class="opaque account">Conta atual: {{ ready.accountId }}</p>
+      <div class="setup-grid">
+        <FarmScopeSelector
+          :ready="ready"
+          @select="selectFarm"
+          @discover="discover"
+        />
         <FarmDeviceSelector
+          v-if="ready.scope"
           :keys="ready.keys"
           :connection-notice="connectionNotice"
           @select="selectKey"
         />
+      </div>
+      <template v-if="ready.scope">
+        <ApprovalPanel :farm-id="ready.scope.farmId" />
         <SpoolInventory
           :items="ready.spools"
           :rows="ready.rows"
@@ -287,6 +298,7 @@ function cancelPause(event: Event) {
           :now-wall-ms="liveNow().wall"
         />
         <section
+          class="panel"
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"
         >
@@ -304,27 +316,24 @@ function cancelPause(event: Event) {
             <Skeleton /><Skeleton /><Skeleton />
           </div>
           <template v-else>
-            <div class="actions">
-              <button
-                type="button"
+            <div class="actions toolbar">
+              <Button
                 @click="selectFarm(ready.scope.farmId, ready.printerAfter)"
               >
                 Atualizar cadastro
-              </button>
-              <button
+              </Button>
+              <Button
                 v-if="ready.printerAfter"
-                type="button"
                 @click="selectFarm(ready.scope.farmId)"
               >
                 Primeira página de atribuições
-              </button>
-              <button
+              </Button>
+              <Button
                 v-if="ready.nextPrinter"
-                type="button"
                 @click="selectFarm(ready.scope.farmId, ready.nextPrinter)"
               >
                 Próximas atribuições
-              </button>
+              </Button>
             </div>
             <p v-if="ready.printerAfter">
               Exibindo outra página de atribuições.
@@ -340,14 +349,23 @@ function cancelPause(event: Event) {
             >
               <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
             </EmptyState>
-            <PrinterWallFilters
-              v-model="wallQuery"
-              :facets="facets"
-              :counts="counts"
-              :total="ready.rows.length"
-              :visible="renderedRows.length"
-            />
+            <form
+              v-if="ready.rows.length"
+              role="search"
+              aria-label="Filtrar impressoras"
+              class="filters"
+              @submit.prevent
+            >
+              <PrinterWallFilters
+                v-model="wallQuery"
+                :facets="facets"
+                :counts="counts"
+                :total="ready.rows.length"
+                :visible="renderedRows.length"
+              />
+            </form>
             <PrinterWallTable
+              v-if="ready.rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
               :live-now="liveNow"
@@ -428,6 +446,7 @@ function cancelPause(event: Event) {
         </section>
         <section
           v-if="offlineVisible"
+          class="panel"
           aria-labelledby="last-known-heading"
           aria-describedby="last-known-description"
         >
@@ -443,7 +462,7 @@ function cancelPause(event: Event) {
           </ul>
         </section>
       </template>
-    </template>
+    </div>
     <dialog
       ref="pauseDialog"
       aria-labelledby="pause-dialog-title"
@@ -505,3 +524,211 @@ function cancelPause(event: Event) {
 </template>
 
 <style scoped src="../components/farm/farm-view.css"></style>
+<style scoped>
+.farm-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+.page-header {
+  display: grid;
+  gap: var(--space-2);
+}
+.eyebrow {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.page-header h1 {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.page-header h1:focus-visible,
+.stack [role='alert']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+.intro {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.nav-links a,
+.cta {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+}
+.nav-links a:hover,
+.cta:hover {
+  border-color: var(--color-accent);
+}
+.nav-links a[aria-current='page'],
+.nav-links a.router-link-exact-active {
+  border-color: var(--color-accent);
+}
+.cta {
+  justify-self: start;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.stack {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.stack > :deep(section),
+.setup-grid > :deep(section),
+.panel {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  min-width: 0;
+}
+.panel > h2,
+.stack > :deep(section) > h2,
+.setup-grid > :deep(section) > h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+}
+.panel > p,
+.stack > :deep(section) > p,
+.setup-grid > :deep(section) > p {
+  margin-block: 0 var(--space-3);
+}
+.account {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.toolbar {
+  margin-bottom: var(--space-4);
+}
+.filters {
+  margin-block: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  columns: 14rem 3;
+  column-gap: var(--space-5);
+}
+.filters :deep(label) {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  break-after: avoid;
+}
+.filters :deep(select),
+.filters :deep(input[type='search']),
+.filters :deep(button) {
+  width: 100%;
+  margin-bottom: var(--space-3);
+  break-inside: avoid;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.filters :deep(button) {
+  background: var(--color-surface-raised);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.filters :deep(ul),
+.filters :deep(p) {
+  column-span: all;
+}
+.filters :deep(ul) {
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+.filters :deep(p) {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--font-weight-semibold);
+}
+.printers {
+  gap: var(--space-4);
+}
+.printers > :deep(.printer-card) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  margin: 0;
+}
+.last-known-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+dialog {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+}
+dialog h2 {
+  margin-top: 0;
+  font-size: var(--font-size-lg);
+  overflow-wrap: anywhere;
+}
+dialog .actions {
+  margin-top: var(--space-4);
+}
+dialog .actions button {
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+dialog .actions button:first-child:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+dialog .actions button:disabled {
+  opacity: 0.6;
+}
+@media (max-width: 400px) {
+  .stack > :deep(section),
+  .setup-grid > :deep(section),
+  .panel {
+    padding: var(--space-4);
+  }
+  .nav-links a {
+    padding-inline: var(--space-3);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-links a,
+  .cta {
+    transition: border-color 120ms ease-out;
+  }
+}
+</style>

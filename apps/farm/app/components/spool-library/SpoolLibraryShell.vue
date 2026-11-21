@@ -8,7 +8,17 @@ import Toast from '../ui/Toast.vue'
 import type { FarmSummary } from '../../composables/useSpoolLibraryFarm.ts'
 
 const props = defineProps<{
-  section: 'spools' | 'filaments' | 'vendors' | 'import'
+  section:
+    | 'spools'
+    | 'filaments'
+    | 'vendors'
+    | 'import'
+    | 'slots'
+    | 'usage'
+    | 'stock'
+    | 'drying'
+    | 'labels'
+    | 'reports'
   title: string
   description: string
   farms: readonly FarmSummary[]
@@ -48,6 +58,36 @@ const navLinks = computed(() => {
       id: 'import' as const,
       to: { path: '/bobinas/importar', query },
       label: 'Importar',
+    },
+    {
+      id: 'slots' as const,
+      to: { path: '/bobinas/slots', query },
+      label: 'Slots',
+    },
+    {
+      id: 'usage' as const,
+      to: { path: '/bobinas/uso', query },
+      label: 'Uso e custo',
+    },
+    {
+      id: 'stock' as const,
+      to: { path: '/bobinas/estoque', query },
+      label: 'Estoque baixo',
+    },
+    {
+      id: 'drying' as const,
+      to: { path: '/bobinas/secagem', query },
+      label: 'Secagem e umidade',
+    },
+    {
+      id: 'labels' as const,
+      to: { path: '/bobinas/etiquetas', query },
+      label: 'Etiquetas',
+    },
+    {
+      id: 'reports' as const,
+      to: { path: '/bobinas/relatorios', query },
+      label: 'Relatórios',
     },
   ]
 })

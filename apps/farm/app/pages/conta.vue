@@ -56,7 +56,10 @@ async function loadIdentities() {
       cause && typeof cause === 'object' && 'statusCode' in cause
         ? cause.statusCode
         : undefined
-    identitiesState.value = status === 401 ? 'session' : 'failed'
+    // 404: this installation exposes no identity providers, so there is
+    // nothing to link and nothing failed.
+    identitiesState.value =
+      status === 404 ? 'ready' : status === 401 ? 'session' : 'failed'
   }
 }
 
@@ -245,6 +248,7 @@ async function changePassword() {
         @submit.prevent="changePassword"
       >
         <SettingsTextField
+          id="current-password"
           v-model="currentPassword"
           label="Senha atual"
           type="password"
@@ -253,6 +257,7 @@ async function changePassword() {
           :disabled="pending"
         />
         <SettingsTextField
+          id="new-password"
           v-model="newPassword"
           label="Nova senha"
           type="password"

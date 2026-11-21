@@ -119,7 +119,7 @@ export async function listIntegrationInventory(
     }[]
   >`SELECT farm_id::text AS "farmId", agent_id::text AS "connectorId", observed_at::float8 AS "observedAt", snapshot
       FROM farm.connector_inventory_snapshots
-      WHERE farm_id = ANY(${sql.array(input.farmIds)}::uuid[])
+      WHERE farm_id = ANY(${input.farmIds}::uuid[])
         AND (${position?.farmId ?? null}::uuid IS NULL OR (farm_id, agent_id) > (${position?.farmId ?? null}::uuid, ${position?.connectorId ?? null}::uuid))
       ORDER BY farm_id, agent_id
       LIMIT ${input.limit + 1}`
@@ -172,7 +172,7 @@ export async function listIntegrationJobs(
       FROM farm.job_history h
       JOIN farm.printer_assignments p ON p.farm_id = h.farm_id AND p.agent_id = h.agent_id
         AND p.printer_key = h.printer_key AND p.revoked_at IS NULL
-      WHERE ((p.farm_id = ANY(${sql.array(input.farmWideFarmIds)}::uuid[])) OR (p.id = ANY(${sql.array(input.assignmentIds)}::uuid[])))
+      WHERE ((p.farm_id = ANY(${input.farmWideFarmIds}::uuid[])) OR (p.id = ANY(${input.assignmentIds}::uuid[])))
         AND (${input.printerId}::uuid IS NULL OR p.id = ${input.printerId}::uuid)
         AND (${input.since}::bigint IS NULL OR h.ended_at >= ${input.since})
         AND (${input.until}::bigint IS NULL OR h.ended_at < ${input.until})

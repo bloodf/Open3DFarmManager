@@ -4,7 +4,12 @@
  * ordering, limit/offset and the x-total-count value.
  */
 import type { SpoolExtraFieldDefinition } from '../scope.ts'
-import { compareText, sqliteLike, splitFilterTerms } from './compat.ts'
+import {
+  compareText,
+  escapeLike,
+  sqliteLike,
+  splitFilterTerms,
+} from './compat.ts'
 import { extraSortValue } from './extra-fields.ts'
 
 export type Direction = 'asc' | 'desc'
@@ -81,7 +86,7 @@ export function stringFilter(
       if (field === null || field === undefined) return false
       if (term[0] === '"' && term.at(-1) === '"')
         return field === term.slice(1, -1)
-      return sqliteLike(field, `%${term}%`)
+      return sqliteLike(field, `%${escapeLike(term)}%`, '/')
     })
 }
 

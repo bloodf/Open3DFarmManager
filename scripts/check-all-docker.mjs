@@ -19,6 +19,8 @@
 // PostgreSQL binaries are exposed through OPENFARM_PG_BIN at /opt/pg, with
 // /usr/lib/postgresql hidden, because the binary-discovery suites assert the
 // "no PostgreSQL installed" error when PATH and OPENFARM_PG_BIN are empty.
+// The browser suites get the Node image's Playwright Chromium through
+// OPENFARM_CHROME_PATH (see check-all-docker-browser.mjs); nothing is skipped.
 //
 //   node scripts/check-all-docker.mjs              # run the full gate
 //   node scripts/check-all-docker.mjs --self-test  # fast, starts no service
@@ -29,6 +31,13 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  BROWSER_CACHE_DIR,
+  CHROME_WRAPPER,
+  PREPARE_BROWSER,
+  browserMount,
+  browserPlanChecks,
+} from './check-all-docker-browser.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const MIN_DOCKER_MAJOR = 28 // `--mount type=image` with image-subpath
@@ -77,6 +86,7 @@ const CONTAINER_ENV = {
   GIT_COMMITTER_NAME: 'check-all',
   GIT_COMMITTER_EMAIL: 'check-all@localhost',
   NUXT_TELEMETRY_DISABLED: '1',
+  OPENFARM_CHROME_PATH: CHROME_WRAPPER,
   npm_config_offline: 'true',
   npm_config_cache: '/npm-cache',
   npm_config_logs_dir: '/tmp/npm-logs',
@@ -117,6 +127,7 @@ export function createArgs(cfg, names) {
       '--mount',
       `type=image,source=${cfg.pgImage},destination=/opt/pg,image-subpath=usr,readonly`,
     ],
+    ...['--mount', browserMount(cfg.nodeImage)],
     ...[
       '--mount',
       `type=volume,source=${cfg.npmCacheVolume},destination=/npm-cache,readonly`,
@@ -160,6 +171,7 @@ export function execPlan(names) {
     },
     { label: 'postgres version', args: sh(PG_CHECK) },
     { label: 'prepare home', args: sh('mkdir -p "$HOME" /tmp/npm-logs') },
+    { label: 'prepare offline browser', args: sh(PREPARE_BROWSER) },
     {
       label: 'copy source',
       args: sh('tar -x --warning=no-unknown-keyword -f -', { stdin: true }),
@@ -237,7 +249,7 @@ export function findPlanProblems(calls) {
   )
   const mounts = create.filter((arg, i) => create[i - 1] === '--mount')
   requireThat(
-    mounts.length === 4 && mounts.every((m) => m.endsWith(',readonly')),
+    mounts.length === 5 && mounts.every((m) => m.endsWith(',readonly')),
     'image and cache mounts must all be read-only',
   )
   const gate = calls.find((call) => call.at(-1) === 'check:all')
@@ -248,6 +260,16 @@ export function findPlanProblems(calls) {
   requireThat(
     calls.some((call) => call.join(' ').includes('npm ci --offline')),
     'dependency install must be `npm ci --offline`',
+  )
+  requireThat(
+    mounts.some((m) =>
+      m.includes(
+        `destination=${BROWSER_CACHE_DIR},image-subpath=ms-playwright,`,
+      ),
+    ) &&
+      CONTAINER_ENV.OPENFARM_CHROME_PATH === CHROME_WRAPPER &&
+      calls.some((call) => call.at(-1) === PREPARE_BROWSER),
+    'browser suites must get the local Chromium via OPENFARM_CHROME_PATH',
   )
   requireThat(
     CONTAINER_ENV.npm_config_offline === 'true',
@@ -600,6 +622,8 @@ export async function selfTest(log = console.log) {
       .filter((_, i) => create[i - 1] === '--mount')
       .every((m) => m.endsWith(',readonly')),
   )
+  for (const [name, ok] of browserPlanChecks(cfg, calls, execPlan(names)))
+    check(name, ok)
   for (const [name, taint] of [
     ['--privileged', [['create', '--privileged']]],
     ['docker pull', [['pull', 'node:22']]],
@@ -620,13 +644,15 @@ export async function selfTest(log = console.log) {
       [['create', '--network', 'host', '--network=host']],
     ],
     ['dropped check:all', [['exec', 'x', 'npm', 'run', 'test']]],
+    ['dropped browser preparation', []],
   ]) {
+    const tainted = {
+      'dropped check:all': () => calls.slice(0, -1).concat(taint),
+      'dropped browser preparation': () =>
+        calls.filter((call) => call.at(-1) !== PREPARE_BROWSER),
+    }[name]
     const caught =
-      findPlanProblems(
-        name === 'dropped check:all'
-          ? calls.slice(0, -1).concat(taint)
-          : [...calls, ...taint],
-      ).length > 0
+      findPlanProblems(tainted ? tainted() : [...calls, ...taint]).length > 0
     check(`plan checker rejects ${name}`, caught)
   }
 

@@ -1,11 +1,12 @@
 FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS go
-FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+# Debian 13 (trixie) ships git >= 2.42 (`worktree add --orphan`). Keep linux/amd64.
+FROM node:22.23.5-trixie-slim@sha256:68c76cfad89921b927eae28ba21407475e29d0ce450afcdbe70c1532db042b64
 
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64 || { echo 'The check image requires linux/amd64' >&2; exit 1; }
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-    ca-certificates curl ffmpeg fonts-liberation git libasound2 libatk-bridge2.0-0 \
+    ca-certificates curl ffmpeg fonts-liberation git python3 libasound2 libatk-bridge2.0-0 \
     libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
     libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
     libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
@@ -35,6 +36,9 @@ COPY packages/sim-tools/package.json packages/sim-tools/package.json
 COPY packages/webrtc-experiment/package.json packages/webrtc-experiment/package.json
 RUN npm ci --ignore-scripts && npm cache clean --force
 COPY . .
-# The Node suite uses git ls-files. Index the source snapshot inside the image.
+# Non-root so permission-based refusals (e.g. mode 0500 directories) match the host suite.
+# The Node suite uses git ls-files. Index the source snapshot as the runtime user.
+RUN chown -R node:node /workspace
+USER node
 RUN git init --quiet && git add --all
 CMD ["npm", "run", "check:all"]

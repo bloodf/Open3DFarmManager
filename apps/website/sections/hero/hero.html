@@ -8,36 +8,70 @@
         materiais do Spoolman e acesso pelo navegador, com um Connector na sua
         rede local.
       </p>
-      <p class="callout" role="note">
-        <strong>Prévia de desenvolvimento.</strong> A Fase 0 está em andamento e
-        a aceitação integrada ainda não foi concluída. Nada disso está
-        comprovado em hardware físico. Esta não é uma versão pronta para operar
-        uma farm em produção.
+      <p class="hero__audience">
+        <strong>Para quem é:</strong> quem administra várias impressoras e quer
+        acompanhar a farm em uma interface em português, e quem quer testar em
+        simuladores, relatar problemas ou contribuir com o código.
       </p>
       <p class="actions">
         <a class="btn btn--primary" href="#instalar">Execute localmente</a>
         <a class="btn" href="{{repo}}/blob/main/docs/PHASE-0.md"
           >Acompanhe o progresso</a
         >
+        <a class="btn" href="{{repo}}">Código no GitHub</a>
       </p>
     </div>
-    <figure class="shot hero__shot">
-      <div class="shot__frame">
-        <img
-          src="assets/screenshots/app-home.png"
-          width="1280"
-          height="540"
-          alt="Página inicial real do Open3DFarmManager, com navegação para Connectors, dispositivos e login."
-        />
+
+    <div class="hero__side">
+      <figure class="shot hero__shot">
+        <div class="shot__frame">
+          <img
+            src="assets/screenshots/app-home.png"
+            width="1280"
+            height="540"
+            alt="Página inicial real do Open3DFarmManager, com o título “Sua farm de impressão, em um só lugar”, links para consultar Connectors, aprovar Connector, dispositivos do navegador, entrar e sair da conta, e o aviso “Recursos ainda indisponíveis”."
+          />
+        </div>
+        <figcaption>
+          Captura real da rota <code>/</code>, em 1280 × 540, de 5 de novembro
+          de 2026 (commit <code>c6f1d6f</code>), sem sessão autenticada e sem
+          edição visual. Não comprova autenticação, pareamento nem integração
+          com hardware.
+          <a href="{{repo}}/blob/main/docs/images/README.md"
+            >Origem da captura</a
+          >.
+        </figcaption>
+      </figure>
+
+      <div class="hero__status" role="group" aria-labelledby="hero-estado">
+        <h2 id="hero-estado" class="hero__status-title">Estado de validação</h2>
+        <dl class="hero__status-list">
+          <div class="hero__status-row">
+            <dt>Simuladores <span class="tag tag--wip">Em andamento</span></dt>
+            <dd>
+              A validação passa por simuladores antes de chegar ao hardware. A
+              Fase 0 segue em andamento e a aceitação integrada ainda não foi
+              concluída.
+            </dd>
+          </div>
+          <div class="hero__status-row">
+            <dt>
+              Hardware físico
+              <span class="tag tag--pending">Não comprovado</span>
+            </dt>
+            <dd>
+              Nenhuma capacidade está comprovada em impressoras reais (<i
+                lang="en"
+                >not proven on hardware</i
+              >). A aceitação em hardware permanece aberta.
+            </dd>
+          </div>
+          <div class="hero__status-row">
+            <dt>Produção <span class="tag tag--pending">Não pronto</span></dt>
+            <dd>Não é uma versão pronta para operar uma farm em produção.</dd>
+          </div>
+        </dl>
       </div>
-      <figcaption>
-        Captura real da rota <code>/</code>, em 1280 × 540, de 5 de novembro de
-        2026 (commit <code>c6f1d6f</code>), sem sessão autenticada e sem edição
-        visual. Não comprova autenticação, pareamento nem integração com
-        hardware.
-        <a href="{{repo}}/blob/main/docs/images/README.md">Origem da captura</a
-        >.
-      </figcaption>
-    </figure>
+    </div>
   </div>
 </section>

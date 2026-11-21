@@ -47,7 +47,8 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 16
+const SCHEMA_VERSION = 17
+const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -180,6 +181,8 @@ type State = {
   clock: () => number
   capacity: number
   writerId: string
+  wallBase: number
+  monotonicBase: number
   closed: boolean
 }
 type Receipt = {
@@ -330,11 +333,17 @@ const schema = [
            AND (status<>'applied' OR write_started_at IS NOT NULL)
            AND ((status='outcome-unknown' AND retain_until IS NULL) OR (status IN ('not-sent','applied') AND retain_until=finished_at+600000))))
   ) STRICT`,
-  `CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
-  `CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
+const previousSchema = schema.map((sql) =>
+  sql.replace(
+    'CREATE INDEX pause_active_',
+    'CREATE UNIQUE INDEX pause_active_',
+  ),
+)
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -382,7 +391,14 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
     row.high_water < 0
   )
     throw new Error('Invalid command journal metadata')
-  if (now < row.high_water) return null
+  if (
+    now < row.high_water ||
+    now >
+      state.wallBase +
+        (performance.now() - state.monotonicBase) +
+        MAX_CLOCK_STEP_MS
+  )
+    return null
   state.database
     .prepare('UPDATE pause_meta SET high_water=? WHERE id=1')
     .run(now)
@@ -441,6 +457,7 @@ export function openCommandJournal(input: {
     }
   }
   privateStorage({ directory: input.directory, path })
+  const writerId = randomUUID()
   const database = new DatabaseSync(path, {
     timeout: 100,
     allowExtension: false,
@@ -471,6 +488,7 @@ export function openCommandJournal(input: {
         13,
         14,
         15,
+        16,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
@@ -503,6 +521,47 @@ export function openCommandJournal(input: {
         database.exec(
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
+        database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
+      } else if (version === 16 && app === APPLICATION_ID) {
+        const definitions = database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
+          )
+          .all()
+          .map((row) => row.sql)
+        if (
+          definitions.length !== previousSchema.length ||
+          definitions.some(
+            (sql, index) => sql !== [...previousSchema].sort()[index],
+          )
+        )
+          throw new Error('Invalid command journal schema')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
@@ -516,7 +575,7 @@ export function openCommandJournal(input: {
           .map((row) => row.sql)
         const matchesLegacy = previousActionSchemas[Number(version)]?.some(
           (previous) => {
-            const expected = schema
+            const expected = previousSchema
               .map((sql) => (sql === actionSchema ? previous : sql))
               .sort()
             return (
@@ -534,6 +593,19 @@ export function openCommandJournal(input: {
           'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
         )
         database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
@@ -553,6 +625,12 @@ export function openCommandJournal(input: {
         .get()
       if (meta?.n !== 1 || meta.id !== 1)
         throw new Error('Invalid command journal metadata')
+      // A previous writer's unfinished operation is never resumed or retried.
+      database
+        .prepare(
+          "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
+        )
+        .run(writerId)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -573,7 +651,9 @@ export function openCommandJournal(input: {
       path,
       clock: input.clock,
       capacity,
-      writerId: randomUUID(),
+      writerId,
+      wallBase: validateWall(input.clock()),
+      monotonicBase: performance.now(),
       closed: false,
     })
     return handle
@@ -645,7 +725,10 @@ function claimRow(
     const result = transaction(
       state,
       (): { ok: true } | Exclude<CommandClaimResult, { ok: true }> => {
-        const now = clockStep(state)
+        const observed = sample(state)
+        if (observed >= command.expires_at)
+          return { ok: false, reason: 'storage-unavailable' }
+        const now = clockStep(state, observed)
         if (now === null) return { ok: false, reason: 'clock-regressed' }
         if (now < command.not_before || now >= command.expires_at)
           return { ok: false, reason: 'storage-unavailable' }
@@ -663,6 +746,7 @@ function claimRow(
         )
           return { ok: false, reason: 'replay' }
         if (
+          command.action !== 'emergency_stop' &&
           state.database
             .prepare(
               "SELECT 1 FROM pause_commands WHERE status IN ('claimed','write-started','outcome-unknown') AND (assignment_id=? OR (farm_id=? AND printer_key=?)) LIMIT 1",
@@ -690,7 +774,8 @@ function claimRow(
             now - 60000,
           )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
-        if (recent >= 10) return { ok: false, reason: 'rate-limited' }
+        if (command.action !== 'emergency_stop' && recent >= 10)
+          return { ok: false, reason: 'rate-limited' }
         // Bed mesh is its own class: one accepted dispatch per printer a minute.
         if (command.action === 'bed_mesh') {
           const meshes = state.database

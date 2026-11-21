@@ -29,6 +29,7 @@ import {
   createAuxRepository,
   type AuxRepository,
 } from './postgres-spool-library-aux.ts'
+import { spoolFeedBus } from '../utils/spool-library/events.ts'
 import {
   DECOY_SHA256,
   issueLegacyToken,
@@ -751,13 +752,18 @@ export class PostgresSpoolLibrary implements SpoolLibraryStorage {
     )
   }
 
-  revokeLegacyCredential(input: SessionInput & { credentialId: string }) {
-    if (!uuid.test(input.credentialId))
-      return Promise.resolve(fail('invalid-input'))
-    return this.manage(input, async (tx, resolved) => {
+  async revokeLegacyCredential(
+    input: SessionInput & { credentialId: string },
+  ): Promise<Result<true>> {
+    if (!uuid.test(input.credentialId)) return fail('invalid-input')
+    const result = await this.manage(input, async (tx, resolved) => {
       const rows =
         await tx`UPDATE farm.spool_library_credentials SET revoked_at=COALESCE(revoked_at, ${resolved.now}) WHERE id=${input.credentialId}::uuid AND farm_id=${resolved.farmId}::uuid RETURNING id`
       return rows[0] ? ok(true as const) : fail('not-found')
     })
+    // After the tombstone commits, drop feeds that were opened with this
+    // credential so inventory updates stop. Sibling credentials stay open.
+    if (result.ok) spoolFeedBus.closeCredential(input.credentialId)
+    return result
   }
 }

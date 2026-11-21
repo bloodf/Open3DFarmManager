@@ -57,6 +57,8 @@ function normalize(value) {
     )
   return value
 }
+let primaryError
+let replayFailed = false
 try {
   console.log(`container ${name}`)
   docker([
@@ -101,7 +103,11 @@ try {
     )
     console.log(`ok ${fixture.name}`)
   }
-} finally {
+} catch (error) {
+  primaryError = error
+  replayFailed = true
+}
+try {
   const inspection = spawnSync(
     'docker',
     [
@@ -120,9 +126,13 @@ try {
       'Refusing to remove a container without the task ownership label',
     )
     docker(['rm', '-f', '-v', name])
-  } else if (!inspection.stderr.includes('No such object')) {
+  } else if (!/no such object/i.test(inspection.stderr)) {
     throw new Error(
       `Could not inspect task container for cleanup: ${inspection.stderr}`,
     )
   }
+} catch (error) {
+  if (!replayFailed) throw error
+  console.error('Container cleanup also failed:', error)
 }
+if (replayFailed) throw primaryError

@@ -175,9 +175,9 @@ type Scene = {
   path: string
   heading: string
   /** Registers the mocks of this state before the page opens. */
-  setup: (page: Page) => Promise<void>
+  setup: (page: Page) => Promise<unknown>
   /** Waits for the state, driving the page into it when it takes an action. */
-  ready: (page: Page) => Promise<void>
+  ready: (page: Page) => Promise<unknown>
 }
 
 const conta = (

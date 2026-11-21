@@ -26,6 +26,7 @@ import {
 import { signPairingProof } from './pairing-proof.ts'
 import { signCredentialProof } from './credential-proof.ts'
 import { signTelemetryProof } from './telemetry-proof.ts'
+import { signLibraryProof } from './library-proof.ts'
 import { signRenewalIntent, signRenewalProof } from './renewal-proof.ts'
 
 import { z } from 'zod'
@@ -130,6 +131,12 @@ export class ConnectorIdentity {
     input: Omit<Parameters<typeof signTelemetryProof>[0], 'privateKey'>,
   ): string {
     return signTelemetryProof({ ...input, privateKey: this.#key })
+  }
+  /** Proof-of-possession headers for one library download or relay request. */
+  signLibraryProof(
+    input: Omit<Parameters<typeof signLibraryProof>[0], 'privateKey'>,
+  ): Record<string, string> {
+    return signLibraryProof({ ...input, privateKey: this.#key })
   }
   signCredentialProof(
     input: Omit<Parameters<typeof signCredentialProof>[0], 'privateKey'>,

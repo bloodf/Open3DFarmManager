@@ -268,6 +268,7 @@ async function runConnectorAgentOnce(
   const library = await createConnectorLibrary({
     endpoint: config.telemetry.endpoint,
     credential,
+    identity,
     dataDirectory: input.dataDirectory,
     library: config.library,
   }).catch((error: unknown) => {

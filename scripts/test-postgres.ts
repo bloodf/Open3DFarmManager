@@ -160,6 +160,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'INTEGRATION_JOBS_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-integration-read.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'INTEGRATION_READ_SYNTHETIC_TEST_PORT',
+      admitted: 'INTEGRATION_READ_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-integration-webhooks.ts': {
     migrations: 'full',
     fixture: {

@@ -73,6 +73,8 @@ h1 {
   color: var(--color-text-muted);
 }
 h1 {
+  justify-self: start;
+  max-inline-size: 100%;
   overflow-wrap: anywhere;
   line-height: var(--line-height-tight);
 }

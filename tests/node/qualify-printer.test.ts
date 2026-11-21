@@ -390,3 +390,10 @@ test('qualify Anycubic printer against LAN simulator with telemetry', async () =
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('CLI exit code: an unreachable report is printed and exits 1', async () => {
+  // Without bridge credentials the KobraLink client refuses before any request.
+  const result = await runCli(['--vendor', 'kobralink', '--host', '127.0.0.1'])
+  assert.equal(result.code, 1)
+  assert.equal(JSON.parse(result.out).qualification.status, 'unreachable')
+})

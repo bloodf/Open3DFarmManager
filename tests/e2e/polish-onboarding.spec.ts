@@ -397,9 +397,7 @@ const scenarios: Scenario[] = [
       await page
         .getByRole('button', { name: 'Aprovar Connector', exact: true })
         .click()
-      await page
-        .getByText('Não foi possível confirmar a aprovação.')
-        .waitFor()
+      await page.getByText('Não foi possível confirmar a aprovação.').waitFor()
     },
   },
   {
@@ -534,9 +532,10 @@ test('every screen has one main, one h1 and headings in order', async ({
       .evaluateAll((nodes) => nodes.map((node) => Number(node.tagName[1])))
     for (const [index, level] of levels.entries())
       if (index > 0)
-        expect(level - levels[index - 1]!, `${id} heading jump`).toBeLessThanOrEqual(
-          1,
-        )
+        expect(
+          level - levels[index - 1]!,
+          `${id} heading jump`,
+        ).toBeLessThanOrEqual(1)
     await page.unrouteAll({ behavior: 'ignoreErrors' })
   }
 })
@@ -549,12 +548,14 @@ test('account forms: labelled fields with help text, keyboard order and a visibl
   await expect(code).toHaveAccessibleDescription(
     'Cole o código recebido, ou abra o link completo do convite.',
   )
-  await expect(page.getByLabel('Usuário', { exact: true })).toHaveAccessibleDescription(
+  await expect(
+    page.getByLabel('Usuário', { exact: true }),
+  ).toHaveAccessibleDescription(
     'Use letras minúsculas, números, hífen ou sublinhado.',
   )
-  await expect(page.getByLabel('Senha', { exact: true })).toHaveAccessibleDescription(
-    'Use 12 caracteres ou mais.',
-  )
+  await expect(
+    page.getByLabel('Senha', { exact: true }),
+  ).toHaveAccessibleDescription('Use 12 caracteres ou mais.')
   await code.focus()
   const seen: string[] = []
   for (let step = 0; step < 4; step++) {
@@ -582,7 +583,12 @@ test('account forms: labelled fields with help text, keyboard order and a visibl
 test('first access sends the setup code header, keeps the code, clears the password and focuses the alert', async ({
   page,
 }) => {
-  const mock = await open(page, byId('primeiro-acesso-error'), viewports[0], 'light')
+  const mock = await open(
+    page,
+    byId('primeiro-acesso-error'),
+    viewports[0],
+    'light',
+  )
   const alert = page.getByRole('alert')
   await expect(alert).toBeFocused()
   expect(mock.posts).toHaveLength(1)
@@ -593,15 +599,16 @@ test('first access sends the setup code header, keeps the code, clears the passw
     password,
   })
   await expect(page.getByLabel('Senha', { exact: true })).toHaveValue('')
-  await expect(page.getByLabel('Código de configuração')).toHaveValue(inviteCode)
+  await expect(page.getByLabel('Código de configuração')).toHaveValue(
+    inviteCode,
+  )
   await expect(page.getByLabel('Código de configuração')).toHaveAttribute(
     'type',
     'password',
   )
-  await expect(page.getByRole('link', { name: 'Já tenho conta' })).toHaveAttribute(
-    'href',
-    '/entrar',
-  )
+  await expect(
+    page.getByRole('link', { name: 'Já tenho conta' }),
+  ).toHaveAttribute('href', '/entrar')
 })
 
 test('the invite code in the link fragment fills the field and leaves the URL', async ({
@@ -689,9 +696,9 @@ test('pairing: loading is announced once, marks the area busy and shows skeleton
   page,
 }) => {
   await open(page, byId('parear-loading'), viewports[0], 'light')
-  await expect(page.locator('[aria-busy="true"]').getByRole('status')).toHaveText(
-    'Carregando suas farms…',
-  )
+  await expect(
+    page.locator('[aria-busy="true"]').getByRole('status'),
+  ).toHaveText('Carregando suas farms…')
   await expect(page.locator('.skeleton')).toHaveCount(3)
   await expect(page.locator('#pairing-farm')).toHaveCount(0)
 })
@@ -706,15 +713,16 @@ test('pairing: the error is an alert with a retry that recovers', async ({
   await mockApi(page)
   await alert.getByRole('button', { name: 'Recarregar formulário' }).click()
   await farmOption(page, '#pairing-farm')
-  await expect(page.getByRole('heading', { name: 'Pareamento não concluído' })).toHaveCount(0)
+  await expect(
+    page.getByRole('heading', { name: 'Pareamento não concluído' }),
+  ).toHaveCount(0)
 })
 
 test('pairing: the empty state offers a way out', async ({ page }) => {
   await open(page, byId('parear-no-farms'), viewports[0], 'light')
-  await expect(page.getByRole('link', { name: 'Usar outra conta' })).toHaveAttribute(
-    'href',
-    '/entrar',
-  )
+  await expect(
+    page.getByRole('link', { name: 'Usar outra conta' }),
+  ).toHaveAttribute('href', '/entrar')
   await expect(page.locator('#pairing-farm')).toHaveCount(0)
 })
 
@@ -760,9 +768,9 @@ test('devices: loading is announced, marks the area busy and shows skeletons', a
   page,
 }) => {
   await open(page, byId('dispositivos-loading'), viewports[0], 'light')
-  await expect(page.locator('[aria-busy="true"]').getByRole('status').first()).toHaveText(
-    'Carregando farms e dispositivos…',
-  )
+  await expect(
+    page.locator('[aria-busy="true"]').getByRole('status').first(),
+  ).toHaveText('Carregando farms e dispositivos…')
   await expect(page.locator('.skeleton')).toHaveCount(3)
 })
 
@@ -770,7 +778,9 @@ test('devices: empty states say why and keep creating a key available', async ({
   page,
 }) => {
   await open(page, byId('dispositivos-empty'), viewports[0], 'light')
-  await expect(page.getByText('Nenhuma chave local para esta conta e farm')).toBeVisible()
+  await expect(
+    page.getByText('Nenhuma chave local para esta conta e farm'),
+  ).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Criar chave e solicitar cadastro' }),
   ).toBeEnabled()
@@ -779,7 +789,12 @@ test('devices: empty states say why and keep creating a key available', async ({
 test('devices: records for an owner show state as text and gate approve and revoke on the typed fingerprint', async ({
   page,
 }) => {
-  const mock = await open(page, byId('dispositivos-populated'), viewports[0], 'dark')
+  const mock = await open(
+    page,
+    byId('dispositivos-populated'),
+    viewports[0],
+    'dark',
+  )
   const list = page.getByRole('list', { name: 'Dispositivos da farm' })
   await expect(list.getByRole('listitem')).toHaveCount(3)
   for (const label of ['Pendente', 'Aprovado', 'Revogado'])
@@ -804,15 +819,26 @@ test('devices: a non-admin sees the records but no decision controls', async ({
 }) => {
   await open(page, byId('dispositivos-member'), viewports[1], 'light')
   await expect(page.getByLabel('Impressão digital confirmada')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Aprovar dispositivo' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Revogar definitivamente' })).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Aprovar dispositivo' }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Revogar definitivamente' }),
+  ).toHaveCount(0)
 })
 
 test('devices: "Próxima página de dispositivos" queries the next page', async ({
   page,
 }) => {
-  const mock = await open(page, byId('dispositivos-populated'), viewports[1], 'light')
-  await page.getByRole('button', { name: 'Próxima página de dispositivos' }).click()
+  const mock = await open(
+    page,
+    byId('dispositivos-populated'),
+    viewports[1],
+    'light',
+  )
+  await page
+    .getByRole('button', { name: 'Próxima página de dispositivos' })
+    .click()
   await expect
     .poll(() => mock.gets.some((item) => item.includes(`after=${cursor}`)))
     .toBe(true)
@@ -848,6 +874,7 @@ test('makes no request outside the loopback host', async ({ page }) => {
 
 test('screenshots of real screen states', async ({ browser }, testInfo) => {
   testInfo.setTimeout(600_000)
+  const baseURL = testInfo.project.use.baseURL
   const dir =
     process.env.POLISH_ONBOARDING_SHOTS_DIR ??
     (await mkdtemp(join(tmpdir(), 'openfarm-onboarding-shots-')))
@@ -858,9 +885,7 @@ test('screenshots of real screen states', async ({ browser }, testInfo) => {
       for (const theme of themes) {
         // A fresh context per state: the browser keys kept by one state
         // (IndexedDB) must not leak into the next.
-        const context = await browser.newContext({
-          baseURL: testInfo.project.use.baseURL,
-        })
+        const context = await browser.newContext(baseURL ? { baseURL } : {})
         const page = await context.newPage()
         // A state that cannot be reached fails fast instead of waiting for the test timeout.
         page.setDefaultTimeout(20_000)
@@ -874,7 +899,9 @@ test('screenshots of real screen states', async ({ browser }, testInfo) => {
         if ((await stat(path)).size <= 0) throw new Error(`Empty ${path}`)
         written.push(path)
       }
-  expect(written).toHaveLength(scenarios.length * viewports.length * themes.length)
+  expect(written).toHaveLength(
+    scenarios.length * viewports.length * themes.length,
+  )
   expect((await readdir(dir)).filter((name) => name.endsWith('.png'))).toEqual(
     expect.arrayContaining(written.map((path) => path.split('/').pop()!)),
   )

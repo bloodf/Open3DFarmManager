@@ -8,8 +8,8 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
     <template #intro>
       <p>
         Crie a conta de proprietário desta instalação. Só funciona enquanto não
-        existir nenhuma conta e exige o código de configuração definido por
-        quem instalou o serviço.
+        existir nenhuma conta e exige o código de configuração definido por quem
+        instalou o serviço.
       </p>
     </template>
     <AccountForm

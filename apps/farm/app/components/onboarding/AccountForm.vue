@@ -140,9 +140,7 @@ async function submit() {
         {{ pending ? 'Criando conta…' : submitLabel }}
       </Button>
     </div>
-    <p v-if="!hydrated" role="status" class="note">
-      Preparando o formulário
-    </p>
+    <p v-if="!hydrated" role="status" class="note">Preparando o formulário</p>
     <p role="status" class="note">{{ pending ? 'Criando sua conta.' : '' }}</p>
   </form>
 </template>

@@ -266,11 +266,7 @@ onBeforeRouteLeave(clear)
       <p role="status">Carregando farms e dispositivos…</p>
       <div class="skeletons"><Skeleton /><Skeleton /><Skeleton /></div>
     </OnboardingPanel>
-    <OnboardingPanel
-      heading-id="farms-heading"
-      title="Suas farms"
-      :busy="busy"
-    >
+    <OnboardingPanel heading-id="farms-heading" title="Suas farms" :busy="busy">
       <OnboardingField id="device-farm" label="Farm">
         <select id="device-farm" v-model="farmId" @change="loadDevices()">
           <option value="">Selecione</option>

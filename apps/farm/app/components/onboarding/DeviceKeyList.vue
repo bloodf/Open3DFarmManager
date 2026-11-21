@@ -43,11 +43,14 @@ function registration(key: LocalDeviceKey) {
     :busy="busy"
   >
     <p>
-      Conta atual: <code>{{ accountId }}</code
-      >. Criar outra chave não substitui nem revoga as anteriores.
+      Conta atual: <code>{{ accountId }}</code>. Criar outra chave não substitui
+      nem revoga as anteriores.
     </p>
     <div class="actions">
-      <Button :disabled="busy || keys.length >= maxKeys" @click="emit('create')">
+      <Button
+        :disabled="busy || keys.length >= maxKeys"
+        @click="emit('create')"
+      >
         Criar chave e solicitar cadastro
       </Button>
     </div>

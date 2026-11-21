@@ -25,11 +25,6 @@ import {
 } from '../../scripts/db/migrations.ts'
 
 const exec = promisify(execFile)
-// PostgreSQL on macOS refuses to start ("postmaster became multithreaded during startup") when
-// no valid locale is set in the environment, e.g. under a non-interactive runner. The throwaway
-// clusters are created with --no-locale, so pin the server tools to the C locale.
-const execPg = (file: string, args: string[]) =>
-  exec(file, args, { env: { ...process.env, LC_ALL: 'C' } })
 
 export const POSTGRES_IMAGE_PATTERN =
   /^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/
@@ -315,7 +310,7 @@ export function disposablePostgres(
         ledger({ resource: 'cluster', name, tempDir, port })
 
         try {
-          await execPg(bins.initdb, [
+          await exec(bins.initdb, [
             '-D',
             dataDir,
             '-U',
@@ -377,7 +372,7 @@ log_timezone = 'UTC'
             ...remainingOpts,
           ].join(' ')
 
-          await execPg(bins.pg_ctl, [
+          await exec(bins.pg_ctl, [
             '-D',
             dataDir,
             '-o',
@@ -418,7 +413,7 @@ log_timezone = 'UTC'
           // If startup failed, ensure clean termination and data dir removal
           if (dataDir && existsSync(dataDir)) {
             try {
-              await execPg(bins.pg_ctl, [
+              await exec(bins.pg_ctl, [
                 '-D',
                 dataDir,
                 '-m',
@@ -542,7 +537,7 @@ log_timezone = 'UTC'
           if (dataDir && existsSync(dataDir)) {
             const bins = findPostgresBin()
             try {
-              await execPg(bins.pg_ctl, [
+              await exec(bins.pg_ctl, [
                 '-D',
                 dataDir,
                 '-m',

@@ -1,6 +1,8 @@
 import { createError } from 'nuxt/server'
 import type { IntegrationAppsService } from './integration-apps.ts'
 import type { IntegrationAuditService } from './integration-audit.ts'
+import { mutation } from './authenticated-session.ts'
+import type { AuthRuntime } from '../utils/auth/runtime.ts'
 
 export interface OwnerAppsDeps {
   apps: IntegrationAppsService
@@ -14,6 +16,36 @@ export interface OwnerAppsDeps {
 
 const farmIdPattern = /^[0-9a-f-]{36}$/i
 const idPattern = /^[0-9a-f-]{36}$/i
+const JSON_BODY_LIMIT = 8192
+
+/** Origin check shared by every non-GET owner integration route. */
+export function requireOwnerAppsMutation(
+  event: Parameters<typeof mutation>[0],
+  runtime: AuthRuntime,
+): void {
+  mutation(event, runtime)
+}
+
+/** JSON-only body reader for owner integration POSTs. */
+export async function readOwnerAppsJsonBody(
+  request: Request,
+): Promise<unknown> {
+  if (
+    request.headers.get('content-type')?.split(';')[0]?.trim() !==
+      'application/json' ||
+    request.headers.has('content-encoding')
+  )
+    throw createError({ status: 415, message: 'Envie os dados em JSON.' })
+  const text = await request.text()
+  if (text.length > JSON_BODY_LIMIT)
+    throw createError({ status: 413, message: 'Solicitação muito grande.' })
+  if (!text) return {}
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    throw createError({ status: 400, message: 'Dados inválidos.' })
+  }
+}
 
 async function requireOwner(
   deps: OwnerAppsDeps,
@@ -138,13 +170,13 @@ export async function revokeOwnerGrant(
   await requireOwner(deps, actorId, farmId)
   if (!idPattern.test(grantId))
     throw createError({ status: 404, message: 'Acesso não encontrado.' })
-  const result = await deps.apps.revokeGrant(actorId, grantId)
-  if (result !== 'ok')
+  const result = await deps.apps.revokeGrant(actorId, grantId, farmId)
+  if (typeof result === 'string')
     throw createError({ status: 404, message: 'Acesso não encontrado.' })
   await deps.audit?.record({
-    farmId,
-    appId: null,
-    printerAssignmentId: null,
+    farmId: result.farmId,
+    appId: result.appId,
+    printerAssignmentId: result.printerAssignmentId,
     actorKind: 'owner',
     actorId,
     action: 'credential.event',

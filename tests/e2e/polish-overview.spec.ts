@@ -168,7 +168,7 @@ async function mockApi(page: Page, scenario: Scenario) {
       json: { farms: farmsFor(scenario), nextAfter: null },
     })
   })
-  await page.route(`**/api/farms/${farm}/printers?*`, (route) =>
+  await page.route(`**/api/farms/${farm}/printers*`, (route) =>
     route.fulfill({
       json: {
         printers: scenario === 'printers-empty' ? [] : printers,
@@ -177,7 +177,7 @@ async function mockApi(page: Page, scenario: Scenario) {
       },
     }),
   )
-  await page.route(`**/api/farms/${farm}/connectors?*`, (route) =>
+  await page.route(`**/api/farms/${farm}/connectors*`, (route) =>
     route.fulfill({ json: { connectors: [], nextAfter: null } }),
   )
   let polls = 0
@@ -213,13 +213,19 @@ async function open(
   await mockApi(page, scenario)
   await page.goto(entry.path)
   await page.getByRole('heading', { level: 1, name: entry.heading }).waitFor()
+  // The baseline capture runs this spec against the pre-polish build, where
+  // some of the waited-for text does not exist yet: it still takes the shot.
+  if (process.env.POLISH_CAPTURE) {
+    await settle(page, scenario).catch(() => undefined)
+    return
+  }
   await settle(page, scenario)
 }
 
 /** Waits for the state each scenario ends in; no fixed sleeps. */
 async function settle(page: Page, scenario: Scenario) {
   const wait = (locator: ReturnType<Page['getByText']>) =>
-    locator.first().waitFor()
+    locator.first().waitFor({ timeout: 15_000 })
   switch (scenario) {
     case 'compat-filtered':
       await page.getByLabel('Buscar marca ou modelo').fill('klipper')
@@ -234,7 +240,9 @@ async function settle(page: Page, scenario: Scenario) {
     case 'printers-populated':
     case 'printers-read-only':
     case 'printers-empty':
-      await page.locator('#printer-farm').selectOption(farm)
+      await page
+        .locator('#printer-farm')
+        .selectOption(farm, { timeout: 15_000 })
       await wait(
         scenario === 'printers-empty'
           ? page.getByRole('heading', {

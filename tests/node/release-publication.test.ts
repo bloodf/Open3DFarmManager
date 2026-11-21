@@ -248,13 +248,10 @@ for (const [label, pullError] of missingForms) {
     const f = fixture(t, { pullError })
     const result = f.run()
     assert.equal(result.status, 0, result.stderr)
-    assert.deepEqual(
-      Object.keys(f.state().images ?? {}).sort(),
-      [
-        'ghcr.io/owner/repo/connector:v1.2.3',
-        'ghcr.io/owner/repo/farm:v1.2.3',
-      ],
-    )
+    assert.deepEqual(Object.keys(f.state().images ?? {}).sort(), [
+      'ghcr.io/owner/repo/connector:v1.2.3',
+      'ghcr.io/owner/repo/farm:v1.2.3',
+    ])
   })
 }
 

@@ -177,7 +177,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-/* The wall follows the app theme; PrinterKiosk keeps its own layout rules. */
+/* The wall is a fixed dark display, not themed; PrinterKiosk keeps its own layout rules. */
 .kiosk-root {
   position: fixed;
   inset: 0;
@@ -186,8 +186,9 @@ onBeforeUnmount(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  color: var(--color-text);
+  background: #0b0d10;
+  color: #f2f4f7;
+  color-scheme: dark;
 }
 .kiosk-root > .kiosk {
   flex: 1;
@@ -197,23 +198,8 @@ onBeforeUnmount(() => {
   margin: 0;
   max-width: none;
   padding: 0.5rem 1rem;
-  border-block-end: 2px solid var(--state-error-color);
-  background: var(--color-surface-raised);
-  color: var(--state-error-color);
+  border-block-end: 2px solid #ff8a8a;
+  background: #5c1a1a;
   font-weight: 700;
-}
-.kiosk-root .kiosk__warn,
-.kiosk-root .kiosk__warn strong {
-  color: var(--state-paused-color);
-}
-.kiosk-root .kiosk__head .kiosk__warn.stale {
-  background: transparent;
-  border-color: var(--state-paused-color);
-}
-.kiosk-root .kiosk__card {
-  background: var(--color-surface-raised);
-}
-.kiosk-root .ui-card {
-  background: var(--color-surface-raised);
 }
 </style>

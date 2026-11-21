@@ -678,7 +678,7 @@ test('conta: fields are labelled, hinted and typed for password managers', async
   const current = page.getByLabel('Senha atual')
   await expect(current).toHaveAttribute('type', 'password')
   await expect(current).toHaveAttribute('autocomplete', 'current-password')
-  await expect(current).toBeRequired()
+  await expect(current).toHaveAttribute('required', '')
   const next = page.getByLabel('Nova senha')
   await expect(next).toHaveAttribute('autocomplete', 'new-password')
   await expect(next).toHaveAttribute('minlength', '12')

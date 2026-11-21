@@ -243,7 +243,7 @@ const keysShown = async (page: Page) => {
 const pairingFilled = async (page: Page, check = true) => {
   await farmOption(page, '#pairing-farm')
   await page.locator('#pairing-farm').selectOption(farm)
-  await page.getByLabel('Código exibido no Connector').fill('ABCD-2345')
+  await page.getByLabel('Código exibido no Connector').fill('BCDF-2345')
   await page
     .getByLabel('Impressão digital exibida no Connector')
     .fill(fingerprint)
@@ -634,7 +634,7 @@ test('pairing: approval stays locked until the fingerprint is confirmed and send
   })
   await expect(approve).toBeDisabled()
   await page.locator('#pairing-farm').selectOption(farm)
-  await page.getByLabel('Código exibido no Connector').fill('abcd-2345')
+  await page.getByLabel('Código exibido no Connector').fill('bcdf-2345')
   await page
     .getByLabel('Impressão digital exibida no Connector')
     .fill(fingerprint)
@@ -644,9 +644,9 @@ test('pairing: approval stays locked until the fingerprint is confirmed and send
     .check()
   await expect(approve).toBeEnabled()
   // Editing anything withdraws the confirmation again.
-  await page.getByLabel('Código exibido no Connector').fill('abcd-2346')
+  await page.getByLabel('Código exibido no Connector').fill('bcdf-2346')
   await expect(approve).toBeDisabled()
-  await page.getByLabel('Código exibido no Connector').fill('abcd-2345')
+  await page.getByLabel('Código exibido no Connector').fill('bcdf-2345')
   await page
     .getByLabel('Conferi a impressão digital completa e a farm de destino.')
     .check()
@@ -659,7 +659,7 @@ test('pairing: approval stays locked until the fingerprint is confirmed and send
       path: '/api/connector-pairing/approve',
       headers: expect.anything(),
       body: {
-        user_code: 'ABCD2345',
+        user_code: 'BCDF2345',
         farm_id: farm,
         expected_fingerprint: fingerprint,
       },
@@ -848,6 +848,8 @@ test('makes no request outside the loopback host', async ({ page }) => {
 
 test('screenshots of real screen states', async ({ page }, testInfo) => {
   testInfo.setTimeout(600_000)
+  // A state that cannot be reached fails fast instead of waiting for the test timeout.
+  page.setDefaultTimeout(20_000)
   const dir =
     process.env.POLISH_ONBOARDING_SHOTS_DIR ??
     (await mkdtemp(join(tmpdir(), 'openfarm-onboarding-shots-')))

@@ -846,10 +846,8 @@ test('makes no request outside the loopback host', async ({ page }) => {
   expect(external).toEqual([])
 })
 
-test('screenshots of real screen states', async ({ page }, testInfo) => {
+test('screenshots of real screen states', async ({ browser }, testInfo) => {
   testInfo.setTimeout(600_000)
-  // A state that cannot be reached fails fast instead of waiting for the test timeout.
-  page.setDefaultTimeout(20_000)
   const dir =
     process.env.POLISH_ONBOARDING_SHOTS_DIR ??
     (await mkdtemp(join(tmpdir(), 'openfarm-onboarding-shots-')))
@@ -858,10 +856,21 @@ test('screenshots of real screen states', async ({ page }, testInfo) => {
   for (const scenario of scenarios)
     for (const viewport of viewports)
       for (const theme of themes) {
-        await page.unrouteAll({ behavior: 'ignoreErrors' })
-        await open(page, scenario, viewport, theme)
+        // A fresh context per state: the browser keys kept by one state
+        // (IndexedDB) must not leak into the next.
+        const context = await browser.newContext({
+          baseURL: testInfo.project.use.baseURL,
+        })
+        const page = await context.newPage()
+        // A state that cannot be reached fails fast instead of waiting for the test timeout.
+        page.setDefaultTimeout(20_000)
         const path = join(dir, `${scenario.id}-${viewport.name}-${theme}.png`)
-        await page.screenshot({ path, fullPage: true })
+        try {
+          await open(page, scenario, viewport, theme)
+          await page.screenshot({ path, fullPage: true })
+        } finally {
+          await context.close()
+        }
         if ((await stat(path)).size <= 0) throw new Error(`Empty ${path}`)
         written.push(path)
       }

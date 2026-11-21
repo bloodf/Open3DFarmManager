@@ -50,26 +50,43 @@ GitHub check, so a passing code job says nothing about them.
 
 Use um daemon Docker Linux amd64. Confira o espaço em disco do daemon e
 registre os recursos da execução conforme o `AGENTS.md`. Na raiz do
-repositório, gere uma imagem para o commit que você quer verificar. Use uma
+repositório, gere uma imagem para a árvore que você quer verificar. Use uma
 tag e nomes de contêiner próprios se houver outras execuções na mesma máquina.
 
-```sh
-git archive HEAD | docker build --platform linux/amd64 \
-  --file infra/check/Dockerfile --tag open3dfarmmanager/check:node22 -
+Evidência / smoke (orquestra o Docker a partir do host; não usa o Node do host
+para a asserção de versão nem para o Chrome):
 
-docker run --rm --name o3dfm-node22-smoke --network none --shm-size 1g \
-  open3dfarmmanager/check:node22 node --test scripts/test-docker-check-image.mjs
+```sh
+node scripts/test-docker-check-image.mjs
+```
+
+Esse script faz o `docker build` da imagem `open3dfarmmanager/check:node22` e,
+num único contêiner com `--network none` e `--shm-size 1g`, confirma Node.js
+22, o binário `/opt/google/chrome/chrome` e o canal Playwright `chrome` contra
+uma página estática em loopback. Sobrescreva a tag com `OPEN3D_CHECK_IMAGE_TAG`
+se precisar isolar a execução. Com `OPEN3D_CHECK_IMAGE_SKIP_BUILD=1`, reutiliza
+uma imagem já construída (somente para repetir o smoke).
+
+Build e gate completo explícitos (equivalente ao que o smoke monta):
+
+```sh
+docker build --platform linux/amd64 \
+  --file infra/check/Dockerfile --tag open3dfarmmanager/check:node22 .
 
 docker run --rm --name o3dfm-node22-full --network none --shm-size 1g \
   open3dfarmmanager/check:node22 npm run check:all
 ```
 
+Para fixar exatamente o commit indexado, use
+`git archive HEAD | docker build --platform linux/amd64 --file infra/check/Dockerfile --tag open3dfarmmanager/check:node22 -`
+no lugar do `docker build` com contexto `.`.
+
 O build baixa as dependências, instala os workspaces Linux com
-`npm ci --ignore-scripts` e inclui o código de `HEAD`. Faça o build novamente
-quando mudar o commit ou o lockfile. Use o `node_modules` da imagem. Cada
-contêiner grava `.nuxt`, `.output` e `dist` em sua própria camada e a descarta
-ao sair. A execução usa loopback dentro do contêiner, sem portas publicadas
-ou volumes do host.
+`npm ci --ignore-scripts` e inclui o código da árvore enviada ao build. Faça o
+build novamente quando mudar o commit ou o lockfile. Use o `node_modules` da
+imagem. Cada contêiner grava `.nuxt`, `.output` e `dist` em sua própria camada
+e a descarta ao sair. A execução usa loopback dentro do contêiner, sem portas
+publicadas ou volumes do host.
 
 O teste rápido inicia o Chrome pelo canal `chrome` do Playwright e abre uma
 página servida em loopback. O comando completo executa o mesmo

@@ -28,12 +28,9 @@ describe('catálogo atualizado', () => {
     const kobra = anycubicCatalog.find(
       (product) => product.id === 'anycubic-kobra-x',
     )!
-    for (const capability of [
-      'telemetry',
-      'pause',
-      'resume',
-      'cancel',
-    ] as const)
+    // Telemetry is hardware-proven from a real Kobra X; commands stay simulated.
+    expect(kobra.capabilities.telemetry).toBe('hardware')
+    for (const capability of ['pause', 'resume', 'cancel'] as const)
       expect(kobra.capabilities[capability]).toBe('simulated')
     // A ponte KobraLink monta alvo de arquivos, então a listagem é alcançável.
     expect(kobra.capabilities.files).toBe('simulated')

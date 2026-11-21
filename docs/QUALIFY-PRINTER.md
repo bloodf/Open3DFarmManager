@@ -21,13 +21,14 @@ The tool performs strictly read-only diagnostics:
 
 ## Supported Vendors
 
-| Vendor Argument         | Compatible Ecosystems                 | Default Port | Primary Protocol         | File Listing            | Camera Check                      |
-| ----------------------- | ------------------------------------- | ------------ | ------------------------ | ----------------------- | --------------------------------- |
-| `moonraker` / `klipper` | Moonraker, Klipper (Fluidd, Mainsail) | `7125`       | WebSocket JSON-RPC       | Yes (gcodes root)       | Yes (HTTP snapshot/stream)        |
-| `bambu` / `bambulab`    | Bambu Lab (X1, P1, A1, H2 series)     | `8883`       | MQTTS over TLS           | Yes (Passive FTPS :990) | Yes (TLS JPEG :6000 / RTSPS :322) |
-| `creality`              | Creality K1/K2, Ender-3 V3/V4         | `9999`       | WebSocket JSON telemetry | N/A (Stock WS)          | Yes (MJPEG :8080)                 |
-| `anycubic`              | Anycubic Kobra 3/4, LAN mode          | `8883`       | MQTTS over TLS           | N/A (LAN MQTT)          | N/A                               |
-| `kobralink`             | Anycubic Kobra X via KobraLink        | `18910`      | HTTP REST bridge         | N/A                     | N/A                               |
+| Vendor Argument         | Compatible Ecosystems                 | Default Port | Primary Protocol         | File Listing             | Camera Check                      |
+| ----------------------- | ------------------------------------- | ------------ | ------------------------ | ------------------------ | --------------------------------- |
+| `moonraker` / `klipper` | Moonraker, Klipper (Fluidd, Mainsail) | `7125`       | WebSocket JSON-RPC       | Yes (gcodes root)        | Yes (HTTP snapshot/stream)        |
+| `bambu` / `bambulab`    | Bambu Lab (X1, P1, A1, H2 series)     | `8883`       | MQTTS over TLS           | Yes (Passive FTPS :990)  | Yes (TLS JPEG :6000 / RTSPS :322) |
+| `creality`              | Creality K1/K2, Ender-3 V3/V4         | `9999`       | WebSocket JSON telemetry | N/A (Stock WS)           | Yes (MJPEG :8080)                 |
+| `anycubic`              | Anycubic Kobra 3/4, LAN mode          | `8883`       | MQTTS over TLS           | N/A (LAN MQTT)           | N/A                               |
+| `kobralink`             | Anycubic Kobra X via KobraLink        | `18910`      | HTTP REST bridge         | N/A                      | N/A                               |
+| `kobra-x`               | Anycubic Kobra X, native LAN          | `9883`       | MQTTS + HTTP `/info`     | Yes (native `listLocal`) | Camera URL reachability           |
 
 ## Command-Line Usage
 
@@ -37,7 +38,7 @@ node scripts/qualify-printer.ts --vendor <vendor> --host <host> [credential file
 
 ### Positional / Named Arguments
 
-- `--vendor`, `-v` _(required)_: One of `moonraker`, `bambu`, `creality`, `anycubic`, or `kobralink`.
+- `--vendor`, `-v` _(required)_: One of `moonraker`, `bambu`, `creality`, `anycubic`, `kobralink`, or `kobra-x`.
 - `--host`, `-h` _(required)_: IP address or hostname of the printer or controller.
 - `[credential file]` _(optional)_: Path to a JSON or token file containing access credentials. Can also be supplied via `--credential-file`.
 
@@ -51,6 +52,13 @@ node scripts/qualify-printer.ts --vendor <vendor> --host <host> [credential file
 - `--ca-file <path>`: Path to custom CA certificate for TLS verification.
 - `--pin-sha256 <hex>`: Expected SHA-256 fingerprint for certificate pinning.
 - `--webcam-origin <origin>`: Base origin for Moonraker camera paths when served from a separate frontend port.
+- `--cert-file <path>` / `--key-file <path>`: Kobra X client certificate and key (PEM) override. Without them the native `kobra-x` vendor uses a local Anycubic Slicer Next installation, then the bundled Anycubic Slicer default identity.
+- `--info-port <port>`: Kobra X HTTP identity port for `/info` and `/ctrl` (default `18910`).
+
+### Native Anycubic Kobra X (`kobra-x`)
+
+The `kobra-x` vendor talks to a Kobra X directly on the LAN, with no KobraLink bridge. It reads `GET /info` (HTTP `18910`) for identity, recovers the MQTT credentials in memory through `POST /ctrl`, and subscribes to the printer's public report topic over mutual TLS (MQTTS `9883`) with the resolved Anycubic Slicer client identity. To make an idle printer report, it publishes only read requests (`query`, `getInfo`, `listLocal`) and never a start, pause, resume, cancel, gcode, temperature, motion or upload command. The recovered credentials and the client private key stay in memory and are never written or logged. Client identity precedence: `--cert-file`/`--key-file`, then a local Anycubic Slicer Next installation, then the bundled Anycubic Slicer default (see `THIRD_PARTY.md`).
+
 - `--help`: Display help and usage information.
 
 ## Credential File Format

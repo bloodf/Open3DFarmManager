@@ -113,6 +113,55 @@ Credential properties:
 - Malformed, unknown, wrong-secret and revoked tokens all return the same
   `unauthorized`.
 
+### Spoolman vendor and filament API (migration `0087_spoolman_vendor_filament`)
+
+The legacy path serves the pinned Spoolman v0.27.1 vendor and filament
+endpoints for the credential's farm:
+
+| Path                             | Methods                    |
+| -------------------------------- | -------------------------- |
+| `/api/v1/vendor`                 | `GET` (find), `POST` (add) |
+| `/api/v1/vendor/{vendor_id}`     | `GET`, `PATCH`, `DELETE`   |
+| `/api/v1/filament`               | `GET` (find), `POST` (add) |
+| `/api/v1/filament/{filament_id}` | `GET`, `PATCH`, `DELETE`   |
+
+They follow upstream's source: the same fields (null fields omitted, `extra`
+always present, filament `vendor` nested and `tags` listed), pydantic
+validation answered as FastAPI `422 {"detail": [...]}`, `400`/`404`/`403`
+`{"message": ...}` errors with upstream's text, `405` for other methods,
+string filters (partial and case-insensitive, `"quoted"` exact, empty for
+unset, comma for alternatives), `vendor.id`/`vendor_id` (`-1` for none),
+`vendor.name`, colour similarity, `extra.<key>` filters and `extra.<key>`
+sorting for registered extra fields, `sort=field:asc|desc` with nested
+`vendor.<field>` and NULLs last, `limit`/`offset` and `x-total-count`.
+Extra values are validated against the farm's extra-field registry
+(`farm.spool_library_fields`); an update merges extra values per key and a
+`null` value clears one. Deleting a vendor clears it from its filaments;
+deleting a filament a spool still uses answers upstream's `403`. A read
+credential gets `403` for every mutation, before validation.
+
+Recorded upstream answers live in
+`tests/fixtures/spoolman/vendor-filament/`: `cases.json` lists the requests,
+and `node scripts/capture-spoolman-vendor-filament.mjs` replays them against
+the local `ghcr.io/donkie/spoolman:0.27.1` image (no network, fresh database,
+container removed on exit) to write `upstream.json`.
+
+Deliberate differences: non-finite numbers (`"inf"`, `"nan"`) are rejected
+with `422 finite_number` instead of being stored; a malformed `color_hex`
+filter answers `500` as upstream does but without a stack trace; a find scans
+at most 20 000 records per kind and farm; the JSON-decode `422` cannot repeat
+Python's parser position and message. NFC/RFID tag linking
+(`POST /filament/{id}/tag`, `DELETE /filament/{id}/tag/{uid}`) belongs to the
+tag module: until it exists no tag is linked, so `tags` is empty, a valid
+`tag=` filter matches nothing and an invalid one answers upstream's `400`.
+
+Endpoints are modules (`legacy-api/types.ts`, `LegacyApiModule`): the shared
+dispatcher authenticates the credential, opens one farm-bound transaction and
+offers the request to each module in `LEGACY_API_MODULES`. A module returns a
+response, a repository failure (which rolls the transaction back), or
+`undefined` for paths it does not own. Spool, field, setting, tag and other
+auxiliary endpoints are added as further modules.
+
 ### Owner-applied Moonraker configuration
 
 Printers and their configuration are not changed by OpenFarm. The farm owner
@@ -145,7 +194,17 @@ Treat the token like a password:
 ```
 node scripts/test-spool-library-storage.mjs
 node scripts/test-spool-library-legacy-access.mjs
+node scripts/test-spoolman-vendor-filament.mjs
 ```
+
+`test-spoolman-vendor-filament.mjs` applies the migrations through `0087`,
+replays every recorded upstream answer on one farm (status, body, key order and
+`x-total-count`), then proves the other farm sees and changes nothing of it,
+read credentials cannot mutate, invalid, forged and revoked credentials get
+`401`, extra modules plug into the dispatcher, and no credential reaches the
+application output or the PostgreSQL statement log. Its container is labelled
+`o3dfm.task=spoolman-vendor-filament-547`; set
+`SPOOL_VENDOR_FILAMENT_EVIDENCE_DIR` for its ledger.
 
 The script starts one PostgreSQL 17 container from the already-present,
 digest-pinned `postgres:17` image (nothing is pulled), on a loopback port with a
@@ -171,5 +230,5 @@ directory is used and printed. The legacy-access script uses
 
 ## Not in this unit
 
-Spoolman routes other than `GET /api/v1/health`, WebSocket, importing from an
+Spoolman routes other than health, vendor and filament, WebSocket, importing from an
 external Spoolman, web pages and the owner UI for issuing credentials.

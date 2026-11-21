@@ -42,6 +42,7 @@ export interface SpoolVendor {
   id: SpoolRecordId
   name: string
   comment: string | null
+  emptySpoolWeight: number | null
   externalId: string | null
   extra: Record<string, unknown>
   registeredAt: number
@@ -49,6 +50,7 @@ export interface SpoolVendor {
 export interface SpoolVendorInput {
   name: string
   comment?: string | null
+  emptySpoolWeight?: number | null
   externalId?: string | null
   extra?: Record<string, unknown>
 }
@@ -59,6 +61,11 @@ export interface SpoolFilament {
   name: string | null
   material: string | null
   colorHex: string | null
+  multiColorHexes: string | null
+  multiColorDirection: 'coaxial' | 'longitudinal' | null
+  articleNumber: string | null
+  settingsExtruderTemp: number | null
+  settingsBedTemp: number | null
   density: number
   diameter: number
   weight: number | null
@@ -74,6 +81,11 @@ export interface SpoolFilamentInput {
   name?: string | null
   material?: string | null
   colorHex?: string | null
+  multiColorHexes?: string | null
+  multiColorDirection?: 'coaxial' | 'longitudinal' | null
+  articleNumber?: string | null
+  settingsExtruderTemp?: number | null
+  settingsBedTemp?: number | null
   density: number
   diameter: number
   weight?: number | null
@@ -129,10 +141,38 @@ interface Crud<T, Input, Patch> {
   delete(id: SpoolRecordId): Promise<Result<true>>
 }
 
+export type SpoolEntityType = 'vendor' | 'filament' | 'spool'
+export type SpoolExtraFieldType =
+  | 'text'
+  | 'integer'
+  | 'integer_range'
+  | 'float'
+  | 'float_range'
+  | 'datetime'
+  | 'boolean'
+  | 'choice'
+
+/** One per-farm extra-field definition (Spoolman `ExtraField`). */
+export interface SpoolExtraFieldDefinition {
+  entityType: SpoolEntityType
+  key: string
+  name: string
+  fieldType: SpoolExtraFieldType
+  order: number
+  unit: string | null
+  defaultValue: string | null
+  choices: string[] | null
+  multiChoice: boolean
+}
+
 /** Farm-bound repository. Mutations on a `read` scope resolve to `denied`. */
 export interface SpoolLibraryRepository {
   readonly farmId: string
   readonly access: SpoolLibraryAccess
+  /** Read-only view of this farm's extra-field registry. */
+  readonly extraFields: {
+    list(entity: SpoolEntityType): Promise<Result<SpoolExtraFieldDefinition[]>>
+  }
   readonly vendors: Crud<
     SpoolVendor,
     SpoolVendorInput,

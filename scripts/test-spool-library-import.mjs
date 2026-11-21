@@ -37,6 +37,7 @@ import {
 
 const exec = promisify(execFile)
 const MIGRATION = '0086_spool_library_import'
+const LIBRARY_MIGRATION = '0087_spoolman_vendor_filament'
 const TASK_LABEL = 'spool-import-544'
 const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const mockFile = join(repoRoot, 'tests/helpers/spoolman-import-mock-server.mjs')
@@ -355,6 +356,12 @@ try {
   await runMigrations(admin, catalog, { kind: 'up' })
   assert.equal(await tableCount(), 4)
   check('migration-0086-down-up-round-trip')
+  // The library repository reads the vendor/filament columns added by 0087.
+  await runMigrations(
+    admin,
+    full.slice(0, full.findIndex((m) => m.id === LIBRARY_MIGRATION) + 1),
+    { kind: 'up' },
+  )
 
   // --- least-privilege roles --------------------------------------------------
   const login = (role, port = fixture.port) =>

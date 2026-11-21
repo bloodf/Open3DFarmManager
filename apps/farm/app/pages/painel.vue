@@ -7,6 +7,7 @@ import {
   parseStatusSummary,
   statusSummaryPath,
 } from '../utils/status-summary.ts'
+import { themeScript, themeStyles } from '../utils/pre-hydration.ts'
 import {
   KIOSK_PAGE_MS,
   KIOSK_POLL_MS,
@@ -15,6 +16,12 @@ import {
   kioskPageCount,
   kioskRemPx,
 } from '../utils/kiosk-wall.ts'
+
+// This page has no layout, so it applies the saved theme itself.
+useHead({
+  script: [{ innerHTML: themeScript }],
+  style: [{ innerHTML: themeStyles }],
+})
 
 // Read-only wall for a TV. It polls the farm status summary (works for any
 // member session, no browser-device enrollment) and renders no control.
@@ -80,7 +87,9 @@ async function poll() {
     if (run.signal.aborted) return
     if (!parsed.ok) throw new Error('invalid-response')
     states.value = parsed.summary.states
-    fetchedAt.value = Date.now()
+    // Move the wall clock with the fetch so the first age is never negative,
+    // which would flash "Dados desatualizados" until the next tick.
+    now.value = fetchedAt.value = Date.now()
     failed.value = false
     noFarm.value = false
     problem.value = ''
@@ -168,9 +177,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+/* The wall is a fixed dark display, not themed; PrinterKiosk keeps its own layout rules. */
 .kiosk-root {
   position: fixed;
   inset: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   background: #0b0d10;
@@ -183,7 +196,9 @@ onBeforeUnmount(() => {
 }
 .kiosk-root__problem {
   margin: 0;
+  max-width: none;
   padding: 0.5rem 1rem;
+  border-block-end: 2px solid #ff8a8a;
   background: #5c1a1a;
   font-weight: 700;
 }

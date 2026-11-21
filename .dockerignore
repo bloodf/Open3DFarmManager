@@ -5,6 +5,7 @@ node_modules
 **/.output
 **/dist
 .env*
+!.env.example
 .DS_Store
 playwright-report
 test-results

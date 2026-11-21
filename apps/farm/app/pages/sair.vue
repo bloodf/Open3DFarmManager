@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import AuthAlert from '../components/auth/AuthAlert.vue'
+import AuthHeader from '../components/auth/AuthHeader.vue'
+import AuthPanel from '../components/auth/AuthPanel.vue'
+import AuthStatus from '../components/auth/AuthStatus.vue'
+import AuthSubmit from '../components/auth/AuthSubmit.vue'
 import { completeAuth } from '../utils/auth-invalidation.ts'
 
 const pending = ref(false)
 const errorMessage = ref('')
-const errorSummary = ref<HTMLElement | null>(null)
+const errorSummary = ref<{ focus: () => void } | null>(null)
 const allSessions = ref(false)
 
 async function logout() {
@@ -38,49 +43,71 @@ async function logout() {
 </script>
 
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1>Sair da conta</h1>
-    <p>
+  <main id="conteudo" class="auth-page">
+    <AuthHeader eyebrow="Open3DFarmManager" title="Sair da conta">
       Encerre sua sessão neste navegador ou em todos os dispositivos da conta.
-    </p>
-    <form
+    </AuthHeader>
+    <AuthPanel
+      tag="form"
       method="post"
       action="/api/auth/logout"
       :aria-busy="pending"
       @submit.prevent="logout"
     >
-      <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
-      <button type="submit" :disabled="pending" @click="allSessions = false">
-        {{
-          pending
-            ? allSessions
-              ? 'Encerrando sessões…'
-              : 'Saindo…'
-            : 'Sair da conta'
-        }}
-      </button>
-      <button type="submit" :disabled="pending" @click="allSessions = true">
-        {{ pending ? 'Aguarde…' : 'Sair de todos os dispositivos' }}
-      </button>
-      <p role="status">{{ pending ? 'Encerrando sua sessão.' : '' }}</p>
-    </form>
-    <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
+      <AuthAlert ref="errorSummary" :message="errorMessage" />
+      <div class="choice">
+        <AuthSubmit :disabled="pending" @click="allSessions = false">
+          {{
+            pending
+              ? allSessions
+                ? 'Encerrando sessões…'
+                : 'Saindo…'
+              : 'Sair da conta'
+          }}
+        </AuthSubmit>
+        <p class="help">Encerra só a sessão deste navegador.</p>
+      </div>
+      <div class="choice">
+        <AuthSubmit
+          variant="secondary"
+          :disabled="pending"
+          @click="allSessions = true"
+        >
+          {{ pending ? 'Aguarde…' : 'Sair de todos os dispositivos' }}
+        </AuthSubmit>
+        <p class="help">
+          Útil se você perdeu um aparelho ou deixou a conta aberta em outro
+          lugar.
+        </p>
+      </div>
+      <AuthStatus :message="pending ? 'Encerrando sua sessão.' : ''" />
+    </AuthPanel>
+    <p class="links"><NuxtLink to="/">Voltar ao início</NuxtLink></p>
   </main>
 </template>
 
 <style scoped>
-button {
+.auth-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  max-width: 30rem;
+}
+.choice {
+  display: grid;
+  gap: var(--space-2);
+}
+.help {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.links {
+  margin: 0;
+}
+.links a {
+  display: inline-flex;
+  align-items: center;
   min-height: 2.75rem;
-  padding: 0.65rem 1.25rem;
-  font: inherit;
-  cursor: pointer;
-}
-button:disabled {
-  cursor: wait;
-}
-button:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
 }
 </style>

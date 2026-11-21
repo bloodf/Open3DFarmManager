@@ -8,29 +8,84 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 if (process.argv[2] !== '--inside') {
-  const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30000 }).trim()
+  // Host docker create often takes 20–40s under load; 30s caused ETIMEDOUT /
+  // SIGTERM (status 143) while the daemon still finished create.
+  const docker = (...args) =>
+    execFileSync('docker', args, { encoding: 'utf8', timeout: 180_000 }).trim()
   const image = docker('image', 'inspect', 'node:22-bookworm', '--format', '{{.Id}}')
   const name = `tou562-external-${randomUUID()}`
   const root = fileURLToPath(new URL('../', import.meta.url))
   const ledger = process.env.TOU562_LEDGER ?? '/tmp/tou562-worker-ledger.jsonl'
   const log = (data) => appendFileSync(ledger, JSON.stringify({ at: new Date().toISOString(), ...data }) + '\n')
+  const inspectOwned = () => {
+    try {
+      const owner = docker('inspect', name, '--format', '{{index .Config.Labels "tou562.owner"}}')
+      if (owner !== name) return null
+      return docker('inspect', name, '--format', '{{.Id}}')
+    } catch {
+      return null
+    }
+  }
   log({ resource: 'container', name, image, action: 'creating' })
   let id
   try {
-    id = docker('create', '--label', `tou562.owner=${name}`, '--name', name, '--network', 'none', '--mount', `type=bind,src=${root},dst=/repo,readonly`, '-w', '/repo', image, 'node', 'scripts/test-spoolman-external-filament.mjs', '--inside')
+    id = docker(
+      'create',
+      '--label',
+      `tou562.owner=${name}`,
+      '--name',
+      name,
+      '--network',
+      'none',
+      '--mount',
+      `type=bind,src=${root},dst=/repo,readonly`,
+      '-w',
+      '/repo',
+      image,
+      'node',
+      'scripts/test-spoolman-external-filament.mjs',
+      '--inside',
+    )
   } catch (error) {
-    // A timed-out create can finish server-side. Remove only an exact name
-    // whose task ownership label matches this invocation.
-    try {
-      const owner = docker('inspect', name, '--format', '{{index .Config.Labels "tou562.owner"}}')
-      if (owner === name) { docker('rm', '-f', name); log({ resource: 'container', name, action: 'removed-after-create-error' }) }
-    } catch {}
-    log({ resource: 'container', name, action: 'create-error', error: String(error) })
-    throw error
+    // Client timeout can still leave a finished create. Adopt when the
+    // ownership label matches this invocation; otherwise remove only that
+    // exact named container and fail.
+    id = inspectOwned()
+    for (let attempt = 0; !id && attempt < 10; attempt++) {
+      spawnSync('sleep', ['0.5'])
+      id = inspectOwned()
+    }
+    if (id) {
+      log({
+        resource: 'container',
+        name,
+        id,
+        action: 'adopted-after-create-error',
+        error: String(error),
+      })
+    } else {
+      try {
+        const owner = docker(
+          'inspect',
+          name,
+          '--format',
+          '{{index .Config.Labels "tou562.owner"}}',
+        )
+        if (owner === name) {
+          docker('rm', '-f', name)
+          log({ resource: 'container', name, action: 'removed-after-create-error' })
+        }
+      } catch {}
+      log({ resource: 'container', name, action: 'create-error', error: String(error) })
+      throw error
+    }
   }
   log({ resource: 'container', name, id, image, reason: 'isolated mock external service and test runner; no host service', action: 'created' })
   try {
-    const run = spawnSync('docker', ['start', '--attach', id], { stdio: 'inherit' })
+    const run = spawnSync('docker', ['start', '--attach', id], {
+      stdio: 'inherit',
+      timeout: 180_000,
+    })
     if (run.status !== 0) throw new Error(`Contract check failed: ${run.status}`)
   } finally {
     docker('rm', '-f', id)

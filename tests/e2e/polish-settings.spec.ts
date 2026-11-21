@@ -575,6 +575,8 @@ async function open(
     scene.id === 'rede-escolher-farm' ? [farm, otherFarm] : [farm],
   )
   await scene.setup(page)
+  // A fresh document, so a hash-only change still runs the page's mount.
+  await page.goto('about:blank')
   await page.goto(scene.path)
   await page
     .getByRole('heading', { level: 1, name: scene.heading, exact: true })
@@ -609,6 +611,13 @@ async function violations(page: Page) {
 const overflowing = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('body *')]
+      // What sits inside a scroll region may be wider than the screen.
+      .filter((node) => {
+        for (let up = node.parentElement; up; up = up.parentElement)
+          if (/auto|scroll|hidden/.test(getComputedStyle(up).overflowX))
+            return false
+        return true
+      })
       .filter(
         (node) => node.getBoundingClientRect().right > window.innerWidth + 1,
       )

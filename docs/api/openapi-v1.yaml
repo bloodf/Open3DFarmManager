@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OpenFarm Integration API
-  version: 1.0.0
+  version: 1.1.0
   summary: Versioned API for third-party applications to observe and control a farm.
   description: |
     Contract for `/api/integrations/v1`. This file is the source of truth; the
@@ -1702,6 +1702,45 @@ components:
             $ref: '#/components/schemas/ActionName'
         sandbox:
           type: boolean
+        specs:
+          $ref: '#/components/schemas/PrinterSpecs'
+    PrinterSpecs:
+      type: object
+      description: >-
+        Read-only physical specs the Connector or printer profile reported.
+        Omitted entirely when nothing is known; each member is omitted when
+        unknown. Values are never defaulted per model.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        buildVolumeMm:
+          type: object
+          required: [x, y, z]
+          additionalProperties: false
+          properties:
+            x: { type: number, exclusiveMinimum: 0 }
+            y: { type: number, exclusiveMinimum: 0 }
+            z: { type: number, exclusiveMinimum: 0 }
+        nozzles:
+          type: array
+          minItems: 1
+          maxItems: 8
+          description: One entry per tool, in tool order.
+          items:
+            type: object
+            required: [diameterMm]
+            additionalProperties: false
+            properties:
+              diameterMm: { type: number, exclusiveMinimum: 0 }
+        spoolSlots:
+          type: integer
+          minimum: 1
+          description: Distinct spool slots the printer reports.
+        multicolor:
+          type: boolean
+          description: >-
+            True when more than one tool or spool slot is reported; false only
+            when exactly one tool and one slot are reported.
     PrinterPage:
       allOf:
         - $ref: '#/components/schemas/PageInfo'

@@ -66,6 +66,182 @@
   margin-top: var(--space-5);
 }
 
+.features__notice {
+  margin-top: var(--space-2);
+}
+
+.features__subtitle--first {
+  margin-top: 0;
+}
+
+.features__more {
+  margin-top: var(--space-4);
+}
+
+/* Architecture diagram built from HTML so it reflows and scales with text. */
+.features__diagram {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.features__flow {
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--paper-raised);
+}
+
+.features__flow ol {
+  display: grid;
+  gap: var(--space-5);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.features__flow li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.features__path {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--copper);
+}
+
+.features__node {
+  padding: var(--space-2) var(--space-3);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.features__node small {
+  display: block;
+  font-size: var(--step--1);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.features__edge {
+  padding-inline: var(--space-3);
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+
+.features__direct .features__node {
+  border-style: dashed;
+}
+
+.features__diagram figcaption {
+  font-size: var(--step--1);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* Qualification legend and printer families. */
+.features__legend {
+  display: grid;
+  margin-top: var(--space-4);
+  border-top: var(--hairline) solid var(--rule-strong);
+}
+
+.features__legend > div {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding-block: var(--space-3);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.features__legend dt {
+  margin: 0;
+}
+
+.features__legend dd {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--ink-muted);
+}
+
+.features__families {
+  display: grid;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+
+.features__family {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--paper-raised);
+}
+
+.features__family > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.features__family h4 {
+  font-size: var(--step-1);
+}
+
+.features__family p {
+  color: var(--ink-muted);
+}
+
+.features__caps {
+  display: grid;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.features__caps > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.features__caps dt,
+.features__caps dd {
+  margin: 0;
+}
+
+.features__entries {
+  font-size: var(--step--1);
+}
+
+.features__limits {
+  display: grid;
+  gap: var(--space-2);
+  padding-inline-start: 1.1rem;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--step--1);
+  line-height: 1.55;
+}
+
+.features__matrix {
+  margin-top: var(--space-5);
+}
+
 @media (min-width: 48rem) {
   .features__list > li {
     grid-template-columns: 4rem minmax(0, 1fr) minmax(0, 1.4fr);
@@ -84,6 +260,32 @@
   }
 
   .features__shots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .features__flow li {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--space-2);
+  }
+
+  .features__path {
+    flex: 0 0 100%;
+  }
+
+  .features__edge {
+    padding-inline: var(--space-1);
+    text-align: center;
+  }
+
+  .features__legend {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: var(--space-5);
+  }
+
+  .features__families {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }

@@ -47,12 +47,18 @@ describe('promoção do catálogo por hardware', () => {
     )
     expect(files.length).toBeGreaterThan(0)
     for (const name of files) {
-      const text = readFileSync(repo(`${reportDir}/${name}`), 'utf8')
+      const report = JSON.parse(
+        readFileSync(repo(`${reportDir}/${name}`), 'utf8'),
+      )
+      expect(report.host, name).toBe('<printer-host>')
+      // Scan every string value except the firmware version, which can look
+      // like an IPv4 address (e.g. "2.0.2.8") without being one.
+      const scan = { ...report, identity: { ...report.identity, firmware: '' } }
+      const text = JSON.stringify(scan)
       expect(text, name).not.toMatch(/\b(?:\d{1,3}\.){3}\d{1,3}\b/)
       expect(text, name).not.toMatch(
         /apiKey|accessCode|password|token|https?:\/\//i,
       )
-      expect(JSON.parse(text).host, name).toBe('<printer-host>')
     }
   })
 })

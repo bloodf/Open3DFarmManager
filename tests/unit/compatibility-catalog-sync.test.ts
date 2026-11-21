@@ -165,21 +165,17 @@ describe('sincronização do catálogo de compatibilidade', () => {
     }
   })
 
-  it('mantém a Kobra X simulada apenas onde a ponte KobraLink cobre', () => {
+  it('mantém a Kobra X simulada fora da telemetria comprovada em hardware', () => {
     const kobra = anycubicCatalog.find(
       (product) => product.id === 'anycubic-kobra-x',
     )!
-    for (const capability of [
-      'telemetry',
-      'files',
-      'pause',
-      'resume',
-      'cancel',
-    ] as const)
+    // Telemetria comprovada por leitura em um Kobra X real (relatório nativo).
+    expect(kobra.capabilities.telemetry).toBe('hardware')
+    for (const capability of ['files', 'pause', 'resume', 'cancel'] as const)
       expect(kobra.capabilities[capability]).toBe('simulated')
-    // A ponte KobraLink não expõe câmera no OpenFarm.
+    // A câmera nativa não está ligada à sessão de mídia do produto.
     expect(kobra.capabilities.camera).toBe('unknown')
-    // AMS/ACE existem na ponte, mas fora do vocabulário de comandos assinados.
+    // AMS/ACE aparecem na telemetria, mas fora do vocabulário de comandos assinados.
     expect(kobra.capabilities.materials).toBe('unknown')
   })
 

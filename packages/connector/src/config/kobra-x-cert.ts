@@ -21,6 +21,7 @@ import {
   writePrivateJsonAtomic,
 } from '../provisioning/private-fs.ts'
 import { readPrivateJsonFile } from './local.ts'
+import { bundledKobraClientIdentity } from './kobra-x-default-cert.ts'
 
 export const KOBRA_CLIENT_CERT_MAX_BYTES = 32 * 1024
 export const KOBRA_CLIENT_CERT_MAX_STRING_CHARS = 8192
@@ -461,6 +462,74 @@ export async function importKobraClientCertFromInput(
         'Nenhum certificado de cliente Kobra X encontrado na instalação informada do Anycubic Slicer Next (client certificate missing).',
     }
   )
+}
+
+export type KobraClientIdentitySource = 'file' | 'install' | 'bundled'
+
+export interface ResolvedKobraClientIdentity {
+  certPem: string
+  keyPem: string
+  source: KobraClientIdentitySource
+}
+
+/**
+ * Resolve the Kobra X client identity for read-only tooling, newest override
+ * first: an explicit user-supplied certificate file, then a local Anycubic
+ * Slicer Next installation scan, then the bundled Anycubic Slicer default
+ * (`kobra-x-default-cert.ts`). An explicit file the operator points at is
+ * trusted as given; the installation scan reuses the validated loader. The
+ * returned private key stays in memory and is never written or logged.
+ */
+export async function resolveKobraClientIdentity(
+  options: {
+    certFile?: string | undefined
+    keyFile?: string | undefined
+    installPath?: string | undefined
+    platform?: NodeJS.Platform
+    now?: number
+  } = {},
+): Promise<ResolvedKobraClientIdentity> {
+  if (options.certFile) {
+    const certBytes = readBoundedFileBytes(options.certFile)
+    if (!certBytes)
+      throw new Error('Kobra X certificate file is unreadable or too large')
+    const keyPath = options.keyFile ?? options.certFile
+    const keyBytes = readBoundedFileBytes(keyPath)
+    if (!keyBytes)
+      throw new Error('Kobra X key file is unreadable or too large')
+    const decoder = new TextDecoder('utf-8', { fatal: false })
+    return {
+      certPem: decoder.decode(certBytes),
+      keyPem: decoder.decode(keyBytes),
+      source: 'file',
+    }
+  }
+
+  const installPath =
+    options.installPath ??
+    ANYCUBIC_SLICER_NEXT_TYPICAL_PATHS[
+      (options.platform ??
+        process.platform) as keyof typeof ANYCUBIC_SLICER_NEXT_TYPICAL_PATHS
+    ]
+  if (installPath) {
+    const stat = lstatSync(installPath, { throwIfNoEntry: false })
+    if (stat && !stat.isSymbolicLink()) {
+      const imported = await importKobraClientCertFromInput(
+        { kind: 'install-path', path: installPath },
+        options.now,
+      )
+      if (imported.ok) {
+        return {
+          certPem: imported.cert.certificatePem,
+          keyPem: imported.cert.keyPem,
+          source: 'install',
+        }
+      }
+    }
+  }
+
+  const bundled = bundledKobraClientIdentity()
+  return { ...bundled, source: 'bundled' }
 }
 
 export async function stageKobraClientCert(

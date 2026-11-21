@@ -11,6 +11,7 @@ import { settingModule } from './legacy-api/setting.ts'
 import { spoolModule } from './legacy-api/spool.ts'
 import {
   MUTATING,
+  methodNotAllowed,
   type LegacyApiModule,
   type LegacyApiResponse,
   type LegacyBody,
@@ -23,6 +24,7 @@ import {
 } from './events.ts'
 import { splitLegacyPath } from './legacy-path.ts'
 import { observeRepository } from './observe.ts'
+import { isTrustedOrigin, UNTRUSTED_ORIGIN_MESSAGE } from './origin-guard.ts'
 import type {
   Result,
   SpoolLibraryFailureReason,
@@ -71,9 +73,9 @@ export type LegacyDispatch = (
 export const healthModule: LegacyApiModule = {
   name: 'health',
   async handle(_repository, request) {
-    if (request.method === 'GET' && request.apiPath === '/api/v1/health')
-      return { ok: true, value: { status: 200, body: { status: 'healthy' } } }
-    return undefined
+    if (request.apiPath !== '/api/v1/health') return undefined
+    if (request.method !== 'GET') return methodNotAllowed()
+    return { ok: true, value: { status: 200, body: { status: 'healthy' } } }
   },
 }
 
@@ -102,6 +104,17 @@ export interface LegacyRequestContext {
   pathname: string
   query?: URLSearchParams
   body?: LegacyBody
+  /** `describeLegacyBody` of the same request, for the endpoints that need it. */
+  bodyDetails?: { contentType?: string; jsonNull?: true; error?: string }
+  /**
+   * The request headers upstream's origin guard reads. When given, a write
+   * from a browser origin that does not name this host is refused with 403.
+   */
+  headers?: {
+    origin?: string | null
+    host?: string | null
+    forwardedHost?: string | null
+  }
 }
 
 const fromDispatch = (dispatch: LegacyDispatch): LegacyApiModule => ({
@@ -125,6 +138,16 @@ export async function handleLegacyRequest(
   dispatch: LegacyDispatch | readonly LegacyApiModule[] = LEGACY_API_MODULES,
   feed: SpoolFeedBus = spoolFeedBus,
 ): Promise<LegacyApiResponse> {
+  if (
+    context.headers &&
+    MUTATING.has(context.method.toUpperCase()) &&
+    !isTrustedOrigin(
+      context.headers.origin,
+      context.headers.host,
+      context.headers.forwardedHost,
+    )
+  )
+    return { status: 403, body: { message: UNTRUSTED_ORIGIN_MESSAGE } }
   const path = splitLegacyPath(context.pathname)
   if (!path.ok) return legacyFailure('unauthorized')
   const modules =
@@ -133,7 +156,16 @@ export async function handleLegacyRequest(
     method: context.method.toUpperCase(),
     apiPath: path.apiPath,
     query: context.query ?? new URLSearchParams(),
-    body: context.body ?? ({ kind: 'none' } as const),
+    body: {
+      ...(context.body ?? ({ kind: 'none' } as const)),
+      ...(context.bodyDetails
+        ? {
+            ...context.bodyDetails,
+            // Described, so an absent media type is a real absence.
+            contentType: context.bodyDetails.contentType ?? '',
+          }
+        : {}),
+    } as LegacyBody,
   }
   // Changes are recorded while the farm's transaction runs and published only
   // once it has committed, to that farm's websocket feeds alone.
@@ -152,7 +184,11 @@ export async function handleLegacyRequest(
         const handled = await module.handle(repository, request)
         if (handled !== undefined) return handled
       }
-      return { ok: false, reason: 'not-found' }
+      // FastAPI's answer for a path no route serves.
+      return {
+        ok: true,
+        value: { status: 404, body: { detail: 'Not Found' } },
+      }
     },
   )
   if (!result.ok) return legacyFailure(result.reason)

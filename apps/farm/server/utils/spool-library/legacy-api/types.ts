@@ -15,12 +15,21 @@ import type {
 } from '../scope.ts'
 
 /** The request body as the route received it, before any validation. */
-export type LegacyBody =
-  | { kind: 'none' }
+export type LegacyBody = (
+  | {
+      kind: 'none'
+      /** The body was the JSON text `null` (FastAPI sees `None`). */
+      jsonNull?: true
+    }
   /** A body that is not JSON (FastAPI then validates the raw bytes). */
   | { kind: 'raw'; text: string }
   | { kind: 'json'; value: unknown }
-  | { kind: 'invalid-json' }
+  /** `error` is Python's `JSONDecodeError.msg` for the received text. */
+  | { kind: 'invalid-json'; error?: string }
+) & {
+  /** Media type of the request (lower-case, parameters removed), if sent. */
+  contentType?: string
+}
 
 export interface LegacyApiRequest {
   method: string

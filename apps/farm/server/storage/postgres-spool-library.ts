@@ -221,13 +221,13 @@ class ScopedRepository implements SpoolLibraryRepository {
         return ok(
           await sp<
             SpoolExtraFieldDefinition[]
-          >`SELECT entity_type AS "entityType", key, name, field_type AS "fieldType", sort_order AS "order", unit, default_value AS "defaultValue", choices, multi_choice AS "multiChoice" FROM farm.spool_library_fields WHERE farm_id=${this.farmId}::uuid AND entity_type=${entity} ORDER BY key LIMIT 256`,
+          >`SELECT entity_type AS "entityType", key, name, field_type AS "fieldType", sort_order AS "order", unit, default_value AS "defaultValue", choices, multi_choice AS "multiChoice" FROM farm.spool_library_fields WHERE farm_id=${this.farmId}::uuid AND entity_type=${entity} ORDER BY updated_at, key LIMIT 256`,
         )
       }),
     upsert: (definition: SpoolExtraFieldDefinition) =>
       this.aux.extraFieldWrites.upsert(definition),
-    delete: (entity: SpoolEntityType, key: string) =>
-      this.aux.extraFieldWrites.delete(entity, key),
+    delete: (entity: SpoolEntityType, key: string, keepValues?: boolean) =>
+      this.aux.extraFieldWrites.delete(entity, key, keepValues),
   }
 
   readonly settings = {

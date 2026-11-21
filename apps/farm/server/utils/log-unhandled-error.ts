@@ -1,4 +1,5 @@
 import { createLogger } from '@open3dfarmmanager/shared'
+import { sanitizeUnhandledErrorPath } from './spool-library/legacy-path.ts'
 
 const log = createLogger('farm-server')
 
@@ -13,7 +14,7 @@ export function logUnhandledError(
     if (typeof status === 'number' && status < 500) return
     log.error('unhandled-error', {
       error,
-      path: String(event?.path ?? '').split('?')[0],
+      path: sanitizeUnhandledErrorPath(event?.path),
     })
   } catch {
     // never throw from the error hook

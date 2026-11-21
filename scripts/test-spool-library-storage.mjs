@@ -38,6 +38,13 @@ if (process.argv.length !== 2)
     'No arguments accepted: node scripts/test-spool-library-storage.mjs',
   )
 
+assert.equal(commandStderr({ stderr: 'docker: denied\n' }), 'docker: denied\n')
+assert.equal(
+  commandStderr({ stderr: Buffer.from('docker: no such image\n') }),
+  'docker: no such image\n',
+)
+assert.equal(commandStderr(new Error('x')), '')
+
 // --- external evidence directory (ledger + retained diagnostics) ------------
 const evidenceDir = resolve(
   process.env.SPOOL_LIBRARY_EVIDENCE_DIR ??
@@ -58,7 +65,7 @@ const ledger = (entry) =>
 const docker = async (...args) =>
   (
     await exec('docker', args, {
-      timeout: 180_000,
+      timeout: 300_000,
       maxBuffer: 16 * 1024 * 1024,
     })
   ).stdout.trim()
@@ -838,6 +845,11 @@ try {
     error: redact(
       error instanceof Error ? (error.stack ?? error.message) : String(error),
     ),
+    stderr: redact(commandStderr(error)).slice(0, 16384),
+    stdout: redact(commandText(error?.stdout)).slice(0, 16384),
+    signal: error?.signal ?? null,
+    killed: error?.killed === true,
+    exitCode: error?.code ?? null,
     checksPassed: checks,
     container: containerName,
     image,
@@ -908,6 +920,20 @@ try {
     console.log(
       `Cleanup: container ${containerName} removed; ledger ${ledgerPath}`,
     )
+}
+
+/** execFile stdout/stderr may be a string or a Buffer. */
+function commandText(value) {
+  if (typeof value === 'string') return value
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8')
+  return ''
+}
+
+/** execFile stderr may be a string or a Buffer. Empty when the failure has none. */
+function commandStderr(error) {
+  const raw =
+    error && typeof error === 'object' && 'stderr' in error ? error.stderr : ''
+  return commandText(raw)
 }
 
 /** Diagnostics never keep a credential: mask anything shaped like one. */

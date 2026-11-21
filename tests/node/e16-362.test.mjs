@@ -6,7 +6,7 @@ import net from 'node:net'
 import tls from 'node:tls'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import {
   BAMBU_CLOUD_FLAG,
   assertBambuCloudOff,
@@ -278,11 +278,32 @@ test('UI hides the Bambu cloud account section when NUXT_BAMBU_CLOUD is off by d
   })
   assert.match(compiled.content, /bambuCloudEnabled/)
 
+  const vueSfcPlugin = {
+    name: 'vue-sfc',
+    setup(pluginBuild) {
+      pluginBuild.onLoad({ filter: /\.vue$/ }, (args) => {
+        const source = readFileSync(args.path, 'utf8')
+        const parsed = sfc.parse(source, { filename: args.path })
+        if (parsed.errors.length > 0) {
+          return { errors: parsed.errors.map((error) => ({ text: String(error.message ?? error) })) }
+        }
+        const script = sfc.compileScript(parsed.descriptor, {
+          id: `e16-362-${relative(appDir, args.path)}`,
+          inlineTemplate: true,
+        })
+        return {
+          contents: script.content,
+          loader: 'ts',
+          resolveDir: dirname(args.path),
+        }
+      })
+    },
+  }
+
   const entry = `
-import { ref, nextTick, createSSRApp, h } from 'vue'
+import { createSSRApp, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-const $fetch = async () => ({})
-${compiled.content.replace('export default', 'const ContaPage =')}
+import ContaPage from './app/pages/conta.vue'
 export async function renderConta() {
   const app = createSSRApp(ContaPage)
   app.component('NuxtLink', { props: ['to'], render() { return h('a', { href: this.to }, this.$slots.default?.()) } })
@@ -296,12 +317,22 @@ export async function renderConta() {
     format: 'esm',
     write: false,
     nodePaths: [join(appDir, 'node_modules')],
+    plugins: [vueSfcPlugin],
     logLevel: 'silent',
   })
   const mod = await import(
     `data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`
   )
-  const html = await mod.renderConta()
+  const hadFetch = Object.prototype.hasOwnProperty.call(globalThis, '$fetch')
+  const previousFetch = globalThis.$fetch
+  globalThis.$fetch = async () => ({})
+  let html
+  try {
+    html = await mod.renderConta()
+  } finally {
+    if (hadFetch) globalThis.$fetch = previousFetch
+    else delete globalThis.$fetch
+  }
   assert.match(html, /Alterar senha/)
   assert.doesNotMatch(html, /bambu-cloud-account/)
   assert.doesNotMatch(html, /Conta Bambu Cloud/)

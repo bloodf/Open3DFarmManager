@@ -38,6 +38,13 @@ if (process.argv.length !== 2)
     'No arguments accepted: node scripts/test-spool-library-storage.mjs',
   )
 
+assert.equal(commandStderr({ stderr: 'docker: denied\n' }), 'docker: denied\n')
+assert.equal(
+  commandStderr({ stderr: Buffer.from('docker: no such image\n') }),
+  'docker: no such image\n',
+)
+assert.equal(commandStderr(new Error('x')), '')
+
 // --- external evidence directory (ledger + retained diagnostics) ------------
 const evidenceDir = resolve(
   process.env.SPOOL_LIBRARY_EVIDENCE_DIR ??
@@ -58,7 +65,7 @@ const ledger = (entry) =>
 const docker = async (...args) =>
   (
     await exec('docker', args, {
-      timeout: 180_000,
+      timeout: 300_000,
       maxBuffer: 16 * 1024 * 1024,
     })
   ).stdout.trim()
@@ -837,7 +844,12 @@ try {
   const diagnostics = {
     error: redact(
       error instanceof Error ? (error.stack ?? error.message) : String(error),
-    ),
+    ).slice(0, 16384),
+    stderr: redact(commandStderr(error)).slice(0, 16384),
+    stdout: redact(commandText(error?.stdout)).slice(0, 16384),
+    signal: error?.signal ?? null,
+    killed: error?.killed === true,
+    exitCode: error?.code ?? null,
     checksPassed: checks,
     container: containerName,
     image,
@@ -847,11 +859,16 @@ try {
     JSON.stringify(diagnostics, null, 2),
     { mode: 0o600 },
   ).catch(() => {})
-  await docker('logs', '--tail', '400', containerName)
-    .then((logs) =>
-      writeFile(join(evidenceDir, 'postgres-container.log'), redact(logs), {
-        mode: 0o600,
-      }),
+  await exec('docker', ['logs', '--tail', '400', containerName], {
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  })
+    .then(({ stdout, stderr }) =>
+      writeFile(
+        join(evidenceDir, 'postgres-container.log'),
+        redact(stdout + stderr),
+        { mode: 0o600 },
+      ),
     )
     .catch(() => {})
   console.error(
@@ -866,7 +883,7 @@ try {
   } catch (error) {
     // A loaded host can make `docker rm -f` slow; removal may still complete.
     console.error(
-      `Container removal reported: ${error instanceof Error ? error.message.split('\n')[0] : error}`,
+      `Container removal reported: ${redact(String(error)).split('\n', 1)[0]}`,
     )
   }
   // A slow daemon can finish creating the container after a start failure, so
@@ -878,7 +895,7 @@ try {
       '-aq',
       '--filter',
       `name=^/${containerName}$`,
-    ).catch((e) => `unknown: ${e}`)
+    ).catch(() => 'unknown')
     if (leftover === '') break
     if (/^[a-f0-9]+$/.test(leftover))
       await docker(
@@ -910,12 +927,26 @@ try {
     )
 }
 
+/** execFile stdout/stderr may be a string or a Buffer. */
+function commandText(value) {
+  if (typeof value === 'string') return value
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8')
+  return ''
+}
+
+/** execFile stderr may be a string or a Buffer. Empty when the failure has none. */
+function commandStderr(error) {
+  const raw =
+    error && typeof error === 'object' && 'stderr' in error ? error.stderr : ''
+  return commandText(raw)
+}
+
 /** Diagnostics never keep a credential: mask anything shaped like one. */
 function redact(text) {
-  let out = text.replace(
-    /sl1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}/g,
-    'sl1.<redacted>',
-  )
+  let out = text
+    .replace(/(\/spoolman\/)[^/\s?#]+/g, '$1<redacted>')
+    .replace(/sl1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}/g, 'sl1.<redacted>')
+    .replace(/(postgres(?:ql)?:\/\/)[^/\s]+@/gi, '$1<redacted>@')
   for (const secret of secrets) out = out.replaceAll(secret, '<redacted>')
   return out
 }

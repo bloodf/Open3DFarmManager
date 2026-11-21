@@ -6,8 +6,10 @@ scoped interface for the API units that follow, and a per-farm credential for
 existing Spoolman clients that cannot authenticate. The external Spoolman
 connector is unchanged and keeps working; this storage is additive.
 
-No HTTP route is added here. Routes, the Spoolman wire format and migration of
-existing data belong to later units that build on the interface below.
+`GET /spoolman/<token>/api/v1/health` is served when the library is enabled.
+The body is the pinned Spoolman v0.27.1 `HealthCheck`, `{"status":"healthy"}`.
+Other paths on that mount use the same credential and `withScope` context.
+Further endpoints and migration of existing data belong to later units.
 
 ## Storage (migration `0085_spool_library_storage`)
 
@@ -72,6 +74,18 @@ Rules for API units:
   returns a failure, or the session expires before it finishes, everything it
   wrote is rolled back.
 
+## Farm server
+
+The route stays off until the process has a login that is a member of
+`farm_spool_library` and nothing else:
+
+```
+NUXT_SPOOL_LIBRARY_ENABLED=true
+NUXT_SPOOL_LIBRARY_DATABASE_URL=postgres://...
+```
+
+That setting does not change printer configuration.
+
 ## Legacy clients (Moonraker and similar)
 
 Moonraker's `[spoolman]` section accepts a server URL with a path and sends no
@@ -130,6 +144,7 @@ Treat the token like a password:
 
 ```
 node scripts/test-spool-library-storage.mjs
+node scripts/test-spool-library-legacy-access.mjs
 ```
 
 The script starts one PostgreSQL 17 container from the already-present,
@@ -148,11 +163,13 @@ results, stored rows or the PostgreSQL statement log (statement logging is on).
 
 The container is labelled `o3dfm.task=farm-storage-541`, removed on exit, and
 removal is verified. The ledger and, on failure, the retained diagnostics
-(error, container log with credentials masked) are written outside the
-repository: set `SPOOL_LIBRARY_EVIDENCE_DIR`, or a temporary directory is
-used and printed.
+(error, Docker stderr and stdout, the CLI signal when the command was killed,
+and the container log with credentials masked) are written
+outside the repository: set `SPOOL_LIBRARY_EVIDENCE_DIR`, or a temporary
+directory is used and printed. The legacy-access script uses
+`SPOOL_LEGACY_EVIDENCE_DIR` and the label `o3dfm.task=farm-legacy-541`.
 
 ## Not in this unit
 
-Spoolman REST/WebSocket routes, the compatibility wire format, importing from
-an external Spoolman, web pages and the owner UI for issuing credentials.
+Spoolman routes other than `GET /api/v1/health`, WebSocket, importing from an
+external Spoolman, web pages and the owner UI for issuing credentials.

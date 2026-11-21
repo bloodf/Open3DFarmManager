@@ -108,12 +108,29 @@ const klipperControlAreas = {
   ),
 } as KlipperCatalogProduct['controlAreas']
 
-const commonLimitations = [
-  'As áreas de controle marcadas como Simulado foram exercitadas apenas no simulador Moonraker em loopback, nunca em hardware; extrusão manual direta, configuração e demais áreas sem teste em simulador permanecem Desconhecido.',
-  'Telemetria, câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
+const controlAreasLimitation =
+  'As áreas de controle marcadas como Simulado foram exercitadas apenas no simulador Moonraker em loopback, nunca em hardware; extrusão manual direta, configuração e demais áreas sem teste em simulador permanecem Desconhecido.'
+const sharedLimitations = [
   'Macros anunciadas e comandos de carregar e descarregar filamento foram exercitados em simulador Moonraker; dependem das macros configuradas e não são comprovados em hardware.',
   'O rótulo Simulado não habilita comandos nem concede autoridade de controle; qualquer comando exige autorização própria do OpenFarm.',
 ] as const
+const commonLimitations = [
+  controlAreasLimitation,
+  'Telemetria, câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
+  ...sharedLimitations,
+] as const
+
+/**
+ * Qualificação somente leitura (`scripts/qualify-printer.ts`) em impressoras
+ * reais. Cada relatório casa com `klipper-generic-moonraker` e comprova apenas
+ * telemetria; ver `docs/hardware-reports/README.md`.
+ */
+const genericHardwareReports = [
+  'docs/hardware-reports/2026-11-21-sovol-sv06-moonraker.json',
+  'docs/hardware-reports/2026-11-21-snapmaker-u1-moonraker.json',
+] as const
+const reportUrl = (path: string) =>
+  `https://github.com/bloodf/Open3DFarmManager/blob/main/${path}`
 
 export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   {
@@ -136,15 +153,20 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     ],
     connection:
       'API HTTP e WebSocket do Moonraker na rede local; autenticação depende da configuração do usuário',
-    capabilities: simulatedControl,
+    capabilities: { ...simulatedControl, telemetry: 'hardware' },
+    hardwareReports: { telemetry: genericHardwareReports },
     sources: [
       'https://www.klipper3d.org/',
       'https://moonraker.readthedocs.io/en/latest/',
       'https://moonraker.readthedocs.io/en/latest/external_api/printer/',
       'https://moonraker.readthedocs.io/en/latest/external_api/webcams/',
+      ...genericHardwareReports.map(reportUrl),
     ],
     limitations: [
-      ...commonLimitations,
+      controlAreasLimitation,
+      'Telemetria comprovada em hardware somente por leitura, em uma Sovol SV06 (Moonraker v0.11.0) e uma Snapmaker U1 (Moonraker 2.0.0): identificação, estado do Klippy, ferramenta ativa e temperaturas dos bicos. Progresso da impressão, outras versões e outros modelos não fazem parte dessa prova.',
+      'Câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
+      ...sharedLimitations,
       'Câmera depende das entradas de webcam configuradas no Moonraker; a leitura da lista de webcams é a única integração coberta.',
       'Arquivos permanecem desconhecidos: o OpenFarm lê e envia arquivos por Moonraker no código, mas nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker, então a operação não é alcançável pelo produto.',
       'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',

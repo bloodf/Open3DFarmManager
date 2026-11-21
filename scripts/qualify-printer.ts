@@ -186,7 +186,8 @@ export async function main(args: string[]): Promise<number> {
   try {
     const report = await qualifyPrinter(parsed.options)
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
-    return 0
+    // The report is still printed as evidence; nothing answered, so it failed.
+    return report.qualification.status === 'unreachable' ? 1 : 0
   } catch (error) {
     process.stderr.write(
       `Printer qualification failed: ${error instanceof Error ? error.message : 'unknown error'}\n`,

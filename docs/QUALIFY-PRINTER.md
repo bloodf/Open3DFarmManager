@@ -163,8 +163,18 @@ When qualification completes, the tool prints a formatted JSON report to `stdout
 }
 ```
 
+## Recorded Reports and Catalog Promotion
+
+Reports from real printers are stored, redacted, in [`docs/hardware-reports/`](hardware-reports/README.md). To promote a catalog capability to `hardware`:
+
+1. Run the CLI against the printer and redact the output as that README describes.
+2. Store the report in `docs/hardware-reports/`.
+3. Set the capability to `hardware` on the catalog entry the report matched (`catalog.matchedCatalogId`) and list the report path in that entry's `hardwareReports`.
+
+Only `telemetry`, `files` and `camera` can be promoted this way, and only when `catalog.provenCapabilities` is `true` for that capability. `tests/unit/catalog-hardware-evidence.test.ts` fails otherwise.
+
 ## Exit Codes
 
-- `0`: Printer qualified successfully (report output to stdout).
-- `1`: Connection or qualification failure (e.g. host unreachable or communication timed out).
+- `0`: Printer qualified or partially qualified (report output to stdout).
+- `1`: Connection or qualification failure (e.g. host unreachable or communication timed out). When the run ends with status `unreachable`, the report is still printed to stdout.
 - `2`: Invalid arguments, missing required options, or forbidden command flags passed.

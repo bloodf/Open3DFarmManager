@@ -35,6 +35,7 @@ export const capabilityLabels: Record<
   cancel: 'Cancelar',
 }
 export const capabilityStatusLabels: Record<CatalogCapability, string> = {
+  hardware: 'Comprovado em hardware',
   documented: 'Documentado',
   simulated: 'Simulado',
   unknown: 'Desconhecido',
